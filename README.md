@@ -1,6 +1,6 @@
 US Presidential Election Analysis: Electoral College, Popular Vote, or Both?
 ======
-This project aims to analyze historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results.
+This project analyzes historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results.
 
 The project is broken down into several steps, each contained within a jupyter notebook:
   1. **step1_electoral_college_data.ipynb**: This notebook scrapes electoral college vote data for each US Presidential Election from 1892 to the present, and then writes the data to a Postgres database where the data from different sources will be aggregated together.
