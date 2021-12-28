@@ -1,11 +1,17 @@
 US Presidential Election Analysis: Electoral College, Popular Vote, or Both?
 ======
-This project analyzes historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results. Debate frequently flares up as to whether the Electoral College approach for determining the winner of US Presidential Elections should be changed so that the Popular Vote decides who wins instead. Reviewing the actual data of past Presidential Elections will show just how different these two approaches are for past elections. In the spirit of checks and balances that is so fundamental to our democratic republic, I'll then propose a third option: what about using the average of the Electoral College Vote and Popular Vote? Exploring this alternate approach will be the focus of the final portion of the voting analysis.
+This project analyzes historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results. Debate frequently flares up as to whether the Electoral College approach for determining the winner of US Presidential Elections should be changed so that the Popular Vote decides who wins instead. Reviewing the actual data of past Presidential Elections will show just how different these two approaches are for past elections. 
+
+In the spirit of checks and balances &#151; a pillar of our democratic republic &#151; I propose a third option: how about using the average of the Electoral College Vote and Popular Vote? Exploring this balanced approach for determining the US President will be the focus of the final portion of the historical voting analysis.
 
 The project is broken down into several steps, each contained within a jupyter notebook, with the first two steps focused on data collection and validation, while the third step performs the voting analysis:
-  1. **step1_electoral_college_data.ipynb**: This notebook scrapes electoral college vote data for each US Presidential Election from 1892 to the present, and then writes the data to a Postgres database where the data from different sources will be aggregated together.
+  1. [X] **step1_electoral_college_data.ipynb**: This notebook scrapes electoral college vote data for each US Presidential Election from 1892 to the present from the National Archives website, and then writes the data to a data warehouse schema in a Postgres database.
+  2. [ ] **step2_popular_vote_data.ipynb**: This notebook scrapes the popular vote data for each US Presidential Election from University of California, Santa Barbara, adding this data to the tables created in the data warehouse schema built in Step 1 above.
+  3. [ ] **step3_voting_data_analysis.ipynb**: This notebook performs analysis, develops visualizations, and creates objects within a data mart schema to support dashboard development
 
-Ultimately, the data collected, transformed, and validated in this project will be written to a postgres database, which will be used to power dashboards that highlight key findings from the voting analysis. More on that later...
+The data model for the data warehouse loosely follows a star schema design &#151; appropriate for historical data of moderate size &#151; with dimension tables that organize data for the Presidential Candidates and for the US States, and a fact table that contains the Votes by State data for each Presidential Election.
+
+The data collected, transformed, validated, and written to a postgres database for this project may be used to back an API, and to power dashboards that surface key findings from the voting analysis. More on that later...
 
 ## Usage
 1. Fork this repo and then clone it to your local environment
