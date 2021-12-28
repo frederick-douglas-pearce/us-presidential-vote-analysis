@@ -1,10 +1,11 @@
 US Presidential Election Analysis: Electoral College, Popular Vote, or Both?
 ======
-This project analyzes historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results.
+This project analyzes historical US Presidential Election data to better understand the relationship between the Electoral College Vote results and the Popular Vote results. Debate frequently flares up as to whether the Electoral College approach for determining the winner of US Presidential Elections should be changed so that the Popular Vote decides who wins instead. Reviewing the actual data of past Presidential Elections will show just how different these two approaches are for past elections. In the spirit of checks and balances that is so fundamental to our democratic republic, I'll then propose a third option: what about using the average of the Electoral College Vote and Popular Vote? Exploring this alternate approach will be the focus of the final portion of the voting analysis.
 
-The project is broken down into several steps, each contained within a jupyter notebook:
+The project is broken down into several steps, each contained within a jupyter notebook, with the first two steps focused on data collection and validation, while the third step performs the voting analysis:
   1. **step1_electoral_college_data.ipynb**: This notebook scrapes electoral college vote data for each US Presidential Election from 1892 to the present, and then writes the data to a Postgres database where the data from different sources will be aggregated together.
 
+Ultimately, the data collected, transformed, and validated in this project will be written to a postgres database, which will be used to power dashboards that highlight key findings from the voting analysis. More on that later...
 
 ## Usage
 1. Fork this repo and then clone it to your local environment
@@ -13,9 +14,11 @@ The project is broken down into several steps, each contained within a jupyter n
 $ git clone https://github.com/frederick-douglas-pearce/us-presidential-election-analysis
 ```
 
-2. Install Requirements
-  * **python3** (>3.6) with the following packages installed: jupyterlab, BeautifulSoup, requests, pandas, geopandas, and matplotlib. You can use pip to install them directly, but I'd recommend using a virtual environment.
+2. Install/Data Requirements
+  * **Python3** (>3.6) with the following packages installed: jupyterlab, BeautifulSoup, requests, pandas, geopandas, and matplotlib. You can use pip to install them directly, but I'd recommend using a virtual environment.
   * I used pipenv, a virtual environment and package management tool for python, to install the packages listed above. This repo includes Pipfiles that list the required packages, version constraints, dependencies, etc. The Pipfiles can be used to generate a pipenv environment with `pipenv install` ([pipenv link](https://pipenv.pypa.io/en/latest/)).
+  * **PostgreSQL** (>12.9) containing a database with permissions for creating a schema and tables from the notebook. Typical defaults should suffice: `host=localhost`, `port=5432`, `dbname=postgres`, `user=postgres`, and whatever `password` you choose. These connection parameters must be modified to whatever you choose in Section 4 of the notebook prior to running it. The password value is obfuscated using `getpass`.
+  * **US States Shapefile** is required to obtain state data, such as name, region id, land area, lat/lon of state's center, etc. Download the required file from [here](https://www2.census.gov/geo/tiger/TIGER2019/STATE/), place it on your file system somewhere accessible, specify that location in the notebook in Section 1.3, and `geopandas` will take care of the rest.
 
 3. Run jupyter lab to open a notebook
 
