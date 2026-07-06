@@ -21,15 +21,18 @@ $ git clone https://github.com/frederick-douglas-pearce/us-presidential-election
 ```
 
 2. Install/Data Requirements
-  * **Python3** (>3.6) with the following packages installed: jupyterlab, BeautifulSoup, requests, pandas, geopandas, and matplotlib. You can use pip to install them directly, but I'd recommend using a virtual environment.
-    * I used **pipenv**, a virtual environment and package management tool for python, to install the packages listed above. This repo includes Pipfiles that list the required packages, version constraints, dependencies, etc. The Pipfiles can be used to generate a pipenv environment with `pipenv install` ([pipenv link](https://pipenv.pypa.io/en/latest/)).
+  * **Python** (>=3.11; developed on 3.14) and [**uv**](https://docs.astral.sh/uv/) for dependency and environment management. From a fresh clone, `uv sync` reads `pyproject.toml` + `uv.lock` to create a virtual environment and install all dependencies (BeautifulSoup, requests, pandas, geopandas, matplotlib, psycopg2, and the dev/notebook tools):
+
+```
+$ uv sync
+```
   * **PostgreSQL** (>12.9) containing a database with permissions for creating a schema and tables from the notebook. Typical defaults should suffice: `host=localhost`, `port=5432`, `dbname=postgres`, `user=postgres`, and whatever `password` you choose. These connection parameters must be modified to whatever you choose in Section 4 of the notebook prior to running it. The password value is obfuscated using `getpass`.
   * **US States Shapefile** is required to obtain state data, such as name, region id, land area, lat/lon of state's center, etc. Download the required file from [here](https://www2.census.gov/geo/tiger/TIGER2019/STATE/), place it on your file system somewhere accessible, specify that location in the notebook in Section 1.3, and `geopandas` will take care of the rest.
 
 3. Run jupyter lab to open a notebook
 
 ```
-$ (pipenv run) jupyter lab
+$ uv run jupyter lab
 ```
   * Once a JuypterLab session is running in your browser, find the notebook you want to work with using the File Browser in the left panel, then double click on the notebook to open it.
   * The notebooks generally require an internet connection for scraping data, plus you'll need to download the occasional file (e.g. shapefile for US States) and provide an accessible path to the file.
