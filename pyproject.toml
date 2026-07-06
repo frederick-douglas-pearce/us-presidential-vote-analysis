@@ -1,0 +1,56 @@
+[project]
+name = "usvote"
+version = "0.1.0"
+description = "Historical US Presidential Election analysis: Electoral College vs. Popular Vote (and a hybrid)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Fred Pearce", email = "fpearce@gmail.com" }
+]
+requires-python = ">=3.11"
+keywords = ["elections", "electoral-college", "popular-vote", "data-pipeline", "analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "pandas>=2.0",
+    "geopandas>=1.0",
+    "psycopg2-binary>=2.9",
+    "matplotlib>=3.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis"
+Repository = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis"
+Issues = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    # Notebook remains runnable during the incremental notebook->package migration.
+    "jupyterlab>=4.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+# Use `packages = [...]` (respects .gitignore). Do NOT switch to
+# `force-include` -- it bypasses .gitignore and can bundle secrets
+# into the wheel.
+[tool.hatch.build.targets.wheel]
+packages = ["src/usvote"]

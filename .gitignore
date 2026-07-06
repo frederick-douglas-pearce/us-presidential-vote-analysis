@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# Build output
+dist/
+build/
+
+# uv manages the environment; uv.lock IS committed for reproducible installs.
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing / coverage
+.coverage
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment / secrets
+.env
+.env.local
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
