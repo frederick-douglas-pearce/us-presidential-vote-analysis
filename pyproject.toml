@@ -55,6 +55,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/usvote"]
 
+# ruff >=0.11 lints notebooks by default. The legacy step1 notebook is kept
+# runnable during the notebook->package migration and is not held to the
+# package's lint policy (see #19); exclude it so bare `ruff check` targets our
+# code and stays green in CI. Rule selection is #19's concern, not CI's.
+[tool.ruff]
+extend-exclude = ["*.ipynb"]
+
 [tool.mypy]
 files = ["src", "tests"]
 
