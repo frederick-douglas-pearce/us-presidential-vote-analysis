@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis"
-Repository = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis"
-Issues = "https://github.com/frederick-douglas-pearce/us-presidential-election-analysis/issues"
+Homepage = "https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis"
+Repository = "https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis"
+Issues = "https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues"
 
 [dependency-groups]
 dev = [
@@ -54,3 +54,21 @@ build-backend = "hatchling.build"
 # into the wheel.
 [tool.hatch.build.targets.wheel]
 packages = ["src/usvote"]
+
+[tool.mypy]
+files = ["src", "tests"]
+
+# pandas/psycopg2 ship no type stubs in this project's deps; silence the
+# missing-import noise so mypy checks our own annotations, not theirs.
+[[tool.mypy.overrides]]
+module = ["pandas", "psycopg2", "psycopg2.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Exclude live-Postgres integration tests by default (and in CI). Run them
+# explicitly with `pytest -m integration`.
+addopts = "-m 'not integration' --strict-markers"
+markers = [
+    "integration: tests that require a live Postgres database (excluded by default)",
+]
