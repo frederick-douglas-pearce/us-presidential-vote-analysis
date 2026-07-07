@@ -314,3 +314,40 @@ exact mechanics remain open.
 historical scrape + ingest** epic (E4, filed now, un-deferred) and a named-but-unscoped
 **MIT PV ingestion** epic (E5). Roadmap epic numbering updated accordingly (join → E6,
 hybrid → E7, internal API → E8, data mart → E9).
+
+---
+
+## D015: Source-namespacing convention — EC flat at the top level, each PV source its own subpackage
+
+**Date:** 2026-07-06
+**Context:** Defining the `src/usvote/` module skeleton (E1-S2 / issue #17, landed as
+PR #40) created the Electoral College / National Archives pipeline modules flat at the
+top level: `usvote/scrape.py`, `usvote/parse.py`, `usvote/transform.py`,
+`usvote/load.py`, `usvote/db.py`, `usvote/pipeline.py`. The architect review of #17
+flagged that D014 commits the project to two additional ingestion sources — UCSB (E4,
+un-deferred) and MIT (E5) — each with its own full scrape→parse→transform→load pipeline.
+E4-S1 already anticipates paths like `usvote/ucsb/scrape.py`. Without a stated
+convention, those source modules would either collide with the flat EC module names (two
+`scrape.py` files doing different jobs) or force an awkward retroactive move of the EC
+modules into an `usvote/ec/` subpackage once E4 lands.
+**Decision:** Adopt a **source-namespacing convention** for `src/usvote/` (D003):
+- The **EC / National Archives pipeline stays flat** at the top level (`usvote/scrape.py`,
+  `usvote/parse.py`, `usvote/transform.py`, `usvote/load.py`, `usvote/db.py`,
+  `usvote/pipeline.py`).
+- **Each popular-vote source lands as its own sibling subpackage** — `usvote/ucsb/` (E4)
+  and `usvote/mit/` (E5) — each with its own scrape/parse/transform/load stages.
+- The **EC-flat / PV-nested asymmetry is deliberate**, not an oversight. A future reader
+  should not "fix" it by nesting EC under `usvote/ec/`.
+
+This resolves the architecture point raised by issue #17 / the E1-S2 skeleton. The
+convention is also carried as a working note ("Source-namespacing convention") in
+CLAUDE.md, added in PR #40; **this entry is the authoritative decision record** that the
+CLAUDE.md note reflects.
+**Rationale:**
+- EC (National Archives) is the source-of-truth spine that both PV sources reconcile
+  against (D006); keeping it flat at the top level reflects its primary/anchor status.
+- The two PV sources have materially different ingestion shapes (clean MIT CSV vs. messy,
+  era-drifting UCSB HTML, per D014), so each warrants its own namespaced subpackage rather
+  than being flattened into one shared PV loader or colliding with EC module names.
+- Recording the convention now prevents a retroactive restructuring of the EC modules once
+  E4 lands, and gives E4/E5 an unambiguous home.
