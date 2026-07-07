@@ -31,17 +31,20 @@ jobs:
 
       # --locked fails the build on a stale uv.lock instead of re-resolving.
       - name: Install dependencies
+        id: install
         run: uv sync --locked --dev
 
       - name: Lint (ruff)
         run: uv run ruff check
 
-      # !cancelled() lets all three checks report in a single run, so a lint
-      # failure doesn't mask a separate type or test failure.
+      # Run the type/test checks even if a sibling check failed, so a lint
+      # failure doesn't mask a type or test failure. Gate on the install step
+      # succeeding, so a dependency-install failure short-circuits cleanly
+      # instead of spawning confusing secondary failures here.
       - name: Type check (mypy)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run mypy
 
       - name: Tests (pytest, integration excluded)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run pytest -m "not integration" --cov=usvote
