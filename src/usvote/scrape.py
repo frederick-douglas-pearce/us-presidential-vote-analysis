@@ -36,6 +36,10 @@ from bs4.element import Tag
 ARCHIVE_URL_DOMAIN = "https://www.archives.gov"
 ARCHIVE_URL_BASE = "/electoral-college/results"
 
+# Seconds to wait on the live network fetch before giving up. Bounded so a
+# stalled server can't wedge a ~60-URL scrape indefinitely.
+FETCH_TIMEOUT_SECONDS = 30
+
 # A Fetch maps a URL to that page's raw markup (bytes). The default hits the
 # network; tests and snapshot replay inject one that reads saved HTML instead.
 #
@@ -66,7 +70,7 @@ def fetch_url(url: str) -> bytes:
     takes a ``fetch`` seam defaulting here; inject :func:`fetch_from_dir` (or any
     :data:`Fetch`) to run the identical parsing against saved HTML.
     """
-    return requests.get(url).content
+    return requests.get(url, timeout=FETCH_TIMEOUT_SECONDS).content
 
 
 @overload
