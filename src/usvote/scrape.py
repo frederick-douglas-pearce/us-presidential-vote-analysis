@@ -49,8 +49,12 @@ FETCH_TIMEOUT_SECONDS = 30
 # usvote/mit/ (E5) they will want this same machinery; extract it into a shared
 # module (e.g. usvote/_fetch.py) at that point rather than importing it *from*
 # this EC spine (which would invert the source-namespacing dependency, D006).
-# Until then it lives here with its one consumer. Downstream parse/transform
-# tests (#25/#26) should read fixtures by path, not import this seam.
+# Until then it lives here. EC parse/transform tests (#25/#26) may reuse this
+# seam (fetch_from_dir + get_html_tables) to replay a saved Archives page into
+# <table> elements offline -- that is the tested snapshot->table path, so
+# re-deriving fixture file paths in those tests would only duplicate it. (This
+# in-spine reuse is fine; it is the future ucsb/mit sources reaching *into* the
+# EC spine that D006 forbids.)
 Fetch = Callable[[str], bytes]
 
 
