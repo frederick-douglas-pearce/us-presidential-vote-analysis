@@ -561,8 +561,8 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
         for ov in OTHER_VOTES_2016:
             row = year_2016 & (matrix["state"] == ov["state"])
             matrix.loc[row, ov["col_ind"]] = ov["votes"]
-        totals_row = year_2016 & (matrix["state"] == "Totals")
-        state_rows = year_2016 & (matrix["state"] != "Totals")
+        totals_row = year_2016 & (matrix["state"] == TOTALS_ROW_LABEL)
+        state_rows = year_2016 & (matrix["state"] != TOTALS_ROW_LABEL)
         matrix.loc[totals_row, other_cols] = (
             matrix.loc[state_rows, other_cols].sum(axis=0).values
         )
