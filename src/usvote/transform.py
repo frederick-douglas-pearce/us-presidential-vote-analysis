@@ -29,14 +29,15 @@ scrape/parse ports' conventions:
   making the transform runnable on any *subset* of years, not just the full
   dataset the notebook's absolute positions assumed.
 
-**Corrections.** #26 *applies* the hardcoded historical corrections inline via the
-named module-level constants below (each carrying its Archives provenance), because
-correct output and passing validations depend on them. E2-S4 (#27) later *promotes*
-these into a formally tested catalog; keeping each correction behind one delimited
-mechanism (a constant + a small ``apply_*``/reconcile function, not scattered
-``df.loc[...] =`` edits) keeps that a clean lift-and-shift. The name reconciliations
-(Trump, Dole, McGovern, Faith Spotted Eagle) are also the first instance of the
-canonical-candidate-key problem the PV sources reconcile against (D006 / #30).
+**Corrections.** Every hardcoded historical correction lives here as a named,
+provenance-carrying module-level constant paired with a small ``apply_*``/reconcile
+function (never a scattered ``df.loc[...] =`` edit). These constants are the
+authoritative catalog; ``docs/corrections.md`` is a human-browsable index that points
+back to them, and each is locked by a test in ``tests/test_transform.py`` (E2-S4 /
+#27). A new election year's anomaly slots in by adding one constant entry + its test
+and one catalog row. The name reconciliations (Trump, Dole, McGovern, Faith Spotted
+Eagle) are also the first instance of the canonical-candidate-key problem the PV
+sources reconcile against (D006 / #30).
 """
 
 from __future__ import annotations
@@ -98,6 +99,30 @@ PARTY_NAME_FIXES: Mapping[str, str] = {"Bob Dole": "Robert Dole"}
 # (middle="Spotted", last="Eagle"); the whole surname is "Spotted Eagle".
 SPOTTED_EAGLE_NAME = "Faith Spotted Eagle"
 SPOTTED_EAGLE_LAST = "Spotted Eagle"
+
+# Confirmed electoral votes that were allotted to a state but never cast or counted
+# — the state's electors cast FEWER votes than its allotment, so that row's
+# per-candidate votes intentionally sum to ``total_electoral_votes - shortfall``.
+# These are NOT scrape errors: assert_row_votes_sum_to_total adds each state's
+# shortfall back before comparing, so the confirmed anomaly does not read as a
+# broken parse. Keyed by *per-state* (year, state) only; the national "Totals" row's
+# shortfall is derived (summed over the year's states) inside the validator, so a
+# new anomaly needs one per-state entry here and never a hand-entered Totals bump.
+#
+# 2000 District of Columbia: DC elector Barbara Lett-Simmons cast a blank ballot in
+# protest of DC's lack of Congressional representation, so DC cast 2 of its 3 votes
+# (Gore 2, Bush 0) — the first (and to date only) modern abstention. The National
+# Archives confirmed by email that the published total=3 / cast=2 is correct; the
+# 2000 national Totals row inherits the same 1-vote shortfall (538 allotted, 537
+# cast). Source: https://www.archives.gov/electoral-college/2000 (Notes section) and
+# the Archives' email reply; see docs/corrections.md.
+ELECTORAL_VOTE_SHORTFALLS: Mapping[tuple[int, str], int] = {
+    (2000, "District of Columbia"): 1,
+}
+
+# The literal state label the parser gives the per-year national totals row (Table 2's
+# final row). The votes matrix carries it verbatim until build_votes_fact NULLs it out.
+TOTALS_ROW_LABEL = "Totals"
 
 # The TIGER state shapefile carries these five US territories in its NAME column;
 # they are not states and are dropped so the state dimension is the 50 states + DC.
@@ -591,14 +616,42 @@ def assert_count_equals(actual: int, expected: int, label: str) -> None:
 
 
 def assert_row_votes_sum_to_total(matrix: pd.DataFrame, candidate_cols: list[int]) -> None:
-    """Raise if any votes-matrix row's candidate votes != its total_electoral_votes."""
+    """Raise if any votes-matrix row's candidate votes != its total_electoral_votes.
+
+    Documented electoral-vote shortfalls (:data:`ELECTORAL_VOTE_SHORTFALLS`, e.g. the
+    2000 DC abstention) are added back before the comparison, so a confirmed anomaly
+    — electors who cast fewer votes than their allotment — is not flagged as a broken
+    parse. A per-state row uses its own shortfall; a year's national totals row uses
+    the sum of that year's per-state shortfalls (derived, never hand-entered).
+    """
     row_sum = matrix[candidate_cols].sum(axis=1)
-    mismatched = matrix.loc[row_sum != matrix["total_electoral_votes"]]
+    expected = matrix["total_electoral_votes"] - _expected_shortfall(matrix)
+    mismatched = matrix.loc[row_sum != expected]
     if len(mismatched):
         offenders = list(zip(mismatched["year"], mismatched["state"]))
         raise TransformError(
             f"Row electoral votes do not sum to total_electoral_votes for: {offenders}"
         )
+
+
+def _expected_shortfall(matrix: pd.DataFrame) -> pd.Series:
+    """Per-row documented shortfall aligned to ``matrix.index`` (0 where none).
+
+    A per-state row maps to :data:`ELECTORAL_VOTE_SHORTFALLS`; a national totals row
+    (state == :data:`TOTALS_ROW_LABEL`) maps to the sum of its year's per-state
+    shortfalls, so the derived totals expectation can never drift from the per-state
+    truth.
+    """
+    shortfall_by_year: dict[int, int] = {}
+    for (year, _state), n in ELECTORAL_VOTE_SHORTFALLS.items():
+        shortfall_by_year[year] = shortfall_by_year.get(year, 0) + n
+
+    def row_shortfall(row: pd.Series) -> int:
+        if row["state"] == TOTALS_ROW_LABEL:
+            return shortfall_by_year.get(row["year"], 0)
+        return ELECTORAL_VOTE_SHORTFALLS.get((row["year"], row["state"]), 0)
+
+    return matrix.apply(row_shortfall, axis=1)
 
 
 def assert_state_count_by_year(
