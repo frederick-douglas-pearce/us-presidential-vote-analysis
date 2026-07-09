@@ -253,8 +253,33 @@ def test_assert_count_equals_raises_on_mismatch() -> None:
 
 
 def test_assert_row_votes_sum_to_total_raises() -> None:
+    # An *undocumented* shortfall (Ohio 2004: 10 + 7 = 17 != 18) is a scrape error.
     matrix = pd.DataFrame({
         "state": ["Ohio"], "total_electoral_votes": [18], "year": [2004], 1: [10], 2: [7],
+    })
+    with pytest.raises(TransformError, match="do not sum"):
+        T.assert_row_votes_sum_to_total(matrix, [1, 2])
+
+
+def test_assert_row_votes_sum_to_total_allows_2000_dc_abstention() -> None:
+    # The 2000 DC abstention (cast 2 of 3) and the Totals row that inherits its
+    # 1-vote shortfall are documented in ELECTORAL_VOTE_SHORTFALLS and must NOT raise.
+    matrix = pd.DataFrame({
+        "state": ["District of Columbia", "Totals"],
+        "total_electoral_votes": [3, 3],
+        "year": [2000, 2000],
+        1: [0, 0],  # Bush
+        2: [2, 2],  # Gore (DC cast 2; the year's only counted votes here)
+    })
+    T.assert_row_votes_sum_to_total(matrix, [1, 2])  # does not raise
+
+
+def test_assert_row_votes_sum_to_total_shortfall_is_year_scoped() -> None:
+    # The documented (2000, DC) shortfall must not excuse the SAME 3-vs-2 gap in a
+    # different year — that would still be an unexplained scrape error.
+    matrix = pd.DataFrame({
+        "state": ["District of Columbia"], "total_electoral_votes": [3],
+        "year": [2004], 1: [0], 2: [2],
     })
     with pytest.raises(TransformError, match="do not sum"):
         T.assert_row_votes_sum_to_total(matrix, [1, 2])
@@ -324,6 +349,54 @@ def test_build_state_dim_drops_territories_and_orders_columns() -> None:
     # REGION/DIVISION arrive as strings and must be coerced to int.
     assert state_df["region"].dtype == "int64"
     assert state_df["latitude"].dtype == "float64"
+
+
+# --- 2000 DC abstainer: full-transform integration -------------------------
+
+# A crafted mini-2000 driven through the whole transform (cheaper + more targeted
+# than a real 2000 Archives fixture, which would drag in every 2000 candidate/state).
+# Bush wins Texas 3-0; DC's 3rd elector abstained so DC casts only 2 (Gore 2, Bush 0);
+# the national Totals inherit that 1-vote shortfall (6 allotted, 5 cast).
+_SYNTHETIC_2000: dict[str, Any] = {
+    "year": 2000,
+    "t1": [
+        {"president_candidate_name": "George W. Bush", "president_candidate_party": "R"},
+        {"president_candidate_name": "Al Gore", "president_candidate_party": "D"},
+    ],
+    "t2": {
+        "candidate_state": [
+            {"president_candidate_name": "George W. Bush", "col_ind": 1,
+             "president_candidate_state": "Texas"},
+            {"president_candidate_name": "Al Gore", "col_ind": 2,
+             "president_candidate_state": "Tennessee"},
+        ],
+        "votes_by_state": [
+            {"state": "Texas", "total_electoral_votes": 3, 1: 3, 2: 0},
+            {"state": "District of Columbia", "total_electoral_votes": 3, 1: 0, 2: 2},
+            {"state": "Totals", "total_electoral_votes": 6, 1: 3, 2: 2},
+        ],
+    },
+}
+
+
+def test_2000_dc_abstention_survives_transform() -> None:
+    # The confirmed abstention must flow through transform_parsed_years without
+    # tripping assert_row_votes_sum_to_total, preserving the allotment/cast gap.
+    candidates, _, votes = transform_parsed_years([_SYNTHETIC_2000], _fake_state_geo())
+    ids = candidates.set_index("name")["candidate_id"]
+
+    dc = votes[(votes["state"] == "District of Columbia")].set_index("candidate_id")
+    # DC keeps its 3-vote allotment, but only 2 were cast (Gore 2, Bush 0).
+    assert (dc["total_electoral_votes"] == 3).all()
+    assert dc.loc[ids["Al Gore"], "president_electoral_votes"] == 2
+    assert dc.loc[ids["George W. Bush"], "president_electoral_votes"] == 0
+
+    # The national totals row: Gore's cast total is 2 (the DC abstention is not
+    # counted for anyone), against a 6-vote allotment that still records the gap.
+    totals = votes[votes["is_total"]].set_index("candidate_id")
+    assert totals.loc[ids["Al Gore"], "president_electoral_votes"] == 2
+    assert totals.loc[ids["George W. Bush"], "president_electoral_votes"] == 3
+    assert (totals["total_electoral_votes"] == 6).all()
 
 
 # --- integration: 2016 + 2020 fixture slice --------------------------------
