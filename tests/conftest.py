@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pandas as pd
 import pytest
 
 # The valid US state names Table 2 rows are matched against — the package
@@ -77,3 +78,27 @@ class RecordingConnection:
 def recording_conn() -> RecordingConnection:
     """A fresh fake connection whose ``.executed`` list captures SQL strings."""
     return RecordingConnection()
+
+
+def fake_state_geo() -> pd.DataFrame:
+    """A plain-pandas stand-in for ``transform.load_state_geo`` output.
+
+    All 50 states + DC, plus Puerto Rico to prove territories are dropped, with
+    REGION/DIVISION as strings (TIGER ships them so) to prove the astype-to-int in
+    ``build_state_dim``. Shared by the transform, load, and pipeline tests so none
+    of them needs the real TIGER shapefile.
+    """
+    rows = []
+    for i, name in enumerate(sorted(STATE_NAMES)):
+        rows.append({
+            "NAME": name, "REGION": str(i % 4 + 1), "DIVISION": str(i % 9 + 1),
+            "STATENS": f"{i:08d}", "GEOID": f"{i:02d}", "STUSPS": name[:2].upper(),
+            "ALAND": 1000 + i, "AWATER": i,
+            "INTPTLAT": f"+{30 + i % 20}.0", "INTPTLON": f"-{70 + i % 40}.0",
+        })
+    rows.append({
+        "NAME": "Puerto Rico", "REGION": "9", "DIVISION": "9", "STATENS": "72000000",
+        "GEOID": "72", "STUSPS": "PR", "ALAND": 1, "AWATER": 1,
+        "INTPTLAT": "+18.0", "INTPTLON": "-66.0",
+    })
+    return pd.DataFrame(rows)

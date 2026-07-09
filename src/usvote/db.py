@@ -102,12 +102,15 @@ class DBC:
         self,
         schema: str,
         table_name: str,
-        table_columns: Iterable[tuple[str, str]],
+        table_columns: Iterable[tuple[str, ...]],
         replace: bool = False,
         close: bool = False,
     ) -> None:
-        """Create table. ``table_columns`` is a list of tuples, each tuple two
-        strings: the first the column name, the second the column's type.
+        """Create table. ``table_columns`` is a list of tuples, each at least two
+        strings — the column name and its type — optionally followed by one or more
+        constraint strings (e.g. ``("state", "varchar", "primary key")`` or a FK
+        ``("candidate_id", "smallint", "not null", "REFERENCES dwh.candidate")``);
+        every element is space-joined into the column clause.
         https://www.postgresql.org/docs/14/sql-createtable.html
         """
         column_str = ", ".join(map(" ".join, table_columns))
