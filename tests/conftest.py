@@ -12,6 +12,22 @@ from typing import Literal
 
 import pytest
 
+# The valid US state names Table 2 rows are matched against — the package
+# equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
+# the parse tests (the state-name filter) and the transform tests (the geo
+# dimension set), so the two stay in lockstep — the SSOT coupling #31 externalizes.
+STATE_NAMES = frozenset({
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
+    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
+    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+})
+
 
 class RecordingCursor:
     """Cursor that appends every executed query to a shared log.

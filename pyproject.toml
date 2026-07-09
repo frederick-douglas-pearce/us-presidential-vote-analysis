@@ -65,10 +65,10 @@ extend-exclude = ["*.ipynb"]
 [tool.mypy]
 files = ["src", "tests"]
 
-# pandas/psycopg2 ship no type stubs in this project's deps; silence the
+# pandas/geopandas/psycopg2 ship no type stubs in this project's deps; silence the
 # missing-import noise so mypy checks our own annotations, not theirs.
 [[tool.mypy.overrides]]
-module = ["pandas", "psycopg2", "psycopg2.*"]
+module = ["pandas", "geopandas", "psycopg2", "psycopg2.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
