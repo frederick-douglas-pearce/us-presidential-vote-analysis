@@ -1,0 +1,432 @@
+"""Unit + integration tests for ``usvote.transform``.
+
+Two coverage layers, mirroring ``test_parse``:
+
+- **Crafted units** over the pure pieces — name parsing, the candidate/party
+  aggregation into ``_2`` columns, the historical name reconciliations, and each
+  raising validator. These carry the cases the fixture slice cannot: ``party_2``
+  (Bryan D-P, T. Roosevelt R-P are pre-1920) and the Bob Dole / McGovern
+  reconciliations have **zero** fixture coverage, so they are exercised here.
+- **One integration test** replaying the 2016 + 2020 Archives fixtures through the
+  full ``transform_parsed_years`` with an injected fake state-geo frame (no TIGER
+  shapefile). It exercises the 2016 "Other" expansion, the Trump multi-state +
+  name reconciliation, Biden's ``Jr.`` suffix, ``is_total`` shaping and the
+  per-year electoral rank.
+
+Note on scope: ``assert_unique_grain`` ("unique candidate names across ALL years")
+is only *meaningful* at full-dataset scale — a 2-year slice can pass it while the
+full set fails. #26 claims validator *correctness* (the unit tests below) plus
+slice-level integration; running the validators against the whole 1789-2020 corpus
+is deferred to the pipeline run (#28) / a dedicated data-validation story.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import pytest
+from bs4.element import Tag
+
+from usvote import transform as T
+from usvote.parse import ParsedYear, parse_election_years
+from usvote.scrape import fetch_from_dir, get_html_tables
+from usvote.transform import (
+    TransformError,
+    apply_other_candidates,
+    build_candidate_dim,
+    build_state_dim,
+    get_name_middle_last,
+    split_name,
+    transform_parsed_years,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+# 50 states + DC (mirrors the notebook's shapefile NAME set and test_parse). The
+# fake geo frame and the parse-time state filter both derive from this one set;
+# #31 makes that a single externalized source (see the SSOT coupling the architect
+# flagged), but here they are deliberately the same literal.
+STATE_NAMES = frozenset({
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
+    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
+    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+})
+
+
+# --- name-part parsing -----------------------------------------------------
+
+
+def test_split_name_jr_suffix() -> None:
+    assert split_name("Joseph R. Biden Jr.") == {
+        "name_first": "Joseph",
+        "name_middle": "R.",
+        "name_last": "Biden",
+        "name_suffix": "Jr.",
+    }
+
+
+def test_split_name_middle_initial() -> None:
+    assert split_name("Donald J. Trump") == {
+        "name_first": "Donald",
+        "name_middle": "J.",
+        "name_last": "Trump",
+        "name_suffix": None,
+    }
+
+
+def test_split_name_no_middle() -> None:
+    assert split_name("Hillary Clinton") == {
+        "name_first": "Hillary",
+        "name_middle": None,
+        "name_last": "Clinton",
+        "name_suffix": None,
+    }
+
+
+def test_split_name_two_word_last_is_mis_split() -> None:
+    # The generic parser mis-splits "Faith Spotted Eagle" (middle="Spotted"); the
+    # dedicated correction in build_candidate_dim fixes it — asserted below.
+    assert split_name("Faith Spotted Eagle") == {
+        "name_first": "Faith",
+        "name_middle": "Spotted",
+        "name_last": "Eagle",
+        "name_suffix": None,
+    }
+
+
+def test_get_name_middle_last_variants() -> None:
+    assert get_name_middle_last("Clinton") == (None, "Clinton")
+    assert get_name_middle_last("R. Biden") == ("R.", "Biden")
+    assert get_name_middle_last("S. Grant Jr") == ("S.", "Grant Jr")
+    assert get_name_middle_last(None) == (None, None)
+    assert get_name_middle_last("") == (None, None)
+
+
+# --- candidate dimension: crafted (party_2 + reconciliations) ---------------
+
+
+def _t2_states(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """A Table-2 candidate-state frame (post-normalize shape)."""
+    return pd.DataFrame(rows)
+
+
+def _t1(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """A Table-1 candidate-party frame (post-normalize shape)."""
+    columns = ["president_candidate_name", "president_candidate_party", "year"]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def test_multi_party_aggregates_into_party_2() -> None:
+    # Bryan (D then P) and T. Roosevelt (R then P) are THE canonical multi-party
+    # cases (CLAUDE.md) and have no fixture coverage — they are pre-1920.
+    t2 = _t2_states([
+        {"president_candidate_name": "William J. Bryan", "col_ind": 1,
+         "president_candidate_state": "Nebraska", "year": 1900},
+        {"president_candidate_name": "Theodore Roosevelt", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 1904},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "William J. Bryan", "president_candidate_party": "D", "year": 1900},
+        {"president_candidate_name": "William J. Bryan", "president_candidate_party": "P", "year": 1900},
+        {"president_candidate_name": "Theodore Roosevelt", "president_candidate_party": "R", "year": 1904},
+        {"president_candidate_name": "Theodore Roosevelt", "president_candidate_party": "P", "year": 1912},
+    ])
+    candidates = build_candidate_dim(t2, t1).set_index("name")
+    assert (candidates.loc["William J. Bryan", "party"],
+            candidates.loc["William J. Bryan", "party_2"]) == ("D", "P")
+    assert (candidates.loc["Theodore Roosevelt", "party"],
+            candidates.loc["Theodore Roosevelt", "party_2"]) == ("R", "P")
+
+
+def test_single_party_has_null_party_2() -> None:
+    t2 = _t2_states([
+        {"president_candidate_name": "Hillary Clinton", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 2016},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Hillary Clinton", "president_candidate_party": "D", "year": 2016},
+    ])
+    row = build_candidate_dim(t2, t1).iloc[0]
+    assert row["party"] == "D"
+    assert row["party_2"] is None
+
+
+def test_bob_dole_name_reconciled_to_table_2() -> None:
+    # Table 1 prints "Bob Dole"; Table 2 (and the canonical key) is "Robert Dole".
+    t2 = _t2_states([
+        {"president_candidate_name": "Robert Dole", "col_ind": 1,
+         "president_candidate_state": "Kansas", "year": 1996},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Bob Dole", "president_candidate_party": "R", "year": 1996},
+    ])
+    candidates = build_candidate_dim(t2, t1)
+    assert candidates["name"].tolist() == ["Robert Dole"]
+    assert candidates.iloc[0]["party"] == "R"
+
+
+def test_mcgovern_name_reconciled_to_table_1() -> None:
+    # Table 2 prints "George McGovern"; Table 1 has the middle initial. The fix
+    # rewrites the Table-2 name AND fills the middle initial before aggregation.
+    t2 = _t2_states([
+        {"president_candidate_name": "George McGovern", "col_ind": 1,
+         "president_candidate_state": "South Dakota", "year": 1972},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "George S. McGovern", "president_candidate_party": "D", "year": 1972},
+    ])
+    row = build_candidate_dim(t2, t1).iloc[0]
+    assert row["name"] == "George S. McGovern"
+    assert row["name_middle"] == "S."
+    assert row["party"] == "D"
+
+
+def test_multi_state_aggregates_into_state_2() -> None:
+    # A candidate appearing under two home states collapses to one row with a
+    # primary state + state_2 (first-appearance order preserved).
+    t2 = _t2_states([
+        {"president_candidate_name": "Andrew Jackson", "col_ind": 1,
+         "president_candidate_state": "Tennessee", "year": 1828},
+        {"president_candidate_name": "Andrew Jackson", "col_ind": 1,
+         "president_candidate_state": "Louisiana", "year": 1832},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Andrew Jackson", "president_candidate_party": "D", "year": 1828},
+    ])
+    candidates = build_candidate_dim(t2, t1)
+    assert len(candidates) == 1
+    row = candidates.iloc[0]
+    assert (row["state"], row["state_2"]) == ("Tennessee", "Louisiana")
+
+
+def test_spotted_eagle_surname_corrected() -> None:
+    t2 = _t2_states([
+        {"president_candidate_name": "Faith Spotted Eagle", "col_ind": 1,
+         "president_candidate_state": "South Dakota", "year": 2016},
+    ])
+    t1 = _t1([])  # no Table-1 party row for a faithless-only candidate
+    row = build_candidate_dim(t2, t1).iloc[0]
+    assert row["name_middle"] is None
+    assert row["name_last"] == "Spotted Eagle"
+
+
+def test_candidate_id_is_one_based_and_nan_becomes_none() -> None:
+    t2 = _t2_states([
+        {"president_candidate_name": "Colin Powell", "col_ind": 1,
+         "president_candidate_state": None, "year": 2016},
+    ])
+    row = build_candidate_dim(t2, _t1([])).iloc[0]
+    assert row["candidate_id"] == 1
+    # No Table-1 party and no home state -> proper None (not NaN) for the DB write.
+    assert row["state"] is None
+    assert row["party"] is None
+
+
+# --- validators: pass + raise ----------------------------------------------
+
+
+def test_assert_unique_grain_raises_on_duplicate() -> None:
+    df = pd.DataFrame({"name": ["A", "A", "B"]})
+    with pytest.raises(TransformError, match="grain broken"):
+        T.assert_unique_grain(df, "name", "candidate")
+
+
+def test_assert_names_reconciled_raises_on_unmatched() -> None:
+    with pytest.raises(TransformError, match="Bob Dole"):
+        T.assert_names_reconciled({"Bob Dole"}, {"Robert Dole"}, "names differ")
+
+
+def test_assert_names_reconciled_passes_when_subset() -> None:
+    T.assert_names_reconciled({"Robert Dole"}, {"Robert Dole", "Bill Clinton"}, "ok")
+
+
+def test_build_candidate_dim_raises_when_party_name_unreconciled() -> None:
+    # A Table-1 name with no Table-2 counterpart trips the reconciliation check.
+    t2 = _t2_states([
+        {"president_candidate_name": "Robert Dole", "col_ind": 1,
+         "president_candidate_state": "Kansas", "year": 1996},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Unknown Person", "president_candidate_party": "X", "year": 1996},
+    ])
+    with pytest.raises(TransformError, match="not all present"):
+        build_candidate_dim(t2, t1)
+
+
+def test_assert_count_equals_raises_on_mismatch() -> None:
+    with pytest.raises(TransformError, match="expected 3, got 2"):
+        T.assert_count_equals(2, 3, "candidate count")
+
+
+def test_assert_row_votes_sum_to_total_raises() -> None:
+    matrix = pd.DataFrame({
+        "state": ["Ohio"], "total_electoral_votes": [18], "year": [2004], 1: [10], 2: [7],
+    })
+    with pytest.raises(TransformError, match="do not sum"):
+        T.assert_row_votes_sum_to_total(matrix, [1, 2])
+
+
+def test_assert_totals_equal_state_sum_raises() -> None:
+    votes = pd.DataFrame({
+        "year": [2004, 2004, 2004],
+        "state": ["Ohio", "Texas", None],  # None row is the scraped total
+        "candidate_id": [1, 1, 1],
+        "president_electoral_votes": [10, 5, 99],  # 99 != 10 + 5
+    })
+    with pytest.raises(TransformError, match="!= sum across states"):
+        T.assert_totals_equal_state_sum(votes)
+
+
+def test_apply_other_candidates_raises_on_non_2016_placeholder() -> None:
+    # An unnamed "Other" column outside 2016 has no hardcoded correction.
+    t2 = _t2_states([
+        {"president_candidate_name": "Other", "col_ind": 2,
+         "president_candidate_state": None, "year": 2004},
+    ])
+    with pytest.raises(TransformError, match="only 2016"):
+        apply_other_candidates(t2)
+
+
+# --- state dimension -------------------------------------------------------
+
+
+def _fake_state_geo() -> pd.DataFrame:
+    """A plain-pandas stand-in for load_state_geo output (all 51 + one territory).
+
+    Includes Puerto Rico to prove territories are dropped, and REGION/DIVISION as
+    strings (TIGER ships them so) to prove the astype-to-int in build_state_dim.
+    """
+    rows = []
+    for i, name in enumerate(sorted(STATE_NAMES)):
+        rows.append({
+            "NAME": name, "REGION": str(i % 4 + 1), "DIVISION": str(i % 9 + 1),
+            "STATENS": f"{i:08d}", "GEOID": f"{i:02d}", "STUSPS": name[:2].upper(),
+            "ALAND": 1000 + i, "AWATER": i,
+            "INTPTLAT": f"+{30 + i % 20}.0", "INTPTLON": f"-{70 + i % 40}.0",
+        })
+    rows.append({
+        "NAME": "Puerto Rico", "REGION": "9", "DIVISION": "9", "STATENS": "72000000",
+        "GEOID": "72", "STUSPS": "PR", "ALAND": 1, "AWATER": 1,
+        "INTPTLAT": "+18.0", "INTPTLON": "-66.0",
+    })
+    return pd.DataFrame(rows)
+
+
+def test_build_state_dim_drops_territories_and_orders_columns() -> None:
+    state_df = build_state_dim(_fake_state_geo())
+    assert len(state_df) == 51
+    assert "Puerto Rico" not in state_df["state"].tolist()
+    assert list(state_df.columns) == list(T.STATE_COLUMN_ORDER)
+    # REGION/DIVISION arrive as strings and must be coerced to int.
+    assert state_df["region"].dtype == "int64"
+    assert state_df["latitude"].dtype == "float64"
+
+
+# --- integration: 2016 + 2020 fixture slice --------------------------------
+
+
+def _year_tables(year: int) -> list[Tag]:
+    return get_html_tables(
+        f"https://www.archives.gov/electoral-college/{year}",
+        find_all=True,
+        fetch=fetch_from_dir(FIXTURES),
+    )
+
+
+@pytest.fixture(scope="module")
+def parsed_slice() -> list[ParsedYear]:
+    data_tables = {year: _year_tables(year) for year in (2016, 2020)}
+    return parse_election_years(data_tables, STATE_NAMES)
+
+
+@pytest.fixture(scope="module")
+def frames(
+    parsed_slice: list[ParsedYear],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    return transform_parsed_years(parsed_slice, _fake_state_geo())
+
+
+def test_frames_schema_and_grain(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    candidates, state_df, votes = frames
+    # 8 distinct candidates across 2016 + 2020: Trump, Biden, Clinton + the five
+    # 2016 faithless recipients (Sanders, Paul, Kasich, Powell, Spotted Eagle).
+    assert len(candidates) == 8
+    assert candidates["candidate_id"].tolist() == list(range(1, 9))
+    assert len(candidates) == candidates["name"].nunique()
+    assert list(votes.columns) == ["votes_id", *T.VOTES_COLUMN_ORDER]
+    assert votes["votes_id"].tolist() == list(range(1, len(votes) + 1))
+
+
+def test_trump_is_one_candidate_across_both_years(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    candidates, _, votes = frames
+    trump = candidates[candidates["name"] == "Donald J. Trump"]
+    # 2016 "Donald Trump"/NY reconciled to the 2020 "Donald J. Trump"/FL spelling,
+    # collapsed to one row spanning both states.
+    assert len(trump) == 1
+    assert set([trump.iloc[0]["state"], trump.iloc[0]["state_2"]]) == {"New York", "Florida"}
+    trump_id = trump.iloc[0]["candidate_id"]
+    # Same candidate_id carries Trump's votes in both years.
+    assert set(votes.loc[votes["candidate_id"] == trump_id, "year"]) == {2016, 2020}
+
+
+def test_biden_jr_suffix(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    candidates, _, _ = frames
+    biden = candidates[candidates["name"] == "Joseph R. Biden Jr."].iloc[0]
+    assert biden["name_suffix"] == "Jr."
+    assert biden["name_last"] == "Biden"
+
+
+def test_2016_totals_and_faithless_placement(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    candidates, _, votes = frames
+    ids = candidates.set_index("name")["candidate_id"]
+    totals = votes[(votes["year"] == 2016) & votes["is_total"]].set_index("candidate_id")
+    # The manually-entered Archives Notes totals: 304/227/3/1/1/1/1 summing to 538.
+    assert totals.loc[ids["Donald J. Trump"], "president_electoral_votes"] == 304
+    assert totals.loc[ids["Hillary Clinton"], "president_electoral_votes"] == 227
+    assert totals.loc[ids["Colin Powell"], "president_electoral_votes"] == 3
+    assert totals["president_electoral_votes"].sum() == 538
+    # Faithless votes land in the right states (state row, is_total False).
+    powell_wa = votes[
+        (votes["candidate_id"] == ids["Colin Powell"]) & (votes["state"] == "Washington")
+    ]
+    assert powell_wa.iloc[0]["president_electoral_votes"] == 3
+    sanders_hi = votes[
+        (votes["candidate_id"] == ids["Bernie Sanders"]) & (votes["state"] == "Hawaii")
+    ]
+    assert sanders_hi.iloc[0]["president_electoral_votes"] == 1
+
+
+def test_totals_rows_have_null_state_and_is_total(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    _, _, votes = frames
+    # Every is_total row has a NULL state and vice-versa; 7 (2016) + 2 (2020) = 9.
+    assert votes["is_total"].sum() == votes["state"].isna().sum() == 9
+    assert (votes.loc[votes["is_total"], "state"].isna()).all()
+
+
+def test_electoral_rank_matches_vote_order(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    candidates, _, votes = frames
+    ids = candidates.set_index("name")["candidate_id"]
+    ranks = votes[(votes["year"] == 2020) & votes["is_total"]].set_index("candidate_id")
+    # Biden (306) outranks Trump (232) in 2020.
+    assert ranks.loc[ids["Joseph R. Biden Jr."], "president_electoral_rank"] == 1
+    assert ranks.loc[ids["Donald J. Trump"], "president_electoral_rank"] == 2
