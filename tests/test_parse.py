@@ -32,22 +32,9 @@ from usvote.parse import (
 )
 from usvote.scrape import fetch_from_dir, get_html_tables
 
-FIXTURES = Path(__file__).parent / "fixtures"
+from .conftest import STATE_NAMES
 
-# The valid US state names Table 2 rows are matched against — the package
-# equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Table 2
-# rows whose column 0 is not one of these (Notes row, blank rows) are skipped.
-STATE_NAMES = frozenset({
-    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
-    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
-    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
-    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
-    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
-    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
-    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
-})
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _year_tables(year: int) -> list[Tag]:

@@ -384,15 +384,19 @@ def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
     split = parties["party"].str.split("-", n=1, expand=True)
     parties["party"] = split[0]
     # Secondary party is a single code; take its first char (drops any tertiary).
-    second = split[1] if split.shape[1] > 1 else None
-    parties["party_2"] = (
-        second.map(lambda x: x[0] if isinstance(x, str) and x else None)
-        if second is not None
-        else None
-    )
+    parties["party_2"] = split[1].str[0] if split.shape[1] > 1 else None
 
     assert_unique_grain(parties, "name", "candidate (Table 1 parties)")
     return parties
+
+
+def _nan_to_none(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert NaN/NaT to ``None`` so Postgres receives proper NULLs.
+
+    Uses ``DataFrame.map`` (the notebook's ``applymap`` is deprecated in pandas
+    >=2.1). ``pd.isnull`` already covers ``None``, so no extra guard is needed.
+    """
+    return df.map(lambda x: None if pd.isnull(x) else x)
 
 
 # --- state dimension -------------------------------------------------------
@@ -477,6 +481,15 @@ def build_votes_fact(
         on=["year", "col_ind"],
         validate="m:1",
     )
+    # Guard the inner join: an unreconciled vote-side name would otherwise drop
+    # that candidate's whole record (state rows AND totals row together), which
+    # assert_totals_equal_state_sum cannot detect since both sides of the sum
+    # vanish. Ported from the notebook's cell-167 name-diff check.
+    assert_names_reconciled(
+        set(votes["president_candidate_name"]),
+        candidates["name"],
+        "vote candidate names not present in the candidate dimension",
+    )
     votes = votes.merge(
         candidates[["candidate_id", "name"]],
         how="inner",
@@ -500,6 +513,7 @@ def build_votes_fact(
     votes.insert(0, "votes_id", range(1, len(votes) + 1))
 
     assert_totals_equal_state_sum(votes)
+    assert_state_count_by_year(parsed_years, votes)
     return votes
 
 
@@ -587,6 +601,36 @@ def assert_row_votes_sum_to_total(matrix: pd.DataFrame, candidate_cols: list[int
         )
 
 
+def assert_state_count_by_year(
+    parsed_years: Sequence[Mapping[str, Any]], votes: pd.DataFrame
+) -> None:
+    """Raise if any year lost (or gained) a state row between parse and votes.
+
+    Ported from notebook cell 196: each year's parsed votes-by-state count (states
+    + the totals row) must equal the distinct states the winning candidate ends up
+    with in ``votes``. Catches a per-state row silently dropped by the inner joins
+    that :func:`assert_names_reconciled` (whole-candidate drop) would miss.
+    Deduplicating on (year, state) makes it robust to a rank-1 tie.
+    """
+    initial = {py["year"]: len(py["t2"]["votes_by_state"]) for py in parsed_years}
+    final = (
+        votes.loc[votes["president_electoral_rank"] == 1]
+        .drop_duplicates(["year", "state"])
+        .groupby("year")
+        .size()
+        .to_dict()
+    )
+    mismatched = {
+        year: (count, final.get(year))
+        for year, count in initial.items()
+        if count != final.get(year)
+    }
+    if mismatched:
+        raise TransformError(
+            f"Per-year state count changed (year: parsed -> votes): {mismatched}"
+        )
+
+
 def assert_totals_equal_state_sum(votes: pd.DataFrame) -> None:
     """Raise if a year/candidate's scraped totals row != the sum over its states.
 
@@ -635,9 +679,3 @@ def transform_parsed_years(
         parsed_years, reconcile_vote_candidate_names(t2_states), candidates_df, state_df
     )
     return candidates_df, state_df, votes_df
-
-
-def _nan_to_none(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert NaN/NaT to ``None`` so Postgres receives proper NULLs (uses map, not
-    the deprecated ``applymap``)."""
-    return df.map(lambda x: None if pd.isnull(x) and x is not None else x)

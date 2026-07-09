@@ -42,23 +42,9 @@ from usvote.transform import (
     transform_parsed_years,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures"
+from .conftest import STATE_NAMES
 
-# 50 states + DC (mirrors the notebook's shapefile NAME set and test_parse). The
-# fake geo frame and the parse-time state filter both derive from this one set;
-# #31 makes that a single externalized source (see the SSOT coupling the architect
-# flagged), but here they are deliberately the same literal.
-STATE_NAMES = frozenset({
-    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
-    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
-    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
-    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
-    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
-    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
-    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
-})
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # --- name-part parsing -----------------------------------------------------
@@ -285,6 +271,16 @@ def test_assert_totals_equal_state_sum_raises() -> None:
         T.assert_totals_equal_state_sum(votes)
 
 
+def test_assert_state_count_by_year_raises_on_dropped_state() -> None:
+    # Parsed says 2 states (Ohio + Totals); votes has only Ohio -> a row was lost.
+    parsed = [{"year": 2020, "t2": {"votes_by_state": [{"state": "Ohio"}, {"state": "Totals"}]}}]
+    votes = pd.DataFrame(
+        {"year": [2020], "state": ["Ohio"], "president_electoral_rank": [1]}
+    )
+    with pytest.raises(TransformError, match="Per-year state count"):
+        T.assert_state_count_by_year(parsed, votes)
+
+
 def test_apply_other_candidates_raises_on_non_2016_placeholder() -> None:
     # An unnamed "Other" column outside 2016 has no hardcoded correction.
     t2 = _t2_states([
@@ -419,6 +415,20 @@ def test_totals_rows_have_null_state_and_is_total(
     # Every is_total row has a NULL state and vice-versa; 7 (2016) + 2 (2020) = 9.
     assert votes["is_total"].sum() == votes["state"].isna().sum() == 9
     assert (votes.loc[votes["is_total"], "state"].isna()).all()
+
+
+def test_build_votes_fact_raises_on_unreconciled_names(
+    parsed_slice: list[ParsedYear],
+) -> None:
+    # A caller (e.g. the future pipeline) that forgets reconcile_vote_candidate_names
+    # must fail loudly, not silently drop Trump's 2016 votes: the raw Table-2 name
+    # "Donald Trump" no longer matches the candidate dim's "Donald J. Trump".
+    t2_raw = T.normalize_candidate_states(parsed_slice)
+    t1 = T.normalize_candidate_parties(parsed_slice)
+    candidates = T.build_candidate_dim(t2_raw, t1)
+    state_df = build_state_dim(_fake_state_geo())
+    with pytest.raises(TransformError, match="not present in the candidate dimension"):
+        T.build_votes_fact(parsed_slice, t2_raw, candidates, state_df)
 
 
 def test_electoral_rank_matches_vote_order(
