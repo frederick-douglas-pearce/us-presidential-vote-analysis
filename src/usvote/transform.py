@@ -172,6 +172,44 @@ VOTES_COLUMN_ORDER: tuple[str, ...] = (
     "president_electoral_rank",
 )
 
+# --- canonical keys (the cross-source reconciliation spine, D006 / #30) ----
+# EC (National Archives) data is the source of truth every popular-vote source
+# (E4 UCSB, E5 MIT) reconciles onto (D006). Two canonical keys form that spine;
+# docs/canonical-keys.md is the browsable catalog. This story only *fixes and
+# documents* the keys — the reconciliation itself is deferred to #38 / the E6 join.
+#
+# The spine is two-tier by design:
+#   - Human/display PK — what the warehouse stores and people read:
+#       candidate -> the reconciled full ``name``  (CANDIDATE_KEY)
+#       state     -> the full ``state`` name        (STATE_KEY)
+#   - Machine match target — the stable, format-normalized columns a PV source
+#     maps onto, because its display strings never match the Archives' verbatim
+#     (UCSB prints "BIDEN, JOSEPH R. JR"; MIT carries state_po/state_fips):
+#       candidate -> the parsed name parts (CANDIDATE_MATCH_COLUMNS)
+#       state     -> the USPS code          (STATE_MATCH_COLUMN)
+#
+# candidate_id is deliberately NOT canonical: build_candidate_dim assigns it as a
+# 1-based, row-order surrogate, so it shifts whenever the candidate set or its
+# order changes (e.g. extending coverage below 1892, #32). It is an internal join
+# key only — never a cross-source reconciliation key, never an externally-exposed
+# identifier. A durable public id (e.g. a name slug) is out of scope until one is
+# actually needed (see docs/canonical-keys.md).
+CANDIDATE_KEY = "name"
+STATE_KEY = "state"
+CANDIDATE_MATCH_COLUMNS: tuple[str, ...] = (
+    "name_first",
+    "name_middle",
+    "name_last",
+    "name_suffix",
+)
+STATE_MATCH_COLUMN = "state_usps"
+
+# At most two home states are representable per candidate (state + state_2); more
+# than two distinct states in one candidate group is either a genuinely 3-state
+# candidate (extend the schema deliberately) or two different people colliding on
+# one full name — the canonical-candidate-key failure mode _candidate_states guards.
+MAX_HOME_STATES = 2
+
 _JR_SUFFIX_RE = re.compile(r",? Jr\.?$")
 
 
@@ -365,17 +403,33 @@ def _candidate_states(t2_states: pd.DataFrame) -> pd.DataFrame:
         for col, value in fix.items():
             states.loc[match, col] = value
 
-    # Aggregate multi-state candidates: join their states with "-" (None -> ""),
-    # preserving first-appearance order (sort=False), then split into state/state_2.
-    grouped = (
-        states.groupby(
-            ["name", "name_first", "name_middle", "name_last", "name_suffix"],
-            sort=False,
-            dropna=False,
-        )["state"]
-        .agg(lambda col: "-".join("" if pd.isna(s) else s for s in col))
-        .reset_index()
-    )
+    # Aggregate multi-state candidates: join their distinct, non-null home states
+    # with "-" in first-appearance order (sort=False), then split into state/state_2.
+    key_cols = ["name", "name_first", "name_middle", "name_last", "name_suffix"]
+    by_candidate = states.groupby(key_cols, sort=False, dropna=False)["state"]
+
+    # Canary (D006 / #30): the split below keeps only the first two states, so a
+    # third would vanish silently. Because a groupby always yields unique keys, the
+    # downstream one-row-per-name grain check cannot see a same-name collision either
+    # — it surfaces here as an over-count. Fail loud instead of dropping data.
+    over_key = by_candidate.agg(lambda col: col.dropna().nunique()) > MAX_HOME_STATES
+    if over_key.any():
+        collided = sorted({key[0] for key in over_key.index[over_key]})
+        raise TransformError(
+            f"canonical candidate key: {collided} aggregate to more than "
+            f"{MAX_HOME_STATES} home states, unrepresentable in the state/state_2 "
+            "model (a new multi-state candidate, or two people sharing one full "
+            "name — see docs/canonical-keys.md)"
+        )
+
+    # Join the DISTINCT, non-null states (dict.fromkeys preserves first-appearance
+    # order): dropping nulls keeps a candidate's real state out of a NULL-primary
+    # slot when an earlier appearance had no home state, and de-duplicating keeps the
+    # token count equal to the canary's distinct-state count above — so the split
+    # below can never mangle state_2 into a hyphen composite or an empty string.
+    grouped = by_candidate.agg(
+        lambda col: "-".join(dict.fromkeys(s for s in col if not pd.isna(s)))
+    ).reset_index()
     split = grouped["state"].str.split("-", n=1, expand=True)
     grouped["state"] = split[0]
     grouped["state_2"] = split[1] if split.shape[1] > 1 else None

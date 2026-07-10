@@ -120,6 +120,10 @@ shared spine that both datasets conform to.
 - Canonical keys absorb the messy real-world variance already seen in the EC data
   (name mismatches, split names, multi-party/multi-state candidates) into one spine
   the PV data must match, rather than reconciling ad hoc per join.
+**Implemented by:** issue #30 — the EC-side keys are established, documented, and tested;
+see [`docs/canonical-keys.md`](../../docs/canonical-keys.md) for the two-tier definition
+(display PK vs. match target) and the `candidate_id`-is-not-canonical rule. The
+cross-source join that consumes them is deferred to E6.
 
 ---
 

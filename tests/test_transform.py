@@ -217,6 +217,105 @@ def test_candidate_id_is_one_based_and_missing_values_are_na() -> None:
     assert pd.isna(row["party"])
 
 
+# --- canonical keys: the cross-source reconciliation spine (D006 / #30) -----
+
+
+def test_canonical_keys_are_the_documented_columns() -> None:
+    # #30 freezes the canonical keys as data; lock the constants against the dims
+    # so a rename can't silently break the spine the PV sources reconcile onto.
+    candidates = build_candidate_dim(
+        _t2_states([{"president_candidate_name": "Robert Dole", "col_ind": 1,
+                     "president_candidate_state": "Kansas", "year": 1996}]),
+        _t1([]),
+    )
+    state_df = build_state_dim(fake_state_geo())
+    # Lock the exact key identity, not just membership — the canonical candidate key
+    # must be the reconciled name (never the candidate_id surrogate the module
+    # forbids) and the state key the full state name.
+    assert T.CANDIDATE_KEY == "name"
+    assert T.STATE_KEY == "state"
+    assert T.CANDIDATE_MATCH_COLUMNS == ("name_first", "name_middle", "name_last", "name_suffix")
+    assert T.STATE_MATCH_COLUMN == "state_usps"
+    # ...and each names a real column on the dimension it keys.
+    assert T.CANDIDATE_KEY in candidates.columns
+    assert T.STATE_KEY in state_df.columns
+    assert set(T.CANDIDATE_MATCH_COLUMNS) <= set(candidates.columns)
+    assert T.STATE_MATCH_COLUMN in state_df.columns
+
+
+def test_candidate_key_is_stable_but_candidate_id_is_not() -> None:
+    # The canonical candidate key is the reconciled name — invariant to input row
+    # order, which is what the future join relies on. candidate_id is a row-order
+    # surrogate (D006 / #30) and is deliberately NOT stable: it must never be the
+    # reconciliation key.
+    rows = [
+        {"president_candidate_name": "John Adams", "col_ind": 1,
+         "president_candidate_state": "Massachusetts", "year": 1796},
+        {"president_candidate_name": "Thomas Jefferson", "col_ind": 1,
+         "president_candidate_state": "Virginia", "year": 1796},
+    ]
+    forward = build_candidate_dim(_t2_states(rows), _t1([]))
+    reverse = build_candidate_dim(_t2_states(list(reversed(rows))), _t1([]))
+    assert set(forward["name"]) == set(reverse["name"])  # the spine is invariant
+    # candidate_id, by contrast, tracks first-appearance order and flips.
+    assert dict(zip(forward["candidate_id"], forward["name"])) != dict(
+        zip(reverse["candidate_id"], reverse["name"])
+    )
+
+
+def test_state_key_is_unique_and_stable_under_input_order() -> None:
+    geo = fake_state_geo()
+    forward = build_state_dim(geo)
+    shuffled = build_state_dim(geo.iloc[::-1].reset_index(drop=True))
+    T.assert_unique_grain(forward, "state", "state")  # one row per state
+    assert list(forward["state"]) == list(shuffled["state"])  # order-independent
+    assert set(forward["state"]) == STATE_NAMES  # 50 states + DC, territories dropped
+
+
+def test_more_than_two_home_states_fails_loud() -> None:
+    # Three distinct home states is unrepresentable in the state/state_2 model and
+    # is the same-name-collision tripwire — it must raise, not silently drop the
+    # third state in the split.
+    t2 = _t2_states([
+        {"president_candidate_name": "Ambiguous Name", "col_ind": 1,
+         "president_candidate_state": state, "year": year}
+        for state, year in (("Ohio", 1900), ("Texas", 1904), ("Iowa", 1908))
+    ])
+    with pytest.raises(TransformError, match="more than 2 home states"):
+        build_candidate_dim(t2, _t1([]))
+
+
+def test_null_home_state_does_not_occupy_primary_slot() -> None:
+    # A candidate whose first-appearing row has no home state must not be demoted to
+    # a NULL primary with the real state pushed into state_2 (#30 review): nulls are
+    # dropped before the primary/secondary split.
+    t2 = _t2_states([
+        {"president_candidate_name": "John Roe", "col_ind": 1,
+         "president_candidate_state": None, "year": 1900},
+        {"president_candidate_name": "John Roe", "col_ind": 1,
+         "president_candidate_state": "Ohio", "year": 1904},
+    ])
+    row = build_candidate_dim(t2, _t1([])).iloc[0]
+    assert row["state"] == "Ohio"
+    assert row["state_2"] is None
+
+
+def test_duplicate_home_state_does_not_mangle_state_2() -> None:
+    # Two raw spellings that reconcile to one canonical name in the SAME state must
+    # collapse to a single home state, not a "New York-New York" composite (#30
+    # review). drop_duplicates upstream keys on the RAW name, so both rows survive
+    # into one group once CANDIDATE_NAME_FIXES rewrites the name.
+    t2 = _t2_states([
+        {"president_candidate_name": "Donald Trump", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 2016},
+        {"president_candidate_name": "Donald J. Trump", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 2020},
+    ])
+    row = build_candidate_dim(t2, _t1([])).iloc[0]
+    assert row["state"] == "New York"
+    assert row["state_2"] is None
+
+
 # --- validators: pass + raise ----------------------------------------------
 
 
