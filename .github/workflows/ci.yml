@@ -48,3 +48,62 @@ jobs:
       - name: Tests (pytest, integration excluded)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run pytest -m "not integration" --cov=usvote
+
+  # The live-Postgres integration tests run in a SEPARATE job so a service-
+  # container/database hiccup is distinguishable from a lint/type/unit failure
+  # in `checks`. The Postgres major version matches the local/prod target (16).
+  integration:
+    runs-on: ubuntu-latest
+    # Bound a wedged connection (DBC connects once and does not retry) rather
+    # than letting a hung step ride the 6h default.
+    timeout-minutes: 10
+
+    # Ephemeral throwaway Postgres with no real data: the password is a plain
+    # literal (no GitHub secret needed) and the tests' destructive `replace=True`
+    # schema drop is safe against it. Do NOT point this at a real database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: usvote_test
+        ports:
+          - 5432:5432
+        # Gate the job's steps on Postgres being ready to accept connections,
+        # so pytest fails on an assertion rather than a connection refusal.
+        # Probe the target DB (-d usvote_test), not just the server: a bare
+        # `pg_isready -U postgres` can pass against the transient socket-only
+        # server the image runs during init, before usvote_test exists / TCP is
+        # up. DBC connects once with no retry, so this gate is the only guard.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d usvote_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      # Point the USVOTE_TEST_DB_* config (read in tests/conftest.py) at the
+      # service container. `-m integration` overrides the ini's default
+      # `-m 'not integration'` (last -m wins), running ONLY these tests here.
+      - name: Tests (pytest, integration only)
+        env:
+          USVOTE_TEST_DB_HOST: localhost
+          USVOTE_TEST_DB_PORT: 5432
+          USVOTE_TEST_DB_NAME: usvote_test
+          USVOTE_TEST_DB_USER: postgres
+          USVOTE_TEST_DB_PASSWORD: postgres
+        run: uv run pytest -m integration
