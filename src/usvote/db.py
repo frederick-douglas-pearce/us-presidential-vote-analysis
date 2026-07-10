@@ -21,9 +21,31 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import psycopg2 as pg
 from psycopg2.extras import execute_values
+
+
+def _df_to_sql_rows(df: pd.DataFrame) -> list[tuple[Any, ...]]:
+    """Convert a DataFrame to native-Python row tuples for :func:`execute_values`.
+
+    ``DataFrame.values`` is unsafe to hand psycopg2 directly: its scalars are numpy
+    types (``numpy.int64``, ``numpy.bool_``) that psycopg2 cannot adapt, and its
+    missing values are ``NaN`` floats that Postgres receives as a literal ``NaN``
+    rather than SQL ``NULL`` — breaking NOT NULL / FK / typed columns. (The frames'
+    text columns are pandas ``StringDtype`` whose NA is ``NaN``, so an upstream
+    NaN->None pass does not survive into ``.values``.) This normalizes both at the
+    write boundary: any null-like value (``None``/``NaN``/``NA``/``NaT``) becomes
+    ``None``, and any numpy scalar is unboxed to its Python equivalent.
+    """
+    return [
+        tuple(
+            None if pd.isna(v) else v.item() if isinstance(v, np.generic) else v
+            for v in row
+        )
+        for row in df.itertuples(index=False, name=None)
+    ]
 
 
 class DBConnectionError(RuntimeError):
@@ -155,7 +177,7 @@ class DBC:
             columns = ",".join(list(df.columns))
             insert_stmt = f"INSERT INTO {schema}.{table_name} ({columns}) VALUES %s"
             with self.conn as conn, conn.cursor() as cur:
-                execute_values(cur, insert_stmt, df.values, **kwargs)
+                execute_values(cur, insert_stmt, _df_to_sql_rows(df), **kwargs)
         else:
             print("Input dataframe, df, is empty: No data was written to the database!")
         if close:

@@ -155,8 +155,31 @@ def test_insert_df_builds_columns_and_stmt(
     assert len(calls) == 1
     _, sql, argslist = calls[0]
     assert sql == "INSERT INTO dwh.votes (year,candidate_id) VALUES %s"
-    # The melted DataFrame's raw .values are handed to execute_values.
+    # Rows are native-Python tuples (not numpy) handed to execute_values.
     assert list(argslist[0]) == [2020, 1]
+    assert all(type(v) is int for v in argslist[0])
+
+
+def test_insert_normalizes_nan_and_numpy_scalars() -> None:
+    # The DataFrame->SQL conversion must unbox numpy scalars (psycopg2 can't adapt
+    # numpy.int64) and turn every null-like value into None (NOT a literal NaN,
+    # which Postgres rejects on NOT NULL / FK columns). Regression for the two
+    # failures the live-Postgres integration test surfaced.
+    df = pd.DataFrame(
+        {
+            "n": [1, 2],  # int64 -> python int
+            "flag": [True, False],  # bool -> python bool
+            "name": pd.array(["Trump", None], dtype="string"),  # StringDtype NA
+            "state_2": [float("nan"), "Ohio"],  # float NaN -> None
+        }
+    )
+    rows = db_module._df_to_sql_rows(df)
+
+    assert rows == [(1, True, "Trump", None), (2, False, None, "Ohio")]
+    # Every non-None scalar is a builtin Python type, not a numpy scalar.
+    for row in rows:
+        for v in row:
+            assert v is None or type(v).__module__ == "builtins"
 
 
 def test_insert_empty_df_is_guarded(
