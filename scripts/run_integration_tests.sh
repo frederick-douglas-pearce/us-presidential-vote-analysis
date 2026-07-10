@@ -36,11 +36,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 # Fail clearly if the Postgres client tools are not on PATH (rather than letting
-# set -e abort mid-run on the first missing binary).
-command -v psql createdb dropdb >/dev/null 2>&1 || {
-  echo "postgres client tools (psql/createdb/dropdb) not found on PATH." >&2
-  exit 1
-}
+# set -e abort mid-run on the first missing binary). Check each one: `command -v`
+# with multiple names only reports on the last, so it must be called per tool.
+for tool in psql createdb dropdb; do
+  command -v "${tool}" >/dev/null 2>&1 || {
+    echo "postgres client tool '${tool}' not found on PATH." >&2
+    exit 1
+  }
+done
 
 export USVOTE_TEST_DB_HOST="${USVOTE_TEST_DB_HOST:-localhost}"
 export USVOTE_TEST_DB_PORT="${USVOTE_TEST_DB_PORT:-5432}"

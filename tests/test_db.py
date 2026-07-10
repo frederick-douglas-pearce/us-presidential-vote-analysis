@@ -8,7 +8,6 @@ at the bottom exercises a real database and is excluded by default.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pandas as pd
@@ -18,12 +17,7 @@ import pytest
 import usvote.db as db_module
 from usvote.db import DBC, DBConnectionError
 
-from .conftest import RecordingConnection
-
-
-def make_dbc(conn: RecordingConnection) -> DBC:
-    """Build a DBC wired to the fake connection instead of a real Postgres."""
-    return DBC({"dbname": "test"}, connect=lambda **_: conn)
+from .conftest import RecordingConnection, make_dbc
 
 
 # --- connection handling ---------------------------------------------------
@@ -230,24 +224,9 @@ def test_select_query_to_df_delegates_to_read_sql(
 
 
 @pytest.mark.integration
-def test_roundtrip_against_real_postgres() -> None:
-    """Smoke test against a real database.
-
-    Configure via env: USVOTE_TEST_DB_{HOST,PORT,NAME,USER,PASSWORD}. Skips if
-    unset so the marker can be run locally without hard-coding credentials.
-    """
-    dbname = os.environ.get("USVOTE_TEST_DB_NAME")
-    if not dbname:
-        pytest.skip("USVOTE_TEST_DB_NAME not set; skipping live-Postgres test")
-
-    config = {
-        "host": os.environ.get("USVOTE_TEST_DB_HOST", "localhost"),
-        "port": int(os.environ.get("USVOTE_TEST_DB_PORT", "5432")),
-        "dbname": dbname,
-        "user": os.environ.get("USVOTE_TEST_DB_USER", "postgres"),
-        "password": os.environ.get("USVOTE_TEST_DB_PASSWORD", ""),
-    }
-    dbc = DBC(config)
+def test_roundtrip_against_real_postgres(integration_db_config: dict[str, Any]) -> None:
+    """Smoke test against a real database (config + skip from the shared fixture)."""
+    dbc = DBC(integration_db_config)
     try:
         dbc.create_schema("usvote_test", replace=True)
         dbc.create_table("usvote_test", "t", [("id", "integer")])

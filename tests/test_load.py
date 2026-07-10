@@ -15,41 +15,23 @@ Two layers, mirroring ``test_db``:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
-import usvote.db as db_module
 from usvote.db import DBC
 from usvote.load import SCHEMA, TABLE_NAMES, build_table_column_defs, load_dataframes
 
-from .conftest import RecordingConnection, fake_state_geo
+from .conftest import (
+    RecordingConnection,
+    fake_state_geo,
+    make_dbc,
+    record_inserts,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-def make_dbc(conn: RecordingConnection) -> DBC:
-    """Build a DBC wired to the fake connection instead of a real Postgres."""
-    return DBC({"dbname": "test"}, connect=lambda **_: conn)
-
-
-def _record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
-    """Patch ``execute_values`` to capture (sql, argslist); returns the log.
-
-    ``insert_df_into_table`` routes through the module-level ``execute_values``
-    rather than ``cursor.execute``, so the recording cursor never sees the INSERTs
-    — patch at the ``usvote.db`` lookup site to record them (test_db.py pattern).
-    """
-    calls: list[tuple[str, Any]] = []
-
-    def fake_execute_values(cur: object, sql: str, argslist: Any, **_: object) -> None:
-        calls.append((sql, argslist))
-
-    monkeypatch.setattr(db_module, "execute_values", fake_execute_values)
-    return calls
 
 
 # --- column definitions ----------------------------------------------------
@@ -91,7 +73,7 @@ def _frames() -> dict[str, pd.DataFrame]:
 def test_load_creates_and_inserts_in_fk_order(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    inserts = _record_inserts(monkeypatch)
+    inserts = record_inserts(monkeypatch)
     load_dataframes(make_dbc(recording_conn), **_frames())
 
     creates = [q for q in recording_conn.executed if q.startswith("CREATE TABLE")]
@@ -110,7 +92,7 @@ def test_load_creates_and_inserts_in_fk_order(
 def test_load_non_destructive_by_default(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _record_inserts(monkeypatch)
+    record_inserts(monkeypatch)
     load_dataframes(make_dbc(recording_conn), **_frames())
 
     # The guard: no DROP of any kind unless replace=True is passed explicitly.
@@ -121,7 +103,7 @@ def test_load_non_destructive_by_default(
 def test_load_replace_drops_schema_cascade(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _record_inserts(monkeypatch)
+    record_inserts(monkeypatch)
     load_dataframes(make_dbc(recording_conn), replace=True, **_frames())
 
     drops = [q for q in recording_conn.executed if q.startswith("DROP")]
@@ -133,7 +115,7 @@ def test_load_replace_drops_schema_cascade(
 def test_load_close_flag_closes_connection(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _record_inserts(monkeypatch)
+    record_inserts(monkeypatch)
     load_dataframes(make_dbc(recording_conn), close=True, **_frames())
     assert recording_conn.closed is True
 
@@ -141,7 +123,7 @@ def test_load_close_flag_closes_connection(
 def test_load_defaults_to_leaving_connection_open(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _record_inserts(monkeypatch)
+    record_inserts(monkeypatch)
     load_dataframes(make_dbc(recording_conn), **_frames())
     # The caller owns the dbc, so load must not close it by default.
     assert recording_conn.closed is False
@@ -151,30 +133,20 @@ def test_load_defaults_to_leaving_connection_open(
 
 
 @pytest.mark.integration
-def test_fixture_slice_loads_into_real_postgres() -> None:
+def test_fixture_slice_loads_into_real_postgres(
+    integration_db_config: dict[str, Any],
+) -> None:
     """Drive the 2016 + 2020 fixture slice through the whole pipeline into Postgres.
 
-    Configure via env: USVOTE_TEST_DB_{HOST,PORT,NAME,USER,PASSWORD}. Skips if
-    unset so the marker runs locally without hard-coded credentials. Replays the
-    Archives fixtures offline (``fetch_from_dir``) and injects the fake state-geo
-    frame (``load_geo``), so no network or TIGER shapefile is needed — only a live
-    database.
+    Replays the Archives fixtures offline (``fetch_from_dir``) and injects the fake
+    state-geo frame (``load_geo``), so no network or TIGER shapefile is needed —
+    only a live database (config + skip from the shared ``integration_db_config``
+    fixture).
     """
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir
 
-    dbname = os.environ.get("USVOTE_TEST_DB_NAME")
-    if not dbname:
-        pytest.skip("USVOTE_TEST_DB_NAME not set; skipping live-Postgres test")
-
-    config = {
-        "host": os.environ.get("USVOTE_TEST_DB_HOST", "localhost"),
-        "port": int(os.environ.get("USVOTE_TEST_DB_PORT", "5432")),
-        "dbname": dbname,
-        "user": os.environ.get("USVOTE_TEST_DB_USER", "postgres"),
-        "password": os.environ.get("USVOTE_TEST_DB_PASSWORD", ""),
-    }
-    dbc = DBC(config)
+    dbc = DBC(integration_db_config)
     try:
         # The fixture dir names pages by year; a link-index fixture drives the two
         # snapshotted years (2016, 2020) through the real scrape->load spine.

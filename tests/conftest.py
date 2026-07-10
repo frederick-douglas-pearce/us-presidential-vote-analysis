@@ -8,10 +8,14 @@ construct a ``DBC`` and will want the same seam.
 
 from __future__ import annotations
 
-from typing import Literal
+import os
+from typing import Any, Literal
 
 import pandas as pd
 import pytest
+
+import usvote.db as db_module
+from usvote.db import DBC
 
 # The valid US state names Table 2 rows are matched against — the package
 # equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
@@ -78,6 +82,51 @@ class RecordingConnection:
 def recording_conn() -> RecordingConnection:
     """A fresh fake connection whose ``.executed`` list captures SQL strings."""
     return RecordingConnection()
+
+
+def make_dbc(conn: RecordingConnection) -> DBC:
+    """Build a :class:`DBC` wired to a fake connection instead of a real Postgres.
+
+    Shared by every load-path test (db / load / pipeline), which all construct a
+    ``DBC`` over the recording connection to assert on the SQL it builds.
+    """
+    return DBC({"dbname": "test"}, connect=lambda **_: conn)
+
+
+def record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
+    """Patch ``usvote.db.execute_values`` to capture ``(sql, argslist)``; return the log.
+
+    ``insert_df_into_table`` routes through the module-level ``execute_values``
+    rather than ``cursor.execute``, so the recording cursor never sees the INSERTs
+    — patch at the ``usvote.db`` lookup site to record them.
+    """
+    calls: list[tuple[str, Any]] = []
+
+    def fake_execute_values(cur: object, sql: str, argslist: Any, **_: object) -> None:
+        calls.append((sql, argslist))
+
+    monkeypatch.setattr(db_module, "execute_values", fake_execute_values)
+    return calls
+
+
+@pytest.fixture
+def integration_db_config() -> dict[str, Any]:
+    """Live-Postgres connection config from ``USVOTE_TEST_DB_*`` env vars.
+
+    Skips the test if ``USVOTE_TEST_DB_NAME`` is unset, so the ``integration``
+    marker can run locally without hard-coded credentials. Shared by every
+    live-database test.
+    """
+    dbname = os.environ.get("USVOTE_TEST_DB_NAME")
+    if not dbname:
+        pytest.skip("USVOTE_TEST_DB_NAME not set; skipping live-Postgres test")
+    return {
+        "host": os.environ.get("USVOTE_TEST_DB_HOST", "localhost"),
+        "port": int(os.environ.get("USVOTE_TEST_DB_PORT", "5432")),
+        "dbname": dbname,
+        "user": os.environ.get("USVOTE_TEST_DB_USER", "postgres"),
+        "password": os.environ.get("USVOTE_TEST_DB_PASSWORD", ""),
+    }
 
 
 def fake_state_geo() -> pd.DataFrame:

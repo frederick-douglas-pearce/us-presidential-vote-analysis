@@ -11,17 +11,14 @@ real-database load is covered by the integration test in ``test_load``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-import usvote.db as db_module
-from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pipeline import LATEST_ELECTION_YEAR, election_years, run_ec_pipeline
 from usvote.scrape import fetch_from_dir
 
-from .conftest import RecordingConnection, fake_state_geo
+from .conftest import RecordingConnection, fake_state_geo, make_dbc, record_inserts
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -38,6 +35,15 @@ def test_election_years_spans_1789_to_latest() -> None:
     assert 1790 not in years
 
 
+def test_election_years_does_not_overshoot_non_election_latest() -> None:
+    # A non-election `latest` must not pull in the next cycle: the 4-year cadence
+    # from 1792 stops at the last election year <= latest.
+    years = election_years(2025)
+    assert 2024 in years
+    assert 2028 not in years
+    assert max(years) == 2024
+
+
 def test_election_years_defaults_to_module_latest() -> None:
     assert election_years() == election_years(LATEST_ELECTION_YEAR)
     assert max(election_years()) == LATEST_ELECTION_YEAR
@@ -51,16 +57,10 @@ def test_run_ec_pipeline_wires_all_stages_offline(
 ) -> None:
     # Capture inserts (insert_df_into_table routes through execute_values, which
     # the recording cursor never sees) so we can assert every table was loaded.
-    inserted: list[str] = []
+    inserts = record_inserts(monkeypatch)
 
-    def fake_execute_values(cur: object, sql: str, argslist: Any, **_: object) -> None:
-        inserted.append(sql.split()[2])  # schema.table
-
-    monkeypatch.setattr(db_module, "execute_values", fake_execute_values)
-
-    dbc = DBC({"dbname": "test"}, connect=lambda **_: recording_conn)
     candidates_df, state_df, votes_df = run_ec_pipeline(
-        dbc,
+        make_dbc(recording_conn),
         "unused.shp",
         replace=True,
         years={2016, 2020},
@@ -78,18 +78,19 @@ def test_run_ec_pipeline_wires_all_stages_offline(
     assert set(votes_df["year"]) == {2016, 2020}
 
     # All three tables were created and inserted, in FK order.
-    assert inserted == [f"{SCHEMA}.state", f"{SCHEMA}.candidate", f"{SCHEMA}.votes"]
+    assert [sql.split()[2] for sql, _ in inserts] == [
+        f"{SCHEMA}.state",
+        f"{SCHEMA}.candidate",
+        f"{SCHEMA}.votes",
+    ]
 
 
 def test_run_ec_pipeline_leaves_connection_open_by_default(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        db_module, "execute_values", lambda *_a, **_k: None
-    )
-    dbc = DBC({"dbname": "test"}, connect=lambda **_: recording_conn)
+    record_inserts(monkeypatch)
     run_ec_pipeline(
-        dbc,
+        make_dbc(recording_conn),
         "unused.shp",
         years={2016, 2020},
         fetch=fetch_from_dir(FIXTURES),

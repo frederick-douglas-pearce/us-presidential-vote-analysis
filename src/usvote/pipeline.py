@@ -35,9 +35,12 @@ def election_years(latest: int = LATEST_ELECTION_YEAR) -> set[int]:
 
     1789 is the lone off-cycle year (the first election); every election since has
     been held every four years from 1792. Ported from notebook cells 10/11; used
-    to filter the scraped Archives links to real election years.
+    to filter the scraped Archives links to real election years. ``latest + 1`` as
+    the range bound includes ``latest`` when it is an election year without
+    overshooting to the next cycle when it is not (e.g. ``election_years(2025)``
+    stops at 2024, not 2028).
     """
-    return {1789} | set(range(1792, latest + 4, 4))
+    return {1789} | set(range(1792, latest + 1, 4))
 
 
 def run_ec_pipeline(
