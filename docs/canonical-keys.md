@@ -1,0 +1,79 @@
+# Canonical keys — the cross-source reconciliation spine
+
+The project joins Electoral College data (National Archives) with popular-vote data
+from two other sources (UCSB, [E4](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/33);
+MIT, E5). Two datasets from three sources need a governing key and a designated
+authority, or reconciliation conflicts have no tiebreaker.
+
+Per [decision **D006**](../.claude/specs/decisions.md), the **EC data is the source of
+truth**, and a **canonical candidate key** and **canonical state key** are the shared
+spine every other source conforms to. This page is the human-browsable description of
+those keys. The authoritative, machine-readable definition is the set of constants in
+the "canonical keys" section of
+[`src/usvote/transform.py`](../src/usvote/transform.py), each locked by a test in
+[`tests/test_transform.py`](../tests/test_transform.py).
+
+> **Scope (issue #30).** This establishes and documents the EC-side keys only. It does
+> **not** build the cross-source join (deferred to E6) or any source's reconciliation
+> logic ([#38](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/38)
+> maps UCSB names onto these keys). The job here is to fix the target the join will aim at.
+
+## The two keys are two-tier
+
+Each key has a **human/display form** (the primary key the warehouse stores and people
+read) and a **machine match target** (the stable, format-normalized columns a foreign
+source actually reconciles onto, because its display strings never match the Archives'
+verbatim — UCSB prints `BIDEN, JOSEPH R. JR`; MIT carries `state_po`/`state_fips`).
+
+| Key | Display form (warehouse PK) | Match target (reconcile onto) | `transform.py` constant |
+|---|---|---|---|
+| **Candidate** | the reconciled full `name` (e.g. `Donald J. Trump`) | the parsed name parts `name_first` / `name_middle` / `name_last` / `name_suffix` | `CANDIDATE_KEY`, `CANDIDATE_MATCH_COLUMNS` |
+| **State** | the full `state` name (e.g. `District of Columbia`) | the USPS code `state_usps` (e.g. `DC`) | `STATE_KEY`, `STATE_MATCH_COLUMN` |
+
+Both keys **absorb the variance already handled in transform** so a foreign source only
+has to match the canonical form, never the raw one:
+
+- **Candidate** — multi-state candidates are aggregated to one row (primary `state` +
+  `state_2`), multi-party to `party`/`party_2`, and name spellings are reconciled to a
+  single canonical form (Trump `Donald Trump`→`Donald J. Trump`, McGovern, Bob Dole,
+  the Faith Spotted Eagle surname split). See [`corrections.md`](corrections.md) for the
+  full catalog of name reconciliations, which double as the first instances of this
+  canonical-key problem.
+- **State** — the full state name is stable and unambiguous across all covered years;
+  TIGER territories are dropped so the dimension is exactly the 50 states + DC.
+
+## `candidate_id` is **not** a canonical key
+
+`build_candidate_dim` assigns `candidate_id` as a **1-based, row-order surrogate**. It
+shifts whenever the candidate set or its order changes (for example when EC coverage is
+extended below 1892,
+[#32](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/32)).
+It is therefore:
+
+- an **internal join key only** — fine for wiring the votes fact to the candidate
+  dimension within one build;
+- **never** a cross-source reconciliation key (a PV source carries names, not our
+  surrogate); and
+- **never** an externally-exposed identifier (e.g. through the planned API, E8). If a
+  durable public candidate id is ever needed, mint a deterministic name slug — do not
+  promote `candidate_id`.
+
+The test `test_candidate_key_is_stable_but_candidate_id_is_not` locks this distinction:
+the `name` key set is invariant to input row order; the `candidate_id`→`name` mapping is
+not.
+
+## Known residual: same-name collisions
+
+The canonical candidate key is the full `name` string, guarded by a one-row-per-name
+grain check. A single build cannot, on its own, distinguish **two different people who
+share an identical full name**. Because candidate rows are aggregated by name *before*
+the grain check, such a collision would silently merge two people into one row rather
+than tripping the uniqueness assert.
+
+`_candidate_states` therefore carries a **canary** (`MAX_HOME_STATES`): a candidate that
+aggregates to **more than two distinct home states** is unrepresentable in the
+`state`/`state_2` model and raises `TransformError` instead of silently dropping the
+third state. That catches the collision when it manifests as an over-count. A stronger,
+curated per-name allow-list is deferred until coverage actually surfaces a same-name
+collision (most likely when extending below 1892, #32) — at which point the fix follows
+the corrections pattern: a provenance-carrying constant + a test + a catalog row.
