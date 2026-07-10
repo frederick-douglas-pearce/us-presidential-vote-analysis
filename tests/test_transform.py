@@ -229,9 +229,16 @@ def test_canonical_keys_are_the_documented_columns() -> None:
         _t1([]),
     )
     state_df = build_state_dim(fake_state_geo())
+    # Lock the exact key identity, not just membership — the canonical candidate key
+    # must be the reconciled name (never the candidate_id surrogate the module
+    # forbids) and the state key the full state name.
+    assert T.CANDIDATE_KEY == "name"
+    assert T.STATE_KEY == "state"
+    assert T.CANDIDATE_MATCH_COLUMNS == ("name_first", "name_middle", "name_last", "name_suffix")
+    assert T.STATE_MATCH_COLUMN == "state_usps"
+    # ...and each names a real column on the dimension it keys.
     assert T.CANDIDATE_KEY in candidates.columns
     assert T.STATE_KEY in state_df.columns
-    # The format-normalized match targets a PV source maps onto both exist.
     assert set(T.CANDIDATE_MATCH_COLUMNS) <= set(candidates.columns)
     assert T.STATE_MATCH_COLUMN in state_df.columns
 
@@ -276,6 +283,37 @@ def test_more_than_two_home_states_fails_loud() -> None:
     ])
     with pytest.raises(TransformError, match="more than 2 home states"):
         build_candidate_dim(t2, _t1([]))
+
+
+def test_null_home_state_does_not_occupy_primary_slot() -> None:
+    # A candidate whose first-appearing row has no home state must not be demoted to
+    # a NULL primary with the real state pushed into state_2 (#30 review): nulls are
+    # dropped before the primary/secondary split.
+    t2 = _t2_states([
+        {"president_candidate_name": "John Roe", "col_ind": 1,
+         "president_candidate_state": None, "year": 1900},
+        {"president_candidate_name": "John Roe", "col_ind": 1,
+         "president_candidate_state": "Ohio", "year": 1904},
+    ])
+    row = build_candidate_dim(t2, _t1([])).iloc[0]
+    assert row["state"] == "Ohio"
+    assert row["state_2"] is None
+
+
+def test_duplicate_home_state_does_not_mangle_state_2() -> None:
+    # Two raw spellings that reconcile to one canonical name in the SAME state must
+    # collapse to a single home state, not a "New York-New York" composite (#30
+    # review). drop_duplicates upstream keys on the RAW name, so both rows survive
+    # into one group once CANDIDATE_NAME_FIXES rewrites the name.
+    t2 = _t2_states([
+        {"president_candidate_name": "Donald Trump", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 2016},
+        {"president_candidate_name": "Donald J. Trump", "col_ind": 1,
+         "president_candidate_state": "New York", "year": 2020},
+    ])
+    row = build_candidate_dim(t2, _t1([])).iloc[0]
+    assert row["state"] == "New York"
+    assert row["state_2"] is None
 
 
 # --- validators: pass + raise ----------------------------------------------

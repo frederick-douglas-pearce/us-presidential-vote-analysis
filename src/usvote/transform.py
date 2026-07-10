@@ -403,8 +403,8 @@ def _candidate_states(t2_states: pd.DataFrame) -> pd.DataFrame:
         for col, value in fix.items():
             states.loc[match, col] = value
 
-    # Aggregate multi-state candidates: join their states with "-" (None -> ""),
-    # preserving first-appearance order (sort=False), then split into state/state_2.
+    # Aggregate multi-state candidates: join their distinct, non-null home states
+    # with "-" in first-appearance order (sort=False), then split into state/state_2.
     key_cols = ["name", "name_first", "name_middle", "name_last", "name_suffix"]
     by_candidate = states.groupby(key_cols, sort=False, dropna=False)["state"]
 
@@ -422,8 +422,13 @@ def _candidate_states(t2_states: pd.DataFrame) -> pd.DataFrame:
             "name — see docs/canonical-keys.md)"
         )
 
+    # Join the DISTINCT, non-null states (dict.fromkeys preserves first-appearance
+    # order): dropping nulls keeps a candidate's real state out of a NULL-primary
+    # slot when an earlier appearance had no home state, and de-duplicating keeps the
+    # token count equal to the canary's distinct-state count above — so the split
+    # below can never mangle state_2 into a hyphen composite or an empty string.
     grouped = by_candidate.agg(
-        lambda col: "-".join("" if pd.isna(s) else s for s in col)
+        lambda col: "-".join(dict.fromkeys(s for s in col if not pd.isna(s)))
     ).reset_index()
     split = grouped["state"].str.split("-", n=1, expand=True)
     grouped["state"] = split[0]
