@@ -200,20 +200,21 @@ def test_spotted_eagle_surname_corrected() -> None:
     ])
     t1 = _t1([])  # no Table-1 party row for a faithless-only candidate
     row = build_candidate_dim(t2, t1).iloc[0]
-    assert row["name_middle"] is None
+    assert pd.isna(row["name_middle"])  # mis-split middle cleared (NA -> NULL at load)
     assert row["name_last"] == "Spotted Eagle"
 
 
-def test_candidate_id_is_one_based_and_nan_becomes_none() -> None:
+def test_candidate_id_is_one_based_and_missing_values_are_na() -> None:
     t2 = _t2_states([
         {"president_candidate_name": "Colin Powell", "col_ind": 1,
          "president_candidate_state": None, "year": 2016},
     ])
     row = build_candidate_dim(t2, _t1([])).iloc[0]
     assert row["candidate_id"] == 1
-    # No Table-1 party and no home state -> proper None (not NaN) for the DB write.
-    assert row["state"] is None
-    assert row["party"] is None
+    # No Table-1 party and no home state -> pandas NA; usvote.db.insert_df_into_table
+    # maps NA to SQL NULL at the write boundary.
+    assert pd.isna(row["state"])
+    assert pd.isna(row["party"])
 
 
 # --- validators: pass + raise ----------------------------------------------

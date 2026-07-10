@@ -313,9 +313,10 @@ def build_candidate_dim(t2_states: pd.DataFrame, t1: pd.DataFrame) -> pd.DataFra
     candidate spanning multiple states becomes one row with primary ``state`` +
     secondary ``state_2``. Parties are aggregated the same way into
     ``party``/``party_2`` and left-joined on the reconciled name. A 1-based
-    ``candidate_id`` PK is assigned and NaN is converted to ``None`` for the DB
-    write. Raises :class:`TransformError` if the grain (one row per candidate) or
-    the Table-1/Table-2 name reconciliation is violated.
+    ``candidate_id`` PK is assigned. Missing home states / parties are left as
+    pandas NA; the DB write boundary (:func:`usvote.db.insert_df_into_table`) maps
+    NA to SQL ``NULL``. Raises :class:`TransformError` if the grain (one row per
+    candidate) or the Table-1/Table-2 name reconciliation is violated.
     """
     states = _candidate_states(t2_states)
     parties = _candidate_parties(t1)
@@ -330,7 +331,6 @@ def build_candidate_dim(t2_states: pd.DataFrame, t1: pd.DataFrame) -> pd.DataFra
     # The party left-join must neither drop nor duplicate a Table-2 candidate.
     assert_count_equals(len(candidates), len(states), "candidate count changed in party join")
     candidates.insert(0, "candidate_id", range(1, len(candidates) + 1))
-    candidates = _nan_to_none(candidates)
 
     assert_unique_grain(candidates, "name", "candidate")
     return candidates
@@ -413,15 +413,6 @@ def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
 
     assert_unique_grain(parties, "name", "candidate (Table 1 parties)")
     return parties
-
-
-def _nan_to_none(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert NaN/NaT to ``None`` so Postgres receives proper NULLs.
-
-    Uses ``DataFrame.map`` (the notebook's ``applymap`` is deprecated in pandas
-    >=2.1). ``pd.isnull`` already covers ``None``, so no extra guard is needed.
-    """
-    return df.map(lambda x: None if pd.isnull(x) else x)
 
 
 # --- state dimension -------------------------------------------------------
