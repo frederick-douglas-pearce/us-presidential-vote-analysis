@@ -42,7 +42,7 @@ from usvote.transform import (
     transform_parsed_years,
 )
 
-from .conftest import STATE_NAMES
+from .conftest import STATE_NAMES, fake_state_geo
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -200,20 +200,21 @@ def test_spotted_eagle_surname_corrected() -> None:
     ])
     t1 = _t1([])  # no Table-1 party row for a faithless-only candidate
     row = build_candidate_dim(t2, t1).iloc[0]
-    assert row["name_middle"] is None
+    assert pd.isna(row["name_middle"])  # mis-split middle cleared (NA -> NULL at load)
     assert row["name_last"] == "Spotted Eagle"
 
 
-def test_candidate_id_is_one_based_and_nan_becomes_none() -> None:
+def test_candidate_id_is_one_based_and_missing_values_are_na() -> None:
     t2 = _t2_states([
         {"president_candidate_name": "Colin Powell", "col_ind": 1,
          "president_candidate_state": None, "year": 2016},
     ])
     row = build_candidate_dim(t2, _t1([])).iloc[0]
     assert row["candidate_id"] == 1
-    # No Table-1 party and no home state -> proper None (not NaN) for the DB write.
-    assert row["state"] is None
-    assert row["party"] is None
+    # No Table-1 party and no home state -> pandas NA; usvote.db.insert_df_into_table
+    # maps NA to SQL NULL at the write boundary.
+    assert pd.isna(row["state"])
+    assert pd.isna(row["party"])
 
 
 # --- validators: pass + raise ----------------------------------------------
@@ -319,30 +320,8 @@ def test_apply_other_candidates_raises_on_non_2016_placeholder() -> None:
 # --- state dimension -------------------------------------------------------
 
 
-def _fake_state_geo() -> pd.DataFrame:
-    """A plain-pandas stand-in for load_state_geo output (all 51 + one territory).
-
-    Includes Puerto Rico to prove territories are dropped, and REGION/DIVISION as
-    strings (TIGER ships them so) to prove the astype-to-int in build_state_dim.
-    """
-    rows = []
-    for i, name in enumerate(sorted(STATE_NAMES)):
-        rows.append({
-            "NAME": name, "REGION": str(i % 4 + 1), "DIVISION": str(i % 9 + 1),
-            "STATENS": f"{i:08d}", "GEOID": f"{i:02d}", "STUSPS": name[:2].upper(),
-            "ALAND": 1000 + i, "AWATER": i,
-            "INTPTLAT": f"+{30 + i % 20}.0", "INTPTLON": f"-{70 + i % 40}.0",
-        })
-    rows.append({
-        "NAME": "Puerto Rico", "REGION": "9", "DIVISION": "9", "STATENS": "72000000",
-        "GEOID": "72", "STUSPS": "PR", "ALAND": 1, "AWATER": 1,
-        "INTPTLAT": "+18.0", "INTPTLON": "-66.0",
-    })
-    return pd.DataFrame(rows)
-
-
 def test_build_state_dim_drops_territories_and_orders_columns() -> None:
-    state_df = build_state_dim(_fake_state_geo())
+    state_df = build_state_dim(fake_state_geo())
     assert len(state_df) == 51
     assert "Puerto Rico" not in state_df["state"].tolist()
     assert list(state_df.columns) == list(T.STATE_COLUMN_ORDER)
@@ -382,7 +361,7 @@ _SYNTHETIC_2000: dict[str, Any] = {
 def test_2000_dc_abstention_survives_transform() -> None:
     # The confirmed abstention must flow through transform_parsed_years without
     # tripping assert_row_votes_sum_to_total, preserving the allotment/cast gap.
-    candidates, _, votes = transform_parsed_years([_SYNTHETIC_2000], _fake_state_geo())
+    candidates, _, votes = transform_parsed_years([_SYNTHETIC_2000], fake_state_geo())
     ids = candidates.set_index("name")["candidate_id"]
 
     dc = votes[(votes["state"] == "District of Columbia")].set_index("candidate_id")
@@ -420,7 +399,7 @@ def parsed_slice() -> list[ParsedYear]:
 def frames(
     parsed_slice: list[ParsedYear],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    return transform_parsed_years(parsed_slice, _fake_state_geo())
+    return transform_parsed_years(parsed_slice, fake_state_geo())
 
 
 def test_frames_schema_and_grain(
@@ -499,7 +478,7 @@ def test_build_votes_fact_raises_on_unreconciled_names(
     t2_raw = T.normalize_candidate_states(parsed_slice)
     t1 = T.normalize_candidate_parties(parsed_slice)
     candidates = T.build_candidate_dim(t2_raw, t1)
-    state_df = build_state_dim(_fake_state_geo())
+    state_df = build_state_dim(fake_state_geo())
     with pytest.raises(TransformError, match="not present in the candidate dimension"):
         T.build_votes_fact(parsed_slice, t2_raw, candidates, state_df)
 

@@ -8,7 +8,6 @@ at the bottom exercises a real database and is excluded by default.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pandas as pd
@@ -18,12 +17,7 @@ import pytest
 import usvote.db as db_module
 from usvote.db import DBC, DBConnectionError
 
-from .conftest import RecordingConnection
-
-
-def make_dbc(conn: RecordingConnection) -> DBC:
-    """Build a DBC wired to the fake connection instead of a real Postgres."""
-    return DBC({"dbname": "test"}, connect=lambda **_: conn)
+from .conftest import RecordingConnection, make_dbc
 
 
 # --- connection handling ---------------------------------------------------
@@ -155,8 +149,31 @@ def test_insert_df_builds_columns_and_stmt(
     assert len(calls) == 1
     _, sql, argslist = calls[0]
     assert sql == "INSERT INTO dwh.votes (year,candidate_id) VALUES %s"
-    # The melted DataFrame's raw .values are handed to execute_values.
+    # Rows are native-Python tuples (not numpy) handed to execute_values.
     assert list(argslist[0]) == [2020, 1]
+    assert all(type(v) is int for v in argslist[0])
+
+
+def test_insert_normalizes_nan_and_numpy_scalars() -> None:
+    # The DataFrame->SQL conversion must unbox numpy scalars (psycopg2 can't adapt
+    # numpy.int64) and turn every null-like value into None (NOT a literal NaN,
+    # which Postgres rejects on NOT NULL / FK columns). Regression for the two
+    # failures the live-Postgres integration test surfaced.
+    df = pd.DataFrame(
+        {
+            "n": [1, 2],  # int64 -> python int
+            "flag": [True, False],  # bool -> python bool
+            "name": pd.array(["Trump", None], dtype="string"),  # StringDtype NA
+            "state_2": [float("nan"), "Ohio"],  # float NaN -> None
+        }
+    )
+    rows = db_module._df_to_sql_rows(df)
+
+    assert rows == [(1, True, "Trump", None), (2, False, None, "Ohio")]
+    # Every non-None scalar is a builtin Python type, not a numpy scalar.
+    for row in rows:
+        for v in row:
+            assert v is None or type(v).__module__ == "builtins"
 
 
 def test_insert_empty_df_is_guarded(
@@ -207,24 +224,9 @@ def test_select_query_to_df_delegates_to_read_sql(
 
 
 @pytest.mark.integration
-def test_roundtrip_against_real_postgres() -> None:
-    """Smoke test against a real database.
-
-    Configure via env: USVOTE_TEST_DB_{HOST,PORT,NAME,USER,PASSWORD}. Skips if
-    unset so the marker can be run locally without hard-coding credentials.
-    """
-    dbname = os.environ.get("USVOTE_TEST_DB_NAME")
-    if not dbname:
-        pytest.skip("USVOTE_TEST_DB_NAME not set; skipping live-Postgres test")
-
-    config = {
-        "host": os.environ.get("USVOTE_TEST_DB_HOST", "localhost"),
-        "port": int(os.environ.get("USVOTE_TEST_DB_PORT", "5432")),
-        "dbname": dbname,
-        "user": os.environ.get("USVOTE_TEST_DB_USER", "postgres"),
-        "password": os.environ.get("USVOTE_TEST_DB_PASSWORD", ""),
-    }
-    dbc = DBC(config)
+def test_roundtrip_against_real_postgres(integration_db_config: dict[str, Any]) -> None:
+    """Smoke test against a real database (config + skip from the shared fixture)."""
+    dbc = DBC(integration_db_config)
     try:
         dbc.create_schema("usvote_test", replace=True)
         dbc.create_table("usvote_test", "t", [("id", "integer")])
