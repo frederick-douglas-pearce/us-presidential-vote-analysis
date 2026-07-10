@@ -5,8 +5,10 @@ ingestion entry point (:func:`run_ec_pipeline`), so the pipeline runs from the
 package instead of by executing notebook cells top-to-bottom.
 
 Assembled in E2-S5 (#28). Configuration (DB connection params, the TIGER
-shapefile path) is externalized in E2-S6 (#31); until then the election-year
-range is hardcoded here and the shapefile path is passed in by the caller.
+shapefile path) is externalized in :mod:`usvote.config` (E2-S6, #31): this module
+takes the resolved shapefile path and the ``DBC`` connection by dependency
+injection, and :mod:`usvote.__main__` resolves both from the environment when run
+as ``python -m usvote``.
 
 The entry point is named for the source (``run_ec_pipeline``, not a bare
 ``run_pipeline``): under the D006 source-namespacing convention the popular-vote
@@ -24,9 +26,10 @@ from usvote import load, parse, scrape, transform
 from usvote.db import DBC
 from usvote.scrape import Fetch, fetch_url
 
-# The most recent election year the pipeline ingests. The notebook (cell 7)
-# hardcoded 2020; bumped to the actual latest election. Hardcoded until config
-# externalization (#31).
+# The most recent election year the pipeline ingests. A domain constant bumped
+# each cycle (the notebook, cell 7, hardcoded 2020; this is the actual latest).
+# Not deployment config: callers override per-run via ``election_years(latest=...)``
+# or the ``years`` argument to :func:`run_ec_pipeline`.
 LATEST_ELECTION_YEAR = 2024
 
 
@@ -58,7 +61,7 @@ def run_ec_pipeline(
     Reads the TIGER state geography once (via ``load_geo``), derives the valid
     state-name set from it — the same frame :func:`usvote.transform.build_state_dim`
     consumes, keeping the parse filter and the state dimension in lockstep (the SSOT
-    #31 externalizes) — then scrapes the Archives, parses each year's tables, builds
+    is the shapefile) — then scrapes the Archives, parses each year's tables, builds
     the ``(candidates_df, state_df, votes_df)`` warehouse frames, and loads them into
     the ``dwh`` schema on ``dbc``.
 
