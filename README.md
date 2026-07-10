@@ -38,6 +38,46 @@ $ uv run jupyter lab
   * The notebooks generally require an internet connection for scraping data, plus you'll need to download the occasional file (e.g. shapefile for US States) and provide an accessible path to the file.
 
 
+## Configuration
+
+The `usvote` package reads all configuration from the environment &mdash; no source
+edits are needed to run it on a fresh machine (issue #31). Copy the template and edit
+the values:
+
+```
+$ cp .env.example .env          # .env is git-ignored; never commit real secrets
+$ # ...edit .env...
+$ set -a; source .env; set +a   # load into the shell (quote any path with spaces)
+```
+
+No dotenv library is required &mdash; the variables are read from the process
+environment, so exporting them by hand or using `direnv` works equally well.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PGHOST` | Postgres host | `localhost` |
+| `PGPORT` | Postgres port | `5432` |
+| `PGDATABASE` | database name | `elections` |
+| `PGUSER` | database user | `postgres` |
+| `PGPASSWORD` | database password | *(unset &rarr; prompted securely at runtime)* |
+| `USVOTE_SHAPEFILE_PATH` | path to the unzipped TIGER2019 STATE shapefile (`.shp`) | *(required)* |
+
+Database settings use the standard libpq `PG*` names, so the same values are shared
+with `psql`, `pg_dump`, and other Postgres tools. The TIGER2019 STATE shapefile is a
+free download from the [Census Bureau](https://www2.census.gov/geo/tiger/TIGER2019/STATE/).
+
+Once configured, run the Electoral College ingestion pipeline from the package (an
+alternative to executing the step&nbsp;1 notebook cells):
+
+```
+$ python -m usvote            # create-if-absent load
+$ python -m usvote --replace  # destructive: drop and recreate the dwh schema first
+```
+
+You are prompted for `PGPASSWORD` at runtime unless it is already set in the
+environment.
+
+
 ## License
 * Copyright 2021 Frederick D. Pearce
 * Licensed under the Apache License, Version 2.0 (the "License")

@@ -21,7 +21,8 @@ from the notebook's ``create_tables_from_dfs``:
 
 Kept source-agnostic (schema/table names are parameters, not EC-specific) so the
 planned ``usvote/ucsb`` and ``usvote/mit`` popular-vote loaders (D006) can reuse
-it. Connection params and the shapefile path are externalized in E2-S6 (#31).
+it. Connection params and the shapefile path are externalized in
+:mod:`usvote.config` (E2-S6, #31).
 """
 
 from __future__ import annotations

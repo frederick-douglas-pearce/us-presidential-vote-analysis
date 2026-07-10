@@ -22,7 +22,8 @@ scrape/parse ports' conventions:
 - **Injected geo seam.** ``build_state_dim`` takes a plain-pandas state-geo frame;
   the geopandas file read lives in the untested :func:`load_state_geo` wrapper,
   mirroring the ``fetch`` seam so the transform core tests offline with a fake
-  frame (no TIGER shapefile needed). Config externalization is E2-S6 (#31).
+  frame (no TIGER shapefile needed). The shapefile path is externalized in
+  :mod:`usvote.config` (E2-S6, #31).
 - **Name-based column ops.** Every notebook ``value_vars=[1..7]`` / positional
   ``.iloc[:, [...]]`` reorder becomes an explicit named-column selection. This
   preserves the notebook's exact final column order (the load contract, #28) while
