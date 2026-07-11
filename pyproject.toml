@@ -115,9 +115,9 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 # Exclude live-Postgres integration tests by default (and in CI). Run them
 # explicitly with `pytest -m integration`. The `integration` MARKER (not the
-# tests/ directory layout) is the source of truth for selection; tests/unit/
-# and tests/integration/ are the documented homes for new tests as the suite
-# grows (see the tests-tree split tracking issue).
+# tests/ directory layout) is the source of truth for selection; the offline
+# suite lives under tests/unit/ and the live-DB tests under tests/integration/,
+# each carrying the marker.
 addopts = "-m 'not integration' --strict-markers"
 markers = [
     "integration: tests that require a live Postgres database (excluded by default)",

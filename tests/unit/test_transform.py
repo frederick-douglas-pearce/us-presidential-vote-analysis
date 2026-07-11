@@ -22,13 +22,13 @@ is deferred to the pipeline run (#28) / a dedicated data-validation story.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 from bs4.element import Tag
 
+from tests._helpers import FIXTURES_DIR, STATE_NAMES, fake_state_geo
 from usvote import transform as T
 from usvote.parse import ParsedYear, parse_election_years
 from usvote.scrape import fetch_from_dir, get_html_tables
@@ -41,11 +41,6 @@ from usvote.transform import (
     split_name,
     transform_parsed_years,
 )
-
-from .conftest import STATE_NAMES, fake_state_geo
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
 
 # --- name-part parsing -----------------------------------------------------
 
@@ -484,7 +479,7 @@ def _year_tables(year: int) -> list[Tag]:
     return get_html_tables(
         f"https://www.archives.gov/electoral-college/{year}",
         find_all=True,
-        fetch=fetch_from_dir(FIXTURES),
+        fetch=fetch_from_dir(FIXTURES_DIR),
     )
 
 

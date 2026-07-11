@@ -16,12 +16,11 @@ Crafted inline HTML covers the structural error paths that raise
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
+from tests._helpers import FIXTURES_DIR, STATE_NAMES
 from usvote.parse import (
     ParsedYear,
     ParseError,
@@ -32,14 +31,10 @@ from usvote.parse import (
 )
 from usvote.scrape import fetch_from_dir, get_html_tables
 
-from .conftest import STATE_NAMES
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
 
 def _year_tables(year: int) -> list[Tag]:
     """Load a saved year page's two raw ``<table>`` elements from fixtures."""
-    fetch = fetch_from_dir(FIXTURES)
+    fetch = fetch_from_dir(FIXTURES_DIR)
     return get_html_tables(
         f"https://www.archives.gov/electoral-college/{year}",
         find_all=True,
