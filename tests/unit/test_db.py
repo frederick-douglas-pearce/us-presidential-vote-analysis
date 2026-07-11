@@ -1,9 +1,9 @@
 """Unit tests for ``usvote.db.DBC``.
 
 These cover SQL-string construction and control flow (close/replace flags, the
-empty-DataFrame guard, connect-failure) without a live Postgres — the fake
-connection from ``conftest`` records executed SQL. A single ``integration`` test
-at the bottom exercises a real database and is excluded by default.
+empty-DataFrame guard, connect-failure) without a live Postgres — the recording
+fake connection from ``tests._helpers`` captures executed SQL. The live-database
+round-trip lives in ``tests/integration/test_db.py``.
 """
 
 from __future__ import annotations
@@ -15,9 +15,8 @@ import psycopg2 as pg
 import pytest
 
 import usvote.db as db_module
+from tests._helpers import RecordingConnection, make_dbc
 from usvote.db import DBC, DBConnectionError
-
-from .conftest import RecordingConnection, make_dbc
 
 # --- connection handling ---------------------------------------------------
 
@@ -217,21 +216,3 @@ def test_select_query_to_df_delegates_to_read_sql(
     assert result is sentinel
     assert seen["query"] == "SELECT n FROM t"
     assert seen["conn"] is recording_conn
-
-
-# --- integration (excluded by default; requires a live Postgres) -----------
-
-
-@pytest.mark.integration
-def test_roundtrip_against_real_postgres(integration_db_config: dict[str, Any]) -> None:
-    """Smoke test against a real database (config + skip from the shared fixture)."""
-    dbc = DBC(integration_db_config)
-    try:
-        dbc.create_schema("usvote_test", replace=True)
-        dbc.create_table("usvote_test", "t", [("id", "integer")])
-        dbc.insert_df_into_table("usvote_test", "t", pd.DataFrame({"id": [1, 2]}))
-        out = dbc.select_query_to_df("SELECT id FROM usvote_test.t ORDER BY id")
-        assert out["id"].tolist() == [1, 2]
-    finally:
-        dbc.delete_schema("usvote_test", option="Cascade")
-        dbc.close_connection()

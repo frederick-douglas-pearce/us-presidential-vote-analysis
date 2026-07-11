@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from bs4.element import Tag
 
+from tests._helpers import FIXTURES_DIR
 from usvote.scrape import (
     ARCHIVE_URL_BASE,
     ARCHIVE_URL_DOMAIN,
@@ -27,7 +28,6 @@ from usvote.scrape import (
     snapshot_page,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures"
 INDEX_URL = ARCHIVE_URL_DOMAIN + ARCHIVE_URL_BASE
 YEAR_2020_URL = f"{ARCHIVE_URL_DOMAIN}/electoral-college/2020"
 
@@ -35,7 +35,7 @@ YEAR_2020_URL = f"{ARCHIVE_URL_DOMAIN}/electoral-college/2020"
 @pytest.fixture
 def fixture_fetch() -> Fetch:
     """A fetch that replays the saved Archives pages in ``tests/fixtures/``."""
-    return fetch_from_dir(FIXTURES)
+    return fetch_from_dir(FIXTURES_DIR)
 
 
 def make_fetch(markup: bytes | str) -> Fetch:

@@ -5,23 +5,24 @@ wiring, run offline: the 2016 + 2020 Archives fixtures replay through
 ``fetch_from_dir``, a fake state-geo frame is injected via ``load_geo``, and the
 load lands on the recording fake connection — so the end-to-end wiring #28 adds is
 exercised with no network, no TIGER shapefile, and no live Postgres. The
-real-database load is covered by the integration test in ``test_load``.
+real-database load is covered by the integration test in
+``tests/integration/test_load.py``.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
+from tests._helpers import (
+    FIXTURES_DIR,
+    RecordingConnection,
+    fake_state_geo,
+    make_dbc,
+    record_inserts,
+)
 from usvote.load import SCHEMA
 from usvote.pipeline import LATEST_ELECTION_YEAR, election_years, run_ec_pipeline
 from usvote.scrape import fetch_from_dir
-
-from .conftest import RecordingConnection, fake_state_geo, make_dbc, record_inserts
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
 
 # --- election_years --------------------------------------------------------
 
@@ -64,7 +65,7 @@ def test_run_ec_pipeline_wires_all_stages_offline(
         "unused.shp",
         replace=True,
         years={2016, 2020},
-        fetch=fetch_from_dir(FIXTURES),
+        fetch=fetch_from_dir(FIXTURES_DIR),
         load_geo=lambda _p: fake_state_geo(),
     )
 
@@ -93,7 +94,7 @@ def test_run_ec_pipeline_leaves_connection_open_by_default(
         make_dbc(recording_conn),
         "unused.shp",
         years={2016, 2020},
-        fetch=fetch_from_dir(FIXTURES),
+        fetch=fetch_from_dir(FIXTURES_DIR),
         load_geo=lambda _p: fake_state_geo(),
     )
     # The caller owns the dbc; the pipeline must not close it by default.

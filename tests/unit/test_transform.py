@@ -1,4 +1,4 @@
-"""Unit + integration tests for ``usvote.transform``.
+"""Unit tests for ``usvote.transform`` (all offline).
 
 Two coverage layers, mirroring ``test_parse``:
 
@@ -7,8 +7,10 @@ Two coverage layers, mirroring ``test_parse``:
   raising validator. These carry the cases the fixture slice cannot: ``party_2``
   (Bryan D-P, T. Roosevelt R-P are pre-1920) and the Bob Dole / McGovern
   reconciliations have **zero** fixture coverage, so they are exercised here.
-- **One integration test** replaying the 2016 + 2020 Archives fixtures through the
-  full ``transform_parsed_years`` with an injected fake state-geo frame (no TIGER
+- **One full-transform fixture-replay test** (offline — this is *not* a live-DB
+  ``@pytest.mark.integration`` test; those live in ``tests/integration/``)
+  replaying the 2016 + 2020 Archives fixtures through the full
+  ``transform_parsed_years`` with an injected fake state-geo frame (no TIGER
   shapefile). It exercises the 2016 "Other" expansion, the Trump multi-state +
   name reconciliation, Biden's ``Jr.`` suffix, ``is_total`` shaping and the
   per-year electoral rank.
@@ -16,19 +18,19 @@ Two coverage layers, mirroring ``test_parse``:
 Note on scope: ``assert_unique_grain`` ("unique candidate names across ALL years")
 is only *meaningful* at full-dataset scale — a 2-year slice can pass it while the
 full set fails. #26 claims validator *correctness* (the unit tests below) plus
-slice-level integration; running the validators against the whole 1789-2020 corpus
+slice-level end-to-end coverage; running the validators against the whole 1789-2020 corpus
 is deferred to the pipeline run (#28) / a dedicated data-validation story.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 from bs4.element import Tag
 
+from tests._helpers import FIXTURES_DIR, STATE_NAMES, fake_state_geo
 from usvote import transform as T
 from usvote.parse import ParsedYear, parse_election_years
 from usvote.scrape import fetch_from_dir, get_html_tables
@@ -41,11 +43,6 @@ from usvote.transform import (
     split_name,
     transform_parsed_years,
 )
-
-from .conftest import STATE_NAMES, fake_state_geo
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
 
 # --- name-part parsing -----------------------------------------------------
 
@@ -484,7 +481,7 @@ def _year_tables(year: int) -> list[Tag]:
     return get_html_tables(
         f"https://www.archives.gov/electoral-college/{year}",
         find_all=True,
-        fetch=fetch_from_dir(FIXTURES),
+        fetch=fetch_from_dir(FIXTURES_DIR),
     )
 
 
