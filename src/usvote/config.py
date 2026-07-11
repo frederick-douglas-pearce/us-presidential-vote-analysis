@@ -21,8 +21,9 @@ Two naming conventions, by design:
   per-source inputs follow the same shape (e.g. ``USVOTE_MIT_CSV_PATH``) and live in the
   relevant subpackage's own config module.
 
-No dotenv dependency: read ``os.environ`` directly. To load a local ``.env`` (git-ignored),
-source it into the shell first — see the README's Configuration section.
+No dotenv dependency: read ``os.environ`` directly. To load a local ``.env``
+(git-ignored), source it into the shell first — see the README's Configuration
+section.
 """
 
 from __future__ import annotations
@@ -84,14 +85,14 @@ def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
     path = environ.get(SHAPEFILE_PATH_VAR)
     if not path:
         raise ConfigError(
-            f"{SHAPEFILE_PATH_VAR} is not set. Point it at the unzipped TIGER2019 STATE "
-            "shapefile (.shp), a free download from the Census Bureau: "
+            f"{SHAPEFILE_PATH_VAR} is not set. Point it at the unzipped TIGER2019 "
+            "STATE shapefile (.shp), a free download from the Census Bureau: "
             "https://www.census.gov/geographies/mapping-files/time-series/geo/"
             "tiger-line-file.html"
         )
     if not os.path.exists(path):
         raise ConfigError(
-            f"{SHAPEFILE_PATH_VAR}={path!r} does not exist. Check the path points at the "
-            "unzipped TIGER2019 STATE shapefile (.shp)."
+            f"{SHAPEFILE_PATH_VAR}={path!r} does not exist. Check the path points at "
+            "the unzipped TIGER2019 STATE shapefile (.shp)."
         )
     return path

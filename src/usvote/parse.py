@@ -141,7 +141,7 @@ def parse_table1(t1_rows: Sequence[Tag]) -> list[CandidateParty]:
     """Parse Table 1's President and Main-Opponent rows into name/party dicts."""
     return [
         parse_t1_candidate_party(t1_rows, ri, rh)
-        for ri, rh in zip(T1_ROW_INDS, T1_ROW_HEADERS)
+        for ri, rh in zip(T1_ROW_INDS, T1_ROW_HEADERS, strict=True)
     ]
 
 
@@ -220,10 +220,7 @@ def parse_t2_candidate_state(
     cs_cols = cs_row.find_all("td")
     candidate_state: list[CandidateState] = []
     for ci, cs in enumerate(cs_cols[:num_candidates]):
-        if cs.find("br"):
-            text = " ".join(cs.stripped_strings)
-        else:
-            text = cs.get_text()
+        text = " ".join(cs.stripped_strings) if cs.find("br") else cs.get_text()
         if text == "Other":
             candidate, state = text, None
         else:

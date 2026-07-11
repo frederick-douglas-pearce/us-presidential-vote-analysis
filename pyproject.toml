@@ -57,18 +57,58 @@ packages = ["src/usvote"]
 
 # ruff >=0.11 lints notebooks by default. The legacy step1 notebook is kept
 # runnable during the notebook->package migration and is not held to the
-# package's lint policy (see #19); exclude it so bare `ruff check` targets our
-# code and stays green in CI. Rule selection is #19's concern, not CI's.
+# package's lint policy; exclude it so bare `ruff check` targets our code and
+# stays green in CI.
 [tool.ruff]
+line-length = 88
+# UP (pyupgrade) needs the language floor so it never suggests >3.11 syntax.
+# ruff infers this from requires-python, but pin it explicitly as insurance.
+target-version = "py311"
 extend-exclude = ["*.ipynb"]
+
+# A pragmatic starter rule set (issue #19): pyflakes/pycodestyle errors plus the
+# high-signal, low-noise families. Strictness can ratchet up later. Beyond the
+# E/F defaults:
+#   I   - import sorting (isort), so ordering is enforced not argued
+#   UP  - pyupgrade, keep syntax modern for requires-python >=3.11
+#   B   - bugbear, catch likely bugs (mutable defaults, etc.)
+#   SIM - flake8-simplify, collapse needlessly verbose constructs
+#   C4  - flake8-comprehensions, prefer comprehension idioms
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+# Test bodies carry long boolean-mask expressions and assert comparisons that
+# don't reflow cleanly; exempt them from the line-length cap (E501 only) rather
+# than mangle readable assertions. src/ stays held to the 88-col limit.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
 
 [tool.mypy]
 files = ["src", "tests"]
+# Pragmatic strictness (issue #19): require annotations and surface the common
+# unsoundness (implicit Optional, unreachable code, silently-Any returns, stale
+# ignores). Not full `strict = true` yet — `disallow_any_*` would drown in the
+# untyped pandas/geopandas surface; ratchet up once those are stub-covered.
+#
+# No `python_version` pin: it's defeated by numpy 2.x's PEP-695 stubs (numpy is
+# imported in db.py) and buys nothing while CI runs a single interpreter. Floor
+# (3.11) coverage belongs to a CI version matrix, not here.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+strict_equality = true
 
 # pandas/geopandas/psycopg2 ship no type stubs in this project's deps; silence the
-# missing-import noise so mypy checks our own annotations, not theirs.
+# missing-import noise so mypy checks our own annotations, not theirs. Submodule
+# globs cover the deeper imports later ports will reach for. (bs4, requests, and
+# numpy all ship py.typed, so they need no override.)
 [[tool.mypy.overrides]]
-module = ["pandas", "geopandas", "psycopg2", "psycopg2.*"]
+module = ["pandas", "pandas.*", "geopandas", "geopandas.*", "psycopg2", "psycopg2.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

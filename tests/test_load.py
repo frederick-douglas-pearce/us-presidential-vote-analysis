@@ -38,8 +38,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_column_defs_embed_schema_in_fk_references() -> None:
-    state, candidate, votes = (dict(zip(TABLE_NAMES, build_table_column_defs("mart")))[t]
-                               for t in TABLE_NAMES)
+    state, candidate, votes = (
+        dict(zip(TABLE_NAMES, build_table_column_defs("mart"), strict=True))[t]
+        for t in TABLE_NAMES
+    )
 
     # The state dimension is a pure dimension: no FK.
     assert not any("REFERENCES" in c for col in state for c in col)
@@ -54,7 +56,7 @@ def test_column_defs_embed_schema_in_fk_references() -> None:
 
 
 def test_column_defs_default_to_dwh_schema() -> None:
-    defs = dict(zip(TABLE_NAMES, build_table_column_defs()))
+    defs = dict(zip(TABLE_NAMES, build_table_column_defs(), strict=True))
     refs = [c for col in defs["votes"] for c in col if "REFERENCES" in c]
     assert refs == [f"REFERENCES {SCHEMA}.state", f"REFERENCES {SCHEMA}.candidate"]
 
