@@ -5,7 +5,8 @@ wiring, run offline: the 2016 + 2020 Archives fixtures replay through
 ``fetch_from_dir``, a fake state-geo frame is injected via ``load_geo``, and the
 load lands on the recording fake connection — so the end-to-end wiring #28 adds is
 exercised with no network, no TIGER shapefile, and no live Postgres. The
-real-database load is covered by the integration test in ``test_load``.
+real-database load is covered by the integration test in
+``tests/integration/test_load.py``.
 """
 
 from __future__ import annotations
