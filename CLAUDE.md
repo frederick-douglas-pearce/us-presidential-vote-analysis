@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Analyzes historical US Presidential Election data (1892–present) to compare Electoral College vs. Popular Vote outcomes, plus a proposed hybrid (average of the two). The work is a multi-step data pipeline where each step is a Jupyter notebook that scrapes, transforms, validates, and loads data into an `elections` PostgreSQL database.
+Analyzes historical US Presidential Election data (1892–present) to compare Electoral College vs. Popular Vote outcomes, plus a proposed hybrid (average of the two). The work is a multi-step data pipeline that scrapes, transforms, validates, and loads data into an `elections` PostgreSQL database. Step 1 originated as a Jupyter notebook and is being migrated into the installable `usvote` package (see [`src/usvote/` package](#srcusvote-package-in-progress-migration)); steps 2–3 remain planned.
 
 - `step1_electoral_college_data.ipynb` — **implemented.** Scrapes Electoral College vote data from the [National Archives](https://www.archives.gov/electoral-college/results) and loads it into the `dwh` (data warehouse) schema.
 - `step2_popular_vote_data.ipynb` — planned. Popular vote data from UC Santa Barbara, added to the same warehouse tables.
@@ -29,18 +29,20 @@ them). `tests/unit/` and `tests/integration/` are the documented homes for new
 tests; `tests/fixtures/` holds saved Archives HTML replayed offline.
 
 ```
-pipenv install          # README references Pipfiles, but none are committed yet; install deps manually if absent
-pipenv run jupyter lab  # open and run notebooks interactively
+uv sync                          # create the venv + install deps from pyproject.toml + uv.lock
+python -m usvote                 # run the packaged EC pipeline (create-if-absent load)
+python -m usvote --replace       # destructive: drop and recreate the dwh schema first
+uv run jupyter lab               # or open the step-1 notebook interactively
 ```
 
-Python >3.6. Dependencies: `jupyterlab`, `beautifulsoup4`, `requests`, `pandas`, `geopandas`, `matplotlib`, `psycopg2`.
+Python >=3.11 (developed on 3.14). Dependencies are pinned in `pyproject.toml` + `uv.lock` (`beautifulsoup4`, `requests`, `pandas`, `geopandas`, `matplotlib`, `psycopg2`, plus the dev/notebook tools).
 
-Prerequisites before running step 1:
-- **PostgreSQL** (>12.9) with a database named `elections` and create-schema/table permissions. Connection params are hardcoded in the notebook's Section 4.1 (`host=localhost`, `port=5432`, `dbname=elections`, `user=postgres`); the password is prompted at runtime via `getpass`.
-- **US States shapefile** (TIGER2019 from census.gov). The path is hardcoded in Section 1.3 (`usa_state_shp`) and **must be edited** to a local path before running. `geopandas` reads state geography (region, area, lat/lon) from it.
+Prerequisites before running step 1 (both the package and the notebook read these from the environment — see the README "Configuration" section; externalized in #31):
+- **PostgreSQL** (>12.9) with a database named `elections` and create-schema/table permissions. Connection params come from the standard libpq `PG*` env vars (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`); `PGPASSWORD` is prompted at runtime via `getpass` when unset.
+- **US States shapefile** (TIGER2019 from census.gov), located via the `USVOTE_SHAPEFILE_PATH` env var. `geopandas` reads state geography (region, area, lat/lon) from it.
 - Internet access for scraping.
 
-Running the notebook top-to-bottom scrapes all election years, builds the three DataFrames, and (final cell) **drops and recreates** the `dwh` schema — `create_tables_from_dfs(..., replace=True)` cascades a schema drop. Be deliberate about executing the write cells.
+Both `python -m usvote --replace` and running the notebook top-to-bottom scrape all election years, build the three DataFrames, and **drop and recreate** the `dwh` schema (`create_tables_from_dfs(..., replace=True)` cascades a schema drop). Be deliberate about executing the write path.
 
 ## Architecture
 
@@ -57,7 +59,7 @@ The notebook follows a strict Scrape → Transform/Validate → Load structure t
 
 ### `src/usvote/` package (in-progress migration)
 
-The notebook is being migrated **incrementally** into an installable `usvote` package (D003). The module skeleton exists now (issue #17); each module is a docstring-only stub until the E2 refactor ports the notebook code into it. The layout mirrors the notebook's own section numbering:
+The notebook is being migrated **incrementally** into an installable `usvote` package (D003). The E2 refactor is complete: every module below is ported and runnable (the `python -m usvote` entry point wires scrape → parse → transform → load). The notebook is **retained** while the migration proceeds — the "keep the notebook vs. fully migrate off it" decision (D003) is still open. The layout mirrors the notebook's own section numbering:
 
 | Module | Notebook origin | Responsibility | Ported in |
 |--------|-----------------|----------------|-----------|
