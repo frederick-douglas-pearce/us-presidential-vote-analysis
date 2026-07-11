@@ -71,10 +71,10 @@ OTHER_CANDIDATES_2016: tuple[dict[str, Any], ...] = (
 # Per-state electoral votes for the 2016 "Other" candidates (same Archives Notes).
 # Every other (2016 state, Other col_ind) cell is zero.
 OTHER_VOTES_2016: tuple[dict[str, Any], ...] = (
-    {"state": "Hawaii", "col_ind": 2, "votes": 1},  # Sanders (1, from a Clinton elector)
-    {"state": "Texas", "col_ind": 4, "votes": 1},  # Paul (1, from a Trump elector)
-    {"state": "Texas", "col_ind": 5, "votes": 1},  # Kasich (1, from a Trump elector)
-    {"state": "Washington", "col_ind": 6, "votes": 3},  # Powell (3, from Clinton electors)
+    {"state": "Hawaii", "col_ind": 2, "votes": 1},  # Sanders (1, Clinton elector)
+    {"state": "Texas", "col_ind": 4, "votes": 1},  # Paul (1, Trump elector)
+    {"state": "Texas", "col_ind": 5, "votes": 1},  # Kasich (1, Trump elector)
+    {"state": "Washington", "col_ind": 6, "votes": 3},  # Powell (3, Clinton electors)
     {"state": "Washington", "col_ind": 7, "votes": 1},  # Faith Spotted Eagle (1)
 )
 
@@ -267,7 +267,9 @@ def split_name(full_name: str) -> dict[str, str | None]:
 # --- Table 2: candidate-state records --------------------------------------
 
 
-def normalize_candidate_states(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+def normalize_candidate_states(
+    parsed_years: Sequence[Mapping[str, Any]],
+) -> pd.DataFrame:
     """Flatten every year's Table 2 candidate/home-state records + apply 2016 Other.
 
     ``pd.json_normalize`` on the ``t2.candidate_state`` path yields one row per
@@ -296,7 +298,8 @@ def apply_other_candidates(t2_states: pd.DataFrame) -> pd.DataFrame:
     if bad_years:
         raise TransformError(
             f"Unnamed 'Other' candidate column(s) in year(s) {sorted(bad_years)}; "
-            f"only {OTHER_YEAR_2016} has a hardcoded correction (see OTHER_CANDIDATES_2016)"
+            f"only {OTHER_YEAR_2016} has a hardcoded correction "
+            "(see OTHER_CANDIDATES_2016)"
         )
     added = pd.DataFrame(
         [
@@ -337,8 +340,13 @@ def reconcile_vote_candidate_names(t2_states: pd.DataFrame) -> pd.DataFrame:
 # --- Table 1: candidate-party records --------------------------------------
 
 
-def normalize_candidate_parties(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
-    """Flatten every year's Table 1 candidate/party records (one row per year/candidate)."""
+def normalize_candidate_parties(
+    parsed_years: Sequence[Mapping[str, Any]],
+) -> pd.DataFrame:
+    """Flatten every year's Table 1 candidate/party records.
+
+    One row per year/candidate.
+    """
     return pd.json_normalize(list(parsed_years), "t1", ["year"])
 
 
@@ -368,7 +376,9 @@ def build_candidate_dim(t2_states: pd.DataFrame, t1: pd.DataFrame) -> pd.DataFra
 
     candidates = states.merge(parties, how="left", on="name", validate="1:1")
     # The party left-join must neither drop nor duplicate a Table-2 candidate.
-    assert_count_equals(len(candidates), len(states), "candidate count changed in party join")
+    assert_count_equals(
+        len(candidates), len(states), "candidate count changed in party join"
+    )
     candidates.insert(0, "candidate_id", range(1, len(candidates) + 1))
 
     assert_unique_grain(candidates, "name", "candidate")
@@ -502,7 +512,9 @@ def build_state_dim(state_geo: pd.DataFrame) -> pd.DataFrame:
     state_df = state_df.merge(
         states, how="inner", left_on="state", right_on="NAME", validate="1:1"
     )
-    state_df = state_df.drop(columns=["NAME"]).rename(columns=dict(STATE_COLUMN_RENAMES))
+    state_df = state_df.drop(columns=["NAME"]).rename(
+        columns=dict(STATE_COLUMN_RENAMES)
+    )
     state_df = state_df.astype(
         {"region": "int", "division": "int", "latitude": "float", "longitude": "float"}
     )
@@ -661,7 +673,9 @@ def assert_count_equals(actual: int, expected: int, label: str) -> None:
         raise TransformError(f"{label}: expected {expected}, got {actual}")
 
 
-def assert_row_votes_sum_to_total(matrix: pd.DataFrame, candidate_cols: list[int]) -> None:
+def assert_row_votes_sum_to_total(
+    matrix: pd.DataFrame, candidate_cols: list[int]
+) -> None:
     """Raise if any votes-matrix row's candidate votes != its total_electoral_votes.
 
     Documented electoral-vote shortfalls (:data:`ELECTORAL_VOTE_SHORTFALLS`, e.g. the
@@ -674,7 +688,7 @@ def assert_row_votes_sum_to_total(matrix: pd.DataFrame, candidate_cols: list[int
     expected = matrix["total_electoral_votes"] - _expected_shortfall(matrix)
     mismatched = matrix.loc[row_sum != expected]
     if len(mismatched):
-        offenders = list(zip(mismatched["year"], mismatched["state"]))
+        offenders = list(zip(mismatched["year"], mismatched["state"], strict=True))
         raise TransformError(
             f"Row electoral votes do not sum to total_electoral_votes for: {offenders}"
         )

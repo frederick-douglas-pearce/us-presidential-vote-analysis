@@ -19,7 +19,6 @@ from usvote.db import DBC, DBConnectionError
 
 from .conftest import RecordingConnection, make_dbc
 
-
 # --- connection handling ---------------------------------------------------
 
 

@@ -258,8 +258,8 @@ def test_candidate_key_is_stable_but_candidate_id_is_not() -> None:
     reverse = build_candidate_dim(_t2_states(list(reversed(rows))), _t1([]))
     assert set(forward["name"]) == set(reverse["name"])  # the spine is invariant
     # candidate_id, by contrast, tracks first-appearance order and flips.
-    assert dict(zip(forward["candidate_id"], forward["name"])) != dict(
-        zip(reverse["candidate_id"], reverse["name"])
+    assert dict(zip(forward["candidate_id"], forward["name"], strict=True)) != dict(
+        zip(reverse["candidate_id"], reverse["name"], strict=True)
     )
 
 
@@ -522,7 +522,7 @@ def test_trump_is_one_candidate_across_both_years(
     # 2016 "Donald Trump"/NY reconciled to the 2020 "Donald J. Trump"/FL spelling,
     # collapsed to one row spanning both states.
     assert len(trump) == 1
-    assert set([trump.iloc[0]["state"], trump.iloc[0]["state_2"]]) == {"New York", "Florida"}
+    assert {trump.iloc[0]["state"], trump.iloc[0]["state_2"]} == {"New York", "Florida"}
     trump_id = trump.iloc[0]["candidate_id"]
     # Same candidate_id carries Trump's votes in both years.
     assert set(votes.loc[votes["candidate_id"] == trump_id, "year"]) == {2016, 2020}

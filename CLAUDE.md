@@ -12,7 +12,21 @@ Analyzes historical US Presidential Election data (1892–present) to compare El
 
 ## Environment & Running
 
-There is no test suite, linter, or build step — this is notebook-driven analysis.
+The original step-1 analysis is notebook-driven, but the `src/usvote/` package now
+has quality gates (run via `uv`, enforced in CI):
+
+```
+uv run pytest                    # unit suite (live-Postgres integration excluded)
+uv run pytest -m integration     # live-DB tests (needs USVOTE_TEST_DB_*)
+uv run pytest --cov=usvote       # branch coverage report
+uv run ruff check                # lint: E,F,I,UP,B,SIM,C4 @ line-length 88
+uv run mypy                      # type check: src + tests
+```
+
+Test layout: unit tests are offline (no network/DB); the two live-Postgres tests
+carry `@pytest.mark.integration` (the marker, not the directory, is what selects
+them). `tests/unit/` and `tests/integration/` are the documented homes for new
+tests; `tests/fixtures/` holds saved Archives HTML replayed offline.
 
 ```
 pipenv install          # README references Pipfiles, but none are committed yet; install deps manually if absent

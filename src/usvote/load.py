@@ -79,7 +79,10 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
             ("year", "smallint", "not null"),
             ("state", "varchar", f"REFERENCES {schema}.{state}"),
             ("is_total", "boolean", "not null"),
-            ("candidate_id", "smallint", "not null", f"REFERENCES {schema}.{candidate}"),
+            (
+                "candidate_id", "smallint", "not null",
+                f"REFERENCES {schema}.{candidate}",
+            ),
             ("total_electoral_votes", "smallint", "not null"),
             ("president_electoral_votes", "smallint", "not null"),
             ("president_electoral_rank", "smallint", "not null"),
@@ -118,7 +121,7 @@ def load_dataframes(
     caller owns the ``dbc`` it passed in.
     """
     frames = {"state": state_df, "candidate": candidates_df, "votes": votes_df}
-    column_defs = dict(zip(TABLE_NAMES, build_table_column_defs(schema)))
+    column_defs = dict(zip(TABLE_NAMES, build_table_column_defs(schema), strict=True))
 
     dbc.create_schema(schema, replace=replace)
     for table_name in TABLE_NAMES:

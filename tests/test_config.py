@@ -6,6 +6,8 @@ process environment, so the tests are hermetic and order-independent.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from usvote import config
@@ -65,7 +67,7 @@ class TestShapefilePathFromEnv:
                 {config.SHAPEFILE_PATH_VAR: "/no/such/tl_2019_us_state.shp"}
             )
 
-    def test_existing_path_returned(self, tmp_path) -> None:
+    def test_existing_path_returned(self, tmp_path: Path) -> None:
         shp = tmp_path / "tl_2019_us_state.shp"
         shp.write_text("")  # existence is all the getter checks
         result = config.shapefile_path_from_env(
