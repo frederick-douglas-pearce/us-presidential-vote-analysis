@@ -29,6 +29,7 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
 | 1824, 1832, 1836, 1860 | Table 2 collapses the minor presidential candidates into a single unnamed "Others" column (parsed with `state=None`, like 2016's "Other") | Split "Others" back into its named candidates with the per-state electoral votes read from each year's Notes: **1824** Crawford (41) / Clay (37); **1832** Floyd (11) / Wirt (7); **1836** White (26) / Webster (14) / Mangum (11); **1860** Breckinridge (72) / Bell (39) | `OTHER_CANDIDATES_1824/1832/1836/1860`, `OTHER_VOTES_*` (applied by `apply_other_candidates`, `_votes_matrix`) | Per-state counts from each year's Archives Notes ("&lt;State&gt; cast N votes for &lt;Name&gt; as President"): [1824](https://www.archives.gov/electoral-college/1824), [1832](https://www.archives.gov/electoral-college/1832), [1836](https://www.archives.gov/electoral-college/1836), [1860](https://www.archives.gov/electoral-college/1860) |
 | 1824 (era) | The Archives prints the early Democratic-Republican party inconsistently — "Democratic-Republican" (Jackson) vs. "D-R" (Adams) — for the same party, so one party would read under two labels and the "-" join delimiter would mis-split "D-R" into a spurious `party_2` | Normalize the label to "D-R" before aggregation, and join a candidate's distinct parties on `|` (never present in a party code) instead of "-" | `PARTY_CODE_FIXES`, `PARTY_JOIN` (in `_candidate_parties`) | [Archives 1824](https://www.archives.gov/electoral-college/1824) |
 | 1832 | Two of Maryland's electors did not vote, so Maryland cast 8 of its 10 allotted votes (Jackson 3, Clay 5); the national Totals row is likewise 286 of 288 | Record the 2-vote shortfall so `assert_row_votes_sum_to_total` adds it back; the allotment is preserved and the Totals shortfall is derived | `ELECTORAL_VOTE_SHORTFALLS` | [Archives 1832 Notes](https://www.archives.gov/electoral-college/1832) ("two electors from Maryland did not vote, making the total number of votes cast 286") |
+| 1824 | No candidate reached an Electoral College majority; Jackson led (99 EC votes) but the House elected John Quincy Adams (84), so the EC leader is *not* who took office | Mark the actual office-holder with `took_office=True` (Adams) while EC-winner stays derived from `president_electoral_rank == 1` (Jackson) — the two are kept distinct, not conflated | `CONTINGENT_OFFICE_HOLDERS` (applied by `_add_took_office`) | [Archives 1824 Notes](https://www.archives.gov/electoral-college/1824) |
 
 ## Notes
 
@@ -48,6 +49,27 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
   footnote markers are stripped from state-name and vote cells (`strip_footnotes`), and
   the totals row's `<th>Totals</th>` plural/`<th>` form is recognized (older years use
   it; a singular-only check silently dropped the totals row and emptied the votes fact).
+- **Contingent elections — which field is authoritative (#29, D010).** In a contingent
+  election the House (or, for the VP, the Senate) chooses the office-holder, so the
+  Electoral College leader is not necessarily who took office. The `votes` fact keeps the
+  two facts on separate columns, and **downstream flip/margin logic (E6/E7) must read them
+  as follows**:
+  - **"Who won under the Electoral College"** → `president_electoral_rank == 1` (on a
+    year's totals rows). This is the single source of truth for the EC outcome; do **not**
+    re-derive it from `took_office`.
+  - **"Who assumed office"** → `took_office == True`. Defaults to the EC winner and is
+    overridden only for the contingent years in `CONTINGENT_OFFICE_HOLDERS`; it is
+    broadcast to every one of a candidate's rows (like the rank). A flip where the EC
+    leader did not become president is the year whose `rank == 1` candidate has
+    `took_office == False`.
+
+  Scope: `took_office` models **president** office-holding only, and only **1824** (Jackson
+  EC rank 1, Adams `took_office`) is within the loaded coverage and exercised in tests.
+  **1836** (a VP-only contingency — the Senate chose the VP while President Van Buren won
+  normally, so there is no president-level divergence) and **1800** (pre-12th-Amendment,
+  two undifferentiated presidential votes, below the 1804 load floor) are representable by
+  the same boolean but are not loaded or tested here; their office outcomes become markable
+  when those eras are ingested under the deferred pre-12th-Amendment epic (D010).
 - **Deferred Reconstruction years (1868, 1872).** These are **excluded** from the
   default ingest (`UNSUPPORTED_EC_YEARS` in [`pipeline.py`](../src/usvote/pipeline.py)),
   not corrected here, because their tables encode contested/uncounted electoral votes

@@ -86,6 +86,7 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
             ("total_electoral_votes", "smallint", "not null"),
             ("president_electoral_votes", "smallint", "not null"),
             ("president_electoral_rank", "smallint", "not null"),
+            ("took_office", "boolean", "not null"),
         ],
     ]
 

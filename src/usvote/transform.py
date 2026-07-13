@@ -240,6 +240,32 @@ ELECTORAL_VOTE_SHORTFALLS: Mapping[tuple[int, str], int] = {
     (2000, "District of Columbia"): 1,
 }
 
+# Contingent elections: the candidate who *assumed office* is NOT the Electoral
+# College leader. Keyed by year -> the full name of the candidate the House elected.
+# For every other year the office-holder is the EC rank-1 candidate, so ``took_office``
+# is derived from ``president_electoral_rank == 1`` and only these years override it
+# (see _add_took_office). Keeping EC-winner derivable from the rank means the two facts
+# never duplicate, so E6/E7 flip logic has one unambiguous "who won under EC"
+# (#29, D010).
+#
+# 1824: no candidate reached an Electoral College majority (131 of 261 needed). Jackson
+# led with 99 electoral votes (rank 1), but under the 12th Amendment the House elected
+# John Quincy Adams (84 EC votes, rank 2), who took office.
+# Source: https://www.archives.gov/electoral-college/1824 (Notes section).
+#
+# Scope: 1824 is the only contingent election inside the loaded EC coverage (post-1804
+# spine, #32) and is therefore the one case exercised/tested. 1800 (pre-12th-Amendment:
+# electors cast two undifferentiated presidential votes, Jefferson/Burr tied 73-73 — a
+# vote structure the president_electoral_votes model does not represent, and below the
+# 1804 load floor) and 1836 (a *VP-only* contingency: the Senate chose the VP, while
+# president Van Buren won normally, so there is no president-level divergence to mark)
+# are out of the loaded/tested scope here. A president-level ``took_office`` neither
+# covers nor precludes them; their office outcomes become markable when those eras are
+# ingested under the deferred pre-12th-Amendment epic (D010). See docs/corrections.md.
+CONTINGENT_OFFICE_HOLDERS: Mapping[int, str] = {
+    1824: "John Quincy Adams",
+}
+
 # The literal state label the parser gives the per-year national totals row (Table 2's
 # final row). The votes matrix carries it verbatim until build_votes_fact NULLs it out.
 TOTALS_ROW_LABEL = "Totals"
@@ -290,6 +316,7 @@ VOTES_COLUMN_ORDER: tuple[str, ...] = (
     "total_electoral_votes",
     "president_electoral_votes",
     "president_electoral_rank",
+    "took_office",
 )
 
 # --- canonical keys (the cross-source reconciliation spine, D006 / #30) ----
@@ -721,6 +748,9 @@ def build_votes_fact(
     votes = votes.drop(columns=["president_candidate_name", "name", "_merge"])
 
     votes = _add_electoral_rank(votes)
+    # took_office is already boolean (from the `== 1` comparison + boolean overrides
+    # in _add_took_office), so it needs no cast here.
+    votes = _add_took_office(votes, candidates)
     votes = votes.astype({"year": "int", "is_total": "bool"})[list(VOTES_COLUMN_ORDER)]
     votes = votes.sort_values(
         ["year", "state", "is_total", "candidate_id", "president_electoral_rank"],
@@ -779,6 +809,36 @@ def _add_electoral_rank(votes: pd.DataFrame) -> pd.DataFrame:
         totals, how="inner", on=["year", "candidate_id", "col_ind"], validate="m:1"
     )
     return ranked.drop(columns=["col_ind"])
+
+
+def _add_took_office(votes: pd.DataFrame, candidates: pd.DataFrame) -> pd.DataFrame:
+    """Mark the candidate who assumed the presidency (broadcast to all their rows).
+
+    Defaults to the Electoral College winner (``president_electoral_rank == 1``); for
+    the contingent elections in :data:`CONTINGENT_OFFICE_HOLDERS` — where the House
+    elected a president other than the EC leader — the office-holder is overridden by
+    name. EC-winner stays derivable from the rank so the two facts never duplicate
+    (#29, D010). Like the rank, ``took_office`` is broadcast to every one of a
+    candidate's rows, so a state-row query is not a "only meaningful when is_total"
+    trap. Raises :class:`TransformError` if a contingent office-holder for a loaded
+    year is absent from the candidate dimension (a name that failed to reconcile).
+    """
+    votes = votes.copy()
+    votes["took_office"] = votes["president_electoral_rank"] == 1
+    name_to_id = candidates.set_index("name")["candidate_id"]
+    for year, holder in CONTINGENT_OFFICE_HOLDERS.items():
+        year_mask = votes["year"] == year
+        if not year_mask.any():
+            continue  # this year not in the current (possibly subset) run
+        if holder not in name_to_id.index:
+            raise TransformError(
+                f"contingent office-holder {holder!r} for {year} not present in the "
+                "candidate dimension"
+            )
+        votes.loc[year_mask, "took_office"] = (
+            votes.loc[year_mask, "candidate_id"] == name_to_id[holder]
+        )
+    return votes
 
 
 # --- validators (load-bearing; each raises TransformError) ------------------
