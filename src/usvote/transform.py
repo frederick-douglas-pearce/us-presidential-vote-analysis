@@ -748,10 +748,10 @@ def build_votes_fact(
     votes = votes.drop(columns=["president_candidate_name", "name", "_merge"])
 
     votes = _add_electoral_rank(votes)
+    # took_office is already boolean (from the `== 1` comparison + boolean overrides
+    # in _add_took_office), so it needs no cast here.
     votes = _add_took_office(votes, candidates)
-    votes = votes.astype(
-        {"year": "int", "is_total": "bool", "took_office": "bool"}
-    )[list(VOTES_COLUMN_ORDER)]
+    votes = votes.astype({"year": "int", "is_total": "bool"})[list(VOTES_COLUMN_ORDER)]
     votes = votes.sort_values(
         ["year", "state", "is_total", "candidate_id", "president_electoral_rank"],
         ignore_index=True,
