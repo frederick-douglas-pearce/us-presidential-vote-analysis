@@ -10,10 +10,10 @@ This file is the human-browsable **index**. The authoritative, machine-readable
 source of truth is the set of provenance-carrying constants in
 [`src/usvote/transform.py`](../src/usvote/transform.py) (the "Corrections" section
 near the top of the module); each is locked by a test in
-[`tests/test_transform.py`](../tests/test_transform.py). When you add coverage for a
-new election year (E2-S7 extends below 1892 and will surface new anomalies), add the
-correction the same way: one constant entry + a small `apply_*`/reconcile function,
-one test, and one row in the table below.
+[`tests/test_transform.py`](../tests/test_transform.py). Extending EC coverage below
+1892 toward the ~1824 comparison floor (#32) surfaced the 19th-century anomalies in
+the table below; adding a new election year follows the same pattern: one constant
+entry + a small `apply_*`/reconcile function, one test, and one row in the table.
 
 ## Catalog
 
@@ -26,6 +26,9 @@ one test, and one row in the table below.
 | 1972 | Table 2 prints "George McGovern"; Table 1 has "George S. McGovern" | Rewrite the Table-2 name to the canonical form and fill the middle initial "S." | `CANDIDATE_NAME_FIXES` | Archives [1972](https://www.archives.gov/electoral-college/1972) |
 | 1996 | Table 1 (party) prints "Bob Dole"; Table 2 prints "Robert Dole", so the two tables' names would not reconcile | Rewrite the Table-1 name to "Robert Dole" | `PARTY_NAME_FIXES` | Archives [1996](https://www.archives.gov/electoral-college/1996) |
 | 2000 | DC elector Barbara Lett-Simmons cast a blank ballot, so DC cast only 2 of its 3 allotted electoral votes; the national Totals row is likewise 537 of 538. A naive row-sum check reads this as a broken parse. | Record the confirmed 1-vote shortfall so `assert_row_votes_sum_to_total` adds it back instead of raising; the allotment (`total_electoral_votes=3`) is preserved | `ELECTORAL_VOTE_SHORTFALLS` (used by `_expected_shortfall`) | [Archives 2000 Notes](https://www.archives.gov/electoral-college/2000) **and a direct email reply from the National Archives** confirming total=3 / cast=2 is correct |
+| 1824, 1832, 1836, 1860 | Table 2 collapses the minor presidential candidates into a single unnamed "Others" column (parsed with `state=None`, like 2016's "Other") | Split "Others" back into its named candidates with the per-state electoral votes read from each year's Notes: **1824** Crawford (41) / Clay (37); **1832** Floyd (11) / Wirt (7); **1836** White (26) / Webster (14) / Mangum (11); **1860** Breckinridge (72) / Bell (39) | `OTHER_CANDIDATES_1824/1832/1836/1860`, `OTHER_VOTES_*` (applied by `apply_other_candidates`, `_votes_matrix`) | Per-state counts from each year's Archives Notes ("&lt;State&gt; cast N votes for &lt;Name&gt; as President"): [1824](https://www.archives.gov/electoral-college/1824), [1832](https://www.archives.gov/electoral-college/1832), [1836](https://www.archives.gov/electoral-college/1836), [1860](https://www.archives.gov/electoral-college/1860) |
+| 1824 (era) | The Archives prints the early Democratic-Republican party inconsistently — "Democratic-Republican" (Jackson) vs. "D-R" (Adams) — for the same party, so one party would read under two labels and the "-" join delimiter would mis-split "D-R" into a spurious `party_2` | Normalize the label to "D-R" before aggregation, and join a candidate's distinct parties on `|` (never present in a party code) instead of "-" | `PARTY_CODE_FIXES`, `PARTY_JOIN` (in `_candidate_parties`) | [Archives 1824](https://www.archives.gov/electoral-college/1824) |
+| 1832 | Two of Maryland's electors did not vote, so Maryland cast 8 of its 10 allotted votes (Jackson 3, Clay 5); the national Totals row is likewise 286 of 288 | Record the 2-vote shortfall so `assert_row_votes_sum_to_total` adds it back; the allotment is preserved and the Totals shortfall is derived | `ELECTORAL_VOTE_SHORTFALLS` | [Archives 1832 Notes](https://www.archives.gov/electoral-college/1832) ("two electors from Maryland did not vote, making the total number of votes cast 286") |
 
 ## Notes
 
@@ -39,3 +42,16 @@ one test, and one row in the table below.
   canonical-candidate-key problem the popular-vote sources (UCSB/MIT) will reconcile
   against; `CANDIDATE_NAME_FIXES` / `PARTY_NAME_FIXES` are expected to be reused there
   (D006 / #30).
+- **Format handling vs. data corrections.** Two pre-1892 fixes are parse-level format
+  robustness rather than per-year data corrections, so they live in
+  [`src/usvote/parse.py`](../src/usvote/parse.py), not the catalog above: superscript
+  footnote markers are stripped from state-name and vote cells (`strip_footnotes`), and
+  the totals row's `<th>Totals</th>` plural/`<th>` form is recognized (older years use
+  it; a singular-only check silently dropped the totals row and emptied the votes fact).
+- **Deferred Reconstruction years (1868, 1872).** These are **excluded** from the
+  default ingest (`UNSUPPORTED_EC_YEARS` in [`pipeline.py`](../src/usvote/pipeline.py)),
+  not corrected here, because their tables encode contested/uncounted electoral votes
+  that need dedicated modeling: 1868's Georgia votes were contested (dual
+  "excluding/including Georgia" totals rows; MS/TX/VA had not been readmitted), and
+  1872's Horace Greeley died after the popular vote, scattering his electoral votes with
+  Georgia's rejected by Congress. Ingesting them is tracked as follow-up work (#57).

@@ -53,6 +53,18 @@ T1_ROW_HEADERS = ("President", "Main Opponent")
 TOTALS_LABELS = frozenset({"Total", "Totals"})
 
 
+def _is_totals_label(text: str | None) -> bool:
+    """True if ``text`` is a ``Total``/``Totals`` label (whitespace-trimmed)."""
+    return text is not None and text.strip() in TOTALS_LABELS
+
+# Table 2 candidate-column labels for an aggregate "Other(s)" column — minor
+# candidates the Archives collapses into one column with no single home state
+# (2016's faithless electors print "Other"; pre-1892 years such as 1824 print
+# "Others"). transform.apply_other_candidates splits these back into named
+# candidates from each year's Notes; here they are just marked (state=None).
+OTHER_LABELS = frozenset({"Other", "Others"})
+
+
 class CandidateParty(TypedDict):
     """One Table 1 candidate: display name (commas stripped) and party code."""
 
@@ -130,11 +142,38 @@ class _YearTables(TypedDict):
 def parse_election_year_tables(
     year_tables: Sequence[Tag], state_names: Container[str]
 ) -> _YearTables:
-    """Dispatch a single year's two tables to the Table 1 / Table 2 parsers."""
+    """Dispatch a single year's two tables to the Table 1 / Table 2 parsers.
+
+    Footnote markers are stripped from both tables first (see
+    :func:`strip_footnotes`) so the pre-1892 pages' superscript annotations do not
+    reach the name/vote parsers.
+    """
+    for table in year_tables[:2]:
+        strip_footnotes(table)
     return {
         "t1": parse_table1(year_tables[0].find_all("tr")),
         "t2": parse_table2(year_tables[1].find_all("tr"), state_names),
     }
+
+
+def strip_footnotes(table: Tag) -> None:
+    """Remove ``<sup>`` footnote markers (and their contents) from ``table`` in place.
+
+    Older Archives pages annotate state names and vote counts with superscript
+    footnote numbers — ``<td>Connecticut<sup>3</sup></td>``, a Totals cell
+    ``261<sup>13</sup>``, the aggregate column ``Others<sup>1</sup>``. Left in, they
+    break state-name matching (``"Connecticut3"`` is not a state) and integer parsing
+    (``int("26113")``). Decomposing the element removes the marker *and its digits*
+    cleanly, where a regex on the rendered text could eat a real trailing digit.
+
+    Nothing load-bearing is lost: the footnote *text* lives in Table 2's trailing
+    Notes row, which :func:`parse_t2_votes_by_state` already skips, and any real vote
+    anomaly a footnote points to (e.g. an elector shortfall) is curated separately as
+    a provenance-carrying constant in :mod:`usvote.transform`, not read from the
+    marker. Modern pages (2016/2020) carry no ``<sup>``, so this is a no-op there.
+    """
+    for sup in table.find_all("sup"):
+        sup.decompose()
 
 
 def parse_table1(t1_rows: Sequence[Tag]) -> list[CandidateParty]:
@@ -182,12 +221,41 @@ def parse_table2(t2_rows: Sequence[Tag], state_names: Container[str]) -> ParsedT
     row 1 the candidate/home-state row, and rows 2+ the per-state vote rows.
     """
     num_candidates = parse_t2_num_candidates(t2_rows[0])
-    return {
-        "candidate_state": parse_t2_candidate_state(t2_rows[1], num_candidates),
-        "votes_by_state": parse_t2_votes_by_state(
-            t2_rows[2:], num_candidates, state_names
-        ),
-    }
+    candidate_state = parse_t2_candidate_state(t2_rows[1], num_candidates)
+    votes_by_state = parse_t2_votes_by_state(t2_rows[2:], num_candidates, state_names)
+    _assert_candidate_columns_consistent(
+        num_candidates, candidate_state, votes_by_state
+    )
+    return {"candidate_state": candidate_state, "votes_by_state": votes_by_state}
+
+
+def _assert_candidate_columns_consistent(
+    num_candidates: int,
+    candidate_state: list[CandidateState],
+    votes_by_state: list[StateVotes],
+) -> None:
+    """Raise unless every parsed row exposes exactly ``num_candidates`` columns.
+
+    The ``For President`` colspan (:func:`parse_t2_num_candidates`) is the single
+    hinge every downstream slice keys off. This cross-checks that the candidate/
+    home-state row yielded that many candidates and that each votes-by-state record
+    carries exactly that many per-candidate vote columns — catching a silent
+    window misalignment on an older page (an extra leading cell, a merged header)
+    before the melt in :mod:`usvote.transform` maps votes to the wrong candidate.
+    """
+    if len(candidate_state) != num_candidates:
+        raise ParseError(
+            f"Table 2 candidate row has {len(candidate_state)} candidates, "
+            f"expected {num_candidates} (the 'For President' colspan)"
+        )
+    for record in votes_by_state:
+        vote_cols = sum(1 for key in record if isinstance(key, int))
+        if vote_cols != num_candidates:
+            raise ParseError(
+                f"Table 2 row {record.get('state')!r} has {vote_cols} candidate "
+                f"vote columns, expected {num_candidates} (the 'For President' "
+                "colspan)"
+            )
 
 
 def parse_t2_num_candidates(header_row: Tag) -> int:
@@ -221,7 +289,7 @@ def parse_t2_candidate_state(
     candidate_state: list[CandidateState] = []
     for ci, cs in enumerate(cs_cols[:num_candidates]):
         text = " ".join(cs.stripped_strings) if cs.find("br") else cs.get_text()
-        if text == "Other":
+        if text in OTHER_LABELS:
             candidate, state = text, None
         else:
             candidate, state = text.split(" of ")
@@ -245,10 +313,10 @@ def parse_t2_votes_by_state(
     """Parse the per-state vote rows into ``{state, votes...}`` records.
 
     Resolving column 0 tells three row kinds apart: a state name (present in
-    ``state_names``), a ``Total``/``Totals`` label in column 0, or a ``<th>Total``
-    header row — the last shifts the column window left by one since it has no
-    state ``<td>``. Any other row (e.g. the trailing Notes row) has no valid
-    state and is skipped, which is the notebook's parse-time state-name check.
+    ``state_names``), a ``Total``/``Totals`` label in column 0, or a
+    ``<th>Total(s)</th>`` header row — the last shifts the column window left by
+    one since it has no state ``<td>``. Any other row (e.g. the trailing Notes row)
+    has no valid state and is skipped, which is the notebook's parse-time check.
 
     Within a kept row, column 0 of the vote window is the state's electoral-vote
     total (stored under ``'total_electoral_votes'``); the remaining columns are
@@ -269,7 +337,11 @@ def parse_t2_votes_by_state(
         elif col_0_text in TOTALS_LABELS:
             state = "Totals"
             start_ind, end_ind = 1, num_candidates + 2
-        elif sr.find("th", string="Total"):
+        elif sr.find("th", string=_is_totals_label):
+            # A ``<th>`` totals header (no state ``<td>``): the window starts at 0.
+            # Older pages use the plural ``<th>Totals</th>`` (e.g. 1824), so match
+            # both labels — a singular-only check silently drops the totals row,
+            # which empties the whole votes fact downstream (rank derives from it).
             state = "Totals"
             start_ind, end_ind = 0, num_candidates + 1
         else:

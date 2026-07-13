@@ -142,6 +142,46 @@ def test_single_party_has_null_party_2() -> None:
     assert row["party_2"] is None
 
 
+def test_hyphenated_party_label_not_mis_split_and_normalized() -> None:
+    # The Archives prints the Democratic-Republican party as "Democratic-Republican"
+    # (Jackson 1824) and "D-R" (Adams 1824) — one party, two labels. Normalizing both
+    # to "D-R" makes them read identically, and the non-"-" join delimiter keeps the
+    # hyphenated code from mis-splitting into a spurious party_2.
+    t2 = _t2_states([
+        {"president_candidate_name": "Andrew Jackson", "col_ind": 1,
+         "president_candidate_state": "Tennessee", "year": 1824},
+        {"president_candidate_name": "John Quincy Adams", "col_ind": 2,
+         "president_candidate_state": "Massachusetts", "year": 1824},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Andrew Jackson",
+         "president_candidate_party": "Democratic-Republican", "year": 1824},
+        {"president_candidate_name": "John Quincy Adams",
+         "president_candidate_party": "D-R", "year": 1824},
+    ])
+    candidates = build_candidate_dim(t2, t1).set_index("name")
+    for name in ("Andrew Jackson", "John Quincy Adams"):
+        assert candidates.loc[name, "party"] == "D-R"
+        assert candidates.loc[name, "party_2"] is None
+
+
+def test_cross_year_party_change_populates_party_2_after_normalization() -> None:
+    # Jackson runs Democratic-Republican (1824) then Democrat (1832) — a genuine
+    # cross-year party change, so party/party_2 = D-R/D, not a hyphen mis-split.
+    t2 = _t2_states([
+        {"president_candidate_name": "Andrew Jackson", "col_ind": 1,
+         "president_candidate_state": "Tennessee", "year": 1824},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Andrew Jackson",
+         "president_candidate_party": "Democratic-Republican", "year": 1824},
+        {"president_candidate_name": "Andrew Jackson",
+         "president_candidate_party": "D", "year": 1832},
+    ])
+    row = build_candidate_dim(t2, t1).iloc[0]
+    assert (row["party"], row["party_2"]) == ("D-R", "D")
+
+
 def test_bob_dole_name_reconciled_to_table_2() -> None:
     # Table 1 prints "Bob Dole"; Table 2 (and the canonical key) is "Robert Dole".
     t2 = _t2_states([
@@ -371,6 +411,20 @@ def test_assert_row_votes_sum_to_total_allows_2000_dc_abstention() -> None:
     T.assert_row_votes_sum_to_total(matrix, [1, 2])  # does not raise
 
 
+def test_assert_row_votes_sum_to_total_allows_1832_maryland_undervote() -> None:
+    # 1832 Maryland: 10 allotted, two electors did not vote (cast 8). The documented
+    # shortfall lets the row-sum pass; the Totals row inherits the same 2-vote gap.
+    matrix = pd.DataFrame({
+        "state": ["Maryland", "Totals"],
+        "total_electoral_votes": [10, 288],
+        "year": [1832, 1832],
+        1: [3, 219],  # Jackson
+        2: [5, 49],   # Clay (Maryland cast 3 + 5 = 8 of 10)
+        3: [0, 18],   # Others (Floyd + Wirt)
+    })
+    T.assert_row_votes_sum_to_total(matrix, [1, 2, 3])  # does not raise
+
+
 def test_assert_row_votes_sum_to_total_shortfall_is_year_scoped() -> None:
     # The documented (2000, DC) shortfall must not excuse the SAME 3-vs-2 gap in a
     # different year — that would still be an unexplained scrape error.
@@ -403,13 +457,13 @@ def test_assert_state_count_by_year_raises_on_dropped_state() -> None:
         T.assert_state_count_by_year(parsed, votes)
 
 
-def test_apply_other_candidates_raises_on_non_2016_placeholder() -> None:
-    # An unnamed "Other" column outside 2016 has no hardcoded correction.
+def test_apply_other_candidates_raises_on_unregistered_placeholder() -> None:
+    # An unnamed "Other" column in a year with no registered correction must raise.
     t2 = _t2_states([
         {"president_candidate_name": "Other", "col_ind": 2,
          "president_candidate_state": None, "year": 2004},
     ])
-    with pytest.raises(TransformError, match="only 2016"):
+    with pytest.raises(TransformError, match="no registered correction"):
         apply_other_candidates(t2)
 
 
