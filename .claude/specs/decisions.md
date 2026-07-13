@@ -355,3 +355,44 @@ CLAUDE.md note reflects.
   than being flattened into one shared PV loader or colliding with EC module names.
 - Recording the convention now prevents a retroactive restructuring of the EC modules once
   E4 lands, and gives E4/E5 an unambiguous home.
+
+---
+
+## D016: PV source determination finalized — MIT is CC0 (public-API-eligible); UCSB analysis-only
+
+**Date:** 2026-07-13
+**Context:** E3 (PV-source research, epic #13) was the task D008 named to resolve the final
+PV source and confirm whether its license permits public-API redistribution — the gate
+D002 leaves open. E3-S1 (#15) characterized MIT, E3-S2 (#16) UCSB / American Presidency
+Project, and E3-S3 (#20) consolidated them into
+[`research-pv-source.md`](research-pv-source.md). During consolidation the MIT license was
+verified against the upstream Harvard Dataverse record (dataset `doi:10.7910/DVN/42MVDX`,
+the source of Fred's `1976-2024-president.csv`): its license object is **CC0 1.0**
+(`http://creativecommons.org/publicdomain/zero/1.0`) with **no custom terms of use
+attached**. D008 had described MIT only as "open-licensed" and D014 still carried the
+license question as an open, outreach-gated item.
+**Decision:** Treat the PV source determination as **settled**:
+- **MIT Election Lab (1976–2024) is licensed CC0 1.0** — a public-domain dedication.
+  Redistribution, commercial use, and derivatives are permitted with no attribution or
+  permission required, so the modern core is **cleared for public-API redistribution**.
+  MIT rows carry `source=MIT`, `redistributable=true`.
+- **UCSB / American Presidency Project remains analysis-only** — no data-specific reuse
+  grant (UCSB Terms of Use prohibit redistribution without explicit permission via
+  `policy@ucsb.edu`). UCSB rows carry `source=UCSB`, `redistributable=false` and are
+  excluded from any public API surface.
+- The **D002 public-API stretch goal is un-gated for 1976–2024** on the licensing axis; no
+  outreach is required to ship the modern core publicly.
+**Resolves D008's open action and closes the licensing question D014 deferred.** D014's
+dual-source split stands unchanged; this entry records that the split's licensing basis is
+now confirmed rather than pending. D008 remains the record of *why* MIT was preferred; D016
+records that the preference is now backed by a verified CC0 license.
+**Rationale:**
+- CC0 is unambiguous and verified at the authoritative upstream (Dataverse license object),
+  so the redistribution gate is settled on evidence, not on a hoped-for outreach reply.
+- Keeping UCSB analysis-only is the safe, defensible default (its Terms of Use grant no
+  reuse), and per-source `redistributable` flags (D014) already let the public surface
+  filter cleanly to CC0 MIT rows.
+**Action required:** None to unblock the API. MIT outreach is now **optional**, narrowed to
+a single nice-to-have question — a possible **pre-1976 coverage extension** (which would let
+more of the historical window ride on the redistributable source). Per epic #13 this stays
+deferred until analysis back to at least 1976 is in hand.
