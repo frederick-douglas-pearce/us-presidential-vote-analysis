@@ -78,7 +78,105 @@ OTHER_VOTES_2016: tuple[dict[str, Any], ...] = (
     {"state": "Washington", "col_ind": 7, "votes": 1},  # Faith Spotted Eagle (1)
 )
 
-OTHER_YEAR_2016 = 2016
+# --- pre-1892 "Others" aggregate columns (EC coverage extension, #32) ----------
+# Several 19th-century Table 2 pages collapse the minor presidential candidates into
+# a single "Others" column (parsed with state=None, like 2016's "Other"). Each is
+# split back here into its named candidates with the per-state electoral votes read
+# from that year's Archives Notes ("<State> cast N votes for <Name> as President").
+# Following the 2016 pattern, the first named candidate reuses the parsed "Others"
+# col_ind; the rest take fresh indices. col_ind is only a votes<->candidate join key
+# (build_votes_fact), never a schema key. The ``state`` is each candidate's HOME
+# state (not a state they won). Every split below is verified to reproduce the parsed
+# Others column per state and to match the candidate's known national EC total.
+
+# 1824 — Crawford (41) + Clay (37) collapsed into "Others". Their per-state votes and
+# home states come from the Archives Notes ("William H. Crawford, of Georgia; and
+# Henry Clay, of Kentucky"). https://www.archives.gov/electoral-college/1824
+OTHER_CANDIDATES_1824: tuple[dict[str, Any], ...] = (
+    {"name": "William H. Crawford", "col_ind": 3, "state": "Georgia"},
+    {"name": "Henry Clay", "col_ind": 4, "state": "Kentucky"},
+)
+OTHER_VOTES_1824: tuple[dict[str, Any], ...] = (
+    {"state": "Delaware", "col_ind": 3, "votes": 2},  # Crawford
+    {"state": "Georgia", "col_ind": 3, "votes": 9},
+    {"state": "Maryland", "col_ind": 3, "votes": 1},
+    {"state": "New York", "col_ind": 3, "votes": 5},
+    {"state": "Virginia", "col_ind": 3, "votes": 24},
+    {"state": "Kentucky", "col_ind": 4, "votes": 14},  # Clay
+    {"state": "Missouri", "col_ind": 4, "votes": 3},
+    {"state": "New York", "col_ind": 4, "votes": 4},
+    {"state": "Ohio", "col_ind": 4, "votes": 16},
+)
+
+# 1832 — Floyd (11, South Carolina's Nullifier slate) + Wirt (7, Anti-Masonic).
+# https://www.archives.gov/electoral-college/1832
+OTHER_CANDIDATES_1832: tuple[dict[str, Any], ...] = (
+    {"name": "John Floyd", "col_ind": 3, "state": "Virginia"},
+    {"name": "William Wirt", "col_ind": 4, "state": "Maryland"},
+)
+OTHER_VOTES_1832: tuple[dict[str, Any], ...] = (
+    {"state": "South Carolina", "col_ind": 3, "votes": 11},  # Floyd
+    {"state": "Vermont", "col_ind": 4, "votes": 7},  # Wirt
+)
+
+# 1836 — the three anti-Van-Buren Whig candidates: White (26), Webster (14),
+# Mangum (11). https://www.archives.gov/electoral-college/1836
+OTHER_CANDIDATES_1836: tuple[dict[str, Any], ...] = (
+    {"name": "Hugh L. White", "col_ind": 3, "state": "Tennessee"},
+    {"name": "Daniel Webster", "col_ind": 4, "state": "Massachusetts"},
+    {"name": "Willie P. Mangum", "col_ind": 5, "state": "North Carolina"},
+)
+OTHER_VOTES_1836: tuple[dict[str, Any], ...] = (
+    {"state": "Georgia", "col_ind": 3, "votes": 11},  # White
+    {"state": "Tennessee", "col_ind": 3, "votes": 15},
+    {"state": "Massachusetts", "col_ind": 4, "votes": 14},  # Webster
+    {"state": "South Carolina", "col_ind": 5, "votes": 11},  # Mangum
+)
+
+# 1860 — Breckinridge (72, Southern Democrat) + Bell (39, Constitutional Union).
+# https://www.archives.gov/electoral-college/1860
+OTHER_CANDIDATES_1860: tuple[dict[str, Any], ...] = (
+    {"name": "John C. Breckinridge", "col_ind": 3, "state": "Kentucky"},
+    {"name": "John Bell", "col_ind": 4, "state": "Tennessee"},
+)
+OTHER_VOTES_1860: tuple[dict[str, Any], ...] = (
+    {"state": "Alabama", "col_ind": 3, "votes": 9},  # Breckinridge
+    {"state": "Arkansas", "col_ind": 3, "votes": 4},
+    {"state": "Delaware", "col_ind": 3, "votes": 3},
+    {"state": "Florida", "col_ind": 3, "votes": 3},
+    {"state": "Georgia", "col_ind": 3, "votes": 10},
+    {"state": "Louisiana", "col_ind": 3, "votes": 6},
+    {"state": "Maryland", "col_ind": 3, "votes": 8},
+    {"state": "Mississippi", "col_ind": 3, "votes": 7},
+    {"state": "North Carolina", "col_ind": 3, "votes": 10},
+    {"state": "South Carolina", "col_ind": 3, "votes": 8},
+    {"state": "Texas", "col_ind": 3, "votes": 4},
+    {"state": "Kentucky", "col_ind": 4, "votes": 12},  # Bell
+    {"state": "Tennessee", "col_ind": 4, "votes": 12},
+    {"state": "Virginia", "col_ind": 4, "votes": 15},
+)
+
+# Year-keyed registries dispatching the faithless/"Other" aggregate-column split.
+# 2016 was the first such correction; extending EC coverage below 1892 (#32) adds
+# the 19th-century years above whose Table 2 collapses minor candidates into an
+# "Other(s)" column. apply_other_candidates and _votes_matrix iterate these maps and
+# apply each correction only to the years actually being ingested, so a subset run
+# (e.g. {2020}) never injects another year's Other candidates. Add a new year by
+# registering its two entries here (plus a test + docs/corrections.md row).
+OTHER_CANDIDATES: Mapping[int, tuple[dict[str, Any], ...]] = {
+    1824: OTHER_CANDIDATES_1824,
+    1832: OTHER_CANDIDATES_1832,
+    1836: OTHER_CANDIDATES_1836,
+    1860: OTHER_CANDIDATES_1860,
+    2016: OTHER_CANDIDATES_2016,
+}
+OTHER_VOTES: Mapping[int, tuple[dict[str, Any], ...]] = {
+    1824: OTHER_VOTES_1824,
+    1832: OTHER_VOTES_1832,
+    1836: OTHER_VOTES_1836,
+    1860: OTHER_VOTES_1860,
+    2016: OTHER_VOTES_2016,
+}
 
 # Table-2 candidate spellings unified to their canonical (Table-1 / later-year)
 # form. Each maps a raw parsed ``name`` to its canonical full name + middle
@@ -96,6 +194,20 @@ CANDIDATE_NAME_FIXES: Mapping[str, dict[str, str]] = {
 # tables' names reconcile. "Bob Dole" (Table 1) -> "Robert Dole" (Table 2, 1996).
 PARTY_NAME_FIXES: Mapping[str, str] = {"Bob Dole": "Robert Dole"}
 
+# Table-1 party *labels* normalized to one canonical code before aggregation, so the
+# same party reads identically across candidates and years and label drift does not
+# spuriously populate party_2. The Archives prints the early-era Democratic-Republican
+# party inconsistently — "Democratic-Republican" (1824 winner Jackson, and 1804-1820)
+# vs. "D-R" (1824 opponent Adams) — for the same party. Left unnormalized, Jackson's
+# and Adams's 1824 party would read differently. https://www.archives.gov/electoral-college/1824
+PARTY_CODE_FIXES: Mapping[str, str] = {"Democratic-Republican": "D-R"}
+
+# Delimiter joining a candidate's distinct parties into party/party_2. Must not occur
+# in any party label: "-" cannot be used because era party codes contain it ("D-R"),
+# which would mis-split a single hyphenated party into a spurious party_2. "|" never
+# appears in an Archives party string.
+PARTY_JOIN = "|"
+
 # Faith Spotted Eagle's two-word last name is mis-split by the generic name parser
 # (middle="Spotted", last="Eagle"); the whole surname is "Spotted Eagle".
 SPOTTED_EAGLE_NAME = "Faith Spotted Eagle"
@@ -110,6 +222,12 @@ SPOTTED_EAGLE_LAST = "Spotted Eagle"
 # shortfall is derived (summed over the year's states) inside the validator, so a
 # new anomaly needs one per-state entry here and never a hand-entered Totals bump.
 #
+# 1832 Maryland: two of Maryland's electors did not vote, so Maryland cast 8 of its
+# 10 allotted votes (Jackson 3, Clay 5). The Archives Notes: "two electors from
+# Maryland did not vote, making the total number of votes cast 286" (of 288 appointed)
+# — so the 1832 national Totals row inherits the same 2-vote shortfall.
+# Source: https://www.archives.gov/electoral-college/1832 (Notes section).
+#
 # 2000 District of Columbia: DC elector Barbara Lett-Simmons cast a blank ballot in
 # protest of DC's lack of Congressional representation, so DC cast 2 of its 3 votes
 # (Gore 2, Bush 0) — the first (and to date only) modern abstention. The National
@@ -118,6 +236,7 @@ SPOTTED_EAGLE_LAST = "Spotted Eagle"
 # cast). Source: https://www.archives.gov/electoral-college/2000 (Notes section) and
 # the Archives' email reply; see docs/corrections.md.
 ELECTORAL_VOTE_SHORTFALLS: Mapping[tuple[int, str], int] = {
+    (1832, "Maryland"): 2,
     (2000, "District of Columbia"): 1,
 }
 
@@ -284,21 +403,24 @@ def normalize_candidate_states(
 
 
 def apply_other_candidates(t2_states: pd.DataFrame) -> pd.DataFrame:
-    """Replace the parsed 2016 "Other" placeholder columns with named candidates.
+    """Replace parsed "Other(s)" placeholder columns with named candidates.
 
-    The parser leaves faithless-elector columns as ``name="Other"``,
-    ``state=None``. Here those placeholder rows are dropped and the real 2016
-    recipients (:data:`OTHER_CANDIDATES_2016`) appended. Position-independent
-    (keyed by year, not the notebook's absolute row indices) so it holds on any
-    subset of years. Raises :class:`TransformError` if a placeholder appears in a
-    year other than 2016 — the only year the correction covers.
+    The parser leaves an aggregate-column candidate as ``name="Other"`` /
+    ``"Others"`` with ``state=None`` (e.g. 2016's faithless electors, 1824's
+    Crawford+Clay). Here those placeholder rows are dropped and each affected
+    year's registered recipients (:data:`OTHER_CANDIDATES`) appended. Only years
+    actually present in ``t2_states`` are injected, so a subset run never pulls in
+    another year's Other candidates. Keyed by year (not the notebook's absolute row
+    indices) so it holds on any subset of years. Raises :class:`TransformError` if a
+    placeholder appears in a year with no registered correction.
     """
     placeholder = t2_states["president_candidate_state"].isna()
-    bad_years = set(t2_states.loc[placeholder, "year"]) - {OTHER_YEAR_2016}
+    present_other_years = set(t2_states.loc[placeholder, "year"])
+    bad_years = present_other_years - set(OTHER_CANDIDATES)
     if bad_years:
         raise TransformError(
-            f"Unnamed 'Other' candidate column(s) in year(s) {sorted(bad_years)}; "
-            f"only {OTHER_YEAR_2016} has a hardcoded correction "
+            f"Unnamed 'Other(s)' candidate column(s) in year(s) {sorted(bad_years)} "
+            "with no registered correction; add an OTHER_CANDIDATES[year] entry "
             "(see OTHER_CANDIDATES_2016)"
         )
     added = pd.DataFrame(
@@ -307,12 +429,15 @@ def apply_other_candidates(t2_states: pd.DataFrame) -> pd.DataFrame:
                 "president_candidate_name": c["name"],
                 "col_ind": c["col_ind"],
                 "president_candidate_state": c["state"],
-                "year": OTHER_YEAR_2016,
+                "year": year,
             }
-            for c in OTHER_CANDIDATES_2016
+            for year in present_other_years
+            for c in OTHER_CANDIDATES[year]
         ]
     )
     kept = t2_states.loc[~placeholder]
+    if added.empty:
+        return kept.sort_values(["year", "col_ind"]).reset_index(drop=True)
     return (
         pd.concat([kept, added], axis=0)
         .sort_values(["year", "col_ind"])
@@ -464,17 +589,25 @@ def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
         )
     )
     parties["name"] = parties["name"].replace(dict(PARTY_NAME_FIXES))
+    # Normalize label drift (e.g. "Democratic-Republican" -> "D-R") *before*
+    # aggregation, then re-dedupe so a candidate whose two labels were the same party
+    # collapses to one row instead of a spurious two-party aggregation.
+    parties["party"] = parties["party"].replace(dict(PARTY_CODE_FIXES))
+    parties = parties.drop_duplicates()
 
     if parties.empty:
         # No Table-1 rows (e.g. a fixture of faithless-only candidates); every
         # candidate left-joins to a null party.
         return pd.DataFrame(columns=["name", "party", "party_2"])
 
-    parties = parties.groupby("name")["party"].agg("-".join).reset_index()
-    split = parties["party"].str.split("-", n=1, expand=True)
+    parties = parties.groupby("name")["party"].agg(PARTY_JOIN.join).reset_index()
+    split = parties["party"].str.split(PARTY_JOIN, expand=True)
     parties["party"] = split[0]
-    # Secondary party is a single code; take its first char (drops any tertiary).
-    parties["party_2"] = split[1].str[0] if split.shape[1] > 1 else None
+    # Secondary party is the full second label (any tertiary is dropped) — keep it
+    # intact rather than truncating to one char, so historical multi-word labels
+    # like "Whig" / "National Republican" survive in party_2 (a varchar) instead of
+    # collapsing to a meaningless "W" / "N".
+    parties["party_2"] = split[1] if split.shape[1] > 1 else None
 
     assert_unique_grain(parties, "name", "candidate (Table 1 parties)")
     return parties
@@ -610,17 +743,20 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     matrix = pd.json_normalize(
         list(parsed_years), ["t2", "votes_by_state"], ["year"]
     )
-    other_cols = [c["col_ind"] for c in OTHER_CANDIDATES_2016]
-    year_2016 = matrix["year"] == OTHER_YEAR_2016
-    if year_2016.any():
-        # Zero every 2016 Other column (creating 5/6/7), then set the per-state
-        # Other votes, then recompute the 2016 totals row for those columns.
-        matrix.loc[year_2016, other_cols] = 0
-        for ov in OTHER_VOTES_2016:
-            row = year_2016 & (matrix["state"] == ov["state"])
+    for year, candidates in OTHER_CANDIDATES.items():
+        year_mask = matrix["year"] == year
+        if not year_mask.any():
+            continue
+        # Zero every Other column for this year (creating any new column indices),
+        # set the per-state Other votes, then recompute this year's totals row for
+        # those columns so the derived totals can never drift from the per-state data.
+        other_cols = [c["col_ind"] for c in candidates]
+        matrix.loc[year_mask, other_cols] = 0
+        for ov in OTHER_VOTES[year]:
+            row = year_mask & (matrix["state"] == ov["state"])
             matrix.loc[row, ov["col_ind"]] = ov["votes"]
-        totals_row = year_2016 & (matrix["state"] == TOTALS_ROW_LABEL)
-        state_rows = year_2016 & (matrix["state"] != TOTALS_ROW_LABEL)
+        totals_row = year_mask & (matrix["state"] == TOTALS_ROW_LABEL)
+        state_rows = year_mask & (matrix["state"] != TOTALS_ROW_LABEL)
         matrix.loc[totals_row, other_cols] = (
             matrix.loc[state_rows, other_cols].sum(axis=0).values
         )
