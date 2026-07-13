@@ -600,6 +600,28 @@ def test_1824_office_holder_differs_from_ec_winner() -> None:
     assert not votes[votes["candidate_id"] == ids["Andrew Jackson"]]["took_office"].any()
 
 
+def test_1824_real_fixture_office_holder_reconciles() -> None:
+    # Regression guard the synthetic case above cannot provide: _SYNTHETIC_1824
+    # hardcodes "John Quincy Adams" on both the input and CONTINGENT_OFFICE_HOLDERS
+    # sides, so it is self-consistent by construction and would still pass if the
+    # candidate dimension started spelling the name differently. Drive the *real*
+    # 1824 Archives fixture end-to-end so the office-holder name actually matches the
+    # parsed-and-reconciled candidate dim — otherwise _add_took_office raises and the
+    # default `python -m usvote` run over 1824 (in loaded coverage, #32) would break.
+    parsed = parse_election_years({1824: _year_tables(1824)}, STATE_NAMES)
+    candidates, _, votes = transform_parsed_years(parsed, fake_state_geo())
+
+    assert "John Quincy Adams" in set(candidates["name"])
+    ids = candidates.set_index("name")["candidate_id"]
+    totals = votes[votes["is_total"]].set_index("candidate_id")
+    # Jackson led the Electoral College (rank 1) but Adams took office via the House.
+    assert totals.loc[ids["Andrew Jackson"], "president_electoral_rank"] == 1
+    assert not bool(totals.loc[ids["Andrew Jackson"], "took_office"])
+    assert bool(totals.loc[ids["John Quincy Adams"], "took_office"])
+    # Exactly one office-holder for the year.
+    assert int(totals["took_office"].sum()) == 1
+
+
 def test_contingent_office_holder_must_reconcile() -> None:
     # A contingent office-holder whose name is not in the candidate dimension (e.g. a
     # reconciliation miss) must fail loudly, not silently leave the EC leader marked as
