@@ -545,6 +545,73 @@ def test_2000_dc_abstention_survives_transform() -> None:
     assert (totals["total_electoral_votes"] == 6).all()
 
 
+# --- 1824 contingent election: office-holder vs. EC winner (#29) -----------
+
+# A crafted mini-1824 driven through the whole transform (same targeted approach as
+# the 2000 case above). 1824 is the one contingent election inside the loaded EC
+# coverage (post-1804 spine, #32): no candidate reached an EC majority, Jackson led
+# the Electoral College but the House elected John Quincy Adams, who took office. The
+# per-state splits are illustrative (Jackson's home Tennessee outweighs Adams's
+# Massachusetts, so Jackson is EC rank 1); the fact under test is the took_office vs.
+# president_electoral_rank distinction, not the real 1824 counts.
+_SYNTHETIC_1824: dict[str, Any] = {
+    "year": 1824,
+    "t1": [
+        {"president_candidate_name": "Andrew Jackson",
+         "president_candidate_party": "Democratic-Republican"},
+        {"president_candidate_name": "John Quincy Adams",
+         "president_candidate_party": "D-R"},
+    ],
+    "t2": {
+        "candidate_state": [
+            {"president_candidate_name": "Andrew Jackson", "col_ind": 1,
+             "president_candidate_state": "Tennessee"},
+            {"president_candidate_name": "John Quincy Adams", "col_ind": 2,
+             "president_candidate_state": "Massachusetts"},
+        ],
+        "votes_by_state": [
+            {"state": "Tennessee", "total_electoral_votes": 11, 1: 11, 2: 0},
+            {"state": "Massachusetts", "total_electoral_votes": 10, 1: 0, 2: 10},
+            {"state": "Totals", "total_electoral_votes": 21, 1: 11, 2: 10},
+        ],
+    },
+}
+
+
+def test_1824_office_holder_differs_from_ec_winner() -> None:
+    # The contingent-election distinction (#29): Jackson leads the Electoral College
+    # (rank 1) but Adams took office via the House. took_office marks the office-holder;
+    # the EC winner stays derivable from president_electoral_rank == 1, so the two facts
+    # never duplicate.
+    candidates, _, votes = transform_parsed_years([_SYNTHETIC_1824], fake_state_geo())
+    ids = candidates.set_index("name")["candidate_id"]
+
+    totals = votes[votes["is_total"]].set_index("candidate_id")
+    # Jackson leads the Electoral College...
+    assert totals.loc[ids["Andrew Jackson"], "president_electoral_rank"] == 1
+    assert totals.loc[ids["John Quincy Adams"], "president_electoral_rank"] == 2
+    # ...but Adams took office, not Jackson.
+    assert not bool(totals.loc[ids["Andrew Jackson"], "took_office"])
+    assert bool(totals.loc[ids["John Quincy Adams"], "took_office"])
+
+    # took_office is broadcast to every one of a candidate's rows (like the rank), so a
+    # state-row query is not a "only meaningful when is_total" trap.
+    assert votes[votes["candidate_id"] == ids["John Quincy Adams"]]["took_office"].all()
+    assert not votes[votes["candidate_id"] == ids["Andrew Jackson"]]["took_office"].any()
+
+
+def test_contingent_office_holder_must_reconcile() -> None:
+    # A contingent office-holder whose name is not in the candidate dimension (e.g. a
+    # reconciliation miss) must fail loudly, not silently leave the EC leader marked as
+    # having taken office.
+    candidates = pd.DataFrame({"candidate_id": [1], "name": ["Andrew Jackson"]})
+    votes = pd.DataFrame(
+        {"year": [1824], "candidate_id": [1], "president_electoral_rank": [1]}
+    )
+    with pytest.raises(TransformError, match="contingent office-holder"):
+        T._add_took_office(votes, candidates)
+
+
 # --- integration: 2016 + 2020 fixture slice --------------------------------
 
 
@@ -659,3 +726,15 @@ def test_electoral_rank_matches_vote_order(
     # Biden (306) outranks Trump (232) in 2020.
     assert ranks.loc[ids["Joseph R. Biden Jr."], "president_electoral_rank"] == 1
     assert ranks.loc[ids["Donald J. Trump"], "president_electoral_rank"] == 2
+
+
+def test_non_contingent_office_holder_is_ec_winner(
+    frames: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    # For an ordinary (non-contingent) election the office-holder IS the EC rank-1
+    # candidate: Biden (2020) is both rank 1 and took_office; Trump is neither.
+    candidates, _, votes = frames
+    ids = candidates.set_index("name")["candidate_id"]
+    totals = votes[(votes["year"] == 2020) & votes["is_total"]].set_index("candidate_id")
+    assert bool(totals.loc[ids["Joseph R. Biden Jr."], "took_office"])
+    assert not bool(totals.loc[ids["Donald J. Trump"], "took_office"])

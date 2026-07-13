@@ -80,7 +80,7 @@ Loose star schema: two dimension tables + one fact table. Column definitions and
 
 - **`state`** — PK `state` (full name); USPS code, census region/division, geoid, land/water area, lat/lon.
 - **`candidate`** — PK `candidate_id`; parsed name parts, up to two home states (FK → `state`), up to two parties. A candidate spanning multiple states/parties is aggregated to one row with `_2` columns (e.g., Bryan D/P, T. Roosevelt R→P).
-- **`votes`** — PK `votes_id`; `year`, `state` (FK, null for totals rows), `is_total` flag, `candidate_id` (FK), `total_electoral_votes`, `president_electoral_votes`, `president_electoral_rank`.
+- **`votes`** — PK `votes_id`; `year`, `state` (FK, null for totals rows), `is_total` flag, `candidate_id` (FK), `total_electoral_votes`, `president_electoral_votes`, `president_electoral_rank`, `took_office` (the candidate who assumed the presidency — the EC winner (`president_electoral_rank == 1`) except in contingent elections like 1824, where the House chose someone other than the EC leader; see `CONTINGENT_OFFICE_HOLDERS` and `docs/corrections.md`).
 
 ### `db_tools.py` — `DBC` class
 
