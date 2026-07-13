@@ -601,10 +601,13 @@ def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["name", "party", "party_2"])
 
     parties = parties.groupby("name")["party"].agg(PARTY_JOIN.join).reset_index()
-    split = parties["party"].str.split(PARTY_JOIN, n=1, expand=True)
+    split = parties["party"].str.split(PARTY_JOIN, expand=True)
     parties["party"] = split[0]
-    # Secondary party is a single code; take its first char (drops any tertiary).
-    parties["party_2"] = split[1].str[0] if split.shape[1] > 1 else None
+    # Secondary party is the full second label (any tertiary is dropped) — keep it
+    # intact rather than truncating to one char, so historical multi-word labels
+    # like "Whig" / "National Republican" survive in party_2 (a varchar) instead of
+    # collapsing to a meaningless "W" / "N".
+    parties["party_2"] = split[1] if split.shape[1] > 1 else None
 
     assert_unique_grain(parties, "name", "candidate (Table 1 parties)")
     return parties

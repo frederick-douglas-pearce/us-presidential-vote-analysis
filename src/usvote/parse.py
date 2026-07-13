@@ -57,6 +57,20 @@ def _is_totals_label(text: str | None) -> bool:
     """True if ``text`` is a ``Total``/``Totals`` label (whitespace-trimmed)."""
     return text is not None and text.strip() in TOTALS_LABELS
 
+
+def _clean_label(text: str) -> str:
+    """Strip footnote asterisks and surrounding whitespace from a cell label.
+
+    Modern Archives pages separate a cell's text from its footnote marker with a
+    **non-breaking space** (e.g. ``Oregon\xa0<sup>1</sup>``). Once
+    :func:`strip_footnotes` removes the ``<sup>``, a trailing ``\xa0`` remains — and
+    a plain ``.strip(" ")`` does not remove it, so the label would fail to match its
+    state name and the row would be silently dropped. ``str.strip()`` (no args)
+    removes *all* Unicode whitespace, ``\xa0`` included; the ``strip("*")`` between
+    the two strips clears footnote asterisks that sit outside the whitespace.
+    """
+    return text.strip().strip("*").strip()
+
 # Table 2 candidate-column labels for an aggregate "Other(s)" column — minor
 # candidates the Archives collapses into one column with no single home state
 # (2016's faithless electors print "Other"; pre-1892 years such as 1824 print
@@ -144,27 +158,29 @@ def parse_election_year_tables(
 ) -> _YearTables:
     """Dispatch a single year's two tables to the Table 1 / Table 2 parsers.
 
-    Footnote markers are stripped from both tables first (see
-    :func:`strip_footnotes`) so the pre-1892 pages' superscript annotations do not
-    reach the name/vote parsers.
+    Each table parser strips its own footnote markers (see :func:`strip_footnotes`),
+    so this dispatch carries no hidden precondition — a direct caller of
+    :func:`parse_table1` / :func:`parse_table2` is handled identically.
     """
-    for table in year_tables[:2]:
-        strip_footnotes(table)
     return {
         "t1": parse_table1(year_tables[0].find_all("tr")),
         "t2": parse_table2(year_tables[1].find_all("tr"), state_names),
     }
 
 
-def strip_footnotes(table: Tag) -> None:
-    """Remove ``<sup>`` footnote markers (and their contents) from ``table`` in place.
+def strip_footnotes(subtree: Tag) -> None:
+    """Remove ``<sup>`` footnote markers (and their contents) from ``subtree`` in place.
 
-    Older Archives pages annotate state names and vote counts with superscript
-    footnote numbers — ``<td>Connecticut<sup>3</sup></td>``, a Totals cell
-    ``261<sup>13</sup>``, the aggregate column ``Others<sup>1</sup>``. Left in, they
-    break state-name matching (``"Connecticut3"`` is not a state) and integer parsing
-    (``int("26113")``). Decomposing the element removes the marker *and its digits*
-    cleanly, where a regex on the rendered text could eat a real trailing digit.
+    Accepts any ``<table>`` or ``<tr>`` element (each table parser calls it on its own
+    rows, so no caller depends on a prior table-wide pass). Older Archives pages
+    annotate state names and vote counts with superscript footnote numbers —
+    ``<td>Connecticut<sup>3</sup></td>``, a Totals cell ``261<sup>13</sup>``, the
+    aggregate column ``Others<sup>1</sup>``. Left in, they break state-name matching
+    (``"Connecticut3"`` is not a state) and integer parsing (``int("26113")``).
+    Decomposing the element removes the marker *and its digits* cleanly, where a regex
+    on the rendered text could eat a real trailing digit. (A non-breaking space left
+    between a label and its removed marker is handled separately by
+    :func:`_clean_label`.)
 
     Nothing load-bearing is lost: the footnote *text* lives in Table 2's trailing
     Notes row, which :func:`parse_t2_votes_by_state` already skips, and any real vote
@@ -172,12 +188,18 @@ def strip_footnotes(table: Tag) -> None:
     a provenance-carrying constant in :mod:`usvote.transform`, not read from the
     marker. Modern pages (2016/2020) carry no ``<sup>``, so this is a no-op there.
     """
-    for sup in table.find_all("sup"):
+    for sup in subtree.find_all("sup"):
         sup.decompose()
 
 
 def parse_table1(t1_rows: Sequence[Tag]) -> list[CandidateParty]:
-    """Parse Table 1's President and Main-Opponent rows into name/party dicts."""
+    """Parse Table 1's President and Main-Opponent rows into name/party dicts.
+
+    Strips its rows' footnote markers first, so it is self-contained (no reliance on
+    a prior table-wide :func:`strip_footnotes` pass).
+    """
+    for row in t1_rows:
+        strip_footnotes(row)
     return [
         parse_t1_candidate_party(t1_rows, ri, rh)
         for ri, rh in zip(T1_ROW_INDS, T1_ROW_HEADERS, strict=True)
@@ -209,8 +231,10 @@ def parse_t1_candidate_party(
         raise ParseError(f"Table 1 row {row_ind} ({row_header}) has no <td> data cell")
     candidate, party = cell.get_text().split(" [")
     return {
-        "president_candidate_name": candidate.strip(" *").replace(",", ""),
-        "president_candidate_party": party.strip(" *]"),
+        "president_candidate_name": _clean_label(candidate).replace(",", ""),
+        # party is "Code]" possibly trailed by a footnote (" *"); drop the bracket
+        # then clean, so "[None] *" -> "None" regardless of marker order.
+        "president_candidate_party": _clean_label(party.replace("]", "")),
     }
 
 
@@ -218,8 +242,12 @@ def parse_table2(t2_rows: Sequence[Tag], state_names: Container[str]) -> ParsedT
     """Parse Table 2 into candidate home states and the votes-by-state matrix.
 
     Row 0 is the header (its ``For President`` colspan sets the candidate count),
-    row 1 the candidate/home-state row, and rows 2+ the per-state vote rows.
+    row 1 the candidate/home-state row, and rows 2+ the per-state vote rows. Strips
+    its rows' footnote markers first, so it is self-contained (no reliance on a prior
+    table-wide :func:`strip_footnotes` pass).
     """
+    for row in t2_rows:
+        strip_footnotes(row)
     num_candidates = parse_t2_num_candidates(t2_rows[0])
     candidate_state = parse_t2_candidate_state(t2_rows[1], num_candidates)
     votes_by_state = parse_t2_votes_by_state(t2_rows[2:], num_candidates, state_names)
@@ -289,12 +317,13 @@ def parse_t2_candidate_state(
     candidate_state: list[CandidateState] = []
     for ci, cs in enumerate(cs_cols[:num_candidates]):
         text = " ".join(cs.stripped_strings) if cs.find("br") else cs.get_text()
+        text = _clean_label(text)
         if text in OTHER_LABELS:
             candidate, state = text, None
         else:
             candidate, state = text.split(" of ")
-            candidate = candidate.strip(", *").replace(",", "")
-            state = state.strip(" *").replace(",", "")
+            candidate = _clean_label(candidate).replace(",", "")
+            state = _clean_label(state).replace(",", "")
         candidate_state.append(
             {
                 "president_candidate_name": candidate,
@@ -329,7 +358,7 @@ def parse_t2_votes_by_state(
         # An empty `if state_cols` yields col-0 "" which resolves to no state and
         # is skipped — a deliberate softening of the notebook's IndexError on a
         # cell-less row, so a stray blank/separator row can't crash a full run.
-        col_0_text = state_cols[0].get_text().strip(" *") if state_cols else ""
+        col_0_text = _clean_label(state_cols[0].get_text()) if state_cols else ""
         state: str | None
         if col_0_text in state_names:
             state = col_0_text
@@ -351,8 +380,20 @@ def parse_t2_votes_by_state(
         if state is not None:
             state_votes: StateVotes = {"state": state}
             for si, sv in enumerate(state_cols[start_ind:end_ind]):
-                votes = sv.get_text()
+                votes = sv.get_text().strip()  # strip() also clears a footnote nbsp
                 key: str | int = "total_electoral_votes" if si == 0 else si
-                state_votes[key] = int(votes) if votes != "-" else 0
+                if votes == "-":
+                    state_votes[key] = 0
+                    continue
+                try:
+                    state_votes[key] = int(votes)
+                except ValueError as exc:
+                    # A non-numeric electoral-vote cell is an un-modelled vote
+                    # notation, e.g. 1868's contested "(9)" for Georgia. Fail with a
+                    # typed, located error instead of a bare int() ValueError.
+                    raise ParseError(
+                        f"Table 2 row {state!r}: non-numeric electoral-vote cell "
+                        f"{votes!r} (column {key}) — an un-modelled vote notation"
+                    ) from exc
             votes_by_state.append(state_votes)
     return votes_by_state

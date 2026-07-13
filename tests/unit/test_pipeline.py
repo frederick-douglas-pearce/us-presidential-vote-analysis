@@ -21,6 +21,7 @@ from tests._helpers import (
     record_inserts,
 )
 from usvote.load import SCHEMA
+from usvote.parse import ParseError
 from usvote.pipeline import (
     EC_SPINE_FLOOR,
     LATEST_ELECTION_YEAR,
@@ -148,22 +149,59 @@ def test_run_ec_pipeline_pre1892_spine_offline(
     assert (jackson["party"], jackson["party_2"]) == ("D-R", "D")
 
 
+@pytest.mark.parametrize(
+    ("year", "exc", "match"),
+    [
+        # 1872: Greeley's scattered votes parse as an "Others" column with no
+        # registered correction -> TransformError.
+        (1872, TransformError, "no registered correction"),
+        # 1868: Georgia's contested "(9)" is a non-numeric vote cell -> ParseError.
+        (1868, ParseError, "un-modelled vote notation"),
+    ],
+)
 def test_run_ec_pipeline_rejects_gated_reconstruction_year(
-    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+    recording_conn: RecordingConnection,
+    monkeypatch: pytest.MonkeyPatch,
+    year: int,
+    exc: type[Exception],
+    match: str,
 ) -> None:
-    # 1872 is excluded from the default ingest (UNSUPPORTED_EC_YEARS); an explicit
-    # years={1872} must fail loudly — Greeley's scattered votes parse as an "Others"
-    # column with no registered correction — rather than silently loading wrong data.
+    # Both years are excluded from the default ingest (UNSUPPORTED_EC_YEARS); an
+    # explicit years={year} must fail loudly with a typed, located error rather than
+    # silently loading wrong data or crashing with a bare ValueError.
     record_inserts(monkeypatch)
-    with pytest.raises(TransformError, match="no registered correction"):
+    with pytest.raises(exc, match=match):
         run_ec_pipeline(
             make_dbc(recording_conn),
             "unused.shp",
             replace=True,
-            years={1872},
+            years={year},
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),
         )
+
+
+def test_run_ec_pipeline_2024_footnoted_state_offline(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2024 exercises the modern footnote format (a non-breaking space between a state
+    # label and its <sup> marker, e.g. Oregon) plus Maine/Nebraska district splits.
+    # All 538 electoral votes must reconcile: Trump 312, Harris 226 (Oregon's 8 for
+    # Harris are only present if the footnoted label was not dropped).
+    record_inserts(monkeypatch)
+    candidates_df, _state_df, votes_df = run_ec_pipeline(
+        make_dbc(recording_conn),
+        "unused.shp",
+        replace=True,
+        years={2024},
+        fetch=fetch_from_dir(FIXTURES_DIR),
+        load_geo=lambda _p: fake_state_geo(),
+    )
+    tot = votes_df[votes_df["is_total"]].merge(
+        candidates_df[["candidate_id", "name"]], on="candidate_id"
+    )
+    ev = {r["name"]: int(r["president_electoral_votes"]) for _, r in tot.iterrows()}
+    assert ev == {"Donald J. Trump": 312, "Kamala D. Harris": 226}
 
 
 def test_run_ec_pipeline_leaves_connection_open_by_default(

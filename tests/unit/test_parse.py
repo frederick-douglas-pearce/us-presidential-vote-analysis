@@ -25,6 +25,7 @@ from usvote.parse import (
     ParsedYear,
     ParseError,
     _assert_candidate_columns_consistent,
+    _clean_label,
     parse_election_years,
     parse_t1_candidate_party,
     parse_t2_num_candidates,
@@ -285,3 +286,36 @@ def test_column_crosscheck_raises_on_vote_column_mismatch() -> None:
 def test_column_crosscheck_raises_on_candidate_count_mismatch() -> None:
     with pytest.raises(ParseError, match="candidates, expected"):
         _assert_candidate_columns_consistent(2, [], [])
+
+
+# --- 2024: modern footnote format (non-breaking space) ---------------------
+
+
+def test_clean_label_strips_nbsp_and_asterisk() -> None:
+    assert _clean_label("Oregon\xa0") == "Oregon"  # trailing nbsp left by a <sup>
+    assert _clean_label("Oregon *") == "Oregon"  # trailing footnote asterisk
+    assert _clean_label("\xa0 Totals \xa0") == "Totals"
+    assert _clean_label("California") == "California"
+
+
+def test_2024_footnoted_state_is_not_dropped() -> None:
+    # Oregon's 2024 cell is `<a>Oregon</a>\xa0<sup>1</sup>`; after strip_footnotes
+    # removes the <sup>, a non-breaking space remains that `.strip(" ")` would miss,
+    # dropping Oregon (8 EC, all Harris). All 51 states + Totals must survive.
+    tables = {2024: _year_tables(2024)}
+    parsed = next(iter(parse_election_years(tables, STATE_NAMES)))
+    by_state = {v["state"]: v for v in parsed["t2"]["votes_by_state"]}
+    assert "Oregon" in by_state
+    assert by_state["Oregon"]["total_electoral_votes"] == 8
+    assert len(parsed["t2"]["votes_by_state"]) == 52  # 50 states + DC + Totals
+
+
+def test_vote_cell_non_numeric_raises_parse_error() -> None:
+    # A non-numeric electoral-vote cell (e.g. 1868's contested "(9)") must raise a
+    # typed, located ParseError rather than a bare int() ValueError.
+    rows = BeautifulSoup(
+        "<table><tr><td>Georgia</td><td>9</td><td>(9)</td><td>-</td></tr></table>",
+        "html.parser",
+    ).find_all("tr")
+    with pytest.raises(ParseError, match="un-modelled vote notation"):
+        parse_t2_votes_by_state(rows, 2, STATE_NAMES)

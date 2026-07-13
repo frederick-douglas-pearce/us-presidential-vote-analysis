@@ -165,6 +165,23 @@ def test_hyphenated_party_label_not_mis_split_and_normalized() -> None:
         assert candidates.loc[name, "party_2"] is None
 
 
+def test_party_2_keeps_full_multi_word_label() -> None:
+    # Henry Clay ran National Republican (1832) then Whig (1844). party_2 (a varchar)
+    # must keep the full "Whig", not truncate to a meaningless single char "W".
+    t2 = _t2_states([
+        {"president_candidate_name": "Henry Clay", "col_ind": 1,
+         "president_candidate_state": "Kentucky", "year": 1832},
+    ])
+    t1 = _t1([
+        {"president_candidate_name": "Henry Clay",
+         "president_candidate_party": "National Republican", "year": 1832},
+        {"president_candidate_name": "Henry Clay",
+         "president_candidate_party": "Whig", "year": 1844},
+    ])
+    row = build_candidate_dim(t2, t1).iloc[0]
+    assert (row["party"], row["party_2"]) == ("National Republican", "Whig")
+
+
 def test_cross_year_party_change_populates_party_2_after_normalization() -> None:
     # Jackson runs Democratic-Republican (1824) then Democrat (1832) — a genuine
     # cross-year party change, so party/party_2 = D-R/D, not a hyphen mis-split.
