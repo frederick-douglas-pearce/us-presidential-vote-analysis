@@ -33,8 +33,8 @@ UCSB alone cannot be redistributed. Both reconcile onto the EC canonical keys (D
 **The headline change since D014:** the MIT **licensing gate is now resolved** — CC0 clears
 the public API for the modern core. MIT outreach is therefore **no longer required for
 licensing**; the only remaining (optional) reason to contact the lab is a possible pre-1976
-coverage extension (§6). This is significant enough to warrant a new decision entry (D015,
-proposed in §9).
+coverage extension (§6). This is significant enough to warrant a new decision entry (D016,
+recorded alongside this synthesis).
 
 ## 2. Source comparison (head-to-head)
 
@@ -219,10 +219,10 @@ The E3 recommendation originally carried two open questions for MIT outreach. Th
   format (MIT `"LAST, FIRST M."`; UCSB header-band names) to design against.
 - **The UCSB scrape epic (E4)** is confirmed necessary and un-deferred (D014) — only it
   reaches the pre-1976 span — and confirmed analysis-only (§3).
-- **Proposed follow-up decision — D015 (source determination finalized):** record that E3
-  confirms the D014 dual-source split *and* resolves the D008/D002 licensing gate (MIT = CC0,
-  publicly redistributable; UCSB = analysis-only pending permission). Filing the decision
-  entry is a follow-up task, not part of this story.
+- **Decision recorded — D016 (source determination finalized):** records that E3 confirms
+  the D014 dual-source split *and* resolves the D008/D002 licensing gate (MIT = CC0, publicly
+  redistributable; UCSB = analysis-only pending permission). See
+  [`decisions.md`](decisions.md) **D016**.
 
 ## 10. Story checklist
 
