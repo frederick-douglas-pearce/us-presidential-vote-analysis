@@ -396,3 +396,89 @@ records that the preference is now backed by a verified CC0 license.
 a single nice-to-have question — a possible **pre-1976 coverage extension** (which would let
 more of the historical window ride on the redistributable source). Per epic #13 this stays
 deferred until analysis back to at least 1976 is in hand.
+
+---
+
+## D017: PV source-overlap policy — MIT-preferred canonical series, UCSB the consistency control, both stored
+
+**Date:** 2026-07-13
+**Context:** MIT (1976–2024, CC0, redistributable — D016) and UCSB (physically 1789–2024,
+analysis-only) both cover **1976–2024**, so the warehouse holds two PV values for the same
+(year, state, candidate) across that overlap. D014 settled that both sources are stored and
+tagged, but not which is authoritative where both exist — a question parked as an acceptance
+criterion on the E6 union story (#68). The thesis is a **per-election** what-if (would this
+election have flipped under PV/hybrid, and by how much), computed from each election's own
+PV+EC; its headline outputs are normalized (flip booleans, margin percentages). The human's
+steer: MIT is the definitive reference *where available* (it is the only API-exposed source,
+for licensing reasons), but a **single-source UCSB series across all elections** should stay
+available so a longitudinal comparison can be internally consistent. Reviewed with the
+architect (see #68 comment) before recording.
+**Decision:** Adopt a layered source-overlap policy. **This is subordinate to D006** — "MIT-
+preferred" is a preference *among PV sources only*; the EC/National-Archives spine remains
+the source of truth, and PV is joined onto it (EC on the left; missing PV surfaces as an
+explicit gap, never a fabricated value — D005).
+
+1. **Storage (unchanged from D014):** both sources' PV rows are stored and tagged `source`
+   + `redistributable`; **the union keeps both rows always** (no dedup at load/union time —
+   precedence is a read-time view concern, resolved in #68).
+2. **Canonical/default analysis series — `pv_preferred`:** MIT wins wherever it exists
+   (1976–2024); UCSB supplies everything earlier. Exactly one preferred PV value per
+   (year, state, candidate), resolved by a documented precedence rank (`DISTINCT ON key
+   ORDER BY precedence_rank`).
+3. **Overlap (1976–2024) is a validation gate, not dual-truth:** where both sources exist,
+   compare them. Close agreement is the **empirical justification that the pre-1976 UCSB
+   methodology is comparable to MIT** — i.e. that the source seam at 1976 does not introduce
+   a step. Disagreements beyond a tolerance are flagged with provenance (D005 reliability),
+   not silently resolved. The magnitude of these discrepancies is measured by a dedicated
+   research task (filed as #70) whose finding calibrates the tolerance and confirms or
+   challenges the benign-seam assumption below.
+4. **Public API surface — `pv_redistributable`:** exposes only `redistributable=true` rows →
+   MIT → 1976–2024; pre-1976 PV is honestly absent from the public surface. This series is
+   defined **independently** (`WHERE redistributable`), not as a filter over `pv_preferred`,
+   so no future change to canonical resolution can leak a non-redistributable UCSB row onto
+   the public API. It coincides with `pv_preferred` across the overlap by construction.
+5. **UCSB single-source control — `pv_ucsb`:** the whole-span UCSB-only series stays fully
+   queryable as the internally-consistent longitudinal lens. It is the **control** that lets
+   us measure whether the 1976 seam matters — so the human's two desires (MIT-definitive
+   *and* a consistent all-elections series) are served by one mechanism, not traded off.
+
+**Benign-seam scope boundary (a load-bearing caveat, per the architect):** MIT-precedence is
+safe for the analysis because a source change at 1976 does not bias the **normalized
+per-election metrics** (flip booleans and margin %, where ratios cancel the source). It is
+**not** automatically safe for (a) a raw national-PV-*count* series read across the seam, or
+(b) a margin *trend* line, if the two sources differ in "other/write-in" handling or in the
+total-votes denominator. Two mitigations are part of this decision: state the caveat
+wherever a cross-seam longitudinal view is presented, and **pin the margin denominator to
+each source's own provided state-total column** rather than re-summing candidate rows (which
+would make margins sensitive to each source's minor-candidate coverage — D007 scopes
+candidates to EC-getters, so re-summing would systematically differ between sources).
+
+**Encoding (how this is materialized):** a small **`pv_source` reference table** carries
+`source`, `precedence_rank`, `redistributable`, and license as the single source of truth for
+these attributes (data, not code). Three **thin views** — `pv_preferred`, `pv_redistributable`,
+`pv_ucsb` — express the three series over one union of the raw per-source rows. **No
+materialized canonical table**; at this scale (low thousands of rows) plain views resolve in
+milliseconds, and `CREATE MATERIALIZED VIEW` remains a one-line escape hatch if ever needed.
+**Consequence for E6:** #68 (union) stacks-and-tags and keeps both rows; #69 joins the EC
+spine to the **resolved single-row `pv_preferred`** (or `pv_redistributable` for the API path),
+**not** the raw union — joining the raw union would fan the 1976–2024 overlap out 2× and
+double-count downstream sums/margins. "Unified PV" is therefore two distinct objects (raw
+tagged union vs. resolved preferred series); they are named apart to prevent that mistake.
+**Rationale:**
+- Precedence-as-data + a resolve-once view (options a+b combined) keeps the pick in exactly
+  one place and avoids the drift of maintaining two materialized artifacts.
+- A materialized "canonical PV" table was **rejected**: the API cannot read a canonical that
+  mixes in pre-1976 UCSB rows, so it would force two materialized artifacts with duplicated,
+  drift-prone resolution logic — all cost, no benefit at this scale.
+- Defining `pv_redistributable` independently (not as a filter of `pv_preferred`) is the
+  guardrail that keeps the D002/D016 licensing boundary structural rather than incidental.
+- **Forward-compatible:** a UCSB redistribution grant becomes a one-row edit
+  (`redistributable=true`) that auto-widens the public series; the ICPSR fallback (or any
+  future source) drops in as one additional ranked row in `pv_source` without touching any
+  view or join.
+**Action required:**
+- E6 #68 — resolve its parked AC to "keep both rows; add the `pv_source` reference table and
+  the three views"; E6 #69 — join EC to `pv_preferred`/`pv_redistributable`, not the raw union.
+- File the MIT-vs-UCSB overlap discrepancy research task (**#70**) that empirically tests the
+  benign-seam assumption and calibrates the overlap tolerance (layer 3). It depends on E4
+  (UCSB parsed to the overlap years) and E5 (MIT read) landing.
