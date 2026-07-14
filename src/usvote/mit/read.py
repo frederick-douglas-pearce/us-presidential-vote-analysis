@@ -53,11 +53,14 @@ EXPECTED_COLUMNS: tuple[str, ...] = (
 
 
 class MITReadError(RuntimeError):
-    """Raised when the MIT CSV is missing an expected column.
+    """Raised when the MIT CSV cannot be read or is missing an expected column.
 
     Mirrors the EC :class:`usvote.scrape.ScrapeError` — a typed, message-carrying
-    failure at the ingest boundary rather than a bare ``KeyError`` surfacing later in
-    transform. Names the missing columns so an upstream schema change is diagnosable.
+    failure at the ingest boundary rather than a bare ``KeyError`` /
+    ``FileNotFoundError`` / pandas error surfacing later. Covers a missing file, an
+    empty/unparseable file, and a renamed/dropped column, so every ingest failure is
+    diagnosable at this seam regardless of whether the path was passed explicitly or
+    resolved from the env.
     """
 
 
@@ -75,7 +78,10 @@ def load_mit_president_csv(
     the CSV verbatim — no dtype coercion, so the transform stage owns typing — after
     asserting every name in :data:`EXPECTED_COLUMNS` is present.
 
-    Raises :class:`MITReadError` if any expected column is missing.
+    Raises :class:`MITReadError` if the file is missing, empty/unparseable, or missing
+    an expected column — so an explicitly-passed path fails the same typed way an
+    env-resolved one does (the latter's *unset* var still surfaces as
+    :class:`~usvote.config.ConfigError` from the getter).
     """
     if path is None:
         path = (
@@ -83,7 +89,14 @@ def load_mit_president_csv(
             if environ is not None
             else mit_csv_path_from_env()
         )
-    df = pd.read_csv(path)
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError as exc:
+        raise MITReadError(f"MIT CSV not found at {path!r}.") from exc
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise MITReadError(
+            f"MIT CSV at {path!r} is empty or unparseable: {exc}"
+        ) from exc
     _assert_expected_columns(df)
     return df
 

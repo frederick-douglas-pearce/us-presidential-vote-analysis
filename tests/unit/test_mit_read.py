@@ -69,5 +69,19 @@ class TestLoadMitPresidentCsv:
         loaded = load_mit_president_csv(augmented)
         assert "new_upstream_field" in loaded.columns
 
+    def test_missing_file_raises_mit_read_error(self, tmp_path: Path) -> None:
+        # An explicitly-passed nonexistent path fails the same typed way an
+        # env-resolved missing path does — not a raw FileNotFoundError.
+        with pytest.raises(MITReadError, match="not found"):
+            load_mit_president_csv(tmp_path / "no_such_president.csv")
+
+    def test_empty_file_raises_mit_read_error(self, tmp_path: Path) -> None:
+        # A zero-byte file trips pandas' EmptyDataError; the ingest boundary
+        # translates it to a typed MITReadError instead of leaking the pandas error.
+        empty = tmp_path / "empty.csv"
+        empty.write_text("")
+        with pytest.raises(MITReadError, match="empty or unparseable"):
+            load_mit_president_csv(empty)
+
     def test_returns_dataframe(self) -> None:
         assert isinstance(load_mit_president_csv(MIT_SAMPLE_CSV), pd.DataFrame)
