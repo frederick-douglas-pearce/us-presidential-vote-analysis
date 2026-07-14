@@ -73,6 +73,30 @@ def db_config_from_env(environ: Mapping[str, str] = os.environ) -> dict[str, Any
     return config
 
 
+def require_path_from_env(
+    var_name: str,
+    environ: Mapping[str, str] = os.environ,
+    *,
+    unset_hint: str,
+    missing_hint: str,
+) -> str:
+    """Return a required machine-local path named by ``var_name``, or raise.
+
+    The shared spine behind every ``*_path_from_env`` getter (the TIGER shapefile
+    here, ``USVOTE_MIT_CSV_PATH`` in :mod:`usvote.mit.config`, UCSB's future path).
+    There is never a sensible default for a machine-local download, so an unset/empty
+    or nonexistent path is a :class:`ConfigError`, not a silent fallback. The two
+    hints let each caller point the reader at the right download without re-writing the
+    unset/missing branching. ``environ`` is injectable for testing.
+    """
+    path = environ.get(var_name)
+    if not path:
+        raise ConfigError(f"{var_name} is not set. {unset_hint}")
+    if not os.path.exists(path):
+        raise ConfigError(f"{var_name}={path!r} does not exist. {missing_hint}")
+    return path
+
+
 def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
     """Return the TIGER states shapefile path from ``USVOTE_SHAPEFILE_PATH``.
 
@@ -82,17 +106,15 @@ def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
     download from the Census Bureau (https://www.census.gov/geographies/mapping-files/
     time-series/geo/tiger-line-file.html). ``environ`` is injectable for testing.
     """
-    path = environ.get(SHAPEFILE_PATH_VAR)
-    if not path:
-        raise ConfigError(
-            f"{SHAPEFILE_PATH_VAR} is not set. Point it at the unzipped TIGER2019 "
-            "STATE shapefile (.shp), a free download from the Census Bureau: "
-            "https://www.census.gov/geographies/mapping-files/time-series/geo/"
-            "tiger-line-file.html"
-        )
-    if not os.path.exists(path):
-        raise ConfigError(
-            f"{SHAPEFILE_PATH_VAR}={path!r} does not exist. Check the path points at "
-            "the unzipped TIGER2019 STATE shapefile (.shp)."
-        )
-    return path
+    return require_path_from_env(
+        SHAPEFILE_PATH_VAR,
+        environ,
+        unset_hint=(
+            "Point it at the unzipped TIGER2019 STATE shapefile (.shp), a free "
+            "download from the Census Bureau: https://www.census.gov/geographies/"
+            "mapping-files/time-series/geo/tiger-line-file.html"
+        ),
+        missing_hint=(
+            "Check the path points at the unzipped TIGER2019 STATE shapefile (.shp)."
+        ),
+    )
