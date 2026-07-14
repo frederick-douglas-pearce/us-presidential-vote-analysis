@@ -28,6 +28,12 @@ from usvote.db import DBC
 # file (which shifts under ``tests/integration/``).
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+# A small sample of real rows from the MIT Election Lab ``1976-2024-president.csv``
+# (CC0 1.0). 13 rows across 1976/2000/2016/2024 covering DC, a minor/OTHER
+# candidate, an EC/PV-split year, and a ``writein=True`` row with NaN candidate/
+# party — enough to seed the MIT read (#64) and later transform tests offline.
+MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
+
 # The valid US state names Table 2 rows are matched against — the package
 # equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
 # the parse tests (the state-name filter) and the transform tests (the geo

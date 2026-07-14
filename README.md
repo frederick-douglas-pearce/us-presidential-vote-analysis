@@ -70,10 +70,14 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `PGUSER` | database user | `postgres` |
 | `PGPASSWORD` | database password | *(unset &rarr; prompted securely at runtime)* |
 | `USVOTE_SHAPEFILE_PATH` | path to the unzipped TIGER2019 STATE shapefile (`.shp`) | *(required)* |
+| `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
 
 Database settings use the standard libpq `PG*` names, so the same values are shared
 with `psql`, `pg_dump`, and other Postgres tools. The TIGER2019 STATE shapefile is a
 free download from the [Census Bureau](https://www2.census.gov/geo/tiger/TIGER2019/STATE/).
+The MIT president CSV is a free CC0&nbsp;1.0 download from
+[Harvard Dataverse](https://doi.org/10.7910/DVN/42MVDX); like the shapefile it lives
+outside the repo and is located via its environment variable, not committed.
 
 Once configured, run the Electoral College ingestion pipeline from the package (an
 alternative to executing the step&nbsp;1 notebook cells):
