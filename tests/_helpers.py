@@ -34,6 +34,16 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # party — enough to seed the MIT read (#64) and later transform tests offline.
 MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 
+# A small, deliberately *self-consistent* MIT sample for the transform tests
+# (#65): unlike ``MIT_SAMPLE_CSV`` (a candidate-subset, so its per-state votes do
+# not sum to ``totalvotes``), every (year, state) here carries its complete
+# candidate set so ``sum(candidatevotes) == totalvotes`` holds — required to
+# exercise the pre-filter reconciliation. Covers 2000 FL (a minor GREEN/OTHER
+# candidate to drop) and 2016 NY (Clinton/Trump fusion lines coded OTHER on their
+# secondary rows, a LIBERTARIAN to drop, and a write-in) — the cases that prove
+# fusion-aggregation-before-filter and the D019 {DEMOCRAT, REPUBLICAN} scope.
+MIT_FUSION_SAMPLE_CSV = FIXTURES_DIR / "mit_fusion_sample.csv"
+
 # The valid US state names Table 2 rows are matched against — the package
 # equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
 # the parse tests (the state-name filter) and the transform tests (the geo
