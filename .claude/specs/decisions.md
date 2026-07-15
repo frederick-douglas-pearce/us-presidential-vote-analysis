@@ -585,3 +585,40 @@ validation, not a comment.
   reconciliation (#67) lands (or the load is FK-deferred until then). `redistributable`,
   `precedence_rank`, and license come from the `pv_source` reference table by join (D017). DDL is
   finalized at the first load story, consistent with this shape.
+
+---
+
+## D019: MIT D007 candidate-scope proxy — `party_simplified ∈ {DEMOCRAT, REPUBLICAN}`
+
+**Date:** 2026-07-15
+**Context:** D007 scopes the MVP to "candidates who received electoral votes," and D018 fixed the
+*mechanism* of the MIT filter (`writein` + `party_simplified`) but left the *value set* open. MIT
+carries **no electoral-vote data**, so the true EC-getter set is not computable inside the pure
+MIT transform (#65). A value set must be chosen without coupling MIT transform to the EC spine.
+**Context surfaced by architect review of the #65 implementation plan.**
+**Decision:** The MIT transform (#65) keeps rows where `writein == False` **and** the candidate's
+(fusion-aggregated) `party_simplified` is in **`{DEMOCRAT, REPUBLICAN}`**. This is a deliberate
+*proxy* for D007's "received electoral votes," valid because across 1976–2024 **every electoral
+vote went to a Democratic or Republican nominee**, so the two-value party filter is effectively
+exact for this window — offline, with zero maintenance. Two known, deliberate deviations:
+- **Libertarian/Green PV candidates are excluded.** None received an electoral vote in 1976–2024,
+  so including them would both violate D007 and manufacture PV rows with no EC counterpart that
+  #67/E6's inner-join would drop silently (the inner-join silent-drop hazard).
+- **Faithless-elector EC recipients are deferred to #67** (e.g. 2016 Powell / Faith Spotted Eagle
+  / Kasich / Paul / Sanders; 1988 Bentsen; 2004 Edwards). They are immaterial to state
+  sums/margins, and the *exact* EC-getter set becomes joinable at reconciliation (#67 / D006)
+  where canonical keys exist.
+**Rationale:**
+- `{DEMOCRAT, REPUBLICAN}` dominates a hand-curated per-year allow-list (exact but maintained for
+  no MVP gain) and injecting the EC-getter set from the spine (correct, but that coupling is the
+  #67 answer, not #65's). D018 already defers candidate *identity* to #67; this keeps #65's scope
+  to "select + type + filter + validate."
+- The filter runs on the **fusion-aggregated** frame (party = the plurality line), so a fusion
+  candidate is judged by their main party, never a secondary `OTHER`-coded line — see D018's
+  fusion-aggregation note.
+- Encoded as a named, provenance-carrying constant in `usvote/mit/transform.py`, mirroring the EC
+  correction-constant pattern, and locked by a test.
+**Action required:**
+- #65 implements the `{DEMOCRAT, REPUBLICAN}` constant + filter; #67 supersedes the proxy with the
+  exact EC-getter set once canonical keys land, at which point the faithless-elector deferral is
+  revisited.
