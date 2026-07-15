@@ -59,27 +59,44 @@ For 2024, two states' candidate rows do not sum to the reported state `totalvote
 | 2024 | NEW YORK | 8,380,555 | 8,381,429 | **−874** |
 
 **Root cause (not a disputed/litigated result — checked; DC was a routine ~90% Harris
-win).** In 2024 MIT itemizes ballot-disposition buckets — `UNDERVOTES`, `OVERVOTES`,
-`VOID` — as their own pseudo-candidate rows (coded `party_simplified=OTHER`). The two
-states then treat `totalvotes` **inconsistently** relative to those rows:
+win).** In 2024 MIT itemizes **ballot-disposition buckets** — `UNDERVOTES`, `OVERVOTES`,
+`VOID` — as their own pseudo-candidate rows (coded `party_simplified=OTHER`), mixed into
+the same table as the real candidates.
 
-- **DC** — `totalvotes` (325,869) **excludes** the under/overvote rows, but the candidate
-  sum **includes** them: `UNDERVOTES` 2,075 + `OVERVOTES` 460 = **2,535**, exactly the
-  surplus. So `totalvotes` here = valid presidential ballots only.
+These are standard election-administration categories: ballots that **were cast** (the
+voter turned out and submitted a ballot) but recorded **no valid vote in the presidential
+contest**. An **undervote** marked *fewer* than allowed — here zero presidential picks,
+usually an intentional skip to vote only downballot, plus marks too faint for the scanner.
+An **overvote** marked *more* than allowed (e.g. two presidential bubbles), so the scanner
+voids that contest. `VOID` is the same idea. So they are the gap between *ballots cast*
+(turnout) and *valid presidential votes*.
+
+Read that way, `totalvotes` = **valid presidential votes**, and the candidate-row sum that
+*includes* the disposition buckets = **total ballots cast**. **DC reconciles exactly:**
+
+    Harris 294,185 + Trump 21,076 + Write-in 7,830 + Kennedy 2,778 = 325,869 = totalvotes
+    325,869 valid + UNDERVOTES 2,075 + OVERVOTES 460         = 328,404 = ballots cast
+
+So DC is fully explained — the +2,535 is just the ~0.8% of DC voters who submitted a ballot
+without a valid presidential selection. The remaining puzzle is **why NY differs**:
+
+- **DC** — `totalvotes` **excludes** the disposition rows (valid votes only); the surplus
+  in the candidate sum is exactly `UNDERVOTES` 2,075 + `OVERVOTES` 460 = **2,535**.
 - **NY** — `totalvotes` (8,381,429) appears **inclusive** (it exceeds the itemized sum),
   leaving an **874**-ballot residual present in `totalvotes` but not itemized in any row.
-  So NY's `totalvotes` is defined oppositely to DC's, plus an unexplained 874.
+  So NY's `totalvotes` is defined *oppositely* to DC's, plus that unexplained 874.
 
 - **How this pipeline handles it:** the `{DEMOCRAT, REPUBLICAN}` scope already drops every
   `OTHER` disposition row, so the transformed output is unaffected. The pre-filter
   reconciliation check (`assert_totals_reconcile`) treats these two as documented, *exact*
   expected discrepancies via `TOTALS_RECONCILIATION_EXCEPTIONS`, so the guard still fires
   if a future MIT re-release changes them or a new mismatch appears.
-- **Suggested questions for MIT:** (1) Is `totalvotes` intended to include or exclude
-  `UNDERVOTES`/`OVERVOTES`/`VOID`? DC and NY 2024 disagree. (2) What is NY 2024's 874-ballot
-  residual (in `totalvotes` but not any itemized row)? (3) Is itemizing
-  under/overvotes/void as `OTHER` "candidate" rows a 2024-only change, or intended going
-  forward? (It affects anyone summing `candidatevotes`.)
+- **Suggested questions for MIT:** (1) Is `totalvotes` intended to mean *valid presidential
+  votes* (as DC's exact reconciliation implies) or *ballots cast*? NY 2024 appears to use the
+  opposite convention from DC. (2) What is NY 2024's 874-ballot residual — present in
+  `totalvotes` but not in any itemized row? (3) Is itemizing `UNDERVOTES`/`OVERVOTES`/`VOID`
+  as `OTHER` "candidate" rows a 2024-only change, or intended going forward? (It affects
+  anyone summing `candidatevotes`, and silently inflates any minor/`OTHER` vote total.)
 
 ### A3 — 66 unnamed non-write-in minor lines (1976–2016)
 
