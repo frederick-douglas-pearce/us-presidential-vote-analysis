@@ -77,12 +77,16 @@ EC_GETTER_PARTIES: frozenset[str] = frozenset({"DEMOCRAT", "REPUBLICAN"})
 
 # --- historical corrections (provenance-carrying constants) ----------------
 #: Known ``(year, state)`` totals-reconciliation exceptions in the real MIT file,
-#: as the *signed* discrepancy ``sum(candidatevotes) - totalvotes`` MIT itself
-#: ships. Both are in the 2024 release: the District of Columbia over-counts by
-#: 2,535 and New York under-counts by 874 relative to the reported ``totalvotes``
-#: (write-in aggregation quirks in MIT's 2024 file). Encoding the *exact* expected
-#: diff means the pre-filter guard still fires if a future MIT re-release changes
-#: these numbers or introduces a new mismatch, mirroring the EC correction pattern.
+#: as the *signed* discrepancy ``sum(candidatevotes) - totalvotes`` MIT itself ships.
+#: Both are in the 2024 release and stem from MIT itemizing ballot-disposition buckets
+#: (``UNDERVOTES``/``OVERVOTES``/``VOID``) as ``OTHER`` pseudo-candidate rows, with
+#: ``totalvotes`` defined inconsistently between the two states: DC's ``totalvotes``
+#: *excludes* its under/overvote rows (surplus = 2,075 + 460 = +2,535), while NY's is
+#: *inclusive* and carries an 874-ballot residual not itemized in any row (-874). Not a
+#: disputed/litigated result. Full analysis + MIT outreach questions in
+#: ``docs/mit-data-anomalies.md``. The ``{D, R}`` scope drops every ``OTHER`` row, so
+#: output is unaffected; encoding the *exact* diff keeps the pre-filter guard firing if
+#: a future MIT re-release changes these or adds a new mismatch (EC-correction pattern).
 #: Source: MIT Election Lab ``1976-2024-president.csv`` (doi:10.7910/DVN/42MVDX).
 TOTALS_RECONCILIATION_EXCEPTIONS: dict[tuple[int, str], int] = {
     (2024, "DISTRICT OF COLUMBIA"): 2535,

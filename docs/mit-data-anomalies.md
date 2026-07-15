@@ -48,27 +48,38 @@ mislabeling. No other year/state codes its major-party nominees as write-ins.
 - **Suggested question for MIT:** is the `writein` flag on the 2020 DC rows intentional,
   or a coding artifact? If intentional, what does it denote there?
 
-### A2 — 2024 DC and NY: `sum(candidatevotes)` ≠ `totalvotes`
+### A2 — 2024 DC and NY: `sum(candidatevotes)` ≠ `totalvotes` (inconsistent `totalvotes` semantics)
 
-For 2024, two states' candidate rows do not sum to the reported state `totalvotes`:
+For 2024, two states' candidate rows do not sum to the reported state `totalvotes`
+(`version` 2025-11-20); every other (year, state) cell in the file reconciles exactly:
 
 | year | state | `sum(candidatevotes)` | `totalvotes` | difference |
 |---|---|---|---|---|
 | 2024 | DISTRICT OF COLUMBIA | 328,404 | 325,869 | **+2,535** |
 | 2024 | NEW YORK | 8,380,555 | 8,381,429 | **−874** |
 
-Every other (year, state) cell in the file reconciles exactly. The two 2024 cells are
-small, opposite-signed discrepancies — consistent with a write-in/blank aggregation
-difference between the per-candidate rows and the reported total.
+**Root cause (not a disputed/litigated result — checked; DC was a routine ~90% Harris
+win).** In 2024 MIT itemizes ballot-disposition buckets — `UNDERVOTES`, `OVERVOTES`,
+`VOID` — as their own pseudo-candidate rows (coded `party_simplified=OTHER`). The two
+states then treat `totalvotes` **inconsistently** relative to those rows:
 
-- **How this pipeline handles it:** the pre-filter reconciliation check
-  (`assert_totals_reconcile`) treats these two as documented, *exact* expected
-  discrepancies via the `TOTALS_RECONCILIATION_EXCEPTIONS` constant. Encoding the exact
-  signed diff means the guard still fires if a future MIT re-release changes these
-  numbers or introduces a new mismatch.
-- **Suggested question for MIT:** should the 2024 DC/NY `totalvotes` equal the sum of
-  the listed candidate rows, or does `totalvotes` include ballots (blank/void/write-in
-  residual) not itemized as candidate rows?
+- **DC** — `totalvotes` (325,869) **excludes** the under/overvote rows, but the candidate
+  sum **includes** them: `UNDERVOTES` 2,075 + `OVERVOTES` 460 = **2,535**, exactly the
+  surplus. So `totalvotes` here = valid presidential ballots only.
+- **NY** — `totalvotes` (8,381,429) appears **inclusive** (it exceeds the itemized sum),
+  leaving an **874**-ballot residual present in `totalvotes` but not itemized in any row.
+  So NY's `totalvotes` is defined oppositely to DC's, plus an unexplained 874.
+
+- **How this pipeline handles it:** the `{DEMOCRAT, REPUBLICAN}` scope already drops every
+  `OTHER` disposition row, so the transformed output is unaffected. The pre-filter
+  reconciliation check (`assert_totals_reconcile`) treats these two as documented, *exact*
+  expected discrepancies via `TOTALS_RECONCILIATION_EXCEPTIONS`, so the guard still fires
+  if a future MIT re-release changes them or a new mismatch appears.
+- **Suggested questions for MIT:** (1) Is `totalvotes` intended to include or exclude
+  `UNDERVOTES`/`OVERVOTES`/`VOID`? DC and NY 2024 disagree. (2) What is NY 2024's 874-ballot
+  residual (in `totalvotes` but not any itemized row)? (3) Is itemizing
+  under/overvotes/void as `OTHER` "candidate" rows a 2024-only change, or intended going
+  forward? (It affects anyone summing `candidatevotes`.)
 
 ### A3 — 66 unnamed non-write-in minor lines (1976–2016)
 
