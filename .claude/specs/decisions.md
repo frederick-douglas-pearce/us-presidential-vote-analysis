@@ -482,3 +482,106 @@ tagged union vs. resolved preferred series); they are named apart to prevent tha
 - File the MIT-vs-UCSB overlap discrepancy research task (**#70**) that empirically tests the
   benign-seam assumption and calibrates the overlap tolerance (layer 3). It depends on E4
   (UCSB parsed to the overlap years) and E5 (MIT read) landing.
+
+---
+
+## D018: Shared PV record shape — the one schema both MIT and UCSB conform to
+
+**Date:** 2026-07-15
+**Context:** E5-S2 (#65) transforms MIT PV into "the shared PV record shape" — but that
+shape is nominally owned by E4-S3 (#36, UCSB), and UCSB is unstarted (`src/usvote/ucsb/`
+does not exist). The backlog anticipated this race (E4-S4 note, backlog-mvp.md:1025): whichever
+PV source lands first **defines a minimal shared PV schema the other conforms to, flagged as a
+shared-schema decision**. MIT is landing first, and MIT is the canonical/preferred PV source
+(D016/D017) at the (year, state, candidate) fact grain already — so MIT is the right source to
+*establish* the shape rather than retrofit onto a UCSB-first design. This decision fixes that
+shape so #65 has a concrete target and #36/#38 (UCSB) later conform to it, not the reverse.
+
+**Decision:** Adopt one **state-level, long-format PV record shape** — one row per
+`(source, year, state, candidate)` — as the shared output contract of every PV source's
+transform stage and the column contract of the shared PV target table. MIT (#65) and UCSB
+(#36) both emit exactly these logical columns; sources differ only in *how* they populate
+them, never in the shape.
+
+**Logical columns (transform output):**
+
+| Column | Type | MIT mapping | Notes |
+|---|---|---|---|
+| `year` | int | `year` | |
+| `state` | str (canonical) | `state` (full name) | Canonical **state key** (full name, → EC `state` dim, D006). Populated MIT-native at #65; reconciled onto the canonical key at #67 (UCSB: #38). See FK-ordering note below. |
+| `candidate` | str (canonical) | `candidate` | Canonical **candidate key**. Same reconcile-later contract as `state` (#67/#38). |
+| `party` | str | `party_simplified` (main line) | **Descriptive-only, not the key.** For an aggregated fusion candidate (see grain note) the party is the **plurality line** — the `party_simplified` of the constituent row with the most `candidatevotes`. Party *authority* lives in the EC candidate dim (D006); this column is for validation/display and must not become a second source of party truth. `party_detailed` is MIT-only and **not** carried into the shape. |
+| `candidate_votes` | int | `candidatevotes` | Popular votes for this candidate in this state, **summed across fusion lines** (see grain note). |
+| `state_total_votes` | int | `totalvotes` | The **source's own** state-total denominator, carried verbatim. Pinning to the provided total (not re-summing candidate rows) is required by D017's benign-seam caveat — re-summing would make margins sensitive to each source's minor-candidate coverage, which D007 scopes differently. |
+| `source` | str | literal `"MIT"` | Provenance (D014). `"MIT"` / `"UCSB"`. **The only provenance column stored in the fact** — `redistributable`/`precedence_rank`/license are derived by join to the `pv_source` reference table (D017), never stored per-row. |
+| `reliability` | enum \| null | literal `"exact"` | D005/D014 reliability flag, constrained to `{exact, estimated, unreliable}` (CHECK / lookup, not a free string). Genuinely **per-row** — UCSB varies it by year/state — so it stays in the fact (unlike `redistributable`, which is per-source). MIT is a clean modern release → `"exact"`. Column exists in the shape **now** so UCSB needs no ALTER later. |
+
+**Grain & natural key:** exactly one row per `(source, year, state, candidate)`. `source` is
+part of the key because the union deliberately keeps both sources' rows (D017 — no dedup at
+load); precedence between sources is a read-time view concern (`pv_preferred` etc., D017), never
+a transform/load-time drop. Grain uniqueness is a tested validation (mirroring the EC transform
+intent, E2-S3).
+
+**Fusion-line aggregation (load-bearing — the raw MIT CSV is *not* at this grain).** MIT lists a
+candidate on multiple party lines in fusion-voting states as **separate rows** (e.g. 2016 NY:
+three `CLINTON, HILLARY` rows across Democratic / Working Families / Women's Equality; two
+`TRUMP, DONALD J.` rows), while other year/states are pre-aggregated (2020 NY Biden is one row).
+D007's EC-getter filter does **not** collapse these — the fusion cases *are* the major
+candidates. Transform therefore **sums `candidatevotes` to one row per (year, state, candidate)
+before** the grain assertion, taking `party` from the plurality line and `state_total_votes`
+verbatim (it is already the all-lines state total). Skipping this makes the grain assertion fail
+and, worse, silently corrupts D017's `pv_preferred` `DISTINCT ON (year,state,candidate)` —
+which would keep one fusion line and **undercount a major candidate**. This is a tested
+validation, not a comment.
+
+**What is deliberately *not* in the shape:**
+- **No stored `redistributable` column.** It is per-*source* (license), so it lives once in the
+  `pv_source` reference table (D017) and is surfaced by join — never duplicated per fact row. This
+  is what keeps "a UCSB redistribution grant is a one-row edit" true (D017). The transform frame
+  *may* carry a literal `redistributable` for self-documentation, but the persistent target table
+  does not store it.
+- **No surrogate `pv_id` and no FK enforcement at transform** — those are added at the load seam
+  (#66/#37), not by transform, exactly as EC assigns `votes_id` at load. Transform emits a logical
+  frame. **FK ordering:** because #65 emits MIT-native `state`/`candidate` strings that do not yet
+  match the EC dims, FK enforcement to `state`/`candidate` must **follow** reconciliation (#67) —
+  or the first load lands FK-deferred. Adding FKs before #67 would reject or silently drop every
+  unreconciled row (the inner-join silent-drop hazard).
+- **No aggregate/total rows.** Unlike the EC `votes` table's `is_total` rows, PV state totals ride
+  as the `state_total_votes` *column*; national totals are derived downstream, not stored.
+- **No `writein` column.** D007 scopes candidates to EC-getters, which drops MIT's write-in long
+  tail (up to 167 names in 2024) at transform; the survivors are non-write-in, so the flag is
+  vacuous. (The filter itself is applied and tested in #65 via `writein` + `party_simplified`.)
+- **No fabricated gap rows.** Where a source lacks a (year, state, candidate) value it is an
+  **absent row**, never a zero-filled placeholder (D005).
+
+**Rationale:**
+- **Long format, not wide** mirrors the EC `votes` fact (melted, one row per candidate/state) so
+  PV joins onto the EC spine at a matching grain (D006) with no reshape at join time.
+- **`source` in the key** is what makes D017's "keep both rows, resolve at read-time" policy
+  expressible — a shape keyed only on (year, state, candidate) could not hold the 1976–2024
+  MIT/UCSB overlap without a lossy dedup the union explicitly forbids.
+- **`reliability` present from day one** avoids an ALTER/backfill when UCSB lands; MIT simply
+  pins it to `"exact"`. Same forward-compat logic as the source-derived `redistributable`.
+- **Canonical keys are the target, reconciliation is a later story** — #65 legitimately emits
+  MIT-native `state`/`candidate` strings and #67 maps them, so this decision names the *columns*
+  as canonical without forcing #65 to also own reconciliation (keeps the stories separable, as
+  the backlog sequences them).
+- **Transform emits a logical frame; load owns keys/FKs/NaN→None** keeps the single write
+  chokepoint (`usvote.db.insert_df_into_table`) authoritative and matches how EC is layered.
+
+**Action required:**
+- #65 (MIT transform) targets this exact column set; **fusion-line aggregation runs before** the
+  grain assertion; grain + totals-reconciliation validations become tested functions; 2000 & 2016
+  covered.
+- **Totals reconciliation is `<=`, not `==`, post-filter.** After the D007 EC-getter filter,
+  `sum(candidate_votes) <= state_total_votes` is expected (the dropped minor candidates are the
+  residual); equality would spuriously fail. Best practice: assert *full* reconciliation on the
+  **pre-filter** frame (catches read/parse regressions), then `<=` on the filtered frame.
+- #36/#38 (UCSB) **conform** to this shape when E4 is scoped — populating `source="UCSB"` and real
+  `reliability` values — rather than defining a rival shape. `redistributable=false` for UCSB is a
+  `pv_source` row, not a fact column.
+- The shared PV **target table** (#66/#37) is these columns (`source` + `reliability`, **not**
+  `redistributable`) + a surrogate PK; FKs to the EC `state`/`candidate` dims are added only once
+  reconciliation (#67) lands (or the load is FK-deferred until then). `redistributable`,
+  `precedence_rank`, and license come from the `pv_source` reference table by join (D017). DDL is
+  finalized at the first load story, consistent with this shape.
