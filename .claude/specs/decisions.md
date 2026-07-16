@@ -584,7 +584,7 @@ validation, not a comment.
   `redistributable`) + a surrogate PK; FKs to the EC `state`/`candidate` dims are added only once
   reconciliation (#67) lands (or the load is FK-deferred until then). `redistributable`,
   `precedence_rank`, and license come from the `pv_source` reference table by join (D017). DDL is
-  finalized at the first load story, consistent with this shape.
+  finalized at the first load story, consistent with this shape. **Finalized in #66 — see D021.**
 
 ---
 
@@ -690,3 +690,60 @@ RHS values are locked by tests in `tests/unit/test_mit_reconcile.py`.
   person printed two ways in different years → two silent candidate rows); the known case (Trump)
   is handled by `CANDIDATE_NAME_FIXES` and tested. A general invariant check belongs with the EC
   coverage-extension work (#32), not #67 — flagged here so it is not lost.
+
+---
+
+## D021: Shared PV target table DDL finalized — `dwh.pv_votes` (state-FK-only, no candidate FK)
+
+**Date:** 2026-07-16
+**Context:** D018 fixed the shared PV *record shape* and left one action open: "DDL is finalized
+at the first load story." MIT is the first PV source to load (it is the canonical/preferred source
+per D016/D017), so **#66 (E5-S3, PR #75)** is that story — it created the shared, source-neutral
+PV fact table and loaded MIT into it. This entry records the DDL that shipped, so a future reader
+knows the concrete table — its name, exact column order, types, and constraints — without
+reverse-engineering it from the loader. Architect-reviewed before merge.
+
+**Decision:** The shared, source-neutral PV fact table is **`dwh.pv_votes`** — named to parallel
+the EC `votes` fact, and kept deliberately distinct from D017's resolved-series **view** names
+(`pv_preferred` / `pv_redistributable` / `pv_ucsb`) and the `pv_source` reference table. Columns,
+in DDL order:
+
+| # | Column | Type | Constraint |
+|---|---|---|---|
+| 1 | `pv_id` | integer | surrogate **PK**, assigned at load |
+| 2 | `source` | varchar | NOT NULL |
+| 3 | `year` | smallint | NOT NULL |
+| 4 | `state` | varchar | `REFERENCES dwh.state` (state-FK) |
+| 5 | `candidate` | varchar | **no FK** |
+| 6 | `party` | varchar | nullable |
+| 7 | `candidate_votes` | integer | NOT NULL |
+| 8 | `state_total_votes` | integer | NOT NULL |
+| 9 | `reliability` | varchar | `CHECK (reliability IN ('exact','estimated','unreliable'))`, nullable |
+
+Table constraint: **`UNIQUE (source, year, state, candidate)`** — the D018 natural key.
+
+**Key design calls (architect-reviewed):**
+- **State-FK-only, no candidate FK.** The EC `candidate` PK is `candidate_id`, not the `name`
+  string this shape carries — so a PV→EC candidate FK cannot target this column, and a PV FK onto
+  the EC candidate dim would **invert the D006 spine dependency** (EC is the source of truth PV
+  joins *onto*, not the reverse). Candidate referential integrity is instead guarded **offline at
+  reconcile (#67)** and **at the EC↔PV join seam (#69)** — not by a DDL constraint.
+- **`state`/`candidate`/`party`/`reliability` left nullable in the DDL** for UCSB forward-compat;
+  the shared loader's `assert_pv_shape` enforces NON-NULL on the natural-key + vote columns for the
+  frame actually being loaded. Nullable-in-DDL + asserted-at-load lets one physical table serve
+  both MIT's strict rows and UCSB's looser rows without an ALTER later.
+- **No `redistributable` column** — it is per-*source* (license), so it lives once in the
+  `pv_source` reference table (D017) and is surfaced by join, never duplicated per fact row. #66
+  deferred `pv_source` itself to **E6 / #68** (per D017); `dwh.pv_votes` carries `source` only.
+
+**Rationale:**
+- Recording the concrete DDL closes D018's "finalized at the first load story" action and gives
+  #37 (UCSB) an exact conformance target rather than a shape description.
+- The nullable-DDL + `assert_pv_shape` split is what lets a single table serve both sources; the
+  no-candidate-FK call is what keeps D006's spine direction structural rather than incidental.
+
+**Action required:**
+- **#37 (UCSB load) conforms to `dwh.pv_votes` as-shipped** — same columns/types/constraints,
+  populating `source="UCSB"` and real `reliability` values; it does **not** redefine the table.
+- **#68 (E6)** adds the `pv_source` reference table + the three D017 views over `dwh.pv_votes`;
+  `redistributable` (incl. MIT's `redistributable=true`) is surfaced there by join, not on the fact.

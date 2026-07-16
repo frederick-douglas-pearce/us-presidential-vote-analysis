@@ -44,21 +44,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-# --- shared PV record shape (D018) -----------------------------------------
-#: The shared PV record-shape columns, in load order (D018). Both PV sources emit
-#: exactly these; MIT lands the shape first as the canonical source (D016/D017), so
-#: this tuple is the SSOT the UCSB port (#36) must **import**, not redefine.
-SHARED_PV_COLUMNS: tuple[str, ...] = (
-    "source",
-    "year",
-    "state",
-    "candidate",
-    "party",
-    "candidate_votes",
-    "state_total_votes",
-    "reliability",
-)
+from usvote.pv.schema import SHARED_PV_COLUMNS
 
+# --- provenance literals ----------------------------------------------------
+# The D018 shared PV record shape (SHARED_PV_COLUMNS) is the source-neutral SSOT in
+# usvote.pv.schema; MIT imports it (direction is always source -> pv) and projects
+# onto it in _project_shared_shape.
 #: Provenance literals MIT stamps on every row (D014/D016). ``redistributable`` is
 #: *not* here — it is a per-source attribute of the ``pv_source`` table (D017/D018).
 SOURCE_MIT = "MIT"
