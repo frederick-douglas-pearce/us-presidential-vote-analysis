@@ -40,9 +40,13 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
   states) needs only its per-state entries here — never a hand-maintained Totals
   bump that could silently drift.
 - **The name reconciliations** (Trump, Dole, McGovern) are the first instance of the
-  canonical-candidate-key problem the popular-vote sources (UCSB/MIT) will reconcile
-  against; `CANDIDATE_NAME_FIXES` / `PARTY_NAME_FIXES` are expected to be reused there
-  (D006 / #30).
+  canonical-candidate-key problem the popular-vote sources (UCSB/MIT) reconcile
+  against; `CANDIDATE_NAME_FIXES` / `PARTY_NAME_FIXES` are the EC-side catalog
+  (D006 / #30). The **MIT** realization lives in its own source-namespaced map,
+  `MIT_CANDIDATE_RECONCILIATIONS` / `MIT_STATE_RECONCILIATIONS` in
+  [`src/usvote/mit/reconcile.py`](../src/usvote/mit/reconcile.py) (#67, D020) — MIT's
+  `"LAST, FIRST M."` format shares no keys with the EC fixes, only the canonical RHS
+  targets; see [`canonical-keys.md`](canonical-keys.md) for how each source conforms.
 - **Format handling vs. data corrections.** Two pre-1892 fixes are parse-level format
   robustness rather than per-year data corrections, so they live in
   [`src/usvote/parse.py`](../src/usvote/parse.py), not the catalog above: superscript
