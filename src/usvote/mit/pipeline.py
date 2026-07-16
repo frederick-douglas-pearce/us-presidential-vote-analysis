@@ -56,13 +56,16 @@ def run_mit_pipeline(
     """
     raw = load_mit_president_csv(path, environ=environ)
     if years is not None:
-        available = sorted(int(y) for y in raw["year"].unique())
-        raw = raw.loc[raw["year"].isin(years)].copy()
-        if raw.empty:
+        matched = raw["year"].isin(years)
+        if not matched.any():
+            # Only materialize the diagnostic on the error path. .tolist() converts the
+            # numpy scalars to native ints so the message renders as [2000, 2016].
+            available = sorted(raw["year"].unique().tolist())
             raise ValueError(
                 f"run_mit_pipeline: no MIT rows for requested years {sorted(years)}; "
                 f"the file covers {available}."
             )
+        raw = raw.loc[matched].copy()
 
     shaped = transform_mit(raw)
     reconciled = reconcile_mit(shaped)
