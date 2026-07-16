@@ -622,3 +622,71 @@ exact for this window — offline, with zero maintenance. Two known, deliberate 
 - #65 implements the `{DEMOCRAT, REPUBLICAN}` constant + filter; #67 supersedes the proxy with the
   exact EC-getter set once canonical keys land, at which point the faithless-elector deferral is
   revisited.
+
+---
+
+## D020: MIT name reconciliation — curated maps producing canonical *values*, in a separate offline stage
+
+**Date:** 2026-07-15
+**Context:** E5-S4 (#67) reconciles MIT's native `state`/`candidate` strings (left MIT-native by
+#65, D018) onto the canonical keys the EC spine defines (D006, #30) — the MIT analogue of the
+UCSB reconciliation (#38). Three mechanism choices were open and settled with the user +
+architect review before coding: (a) how candidate names map, (b) what the reconciliation targets,
+(c) where the stage runs. MIT prints `"LAST, FIRST M. SUFFIX"`; the EC canonical `name` is not a
+mechanical transform of it — across 1976–2024 the reconciliation *drops* MIT's middle initial for
+some nominees (`OBAMA, BARACK H.` → `Barack Obama`; `BUSH, GEORGE H.W.` → `George Bush`) and
+*adds* one for others (`FORD, GERALD` → `Gerald R. Ford`; `MONDALE, WALTER` → `Walter F. Mondale`),
+plus given-name substitutions (`CLINTON, BILL` → `William J. Clinton`; `GORE, AL` →
+`Albert Gore Jr.`). RHS names were derived from the National Archives Table 1 per year (+ the
+`Bob Dole` → `Robert Dole` EC correction), LHS from the distinct `candidate` values `transform_mit`
+emits on the real file — both enumerated, not guessed.
+
+**Decision:** Reconcile via **curated, provenance-carrying lookup maps** in a **separate offline
+reconcile stage** (`src/usvote/mit/reconcile.py`, `reconcile_mit`) that produces the canonical
+**values** directly:
+1. **Curated maps, not a parser.** `MIT_STATE_RECONCILIATIONS` (51 jurisdictions) and
+   `MIT_CANDIDATE_RECONCILIATIONS` (18 D/R nominees, bounded by D019). Each value is the whole
+   canonical string — no token-level nickname/middle-initial logic — mirroring the EC
+   `CANDIDATE_NAME_FIXES` catalog. The map is keyed on the MIT string and is **many-to-one safe**
+   (multiple MIT spellings of one person → the same canonical name); the inverse (one MIT string →
+   two people) does not occur and is assumed not to (per D006 each EC candidate has a single
+   canonical name across all years; a violation would be an upstream EC-transform bug).
+2. **Static canonical values, not a live join.** Reconcile emits only the **display keys**
+   (`name`, full `state` name) deterministically; it does **not** join against the live EC dims,
+   so the stage is pure/offline (no DB, shapefile, network). The EC "match target" columns
+   (name-parts, `state_usps`) exist to absorb *format* variance the maps have already removed, so
+   E6/#69 joins on the display key directly. **#69 owns the reciprocal guard** — that every
+   reconciled MIT name/state is present in the EC dims (the offline map only pins RHS in a test).
+3. **State map on the ALLCAPS name, not `state_po`.** D018's shape drops `state_po`, and the full
+   state name is documented stable/unambiguous, so the map keys the ALLCAPS name (the AC also
+   names `state_po`; we deviate deliberately, documented in `reconcile.py`). `.title()` is *not*
+   used — DC's lowercase "of" needs the explicit entry.
+4. **Separate stage, not folded into `transform_mit`.** `transform_mit` validates MIT-internal
+   correctness (totals, scope); reconcile validates cross-source conformance to the EC spine — a
+   different concern with a different authority (SRP; matches the per-source read/transform seams,
+   D015).
+
+**Validation (each raises `MITReconcileError`):** full state + candidate coverage (unmapped value
+→ raise, the inner-join silent-drop guard); unique `(year, state, candidate)` grain re-asserted
+*after* the rewrite (catches two MIT strings collapsing onto one canonical name); D018 shape +
+row-count preserved. The two-Bushes non-collision (`George Bush` ≠ `George W. Bush`) and the pinned
+RHS values are locked by tests in `tests/unit/test_mit_reconcile.py`.
+
+**Rationale:**
+- The reconciliation is genuinely non-mechanical (middles dropped *and* added, given-name
+  substitutions), so a parser would need per-name overrides for most nominees anyway — a curated
+  map is simpler and fully auditable at this scale (18 nominees, 51 states).
+- Emitting canonical *values* offline keeps #67 free of the DB/shapefile/network that a live join
+  would drag in, and keeps the D002/D016 licensing boundary and the join itself as #69's concern.
+- **Supersedes D019's proxy question narrowly:** the D019 `{DEMOCRAT, REPUBLICAN}` scope already
+  yields exactly the 18 EC-getter nominees for 1976–2024, so #67 confirms rather than replaces the
+  proxy; no faithless-elector recipient appears in MIT's D/R-scoped PV rows, so that D019 deferral
+  is discharged as "out of scope for MIT PV" rather than acted on.
+
+**Action required:**
+- #69 (E6 join) must carry the reciprocal guard: assert every reconciled MIT `name`/`state` is
+  present in the EC candidate/state dims (fail loud, not an inner-join silent drop).
+- The EC transform has no *general* guard against a future un-`FIXED` cross-year name split (one
+  person printed two ways in different years → two silent candidate rows); the known case (Trump)
+  is handled by `CANDIDATE_NAME_FIXES` and tested. A general invariant check belongs with the EC
+  coverage-extension work (#32), not #67 — flagged here so it is not lost.

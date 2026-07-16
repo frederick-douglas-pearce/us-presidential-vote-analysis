@@ -268,12 +268,22 @@ def assert_totals_reconcile(
         )
 
 
-def assert_unique_grain(df: pd.DataFrame) -> None:
-    """Assert one row per ``(year, state, candidate)`` (``source`` is constant here)."""
+def assert_unique_grain(
+    df: pd.DataFrame,
+    *,
+    error_cls: type[Exception] = MITTransformError,
+    context: str = "transform",
+) -> None:
+    """Assert one row per ``(year, state, candidate)`` (``source`` is constant here).
+
+    Shared by the transform (default `MITTransformError`) and the reconcile stage,
+    which passes ``error_cls=MITReconcileError`` / ``context="reconcile"`` so the same
+    grain check reports under its own error type and stage name.
+    """
     dupes = df.loc[df.duplicated(["year", "state", "candidate"], keep=False)]
     if not dupes.empty:
-        raise MITTransformError(
-            "MIT transform grain violated — duplicate (year, state, candidate): "
+        raise error_cls(
+            f"MIT {context} grain violated — duplicate (year, state, candidate): "
             f"{dupes[['year', 'state', 'candidate']].values.tolist()}"
         )
 

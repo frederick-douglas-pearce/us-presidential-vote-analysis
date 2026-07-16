@@ -77,3 +77,26 @@ third state. That catches the collision when it manifests as an over-count. A st
 curated per-name allow-list is deferred until coverage actually surfaces a same-name
 collision (most likely when extending below 1892, #32) — at which point the fix follows
 the corrections pattern: a provenance-carrying constant + a test + a catalog row.
+
+## How each source conforms onto the keys
+
+A foreign PV source conforms by rewriting its native `state`/`candidate` strings to the
+canonical **display** forms above, in its own source-namespaced reconcile stage:
+
+- **UCSB** (#38) — deferred with the UCSB epic (E4).
+- **MIT** (#67, D020) — `reconcile_mit` in
+  [`src/usvote/mit/reconcile.py`](../src/usvote/mit/reconcile.py), via two curated,
+  provenance-carrying maps: `MIT_STATE_RECONCILIATIONS` (51 jurisdictions,
+  `DISTRICT OF COLUMBIA` → `District of Columbia`) and `MIT_CANDIDATE_RECONCILIATIONS`
+  (18 D/R nominees, 1976–2024, bounded by D019). MIT's `"LAST, FIRST M. SUFFIX"` is not
+  a mechanical transform of the canonical `name` — the same reconciliation drops MIT's
+  middle initial for some (`OBAMA, BARACK H.` → `Barack Obama`) and adds one for others
+  (`FORD, GERALD` → `Gerald R. Ford`) — which is why it is a curated map, not a parser.
+
+**Sources emit the display key, and E6 joins on it.** Because reconciliation removes the
+*format* variance, the "match target" columns (name-parts, `state_usps`) are not needed
+for the PV↔EC join: both sources produce the canonical `name` / full `state` name
+directly, and the cross-source union/join (E6, #68/#69) keys on the display form. The
+reconcile stage produces canonical *values* offline; #69 owns the reciprocal guard that
+every reconciled value is actually present in the EC dims (an unmatched value must fail
+loud there, not vanish in an inner join).
