@@ -202,6 +202,17 @@ class TestGuards:
                 make_frame([{"year": 2000, "state": "OHIO", "candidate": "NADER, RALPH"}])
             )
 
+    def test_null_value_raises_reconcile_error_not_typeerror(self) -> None:
+        # A malformed upstream frame (a null state among strings) must surface as a
+        # clean MITReconcileError, not a TypeError from sorting mixed NaN/str values.
+        frame = make_frame([
+            {"year": 2020, "state": "OHIO", "candidate": "BIDEN, JOSEPH R. JR"},
+            {"year": 2020, "state": "TEXAS", "candidate": "TRUMP, DONALD J."},
+        ])
+        frame.loc[0, "state"] = None
+        with pytest.raises(MITReconcileError):
+            reconcile_mit(frame)
+
     def test_grain_collapse_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Two distinct MIT strings mapping to the SAME canonical name within one
         # (year, state) would double-count downstream — must raise, not silently pass.

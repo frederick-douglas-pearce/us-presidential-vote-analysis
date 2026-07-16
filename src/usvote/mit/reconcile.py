@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from usvote.mit.transform import SHARED_PV_COLUMNS
+from usvote.mit.transform import SHARED_PV_COLUMNS, assert_unique_grain
 
 # --- state reconciliation (MIT ALLCAPS full name -> canonical full name) -----
 # The canonical state key is the full name (STATE_KEY), and the EC state dim spells
@@ -187,8 +187,8 @@ def reconcile_mit(df: pd.DataFrame) -> pd.DataFrame:
         candidate=df["candidate"].map(MIT_CANDIDATE_RECONCILIATIONS),
     )
 
-    _assert_unique_grain(out)
-    _assert_shape(out, expected_rows=len(df))
+    assert_unique_grain(out, error_cls=MITReconcileError, context="reconcile")
+    _assert_columns(out)
     return out
 
 
@@ -203,7 +203,9 @@ def _assert_full_coverage(
     whole election. Surfacing it here makes the loss loud, not invisible.
     """
     present = set(df[column].unique())
-    unmapped = sorted(present - mapping.keys())
+    # sort by str repr so a stray non-string (e.g. a NaN from a malformed upstream
+    # frame) still yields a clean MITReconcileError rather than a TypeError on the sort.
+    unmapped = sorted((present - set(mapping)), key=str)
     if unmapped:
         raise MITReconcileError(
             f"MIT {column} value(s) with no canonical-key reconciliation: {unmapped}. "
@@ -212,38 +214,16 @@ def _assert_full_coverage(
         )
 
 
-def _assert_unique_grain(df: pd.DataFrame) -> None:
-    """Assert one row per ``(year, state, candidate)`` after the rewrite.
+def _assert_columns(df: pd.DataFrame) -> None:
+    """Assert the output still carries exactly the D018 shape columns, in order.
 
-    The real post-reconcile hazard (row count alone cannot catch it): two distinct MIT
-    strings mapping to the *same* canonical name within one ``(year, state)`` would
-    duplicate the grain and double-count that candidate downstream (e.g. D017's
-    ``DISTINCT ON`` resolution).
+    Grain (`assert_unique_grain`) and coverage (`_assert_full_coverage`) cover the
+    row-level invariants; row count and non-nullity need no separate check here —
+    ``df.assign`` cannot change the row count, and coverage guarantees every mapped
+    value is non-null, so those would be unreachable guards.
     """
-    dupes = df.loc[df.duplicated(["year", "state", "candidate"], keep=False)]
-    if not dupes.empty:
-        raise MITReconcileError(
-            "MIT reconcile grain violated — two source rows map to one "
-            "(year, state, candidate): "
-            f"{dupes[['year', 'state', 'candidate']].values.tolist()}"
-        )
-
-
-def _assert_shape(df: pd.DataFrame, *, expected_rows: int) -> None:
-    """Assert the D018 shape is preserved: columns, non-nullity, and row count."""
     if list(df.columns) != list(SHARED_PV_COLUMNS):
         raise MITReconcileError(
             f"MIT reconcile columns {list(df.columns)} != shared PV shape "
             f"{list(SHARED_PV_COLUMNS)}"
         )
-    if len(df) != expected_rows:
-        raise MITReconcileError(
-            f"MIT reconcile changed row count: {len(df)} != {expected_rows} "
-            "(reconciliation must rewrite values, never add or drop rows)"
-        )
-    for col in ("state", "candidate"):
-        if df[col].isna().any():
-            raise MITReconcileError(
-                f"MIT reconcile produced null {col!r} — an unmapped value slipped the "
-                "coverage guard"
-            )
