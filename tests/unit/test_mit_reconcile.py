@@ -1,10 +1,12 @@
 """Unit tests for :mod:`usvote.mit.reconcile` — MIT names -> canonical keys (#67).
 
-Offline and data-free: reconcile operates on the D018 ``SHARED_PV_COLUMNS`` frame, so
-these build small in-memory frames directly rather than reading a fixture. They lock
-the curated candidate/state maps (RHS values pinned so drift from the EC spine is
-caught), the 51-state coverage, the two-Bushes non-collision, and every
-:class:`MITReconcileError` guard (unmapped value, grain collapse, shape).
+Offline, and the map RHS is checked against **independent authorities**, not a copy of
+itself: the state targets against the shared ``STATE_NAMES`` SSOT, and the candidate
+targets against the real National Archives HTML fixtures parsed through the actual EC
+parse path (2016/2020/2024 — the in-window years snapshotted in ``tests/fixtures``).
+A ``transform_mit -> reconcile_mit`` seam test on the MIT sample fixture ties the map
+*keys* to what the transform actually emits. The remaining checks lock the two-Bushes
+non-collision, value uniqueness, and every :class:`MITReconcileError` guard.
 """
 
 from __future__ import annotations
@@ -12,13 +14,40 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, STATE_NAMES
+from usvote.mit.read import load_mit_president_csv
 from usvote.mit.reconcile import (
     MIT_CANDIDATE_RECONCILIATIONS,
     MIT_STATE_RECONCILIATIONS,
     MITReconcileError,
     reconcile_mit,
 )
-from usvote.mit.transform import SHARED_PV_COLUMNS
+from usvote.mit.transform import SHARED_PV_COLUMNS, transform_mit
+from usvote.parse import parse_table1
+from usvote.scrape import fetch_from_dir, get_html_tables
+from usvote.transform import CANDIDATE_NAME_FIXES, PARTY_NAME_FIXES
+
+
+def ec_canonical_president_names(year: int) -> list[str]:
+    """Return a fixture year's EC canonical president names via the real parse path.
+
+    Parses Table 1 from the snapshotted Archives HTML and applies the same name
+    corrections the EC candidate dim applies (``PARTY_NAME_FIXES`` then
+    ``CANDIDATE_NAME_FIXES``), so the result is exactly the canonical ``name`` the MIT
+    map's RHS must match — derived from the authority, never hand-copied here.
+    """
+    tables = get_html_tables(
+        f"https://www.archives.gov/electoral-college/{year}",
+        find_all=True,
+        fetch=fetch_from_dir(FIXTURES_DIR),
+    )
+    names = []
+    for cand in parse_table1(tables[0].find_all("tr")):
+        raw = cand["president_candidate_name"]
+        corrected = PARTY_NAME_FIXES.get(raw, raw)
+        corrected = CANDIDATE_NAME_FIXES.get(corrected, {}).get("name", corrected)
+        names.append(corrected)
+    return names
 
 
 def make_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -44,36 +73,32 @@ def make_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(filled)[list(SHARED_PV_COLUMNS)]
 
 
-# The 18 distinct MIT D/R candidate strings transform_mit emits for 1976–2024, each
-# paired with the EC canonical name (Archives Table 1 + the Dole correction). Pinned
-# here so any drift between this map and the EC spine surfaces as a test failure.
-EXPECTED_CANDIDATE_MAP = {
-    "CARTER, JIMMY": "Jimmy Carter",
-    "FORD, GERALD": "Gerald R. Ford",
-    "REAGAN, RONALD": "Ronald Reagan",
-    "MONDALE, WALTER": "Walter F. Mondale",
-    "DUKAKIS, MICHAEL": "Michael S. Dukakis",
-    "BUSH, GEORGE H.W.": "George Bush",
-    "CLINTON, BILL": "William J. Clinton",
-    "DOLE, ROBERT": "Robert Dole",
-    "GORE, AL": "Albert Gore Jr.",
-    "BUSH, GEORGE W.": "George W. Bush",
-    "KERRY, JOHN": "John F. Kerry",
-    "OBAMA, BARACK H.": "Barack Obama",
-    "MCCAIN, JOHN": "John McCain",
-    "ROMNEY, MITT": "Mitt Romney",
-    "CLINTON, HILLARY": "Hillary Clinton",
-    "TRUMP, DONALD J.": "Donald J. Trump",
-    "BIDEN, JOSEPH R. JR": "Joseph R. Biden Jr.",
-    "HARRIS, KAMALA D.": "Kamala D. Harris",
-}
-
-
 class TestCandidateMap:
-    def test_map_matches_pinned_expectations(self) -> None:
-        # Locks the RHS against the EC canonical names — the offline stand-in for
-        # #69's live join guard (reciprocal check deferred to E6).
-        assert MIT_CANDIDATE_RECONCILIATIONS == EXPECTED_CANDIDATE_MAP
+    @pytest.mark.parametrize("year", [2016, 2020, 2024])
+    def test_rhs_matches_archives_fixtures(self, year: int) -> None:
+        # Authority-backed (not a self-copy): every EC canonical president name for an
+        # in-window fixture year, derived through the real Archives-parse path, must be
+        # a value in the MIT map. Breaks the tautology of asserting the map equals a
+        # hand-copy of itself — a wrong RHS (e.g. "Kamala Harris" without the "D.")
+        # fails here because the fixture-derived name is not among the map's values.
+        canonical_values = set(MIT_CANDIDATE_RECONCILIATIONS.values())
+        for name in ec_canonical_president_names(year):
+            assert name in canonical_values, (
+                f"{year} EC name {name!r} is not an RHS value of the MIT map"
+            )
+
+    def test_map_values_are_unique(self) -> None:
+        # No two MIT nominees may reconcile to the same canonical name (that would
+        # double-count them in any single year they overlap — the grain hazard at the
+        # map level rather than the frame level).
+        values = list(MIT_CANDIDATE_RECONCILIATIONS.values())
+        assert len(values) == len(set(values))
+
+    def test_keys_are_mit_native_format(self) -> None:
+        # LHS keys are the "LAST, FIRST ..." ALLCAPS strings MIT emits; a lowercase or
+        # comma-less key signals the map drifted from the transform's output form.
+        for key in MIT_CANDIDATE_RECONCILIATIONS:
+            assert key == key.upper() and "," in key
 
     @pytest.mark.parametrize(
         ("mit_name", "canonical"),
@@ -107,8 +132,13 @@ class TestCandidateMap:
 
 
 class TestStateMap:
-    def test_covers_all_51_jurisdictions(self) -> None:
-        assert len(MIT_STATE_RECONCILIATIONS) == 51
+    def test_rhs_matches_canonical_state_names(self) -> None:
+        # Authority-backed: the state targets must equal the shared 50-states-plus-DC
+        # SSOT the EC parse/transform tests use (tests._helpers.STATE_NAMES), not a
+        # copy defined in this file. Catches a mis-spelled or missing jurisdiction
+        # (e.g. "District Of Columbia") independently of the reconcile map itself.
+        assert set(MIT_STATE_RECONCILIATIONS.values()) == STATE_NAMES
+        assert len(MIT_STATE_RECONCILIATIONS) == len(STATE_NAMES) == 51
 
     def test_all_states_reconcile(self) -> None:
         rows = [
@@ -184,3 +214,24 @@ class TestGuards:
                 {"year": 1992, "state": "OHIO", "candidate": "CLINTON, BILL"},
                 {"year": 1992, "state": "OHIO", "candidate": "BILL CLINTON"},
             ]))
+
+
+class TestSeamOnFixture:
+    """Exercise the real transform_mit -> reconcile_mit seam on the MIT sample fixture.
+
+    Ties the map *keys* to what the transform actually emits (a value not in the map
+    would trip reconcile's coverage guard), and confirms both maps applied together
+    produce canonical names/states on real-shaped data — not just synthetic frames.
+    """
+
+    def test_transform_then_reconcile_produces_canonical_names(self) -> None:
+        transformed = transform_mit(load_mit_president_csv(MIT_FUSION_SAMPLE_CSV))
+        out = reconcile_mit(transformed)
+        # The fusion sample covers 2000 FL (Gore/Bush) and 2016 NY (Clinton/Trump).
+        assert set(out["candidate"]) == {
+            "Albert Gore Jr.", "George W. Bush", "Hillary Clinton", "Donald J. Trump",
+        }
+        assert set(out["state"]) == {"Florida", "New York"}
+        # Grain and shape survive the real two-map rewrite.
+        assert not out.duplicated(["year", "state", "candidate"]).any()
+        assert list(out.columns) == list(SHARED_PV_COLUMNS)
