@@ -19,7 +19,7 @@ integration test drives :func:`run_mit_pipeline` directly.
 
 from __future__ import annotations
 
-from collections.abc import Container, Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 import pandas as pd
@@ -35,7 +35,7 @@ def run_mit_pipeline(
     dbc: DBC,
     path: str | Path | None = None,
     *,
-    years: Container[int] | None = None,
+    years: Collection[int] | None = None,
     environ: Mapping[str, str] | None = None,
     replace: bool = False,
     close: bool = False,
@@ -56,7 +56,13 @@ def run_mit_pipeline(
     """
     raw = load_mit_president_csv(path, environ=environ)
     if years is not None:
+        available = sorted(int(y) for y in raw["year"].unique())
         raw = raw.loc[raw["year"].isin(years)].copy()
+        if raw.empty:
+            raise ValueError(
+                f"run_mit_pipeline: no MIT rows for requested years {sorted(years)}; "
+                f"the file covers {available}."
+            )
 
     shaped = transform_mit(raw)
     reconciled = reconcile_mit(shaped)

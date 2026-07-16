@@ -63,7 +63,20 @@ def test_pipeline_without_year_filter_loads_all_years(
     loaded = run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV)
 
     # The fixture covers 2000 FL (Bush, Gore) + 2016 NY (Clinton, Trump) — four D/R
-    # rows after scoping, spanning both years.
+    # rows after scoping, spanning both years. The returned frame is the shared shape
+    # (pv_id is DB-assigned, so it is not a column here).
     assert set(loaded["year"]) == {2000, 2016}
-    assert list(loaded.columns) == ["pv_id", *SHARED_PV_COLUMNS]
-    assert loaded["pv_id"].tolist() == [1, 2, 3, 4]
+    assert list(loaded.columns) == list(SHARED_PV_COLUMNS)
+    assert len(loaded) == 4
+
+
+def test_pipeline_raises_clearly_when_no_rows_for_requested_years(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A years set disjoint from the file must fail with a clear, actionable message
+    # naming the covered years — not an opaque MITTransformError deep in transform.
+    record_inserts(monkeypatch)
+    with pytest.raises(ValueError, match=r"no MIT rows for requested years.*covers"):
+        run_mit_pipeline(
+            make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={1900}
+        )

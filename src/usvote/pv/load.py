@@ -16,11 +16,19 @@ table if absent, and inserts — tagged by whatever ``source`` value the frame c
   *unconditionally* and gates ``replace`` only at the **table** level — a PV reload
   drops at most ``dwh.pv_votes``, never the schema. A unit test asserts no
   schema-level drop is ever issued.
-- **Load owns the surrogate key; the DB boundary owns NaN -> None.** ``pv_id`` is
-  assigned here (D018: transform emits a logical frame, load assigns keys/FKs),
-  mirroring how the EC votes fact gets ``votes_id``. NaN/NA -> SQL NULL and numpy
-  unboxing stay owned by ``usvote.db.insert_df_into_table`` — this module adds no
-  upstream ``.map`` pass (which would silently no-op on ``StringDtype``; CLAUDE.md).
+- **The database owns the surrogate key; the DB boundary owns NaN -> None.**
+  ``pv_id`` is a ``GENERATED ALWAYS AS IDENTITY`` column (see
+  :func:`usvote.pv.schema.build_pv_column_defs`), so Postgres assigns it from a
+  persistent sequence on insert and the loader **never supplies it**. This is the fix
+  for the multi-source-coexistence hazard: a per-call pandas ``range(1, n+1)`` would
+  restart at 1 on every load and collide on the ``pv_id`` PK the moment a second
+  source (UCSB #37) or a second year-batch is appended — the exact "keep both rows"
+  case D017 requires. Deferring the id to the DB sequence keeps ids unique across all
+  loads. (The EC ``votes`` fact assigns ``votes_id`` in pandas instead, but EC always
+  rebuilds the whole schema in one shot, so it never appends; PV is append-shaped.)
+  NaN/NA -> SQL NULL and numpy unboxing stay owned by
+  ``usvote.db.insert_df_into_table`` — this module adds no upstream ``.map`` pass
+  (which would silently no-op on ``StringDtype``; CLAUDE.md).
 """
 
 from __future__ import annotations
@@ -50,12 +58,15 @@ def load_pv_records(
     ``df`` must be on the D018 shared shape (:func:`assert_pv_shape` guards this) with
     ``state``/``candidate`` already reconciled onto the canonical keys — the ``state``
     FK to ``dwh.state`` requires the EC spine to be loaded first, so a PV load always
-    runs *after* the EC pipeline. Returns the loaded frame (``pv_id`` prepended) for
-    inspection/validation.
+    runs *after* the EC pipeline. Returns the shared-shape frame as inserted (sorted;
+    **without** ``pv_id`` — that is DB-assigned) for inspection/validation.
 
-    ``pv_id`` is ``1..n`` assigned after a stable sort on the
-    :data:`~usvote.pv.schema.NATURAL_KEY` ``(source, year, state, candidate)``, so the
-    surrogate key is reproducible across runs (tests can assert exact ids).
+    Rows are inserted in a stable sort on the
+    :data:`~usvote.pv.schema.NATURAL_KEY` ``(source, year, state, candidate)`` for a
+    deterministic insert/output order. ``pv_id`` itself is **not** assigned here — it
+    is a ``GENERATED ALWAYS AS IDENTITY`` column the database fills from a persistent
+    sequence, so ids stay unique across separate loads (the loader omits the column
+    from the INSERT).
 
     ``replace`` gates the **table-level** destructive rebuild only: ``True`` drops and
     recreates ``schema.pv_votes`` (discarding existing PV rows for *all* sources);
@@ -69,8 +80,10 @@ def load_pv_records(
     """
     assert_pv_shape(df)
 
+    # Stable-sort for a deterministic insert/output order. pv_id is NOT assigned here —
+    # it is a GENERATED ALWAYS AS IDENTITY column the DB fills, so it must be absent
+    # from the inserted frame (a per-call range(1, n+1) would collide across loads).
     ordered = df.sort_values(list(NATURAL_KEY), kind="stable").reset_index(drop=True)
-    ordered.insert(0, "pv_id", range(1, len(ordered) + 1))
 
     # NEVER forward ``replace`` to create_schema — that cascades a drop of the whole
     # ``dwh`` schema and wipes the EC spine. Create-if-absent only; ``replace`` is

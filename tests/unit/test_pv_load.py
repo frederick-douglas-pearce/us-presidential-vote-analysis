@@ -41,10 +41,13 @@ def test_column_defs_default_to_dwh_schema() -> None:
     assert f"REFERENCES {PV_SCHEMA}.state" in defs["state"]
 
 
-def test_column_defs_pv_id_is_primary_key() -> None:
+def test_column_defs_pv_id_is_db_generated_identity_pk() -> None:
+    # pv_id must be a DB-assigned IDENTITY PK, not a value the loader supplies — so
+    # ids stay unique across separate loads (MIT then UCSB) instead of restarting at 1.
     first = build_pv_column_defs()[0]
     assert first[0] == "pv_id"
     assert "primary key" in first
+    assert "generated always as identity" in first
 
 
 def test_column_defs_reliability_check_lists_the_enum() -> None:
@@ -61,9 +64,10 @@ def test_column_defs_carry_natural_key_unique_constraint() -> None:
     assert "(source, year, state, candidate)" in constraint
 
 
-def test_column_defs_columns_match_insert_order() -> None:
-    # Every SHARED_PV_COLUMNS column is defined, prefixed by pv_id, before the
-    # trailing table constraint — the exact order the loader inserts in.
+def test_column_defs_define_pv_id_then_shared_shape() -> None:
+    # The DDL defines pv_id (DB-generated) first, then every SHARED_PV_COLUMNS column,
+    # before the trailing table constraint. The loader inserts only SHARED_PV_COLUMNS —
+    # pv_id is filled by the identity sequence (see the INSERT-columns test below).
     names = [col[0] for col in build_pv_column_defs()[:-1]]
     assert names == ["pv_id", *SHARED_PV_COLUMNS]
 
@@ -127,18 +131,30 @@ def test_assert_pv_shape_allows_null_party() -> None:
     assert_pv_shape(ok)  # does not raise
 
 
-# --- load_pv_records: pv_id + insert ---------------------------------------
+def test_assert_pv_shape_rejects_float_vote_counts() -> None:
+    # A source whose transform left candidate_votes as float64 would otherwise be
+    # inserted into the integer DDL column (silent rounding / opaque psycopg2 error).
+    # The shared guard must reject it — mirroring MIT's own transform.assert_shape.
+    bad = _valid_frame()
+    bad["candidate_votes"] = bad["candidate_votes"].astype("float64")
+    with pytest.raises(PVShapeError, match="must be integer"):
+        assert_pv_shape(bad)
 
 
-def test_load_assigns_sequential_pv_id_by_natural_key(
+# --- load_pv_records: ordering + insert ------------------------------------
+
+
+def test_load_inserts_rows_in_natural_key_order(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record_inserts(monkeypatch)
     loaded = load_pv_records(make_dbc(recording_conn), _valid_frame())
 
-    assert loaded["pv_id"].tolist() == [1, 2, 3]
     # Rows sorted by (source, year, state, candidate): California sorts before New
-    # York, and within New York "Donald..." before "Hillary...".
+    # York, and within New York "Donald..." before "Hillary...". pv_id is NOT in the
+    # returned frame — the database assigns it (identity), so nothing here can depend
+    # on a per-call 1..n numbering.
+    assert "pv_id" not in loaded.columns
     assert loaded[["state", "candidate"]].values.tolist() == [
         ["California", "Hillary Clinton"],
         ["New York", "Donald J. Trump"],
@@ -146,14 +162,19 @@ def test_load_assigns_sequential_pv_id_by_natural_key(
     ]
 
 
-def test_load_inserts_pv_id_first_then_shared_shape(
+def test_load_insert_omits_pv_id_so_the_db_generates_it(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     inserts = record_inserts(monkeypatch)
     load_pv_records(make_dbc(recording_conn), _valid_frame())
 
+    # The INSERT column list is exactly SHARED_PV_COLUMNS — pv_id is absent, so the
+    # GENERATED ALWAYS AS IDENTITY sequence fills it (a supplied pv_id would both
+    # collide across loads and be rejected by the ALWAYS identity).
     (sql, _argslist) = inserts[0]
-    assert sql.startswith(f"INSERT INTO {PV_SCHEMA}.{PV_TABLE} (pv_id,source,year,")
+    expected_cols = ",".join(SHARED_PV_COLUMNS)
+    assert sql == f"INSERT INTO {PV_SCHEMA}.{PV_TABLE} ({expected_cols}) VALUES %s"
+    assert "pv_id" not in sql
 
 
 # --- load_pv_records: the replace footgun ----------------------------------

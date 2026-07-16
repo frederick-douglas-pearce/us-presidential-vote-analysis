@@ -63,6 +63,14 @@ REQUIRED_NON_NULL: tuple[str, ...] = (
     "state_total_votes",
 )
 
+#: Vote-count columns the shared guard requires to be an integer dtype. A float-typed
+#: count (e.g. a source whose transform let an NA coerce the column to float64) would
+#: otherwise be inserted into the ``integer`` DDL columns — whole floats round
+#: silently, a residual fraction/NaN errors deep in psycopg2. Mirrors the per-source
+#: check in :func:`usvote.mit.transform.assert_shape`, generalized to the shared
+#: boundary so every source (not just MIT) is covered.
+INTEGER_COLUMNS: tuple[str, ...] = ("candidate_votes", "state_total_votes")
+
 #: The D018 ``reliability`` enum, enforced as a table CHECK. MIT pins ``"exact"``;
 #: UCSB varies it per row. NULL is permitted (the CHECK only constrains present
 #: values) for forward-compat.
@@ -93,13 +101,22 @@ def build_pv_column_defs(schema: str = PV_SCHEMA) -> list[tuple[str, ...]]:
     """Return the ``pv_votes`` column definitions as :meth:`DBC.create_table` tuples.
 
     A function (not a module constant) because the ``state`` FK embeds ``schema`` in
-    its ``REFERENCES`` clause — keeping it parameterized lets a caller load into a
-    schema other than ``dwh`` without the FK drifting, exactly as
-    :func:`usvote.load.build_table_column_defs` does for the EC tables.
+    its ``REFERENCES`` clause, exactly as :func:`usvote.load.build_table_column_defs`
+    does for the EC tables. **``schema`` is the shared warehouse schema that already
+    holds the EC dimensions** (D021: PV co-locates with the EC spine in one schema) —
+    the ``state`` FK targets ``{schema}.state``, so it is *not* an independent
+    PV-only location: passing a schema whose ``state`` dim does not exist yields a
+    dangling FK at ``CREATE TABLE``. Both the EC load (:data:`usvote.load.SCHEMA`) and
+    this must use the same schema; the default ``dwh`` keeps them aligned.
 
-    Column order matches the loader's insert order: the surrogate ``pv_id`` first,
-    then :data:`SHARED_PV_COLUMNS`. The final tuple is a table-level ``UNIQUE``
-    constraint on the D018 natural key.
+    ``pv_id`` is ``GENERATED ALWAYS AS IDENTITY``: the database owns a persistent
+    sequence and assigns each row's id on insert, so ids stay globally unique **across
+    separate loads** (MIT then UCSB, or incremental year batches) — the loader never
+    supplies ``pv_id``. ``ALWAYS`` also rejects any hand-supplied id, so a per-call
+    ``1..n`` scheme (which would collide on the second load) cannot be reintroduced.
+
+    The remaining columns are :data:`SHARED_PV_COLUMNS`; the final tuple is a
+    table-level ``UNIQUE`` constraint on the D018 natural key.
     """
     reliability_check = (
         "CHECK (reliability IN ("
@@ -107,7 +124,7 @@ def build_pv_column_defs(schema: str = PV_SCHEMA) -> list[tuple[str, ...]]:
         + "))"
     )
     return [
-        ("pv_id", "integer", "primary key"),
+        ("pv_id", "integer", "generated always as identity", "primary key"),
         ("source", "varchar", "not null"),
         ("year", "smallint", "not null"),
         ("state", "varchar", f"REFERENCES {schema}.state"),
@@ -128,11 +145,13 @@ def build_pv_column_defs(schema: str = PV_SCHEMA) -> list[tuple[str, ...]]:
 def assert_pv_shape(df: pd.DataFrame) -> None:
     """Assert ``df`` is on the D018 shared shape before the shared loader inserts it.
 
-    Checks the columns are exactly :data:`SHARED_PV_COLUMNS` in order, and that every
-    :data:`REQUIRED_NON_NULL` column has no null values. Raises :class:`PVShapeError`
-    on either. This is the boundary guard that makes the loader safely reusable by
-    every PV source — it does not re-validate source-specific invariants (grain,
-    totals) that each source's own transform already enforced.
+    Checks the columns are exactly :data:`SHARED_PV_COLUMNS` in order, that every
+    :data:`REQUIRED_NON_NULL` column has no null values, and that every
+    :data:`INTEGER_COLUMNS` count is an integer dtype (not float, which the
+    ``integer`` DDL columns would silently round or error on). Raises
+    :class:`PVShapeError` on any. This is the boundary guard that makes the loader
+    safely reusable by every PV source — it does not re-validate source-specific
+    invariants (grain, totals) that each source's own transform already enforced.
     """
     if list(df.columns) != list(SHARED_PV_COLUMNS):
         raise PVShapeError(
@@ -143,4 +162,9 @@ def assert_pv_shape(df: pd.DataFrame) -> None:
         if df[col].isna().any():
             raise PVShapeError(
                 f"PV frame column {col!r} has null value(s) (required non-null)"
+            )
+    for col in INTEGER_COLUMNS:
+        if not pd.api.types.is_integer_dtype(df[col]):
+            raise PVShapeError(
+                f"PV frame column {col!r} must be integer, got {df[col].dtype}"
             )
