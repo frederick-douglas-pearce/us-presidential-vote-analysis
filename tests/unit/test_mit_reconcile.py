@@ -22,8 +22,9 @@ from usvote.mit.reconcile import (
     MITReconcileError,
     reconcile_mit,
 )
-from usvote.mit.transform import SHARED_PV_COLUMNS, transform_mit
+from usvote.mit.transform import transform_mit
 from usvote.parse import parse_table1
+from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.scrape import fetch_from_dir, get_html_tables
 from usvote.transform import CANDIDATE_NAME_FIXES, PARTY_NAME_FIXES
 

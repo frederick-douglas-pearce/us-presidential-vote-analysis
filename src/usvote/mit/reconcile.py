@@ -48,7 +48,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from usvote.mit.transform import SHARED_PV_COLUMNS, assert_unique_grain
+from usvote.mit.transform import assert_unique_grain
+from usvote.pv.schema import SHARED_PV_COLUMNS
 
 # --- state reconciliation (MIT ALLCAPS full name -> canonical full name) -----
 # The canonical state key is the full name (STATE_KEY), and the EC state dim spells

@@ -17,12 +17,12 @@ from usvote.mit.read import load_mit_president_csv
 from usvote.mit.transform import (
     EC_GETTER_PARTIES,
     RELIABILITY_EXACT,
-    SHARED_PV_COLUMNS,
     SOURCE_MIT,
     MITTransformError,
     assert_totals_reconcile,
     transform_mit,
 )
+from usvote.pv.schema import SHARED_PV_COLUMNS
 
 
 @pytest.fixture
