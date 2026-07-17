@@ -910,29 +910,109 @@ reaching ~1824 (D009), so its necessity does not depend on E3's licensing outcom
 
 **Body:**
 
+> **Research note (2026-07-17):** The **snapshot itself is already complete** — it was
+> produced *before* this story was worked. A self-contained, stdlib-only snapshot script
+> (`_snapshot_ucsb.py`, whose docstring names "backlog #34 (E4-S1)") was written and run on
+> **2026-07-06** to collect the HTML promptly and politely in a single pass, so the raw data
+> was in hand while the site was cooperative rather than being re-fetched piecemeal later.
+> Result: **all 60 elections 1789–2024, every one HTTP 200**, ~8.2MB, plus the
+> `/statistics/elections` index page and a `manifest.json` carrying per-year
+> url / http_status / bytes / **sha256** / timestamp — **zero errors**. It lives at
+> `~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/`, **outside the repo and
+> untracked by git** (UCSB is non-redistributable — D014/D016). `research-pv-source.md` §5
+> records this as "pre-satisfies the E4 snapshot story (#34)."
+>
+> **What that leaves:** the scrape *code* is not in the repo (`src/usvote/ucsb/` does not
+> exist, and the script is not importable as `usvote.*` nor under version control), and the
+> fixtures AC has since **been amended by D022** — see below. This story is therefore
+> re-scoped to **(a) port the script into the package** and **(b) add synthetic fixtures**.
+> ACs already met are kept visible with a note on how they were met, not deleted.
+
 ### Summary
 
-Scrape the UCSB / American Presidency Project presidential popular-vote pages (~1824–1972)
-and snapshot the raw HTML to disk, separating live-network scraping from parsing (mirrors
-E2-S1). The snapshots seed fixture-based parser tests and insulate the pipeline from site
-changes.
+Scrape the UCSB / American Presidency Project presidential popular-vote pages and snapshot
+the raw HTML to disk, separating live-network scraping from parsing (mirrors E2-S1). The
+snapshot insulates the pipeline from site changes and lets every downstream stage run
+offline. **The snapshot data already exists** (see the research note); the remaining work is
+bringing the *scrape code* under `usvote/` with env-var path config + tests, and seeding
+**synthetic** parser fixtures per D022.
 
 ### Acceptance Criteria
 
-- A UCSB scrape module (e.g. `usvote/ucsb/scrape.py` — final path per the E1-S2 layout) fetches the per-year UCSB PV pages across the covered range
-- Raw HTML is saved to disk (a snapshot cache) so parse/transform stages never hit the network
-- At least a few representative year snapshots (spanning different eras) are saved into `tests/fixtures/` to seed parser tests
-- Network access is isolated to this module
+**Already satisfied (2026-07-06 snapshot run) — retained for the record:**
+
+- [x] **Raw HTML is saved to disk (a snapshot cache) so parse/transform stages never hit the
+  network** — met: 60/60 elections 1789–2024, all HTTP 200, at
+  `~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/` (one `{year}.html` per
+  election + `_index_elections.html`), with a sha256 `manifest.json` for integrity.
+- [x] **Network access is isolated to this module** — met in substance: fetching happens only
+  in the snapshot script; parse/transform read files from disk. Formalized by the port below.
+- [x] **A UCSB scrape module fetches the per-year UCSB PV pages across the covered range** —
+  met *functionally* by `_snapshot_ucsb.py`, but the code lives outside the repo and is not
+  importable as `usvote.*`. **Closed by the port below.**
+
+**Remaining work:**
+
+- [ ] **(a) Port the snapshot script into the package** at `src/usvote/ucsb/scrape.py`
+  (per D015: each PV source is its own sibling subpackage), **preserving its
+  robots-compliant behavior exactly**:
+  - honors the site's `Crawl-delay: 10`
+  - identifies truthfully as `us-presidential-vote-analysis-research/0.1 (personal academic
+    research)` — matching `User-agent: *`, explicitly **not** ClaudeBot
+  - enumerates year URLs by regexing the already-saved index (no extra network hit)
+  - skip-if-already-have; **halts immediately on 403/429** to respect the server
+  - writes the per-year sha256 `manifest.json`
+- [ ] **Snapshot directory path is resolved from the env var `USVOTE_UCSB_HTML_DIR`** (D023),
+  mirroring the established config convention for machine-local external data —
+  `USVOTE_MIT_CSV_PATH` / `USVOTE_SHAPEFILE_PATH`, see `src/usvote/config.py` and
+  `src/usvote/mit/config.py` — rather than the script's hard-coded `os.path.expanduser(...)`.
+  Unset / empty / nonexistent raises the typed `ConfigError`.
+- [ ] **Unit tests** cover URL enumeration from the saved index, manifest shape + sha256, the
+  skip-if-already-have path, the 403/429 halt, and env-var config resolution — **against
+  injected fakes; no live network in CI** (the snapshot must not be re-fetched by a test run).
+- [ ] **(b) Synthetic, era-spanning parser fixtures** are added to `tests/fixtures/` per
+  **D022** — hand-written HTML mimicking the real UCSB table structure with **fabricated vote
+  numbers**, each annotated with the real source year it mimics. Between them they must pin:
+  wide-not-long layout (melt required); `colspan`/`rowspan` multi-row headers with the
+  candidate-group count drifting by era (2 groups in 1876, 4 in 1824); legislature-chosen-elector
+  states with no PV (1824: DE, GA, LA, NY, SC, VT) that must be **flagged, never zeroed** (D005);
+  and footnote rows at table bottom.
+- [ ] **No UCSB-sourced bytes are committed to this repository** (D022) — this repo is public
+  and UCSB is `redistributable=false` (D014/D016). The external snapshot stays external.
+
+> **AC amended (D022).** The original AC3 — "at least a few representative year snapshots
+> (spanning different eras) are saved into `tests/fixtures/`" — was written 2026-07-06, before
+> the D014/D016 licensing posture hardened. It is **replaced by the synthetic-fixtures AC
+> above**: committing real UCSB HTML to a **public** repo *is* redistribution, and pushing is
+> effectively irreversible (forks, clones, git history, third-party caches). Recorded as
+> amended rather than dropped, since as written it would have required shipping
+> non-redistributable content. Full rationale + options weighed: **D022**.
 
 ### Implementation Notes
 
-- Mirror the EC scrape seam (E2-S1): fetch vs. parse are separate so tests run offline
-- Expect the UCSB page structure to differ across eras — snapshot broadly enough to cover the format-drift cases E4-S2 must handle
-- This is UCSB-only; MIT is a clean CSV handled separately (E5)
+- **Port, don't rewrite.** The crawl-delay, truthful UA, and 403/429 halt are what make
+  re-running this scrape ethically and operationally safe — a from-scratch reimplementation
+  risks losing them silently.
+- **Why port at all, given the snapshot exists?** Two reasons: (1) **reproducibility is the
+  D003 star** — a pipeline re-run every four years (the 2028 refresh) cannot depend on a
+  script that exists on exactly one machine; (2) the snapshot currently has **no git backup**,
+  so the *means to re-fetch it* is as fragile as the data. Porting the code removes the worse
+  half of that risk. The **data itself deliberately stays out of the repo** (non-redistributable);
+  it is re-fetchable precisely *because* the script is in git. Recorded as **D023**.
+- Mirror the EC scrape seam (E2-S1): fetch vs. parse are separate so tests run offline.
+- The real 60-year external snapshot remains the **development corpus and acceptance check**
+  for E4-S2 (#35) — the synthetic fixtures pin structure in CI, they do not replace it (D022's
+  known drift tradeoff).
+- Legacy reference: the unmerged branch `origin/feature/step2_scrape_app_site` carries a
+  prior-generation BeautifulSoup UCSB scrape in a notebook (selectors
+  `section#block-views-election-maps-block-1` for links, `section#block-system-main` for
+  tables). It stops before parsing — useful as a **selector reference for #35 only**, not for
+  this story.
+- This is UCSB-only; MIT is a clean CSV handled separately (E5).
 
 ### Dependencies
 
-- E1-S2 (module layout), E1-S4 (fixtures dir)
+- E1-S2 (module layout), E1-S4 (fixtures dir); D015 (`usvote/ucsb/` namespace), D022 (synthetic fixtures), D023 (port the script; env var name)
 
 ---
 
@@ -953,13 +1033,16 @@ harder than the MIT CSV.
 
 - Given a snapshotted UCSB year page, parsing yields per-(year, state, candidate) records with candidate votes and state totals
 - Era-specific format variations are handled (or explicitly flagged where a year cannot be parsed cleanly)
-- Unit tests cover at least one page per distinct era format, against saved fixtures — no network
+- Unit tests cover at least one page per distinct era format, against saved **synthetic** fixtures (D022) — no network
 - Parsing failures/ambiguities are surfaced loudly (not silently dropped), feeding the provenance/reliability flags in E4-S3
 
 ### Implementation Notes
 
 - This is the highest-risk story in the epic — budget for per-era special-casing, as with EC's older years (E2-S7)
 - Keep parse pure given HTML input so it is unit-testable against fixtures
+- Per D022 the committed fixtures are **synthetic** (structure real, numbers fabricated); the
+  **real 60-year external snapshot** at `~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/`
+  is the development corpus and the acceptance check the fixtures alone cannot provide
 
 ### Dependencies
 
