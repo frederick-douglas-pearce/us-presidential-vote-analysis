@@ -747,3 +747,166 @@ Table constraint: **`UNIQUE (source, year, state, candidate)`** — the D018 nat
   populating `source="UCSB"` and real `reliability` values; it does **not** redefine the table.
 - **#68 (E6)** adds the `pv_source` reference table + the three D017 views over `dwh.pv_votes`;
   `redistributable` (incl. MIT's `redistributable=true`) is surfaced there by join, not on the fact.
+
+---
+
+## D022: UCSB parser fixtures are synthetic, not real snapshots — amends E4-S1 (#34) AC3
+
+**Date:** 2026-07-17
+**Context:** E4-S1 (#34) carries an acceptance criterion — written 2026-07-06, before the
+D014/D016 licensing posture hardened — requiring that "at least a few representative year
+snapshots (spanning different eras) are saved into `tests/fixtures/`" to seed the UCSB parser
+tests (E4-S2 / #35). That AC is now in **direct conflict with D014/D016**: this repository is
+**public**, and UCSB / American Presidency Project content is `redistributable=false` (UCSB Terms
+of Use grant no reuse; redistribution requires explicit permission via `policy@ucsb.edu` —
+research-pv-source.md §3). **Committing UCSB HTML to a public repo *is* redistribution**, and the
+act is effectively **irreversible** — once pushed, the bytes persist in forks, clones, git
+history, and third-party caches beyond our control. The AC and the licensing decision cannot both
+be honored as written.
+
+The raw snapshot itself already exists in full — **all 60 elections 1789–2024, every one HTTP
+200**, fetched 2026-07-06 — at `~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/`,
+**outside the repo and untracked by git** (research-pv-source.md §5). So the question at issue is
+only **what ships into `tests/fixtures/`**, never whether the parser has real data to be
+developed against.
+
+**Decision:** UCSB parser fixtures are **hand-written synthetic HTML** that mimics the real UCSB
+table structure with **fabricated vote numbers**. **No UCSB-sourced bytes are committed to this
+repository.** The real snapshot stays where it is — external, untracked, analysis-only — and
+remains the artifact each fixture is *derived from* by close reading, never by copy.
+
+Each synthetic fixture is **annotated with the real source year it mimics** (e.g. "structure
+mimics 1824; vote values are fabricated") so the derivation stays auditable. Between them the
+fixtures must pin every structural case #35 must handle (research-pv-source.md §5):
+- **Wide-not-long layout** — candidates in columns; the melt to per-(year, state, candidate) records.
+- **`colspan`/`rowspan` multi-row headers**, with the **candidate-group count drifting by era**
+  (2 groups in 1876, 4 in 1824) — forcing generic header parsing, never fixed column indices.
+- **Legislature-chosen-elector states with no PV** (1824: Delaware, Georgia, Louisiana, New York,
+  South Carolina, Vermont) — which must be **flagged with provenance, never coerced to zero** (D005).
+- **Footnote/annotation rows at table bottom** (e.g. 1824's "elected by the House of
+  Representatives") — which must not be mistaken for data rows.
+
+**This decision amends E4-S1's AC3** (issue #34 and its `backlog-mvp.md` entry): "representative
+year snapshots saved into `tests/fixtures/`" is **replaced by** "synthetic era-spanning fixtures
+saved into `tests/fixtures/`." The original AC is recorded as **amended, not silently dropped** —
+as written it would have required shipping non-redistributable content.
+
+**Options weighed:**
+1. **Commit small excerpts of the real HTML** — reduces the *volume* redistributed but not the
+   *fact* of it; the licensing question is unchanged by size. **Rejected.**
+2. **Hand-written synthetic fixtures** — no UCSB content ships; parser tests still pin every
+   structural case; runs in CI. **Chosen.**
+3. **Keep fixtures external + env-var-gate the parser tests** — uses real data, but the parser
+   tests cannot then run in CI, which is most of the point of having them. **Rejected.**
+
+**Rationale:**
+- **The parser cares about structural shape, not vote values.** #35's job is to survive
+  `colspan`/`rowspan` header drift, melt a wide table, and distinguish footnote rows and no-PV
+  states from data. Every one of those cases is expressible with fabricated numbers, so real UCSB
+  values buy the tests nothing they cannot get synthetically.
+- **Keeps the parser tests in CI** — unlike option 3, which would leave CI blind to exactly the
+  era-drift regressions that make #35 the highest-risk story in the epic.
+- **Keeps the public repo free of non-redistributable content** — unlike options 1 and 3, which
+  either ship UCSB bytes or accept a blind CI. Since pushing is irreversible, the conservative
+  option is the only reversible one.
+- Consistent with D014/D016 treating redistributability as a **first-class per-source attribute**:
+  UCSB is usable for analysis *and* undistributable, and those are separable — the fixtures are
+  where that separation becomes structural rather than incidental.
+
+**Known tradeoff (and its mitigation):** synthetic fixtures can **drift from real UCSB quirks** —
+a structure we invent may be subtly cleaner than the one the site actually serves, so a green test
+suite could coexist with a parser that fails on the real snapshot. Mitigations: (a) derive each
+fixture from **close reading of the real snapshot**, not from imagination; (b) **annotate the real
+source year** each fixture mimics, so the derivation is re-checkable; (c) treat a parse run over
+the **full external 60-year snapshot** as an acceptance check for #35 that the fixtures alone
+cannot provide.
+
+**Action required:**
+- **#34** — AC3 amended per this entry; the remaining fixture work is *synthetic* era-spanning
+  fixtures, not real snapshots. The `backlog-mvp.md` E4-S1 entry is updated to match.
+- **#35 (UCSB parse)** — its "one page per distinct era format, against saved fixtures" AC reads
+  as *synthetic* fixtures; the real 60-year external snapshot remains the development corpus and
+  acceptance check.
+- **No UCSB HTML is ever committed** to this repository while `redistributable=false` stands.
+  Should UCSB ever grant permission (D017 notes this is a one-row `pv_source` edit for *data*),
+  this fixture decision may be revisited — though the synthetic fixtures would remain adequate
+  regardless.
+
+---
+
+## D023: Port the UCSB snapshot script into the package — code comes in, data stays out
+
+**Date:** 2026-07-17
+**Context:** The UCSB HTML snapshot E4-S1 (#34) asks for **already exists in full** — all 60
+elections 1789–2024, every one HTTP 200, fetched 2026-07-06 — produced by a self-contained,
+stdlib-only script, `_snapshot_ucsb.py`, whose own docstring names "backlog #34 (E4-S1)". Both
+the snapshot **and the script** live at
+`~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/` — **outside the repo and
+untracked by git**. D022 settled what ships into `tests/fixtures/` (synthetic HTML, no UCSB
+bytes) but not what happens to the **scrape code**: `src/usvote/ucsb/` does not exist, and the
+script is neither importable as `usvote.*` nor under version control. The port rationale existed
+only in #34's Implementation Notes; this entry promotes it to a decision of record.
+
+**Decision:** **Port `_snapshot_ucsb.py` into the package** at `src/usvote/ucsb/scrape.py`, per
+D015's sibling-subpackage namespacing (each PV source is its own subpackage; EC stays flat).
+
+**Port, don't rewrite.** The script's robots-compliant behavior is preserved **exactly**, not
+reimplemented:
+- honors the site's **`Crawl-delay: 10`**
+- identifies truthfully as **`us-presidential-vote-analysis-research/0.1 (personal academic
+  research)`** — matching `User-agent: *`, explicitly **not** ClaudeBot
+- enumerates year URLs by **regexing the already-saved index** (no extra network hit)
+- **skip-if-already-have**
+- **halts immediately on 403/429**
+- writes the per-year **sha256 `manifest.json`**
+
+These politeness behaviors are precisely what a from-scratch reimplementation would lose, and
+their loss is **invisible until the site blocks us** — by which point the damage (to the
+project's access and to a public archive's goodwill) is already done. A rewrite would be judged
+green by any test that only checks "did we get the HTML."
+
+**The snapshot DATA stays outside the repo.** Only the *code* comes in. UCSB is
+`redistributable=false` (D014/D016) and this repo is public, so committing the HTML is
+redistribution (D022's reasoning applies unchanged to the snapshot itself, not just to fixtures).
+The resulting **asymmetry is deliberate and worth naming**: the data is knowingly left
+**un-backed-up by git**, and it is safely re-fetchable **precisely because the script is in git**.
+The script in version control is what makes the data's absence from version control an acceptable
+risk rather than a single point of failure.
+
+**The snapshot directory path is resolved from the env var `USVOTE_UCSB_HTML_DIR`** rather than
+the script's hard-coded `os.path.expanduser(...)`. The name follows the established sibling
+config convention — `USVOTE_MIT_CSV_PATH` and `USVOTE_SHAPEFILE_PATH` both name **format + role**,
+so `USVOTE_UCSB_HTML_DIR` is exactly parallel; a `..._SNAPSHOT_DIR` variant would name role only
+and break the pattern. Unset / empty / nonexistent raises the typed `ConfigError`, as the sibling
+config modules do.
+
+**Rationale:**
+- **Reproducibility is the D003 star.** The 2028 refresh must regenerate the snapshot by running
+  a versioned, tested module — not by hunting for a loose script on one machine. A pipeline whose
+  ingestion step exists only as untracked local code is not reproducible in any meaningful sense.
+- **The means to re-fetch was as fragile as the data.** The snapshot has no backup and exists on
+  exactly one disk; before this port, so did the *only* copy of the fetch logic. Porting the code
+  removes the worse half of that risk — losing the data costs a polite re-scrape, whereas losing
+  the script costs re-deriving the URL enumeration, the politeness rules, and the manifest format
+  from scratch.
+- **It creates the `usvote/ucsb/` namespace that #35–#38 all need**, so it is the natural first
+  story of the epic regardless of the snapshot's existence.
+
+**Counter-argument (recorded honestly):** the snapshot is **one-and-done for historical data** —
+1789–2024 does not change — so a re-scraper earns its keep only about **every four years**. That
+is a real argument against porting. It loses anyway because the cost is **~70 lines of
+already-written code** (a port, not a build), while the downside case — losing the only copy of
+the fetch logic — is **silent until it matters**, and matters at exactly the moment (a refresh
+deadline) when re-deriving it is most expensive.
+
+**Related:** **D022** (its sibling — that entry governs *fixtures*, this one governs *code*; both
+land on "no UCSB bytes in the repo"); **D015** (the `usvote/ucsb/` namespacing this port obeys);
+**D003** (the reproducibility star it serves); **D014**/**D016** (why the data stays out).
+
+**Action required:**
+- **#34** — the port is scoped as remaining-work item (a), with the robots-compliant behaviors
+  enumerated as ACs so a reviewer can check each one survived the port; env var is
+  `USVOTE_UCSB_HTML_DIR`; unit tests cover URL enumeration, manifest shape + sha256,
+  skip-if-already-have, the 403/429 halt, and config resolution — **against injected fakes, no
+  live network in CI** (a test run must never re-fetch the snapshot).
+- **No UCSB HTML is committed** by this port (D022) — only the code that can re-fetch it.
