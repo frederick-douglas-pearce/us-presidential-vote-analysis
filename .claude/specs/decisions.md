@@ -981,6 +981,24 @@ sibling table rather than amending the shared PV fact.
    general statehood-admission roster is **rejected**: it needs reference data the repo lacks (the
    `state` dim is TIGER geography, no admission dates) for a set that is **historically closed**
    and can never grow.
+   - *Clarified 2026-07-18 during the #36 architect review (scope refinement; no part of this
+     decision reverses).* §6 assumed the EC spine covers every year UCSB publishes PV for. It does
+     not: `UNSUPPORTED_EC_YEARS` (`pipeline.py:53`) gates 1868 and 1872, for which UCSB *does*
+     publish PV. **UCSB ingestion is therefore scoped to the EC spine** — `ec_ingest_years()` minus
+     `NO_POPULAR_VOTE_YEARS` — **derived at runtime, never duplicated as a literal year set in
+     `usvote/ucsb/`**, so #57 lifting the gate admits both years to E4 with no change in
+     `usvote/ucsb/`. A roster that comes back empty for an in-scope year **raises**. Rationale:
+     `pv_coverage` (§8) is EV-weighted and therefore uncomputable without an EC spine for the year,
+     so ingesting 1868/1872 would create exactly the partial-coverage years D009 mandates a caveat
+     for, with no means to quantify one. This **defers, not hides**: the gating is expected to be
+     temporary (#57 is tracked, deprioritized behind bulk-ingest and the API, and non-trivial),
+     `UCSB_NONPARTICIPATING_STATES` retains all 14 entries including 1868's three, and
+     `docs/corrections.md` records that the 1868 rows are catalogued but not yet ingested.
+   - *Also clarified:* the participating-state roster derives from `dwh.votes` **with totals rows
+     excluded** (`is_total = false` / `state IS NOT NULL`) — `votes.state` is NULL on totals rows,
+     so a naive `SELECT DISTINCT year, state` yields a NULL roster entry per year. The same filter
+     applies to E6's MIT roster backfill, which §Rationale describes as a mechanical
+     `INSERT … SELECT DISTINCT`.
 7. **The silent-drop guard is a two-way tested assert**, and is the roster's primary purpose:
    every `popular_vote` roster state has **≥1** `pv_votes` row; every absence-status state has
    **exactly 0**; and every `pv_votes` (year, state) is **in** the roster. The third check is what
@@ -1045,7 +1063,14 @@ fabricated values); **D009** (the ~1824 window, strengthened via `pv_coverage`);
     written. The parser retains the §7 **within-page** no-residual guard and §4's raise-on-
     unclassifiable rule; the cross-page two-way roster assert stays in #36 per §7.
 - **#36 (E4-S3)** — builds the roster from the EC spine + `UCSB_NONPARTICIPATING_STATES`; the
-  two-way roster/fact assert is a tested function; `docs/corrections.md` gains the case-2 rows.
+  two-way roster/fact assert is a tested function, scoped by source and in-scope year set;
+  `docs/corrections.md` gains the case-2 rows. Per the §6 clarification, UCSB's year scope is
+  derived from `ec_ingest_years()`, and **state-name** canonicalization moves here from #38 (the
+  roster is keyed on `dwh.state`'s canonical PK, so it must precede the assert); #38 keeps
+  **candidate**-name reconciliation.
+- **#57** — lifting 1868/1872 from `UNSUPPORTED_EC_YEARS` also admits them to UCSB ingestion; its
+  test updates must cover the UCSB roster path (18-vs-17 legislature-chosen count, and
+  `UCSB_NONPARTICIPATING_STATES` going from 11 consumed entries to 14).
 - **#37 (E4-S4)** — creates `dwh.pv_state_status` and loads UCSB rows; `dwh.pv_votes` is used
   as-shipped (D021).
 - **E6** — a small MIT roster-backfill story (derived, not a reopening of #65/#66); `pv_coverage`
