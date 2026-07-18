@@ -28,6 +28,15 @@ carry `@pytest.mark.integration` (the marker, not the directory, is what selects
 them). `tests/unit/` and `tests/integration/` are the documented homes for new
 tests; `tests/fixtures/` holds saved Archives HTML replayed offline.
 
+Two fixture caveats specific to UCSB (D014/D016/D022): the Archives fixtures are real
+saved bytes, but **every `ucsb_synthetic_*.html` fixture is hand-written** — UCSB grants
+no reuse rights and this repo is public, so no UCSB bytes are committed and
+`test_no_fixture_ships_real_ucsb_bytes` guards that. The real 60-page snapshot is the
+acceptance corpus for the UCSB parser and lives outside the tree; `TestRealCorpus` in
+`tests/unit/test_ucsb_parse.py` runs against it and **skips when `USVOTE_UCSB_HTML_DIR`
+is unset**, so CI stays green and never touches UCSB. Run it locally with that env var
+set — it is the only check that exercises all six header layouts against real markup.
+
 ```
 uv sync                          # create the venv + install deps from pyproject.toml + uv.lock
 python -m usvote                 # run the packaged EC pipeline (create-if-absent load)

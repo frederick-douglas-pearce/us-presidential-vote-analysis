@@ -1037,15 +1037,23 @@ harder than the MIT CSV.
   What is flagged is **popular-vote absence at the record level**, per D024
 - Unit tests cover at least one page per distinct era format, against saved **synthetic** fixtures (D022) — no network
 - Parsing failures/ambiguities are surfaced loudly (not silently dropped), feeding the provenance/reliability flags in E4-S3
-- Per (year, state), the parser emits a **status classification** — `popular_vote`,
-  `legislature_chosen`, or `not_participating` — plus the **verbatim note text** for
-  legislature-chosen rows, preserved unparsed (D024). Elector counts and split allocations in that
-  prose are **not** extracted into structured fields (D006: EC is the source of truth for
-  electoral votes)
+- The parser is **roster-free**. Per (year, state) it emits the one status that is readable from
+  markup — **`legislature_chosen`** (a 2-cell row with `colspan = W-1`; 18 rows corpus-wide, all
+  carrying the marker substring `electors chosen by state legislature`) — plus the **verbatim note
+  text**, preserved unparsed (D024 §5). Elector counts and split allocations in that prose are
+  **not** extracted into structured fields (D006: EC is the source of truth for electoral votes)
+- The other two statuses are **out of scope here and assigned by E4-S3**: `not_participating` has
+  **no markup whatsoever** ([`docs/ucsb-html-formats.md`](../../docs/ucsb-html-formats.md) §4 case
+  2 — the row is simply absent) and is detectable only against an expected roster; `popular_vote`
+  is that roster's residual category. D024 §6 sources the roster from the **EC spine +
+  `UCSB_NONPARTICIPATING_STATES`**, both of which are E4-S3 work — so the parser cannot and must
+  not attempt either
 - Absence is **never** emitted as `0`. Both the pre-1852 `U+00A0` and the 1852+ `--`
   not-on-ballot cells normalize to one internal sentinel and yield **no record**. Per
   (year, state), `numeric_cells + not_on_ballot_cells == candidate_column_count` with **no
-  residual** — any cell that is neither a parseable number nor a recognized sentinel **raises** (D024)
+  residual** — any cell that is neither a parseable number nor a recognized sentinel **raises**
+  (D024 §4/§7). This within-page guard stays in the parser; the cross-page two-way roster assert
+  is E4-S3's
 
 ### Implementation Notes
 
@@ -1059,6 +1067,8 @@ harder than the MIT CSV.
   grammar (one body parser suffices — branch on detected header shape, **never** on year, since
   1936/1964/1972/1976/1984/1988 break chronological ordering), the four absence cases with markup,
   16 ranked parsing risks, the eight fixture representatives, and a proposed function decomposition
+- The roster-free split above narrows this story's original status AC, which overreached; D024's
+  design is unchanged (see D024 "Action required")
 
 ### Dependencies
 
@@ -1091,6 +1101,12 @@ unreliable or missing PV rather than hiding it — is a product feature.
   for every state in that year's election, including `popular_vote` states — assembled from the
   **EC spine** (participating states) plus the provenance-carrying constant
   `UCSB_NONPARTICIPATING_STATES` (1864, 1868), which also gains a `docs/corrections.md` row
+- **This story owns assignment of `popular_vote` and `not_participating`.** Neither is readable
+  from UCSB markup, so E4-S2 emits only `legislature_chosen` + the verbatim note. Here:
+  `not_participating` comes from `UCSB_NONPARTICIPATING_STATES`; `popular_vote` is the **residual**
+  — any roster state not flagged `legislature_chosen` by the parser and not listed as
+  non-participating. All three statuses are therefore assigned in one place, against the complete
+  roster
 - The **two-way roster assert** is an automated test: every `popular_vote` state has ≥1
   `pv_votes` row; every absence-status state has exactly 0; every `pv_votes` (year, state) is in
   the roster. This is the guard against the inner-join silent-drop hazard, which sum validators
@@ -1108,6 +1124,10 @@ unreliable or missing PV rather than hiding it — is a product feature.
 - The `note` column holds **verbatim UCSB text** and is therefore `redistributable=false` content
   (D024, extending D022/D016) — exclude it from any public API surface, and never let it appear in
   a committed fixture. The `pv_status` enum is a bare historical fact and carries no such restriction
+- Statuses arrive from two directions and must be merged deterministically: parser-emitted
+  `legislature_chosen` rows (keyed by year, state) join onto the EC-derived roster; a
+  `legislature_chosen` state absent from the roster, or a non-participating state the parser also
+  flagged, is a **contradiction and should raise** rather than silently resolve
 
 ### Dependencies
 

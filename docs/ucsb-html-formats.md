@@ -350,3 +350,70 @@ and CD-breakdown rows have no EC analogue.
 elements at all** — footnote markers are bare `*` characters inside the text. A
 `strip_footnotes` port would be a silent no-op giving false confidence; `_clean_label`'s
 `.strip("*")` is what actually handles them.
+
+---
+
+## 9. Corrections and additions from the #35 implementation
+
+The survey above was written from reading the corpus; this section records what
+actually running a parser against all 60 pages changed. Everything here is verified
+against the real snapshot, and each item is pinned by a test in
+`tests/unit/test_ucsb_parse.py`.
+
+**§3's nesting claim was too narrow.** The taxonomy implies table nesting begins at
+L2/1928. In fact **1836's summary block is sibling rows of the same table as its state
+block** (widths 9 and 14 interleaved in one `<table>`). `own_rows` does not separate
+them — the modal-width rule does — so that rule is load-bearing for considerably more
+years than §3 suggests. Two independent defences are needed and neither covers the
+other: `own_rows`/`_own_cells` for genuinely nested tables, and the modal-width rule for
+same-table interleaving.
+
+**The summary block also appears BELOW the state block, in the same table.** On
+1928, 1932, 1940, 1944, 1948, 1952, 1956, 1972 and 1988 the summary rows are appended
+after the totals row. They are neither data nor benign prose, so the body has to be
+truncated where they begin (`_find_body_end`, keying on the `Party`/`Nominees` header
+cells). Without that truncation those nine years hit the terminal raise.
+
+**§2's `g` rule needs one addition: filter before taking the mode.** Taking the modal
+width of all-single-colspan rows is right, but it must be restricted to structurally
+possible widths (`W = 2 + 3g`) *first*. On a page whose summary rows tie with or
+outnumber its data rows, a bare mode picks the summary width — and `(9-2)//3`
+floor-divides to a plausible-looking `g=2` instead of failing. Filtered, the rule
+reproduces the §5 `g` table for all 51 popular-vote years with zero mismatches.
+
+**1976's header is three rows, not two, and the missing header cell is TOTAL VOTE.**
+§3 records that the header is narrower than the data rows but not why. The real shape
+is names / parties+`TOTAL VOTES` / `STATE`+units, and the `STATE` row carries no
+TOTAL VOTE header at all — hence `1 + 3g = 7` against data rows of `2 + 3g = 8`. Its
+name and party rows are at `STATE_row - 2` and `STATE_row - 1`, unlike every other
+layout's single adjacent name row.
+
+**`select_results_table` cannot be "the widest table in the section."** On 1976 the
+summary rows are 9 wide and the data rows 8, so widest-table selects the summary block.
+The rule that works — *the table containing an own-row with a `STATE`/`STATES` cell* —
+selects exactly one table on each of the 51 popular-vote years and zero on all nine
+1789–1820 pages, so it doubles as the L0 detector.
+
+**The percent cross-check must be aggregate, not per cell.** Three years carry percents
+that disagree with their own vote counts, and in all three the columns are provably
+aligned (the row's candidates sum exactly to its TOTAL VOTE):
+
+| Year | State | Published | Actual | What happened |
+|------|-------|-----------|--------|---------------|
+| 1860 | Vermont | `4.16` twice | 19.6 / 4.16 | the same percent duplicated into two cells |
+| 1968 | Utah | `31.1` | 37.1 | transposed digits |
+| 1872 | Kentucky | percents sum to exactly 100.0 | 46.4 / 52.3 | computed on a different denominator |
+
+These are source defects, not parse errors. Since a genuine column-window shift
+misaligns essentially *every* row while a source typo hits one cell, the check asserts
+on the mismatch **rate** (>25%), not on any individual cell.
+
+**The pre-1824 year set is not `range(1789, 1824, 4)`.** That yields 1793, 1797, 1801…
+and matches no real election. The series starts at 1789 but goes quadrennial from 1792:
+`{1789, *range(1792, 1824, 4)}` — exactly the nine pages that carry no state table.
+
+**Counts confirmed against the snapshot.** 18 legislature-chosen rows (six 1824 states;
+South Carolina every year through 1860; 1868 Florida; 1876 Colorado); CD sub-rows only
+in 2016 (Nebraska, 3) and 2020/2024 (Maine + Nebraska, 5 each); 186 not-on-ballot cells;
+and **zero literal `0` values in any state-row vote column**, which is what licenses
+treating a parsed `0` as proof of a bug.
