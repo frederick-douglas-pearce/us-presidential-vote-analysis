@@ -43,13 +43,18 @@ FETCH_TIMEOUT_SECONDS = 30
 # A Fetch maps a URL to that page's raw markup (bytes). The default hits the
 # network; tests and snapshot replay inject one that reads saved HTML instead.
 #
-# NOTE: the Fetch seam and the snapshot helpers below are source-agnostic
-# plumbing (URL->bytes, save/replay by slug), whereas the scrape functions are
-# Archives-specific. When the popular-vote sources land as usvote/ucsb/ (E4) and
-# usvote/mit/ (E5) they will want this same machinery; extract it into a shared
-# module (e.g. usvote/_fetch.py) at that point rather than importing it *from*
-# this EC spine (which would invert the source-namespacing dependency, D006).
-# Until then it lives here. EC parse/transform tests (#25/#26) may reuse this
+# NOTE: this seam stays EC-local, and both PV sources have now settled the
+# question of whether it should be shared. An earlier note here anticipated
+# extracting it into a usvote/_fetch.py once usvote/ucsb/ (E4) and usvote/mit/
+# (E5) landed, on the premise they would want the same machinery. They did not:
+# MIT ships a local CSV and needs no fetch seam at all (usvote/mit/read.py),
+# and UCSB's seam is a different shape -- it must surface HTTP status (its
+# 403/429 halt reads it) and keep the body on an error status, encoding
+# presidency.ucsb.edu's robots policy rather than plain "fetch a URL"
+# (usvote/ucsb/scrape.py). With no duplicated knowledge to factor out, the
+# extraction would buy indirection only. D006's actual constraint -- that a PV
+# source must not import *from* this EC spine -- holds either way, and does.
+# EC parse/transform tests (#25/#26) may reuse this
 # seam (fetch_from_dir + get_html_tables) to replay a saved Archives page into
 # <table> elements offline -- that is the tested snapshot->table path, so
 # re-deriving fixture file paths in those tests would only duplicate it. (This

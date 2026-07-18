@@ -71,6 +71,7 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `PGPASSWORD` | database password | *(unset &rarr; prompted securely at runtime)* |
 | `USVOTE_SHAPEFILE_PATH` | path to the unzipped TIGER2019 STATE shapefile (`.shp`) | *(required)* |
 | `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
+| `USVOTE_UCSB_HTML_DIR` | path to the local UCSB raw-HTML snapshot directory | *(required for the UCSB popular-vote scrape)* |
 
 Database settings use the standard libpq `PG*` names, so the same values are shared
 with `psql`, `pg_dump`, and other Postgres tools. The TIGER2019 STATE shapefile is a
@@ -78,6 +79,14 @@ free download from the [Census Bureau](https://www2.census.gov/geo/tiger/TIGER20
 The MIT president CSV is a free CC0&nbsp;1.0 download from
 [Harvard Dataverse](https://doi.org/10.7910/DVN/42MVDX); like the shapefile it lives
 outside the repo and is located via its environment variable, not committed.
+
+The UCSB snapshot directory holds the raw per-election HTML fetched by
+`python -m usvote.ucsb` (one `{year}.html` per election, plus `_index_elections.html`
+and a sha256 `manifest.json`). UCSB / American Presidency Project content is **not
+redistributable**, so this directory must live **outside** this public repository and
+its bytes are never committed &mdash; only the scrape code is versioned (see D023). The
+scrape is deliberately polite (honors the site's `Crawl-delay: 10`, so a full run takes
+~10&nbsp;minutes) and re-runnable (already-saved pages are skipped).
 
 Once configured, run the Electoral College ingestion pipeline from the package (an
 alternative to executing the step&nbsp;1 notebook cells):
