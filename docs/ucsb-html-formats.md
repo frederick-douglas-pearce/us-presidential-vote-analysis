@@ -129,6 +129,12 @@ The prose always contains the exact substring **`electors chosen by state legisl
 | 1868 | Florida |
 | 1876 | Colorado |
 
+**18 at the parser, 17 at the roster — not a regression.** 1868 Florida is the only one of
+the 18 outside the EC spine (`UNSUPPORTED_EC_YEARS` gates 1868/1872; see D024 §6 as clarified
+2026-07-18). The parser finds all 18 — `TestRealCorpus` runs the full 60-page snapshot — but
+the `pv_state_status` roster contains 17 until #57 ingests the Reconstruction years. Any test
+asserting a count must state which layer it measures.
+
 #### Case 2 — state did not participate *(state-level, no markup at all)*
 
 The row is simply **absent**. No placeholder, no blank row. Only a prose footnote
