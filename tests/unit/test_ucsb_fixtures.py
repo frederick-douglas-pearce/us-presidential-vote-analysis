@@ -42,7 +42,7 @@ import pytest
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-from tests._helpers import FIXTURES_DIR
+from tests._helpers import FIXTURES_DIR, UCSB_PV_FIXTURES, ucsb_fixture_html
 from usvote.ucsb.parse import parse_election_year
 
 # The two #34 fixtures the ad-hoc extractor was written for; see the module docstring
@@ -52,17 +52,8 @@ FIXTURES = {
     "4group": FIXTURES_DIR / "ucsb_synthetic_4group.html",
 }
 
-# Every fixture with a state table, and the year to parse it as. Excludes the L0
-# (summary-only) fixture, which by design has no popular-vote grid at all.
-PV_FIXTURES = {
-    "2group": (1876, "L1"),
-    "4group": (1824, "L1"),
-    "nocolspan": (1836, "L1b"),
-    "dashdash": (1948, "L2"),
-    "missing_states": (1864, "L1"),
-    "inline_cd": (2020, "L3"),
-    "1976": (1976, "L1c"),
-}
+# Shared with test_ucsb_parse.py via tests._helpers so the two cannot drift.
+PV_FIXTURES = UCSB_PV_FIXTURES
 
 
 def _cells(row: Tag) -> list[str]:
@@ -267,10 +258,7 @@ class TestFixtureRealism:
     @pytest.mark.parametrize("stem", list(PV_FIXTURES))
     def test_total_vote_exceeds_the_shown_candidates(self, stem: str) -> None:
         year, _ = PV_FIXTURES[stem]
-        parsed = parse_election_year(
-            (FIXTURES_DIR / f"ucsb_synthetic_{stem}.html").read_text(encoding="utf-8"),
-            year,
-        )
+        parsed = parse_election_year(ucsb_fixture_html(stem), year)
         assert parsed is not None
         for row in parsed["state_rows"]:
             shown = sum(cell["votes"] or 0 for cell in row["cells"])

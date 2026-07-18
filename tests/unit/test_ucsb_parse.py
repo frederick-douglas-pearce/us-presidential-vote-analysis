@@ -23,13 +23,14 @@ snapshot is absent so CI stays green and never touches UCSB.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-from tests._helpers import FIXTURES_DIR
+from tests._helpers import FIXTURES_DIR, UCSB_PV_FIXTURES, ucsb_fixture_html
 from usvote.ucsb.parse import (
     LEGISLATURE_MARKER,
     NO_POPULAR_VOTE_YEARS,
@@ -47,21 +48,11 @@ from usvote.ucsb.parse import (
     select_results_table,
 )
 
-# fixture stem -> (year to parse it as, expected layout)
-FIXTURES: dict[str, tuple[int, str]] = {
-    "2group": (1876, "L1"),
-    "4group": (1824, "L1"),
-    "nocolspan": (1836, "L1b"),
-    "dashdash": (1948, "L2"),
-    "missing_states": (1864, "L1"),
-    "inline_cd": (2020, "L3"),
-    "1976": (1976, "L1c"),
-}
+# Shared with test_ucsb_fixtures.py via tests._helpers so the two cannot drift.
+FIXTURES = UCSB_PV_FIXTURES
 PV_FIXTURES = list(FIXTURES)  # every fixture that has a state table (excludes L0)
 
-
-def _html(stem: str) -> str:
-    return (FIXTURES_DIR / f"ucsb_synthetic_{stem}.html").read_text(encoding="utf-8")
+_html = ucsb_fixture_html
 
 
 def _rows(stem: str) -> list[Tag]:
@@ -383,6 +374,99 @@ class TestWithinPageInvariants:
             _assert_percent_consistent(shifted)
 
 
+class TestGuardsFailLoudly:
+    """Regressions for four guards that used to degrade quietly instead of raising.
+
+    All four shared one defect: a check that could not run silently reported success.
+    That is the same failure the module docstring rules out for *input data* ("nothing
+    unclassifiable passes silently"), applied inconsistently to the parser's own
+    control flow — so each is pinned here rather than left to the corpus to re-find.
+    """
+
+    def test_a_state_row_at_the_top_does_not_wrap_to_the_last_row(self) -> None:
+        # `ind - 1` on an L3 table whose STATE row is row 0 used to index NEGATIVELY.
+        # Python wraps silently, so the table's LAST row was read as the candidate
+        # name row: parsing succeeded and returned names lifted from a trailing data
+        # row. A whole year's candidates would be mislabelled with no error at all.
+        html = (
+            "<table>"
+            "<tr><td>STATE</td><td>TOTAL VOTE</td><td>Votes</td><td>%</td><td>EV</td>"
+            "<td>Votes</td><td>%</td><td>EV</td></tr>"
+            "<tr><td>Alabama</td><td>100,000</td><td>60,000</td><td>60.0</td><td>9</td>"
+            "<td>39,000</td><td>39.0</td><td> </td></tr>"
+            "<tr><td>Maine</td><td>50,000</td><td>30,000</td><td>60.0</td><td>4</td>"
+            "<td>19,000</td><td>38.0</td><td> </td></tr>"
+            "<tr><td>DECOY-A</td><td>DECOY-B</td></tr>"
+            "</table>"
+        )
+        table = BeautifulSoup(html, "html.parser").find("table")
+        assert isinstance(table, Tag)
+        with pytest.raises(UCSBParseError, match="no header row 1 above it"):
+            detect_layout(own_rows(table))
+
+    def test_an_absent_totals_cell_does_not_exempt_a_column_from_the_sum_check(
+        self,
+    ) -> None:
+        # `if total_cell["votes"] is None: continue` conflated "nothing to check" with
+        # "checked and fine", so blanking a totals cell disabled that candidate's sum
+        # validation entirely and let arbitrary corruption through.
+        html = _html("dashdash").replace(
+            '<td bgcolor="#F7FAFD">100,000</td>', '<td bgcolor="#F7FAFD">999,000</td>', 1
+        ).replace(
+            '<td bgcolor="#F7FAFD">2,194,000</td>', '<td bgcolor="#F7FAFD">--</td>', 1
+        )
+        with pytest.raises(UCSBParseError, match="has no totals value"):
+            parse_election_year(html, 1948)
+
+    def test_unreadable_percents_raise_rather_than_silently_skipping_the_check(
+        self,
+    ) -> None:
+        # The percent cross-check is the only cheap detector for a column-window
+        # shift. Guarding on `if compared and ...` meant a year whose percent format
+        # drifted compared ZERO cells and passed — quietly dropping the guarantee.
+        html = re.sub(
+            r'(<td bgcolor="#(?:F7FAFD|FFFFFF)">)(\d+\.\d)(</td>)',
+            r"\1n/a\3",
+            _html("1976"),
+        )
+        with pytest.raises(UCSBParseError, match="no percent cell could be read"):
+            parse_election_year(html, 1976)
+
+    def test_a_state_cannot_be_both_a_vote_row_and_a_legislature_row(self) -> None:
+        # `pv_state_status` is keyed (source, year, state), so this hands #36 two
+        # irreconcilable facts for one key. Cheap to reject at the source.
+        html = _html("2group").replace(
+            '<td bgcolor="#F7FAFD">Alabama</td>', '<td bgcolor="#F7FAFD">Colorado</td>', 1
+        )
+        with pytest.raises(UCSBParseError, match="both popular-vote rows and"):
+            parse_election_year(html, 1876)
+
+    def test_duplicate_state_rows_raise(self) -> None:
+        html = _html("2group").replace(
+            '<td bgcolor="#FFFFFF">California</td>',
+            '<td bgcolor="#FFFFFF">Alabama</td>',
+            1,
+        )
+        with pytest.raises(UCSBParseError, match="duplicate state rows"):
+            parse_election_year(html, 1876)
+
+    @pytest.mark.parametrize(
+        ("original", "shouted"),
+        [("Totals", "TOTALS"), ("STATE", "State"), ("Party", "PARTY")],
+    )
+    def test_header_labels_are_matched_case_insensitively(
+        self, original: str, shouted: str
+    ) -> None:
+        # UCSB's casing is not stable across eras (1940 alone switches STATE ->
+        # STATES), and the label lookups had diverged: STATE folded case, the totals
+        # and summary-block labels did not.
+        parsed = parse_election_year(
+            _html("2group").replace(f">{original}<", f">{shouted}<"), 1876
+        )
+        assert parsed is not None
+        assert parsed["totals"] is not None
+
+
 class TestUnclassifiableRowsRaise:
     """D024 §4 rejects an 'unknown' bucket by name; there is no blanket skip."""
 
@@ -408,6 +492,30 @@ class TestEntryPoint:
             1864: _html("missing_states"),
         })
         assert [p["year"] for p in result] == [1864, 1876]
+
+
+class TestCorrectionsCatalog:
+    """Every UCSB anomaly constant must appear in ``docs/corrections.md``.
+
+    CLAUDE.md: "add a new anomaly the same way (constant + test + catalog row),
+    documenting its source as existing entries do." The catalog is only useful if it
+    is complete, and completeness is exactly the property that rots silently — so it
+    is asserted rather than trusted.
+    """
+
+    @pytest.mark.parametrize(
+        "constant",
+        ["ABSENT_VOTE_TOKENS", "PERCENT_MISMATCH_RATE", "TOTALS_LABELS",
+         "STATE_HEADER_LABELS"],
+    )
+    def test_anomaly_constant_has_a_catalog_row(self, constant: str) -> None:
+        catalog = (
+            Path(__file__).resolve().parents[2] / "docs" / "corrections.md"
+        ).read_text(encoding="utf-8")
+        assert constant in catalog, (
+            f"{constant} handles a real UCSB data anomaly but has no row in "
+            f"docs/corrections.md"
+        )
 
 
 class TestFixtureHygiene:

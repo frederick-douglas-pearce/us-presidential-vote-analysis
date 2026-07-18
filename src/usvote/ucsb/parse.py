@@ -69,7 +69,12 @@ MAIN_SECTION_ID = "block-system-main"
 # Column-0 labels marking the totals row. SINGULAR "Total" is real: 1864 and 1944 use
 # it. A ``== "Totals"`` test drops the totals row on those years and silently no-ops
 # the sum validator, which is the whole point of having one.
-TOTALS_LABELS = frozenset({"Total", "Totals"})
+#
+# Every label constant in this module is stored UPPERCASE and compared through
+# :func:`_matches_label`. UCSB's casing is not stable across eras (1940 alone switches
+# STATE -> STATES), so a case-sensitive comparison here is a latent format-drift bug
+# rather than a style choice.
+TOTALS_LABELS = frozenset({"TOTAL", "TOTALS"})
 
 # Every one of the 18 legislature-chosen rows in the corpus carries this phrase
 # (verified across all 60 pages). The prose is captured VERBATIM and left unparsed —
@@ -114,11 +119,11 @@ STATE_HEADER_LABELS = frozenset({"STATE", "STATES"})
 # 1956/1972/1988 it is appended as SIBLING ROWS BELOW the totals row of the very same
 # table. Those rows are neither data nor benign prose, so the body has to be truncated
 # where they begin — otherwise they hit the terminal raise.
-SUMMARY_HEADER_LABELS = frozenset({"Party", "Nominees"})
+SUMMARY_HEADER_LABELS = frozenset({"PARTY", "NOMINEES"})
 
 # The units-row marker used to tell an inline header (L1c/L3, where the STATE row IS
 # the units row) from a stacked one (L1/L1b/L2, where units are a separate row).
-UNITS_VOTES_LABEL = "Votes"
+UNITS_VOTES_LABELS = frozenset({"VOTES"})
 
 # W = 2 + 3g, so the narrowest structurally-possible data row (g=1) is 5 cells.
 MIN_DATA_WIDTH = 5
@@ -323,11 +328,19 @@ def _parse_percent_cell(text: str) -> float | None:
         return None
 
 
+def _matches_label(text: str, labels: frozenset[str]) -> bool:
+    """True if ``text`` cleans and upper-cases into ``labels``.
+
+    The single comparison path for every header/label constant in this module. Having
+    one keeps casing conventions from diverging between structurally identical lookups
+    — which they had, with STATE folded and the summary/totals labels not.
+    """
+    return _clean_label(text).upper() in labels
+
+
 def _has_state_header(row: Tag) -> bool:
     """True if the row carries a ``STATE``/``STATES`` header cell."""
-    return any(
-        _clean_label(text).upper() in STATE_HEADER_LABELS for text in _cell_texts(row)
-    )
+    return any(_matches_label(text, STATE_HEADER_LABELS) for text in _cell_texts(row))
 
 
 # --------------------------------------------------------------------------------
@@ -382,11 +395,11 @@ def _detect_group_count(rows: list[Tag]) -> tuple[int, int]:
 
     Verified against all 51 real popular-vote years with zero mismatches.
     """
+    all_cells = [_own_cells(row) for row in rows]
     widths = Counter(
-        len(_own_cells(row))
-        for row in rows
-        if _own_cells(row)
-        and all(_colspan(cell) == 1 for cell in _own_cells(row))
+        len(cells)
+        for cells in all_cells
+        if cells and all(_colspan(cell) == 1 for cell in cells)
     )
     valid = {
         width: count
@@ -426,19 +439,39 @@ def detect_layout(rows: list[Tag]) -> UCSBLayout:
         raise UCSBParseError("no STATE/STATES header row in the selected table")
     ind = state_inds[0]
 
+    def above(offset: int, kind: str) -> int:
+        """Index ``offset`` rows above the STATE row, refusing to run off the top.
+
+        Without this, ``ind - 1`` / ``ind - 2`` index NEGATIVELY on a table whose
+        STATE row sits near the top, and Python silently wraps to rows at the END of
+        the table. That does not crash — it reads a trailing data or footnote row as
+        the candidate-name row, so a whole year's candidates come out mislabelled
+        with no error. Refuse loudly instead.
+        """
+        if ind - offset < 0:
+            raise UCSBParseError(
+                f"{kind}: STATE row at index {ind} has no header row {offset} above "
+                f"it; the page is missing the expected candidate header"
+            )
+        return ind - offset
+
     cells = _own_cells(rows[ind])
     width = len(cells)
-    has_units = any(text == UNITS_VOTES_LABEL for text in _cell_texts(rows[ind]))
+    has_units = any(
+        _matches_label(text, UNITS_VOTES_LABELS) for text in _cell_texts(rows[ind])
+    )
     has_colspan = any(_colspan(cell) > 1 for cell in cells)
 
     if has_units and width == data_width:
         # L3 — inline 2-row header; name and party fused in one cell above.
-        return UCSBLayout("L3", group_count, data_width, ind + 1, ind - 1, None)
+        return UCSBLayout("L3", group_count, data_width, ind + 1, above(1, "L3"), None)
     if has_units and width < data_width:
         # L1c — 1976 only. Three stacked rows (names / parties+TOTAL VOTES / STATE+
         # units), and the STATE row carries no TOTAL VOTE header at all, which is why
         # it is 1 + 3g wide against data rows of 2 + 3g.
-        return UCSBLayout("L1c", group_count, data_width, ind + 1, ind - 2, ind - 1)
+        return UCSBLayout(
+            "L1c", group_count, data_width, ind + 1, above(2, "L1c"), above(1, "L1c")
+        )
     if not has_colspan:
         # L1b — 1836 only; stacked header carrying no colspans at all.
         return UCSBLayout("L1b", group_count, data_width, ind + 3, ind + 1, ind)
@@ -533,7 +566,7 @@ def _find_body_end(rows: list[Tag], header_end: int) -> int:
     keeps them from reaching :func:`classify_row`'s terminal raise.
     """
     for ind in range(header_end, len(rows)):
-        labels = {_clean_label(text) for text in _cell_texts(rows[ind])}
+        labels = {_clean_label(text).upper() for text in _cell_texts(rows[ind])}
         if labels.issuperset(SUMMARY_HEADER_LABELS):
             return ind
     return len(rows)
@@ -586,7 +619,7 @@ def classify_row(row: Tag, layout: UCSBLayout) -> RowKind:
         return RowKind.STATUS
 
     label = _clean_label(texts[0]) if texts else ""
-    if label in TOTALS_LABELS:
+    if label.upper() in TOTALS_LABELS:
         return RowKind.TOTALS
 
     if len(texts) == layout.data_width and _parse_int(texts[1]) is not None:
@@ -707,16 +740,27 @@ def _assert_sums_reconcile(parsed: ParsedUCSBYear) -> None:
         )
 
     for ind, total_cell in enumerate(totals["cells"]):
-        if total_cell["votes"] is None:
-            continue
+        name = parsed["candidates"][ind]["name"]
         column = sum(
             cell["votes"] or 0
             for row in parsed["state_rows"]
             for cell in row["cells"]
             if cell["col_ind"] == total_cell["col_ind"]
         )
+        if total_cell["votes"] is None:
+            # An absent totals cell is only consistent with a candidate who polled
+            # nowhere. Skipping the column outright — as this used to — conflates
+            # "nothing to check" with "checked and fine", and silently exempts an
+            # entire candidate from the sum validator. Verified: no year in the
+            # corpus has an absent totals cell, so this can only fire on new markup.
+            if column:
+                raise UCSBParseError(
+                    f"{parsed['year']}: column {total_cell['col_ind']} ({name}) has no "
+                    f"totals value, but its state rows sum to {column:,} — the totals "
+                    f"row and the data disagree about whether this candidate ran"
+                )
+            continue
         if column != total_cell["votes"]:
-            name = parsed["candidates"][ind]["name"]
             raise UCSBParseError(
                 f"{parsed['year']}: column {total_cell['col_ind']} ({name}) sums to "
                 f"{column:,}, totals row says {total_cell['votes']:,}"
@@ -764,11 +808,53 @@ def _assert_percent_consistent(parsed: ParsedUCSBYear) -> None:
                         f"{cell['votes']:,}/{total:,} = {computed:.1f}%, "
                         f"page publishes {cell['percent']}%"
                     )
-    if compared and mismatched / compared > PERCENT_MISMATCH_RATE:
+    if not compared:
+        # No comparable cell means this detector did not run at all. Since it is the
+        # only cheap check for a column-window shift, passing silently here would
+        # quietly downgrade the guarantee the docstring above advertises — so a year
+        # with votes but no readable percents is itself the error. (All 51 corpus
+        # years compare every populated cell, so this fires only on format drift.)
+        if any(
+            cell["votes"] is not None
+            for row in parsed["state_rows"]
+            for cell in row["cells"]
+        ):
+            raise UCSBParseError(
+                f"{parsed['year']}: no percent cell could be read, so the "
+                f"column-alignment cross-check could not run; the percent column's "
+                f"format has probably changed"
+            )
+        return
+
+    if mismatched / compared > PERCENT_MISMATCH_RATE:
         raise UCSBParseError(
             f"{parsed['year']}: {mismatched}/{compared} cells disagree with their "
             f"published percent — the column window is probably misaligned "
             f"(first: {worst})"
+        )
+
+
+def _assert_one_status_per_state(parsed: ParsedUCSBYear) -> None:
+    """A state may be a popular-vote row or a legislature row, never both.
+
+    ``pv_state_status`` is keyed ``(source, year, state)``, so a state carrying both a
+    vote total and a ``legislature_chosen`` status hands #36 two irreconcilable facts
+    for one key. The contradiction originates here and is cheap to reject here, rather
+    than surfacing downstream as a merge conflict with no way back to the markup.
+    """
+    voting = [row["state_label"] for row in parsed["state_rows"]]
+    overlap = {row["state_label"] for row in parsed["status_rows"]}.intersection(voting)
+    if overlap:
+        raise UCSBParseError(
+            f"{parsed['year']}: {sorted(overlap)} appear as both popular-vote rows and "
+            f"legislature-chosen rows; a state cannot be in two statuses at once"
+        )
+
+    duplicates = {label for label in voting if voting.count(label) > 1}
+    if duplicates:
+        raise UCSBParseError(
+            f"{parsed['year']}: duplicate state rows for {sorted(duplicates)}; the "
+            f"state grain is one row per state"
         )
 
 
@@ -781,6 +867,7 @@ def validate_year(parsed: ParsedUCSBYear) -> None:
     """
     _assert_no_residual_cells(parsed)
     _assert_never_zero(parsed)
+    _assert_one_status_per_state(parsed)
     _assert_sums_reconcile(parsed)
     _assert_percent_consistent(parsed)
 

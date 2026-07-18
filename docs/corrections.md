@@ -1,5 +1,10 @@
 # Historical data corrections catalog
 
+Each ingest patches or tolerates a handful of real historical anomalies in its source
+data. The **Electoral College** catalog comes first, then the **UCSB popular-vote**
+catalog; each source's constants live in that source's own module, per the
+source-namespacing convention (D006/D015).
+
 The Electoral College pipeline patches a handful of real historical anomalies in the
 National Archives source data. Each is **hard-won correctness** — a value confirmed
 against the Archives' own Notes sections (or, for 2000, a direct email reply from the
@@ -30,6 +35,34 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
 | 1824 (era) | The Archives prints the early Democratic-Republican party inconsistently — "Democratic-Republican" (Jackson) vs. "D-R" (Adams) — for the same party, so one party would read under two labels and the "-" join delimiter would mis-split "D-R" into a spurious `party_2` | Normalize the label to "D-R" before aggregation, and join a candidate's distinct parties on `|` (never present in a party code) instead of "-" | `PARTY_CODE_FIXES`, `PARTY_JOIN` (in `_candidate_parties`) | [Archives 1824](https://www.archives.gov/electoral-college/1824) |
 | 1832 | Two of Maryland's electors did not vote, so Maryland cast 8 of its 10 allotted votes (Jackson 3, Clay 5); the national Totals row is likewise 286 of 288 | Record the 2-vote shortfall so `assert_row_votes_sum_to_total` adds it back; the allotment is preserved and the Totals shortfall is derived | `ELECTORAL_VOTE_SHORTFALLS` | [Archives 1832 Notes](https://www.archives.gov/electoral-college/1832) ("two electors from Maryland did not vote, making the total number of votes cast 286") |
 | 1824 | No candidate reached an Electoral College majority; Jackson led (99 EC votes) but the House elected John Quincy Adams (84), so the EC leader is *not* who took office | Mark the actual office-holder with `took_office=True` (Adams) while EC-winner stays derived from `president_electoral_rank == 1` (Jackson) — the two are kept distinct, not conflated | `CONTINGENT_OFFICE_HOLDERS` (applied by `_add_took_office`) | [Archives 1824 Notes](https://www.archives.gov/electoral-college/1824) |
+
+## UCSB popular-vote catalog
+
+Source-namespaced per D006/D015, exactly as MIT's reconciliations are: these anomalies
+are in the **UCSB** popular-vote source, so their constants live in
+[`src/usvote/ucsb/parse.py`](../src/usvote/ucsb/parse.py) rather than
+`transform.py`, and each is locked by a test in
+[`tests/unit/test_ucsb_parse.py`](../tests/unit/test_ucsb_parse.py).
+
+One difference from the EC catalog above is worth stating plainly: the EC corrections
+*rewrite* wrong values, whereas most UCSB entries are anomalies the parser must
+**tolerate without correcting** — UCSB is not the source of truth for anything the
+Electoral College spine already carries (D006), so a wrong percent is recorded and
+worked around, never silently "fixed" into a number UCSB never published.
+
+| Year(s) | Anomaly | Handling | `ucsb/parse.py` constant | Source / provenance |
+|---|---|---|---|---|
+| 1836 | Rhode Island's third candidate cell is a single `-` (one hyphen), where every other year spells "not on the ballot" as `--`. A literal `"--"` test reads it as an unparseable vote and raises. | Model the absence token as a **set**, not a literal, so both spellings parse to `None` — never to `0` (D024 §2) | `ABSENT_VOTE_TOKENS` | UCSB [1836](https://www.presidency.ucsb.edu/statistics/elections/1836); `-` appears in exactly this one cell corpus-wide |
+| 1860 | Vermont publishes `4.16` as the percent for **two different** candidates (8,748 and 1,859 votes); 8,748/44,712 is 19.6%. The columns are provably aligned — the row's four candidates sum to exactly its 44,712 TOTAL VOTE — so this is a duplicated cell in the source. | Tolerated. The percent cross-check asserts on the **mismatch rate**, not per cell, so isolated source typos do not fail the year while a systematic column shift still does | `PERCENT_MISMATCH_RATE` (used by `_assert_percent_consistent`) | UCSB [1860](https://www.presidency.ucsb.edu/statistics/elections/1860) |
+| 1968 | Utah publishes `31.1` where 156,665/422,568 is 37.1 — transposed digits. That row's candidates also reconcile against its total. | Tolerated, as above | `PERCENT_MISMATCH_RATE` | UCSB [1968](https://www.presidency.ucsb.edu/statistics/elections/1968) |
+| 1872 | Kentucky's published percents sum to exactly 100.0 (45.5 / 54.5) while its votes leave a 2,374-vote residual, so UCSB computed them against a different denominator than the printed TOTAL VOTE. | Tolerated, as above | `PERCENT_MISMATCH_RATE` | UCSB [1872](https://www.presidency.ucsb.edu/statistics/elections/1872) |
+| 1864, 1944 | The totals row is labelled singular `Total`, not `Totals`. A `== "Totals"` test drops the row, leaves `totals=None`, and silently no-ops the sum validator. | Match against a set of labels, case-insensitively | `TOTALS_LABELS` | UCSB [1864](https://www.presidency.ucsb.edu/statistics/elections/1864), [1944](https://www.presidency.ucsb.edu/statistics/elections/1944) |
+| 1940 | The state-column header is plural `STATES`, not `STATE` — and `select_results_table` keys on exactly that cell, so a singular-only test finds no results table and the year reads as having no popular vote. | Match against a set of labels, case-insensitively | `STATE_HEADER_LABELS` | UCSB [1940](https://www.presidency.ucsb.edu/statistics/elections/1940) |
+
+Structural (rather than per-year) UCSB format quirks — the six header layouts, the
+trailing summary blocks, 1976's narrower header — are **not** data corrections and are
+catalogued instead in [`ucsb-html-formats.md`](ucsb-html-formats.md) §9, with the
+reasoning that produced each rule.
 
 ## Notes
 

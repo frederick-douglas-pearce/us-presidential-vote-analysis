@@ -44,6 +44,31 @@ MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 # fusion-aggregation-before-filter and the D019 {DEMOCRAT, REPUBLICAN} scope.
 MIT_FUSION_SAMPLE_CSV = FIXTURES_DIR / "mit_fusion_sample.csv"
 
+# The synthetic UCSB fixtures that carry a state table, mapped to the year each is
+# parsed as and the header layout it pins. Excludes the L0 (summary-only) fixture,
+# which by design has no popular-vote grid.
+#
+# Single source of truth on purpose: test_ucsb_parse.py (layout, absence, and sum
+# assertions) and test_ucsb_fixtures.py (the fixture-realism identity) each held their
+# own copy, so adding a fixture to one and not the other silently shrank coverage with
+# nothing failing — the same "a fixture bug and a parser bug look identical" trap the
+# #34 integrity suite exists to close.
+UCSB_PV_FIXTURES: dict[str, tuple[int, str]] = {
+    "2group": (1876, "L1"),
+    "4group": (1824, "L1"),
+    "nocolspan": (1836, "L1b"),
+    "dashdash": (1948, "L2"),
+    "missing_states": (1864, "L1"),
+    "inline_cd": (2020, "L3"),
+    "1976": (1976, "L1c"),
+}
+
+
+def ucsb_fixture_html(stem: str) -> str:
+    """Read a synthetic UCSB fixture by its stem (e.g. ``"dashdash"``)."""
+    return (FIXTURES_DIR / f"ucsb_synthetic_{stem}.html").read_text(encoding="utf-8")
+
+
 # The valid US state names Table 2 rows are matched against — the package
 # equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
 # the parse tests (the state-name filter) and the transform tests (the geo
