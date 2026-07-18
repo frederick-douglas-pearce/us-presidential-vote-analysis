@@ -192,6 +192,11 @@ decision or research task later.
    not an MVP blocker (D010, D011).
 5. **PV data quality pre-1824.** How far back a *meaningful* comparison is honest, given
    states that chose electors by legislature. MVP may start the comparison at 1824 (D009).
-6. **Shared PV record schema.** MIT (E5) and UCSB (E4) must share one PV record shape
-   (provenance / reliability / `source` / `redistributable` columns). E4 defines a minimal
-   schema MIT can conform to; confirm before E5/E6 scoping.
+6. ~~**Shared PV record schema.**~~ **RESOLVED (D018/D021)** — and resolved with its premise
+   reversed. This question assumed E4 (UCSB) would define a minimal schema MIT could conform to.
+   In the event **MIT landed first**: D018 settled the shared PV record shape and D021 finalized
+   and shipped the `dwh.pv_votes` DDL, with `candidate_votes`/`state_total_votes` **NOT NULL**
+   enforced for every source at the shared write boundary. **UCSB conforms to that table
+   as-shipped and does not redefine it.** UCSB's one genuinely un-shared need — popular-vote
+   *absence*, which has no MIT analogue post-1976 — is met by a **sibling** table
+   (`dwh.pv_state_status`) rather than by amending the shared fact, per **D024**.
