@@ -910,3 +910,137 @@ land on "no UCSB bytes in the repo"); **D015** (the `usvote/ucsb/` namespacing t
   skip-if-already-have, the 403/429 halt, and config resolution — **against injected fakes, no
   live network in CI** (a test run must never re-fetch the snapshot).
 - **No UCSB HTML is committed** by this port (D022) — only the code that can re-fetch it.
+
+---
+
+## D024: PV absence is modeled at its own grain — a `pv_state_status` roster, never a null vote
+
+**Date:** 2026-07-18
+**Context:** A survey of all 60 real UCSB year pages (see
+[`docs/ucsb-html-formats.md`](../../docs/ucsb-html-formats.md)) established that **no year fails
+to parse**. E4-S2's acceptance criterion "era-specific format variations are handled (or
+explicitly flagged where a year cannot be parsed cleanly)" was written expecting year-level parse
+failures; there are none. What actually needs flagging is **popular-vote absence at the record
+level**, in four structurally distinct cases:
+
+1. **State chose electors by legislature** — no popular vote was ever held. 18 rows across 12
+   years (1824 DE/GA/LA/NY/SC/VT; 1828 DE/SC; 1832–1860 SC each cycle; 1868 FL; 1876 CO). Markup
+   is a 2-cell row whose second cell has `colspan = width-1`, carrying verbatim prose such as
+   *"3 electors chosen by state legislature and awarded to Rutherford B. Hayes"* or, for 1824
+   New York, *"…: 2 for Crawford; 1 for Adams"* — i.e. the prose sometimes records a **split
+   elector allocation**.
+2. **State did not participate at all** — the row is simply **absent, with no markup whatsoever**.
+   1864 (11 Confederate states), 1868 (3 states). Only a prose footnote elsewhere on the page
+   attests to it.
+3. **Candidate not on that state's ballot, pre-1852** — the Votes cell is a lone `U+00A0`.
+4. **Candidate not on that state's ballot, 1852+** — the Votes cell is `--`.
+
+Crucially: **a literal `0` never appears in a state-row vote column anywhere in the corpus.**
+"Zero popular votes" is never encoded, so absence must never be modeled as zero.
+
+Two prior decisions constrain the answer. **D021** shipped `dwh.pv_votes` with
+`candidate_votes`/`state_total_votes` **NOT NULL**, enforced for *every* source by
+`usvote.pv.schema.REQUIRED_NON_NULL`; and its action item states that UCSB (#37) **conforms to the
+table as-shipped and does not redefine it**. **D018** already settled that a source lacking a
+(year, state, candidate) value yields an **absent row, never a zero-filled placeholder**.
+
+**Decision:** Model PV absence **at the grain at which each case actually occurs**, adding a
+sibling table rather than amending the shared PV fact.
+
+1. **`dwh.pv_votes` is untouched.** No `ALTER`, no nullable `candidate_votes`, no weakened
+   `assert_pv_shape`. The "null vote + reason enum" design is **rejected**: it would relax a
+   shipped constraint for both sources to describe a UCSB-only phenomenon, and it denormalizes a
+   (year, state) fact onto N candidate rows with nothing keeping the copies consistent.
+2. **Cases 3–4 produce no row**, per D018's existing absent-row policy. Both the pre-1852 `U+00A0`
+   and the 1852+ `--` normalize to one internal parser sentinel — the era difference is a parsing
+   detail, not a data attribute.
+3. **Cases 1–2 land in a new sibling table `dwh.pv_state_status`**, grain `(source, year, state)`,
+   with columns `pv_status` (CHECK-constrained), `note` (nullable text), and `source`. It is a
+   **complete roster — one row per state in that year's election, including ordinary ones** — not
+   an exceptions table. This is what makes absence detectable at all: an exceptions-only table
+   cannot distinguish "no exception" from "we never looked."
+4. **`pv_status` has exactly three values:** **`popular_vote`** (held and recorded in `pv_votes`),
+   **`legislature_chosen`** (case 1), **`not_participating`** (case 2). Deliberately absent: any
+   value for cases 3–4 (they are one fact, not two); a secession/unreconstructed split (the enum
+   encodes the data-modeling consequence, not the historical cause — cause goes in `note`); and
+   any `unknown`/`unparsed` bucket — **anything the parser cannot classify raises**, because an
+   `unknown` slot is where parse failures go to die quietly.
+5. **The verbatim legislature prose is preserved unparsed** in `note`. Elector counts and the 1824
+   NY split allocation are **not** extracted into structured columns: doing so would create a
+   **second source of electoral-vote truth**, contrary to D006 — the same ruling D018 made for
+   `party` ("must not become a second source of party truth"). Nothing is lost, because the EC
+   `votes` fact already carries per-state per-candidate electoral votes from the authoritative
+   source. Only the **structural** cross-check is automated (every `legislature_chosen`
+   (year, state) has ≥1 EC `votes` row); textual name-matching against the prose is a one-time
+   manual audit recorded in `docs/`, not a test.
+6. **The roster is assembled from the EC spine plus a named constant — never from UCSB markup.**
+   The participating-state roster for year Y is the distinct states in the EC `votes` fact (D006
+   makes EC authoritative on participation; costs no new reference data). Case 2 comes from
+   `UCSB_NONPARTICIPATING_STATES` in `usvote/ucsb/transform.py` — 14 entries, each with its cause
+   — following the established anomaly pattern (constant + test + `docs/corrections.md` row). A
+   general statehood-admission roster is **rejected**: it needs reference data the repo lacks (the
+   `state` dim is TIGER geography, no admission dates) for a set that is **historically closed**
+   and can never grow.
+7. **The silent-drop guard is a two-way tested assert**, and is the roster's primary purpose:
+   every `popular_vote` roster state has **≥1** `pv_votes` row; every absence-status state has
+   **exactly 0**; and every `pv_votes` (year, state) is **in** the roster. The third check is what
+   catches a phantom or dropped state that a sum validator cannot see. A **within-page** guard
+   complements it: per (year, state), `numeric_cells + not_on_ballot_cells ==
+   candidate_column_count` with **no residual**.
+8. **`pv_coverage`** — the share of a year's **electoral votes** cast by `popular_vote` states —
+   is the honest qualifier on partial-coverage years (see the D009 note below). Weighted by
+   electoral votes, not state count, because EV is the analytically relevant weight and is already
+   loaded.
+
+**Licensing consequence (extends D022/D016):** the `note` column holds **verbatim UCSB text** and
+is therefore `redistributable=false` content — it must be excluded from any public API surface and
+must never appear in a committed fixture. The `pv_status` enum is a bare historical fact and
+carries no such restriction. Same distinction D022 drew for fixtures, surfacing in a new place.
+
+**Consequence for D009 (strengthens, does not change):** the ~1824 comparison start **stands**. For
+a legislature-chosen state the national PV is **not an incomplete measurement of the national
+electorate — it is a complete measurement of a smaller one**; those voters never voted, so there
+is no missing value to impute and any "adjusted" national PV would be fabrication (D005).
+Partial-coverage years therefore remain usable in an EC-vs-PV comparison, reported as *"PV among
+states that held one"*, with `pv_coverage` surfaced and a **mandatory caveat wherever a year with
+`pv_coverage < 100%` is displayed**. **No exclusion threshold** is set — an arbitrary cutoff would
+hide exactly the years the project exists to illuminate. This is grounds to move D009 from
+"mutually-agreed pending" toward settled: D009 named E3/E4's data work as the confirmation point,
+and that work has now confirmed it *with a mechanism attached*.
+
+**Rationale:**
+- **Grain drives structure.** Cases 1–2 assert "this election had no popular-vote event in this
+  state" — true independent of any candidate. Expressing it as a candidate-level null is a
+  category error that happens to fit in the column.
+- **Absence never enters the fact table**, so the corpus finding that `0` is never encoded is
+  honored structurally: there is no cell that could be mistakenly zero-filled.
+- **A complete roster is the only shape that makes case 2 representable at all** (it has no
+  markup) and simultaneously supplies the expected-state roster the silent-drop guard needs — one
+  mechanism, two jobs.
+- **MIT is not taxed.** Cases 1–2 cannot occur in 1976–2024, and the design imposes no
+  shared-shape change; MIT's roster rows are a mechanical `INSERT … SELECT DISTINCT` over
+  already-loaded rows.
+
+**Known trade-off (recorded):** modeling cases 3–4 as no-row loses the distinction between
+"attested not on ballot" and "absent from our data." Accepted because D007 scopes candidates to
+EC-getters, for whom "no row" and "zero votes" are arithmetically identical in every flip and
+margin computation. **Revisit trigger:** if the explorer wants "appeared on the ballot in N
+states" as a narrative statistic, cases 3–4 need their own table.
+
+**Related:** **D021** (the shipped `dwh.pv_votes` DDL this conforms to rather than amends);
+**D018** (absent-row-not-zero-fill, and the "no second source of truth" ruling reapplied here);
+**D006** (EC as the source of truth for electoral votes and participation); **D005** (no
+fabricated values); **D009** (the ~1824 window, strengthened via `pv_coverage`); **D022**/**D016**
+(the redistributability line the `note` column falls on).
+
+**Action required:**
+- **#35 (E4-S2)** — parser emits, per (year, state), a classified status + the verbatim note, and
+  **raises** on any unclassifiable cell; the no-residual cell-count assert is a tested function.
+- **#36 (E4-S3)** — builds the roster from the EC spine + `UCSB_NONPARTICIPATING_STATES`; the
+  two-way roster/fact assert is a tested function; `docs/corrections.md` gains the case-2 rows.
+- **#37 (E4-S4)** — creates `dwh.pv_state_status` and loads UCSB rows; `dwh.pv_votes` is used
+  as-shipped (D021).
+- **E6** — a small MIT roster-backfill story (derived, not a reopening of #65/#66); `pv_coverage`
+  is defined alongside the D017 views; the `note` column is excluded from the public surface.
+- **ROADMAP Open Question 6 ("Shared PV record schema") is closed** — resolved by D018/D021, which
+  reversed its premise: MIT landed first and defined the shape; UCSB conforms.

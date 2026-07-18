@@ -1032,9 +1032,20 @@ harder than the MIT CSV.
 ### Acceptance Criteria
 
 - Given a snapshotted UCSB year page, parsing yields per-(year, state, candidate) records with candidate votes and state totals
-- Era-specific format variations are handled (or explicitly flagged where a year cannot be parsed cleanly)
+- Era-specific format variations are handled; all 60 year pages parse (no year-level parse
+  failures exist in the corpus — see [`docs/ucsb-html-formats.md`](../../docs/ucsb-html-formats.md)).
+  What is flagged is **popular-vote absence at the record level**, per D024
 - Unit tests cover at least one page per distinct era format, against saved **synthetic** fixtures (D022) — no network
 - Parsing failures/ambiguities are surfaced loudly (not silently dropped), feeding the provenance/reliability flags in E4-S3
+- Per (year, state), the parser emits a **status classification** — `popular_vote`,
+  `legislature_chosen`, or `not_participating` — plus the **verbatim note text** for
+  legislature-chosen rows, preserved unparsed (D024). Elector counts and split allocations in that
+  prose are **not** extracted into structured fields (D006: EC is the source of truth for
+  electoral votes)
+- Absence is **never** emitted as `0`. Both the pre-1852 `U+00A0` and the 1852+ `--`
+  not-on-ballot cells normalize to one internal sentinel and yield **no record**. Per
+  (year, state), `numeric_cells + not_on_ballot_cells == candidate_column_count` with **no
+  residual** — any cell that is neither a parseable number nor a recognized sentinel **raises** (D024)
 
 ### Implementation Notes
 
@@ -1043,6 +1054,11 @@ harder than the MIT CSV.
 - Per D022 the committed fixtures are **synthetic** (structure real, numbers fabricated); the
   **real 60-year external snapshot** at `~/Documents/Projects/data/presidential_vote_analysis/ucsb_raw/`
   is the development corpus and the acceptance check the fixtures alone cannot provide
+- [`docs/ucsb-html-formats.md`](../../docs/ucsb-html-formats.md) is the corpus survey that drives
+  this story: the six header layouts and their detection signals, the uniform `2 + 3g` data-row
+  grammar (one body parser suffices — branch on detected header shape, **never** on year, since
+  1936/1964/1972/1976/1984/1988 break chronological ordering), the four absence cases with markup,
+  16 ranked parsing risks, the eight fixture representatives, and a proposed function decomposition
 
 ### Dependencies
 
@@ -1067,14 +1083,31 @@ unreliable or missing PV rather than hiding it — is a product feature.
 
 - Parsed UCSB data becomes state-level PV records (candidate votes + state total per year/state)
 - Each record carries provenance (`source=UCSB`) and a reliability flag; unreliable or estimated values are marked, not silently accepted
-- Where UCSB PV is unavailable for a year/state, it is represented as an explicit gap (no fabricated values), per D005
+- Where UCSB PV is unavailable, absence is modeled **at its own grain** per D024 — never as a
+  null or zero vote in `dwh.pv_votes`. State-level absence (legislature-chosen, non-participating)
+  becomes a `dwh.pv_state_status` row; candidate-level absence (not on ballot) becomes **no row**.
+  No fabricated values, per D005
+- `dwh.pv_state_status` is populated as a **complete roster** — one row per (source, year, state)
+  for every state in that year's election, including `popular_vote` states — assembled from the
+  **EC spine** (participating states) plus the provenance-carrying constant
+  `UCSB_NONPARTICIPATING_STATES` (1864, 1868), which also gains a `docs/corrections.md` row
+- The **two-way roster assert** is an automated test: every `popular_vote` state has ≥1
+  `pv_votes` row; every absence-status state has exactly 0; every `pv_votes` (year, state) is in
+  the roster. This is the guard against the inner-join silent-drop hazard, which sum validators
+  cannot detect
 - Validation checks (grain, and totals reconciliation where possible) run as automated tests
 - Redistributability is captured as a per-record/per-source attribute (`redistributable=false` for UCSB pending a license answer) — set here or at load (E4-S4), documented either way
 
 ### Implementation Notes
 
 - Mirror the EC transform/validate intent (E2-S3): load-bearing validations become real tested functions
-- Provenance / reliability / `redistributable` are first-class attributes per D014 — coordinate the exact column set with the MIT-ingestion design (E5) so both sources share one PV record shape
+- Provenance / reliability / `redistributable` are first-class attributes per D014. The shared PV
+  record shape is **already settled** — D018/D021 shipped `dwh.pv_votes` (MIT landed first and
+  defined it), so this story **conforms to the table as-shipped and does not redefine it**. What
+  E4 adds is the sibling `dwh.pv_state_status` roster (D024), not a change to the fact table
+- The `note` column holds **verbatim UCSB text** and is therefore `redistributable=false` content
+  (D024, extending D022/D016) — exclude it from any public API surface, and never let it appear in
+  a committed fixture. The `pv_status` enum is a bare historical fact and carries no such restriction
 
 ### Dependencies
 
