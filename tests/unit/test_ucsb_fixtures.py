@@ -18,6 +18,19 @@ The small extractor below is deliberately ad hoc — just enough to read the gri
 preview of the real parser. It reads the state-block header to discover the candidate
 count and names (never assuming a fixed width), which is also why the same test covers
 both the 2- and 4-candidate-group eras.
+
+**It stays frozen against the two fixtures it was written for.** #35 added six more
+(L1b/L1c/L2/L3/L0), and the extractor cannot read them: its ``find_next_sibling``
+name-row lookup assumes L1's stacked header, and the legislature assertion below
+assumes every fixture has a legislature-chosen state — true of these two, false of
+five of the six new ones. Growing it to cope would turn a throwaway grid reader into a
+second, untested parser shadowing the real one.
+
+So the new fixtures are held to the same identities by :mod:`tests.unit.test_ucsb_parse`
+using the **real** parser instead. Identities (1) and (2) are enforced there by
+``validate_year`` on every parse; identity (3) is checked for all seven popular-vote
+fixtures by ``TestFixtureRealism`` at the bottom of this file, which is the one
+fixture-realism property the parser has no reason to assert.
 """
 
 from __future__ import annotations
@@ -30,10 +43,25 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from tests._helpers import FIXTURES_DIR
+from usvote.ucsb.parse import parse_election_year
 
+# The two #34 fixtures the ad-hoc extractor was written for; see the module docstring
+# on why it is not extended to the rest.
 FIXTURES = {
     "2group": FIXTURES_DIR / "ucsb_synthetic_2group.html",
     "4group": FIXTURES_DIR / "ucsb_synthetic_4group.html",
+}
+
+# Every fixture with a state table, and the year to parse it as. Excludes the L0
+# (summary-only) fixture, which by design has no popular-vote grid at all.
+PV_FIXTURES = {
+    "2group": (1876, "L1"),
+    "4group": (1824, "L1"),
+    "nocolspan": (1836, "L1b"),
+    "dashdash": (1948, "L2"),
+    "missing_states": (1864, "L1"),
+    "inline_cd": (2020, "L3"),
+    "1976": (1976, "L1c"),
 }
 
 
@@ -219,5 +247,31 @@ class TestStructuralCoverage:
     def test_no_fixture_ships_real_ucsb_bytes(self) -> None:
         # D022: the tell would be real presidency.ucsb.edu asset URLs; the synthetics
         # use example.invalid. A cheap guard against a real page being pasted in later.
-        for path in FIXTURES.values():
+        # Globs rather than iterating FIXTURES so fixtures added later are covered
+        # automatically — a hygiene check that can be outgrown is worse than none.
+        for path in FIXTURES_DIR.glob("ucsb_synthetic_*.html"):
             assert "presidency.ucsb.edu" not in path.read_text(encoding="utf-8")
+
+
+class TestFixtureRealism:
+    """Identity (3) across all seven popular-vote fixtures, via the real parser.
+
+    The columned candidates are never the whole ballot — real UCSB pages carry a
+    residual "other" vote — so per state, TOTAL VOTE must strictly exceed the sum of
+    the shown candidates. This is the one identity the parser has no business
+    asserting (a year where they summed exactly would be legitimate data, not a parse
+    error), yet a fixture that got it wrong would quietly license a wrong assumption
+    downstream: that within-row votes can be used as the state total.
+    """
+
+    @pytest.mark.parametrize("stem", list(PV_FIXTURES))
+    def test_total_vote_exceeds_the_shown_candidates(self, stem: str) -> None:
+        year, _ = PV_FIXTURES[stem]
+        parsed = parse_election_year(
+            (FIXTURES_DIR / f"ucsb_synthetic_{stem}.html").read_text(encoding="utf-8"),
+            year,
+        )
+        assert parsed is not None
+        for row in parsed["state_rows"]:
+            shown = sum(cell["votes"] or 0 for cell in row["cells"])
+            assert row["state_total_votes"] > shown, (stem, row["state_label"])

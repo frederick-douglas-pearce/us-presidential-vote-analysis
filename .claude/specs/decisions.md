@@ -1036,6 +1036,14 @@ fabricated values); **D009** (the ~1824 window, strengthened via `pv_coverage`);
 **Action required:**
 - **#35 (E4-S2)** — parser emits, per (year, state), a classified status + the verbatim note, and
   **raises** on any unclassifiable cell; the no-residual cell-count assert is a tested function.
+  - *Clarified 2026-07-18 during the #35 architect review (story boundary only — no part of this
+    decision changes).* The parser emits **only `legislature_chosen`**, the sole status readable
+    from markup (§4 case 1). `not_participating` has no markup at all (§4 case 2) and
+    `popular_vote` is the roster's residual, so **both are assigned in #36**, which per §6 owns the
+    only legitimate roster inputs — the EC spine and `UCSB_NONPARTICIPATING_STATES`. §6 forbids
+    deriving participation from UCSB markup, so #35's original three-status AC was unsatisfiable as
+    written. The parser retains the §7 **within-page** no-residual guard and §4's raise-on-
+    unclassifiable rule; the cross-page two-way roster assert stays in #36 per §7.
 - **#36 (E4-S3)** — builds the roster from the EC spine + `UCSB_NONPARTICIPATING_STATES`; the
   two-way roster/fact assert is a tested function; `docs/corrections.md` gains the case-2 rows.
 - **#37 (E4-S4)** — creates `dwh.pv_state_status` and loads UCSB rows; `dwh.pv_votes` is used
