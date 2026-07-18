@@ -57,6 +57,8 @@ class Grid:
     data_ev: dict[str, list[int]] = field(default_factory=dict)
     state_totals: list[int] = field(default_factory=list)
     state_shown_sums: list[int] = field(default_factory=list)
+    pv_states: list[str] = field(default_factory=list)  # states with a popular vote
+    legislature_states: list[str] = field(default_factory=list)  # no-PV, flagged rows
     legislature_awards: list[list[tuple[int, str]]] = field(default_factory=list)
 
 
@@ -112,6 +114,7 @@ def _parse_grid(html: str) -> Grid:
         # prose opens with the elector count. The leading-digit test distinguishes it
         # from the candidate-name header row, also two cells with a colspan.
         if len(tds) == 2 and tds[1].get("colspan") and re.match(r"\s*\d", cells[1]):
+            grid.legislature_states.append(cells[0])
             grid.legislature_awards.append(_parse_legislature_prose(cells[1]))
             continue
 
@@ -128,6 +131,7 @@ def _parse_grid(html: str) -> Grid:
             grid.totals = {"TOTAL": total, **votes}
             grid.totals_ev = evs
         else:
+            grid.pv_states.append(cells[0])
             grid.state_totals.append(total)
             grid.state_shown_sums.append(sum(votes.values()))
             for c in candidates:
@@ -170,13 +174,24 @@ class TestAggregationIdentities:
             expected = sum(grid.data_ev[candidate]) + legislature_ev[candidate]
             assert expected == grid.totals_ev[candidate], candidate
 
-    def test_legislature_states_contribute_no_popular_vote(self, grid: Grid) -> None:
-        # The flip side of (4): the PV columns already reconcile (identity 1) WITHOUT
-        # the legislature states, i.e. those states are absent from the vote sums, not
-        # entered as zero rows. This is what "flagged, never zeroed" means numerically.
-        assert grid.legislature_awards  # both fixtures must exercise the case
-        pv_state_count = len(grid.state_totals)
-        assert pv_state_count + len(grid.legislature_awards) > pv_state_count
+    def test_legislature_states_are_flagged_and_never_zeroed(self, grid: Grid) -> None:
+        # The D005 property, and the flip side of identity (4). Two things must hold,
+        # and the earlier tautological version checked neither:
+        assert grid.legislature_states  # both fixtures must exercise the case
+
+        # (a) NEVER ZEROED: every legislature state carries a positive elector count in
+        #     its prose. A state coerced to zero -- or dropped -- would show up as an
+        #     award summing to 0 here.
+        for state, awards in zip(
+            grid.legislature_states, grid.legislature_awards, strict=True
+        ):
+            assert sum(count for count, _ in awards) > 0, state
+
+        # (b) NOT IN THE PV GRAIN: legislature states are absent from the popular-vote
+        #     rows entirely (identity 1 reconciles without them), not entered as
+        #     zero-vote data rows. If one had leaked into the data rows it would appear
+        #     in both lists.
+        assert set(grid.legislature_states).isdisjoint(grid.pv_states)
 
 
 class TestStructuralCoverage:

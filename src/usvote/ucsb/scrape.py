@@ -60,7 +60,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from usvote.ucsb.config import ucsb_html_dir_from_env
@@ -144,11 +144,18 @@ def fetch_url(url: str) -> FetchResult:
             status = getattr(response, "status", None) or response.getcode()
             return FetchResult(status, response.read())
     except HTTPError as exc:
-        # MUST precede the URLError branch: HTTPError subclasses URLError, so catching
-        # URLError first would swallow every error status -- including the 403/429 the
-        # halt depends on -- as a transport error, silently disarming it.
+        # MUST precede the OSError branch: HTTPError subclasses URLError subclasses
+        # OSError, so catching OSError first would swallow every error status --
+        # including the 403/429 the halt depends on -- as a transport error, silently
+        # disarming it.
         return FetchResult(exc.code, exc.read())
-    except URLError as exc:
+    except OSError as exc:
+        # Every non-HTTP failure: URLError (DNS, refused connection) raised during
+        # connect, but ALSO the bare OSError family raised during response.read() --
+        # a read timeout (socket.timeout is TimeoutError, an OSError sibling of
+        # URLError, so `except URLError` would miss it) or a connection reset
+        # mid-body. All mean "no usable response"; log and continue, never crash the
+        # run over one page.
         return FetchResult(None, b"", str(exc))
 
 
@@ -166,24 +173,49 @@ def enumerate_year_urls(index_html: str) -> list[tuple[str, str]]:
 
 
 def read_manifest(html_dir: str | Path) -> dict[str, Any]:
-    """Return the snapshot manifest, or an empty one if it does not exist yet."""
+    """Return the snapshot manifest, or an empty one if it does not exist yet.
+
+    Raises :class:`UCSBScrapeError` if the file exists but is not valid JSON, rather
+    than letting a bare ``JSONDecodeError`` abort the run — a corrupt manifest is a
+    recoverable, message-worthy state (see :func:`write_manifest` on why it should be
+    rare), not a stack trace.
+    """
     path = Path(html_dir) / MANIFEST_FILENAME
     if not path.exists():
         return {}
-    manifest: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        manifest: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise UCSBScrapeError(
+            f"The manifest at {path} is not valid JSON: {exc}. Inspect or remove it "
+            f"and re-run — note that removing it forces a full re-scrape, since the "
+            f"manifest is what records which pages are already saved."
+        ) from exc
     return manifest
 
 
 def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
-    """Write ``manifest`` to the snapshot directory, sorted and indented.
+    """Write ``manifest`` to the snapshot directory, sorted and indented, atomically.
 
     Sorted keys and indentation keep it diffable and human-readable — it is the
     snapshot's provenance record, not an internal cache file.
+
+    The write goes to a sibling temp file that is then atomically swapped into place
+    via :meth:`Path.replace` (an ``os.rename`` on the same filesystem). This matters
+    because the manifest is rewritten after *every* page precisely so an interrupted
+    run leaves an accurate record: a plain truncate-then-write would defeat that goal,
+    since a crash mid-write would leave a half-written file that the next
+    :func:`read_manifest` cannot parse. The swap guarantees the on-disk manifest is
+    always either the old complete version or the new complete version, never a partial
+    one.
     """
-    path = Path(html_dir) / MANIFEST_FILENAME
-    path.write_text(
+    directory = Path(html_dir)
+    path = directory / MANIFEST_FILENAME
+    tmp = directory / f"{MANIFEST_FILENAME}.tmp"
+    tmp.write_text(
         json.dumps(dict(manifest), indent=2, sort_keys=True), encoding="utf-8"
     )
+    tmp.replace(path)
 
 
 def snapshot_elections(

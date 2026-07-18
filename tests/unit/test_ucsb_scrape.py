@@ -112,6 +112,44 @@ class TestEnumerateYearUrls:
         assert scrape.enumerate_year_urls("<html><body>No links</body></html>") == []
 
 
+class TestManifestIO:
+    def test_missing_manifest_reads_as_empty(self, tmp_path: Path) -> None:
+        assert scrape.read_manifest(tmp_path) == {}
+
+    def test_write_then_read_round_trips(self, tmp_path: Path) -> None:
+        manifest = {"1824": {"http_status": 200, "bytes": 42}}
+        scrape.write_manifest(tmp_path, manifest)
+        assert scrape.read_manifest(tmp_path) == manifest
+
+    def test_write_leaves_no_temp_file_behind(self, tmp_path: Path) -> None:
+        scrape.write_manifest(tmp_path, {"1824": {"http_status": 200}})
+        # The atomic swap must consume its temp file, not litter the snapshot dir.
+        assert [p.name for p in tmp_path.iterdir()] == [scrape.MANIFEST_FILENAME]
+
+    def test_write_replaces_in_place_without_a_partial_state(
+        self, tmp_path: Path
+    ) -> None:
+        # The whole point of the temp-file swap: an existing manifest is only ever
+        # replaced by a complete new one. Overwriting a populated manifest still leaves
+        # exactly one valid file.
+        scrape.write_manifest(tmp_path, {"1824": {"http_status": 200}})
+        scrape.write_manifest(tmp_path, {"1824": {"http_status": 200}, "1876": {}})
+        assert scrape.read_manifest(tmp_path) == {
+            "1824": {"http_status": 200},
+            "1876": {},
+        }
+
+    def test_corrupt_manifest_raises_typed_error_not_a_bare_decode_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A truncated manifest (e.g. a kill mid-write on a pre-atomic build, or a bad
+        # manual edit) must fail with actionable guidance, not abort the run with a raw
+        # JSONDecodeError.
+        (tmp_path / scrape.MANIFEST_FILENAME).write_text('{"1824": {"http_stat')
+        with pytest.raises(scrape.UCSBScrapeError, match="not valid JSON"):
+            scrape.read_manifest(tmp_path)
+
+
 class TestSnapshotElections:
     def test_saves_every_page_and_writes_a_manifest(self, snapshot_dir: Path) -> None:
         manifest = scrape.snapshot_elections(
@@ -441,3 +479,27 @@ class TestFetchUrl:
         assert result.status is None
         assert result.body == b""
         assert "connection refused" in str(result.error)
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            TimeoutError("timed out"),  # socket.timeout during response.read()
+            ConnectionResetError("reset by peer"),  # dropped mid-body
+        ],
+    )
+    def test_read_phase_os_errors_are_caught_not_propagated(
+        self, monkeypatch: pytest.MonkeyPatch, exc: OSError
+    ) -> None:
+        # These fire during response.read(), outside urllib's URLError-wrapping, and
+        # are OSError siblings of URLError -- so an `except URLError` would let them
+        # crash the whole scrape mid-run. Over a 60-page live pass one slow or flaky
+        # page must degrade to a logged skip, never abort the run.
+        def fake_urlopen(request: Any, timeout: float) -> FakeResponse:
+            raise exc
+
+        monkeypatch.setattr(scrape, "urlopen", fake_urlopen)
+        result = scrape.fetch_url("https://example.test/1824")
+
+        assert result.status is None
+        assert result.body == b""
+        assert str(exc) in str(result.error)
