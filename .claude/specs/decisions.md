@@ -999,6 +999,30 @@ sibling table rather than amending the shared PV fact.
      so a naive `SELECT DISTINCT year, state` yields a NULL roster entry per year. The same filter
      applies to E6's MIT roster backfill, which §Rationale describes as a mechanical
      `INSERT … SELECT DISTINCT`.
+   - *Clarified 2026-07-19 during #36 implementation (the design is unchanged; its stated
+     justification was wrong).* §6 above says the roster is the EC spine "**plus**"
+     `UCSB_NONPARTICIPATING_STATES`, implying a non-participating state is *missing* from the spine
+     and the constant supplies its row. Measured against the real spine, it is not: the Archives
+     Table 2 carries rows for non-participating states with **`total_electoral_votes = 0`**, so
+     `dwh.votes` already yields the *complete* roster (1864: 36 states, against UCSB's 25 popular-
+     vote rows). **The constant therefore supplies the `pv_status`, not the roster row**, and the
+     union is retained as belt-and-braces rather than as the mechanism. This matters because a
+     future reader who measures the same thing has a live incentive to delete the constant from
+     roster assembly as dead code — which would silently lose the status assignment, leaving 1864's
+     eleven states classified `popular_vote` with zero facts.
+   - *Consequently, a structural cross-check is available and is now enforced* (§7-adjacent, the
+     generalization of §5's "every `legislature_chosen` (year, state) has ≥1 EC `votes` row"):
+     **(a)** every in-scope `UCSB_NONPARTICIPATING_STATES` entry must have
+     `total_electoral_votes = 0` in the spine, validating the constant against the authority; and
+     **(b)** no zero-EV roster state may be classified `popular_vote`. Verified exact corpus-wide —
+     the zero-EV roster states are precisely 1864's eleven, in every in-scope year, with no false
+     positives. (b) deliberately couples E4 to the Archives' rendering: a silent change in how
+     non-participating states are rendered would corrupt the roster invisibly, and surfacing that is
+     the roster's entire purpose, so its error message says plainly that the cause is an EC-spine
+     change rather than a UCSB one. **Do not "optimize" the roster by filtering to
+     `total_electoral_votes > 0`** — that drops exactly the states this design exists to represent.
+     For **#57**: whatever spine it builds for 1868 must render that year's three non-participating
+     states as zero-EV rows, or check (a) will fire.
 7. **The silent-drop guard is a two-way tested assert**, and is the roster's primary purpose:
    every `popular_vote` roster state has **≥1** `pv_votes` row; every absence-status state has
    **exactly 0**; and every `pv_votes` (year, state) is **in** the roster. The third check is what

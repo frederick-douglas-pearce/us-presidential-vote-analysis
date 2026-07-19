@@ -35,7 +35,16 @@ no reuse rights and this repo is public, so no UCSB bytes are committed and
 acceptance corpus for the UCSB parser and lives outside the tree; `TestRealCorpus` in
 `tests/unit/test_ucsb_parse.py` runs against it and **skips when `USVOTE_UCSB_HTML_DIR`
 is unset**, so CI stays green and never touches UCSB. Run it locally with that env var
-set — it is the only check that exercises all six header layouts against real markup.
+set — it is the only check that exercises all six header layouts against real markup, and
+(via `test_ucsb_transform.py`) the only one that runs the D024 two-way roster assert over
+all 49 in-scope years.
+
+One fixture runs the other way: `tests/fixtures/ec_state_roster_by_year.json` is a
+committed snapshot of the **Electoral College** participation roster (public-domain
+Archives data, so D022 does not apply), which lets the UCSB roster logic be tested offline
+against real 1824/1864/1876 shapes. It is **test input only** — a test asserts nothing
+under `src/` reads it, so it cannot become a second source of participation truth (D006) —
+and it deliberately carries no electoral-vote counts (D024 §5).
 
 ```
 uv sync                          # create the venv + install deps from pyproject.toml + uv.lock
@@ -82,6 +91,10 @@ The notebook is being migrated **incrementally** into an installable `usvote` pa
 The notebook's display/viz helpers (`make_map_usa`, `pprint_list_of_dicts`, `print_election_year_results`) are **not** part of this spine and stay in the notebook (the presentation layer is deferred per D001). Config (DB params, shapefile path) is externalized in E2-S6 (#31), not carried into the skeleton.
 
 **Source-namespacing convention.** The top-level `usvote/` modules are the **Electoral College / National Archives** pipeline — the source-of-truth spine (D006). The two popular-vote sources land as sibling subpackages, `usvote/ucsb/` (E4) and `usvote/mit/` (E5), each with its own scrape/parse/transform/load. EC stays flat by design; PV sources nest.
+
+Two shared, **source-neutral** modules sit between them, and the dependency always runs `source -> shared`, never source-to-source: `usvote/pv/` holds the contracts both PV sources conform to — `schema.py` (the D018 record shape + `dwh.pv_votes` DDL) and `status.py` (the D024 `pv_state_status` roster shape, the `pv_status` enum, and the two-way roster/fact assert). `usvote/years.py` holds the election-year domain constants (`ec_ingest_years`, `UNSUPPORTED_EC_YEARS`) and is deliberately dependency-free, so a pure transform can derive its year scope from the EC spine without importing the orchestrator (and its DB/network stack). `usvote/pipeline.py` re-exports those names.
+
+Because D006 makes EC authoritative, a PV source importing domain facts *from* the spine is expected (UCSB derives both its year scope and its state roster from it); what must never happen is the reverse.
 
 ### Data model (`dwh` schema)
 

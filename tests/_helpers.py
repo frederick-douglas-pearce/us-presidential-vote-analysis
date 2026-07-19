@@ -14,6 +14,8 @@ builds without a live Postgres; the EC and future ``usvote/ucsb`` /
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -67,6 +69,53 @@ UCSB_PV_FIXTURES: dict[str, tuple[int, str]] = {
 def ucsb_fixture_html(stem: str) -> str:
     """Read a synthetic UCSB fixture by its stem (e.g. ``"dashdash"``)."""
     return (FIXTURES_DIR / f"ucsb_synthetic_{stem}.html").read_text(encoding="utf-8")
+
+
+# A regenerable snapshot of the EC participation roster — ``{year: {"states": [...],
+# "zero_ev_states": [...]}}`` for every in-scope UCSB year — so the #36 two-way roster
+# assert can be exercised against REAL 1824/1864/1876 shapes offline. Unlike the UCSB
+# corpus this is National Archives data (public domain), so committing it is fine under
+# D022; and unlike ``UCSB_NONPARTICIPATING_STATES`` it is **test input only** — a test
+# asserts nothing under ``src/`` reads it, so it cannot become a second source of
+# participation truth (D006). Carries no electoral-vote *counts*, only the zero/non-zero
+# split the D024 §5 cross-check needs, for the same reason.
+EC_ROSTER_FIXTURE = FIXTURES_DIR / "ec_state_roster_by_year.json"
+
+
+def ec_participation_frame(years: Iterable[int] | None = None) -> pd.DataFrame:
+    """Build a ``dwh.votes``-shaped participation frame from the roster fixture.
+
+    Shaped like the frame :func:`usvote.transform.transform_parsed_years` returns and
+    like a ``SELECT`` of ``dwh.votes`` — including a **totals row per year** (``state``
+    NULL, ``is_total`` True), because excluding those is exactly what the roster
+    derivation must get right (D024 §6).
+
+    ``total_electoral_votes`` is synthesized as 0 for the fixture's zero-EV states and a
+    nonzero placeholder otherwise: only the zero/non-zero distinction is meaningful, and
+    committing real counts would edge toward a second source of EV truth (D024 §5).
+    """
+    entries = json.loads(EC_ROSTER_FIXTURE.read_text(encoding="utf-8"))["years"]
+    wanted = None if years is None else {int(y) for y in years}
+    rows: list[dict[str, Any]] = []
+    for raw_year, entry in entries.items():
+        year = int(raw_year)
+        if wanted is not None and year not in wanted:
+            continue
+        zero_ev = set(entry["zero_ev_states"])
+        for state in entry["states"]:
+            rows.append({
+                "year": year,
+                "state": state,
+                "is_total": False,
+                "total_electoral_votes": 0 if state in zero_ev else 5,
+            })
+        rows.append({
+            "year": year,
+            "state": None,
+            "is_total": True,
+            "total_electoral_votes": 99,
+        })
+    return pd.DataFrame(rows)
 
 
 # The valid US state names Table 2 rows are matched against — the package
