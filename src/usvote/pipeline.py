@@ -39,6 +39,14 @@ from usvote.years import (
 # because this module imports the DB and network stages, and :mod:`usvote.ucsb.
 # transform` — a pure offline transform — must derive its ingest scope from
 # :func:`ec_ingest_years` (D024 §6) without inheriting those dependencies.
+#
+# PATCH POINT: :mod:`usvote.years` is the *authoritative* home. ``ec_ingest_years``
+# reads ``usvote.years.UNSUPPORTED_EC_YEARS`` at call time, so a test (e.g. #57
+# simulating the Reconstruction-year gate being lifted) must patch it there —
+# ``monkeypatch.setattr(usvote.years, "UNSUPPORTED_EC_YEARS", ...)``. The names below
+# are by-value re-exports for import compatibility; rebinding
+# ``usvote.pipeline.UNSUPPORTED_EC_YEARS`` does **not** change what ``ec_ingest_years``
+# sees and would be a silently-passing no-op.
 __all__ = [
     "EC_SPINE_FLOOR",
     "LATEST_ELECTION_YEAR",

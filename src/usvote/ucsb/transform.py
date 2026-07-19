@@ -55,9 +55,10 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+import numpy as np
 import pandas as pd
 
-from usvote.pv.schema import SHARED_PV_COLUMNS
+from usvote.pv.schema import SHARED_PV_COLUMNS, assert_pv_shape
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -274,6 +275,7 @@ def transform_ucsb(
     canonical = [_canonicalize_state_labels(parsed) for parsed in scoped]
 
     roster_states = _build_ec_roster(ec_participation, in_scope)
+    _assert_roster_built_for_every_year(roster_states, in_scope)
     assert_no_status_contradictions(canonical, roster_states)
 
     pv_votes = _build_pv_votes(canonical)
@@ -308,6 +310,18 @@ def _scope_years(
     roster of ``popular_vote`` states with zero facts, which the two-way assert reports
     as ~40 mismatched states — the right failure for the wrong reason.
     """
+    seen = [parsed["year"] for parsed in parsed_years]
+    duplicates = sorted({year for year in seen if seen.count(year) > 1})
+    if duplicates:
+        # A dict keyed on year would silently keep the last record per year, dropping
+        # the first year's states — a silent drop in the stage built to prevent them.
+        # The two-way assert catches the *consequence* but reports it as an unreconciled
+        # label, pointing at the wrong cause. Name it here instead.
+        raise UCSBTransformError(
+            f"more than one parsed UCSB page for year(s) {duplicates}; the grain is "
+            f"one page per election year. A batched caller passed duplicates, or two "
+            f"pages parsed to the same `year`."
+        )
     by_year = {parsed["year"]: parsed for parsed in parsed_years}
     missing = sorted(in_scope - set(by_year))
     if missing:
@@ -323,24 +337,22 @@ def _scope_years(
 def _canonicalize_state_labels(parsed: ParsedUCSBYear) -> ParsedUCSBYear:
     """Rewrite every verbatim UCSB state label onto the canonical ``dwh.state`` PK.
 
-    Applies to state rows, CD rows and status rows alike — a status row keyed on a
-    verbatim label would miss its roster state just as surely as a vote row would.
-    Raises if any label is unmapped: an unmapped label would become a phantom state in
-    the two-way assert, and (via ``pv_votes.state``'s FK) could not load at all.
+    Applies to state rows and status rows — a status row keyed on a verbatim label
+    would miss its roster state just as surely as a vote row would. Raises if any label
+    is unmapped: an unmapped label would become a phantom state in the two-way assert,
+    and (via ``pv_votes.state``'s FK) could not load at all.
+
+    CD rows are **not** rewritten: :func:`_build_pv_votes` drops them wholesale (their
+    votes partition the parent state's), so nothing downstream reads their labels.
+    Their parent labels are still validated for coverage —
+    :func:`_assert_label_coverage` checks them, catching label drift on a split-EV
+    state — they are just not carried canonicalized into output nothing consumes.
     """
     _assert_label_coverage(parsed)
     fix = UCSB_STATE_RECONCILIATIONS.__getitem__
     out = dict(parsed)
     out["state_rows"] = [
         {**row, "state_label": fix(row["state_label"])} for row in parsed["state_rows"]
-    ]
-    out["cd_rows"] = [
-        {
-            **row,
-            "state_label": row["state_label"],  # CD sub-rows are "CD-1", not states
-            "parent_state_label": fix(row["parent_state_label"]),
-        }
-        for row in parsed["cd_rows"]
     ]
     out["status_rows"] = [
         {**row, "state_label": fix(row["state_label"])} for row in parsed["status_rows"]
@@ -372,11 +384,47 @@ def _build_ec_roster(
         & frame["state"].notna()
         & frame["year"].isin(in_scope)
     ]
+    # `total_electoral_votes` feeds ``int(max_ev)`` below and the EV cross-check. A
+    # NULL there (a nullable column in a DB read) would otherwise surface as a bare
+    # ``ValueError: cannot convert float NaN to integer`` with no year/state — so name
+    # it here as a typed roster error. Checked on the participating rows only, so a NaN
+    # in a dropped totals row is not a false positive.
+    null_ev = rows[rows["total_electoral_votes"].isna()]
+    if not null_ev.empty:
+        raise UCSBRosterError(
+            "EC participation frame has null `total_electoral_votes` for "
+            f"{null_ev[['year', 'state']].values.tolist()[:10]}; every participating "
+            f"state carries an electoral-vote count in the EC fact (0 for a "
+            f"non-participating state), so a null here is an upstream EC-load defect."
+        )
     grouped = rows.groupby(["year", "state"])["total_electoral_votes"].max()
     roster: dict[int, dict[str, int]] = {}
     for (year, state), max_ev in grouped.items():
         roster.setdefault(int(year), {})[str(state)] = int(max_ev)
     return roster
+
+
+def _assert_roster_built_for_every_year(
+    roster_states: dict[int, dict[str, int]], in_scope: frozenset[int]
+) -> None:
+    """Raise if the EC spine yielded no roster for an in-scope year, before all else.
+
+    This must run **before** :func:`assert_no_status_contradictions` and the two-way
+    assert. Otherwise a year with legislature rows but no spine (the EC pipeline was
+    run for a different year set) trips the contradiction check first — "UCSB says the
+    state took part; the EC spine does not carry it" — misdiagnosing a
+    pipeline-sequencing problem as a source disagreement about participation. The ACs
+    require these two to stay distinct: different cause, different fix.
+    """
+    missing = sorted(in_scope - set(roster_states))
+    if missing:
+        raise UCSBRosterError(
+            f"the EC spine yielded no roster for in-scope year(s) {missing}. This is a "
+            f"pipeline-sequencing failure, not a state mismatch: the roster derives "
+            f"from `dwh.votes`, so the EC pipeline was never run for these years (or "
+            f"was run for a different year set). Load the EC spine for them, or narrow "
+            f"the UCSB run's `years` to match."
+        )
 
 
 def _build_pv_votes(parsed_years: list[ParsedUCSBYear]) -> pd.DataFrame:
@@ -538,10 +586,15 @@ def _assert_participation_shape(df: pd.DataFrame) -> None:
     """Assert the injected EC frame carries the columns the roster derivation needs.
 
     The whole roster rests on this frame, and it arrives across a DI seam from a caller
-    we do not control — #37 will hand it a DB result, where ``is_total`` may be object
-    dtype and ``state`` may be ``None`` rather than ``NaN``. A missing or mistyped
-    ``is_total`` silently admits totals rows, whose NULL state becomes a phantom roster
-    entry, so this fails loudly instead.
+    we do not control — #37 will hand it a DB result, where ``state`` may be ``None``
+    rather than ``NaN``. The roster excludes totals rows via ``is_total``, so a mistyped
+    ``is_total`` silently admits them (a totals row's NULL state then becomes a phantom
+    roster entry). The subtle case: a driver returning ``is_total`` as ``'t'``/``'f'``
+    **strings** makes ``.astype(bool)`` truthy for *every* row (a non-empty string is
+    ``True``), so no row is treated as data and the roster comes back empty — which the
+    downstream check then blames on the spine "never being loaded." So require genuine
+    booleans, accepting an ``object`` column of real ``bool`` values (what psycopg2
+    yields for a Postgres boolean) but rejecting strings and 0/1 ints.
     """
     required = ("year", "state", "is_total", "total_electoral_votes")
     missing = [col for col in required if col not in df.columns]
@@ -550,10 +603,20 @@ def _assert_participation_shape(df: pd.DataFrame) -> None:
             f"EC participation frame is missing column(s) {missing}; the roster "
             f"derives from {list(required)} (totals rows excluded via `is_total`)."
         )
-    if df["is_total"].isna().any():
+    is_total = df["is_total"]
+    if is_total.isna().any():
         raise UCSBRosterError(
             "EC participation frame has null `is_total` value(s); totals rows could "
             "not be excluded, and a totals row's NULL state becomes a phantom entry."
+        )
+    non_bool = is_total.map(lambda v: not isinstance(v, bool | np.bool_))
+    if non_bool.any():
+        bad = sorted({repr(v) for v in is_total[non_bool]})[:5]
+        raise UCSBRosterError(
+            f"EC participation frame `is_total` is not boolean (dtype "
+            f"{is_total.dtype}, e.g. {bad}); casting it to bool would silently "
+            f"misclassify totals rows (a 't'/'f' string is truthy). Cast it to bool on "
+            f"read (#37's DB seam)."
         )
 
 
@@ -721,20 +784,14 @@ def assert_totals_not_exceeded(df: pd.DataFrame) -> None:
 
 
 def assert_pv_columns(df: pd.DataFrame) -> None:
-    """Assert the D018 shape: column order, key non-nullity, and integer counts."""
-    if list(df.columns) != list(SHARED_PV_COLUMNS):
-        raise UCSBTransformError(
-            f"UCSB transform columns {list(df.columns)} != shared PV shape "
-            f"{list(SHARED_PV_COLUMNS)}"
-        )
-    for col in ("source", "year", "state", "candidate_votes", "state_total_votes"):
-        if df[col].isna().any():
-            raise UCSBTransformError(f"UCSB transform column {col!r} has null values")
-    for col in ("candidate_votes", "state_total_votes"):
-        if not pd.api.types.is_integer_dtype(df[col]):
-            raise UCSBTransformError(
-                f"UCSB transform column {col!r} must be integer, got {df[col].dtype}"
-            )
+    """Assert the D018 shape: column order, key non-nullity, and integer counts.
+
+    Delegates to the shared :func:`usvote.pv.schema.assert_pv_shape` rather than
+    re-implementing it, so the non-null key set (which must include ``candidate``) and
+    the integer-column set have one definition, not one per source that can silently
+    drift. ``error_cls`` keeps the failure typed as a UCSB transform error.
+    """
+    assert_pv_shape(df, error_cls=UCSBTransformError)
 
 
 def assert_note_only_on_absence(roster: pd.DataFrame) -> None:

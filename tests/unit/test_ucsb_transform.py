@@ -412,8 +412,24 @@ class TestRoster:
         """A distinct failure from "a state mismatched" — different cause, different fix."""
         parsed = [_year(1900, state_rows=[_state_row("Ohio", 100, 100)])]
         ec = _ec((1896, "Ohio", False, 23))  # spine loaded for the WRONG year
-        with pytest.raises(UCSBRosterError, match="empty for in-scope year"):
+        with pytest.raises(UCSBRosterError, match="pipeline-sequencing failure"):
             transform_ucsb(parsed, ec, years={1900})
+
+    def test_empty_roster_beats_a_status_contradiction_when_the_spine_is_missing(
+        self,
+    ) -> None:
+        """A year with legislature rows and no spine must report the sequencing failure,
+        not blame UCSB and the Archives for disagreeing about participation."""
+        parsed = [
+            _year(
+                1824,
+                state_rows=[_state_row("Ohio", 100, 100)],
+                status_rows=[_status_row("Delaware")],
+            )
+        ]
+        ec = _ec((1820, "Ohio", False, 8))  # spine loaded for the WRONG year
+        with pytest.raises(UCSBRosterError, match="pipeline-sequencing failure"):
+            transform_ucsb(parsed, ec, years={1824})
 
     def test_participation_frame_missing_a_column_raises(self) -> None:
         parsed = [_year(1900, state_rows=[_state_row("Ohio", 100, 100)])]
@@ -685,6 +701,51 @@ class TestDefensiveGuards:
         with pytest.raises(UCSBRosterError, match="null `is_total`"):
             transform_ucsb(parsed, ec, years={1900})
 
+    def test_string_is_total_raises_rather_than_emptying_the_roster(self) -> None:
+        """'t'/'f' strings are both truthy under ``.astype(bool)`` — every row would read
+        as a total and the roster would silently come back empty."""
+        parsed = [_year(1900, state_rows=[_state_row("Ohio", 100, 100)])]
+        ec = _ec((1900, "Ohio", False, 23), (1900, None, True, 99))
+        ec["is_total"] = ec["is_total"].map({False: "f", True: "t"})
+        with pytest.raises(UCSBRosterError, match="is not boolean"):
+            transform_ucsb(parsed, ec, years={1900})
+
+    def test_object_column_of_real_bools_is_accepted(self) -> None:
+        """psycopg2 yields Python bools in an object column — that must still pass."""
+        parsed = [_year(1900, state_rows=[_state_row("Ohio", 100, 100)])]
+        ec = _ec((1900, "Ohio", False, 23))
+        ec["is_total"] = ec["is_total"].astype("object")
+        pv, _ = transform_ucsb(parsed, ec, years={1900})
+        assert pv["state"].tolist() == ["Ohio"]
+
+    def test_null_total_electoral_votes_raises_typed_not_valueerror(self) -> None:
+        """A NULL EV would otherwise crash at ``int(NaN)`` with an untyped ValueError."""
+        parsed = [_year(1900, state_rows=[_state_row("Ohio", 100, 100)])]
+        ec = _ec((1900, "Ohio", False, 23))
+        ec["total_electoral_votes"] = ec["total_electoral_votes"].astype("float")
+        ec.loc[0, "total_electoral_votes"] = float("nan")
+        with pytest.raises(UCSBRosterError, match="null `total_electoral_votes`"):
+            transform_ucsb(parsed, ec, years={1900})
+
+    def test_duplicate_parsed_year_raises_rather_than_dropping_the_first(self) -> None:
+        parsed = [
+            _year(1900, state_rows=[_state_row("Ohio", 100, 100)]),
+            _year(1900, state_rows=[_state_row("Iowa", 50, 50)]),
+        ]
+        ec = _ec((1900, "Ohio", False, 23), (1900, "Iowa", False, 13))
+        with pytest.raises(UCSBTransformError, match="more than one parsed UCSB page"):
+            transform_ucsb(parsed, ec, years={1900})
+
+    def test_null_candidate_column_raises(self) -> None:
+        """`candidate` is a key column — its non-null check must not be omitted."""
+        frame = pd.DataFrame([{
+            "source": SOURCE_UCSB, "year": 1900, "state": "Ohio", "candidate": None,
+            "party": None, "candidate_votes": 1, "state_total_votes": 1,
+            "reliability": RELIABILITY_EXACT,
+        }])
+        with pytest.raises(UCSBTransformError, match=r"'candidate' has null value\(s\)"):
+            assert_pv_columns(frame)
+
     def test_duplicate_pv_grain_raises(self) -> None:
         frame = pd.DataFrame([
             {"year": 1900, "state": "Ohio", "candidate": "A"},
@@ -712,7 +773,7 @@ class TestDefensiveGuards:
             "party": None, "candidate_votes": 1, "state_total_votes": 1,
             "reliability": RELIABILITY_EXACT,
         }])
-        with pytest.raises(UCSBTransformError, match="has null values"):
+        with pytest.raises(UCSBTransformError, match=r"has null value\(s\)"):
             assert_pv_columns(frame)
 
     def test_float_vote_column_raises(self) -> None:
