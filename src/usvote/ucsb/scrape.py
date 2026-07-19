@@ -46,8 +46,15 @@ and :class:`UCSBScrapeError` messages, where a fresh machine will actually meet 
 scrape's ``Fetch``. The two look similar but encode different knowledge: EC's is "fetch
 a URL" (bytes, status discarded); this one is "fetch a URL *under presidency.ucsb.edu's
 robots policy*" — it must surface the status code the 403/429 halt reads, and the body
-even on an error status. D006's concern is dependency *direction* (a PV source must not
-import from the EC spine), which a local seam honors completely.
+even on an error status. Keeping the seam local is about that difference in meaning, not
+about avoiding the EC package: a shared ``Fetch`` would have to carry both contracts.
+
+To be precise, since the narrower claim is easy to over-read: D006 makes the EC spine
+**authoritative**, so a PV source importing *domain facts* from it is not merely allowed
+but required — :func:`usvote.ucsb.transform.ucsb_ingest_years` derives its year scope
+from :func:`usvote.years.ec_ingest_years` for exactly that reason (D024 §6), and the
+roster derives from the EC ``votes`` fact. What must not happen is the reverse: the EC
+spine must never depend on a PV source.
 """
 
 from __future__ import annotations

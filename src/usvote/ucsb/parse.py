@@ -38,7 +38,9 @@ markup is ``legislature_chosen``. ``not_participating`` has **no markup whatsoev
 the state's row is simply absent — and ``popular_vote`` is the roster's residual, so
 both are assigned in #36 against the EC spine. This parser is deliberately
 **roster-free**: it emits verbatim cleaned state labels and classifies rows purely
-structurally. Label canonicalization is E4-S5's (#38).
+structurally. **State**-label canonicalization is E4-S3's (#36,
+:data:`usvote.ucsb.transform.UCSB_STATE_RECONCILIATIONS`); #38 keeps **candidate**-name
+reconciliation.
 """
 
 from __future__ import annotations
@@ -272,8 +274,12 @@ def _clean_label(text: str) -> str:
     """Trim whitespace and the footnote asterisks UCSB appends to some state labels.
 
     Deliberately minimal. Canonicalizing labels (``Dist. of Col.``, the 1852
-    ``New jersey`` typo) belongs to E4-S5 (#38); doing it here would bury a mapping
-    decision inside the parse stage.
+    ``New jersey`` typo) belongs to E4-S3 (#36) — see
+    :data:`usvote.ucsb.transform.UCSB_STATE_RECONCILIATIONS`; doing it here would bury a
+    mapping decision inside the parse stage. (D024's 2026-07-18 clarification moved the
+    **state**-name half there from #38, because #36's roster is keyed on ``dwh.state``'s
+    canonical PK and its two-way assert is meaningless without it. #38 keeps
+    **candidate**-name reconciliation.)
     """
     return text.strip().strip("*").strip()
 

@@ -39,10 +39,13 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
 ## UCSB popular-vote catalog
 
 Source-namespaced per D006/D015, exactly as MIT's reconciliations are: these anomalies
-are in the **UCSB** popular-vote source, so their constants live in
-[`src/usvote/ucsb/parse.py`](../src/usvote/ucsb/parse.py) rather than
-`transform.py`, and each is locked by a test in
-[`tests/unit/test_ucsb_parse.py`](../tests/unit/test_ucsb_parse.py).
+are in the **UCSB** popular-vote source, so their constants live in that subpackage
+rather than the EC `transform.py` — parse-stage anomalies in
+[`src/usvote/ucsb/parse.py`](../src/usvote/ucsb/parse.py) (locked by
+[`tests/unit/test_ucsb_parse.py`](../tests/unit/test_ucsb_parse.py)) and transform-stage
+ones in [`src/usvote/ucsb/transform.py`](../src/usvote/ucsb/transform.py) (locked by
+[`tests/unit/test_ucsb_transform.py`](../tests/unit/test_ucsb_transform.py)). The
+`ucsb/parse.py` constant column below names which module each lives in.
 
 One difference from the EC catalog above is worth stating plainly: the EC corrections
 *rewrite* wrong values, whereas most UCSB entries are anomalies the parser must
@@ -50,11 +53,13 @@ One difference from the EC catalog above is worth stating plainly: the EC correc
 Electoral College spine already carries (D006), so a wrong percent is recorded and
 worked around, never silently "fixed" into a number UCSB never published.
 
-| Year(s) | Anomaly | Handling | `ucsb/parse.py` constant | Source / provenance |
+| Year(s) | Anomaly | Handling | `ucsb/` constant (module) | Source / provenance |
 |---|---|---|---|---|
-| 1836 | Rhode Island's third candidate cell is a single `-` (one hyphen), where every other year spells "not on the ballot" as `--`. A literal `"--"` test reads it as an unparseable vote and raises. | Model the absence token as a **set**, not a literal, so both spellings parse to `None` — never to `0` (D024 §2) | `ABSENT_VOTE_TOKENS` | UCSB [1836](https://www.presidency.ucsb.edu/statistics/elections/1836); `-` appears in exactly this one cell corpus-wide |
-| 1860 | Vermont publishes `4.16` as the percent for **two different** candidates (8,748 and 1,859 votes); 8,748/44,712 is 19.6%. The columns are provably aligned — the row's four candidates sum to exactly its 44,712 TOTAL VOTE — so this is a duplicated cell in the source. | Tolerated. The percent cross-check asserts on the **mismatch rate**, not per cell, so isolated source typos do not fail the year while a systematic column shift still does | `PERCENT_MISMATCH_RATE` (used by `_assert_percent_consistent`) | UCSB [1860](https://www.presidency.ucsb.edu/statistics/elections/1860) |
-| 1968 | Utah publishes `31.1` where 156,665/422,568 is 37.1 — transposed digits. That row's candidates also reconcile against its total. | Tolerated, as above | `PERCENT_MISMATCH_RATE` | UCSB [1968](https://www.presidency.ucsb.edu/statistics/elections/1968) |
+| 1836 | Rhode Island's third candidate cell is a single `-` (one hyphen), where every other year spells "not on the ballot" as `--`. A literal `"--"` test reads it as an unparseable vote and raises. | Model the absence token as a **set**, not a literal, so both spellings parse to `None` — never to `0` (D024 §2) | `ABSENT_VOTE_TOKENS` (`parse.py`) | UCSB [1836](https://www.presidency.ucsb.edu/statistics/elections/1836); `-` appears in exactly this one cell corpus-wide |
+| 1860 | **Vermont, Virginia and Wisconsin** each publish the Douglas percent as a duplicate of the *next* candidate's (Breckinridge's) — `4.16`, `44.46` and `0.58` respectively, against true values of 19.57%, 9.74% and 42.73%. The columns are provably aligned: each row's four candidates sum to exactly its TOTAL VOTE, and **all 28 other 1860 states agree with their published percent to 0.00pp**, which is what shows these are isolated source typos rather than a column shift. | Tolerated, never rewritten (UCSB is not the source of truth here). The percent cross-check asserts on the **mismatch rate**, not per cell, so isolated typos do not fail the year while a systematic shift still does. At transform these three cells are flagged `reliability='unreliable'` — the page contradicts itself and we cannot know which published number is wrong | `PERCENT_MISMATCH_RATE`, `PERCENT_TOLERANCE` (`parse.py`); `_cell_reliability` (`transform.py`) | UCSB [1860](https://www.presidency.ucsb.edu/statistics/elections/1860); the three-state extent established in #36 (the earlier catalog entry recorded Vermont only) |
+| 1968 | Utah publishes `31.1` where 156,665/422,568 is 37.1 — transposed digits. That row's candidates also reconcile against its total. | Tolerated, and flagged `reliability='unreliable'`, as above | `PERCENT_MISMATCH_RATE` (`parse.py`); `_cell_reliability` (`transform.py`) | UCSB [1968](https://www.presidency.ucsb.edu/statistics/elections/1968) |
+| 1864, 1868 | **Fourteen states took no part in the election at all** — 1864's eleven Confederate states, and 1868's Mississippi/Texas/Virginia, not yet readmitted. The defining property is that this has **no markup whatsoever**: the state's row is simply absent from the page, so it cannot be parsed, only enumerated (D024 §4 case 2). | Enumerated with its cause, and emitted as a `not_participating` row in `dwh.pv_state_status` — **never** as a null or zero vote in `pv_votes` (D024 §1/§2, D005). Cross-checked against the EC spine, which carries these states with `total_electoral_votes = 0`. All 14 entries are retained but only **in-scope years are consumed** (11 today): 1868 is gated out of the EC spine, so its three are catalogued but not yet ingested, pending #57 | `UCSB_NONPARTICIPATING_STATES` (`transform.py`) | Settled history; the 1868 trio independently corroborated by the EC spine's own `UNSUPPORTED_EC_YEARS` note, and every in-scope entry verified against `dwh.votes` |
+| 1852, 1964–2016 | UCSB prints two state labels that differ from the canonical `dwh.state` key: `New jersey` (1852, a lower-case "j" typo) and `Dist. of Col.` (1964–2016; 2020/2024 print `District of Columbia` in full). Unreconciled, DC reads as two different states across the series and the roster assert reports both as phantom states. | Rewritten to the canonical full name before anything roster-related. The map is **exhaustive** over all 53 corpus labels rather than exceptions-only, so an unseen future spelling fails loudly instead of vanishing in a join | `UCSB_STATE_RECONCILIATIONS` (`transform.py`) | UCSB state-column labels, all 60 pages; RHS per the EC state dimension (TIGER2019) |
 | 1872 | Kentucky's published percents sum to exactly 100.0 (45.5 / 54.5) while its votes leave a 2,374-vote residual, so UCSB computed them against a different denominator than the printed TOTAL VOTE. | Tolerated, as above | `PERCENT_MISMATCH_RATE` | UCSB [1872](https://www.presidency.ucsb.edu/statistics/elections/1872) |
 | 1864, 1944 | The totals row is labelled singular `Total`, not `Totals`. A `== "Totals"` test drops the row, leaves `totals=None`, and silently no-ops the sum validator. | Match against a set of labels, case-insensitively | `TOTALS_LABELS` | UCSB [1864](https://www.presidency.ucsb.edu/statistics/elections/1864), [1944](https://www.presidency.ucsb.edu/statistics/elections/1944) |
 | 1940 | The state-column header is plural `STATES`, not `STATE` — and `select_results_table` keys on exactly that cell, so a singular-only test finds no results table and the year reads as having no popular vote. | Match against a set of labels, case-insensitively | `STATE_HEADER_LABELS` | UCSB [1940](https://www.presidency.ucsb.edu/statistics/elections/1940) |
@@ -107,10 +112,25 @@ reasoning that produced each rule.
   two undifferentiated presidential votes, below the 1804 load floor) are representable by
   the same boolean but are not loaded or tested here; their office outcomes become markable
   when those eras are ingested under the deferred pre-12th-Amendment epic (D010).
+- **UCSB state vs. candidate reconciliation.** `UCSB_STATE_RECONCILIATIONS` above covers
+  **state** names only. UCSB **candidate** names (e.g. the 1872 `HORACE GREEFLEY` typo)
+  are reconciled onto the canonical EC name in #38, and until then `dwh.pv_votes` carries
+  UCSB-native candidate strings. The split is deliberate: the roster is keyed on
+  `dwh.state`'s PK, so state canonicalization is a *prerequisite* of #36's two-way assert,
+  while candidate names are not (D024's 2026-07-18 clarification). One consequence to keep
+  in view — until #38 applies the D007 candidate scope, MIT rows are scoped to EC-getters
+  while UCSB rows carry every named column UCSB prints; totals and margins are unaffected
+  (`state_total_votes` is carried verbatim), but the *candidate* grain differs by source.
 - **Deferred Reconstruction years (1868, 1872).** These are **excluded** from the
-  default ingest (`UNSUPPORTED_EC_YEARS` in [`pipeline.py`](../src/usvote/pipeline.py)),
+  default ingest (`UNSUPPORTED_EC_YEARS` in [`years.py`](../src/usvote/years.py),
+  re-exported from [`pipeline.py`](../src/usvote/pipeline.py)),
   not corrected here, because their tables encode contested/uncounted electoral votes
   that need dedicated modeling: 1868's Georgia votes were contested (dual
   "excluding/including Georgia" totals rows; MS/TX/VA had not been readmitted), and
   1872's Horace Greeley died after the popular vote, scattering his electoral votes with
   Georgia's rejected by Congress. Ingesting them is tracked as follow-up work (#57).
+  **UCSB ingestion inherits this gate by derivation** (D024 §6): `ucsb_ingest_years()` is
+  `ec_ingest_years()` minus the pre-1824 no-popular-vote years, so #57 admits both years
+  to E4 with no change under `usvote/ucsb/`. Until then UCSB's 1868 rows — three
+  non-participating states and the Florida legislature-chosen row — are catalogued but
+  not ingested.

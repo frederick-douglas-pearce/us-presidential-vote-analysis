@@ -142,7 +142,9 @@ def build_pv_column_defs(schema: str = PV_SCHEMA) -> list[tuple[str, ...]]:
     ]
 
 
-def assert_pv_shape(df: pd.DataFrame) -> None:
+def assert_pv_shape(
+    df: pd.DataFrame, *, error_cls: type[Exception] = PVShapeError
+) -> None:
     """Assert ``df`` is on the D018 shared shape before the shared loader inserts it.
 
     Checks the columns are exactly :data:`SHARED_PV_COLUMNS` in order, that every
@@ -152,19 +154,25 @@ def assert_pv_shape(df: pd.DataFrame) -> None:
     :class:`PVShapeError` on any. This is the boundary guard that makes the loader
     safely reusable by every PV source — it does not re-validate source-specific
     invariants (grain, totals) that each source's own transform already enforced.
+
+    ``error_cls`` lets a source raise its own typed error from this shared
+    implementation (as :func:`usvote.mit.transform.assert_unique_grain` does), so a
+    source's transform can use this as its own D018-shape guard instead of
+    re-implementing it — and drift like a dropped non-null column (``candidate``) cannot
+    reappear per source.
     """
     if list(df.columns) != list(SHARED_PV_COLUMNS):
-        raise PVShapeError(
+        raise error_cls(
             f"PV frame columns {list(df.columns)} != shared PV shape "
             f"{list(SHARED_PV_COLUMNS)}"
         )
     for col in REQUIRED_NON_NULL:
         if df[col].isna().any():
-            raise PVShapeError(
+            raise error_cls(
                 f"PV frame column {col!r} has null value(s) (required non-null)"
             )
     for col in INTEGER_COLUMNS:
         if not pd.api.types.is_integer_dtype(df[col]):
-            raise PVShapeError(
+            raise error_cls(
                 f"PV frame column {col!r} must be integer, got {df[col].dtype}"
             )
