@@ -40,7 +40,10 @@ from usvote.transform import (
     build_candidate_dim,
     build_state_dim,
     get_name_middle_last,
+    normalize_candidate_parties,
+    normalize_candidate_states,
     split_name,
+    strip_name_footnote_markers,
     transform_parsed_years,
 )
 
@@ -256,6 +259,50 @@ def test_spotted_eagle_surname_corrected() -> None:
     row = build_candidate_dim(t2, t1).iloc[0]
     assert pd.isna(row["name_middle"])  # mis-split middle cleared (NA -> NULL at load)
     assert row["name_last"] == "Spotted Eagle"
+
+
+def test_strip_name_footnote_markers() -> None:
+    # Trailing "*" (with or without a leading space) is stripped; clean names untouched.
+    assert strip_name_footnote_markers("Franklin D. Roosevelt*") == "Franklin D. Roosevelt"
+    assert strip_name_footnote_markers("Franklin D. Roosevelt *") == "Franklin D. Roosevelt"
+    assert strip_name_footnote_markers("Franklin D. Roosevelt") == "Franklin D. Roosevelt"
+    assert strip_name_footnote_markers("Harry S. Truman") == "Harry S. Truman"
+
+
+def _parsed_year(year: int, t2_name: str, t1_name: str) -> dict[str, Any]:
+    return {
+        "year": year,
+        "t1": [
+            {"president_candidate_name": t1_name, "president_candidate_party": "D"},
+        ],
+        "t2": {
+            "candidate_state": [
+                {
+                    "president_candidate_name": t2_name,
+                    "col_ind": 1,
+                    "president_candidate_state": "New York",
+                }
+            ]
+        },
+    }
+
+
+def test_fdr_1944_asterisk_merges_into_single_candidate() -> None:
+    # Table 2 prints "Franklin D. Roosevelt*" in 1944 (a footnote marker) but the
+    # unmarked name in 1940. Left in, the "*" would give FDR a second, party-less
+    # candidate row keyed "...Roosevelt*"; the normalize-time strip collapses both
+    # years onto the one canonical "Franklin D. Roosevelt" with its Table-1 party.
+    parsed = [
+        _parsed_year(1940, "Franklin D. Roosevelt", "Franklin D. Roosevelt"),
+        _parsed_year(1944, "Franklin D. Roosevelt*", "Franklin D. Roosevelt"),
+    ]
+    t2 = normalize_candidate_states(parsed)
+    t1 = normalize_candidate_parties(parsed)
+    assert "Franklin D. Roosevelt*" not in set(t2["president_candidate_name"])
+    candidates = build_candidate_dim(t2, t1)
+    fdr = candidates[candidates["name"].str.startswith("Franklin")]
+    assert fdr["name"].tolist() == ["Franklin D. Roosevelt"]  # one row, no "*" twin
+    assert fdr.iloc[0]["party"] == "D"
 
 
 def test_candidate_id_is_one_based_and_missing_values_are_na() -> None:

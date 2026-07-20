@@ -194,6 +194,25 @@ CANDIDATE_NAME_FIXES: Mapping[str, dict[str, str]] = {
 # tables' names reconcile. "Bob Dole" (Table 1) -> "Robert Dole" (Table 2, 1996).
 PARTY_NAME_FIXES: Mapping[str, str] = {"Bob Dole": "Robert Dole"}
 
+# Trailing footnote marker the Archives appends to a candidate's name in a single
+# year's table when a note applies to them. Table 2 for 1944 prints
+# "Franklin D. Roosevelt*" (the page footnotes that he died in office the following
+# April); every other year prints him unmarked. The "*" is not part of the name, and
+# left in it splits one person across two canonical keys — "Franklin D. Roosevelt"
+# (1932-1940) vs. "Franklin D. Roosevelt*" (1944) — which would give FDR a second,
+# party-less candidate row and break the D006 canonical candidate key that both PV
+# sources reconcile onto (#38 UCSB, #67 MIT). Stripped from both tables' names at
+# normalize time so the marker never reaches the canonical `name`. A no-op for every
+# unmarked name; 1944 FDR is the only affected candidate in current coverage.
+# Source: https://www.archives.gov/electoral-college/1944 (Table 2 + Notes); see
+# docs/corrections.md.
+_NAME_FOOTNOTE_MARKER_RE = re.compile(r"\s*\*+$")
+
+
+def strip_name_footnote_markers(name: str) -> str:
+    """Strip a trailing Archives footnote marker (``*``) from a candidate name."""
+    return _NAME_FOOTNOTE_MARKER_RE.sub("", name)
+
 # Table-1 party *labels* normalized to one canonical code before aggregation, so the
 # same party reads identically across candidates and years and label drift does not
 # spuriously populate party_2. The Archives prints the early-era Democratic-Republican
@@ -426,6 +445,9 @@ def normalize_candidate_states(
     t2_states = pd.json_normalize(
         list(parsed_years), ["t2", "candidate_state"], ["year"]
     )
+    t2_states["president_candidate_name"] = t2_states[
+        "president_candidate_name"
+    ].map(strip_name_footnote_markers)
     return apply_other_candidates(t2_states)
 
 
@@ -499,7 +521,11 @@ def normalize_candidate_parties(
 
     One row per year/candidate.
     """
-    return pd.json_normalize(list(parsed_years), "t1", ["year"])
+    t1 = pd.json_normalize(list(parsed_years), "t1", ["year"])
+    t1["president_candidate_name"] = t1["president_candidate_name"].map(
+        strip_name_footnote_markers
+    )
+    return t1
 
 
 # --- candidate dimension ---------------------------------------------------

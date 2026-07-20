@@ -83,7 +83,19 @@ the corrections pattern: a provenance-carrying constant + a test + a catalog row
 A foreign PV source conforms by rewriting its native `state`/`candidate` strings to the
 canonical **display** forms above, in its own source-namespaced reconcile stage:
 
-- **UCSB** (#38) — deferred with the UCSB epic (E4).
+- **UCSB** (#38, D025) — `reconcile_ucsb` in
+  [`src/usvote/ucsb/reconcile.py`](../src/usvote/ucsb/reconcile.py). UCSB's **state** names
+  were already reconciled in #36 (`UCSB_STATE_RECONCILIATIONS`); this story reconciles
+  **candidate** names via `UCSB_CANDIDATE_RECONCILIATIONS` — a curated, provenance-carrying
+  map keyed by `(year, ucsb_native_name)` (111 entries; keyed by year because 49 elections
+  reuse surnames across people, e.g. the two Roosevelts). Like MIT's, UCSB's header spelling
+  is not a mechanical transform of the canonical `name` (`STROM THURMOND` → `J. Strom
+  Thurmond`, `ADLAI E. STEVENSON` → `Adlai Stevenson`, `JOHN C. FREMONT` → `John C. Frémont`).
+  Unlike MIT, reconcile also applies the **D007 candidate scope** here — UCSB has no
+  `party_simplified` proxy, so scoping to EC-getters is a name match: the 8 popular-vote-only
+  minors are dropped (`UCSB_NON_GETTER_COLUMNS`) and a reciprocal completeness guard, against
+  an injected EC-getter frame, proves no major was silently lost (`EC_GETTERS_WITHOUT_POPULAR_VOTE`
+  exempts the 13 getters — faithless/unpledged/legislature-chosen — that held no popular vote).
 - **MIT** (#67, D020) — `reconcile_mit` in
   [`src/usvote/mit/reconcile.py`](../src/usvote/mit/reconcile.py), via two curated,
   provenance-carrying maps: `MIT_STATE_RECONCILIATIONS` (51 jurisdictions,

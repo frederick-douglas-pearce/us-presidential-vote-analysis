@@ -118,6 +118,35 @@ def ec_participation_frame(years: Iterable[int] | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# A regenerable snapshot of the EC president-EV getters — ``{year: [canonical name, ...]}``
+# for every in-scope UCSB year — so the #38 reciprocal completeness guard can be exercised
+# against the REAL Archives getter set offline. Like ``EC_ROSTER_FIXTURE`` it is National
+# Archives data (public domain, fine under D022) and **test input only** — a test asserts
+# nothing under ``src/`` reads it, so it cannot become the reconcile map's own witness (that
+# would make the completeness guard circular, D006). Carries no electoral-vote *counts*
+# (D024 §5); the frame synthesizes a nonzero placeholder, since only getter identity matters.
+EC_GETTERS_FIXTURE = FIXTURES_DIR / "ec_getters_by_year.json"
+
+
+def ec_getters_frame(years: Iterable[int] | None = None) -> pd.DataFrame:
+    """Build an ``ec_getters``-shaped frame (the #38 reconcile DI seam) from the fixture.
+
+    Shaped like ``dwh.votes`` joined to ``dwh.candidate`` filtered to president-EV getters:
+    ``year``, ``candidate`` (canonical name), ``president_electoral_votes``. The EV value is
+    a nonzero placeholder — the fixture stores only identity (D024 §5), and the completeness
+    guard needs only ``> 0`` — so it must not be read as a real electoral-vote count.
+    """
+    entries = json.loads(EC_GETTERS_FIXTURE.read_text(encoding="utf-8"))["years"]
+    wanted = None if years is None else {int(y) for y in years}
+    rows: list[dict[str, Any]] = [
+        {"year": int(raw_year), "candidate": name, "president_electoral_votes": 1}
+        for raw_year, names in entries.items()
+        if wanted is None or int(raw_year) in wanted
+        for name in names
+    ]
+    return pd.DataFrame(rows)
+
+
 # The valid US state names Table 2 rows are matched against — the package
 # equivalent of the notebook's geopandas ``NAME`` set (50 states + DC). Shared by
 # the parse tests (the state-name filter) and the transform tests (the geo
