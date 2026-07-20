@@ -112,15 +112,37 @@ reasoning that produced each rule.
   two undifferentiated presidential votes, below the 1804 load floor) are representable by
   the same boolean but are not loaded or tested here; their office outcomes become markable
   when those eras are ingested under the deferred pre-12th-Amendment epic (D010).
-- **UCSB state vs. candidate reconciliation.** `UCSB_STATE_RECONCILIATIONS` above covers
-  **state** names only. UCSB **candidate** names (e.g. the 1872 `HORACE GREEFLEY` typo)
-  are reconciled onto the canonical EC name in #38, and until then `dwh.pv_votes` carries
-  UCSB-native candidate strings. The split is deliberate: the roster is keyed on
-  `dwh.state`'s PK, so state canonicalization is a *prerequisite* of #36's two-way assert,
-  while candidate names are not (D024's 2026-07-18 clarification). One consequence to keep
-  in view — until #38 applies the D007 candidate scope, MIT rows are scoped to EC-getters
-  while UCSB rows carry every named column UCSB prints; totals and margins are unaffected
-  (`state_total_votes` is carried verbatim), but the *candidate* grain differs by source.
+- **UCSB candidate reconciliation onto the canonical key (#38, D025).**
+  `UCSB_STATE_RECONCILIATIONS` (above) canonicalizes **state** names in #36; UCSB
+  **candidate** names are reconciled onto the canonical EC `name` in
+  [`src/usvote/ucsb/reconcile.py`](../src/usvote/ucsb/reconcile.py) via
+  `UCSB_CANDIDATE_RECONCILIATIONS` — a curated map keyed by `(year, ucsb_native_name)`
+  (111 EC-getter columns). The spellings are non-mechanical, mirroring the EC/MIT
+  catalogs: `STROM THURMOND` → `J. Strom Thurmond`, `ADLAI E. STEVENSON` → `Adlai
+  Stevenson`, `WENDELL WILLKIE` → `Wendell L. Willkie`, `AL GORE` → `Albert Gore Jr.`,
+  and the accent restored in `JOHN C. FREMONT` → `John C. Frémont`. (The 1872 `HORACE
+  GREEFLEY` typo lives in a Reconstruction year gated out of the EC spine, so it is
+  catalogued but not ingested until #57 — see below.) The **D007 candidate scope** is
+  applied in the same stage: the 8 popular-vote-only minors UCSB prints are dropped
+  (`UCSB_NON_GETTER_COLUMNS` — Van Buren '48, Hale '52, Debs '12, Anderson '80, Perot
+  '92/'96, Nader '00, G. Johnson '16), and a reciprocal completeness guard against an
+  injected EC-getter frame proves no major was silently lost.
+  `EC_GETTERS_WITHOUT_POPULAR_VOTE` (13 entries) exempts the getters that held no popular
+  vote — faithless/unpledged electors (1960 Byrd, 2016's five, 2004 Edwards, …) and the
+  1832/1836 South Carolina legislature-chosen awards. With #38 landed, MIT and UCSB rows
+  now share the EC-getter candidate grain in `dwh.pv_votes` (totals/margins were never
+  affected — `state_total_votes` is carried verbatim).
+- **1944 Franklin D. Roosevelt footnote asterisk (EC-side, D025).** Table 2 of the
+  National Archives [1944 page](https://www.archives.gov/electoral-college/1944) prints
+  `Franklin D. Roosevelt*` — a footnote marker (he died in office the following April) —
+  while every other year prints him unmarked. Left in, the `*` splits one person across
+  two canonical keys (`Franklin D. Roosevelt` in 1932–1940 vs. `…Roosevelt*` in 1944),
+  giving FDR a second, party-less candidate row and breaking the D006 canonical key.
+  `usvote.transform.strip_name_footnote_markers` strips a trailing `*` from both tables'
+  names at normalize time, so the marker never reaches the canonical `name`; it is a
+  no-op for every unmarked candidate and 1944 FDR is the only one affected in current
+  coverage. Discovered while authoring the #38 UCSB candidate map (the RHS must equal the
+  clean EC name for the E6 join to key on it). Source: the 1944 Table 2 + Notes.
 - **Deferred Reconstruction years (1868, 1872).** These are **excluded** from the
   default ingest (`UNSUPPORTED_EC_YEARS` in [`years.py`](../src/usvote/years.py),
   re-exported from [`pipeline.py`](../src/usvote/pipeline.py)),

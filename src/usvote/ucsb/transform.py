@@ -736,11 +736,18 @@ def assert_absence_matches_zero_ev(
             )
 
 
-def assert_pv_grain(df: pd.DataFrame) -> None:
-    """Assert one PV row per ``(year, state, candidate)`` (``source`` is constant)."""
+def assert_pv_grain(
+    df: pd.DataFrame, *, error_cls: type[Exception] = UCSBTransformError
+) -> None:
+    """Assert one PV row per ``(year, state, candidate)`` (``source`` is constant).
+
+    ``error_cls`` lets the reconcile stage (#38) re-run this after its candidate rewrite
+    and raise its own :class:`~usvote.ucsb.reconcile.UCSBReconcileError`, mirroring how
+    :func:`usvote.mit.transform.assert_unique_grain` is reused across MIT's stages.
+    """
     dupes = df.loc[df.duplicated(["year", "state", "candidate"], keep=False)]
     if not dupes.empty:
-        raise UCSBTransformError(
+        raise error_cls(
             "UCSB transform grain violated — duplicate (year, state, candidate): "
             f"{dupes[['year', 'state', 'candidate']].values.tolist()}"
         )
@@ -783,15 +790,18 @@ def assert_totals_not_exceeded(df: pd.DataFrame) -> None:
         )
 
 
-def assert_pv_columns(df: pd.DataFrame) -> None:
+def assert_pv_columns(
+    df: pd.DataFrame, *, error_cls: type[Exception] = UCSBTransformError
+) -> None:
     """Assert the D018 shape: column order, key non-nullity, and integer counts.
 
     Delegates to the shared :func:`usvote.pv.schema.assert_pv_shape` rather than
     re-implementing it, so the non-null key set (which must include ``candidate``) and
     the integer-column set have one definition, not one per source that can silently
-    drift. ``error_cls`` keeps the failure typed as a UCSB transform error.
+    drift. ``error_cls`` keeps the failure typed to the caller's stage (UCSB transform
+    by default; :class:`~usvote.ucsb.reconcile.UCSBReconcileError` when #38 re-runs it).
     """
-    assert_pv_shape(df, error_cls=UCSBTransformError)
+    assert_pv_shape(df, error_cls=error_cls)
 
 
 def assert_note_only_on_absence(roster: pd.DataFrame) -> None:

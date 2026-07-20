@@ -32,7 +32,12 @@ import pandas as pd
 import pytest
 
 import usvote.years
-from tests._helpers import EC_ROSTER_FIXTURE, ec_participation_frame
+from tests._helpers import (
+    EC_GETTERS_FIXTURE,
+    EC_ROSTER_FIXTURE,
+    ec_getters_frame,
+    ec_participation_frame,
+)
 from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -48,6 +53,11 @@ from usvote.ucsb.parse import (
     UCSBStateRow,
     UCSBStatusRow,
     UCSBVoteCell,
+)
+from usvote.ucsb.reconcile import (
+    UCSB_CANDIDATE_RECONCILIATIONS,
+    UCSB_NON_GETTER_COLUMNS,
+    reconcile_ucsb,
 )
 from usvote.ucsb.transform import (
     RELIABILITY_EXACT,
@@ -677,6 +687,19 @@ class TestRealShapes:
         for entry in entries.values():
             assert set(entry) == {"states", "zero_ev_states"}
 
+    def test_getter_fixture_is_test_input_only_and_never_read_from_src(self) -> None:
+        """The witness must not become the reconcile map's own source (D006 circularity)."""
+        src = Path(__file__).resolve().parents[2] / "src"
+        for path in src.rglob("*.py"):
+            assert EC_GETTERS_FIXTURE.name not in path.read_text(encoding="utf-8")
+
+    def test_getter_fixture_carries_no_electoral_vote_counts(self) -> None:
+        """D024 §5: getter identity only, never counts (each year is a list of names)."""
+        entries = json.loads(EC_GETTERS_FIXTURE.read_text(encoding="utf-8"))["years"]
+        for names in entries.values():
+            assert isinstance(names, list)
+            assert all(isinstance(n, str) for n in names)
+
 
 def _roster_states(year: int) -> list[str]:
     entries = json.loads(EC_ROSTER_FIXTURE.read_text(encoding="utf-8"))["years"]
@@ -826,6 +849,16 @@ def real_corpus_result() -> tuple[pd.DataFrame, pd.DataFrame]:
     return transform_ucsb(parse_election_years(html), ec_participation_frame(years))
 
 
+@pytest.fixture(scope="module")
+def real_corpus_reconciled(
+    real_corpus_result: tuple[pd.DataFrame, pd.DataFrame],
+) -> pd.DataFrame:
+    """Reconcile the whole real snapshot against the committed EC-getter witness (#38)."""
+    pv, roster = real_corpus_result
+    years = ucsb_ingest_years()
+    return reconcile_ucsb(pv, roster, ec_getters_frame(years), years=years)
+
+
 @pytest.mark.skipif(
     not _CORPUS,
     reason="USVOTE_UCSB_HTML_DIR unset; the UCSB snapshot lives outside the repo",
@@ -915,3 +948,41 @@ class TestRealCorpus:
             PV_STATUS_LEGISLATURE_CHOSEN,
             PV_STATUS_NOT_PARTICIPATING,
         }
+
+    # --- reconcile (#38): the only run of reconcile over all 49 in-scope years ---
+    def test_reconcile_passes_all_guards_over_the_whole_corpus(
+        self, real_corpus_reconciled: pd.DataFrame
+    ) -> None:
+        # reconcile_ucsb builds and asserts internally (coverage, completeness, grain,
+        # two-way roster) — reaching here at all proves every guard held on real data.
+        out = real_corpus_reconciled
+        assert set(out["year"]) == ucsb_ingest_years()
+        assert not out.duplicated(["year", "state", "candidate"]).any()
+
+    def test_every_candidate_is_a_canonical_ec_name(
+        self, real_corpus_reconciled: pd.DataFrame
+    ) -> None:
+        # After reconcile no UCSB-native ALLCAPS spelling survives; every name is an EC
+        # getter for its year, per the independent witness.
+        out = real_corpus_reconciled
+        getter_keys = set(
+            ec_getters_frame(ucsb_ingest_years())
+            .itertuples(index=False, name=None)
+        )
+        getter_keys = {(y, c) for y, c, _ in getter_keys}
+        for year, name in out[["year", "candidate"]].itertuples(index=False, name=None):
+            assert (year, name) in getter_keys
+
+    def test_d007_drops_the_eight_non_getter_columns(
+        self,
+        real_corpus_result: tuple[pd.DataFrame, pd.DataFrame],
+        real_corpus_reconciled: pd.DataFrame,
+    ) -> None:
+        # Every UCSB column is classified (mapped or dropped); the drops are exactly the
+        # eight zero-EV minors, and reconcile removes their rows.
+        pv, _ = real_corpus_result
+        native = {
+            (int(y), c) for y, c in pv[["year", "candidate"]].itertuples(index=False, name=None)
+        }
+        assert native == set(UCSB_CANDIDATE_RECONCILIATIONS) | UCSB_NON_GETTER_COLUMNS
+        assert len(real_corpus_reconciled) < len(pv)

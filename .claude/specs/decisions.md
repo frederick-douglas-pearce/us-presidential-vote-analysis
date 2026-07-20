@@ -1101,3 +1101,66 @@ fabricated values); **D009** (the ~1824 window, strengthened via `pv_coverage`);
   is defined alongside the D017 views; the `note` column is excluded from the public surface.
 - **ROADMAP Open Question 6 ("Shared PV record schema") is closed** — resolved by D018/D021, which
   reversed its premise: MIT landed first and defined the shape; UCSB conforms.
+
+---
+
+## D025: UCSB candidate reconciliation scopes to EC-getters via a reciprocal completeness guard
+
+**Date:** 2026-07-20
+**Context:** E4-S4 (#38) reconciles UCSB **candidate** names onto the canonical EC candidate
+key (D006) *and* applies the D007 candidate scope (MVP = candidates who received electoral
+votes). MIT (#67) could require **full coverage** — every native name mapped, else raise —
+because D019 had already pre-scoped it to `party_simplified ∈ {DEMOCRAT, REPUBLICAN}`. UCSB
+has no party proxy: it prints the top 2–4 candidates each year (majors *and* notable minors
+like Debs 1912, Perot 1992/1996, Nader 2000), so scoping to EC-getters *is* a name match, and
+telling a legitimately dropped minor from a **forgotten major** needs the EC-getter authority.
+The #38 architect review weighed two designs: **Fork 1** — enumerate every UCSB column,
+minors included, with an explicit DROP sentinel (full coverage like MIT); **Fork 2** — map
+EC-getters only and guard completeness reciprocally.
+
+**Decision:** **Fork 2.** In `usvote/ucsb/reconcile.py`:
+
+1. `UCSB_CANDIDATE_RECONCILIATIONS` maps only EC-getter columns, keyed `(year,
+   ucsb_native_name)` → canonical `name` (111 entries; keyed by year because 49 elections reuse
+   surnames across different people and drift one person's spelling across years). The 8
+   popular-vote-only minors are enumerated in `UCSB_NON_GETTER_COLUMNS` and dropped under D007.
+   `_assert_native_coverage` requires **every** UCSB column to be in one bucket or the other —
+   an unclassified column raises rather than being silently dropped.
+2. Dropping-by-omission is made safe not by enumerating minors (Fork 1's open-ended,
+   burden-heavy catalog that D007 exists to avoid) but by a **reciprocal completeness guard**:
+   every EC-getter that held a popular vote must survive into the reconciled facts. The getter
+   set arrives as an injected `ec_getters` frame (dependency injection, the pattern
+   `transform_ucsb` already uses for `ec_participation`), so reconcile stays pure/offline.
+3. `EC_GETTERS_WITHOUT_POPULAR_VOTE` (13 entries) exempts EC-getters who by design have no
+   popular-vote row — faithless/unpledged electors (1960 Byrd, the 2016 faithless five, 2004
+   Edwards, …) and legislature-chosen awards (1832 Floyd, 1836 Mangum). It is historically
+   closed. Without it the guard would false-positive on exactly these.
+4. This guard is **distinct from and additional to** E6/#69's join-side guard. The #36 two-way
+   roster assert operates at `(year, state)` grain and *cannot* catch a forgotten major (its
+   states stay non-empty via the other majors), and #69 only ever sees surviving rows — so an
+   **ingest-side, candidate-grain** guard here is the only thing that can catch it. #69 still
+   owns the reciprocal join-side check that every reconciled name is present in the EC dim.
+5. A prerequisite **EC-side** correction strips the 1944 footnote asterisk from the canonical
+   name (`Franklin D. Roosevelt*` → `Franklin D. Roosevelt`, via
+   `usvote.transform.strip_name_footnote_markers`), so FDR is one cross-year-consistent
+   canonical key and UCSB maps 1944 to the clean name.
+
+**Rationale:**
+- D007 exists to *bound* the reconciliation burden to the thesis-relevant (EC-getter) set;
+  Fork 1's minor catalog is exactly the open-ended list it rejects, and drop-by-omission already
+  has precedent (D019 drops non-{D,R} without cataloguing minors).
+- The completeness guard, injected offline, gives the anti-silent-drop guarantee that full
+  enumeration would — without the catalog — and catches the one failure (a forgotten major in a
+  multi-major state) that no later stage can.
+- Keying on `(year, name)` resolves recurring surnames and *is* the per-year D007 decision
+  (Van Buren won EVs in 1836, ran Free-Soil with none in 1848).
+
+**Action items:**
+- **#38 (E4-S4)** — `reconcile_ucsb(pv_votes, roster, ec_getters, *, years)`; the three curated
+  constants; `docs/corrections.md` gains the candidate-reconciliation and 1944-asterisk rows;
+  `docs/canonical-keys.md`'s UCSB line describes the shipped map. Committed test-input-only
+  witness `ec_getters_by_year.json` (names only, D024 §5) drives the offline 49-year guard run.
+- **#37 (E4-S5)** — resolves `ec_getters` from `dwh.votes` joined to `dwh.candidate`
+  (`president_electoral_votes > 0`, totals rows excluded) and runs reconcile before the load.
+- **#69 (E6)** — carries the reciprocal join-side guard that every reconciled UCSB/MIT name is
+  present in the EC `candidate` dim.
