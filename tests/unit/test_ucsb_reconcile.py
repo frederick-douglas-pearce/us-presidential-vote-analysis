@@ -287,3 +287,36 @@ class TestGuards:
         getters = make_getters([(2000, "George W. Bush"), (2000, "Albert Gore Jr.")])
         with pytest.raises(UCSBReconcileError, match="no vote rows"):
             reconcile_ucsb(pv, roster, getters, years={2000})
+
+    def test_empty_or_wrong_year_ec_getters_raises_not_vacuous(self) -> None:
+        # The completeness guard must not pass vacuously when ec_getters has no rows for
+        # an in-scope year (e.g. #37's query returned nothing, or year came back as str
+        # so .isin of ints matched nothing) — that would silently disable it.
+        pv, roster, _ = self._ohio_2016()
+        wrong_year = make_getters([(2020, "Donald J. Trump")])  # nothing for 2016
+        with pytest.raises(UCSBReconcileError, match="no president-EV getter"):
+            reconcile_ucsb(pv, roster, wrong_year, years={2016})
+
+    def test_zero_ev_getter_is_not_required(self) -> None:
+        # The `president_electoral_votes > 0` filter: a 0-EV row is not a getter, so the
+        # completeness guard must not demand a popular-vote row for it.
+        pv, roster, getters = self._ohio_2016()
+        getters = pd.concat(
+            [getters, make_getters([(2016, "Not A Getter")], ev=0)], ignore_index=True
+        )
+        out = reconcile_ucsb(pv, roster, getters, years={2016})
+        assert "Not A Getter" not in set(out["candidate"])
+
+    def test_out_of_scope_year_rows_are_scoped_out_not_leaked(self) -> None:
+        # A pv_votes row for a year outside `years` must not leak into the output (nor
+        # bypass the coverage guard by being dropped unchecked): reconcile scopes first.
+        pv = make_pv([
+            {"year": 2016, "state": "Ohio", "candidate": "DONALD TRUMP"},
+            {"year": 2016, "state": "Ohio", "candidate": "HILLARY CLINTON"},
+            {"year": 2020, "state": "Ohio", "candidate": "DONALD TRUMP"},  # out of scope
+        ])
+        roster = make_roster([(2016, "Ohio")])
+        getters = make_getters([(2016, "Donald J. Trump"), (2016, "Hillary Clinton")])
+        out = reconcile_ucsb(pv, roster, getters, years={2016})
+        assert set(out["year"]) == {2016}
+        assert len(out) == 2

@@ -213,6 +213,21 @@ def strip_name_footnote_markers(name: str) -> str:
     """Strip a trailing Archives footnote marker (``*``) from a candidate name."""
     return _NAME_FOOTNOTE_MARKER_RE.sub("", name)
 
+
+def strip_footnote_markers_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip footnote markers from ``president_candidate_name`` in ``df``, in place.
+
+    The frame-level form used by the Table-1/Table-2 normalizers. Vectorized via
+    ``.str.replace`` rather than ``.map(strip_name_footnote_markers)`` so it is
+    null-safe (a NaN name passes through as NaN, not a ``TypeError``) and a no-op when
+    the frame is empty and the column is absent — keeping the normalizers total, as they
+    were before the strip was introduced. Returns ``df`` for chaining.
+    """
+    col = "president_candidate_name"
+    if col in df.columns:
+        df[col] = df[col].str.replace(_NAME_FOOTNOTE_MARKER_RE, "", regex=True)
+    return df
+
 # Table-1 party *labels* normalized to one canonical code before aggregation, so the
 # same party reads identically across candidates and years and label drift does not
 # spuriously populate party_2. The Archives prints the early-era Democratic-Republican
@@ -445,9 +460,7 @@ def normalize_candidate_states(
     t2_states = pd.json_normalize(
         list(parsed_years), ["t2", "candidate_state"], ["year"]
     )
-    t2_states["president_candidate_name"] = t2_states[
-        "president_candidate_name"
-    ].map(strip_name_footnote_markers)
+    t2_states = strip_footnote_markers_column(t2_states)
     return apply_other_candidates(t2_states)
 
 
@@ -522,10 +535,7 @@ def normalize_candidate_parties(
     One row per year/candidate.
     """
     t1 = pd.json_normalize(list(parsed_years), "t1", ["year"])
-    t1["president_candidate_name"] = t1["president_candidate_name"].map(
-        strip_name_footnote_markers
-    )
-    return t1
+    return strip_footnote_markers_column(t1)
 
 
 # --- candidate dimension ---------------------------------------------------

@@ -351,6 +351,12 @@ def reconcile_ucsb(
     in_scope = frozenset(ucsb_ingest_years() if years is None else years)
 
     _assert_ec_getters_shape(ec_getters)
+    # Scope to the years being processed first, so the rewrite/drop, the coverage guard,
+    # and the completeness/roster guards all see the same row set. Otherwise a row for a
+    # year outside `years` would slip past _assert_native_coverage (which is scoped to
+    # in_scope) yet still be dropped or reconciled by _rewrite_and_scope — a silent drop
+    # in the stage built to prevent them, or a leak of an unprocessed year downstream.
+    pv_votes = pv_votes[pv_votes["year"].isin(in_scope)].reset_index(drop=True)
     _assert_native_coverage(pv_votes, in_scope)
 
     out = _rewrite_and_scope(pv_votes)
@@ -439,6 +445,18 @@ def _assert_getter_completeness(
         ec_getters["year"].isin(in_scope)
         & (ec_getters["president_electoral_votes"] > 0)
     ]
+    # Every in-scope election year has EC-getters; a year with none means the injected
+    # frame is empty or mis-typed (e.g. #37's query returned nothing, or `year` came
+    # back as strings so `.isin` of ints matched nothing). Without this, the guard
+    # below would pass vacuously — silently disabling the forgotten-major check.
+    missing_years = sorted(in_scope - {int(y) for y in getters["year"]})
+    if missing_years:
+        raise UCSBReconcileError(
+            f"ec_getters has no president-EV getter rows for in-scope year(s) "
+            f"{missing_years}; the completeness guard cannot run. The injected frame "
+            f"is empty or its `year` column is mis-typed (dwh.votes should yield an "
+            f"int year and president_electoral_votes > 0 for each getter)."
+        )
     getter_keys = {
         (int(y), str(c))
         for y, c in zip(getters["year"], getters["candidate"], strict=True)

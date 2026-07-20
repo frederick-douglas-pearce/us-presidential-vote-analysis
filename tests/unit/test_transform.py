@@ -43,6 +43,7 @@ from usvote.transform import (
     normalize_candidate_parties,
     normalize_candidate_states,
     split_name,
+    strip_footnote_markers_column,
     strip_name_footnote_markers,
     transform_parsed_years,
 )
@@ -267,6 +268,17 @@ def test_strip_name_footnote_markers() -> None:
     assert strip_name_footnote_markers("Franklin D. Roosevelt *") == "Franklin D. Roosevelt"
     assert strip_name_footnote_markers("Franklin D. Roosevelt") == "Franklin D. Roosevelt"
     assert strip_name_footnote_markers("Harry S. Truman") == "Harry S. Truman"
+
+
+def test_strip_footnote_markers_column_is_null_safe_and_total() -> None:
+    # The frame-level strip must pass a NaN name through unchanged (not TypeError) and
+    # no-op when the frame is empty and the column is absent (not KeyError).
+    df = pd.DataFrame({"president_candidate_name": ["Franklin D. Roosevelt*", None]})
+    out = strip_footnote_markers_column(df)["president_candidate_name"]
+    assert out.iloc[0] == "Franklin D. Roosevelt"
+    assert pd.isna(out.iloc[1])  # null passes through, not a TypeError
+    empty = pd.DataFrame()  # no such column
+    assert strip_footnote_markers_column(empty).empty
 
 
 def _parsed_year(year: int, t2_name: str, t1_name: str) -> dict[str, Any]:
