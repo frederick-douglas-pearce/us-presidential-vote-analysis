@@ -63,7 +63,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -223,6 +223,62 @@ def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
         json.dumps(dict(manifest), indent=2, sort_keys=True), encoding="utf-8"
     )
     tmp.replace(path)
+
+
+def read_snapshot_html(
+    html_dir: str | Path | None = None,
+    *,
+    years: Collection[int] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> dict[int, str]:
+    """Read the saved snapshot into the ``{year: html}`` mapping the parser consumes.
+
+    The read counterpart of :func:`snapshot_elections`: it turns the on-disk snapshot
+    (``{year}.html`` pages + ``manifest.json``) into the ``Mapping[int, str]``
+    :func:`usvote.ucsb.parse.parse_election_years` requires — the one place under
+    ``src/`` that assembles it (the ``#37`` pipeline seam; tests previously built it ad
+    hoc). ``html_dir`` resolves from ``USVOTE_UCSB_HTML_DIR`` when ``None``, exactly as
+    :func:`snapshot_elections` does.
+
+    **Only ``http_status == 200`` pages are returned.** A page the server answered
+    404/403/etc. was saved verbatim (the manifest records what the server said), but it
+    is not usable markup and must never reach the parser. Skipping it here means the
+    year is simply absent from the mapping.
+
+    ``years`` narrows to a subset (int years); ``None`` returns every 200 page. A
+    requested year that is missing or non-200 is **not** raised on here — it falls
+    through absent, and :func:`usvote.ucsb.transform._scope_years` raises the
+    ``UCSBMissingYearError`` that names it with the actionable "re-run the snapshot or
+    narrow ``years``" guidance. Raising here too would be a second guard for one
+    condition, and the worse-worded one would fire first.
+
+    Raises :class:`UCSBScrapeError` only for a structurally broken snapshot: a 200
+    manifest entry whose ``{year}.html`` file is missing from disk (the manifest and the
+    directory disagree — a corrupt snapshot, not an absent year).
+    """
+    directory = Path(_resolve_html_dir(html_dir, environ))
+    manifest = read_manifest(directory)
+    wanted = None if years is None else {int(y) for y in years}
+
+    html_by_year: dict[int, str] = {}
+    for raw_year, entry in manifest.items():
+        if not isinstance(entry, Mapping) or entry.get("http_status") != 200:
+            continue
+        year = int(raw_year)
+        if wanted is not None and year not in wanted:
+            continue
+        page = directory / entry.get("file", f"{year}.html")
+        if not page.exists():
+            raise UCSBScrapeError(
+                f"manifest records {page.name} at HTTP 200 for {year}, but the file is "
+                f"missing from {directory}. The snapshot and its manifest disagree; "
+                f"re-run `python -m usvote.ucsb` to repair it."
+            )
+        # Match the verbatim-bytes snapshot's tolerance: decode replacing any stray
+        # bytes rather than aborting the whole read on one malformed page (as
+        # `_read_index` does for the index).
+        html_by_year[year] = page.read_text(encoding="utf-8", errors="replace")
+    return html_by_year
 
 
 def snapshot_elections(

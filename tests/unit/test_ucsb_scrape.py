@@ -360,6 +360,74 @@ class TestSnapshotElectionsConfig:
         assert fetch.urls == []
 
 
+def _write_page(directory: Path, year: int, html: str) -> None:
+    (directory / f"{year}.html").write_text(html, encoding="utf-8")
+
+
+def _manifest_entry(year: int, status: int) -> dict[str, Any]:
+    return {"url": f".../{year}", "file": f"{year}.html", "http_status": status}
+
+
+class TestReadSnapshotHtml:
+    """The read counterpart of the snapshot — ``{year: html}`` for the parser (#37)."""
+
+    def test_reads_200_pages_into_an_int_keyed_mapping(self, tmp_path: Path) -> None:
+        _write_page(tmp_path, 1824, "<html>1824</html>")
+        _write_page(tmp_path, 1876, "<html>1876</html>")
+        scrape.write_manifest(
+            tmp_path, {"1824": _manifest_entry(1824, 200), "1876": _manifest_entry(1876, 200)}
+        )
+        assert scrape.read_snapshot_html(tmp_path) == {
+            1824: "<html>1824</html>",
+            1876: "<html>1876</html>",
+        }
+
+    def test_skips_non_200_pages(self, tmp_path: Path) -> None:
+        # A saved 404/403 page is not usable markup and must never reach the parser;
+        # the year is simply absent from the mapping (the transform then names it).
+        _write_page(tmp_path, 1824, "<html>1824</html>")
+        _write_page(tmp_path, 1900, "<html>not found</html>")
+        scrape.write_manifest(
+            tmp_path, {"1824": _manifest_entry(1824, 200), "1900": _manifest_entry(1900, 404)}
+        )
+        assert scrape.read_snapshot_html(tmp_path) == {1824: "<html>1824</html>"}
+
+    def test_years_filter_narrows_the_mapping(self, tmp_path: Path) -> None:
+        for year in (1824, 1876, 2020):
+            _write_page(tmp_path, year, f"<html>{year}</html>")
+        scrape.write_manifest(
+            tmp_path, {str(y): _manifest_entry(y, 200) for y in (1824, 1876, 2020)}
+        )
+        assert set(scrape.read_snapshot_html(tmp_path, years={1876, 2020})) == {1876, 2020}
+
+    def test_missing_in_scope_year_is_not_raised_here(self, tmp_path: Path) -> None:
+        # A requested year with no 200 page falls through absent — the transform's
+        # _scope_years owns the actionable UCSBMissingYearError, so raising here too
+        # would be a second guard for one condition with the worse-worded one firing.
+        _write_page(tmp_path, 1824, "<html>1824</html>")
+        scrape.write_manifest(tmp_path, {"1824": _manifest_entry(1824, 200)})
+        assert scrape.read_snapshot_html(tmp_path, years={1824, 1900}) == {
+            1824: "<html>1824</html>"
+        }
+
+    def test_200_entry_with_no_file_on_disk_raises(self, tmp_path: Path) -> None:
+        # The manifest and the directory disagree — a corrupt snapshot, distinct from an
+        # absent year, so it raises rather than falling through.
+        scrape.write_manifest(tmp_path, {"1824": _manifest_entry(1824, 200)})
+        with pytest.raises(scrape.UCSBScrapeError, match="missing from"):
+            scrape.read_snapshot_html(tmp_path)
+
+    def test_empty_manifest_reads_as_empty_mapping(self, tmp_path: Path) -> None:
+        assert scrape.read_snapshot_html(tmp_path) == {}
+
+    def test_resolves_the_directory_from_the_environment(self, tmp_path: Path) -> None:
+        _write_page(tmp_path, 1824, "<html>1824</html>")
+        scrape.write_manifest(tmp_path, {"1824": _manifest_entry(1824, 200)})
+        assert scrape.read_snapshot_html(
+            environ={UCSB_HTML_DIR_VAR: str(tmp_path)}
+        ) == {1824: "<html>1824</html>"}
+
+
 class FakeResponse:
     """A minimal stand-in for the ``http.client.HTTPResponse`` ``urlopen`` returns."""
 

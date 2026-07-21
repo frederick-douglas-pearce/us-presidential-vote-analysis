@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from tests._helpers import RecordingConnection, make_dbc, record_inserts
-from usvote.pv.load import load_pv_records
+from usvote.pv.load import load_pv_records, load_pv_status
 from usvote.pv.schema import (
     PV_SCHEMA,
     PV_TABLE,
@@ -22,6 +22,15 @@ from usvote.pv.schema import (
     PVShapeError,
     assert_pv_shape,
     build_pv_column_defs,
+)
+from usvote.pv.status import (
+    PV_STATUS_LEGISLATURE_CHOSEN,
+    PV_STATUS_NOT_PARTICIPATING,
+    PV_STATUS_POPULAR_VOTE,
+    ROSTER_COLUMNS,
+    ROSTER_SCHEMA,
+    ROSTER_TABLE,
+    PVRosterError,
 )
 
 # --- column definitions ----------------------------------------------------
@@ -226,3 +235,109 @@ def test_load_defaults_to_leaving_connection_open(
     record_inserts(monkeypatch)
     load_pv_records(make_dbc(recording_conn), _valid_frame())
     assert recording_conn.closed is False
+
+
+# --- load_pv_status: the D024 roster loader --------------------------------
+
+
+def _valid_roster() -> pd.DataFrame:
+    """A minimal valid roster frame, rows deliberately out of natural-key order."""
+    rows = [
+        {
+            "source": "UCSB", "year": 1876, "state": "South Carolina",
+            "pv_status": PV_STATUS_LEGISLATURE_CHOSEN, "note": "chosen by legislature",
+        },
+        {
+            "source": "UCSB", "year": 1876, "state": "Colorado",
+            "pv_status": PV_STATUS_NOT_PARTICIPATING, "note": None,
+        },
+        {
+            "source": "UCSB", "year": 1876, "state": "Alabama",
+            "pv_status": PV_STATUS_POPULAR_VOTE, "note": None,
+        },
+    ]
+    return pd.DataFrame(rows)[list(ROSTER_COLUMNS)]
+
+
+def test_load_status_inserts_rows_in_natural_key_order(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_inserts(monkeypatch)
+    loaded = load_pv_status(make_dbc(recording_conn), _valid_roster())
+
+    # Sorted by (source, year, state): Alabama, Colorado, South Carolina. status_id is
+    # DB-assigned (identity), so it is absent from the returned frame.
+    assert "status_id" not in loaded.columns
+    assert loaded["state"].tolist() == ["Alabama", "Colorado", "South Carolina"]
+
+
+def test_load_status_insert_omits_status_id_so_the_db_generates_it(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inserts = record_inserts(monkeypatch)
+    load_pv_status(make_dbc(recording_conn), _valid_roster())
+
+    (sql, _argslist) = inserts[0]
+    expected_cols = ",".join(ROSTER_COLUMNS)
+    assert sql == (
+        f"INSERT INTO {ROSTER_SCHEMA}.{ROSTER_TABLE} ({expected_cols}) VALUES %s"
+    )
+    assert "status_id" not in sql
+
+
+def test_load_status_creates_table_and_is_non_destructive_by_default(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_inserts(monkeypatch)
+    load_pv_status(make_dbc(recording_conn), _valid_roster())
+
+    assert not any("DROP" in q for q in recording_conn.executed)
+    assert any(
+        q.startswith(f"CREATE TABLE IF NOT EXISTS {ROSTER_SCHEMA}.{ROSTER_TABLE}")
+        for q in recording_conn.executed
+    )
+
+
+def test_load_status_does_not_create_the_schema(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike load_pv_records, the roster loader does NOT re-issue CREATE SCHEMA: dwh
+    # always pre-exists a roster load (the EC spine created it and the pipeline read
+    # from it first), so a second CREATE SCHEMA would be a redundant round-trip.
+    record_inserts(monkeypatch)
+    load_pv_status(make_dbc(recording_conn), _valid_roster())
+    assert not any(q.startswith("CREATE SCHEMA") for q in recording_conn.executed)
+
+
+def test_load_status_replace_drops_only_the_table_never_the_schema(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same guard as the fact loader: a roster replace must not cascade-drop the dwh
+    # schema (wiping the EC spine). Exactly one drop, and it is the roster table.
+    record_inserts(monkeypatch)
+    load_pv_status(make_dbc(recording_conn), _valid_roster(), replace=True)
+
+    drops = [q for q in recording_conn.executed if q.startswith("DROP")]
+    assert drops == [f"DROP TABLE IF EXISTS {ROSTER_SCHEMA}.{ROSTER_TABLE} Cascade"]
+    assert not any("DROP SCHEMA" in q for q in recording_conn.executed)
+
+
+def test_load_status_guards_shape_before_any_ddl(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A malformed roster must fail loudly at the boundary, not mid-insert. A null state
+    # in the natural key trips assert_roster_shape before any CREATE/INSERT is issued.
+    record_inserts(monkeypatch)
+    bad = _valid_roster()
+    bad.loc[0, "state"] = None
+    with pytest.raises(PVRosterError):
+        load_pv_status(make_dbc(recording_conn), bad)
+    assert not any(q.startswith("CREATE TABLE") for q in recording_conn.executed)
+
+
+def test_load_status_close_flag_closes_connection(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_inserts(monkeypatch)
+    load_pv_status(make_dbc(recording_conn), _valid_roster(), close=True)
+    assert recording_conn.closed is True
