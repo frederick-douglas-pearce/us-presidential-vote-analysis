@@ -1,10 +1,21 @@
-"""Load stage — write a shared-shape PV frame into the ``dwh.pv_votes`` table.
+"""Load stage — write the shared-shape PV frames into their ``dwh`` tables.
 
 The source-neutral PV analogue of the EC :func:`usvote.load.load_dataframes`. Every
 PV source (MIT #66, later UCSB #37) loads through this one seam: hand it a frame on
 the D018 shared shape (:data:`usvote.pv.schema.SHARED_PV_COLUMNS`, already reconciled
 onto the canonical keys) and it assigns the surrogate ``pv_id``, creates the shared
 table if absent, and inserts — tagged by whatever ``source`` value the frame carries.
+
+Two loaders live here, one per shared PV table, and they are deliberately parallel:
+:func:`load_pv_records` writes the ``dwh.pv_votes`` fact, and :func:`load_pv_status`
+writes the D024 ``dwh.pv_state_status`` roster (the second frame a source's transform
+emits). Both are source-neutral — UCSB (#37) is the first caller of the roster loader,
+but E6's MIT roster backfill is the second, so neither can live under a source
+subpackage. A source that loads both (UCSB) applies **one** ``replace`` flag to both
+calls; the two writes are not one transaction (``DBC`` commits per statement), so a
+failure between them can leave the roster/fact pair inconsistent in the DB — see
+:func:`usvote.ucsb.pipeline.run_ucsb_pipeline` for the load order that minimizes the
+blast radius and follow-up #84, which would make it atomic.
 
 **Two invariants this module exists to protect:**
 
@@ -42,6 +53,14 @@ from usvote.pv.schema import (
     PV_TABLE,
     assert_pv_shape,
     build_pv_column_defs,
+)
+from usvote.pv.status import (
+    ROSTER_NATURAL_KEY,
+    ROSTER_SCHEMA,
+    ROSTER_TABLE,
+    assert_roster_shape,
+    assert_unique_roster_grain,
+    build_status_column_defs,
 )
 
 
@@ -91,6 +110,58 @@ def load_pv_records(
     dbc.create_schema(schema, replace=False)
     dbc.create_table(schema, PV_TABLE, build_pv_column_defs(schema), replace=replace)
     dbc.insert_df_into_table(schema, PV_TABLE, ordered)
+    if close:
+        dbc.close_connection()
+    return ordered
+
+
+def load_pv_status(
+    dbc: DBC,
+    roster: pd.DataFrame,
+    *,
+    schema: str = ROSTER_SCHEMA,
+    replace: bool = False,
+    close: bool = False,
+) -> pd.DataFrame:
+    """Create ``schema.pv_state_status`` if absent and insert the D024 roster frame.
+
+    The roster-table sibling of :func:`load_pv_records`, and source-neutral for the
+    same reason its shape contract is (``usvote.pv.status``): E6's MIT roster backfill
+    loads through this seam too, so it must not live under a source subpackage.
+    ``roster`` is the second frame :func:`usvote.ucsb.transform.transform_ucsb` returns,
+    on :data:`~usvote.pv.status.ROSTER_COLUMNS`; its ``state`` FK targets ``dwh.state``,
+    so the EC spine must be loaded first.
+
+    Mirrors :func:`load_pv_records` exactly:
+
+    - the frame is shape/grain-guarded (:func:`assert_roster_shape`,
+      :func:`assert_unique_roster_grain`) before any DDL, so a malformed roster fails
+      loudly here rather than mid-insert;
+    - it is stable-sorted on :data:`~usvote.pv.status.ROSTER_NATURAL_KEY` for a
+      deterministic insert/output order;
+    - ``status_id`` is a ``GENERATED ALWAYS AS IDENTITY`` column the DB fills, so it is
+      **never** supplied in the frame (a per-call ``range`` would collide across a
+      second source's append, the same hazard ``pv_id`` avoids);
+    - ``create_schema`` is called ``replace=False`` **unconditionally** — the EC spine
+      sharing ``dwh`` must survive — and ``replace`` gates only the table-level rebuild.
+
+    Returns the sorted roster frame as inserted (without ``status_id``).
+    """
+    assert_roster_shape(roster)
+    assert_unique_roster_grain(roster)
+
+    ordered = roster.sort_values(
+        list(ROSTER_NATURAL_KEY), kind="stable"
+    ).reset_index(drop=True)
+
+    # As in load_pv_records: NEVER forward ``replace`` to create_schema (it would
+    # cascade a drop of the whole dwh schema and wipe the EC spine). Create-if-absent
+    # only; ``replace`` is gated at the table level.
+    dbc.create_schema(schema, replace=False)
+    dbc.create_table(
+        schema, ROSTER_TABLE, build_status_column_defs(schema), replace=replace
+    )
+    dbc.insert_df_into_table(schema, ROSTER_TABLE, ordered)
     if close:
         dbc.close_connection()
     return ordered
