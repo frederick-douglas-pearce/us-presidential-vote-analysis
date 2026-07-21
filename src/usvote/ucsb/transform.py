@@ -59,6 +59,7 @@ import numpy as np
 import pandas as pd
 
 from usvote.pv.schema import SHARED_PV_COLUMNS, assert_pv_shape
+from usvote.pv.source import SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -76,10 +77,12 @@ from usvote.ucsb.parse import (
 from usvote.years import LATEST_ELECTION_YEAR, ec_ingest_years
 
 # --- provenance literals ----------------------------------------------------
-#: Provenance stamped on every row of both frames (D014/D016). ``redistributable`` is
-#: *not* a column — it is a per-source attribute of the ``pv_source`` reference table
-#: (D017/D018), and for UCSB it is ``false`` pending a license answer (D022).
-SOURCE_UCSB = "UCSB"
+# ``SOURCE_UCSB`` moved to usvote.pv.source in #68 — the SSOT for source-name literals,
+# where the pv_source reference table also keys on it. Re-imported above (still
+# ``source -> pv``) so callers of ``usvote.ucsb.transform.SOURCE_UCSB`` (including
+# ``usvote.ucsb.reconcile``) are unaffected. ``redistributable`` is *not* a column — it
+# is a per-source attribute of the pv_source reference table (D017/D018), and for UCSB
+# it is ``false`` pending a license answer (D022).
 
 #: The D018 reliability values UCSB emits. UCSB publishes exact integer counts and no
 #: reliability signal of its own, so rows are ``exact`` unless the page contradicts

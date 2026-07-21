@@ -112,3 +112,29 @@ directly, and the cross-source union/join (E6, #68/#69) keys on the display form
 reconcile stage produces canonical *values* offline; #69 owns the reciprocal guard that
 every reconciled value is actually present in the EC dims (an unmatched value must fail
 loud there, not vanish in an inner join).
+
+## The union is the raw fact; the series are read-time views (#68, D017)
+
+Once both sources sit on the canonical keys, they are already stacked in **one**
+`dwh.pv_votes` — each loaded through `load_pv_records`, tagged by `source`, with `source`
+part of the natural key so the 1976–2024 overlap keeps **both** rows. That table *is* the
+raw union; #68 adds no second fact table. It exposes three D017 series as thin read-time
+views over the union (see [`src/usvote/pv/views.py`](../src/usvote/pv/views.py)):
+
+- **`pv_preferred`** — the default analysis series: exactly one row per `(year, state,
+  candidate)`, MIT winning the overlap and UCSB supplying everything earlier. Resolved by
+  `DISTINCT ON (year, state, candidate) ORDER BY …, precedence_rank`.
+- **`pv_redistributable`** — the public API surface, defined *independently* as `WHERE
+  redistributable` (MIT only), never as a filter over `pv_preferred`, so no change to
+  preference resolution can leak a non-redistributable UCSB row onto it.
+- **`pv_ucsb`** — the whole-span UCSB-only consistency control.
+
+Precedence, `redistributable`, and license are **data, not code** — one row per source in
+the `dwh.pv_source` reference table ([`src/usvote/pv/source.py`](../src/usvote/pv/source.py)),
+which the views join on `source`. A UCSB redistribution grant, or adding a third source, is
+a one-row edit with no view or DDL change.
+
+**The join (#69) reads a resolved view, never the raw union.** Joining the EC spine to
+`dwh.pv_votes` directly would fan the overlap out 2× and double-count every downstream
+sum/margin — the raw tagged union and the resolved single-row series are deliberately
+named apart to prevent that mistake.

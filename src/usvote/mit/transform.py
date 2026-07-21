@@ -45,14 +45,17 @@ from __future__ import annotations
 import pandas as pd
 
 from usvote.pv.schema import SHARED_PV_COLUMNS
+from usvote.pv.source import SOURCE_MIT
 
 # --- provenance literals ----------------------------------------------------
 # The D018 shared PV record shape (SHARED_PV_COLUMNS) is the source-neutral SSOT in
 # usvote.pv.schema; MIT imports it (direction is always source -> pv) and projects
 # onto it in _project_shared_shape.
-#: Provenance literals MIT stamps on every row (D014/D016). ``redistributable`` is
-#: *not* here — it is a per-source attribute of the ``pv_source`` table (D017/D018).
-SOURCE_MIT = "MIT"
+# ``SOURCE_MIT`` moved to usvote.pv.source in #68 — the SSOT for source-name literals,
+# where the pv_source reference table also keys on it (so the tag and the table cannot
+# disagree). Re-imported here (still ``source -> pv``) so callers of
+# ``usvote.mit.transform.SOURCE_MIT`` are unaffected. ``redistributable`` is likewise a
+# per-source attribute of the pv_source table (D017/D018), never a row column here.
 #: MIT is a clean modern release, so every row is exact (D005 reliability flag).
 #: The shared enum is ``{exact, estimated, unreliable}``; UCSB varies it per row.
 RELIABILITY_EXACT = "exact"

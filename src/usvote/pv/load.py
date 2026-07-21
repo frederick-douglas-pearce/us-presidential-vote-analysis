@@ -6,7 +6,7 @@ the D018 shared shape (:data:`usvote.pv.schema.SHARED_PV_COLUMNS`, already recon
 onto the canonical keys) and it assigns the surrogate ``pv_id``, creates the shared
 table if absent, and inserts — tagged by whatever ``source`` value the frame carries.
 
-Two loaders live here, one per shared PV table, and they are deliberately parallel:
+Two per-source loaders write the raw facts, deliberately parallel:
 :func:`load_pv_records` writes the ``dwh.pv_votes`` fact, and :func:`load_pv_status`
 writes the D024 ``dwh.pv_state_status`` roster (the second frame a source's transform
 emits). Both are source-neutral — UCSB (#37) is the first caller of the roster loader,
@@ -16,6 +16,15 @@ calls; the two writes are not one transaction (``DBC`` commits per statement), s
 failure between them can leave the roster/fact pair inconsistent in the DB — see
 :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` for the load order that minimizes the
 blast radius and follow-up #84, which would make it atomic.
+
+The union story (#68, D017) adds three more seams here, over the *already-loaded*
+per-source facts rather than writing a new one: :func:`load_pv_source` seeds the small
+``dwh.pv_source`` reference table, :func:`create_pv_views` creates the three resolution
+views (``pv_preferred``/``pv_redistributable``/``pv_ucsb``), and :func:`build_pv_union`
+orchestrates the two. There is no fourth "union" fact write — the raw union *is*
+``dwh.pv_votes`` (both sources stacked, tagged by ``source``, overlap kept per D017 §1);
+the views resolve the series at read time. See :mod:`usvote.pv.views` for why joining
+the raw union downstream (#69) would double-count the overlap.
 
 **Two invariants this module exists to protect:**
 
@@ -54,6 +63,13 @@ from usvote.pv.schema import (
     assert_pv_shape,
     build_pv_column_defs,
 )
+from usvote.pv.source import (
+    PV_SOURCE_SCHEMA,
+    PV_SOURCE_TABLE,
+    assert_pv_source_shape,
+    build_pv_source_column_defs,
+    build_pv_source_frame,
+)
 from usvote.pv.status import (
     ROSTER_NATURAL_KEY,
     ROSTER_SCHEMA,
@@ -61,6 +77,14 @@ from usvote.pv.status import (
     assert_roster_shape,
     assert_unique_roster_grain,
     build_status_column_defs,
+)
+from usvote.pv.views import (
+    PV_PREFERRED_VIEW,
+    PV_REDISTRIBUTABLE_VIEW,
+    PV_UCSB_VIEW,
+    build_pv_preferred_sql,
+    build_pv_redistributable_sql,
+    build_pv_ucsb_sql,
 )
 
 
@@ -172,3 +196,104 @@ def load_pv_status(
     if close:
         dbc.close_connection()
     return ordered
+
+
+def load_pv_source(
+    dbc: DBC,
+    *,
+    schema: str = PV_SOURCE_SCHEMA,
+    replace: bool = False,
+    close: bool = False,
+) -> pd.DataFrame:
+    """Create ``schema.pv_source`` if absent and seed the D017 reference rows.
+
+    The reference-table sibling of :func:`load_pv_records`. Unlike the fact loaders it
+    takes **no frame** — the seed *is* the contract (:func:`build_pv_source_frame`,
+    ``data, not code`` per D017) — so it builds, shape-guards, creates, and inserts the
+    two rows (MIT rank 1 / redistributable; UCSB rank 2 / analysis-only). Returns the
+    seeded frame.
+
+    ``replace`` gates only the **table**-level rebuild (the same footgun guard as
+    :func:`load_pv_records`): ``create_schema`` is called with ``replace=False``
+    *unconditionally*, so a PV rebuild never cascades a drop of ``dwh`` and the EC spine
+    survives. Re-running with ``replace=False`` against the already-seeded table raises
+    a PK/unique violation on ``source`` (the intended non-destructive guard) — pass
+    ``replace=True`` to re-seed.
+    """
+    frame = build_pv_source_frame()
+    assert_pv_source_shape(frame)
+
+    # NEVER forward ``replace`` to create_schema — that cascades a drop of the whole
+    # ``dwh`` schema and wipes the EC spine (see load_pv_records). Table-level only.
+    dbc.create_schema(schema, replace=False)
+    dbc.create_table(
+        schema, PV_SOURCE_TABLE, build_pv_source_column_defs(), replace=replace
+    )
+    dbc.insert_df_into_table(schema, PV_SOURCE_TABLE, frame)
+    if close:
+        dbc.close_connection()
+    return frame
+
+
+def create_pv_views(
+    dbc: DBC,
+    *,
+    schema: str = PV_SCHEMA,
+    replace: bool = True,
+    close: bool = False,
+) -> None:
+    """Create the three D017 resolution views over ``schema.pv_votes`` + ``pv_source``.
+
+    ``pv_preferred`` (default series, MIT-preferred), ``pv_redistributable`` (public
+    surface, ``WHERE redistributable``), and ``pv_ucsb`` (whole-span UCSB control) —
+    see :mod:`usvote.pv.views`. Both ``pv_votes`` and ``pv_source`` must already exist
+    (a source load created the fact table; :func:`load_pv_source` created the reference
+    table), so run this **after** at least one source load and after
+    :func:`load_pv_source`.
+
+    ``replace`` defaults to ``True`` here (unlike the table loaders' ``False``) because
+    ``CREATE OR REPLACE VIEW`` is non-destructive and idempotent — re-running swaps each
+    view's query in place without dropping it or its dependents (see
+    :meth:`usvote.db.DBC.create_view`).
+    """
+    dbc.create_view(
+        schema, PV_PREFERRED_VIEW, build_pv_preferred_sql(schema), replace=replace
+    )
+    dbc.create_view(
+        schema,
+        PV_REDISTRIBUTABLE_VIEW,
+        build_pv_redistributable_sql(schema),
+        replace=replace,
+    )
+    dbc.create_view(
+        schema, PV_UCSB_VIEW, build_pv_ucsb_sql(schema), replace=replace
+    )
+    if close:
+        dbc.close_connection()
+
+
+def build_pv_union(
+    dbc: DBC,
+    *,
+    schema: str = PV_SCHEMA,
+    replace: bool = False,
+    close: bool = False,
+) -> None:
+    """Assemble the resolved PV series: seed ``pv_source`` then create the three views.
+
+    The single entry point for #68. It does **not** write a new fact table — the raw
+    union already exists physically as ``dwh.pv_votes`` (both sources loaded through
+    :func:`load_pv_records`, tagged by ``source``, overlap kept by D017 §1). This only
+    adds the reference table and the read-time views that resolve the three series, so
+    it must run **after** the MIT and/or UCSB source loads (``pv_votes`` must exist for
+    the views to compile).
+
+    ``replace`` gates the **``pv_source`` table** rebuild only (never the schema); the
+    views are always ``CREATE OR REPLACE`` (idempotent). Like the source loaders there
+    is no ``__main__`` — E6's combined entry point is deferred (#84); this is driven
+    directly (e.g. by the integration test), mirroring ``run_mit_pipeline``.
+    """
+    load_pv_source(dbc, schema=schema, replace=replace)
+    create_pv_views(dbc, schema=schema, replace=True)
+    if close:
+        dbc.close_connection()

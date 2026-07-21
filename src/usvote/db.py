@@ -143,6 +143,31 @@ class DBC:
             close=close,
         )
 
+    def create_view(
+        self,
+        schema: str,
+        view_name: str,
+        select_sql: str,
+        replace: bool = False,
+        close: bool = False,
+    ) -> None:
+        """Create a view named ``schema.view_name`` over ``select_sql``.
+
+        ``replace=True`` emits ``CREATE OR REPLACE VIEW`` — non-destructive (unlike the
+        table/schema ``replace`` paths, which ``DROP ... CASCADE``): it swaps the query
+        in place without dropping the view, so dependent views (e.g. a later EC<->PV
+        join, #69) are left intact. This is why the PV view loader defaults
+        ``replace=True`` while the table loaders default ``replace=False``. ``replace``
+        does require the new query to generate the same columns (same names, order, and
+        types) as the existing view, though it may append columns at the end; a genuine
+        column-set change is a migration that drops the view explicitly.
+        https://www.postgresql.org/docs/16/sql-createview.html
+        """
+        verb = "CREATE OR REPLACE VIEW" if replace else "CREATE VIEW"
+        self.execute_query(
+            f"{verb} {schema}.{view_name} AS {select_sql}", close=close
+        )
+
     def copy_csv_to_table(
         self,
         schema: str,
