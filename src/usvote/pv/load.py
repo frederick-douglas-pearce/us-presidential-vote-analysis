@@ -142,8 +142,15 @@ def load_pv_status(
     - ``status_id`` is a ``GENERATED ALWAYS AS IDENTITY`` column the DB fills, so it is
       **never** supplied in the frame (a per-call ``range`` would collide across a
       second source's append, the same hazard ``pv_id`` avoids);
-    - ``create_schema`` is called ``replace=False`` **unconditionally** — the EC spine
-      sharing ``dwh`` must survive — and ``replace`` gates only the table-level rebuild.
+    - ``replace`` gates only the table-level rebuild — never the schema, so the EC spine
+      sharing ``dwh`` survives a roster reload.
+
+    Unlike :func:`load_pv_records`, this does **not** create the schema: a roster load
+    always runs after the EC spine (its ``state`` FK needs ``dwh.state``, and the
+    pipeline's :func:`usvote.spine.read_ec_participation` has already read ``dwh.votes``
+    by the time this is called), so ``dwh`` provably exists and re-issuing
+    ``CREATE SCHEMA`` would only add a redundant round-trip. The fact loader keeps its
+    own create-if-absent for its #66 standalone contract.
 
     Returns the sorted roster frame as inserted (without ``status_id``).
     """
@@ -154,10 +161,10 @@ def load_pv_status(
         list(ROSTER_NATURAL_KEY), kind="stable"
     ).reset_index(drop=True)
 
-    # As in load_pv_records: NEVER forward ``replace`` to create_schema (it would
-    # cascade a drop of the whole dwh schema and wipe the EC spine). Create-if-absent
-    # only; ``replace`` is gated at the table level.
-    dbc.create_schema(schema, replace=False)
+    # No create_schema here (unlike load_pv_records): dwh always pre-exists a roster
+    # load — the EC spine created it and the pipeline read from it first — so this would
+    # be a redundant round-trip. ``replace`` is still gated at the table level only; it
+    # drops at most pv_state_status, never the schema.
     dbc.create_table(
         schema, ROSTER_TABLE, build_status_column_defs(schema), replace=replace
     )

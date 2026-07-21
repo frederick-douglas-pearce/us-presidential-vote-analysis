@@ -59,10 +59,9 @@ def test_participation_returns_the_roster_columns() -> None:
     assert list(out.columns) == list(EC_PARTICIPATION_COLUMNS)
 
 
-def test_participation_casts_is_total_to_genuine_bool() -> None:
-    # The DB seam owns the cast: _assert_participation_shape rejects 0/1 ints and
-    # 't'/'f' strings (a string is truthy for every row). A driver handing back ints
-    # must come out as real bools.
+def test_participation_coerces_int_is_total_to_bool() -> None:
+    # A 0/1-int is_total (which _assert_participation_shape rejects) is coerced to real
+    # bool here, so a driver handing back ints still yields a valid participation frame.
     stub = StubDBC(
         pd.DataFrame({
             "year": [1876, 1876],
@@ -74,6 +73,37 @@ def test_participation_casts_is_total_to_genuine_bool() -> None:
     out = read_ec_participation(stub)  # type: ignore[arg-type]
     assert out["is_total"].dtype == bool
     assert out["is_total"].tolist() == [False, True]
+
+
+def test_participation_leaves_string_is_total_uncoerced_for_the_guard() -> None:
+    # The footgun a blanket .astype(bool) would introduce: 't'/'f' strings are truthy,
+    # so it would map every row to True (all rows treated as totals). The seam must
+    # leave a non-integer is_total untouched so _assert_participation_shape rejects it
+    # loudly instead — NOT silently coerce it to all-True.
+    stub = StubDBC(
+        pd.DataFrame({
+            "year": [1876, 1876],
+            "state": ["Alabama", None],
+            "is_total": ["f", "t"],
+            "total_electoral_votes": [10, 369],
+        })
+    )
+    out = read_ec_participation(stub)  # type: ignore[arg-type]
+    assert out["is_total"].tolist() == ["f", "t"]
+
+
+def test_participation_empty_years_emits_always_false_not_invalid_in() -> None:
+    # An empty (non-None) year set means "no in-scope years": the query must be valid
+    # SQL returning nothing (WHERE FALSE), never the invalid `year IN ()`.
+    stub = StubDBC(
+        pd.DataFrame({
+            "year": [], "state": [], "is_total": [], "total_electoral_votes": [],
+        })
+    )
+    read_ec_participation(stub, years=set())  # type: ignore[arg-type]
+    (query,) = stub.queries
+    assert "WHERE FALSE" in query
+    assert "IN ()" not in query
 
 
 def test_participation_year_filter_is_inlined() -> None:
@@ -143,3 +173,16 @@ def test_getters_year_filter_uses_and_not_a_second_where() -> None:
     (query,) = stub.queries
     assert "WHERE v.is_total AND v.year IN (1876)" in query
     assert query.count("WHERE") == 1
+
+
+def test_getters_empty_years_emits_always_false_not_invalid_in() -> None:
+    # Same empty-scope guard on the getter side: an always-false AND, never `IN ()`.
+    stub = StubDBC(
+        pd.DataFrame({
+            "year": [], "candidate": [], "president_electoral_votes": [],
+        })
+    )
+    read_ec_getters(stub, years=set())  # type: ignore[arg-type]
+    (query,) = stub.queries
+    assert "WHERE v.is_total AND FALSE" in query
+    assert "IN ()" not in query

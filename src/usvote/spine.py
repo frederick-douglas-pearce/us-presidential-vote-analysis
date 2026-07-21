@@ -58,10 +58,17 @@ def _year_predicate(years: Collection[int] | None, *, column: str) -> str | None
     are the pipeline's own in-scope set (ints from
     :func:`usvote.years.ec_ingest_years`), never user input, so an inline literal list
     is safe here; ``None`` years reads every year.
+
+    An **empty but non-``None``** ``years`` (e.g. a caller passing ``set()``) means "no
+    in-scope years", so it returns the always-false predicate ``"FALSE"`` — a valid
+    query yielding zero rows — rather than the invalid SQL ``column IN ()`` that an
+    empty join would produce.
     """
     if years is None:
         return None
     ints = ", ".join(str(int(y)) for y in sorted(years))
+    if not ints:
+        return "FALSE"
     return f"{column} IN ({ints})"
 
 
@@ -78,10 +85,14 @@ def read_ec_participation(
     derivation excludes itself). ``years`` narrows to a subset of elections; ``None``
     reads all.
 
-    ``is_total`` is cast to a genuine ``bool`` dtype on the way out:
-    :func:`usvote.ucsb.transform._assert_participation_shape` rejects strings and 0/1
-    ints (a ``'t'``/``'f'`` string would be silently truthy for every row), so the DB
-    seam owns the cast rather than trusting the driver's dtype.
+    A 0/1-int ``is_total`` is coerced to ``bool`` here; **any other representation is
+    passed through untouched** so
+    :func:`usvote.ucsb.transform._assert_participation_shape` can validate it. A blanket
+    ``.astype(bool)`` would silently map every non-empty ``'t'``/``'f'`` string to
+    ``True`` — treating every row as a totals row — and, because it runs *before* that
+    guard, would defeat the guard's whole reason to reject strings. Real Postgres
+    booleans already arrive as ``bool`` (via psycopg2), so this coercion is a no-op on
+    the live path and only rescues the 0/1-int case.
     """
     predicate = _year_predicate(years, column="year")
     where = f" WHERE {predicate}" if predicate else ""
@@ -89,7 +100,8 @@ def read_ec_participation(
         f"SELECT year, state, is_total, total_electoral_votes "
         f"FROM {schema}.votes{where}"
     )
-    df["is_total"] = df["is_total"].astype(bool)
+    if pd.api.types.is_integer_dtype(df["is_total"]):
+        df["is_total"] = df["is_total"].astype(bool)
     return df[list(EC_PARTICIPATION_COLUMNS)]
 
 
