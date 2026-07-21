@@ -92,14 +92,24 @@ def build_pv_redistributable_sql(schema: str = PV_SCHEMA) -> str:
     Defined **independently** as ``WHERE s.redistributable`` (a join to ``pv_source``,
     reading the attribute — not a hardcoded ``source = 'MIT'``, and **not** a filter
     over ``pv_preferred``). Structurally it cannot surface a non-redistributable row
-    regardless of any future precedence change. Each source is already unique per key,
-    and only MIT is redistributable, so this is one-row-per-key without ``DISTINCT ON``.
+    regardless of any future precedence change.
+
+    It is deduped the same way ``pv_preferred`` is — ``DISTINCT ON (year, state,
+    candidate) ORDER BY …, precedence_rank`` — so it stays **exactly one row per key**
+    even if a second redistributable source is ever added (the "one-row `pv_source`
+    edit" the reference table advertises would otherwise silently double-count the
+    public surface where two redistributable sources overlap). Today only MIT is
+    redistributable, so the ``DISTINCT ON`` is a no-op and this coincides with
+    ``pv_preferred`` across the overlap by construction; it is a forward-compat guard,
+    not a behavior change.
     """
+    key = ", ".join(f"v.{col}" for col in RESOLVED_KEY)
     return (
-        f"SELECT {_select('v')} "
+        f"SELECT DISTINCT ON ({key}) {_select('v')} "
         f"FROM {schema}.{PV_TABLE} v "
         f"JOIN {schema}.{PV_SOURCE_TABLE} s USING (source) "
-        f"WHERE s.redistributable"
+        f"WHERE s.redistributable "
+        f"ORDER BY {key}, s.precedence_rank"
     )
 
 

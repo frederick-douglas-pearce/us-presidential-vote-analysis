@@ -11,8 +11,10 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from usvote.pv.schema import PV_SCHEMA
 from usvote.pv.source import (
     PV_SOURCE_COLUMNS,
+    PV_SOURCE_SCHEMA,
     PV_SOURCE_TABLE,
     SOURCE_MIT,
     SOURCE_UCSB,
@@ -140,3 +142,10 @@ def test_table_name_is_named_apart_from_the_fact() -> None:
 
     assert PV_SOURCE_TABLE == "pv_source"
     assert PV_SOURCE_TABLE != PV_TABLE
+
+
+def test_source_schema_aliases_the_one_pv_schema() -> None:
+    # pv_source co-locates with pv_votes; PV_SOURCE_SCHEMA is the SAME object as
+    # PV_SCHEMA, not a second "dwh" literal — so the view's JOIN and this loader's
+    # target can never drift to different schemas.
+    assert PV_SOURCE_SCHEMA == PV_SCHEMA

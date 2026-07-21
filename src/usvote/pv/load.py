@@ -82,6 +82,8 @@ from usvote.pv.views import (
     PV_PREFERRED_VIEW,
     PV_REDISTRIBUTABLE_VIEW,
     PV_UCSB_VIEW,
+    PVViewError,
+    assert_provenance_coverage,
     build_pv_preferred_sql,
     build_pv_redistributable_sql,
     build_pv_ucsb_sql,
@@ -272,6 +274,40 @@ def create_pv_views(
         dbc.close_connection()
 
 
+def _relation_exists(dbc: DBC, schema: str, name: str) -> bool:
+    """Return whether ``schema.name`` exists, via ``to_regclass`` (NULL when absent).
+
+    ``to_regclass`` resolves a relation name to its OID or ``NULL`` without raising — so
+    it is the cheap existence probe :func:`build_pv_union` uses to turn a missing
+    ``pv_votes`` into a clear precondition error rather than an opaque
+    ``UndefinedTable`` deep in ``CREATE VIEW``.
+    """
+    got = dbc.select_query_to_df(f"SELECT to_regclass('{schema}.{name}') AS relation")
+    return got["relation"].iloc[0] is not None
+
+
+def assert_db_provenance_coverage(dbc: DBC, *, schema: str = PV_SCHEMA) -> None:
+    """Assert every ``schema.pv_votes`` source has a ``schema.pv_source`` row, live.
+
+    The DB-path enforcement of :func:`usvote.pv.views.assert_provenance_coverage` (which
+    only ever ran over in-memory fixtures/the oracle). Because there is deliberately
+    **no** ``pv_votes.source -> pv_source`` FK (adding one would reorder the existing
+    load path), nothing at the database level stops a source landing in ``pv_votes``
+    with no ``pv_source`` row — and the resolution views ``JOIN pv_source USING
+    (source)``, so that source's rows would be **silently dropped** from
+    ``pv_preferred``/``pv_redistributable``. This runs the pure guard over the two live
+    ``source`` sets so the gap fails loudly at union-build time instead. Assumes both
+    tables exist (``build_pv_union`` seeds ``pv_source`` and checks ``pv_votes`` first).
+    """
+    union_sources = dbc.select_query_to_df(
+        f"SELECT DISTINCT source FROM {schema}.{PV_TABLE}"
+    )
+    source_ref = dbc.select_query_to_df(
+        f"SELECT source FROM {schema}.{PV_SOURCE_TABLE}"
+    )
+    assert_provenance_coverage(union_sources, source_ref)
+
+
 def build_pv_union(
     dbc: DBC,
     *,
@@ -284,16 +320,29 @@ def build_pv_union(
     The single entry point for #68. It does **not** write a new fact table — the raw
     union already exists physically as ``dwh.pv_votes`` (both sources loaded through
     :func:`load_pv_records`, tagged by ``source``, overlap kept by D017 §1). This only
-    adds the reference table and the read-time views that resolve the three series, so
-    it must run **after** the MIT and/or UCSB source loads (``pv_votes`` must exist for
-    the views to compile).
+    adds the reference table and the read-time views that resolve the three series.
+
+    Two DB-side preconditions are enforced (neither has a schema-level FK to lean on):
+
+    1. ``pv_votes`` **must already exist** — the views reference it, so a union built
+       before any PV source load raises a clear :class:`~usvote.pv.views.PVViewError`
+       here instead of an opaque ``UndefinedTable`` inside ``CREATE VIEW`` (#3).
+    2. every ``pv_votes`` source **must be covered** by a ``pv_source`` row — else the
+       inner-join views would silently drop it (:func:`assert_db_provenance_coverage`,
+       run after the seed) (#1).
 
     ``replace`` gates the **``pv_source`` table** rebuild only (never the schema); the
     views are always ``CREATE OR REPLACE`` (idempotent). Like the source loaders there
     is no ``__main__`` — E6's combined entry point is deferred (#84); this is driven
     directly (e.g. by the integration test), mirroring ``run_mit_pipeline``.
     """
+    if not _relation_exists(dbc, schema, PV_TABLE):
+        raise PVViewError(
+            f"{schema}.{PV_TABLE} does not exist — load at least one PV source "
+            f"(run_mit_pipeline / run_ucsb_pipeline) before building the union."
+        )
     load_pv_source(dbc, schema=schema, replace=replace)
+    assert_db_provenance_coverage(dbc, schema=schema)
     create_pv_views(dbc, schema=schema, replace=True)
     if close:
         dbc.close_connection()

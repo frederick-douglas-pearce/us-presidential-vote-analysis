@@ -68,6 +68,18 @@ def test_redistributable_is_defined_independently_not_over_preferred() -> None:
     assert "'MIT'" not in sql
 
 
+def test_redistributable_dedupes_by_precedence_rank() -> None:
+    # Forward-compat guard: the public surface must stay one row per key even if a
+    # second redistributable source is added, so it deduplicates the same way
+    # pv_preferred does (DISTINCT ON key ORDER BY precedence_rank), not by assuming
+    # MIT is the only redistributable source.
+    sql = build_pv_redistributable_sql()
+    assert "DISTINCT ON (v.year, v.state, v.candidate)" in sql
+    assert sql.rstrip().endswith(
+        "ORDER BY v.year, v.state, v.candidate, s.precedence_rank"
+    )
+
+
 def test_ucsb_control_filters_the_literal_source() -> None:
     sql = build_pv_ucsb_sql()
     # D017 §5: specifically the UCSB single-source control — a literal source filter,

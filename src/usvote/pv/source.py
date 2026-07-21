@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from usvote.pv.schema import PV_SCHEMA
+
 #: Source-name literals — the SSOT both source transforms stamp on their rows and the
 #: ``pv_source`` reference table keys on. ``usvote.mit.transform`` and
 #: ``usvote.ucsb.transform`` import these from here (direction is always ``source ->
@@ -32,9 +34,12 @@ import pandas as pd
 SOURCE_MIT = "MIT"
 SOURCE_UCSB = "UCSB"
 
-#: The warehouse schema and reference-table name. Co-located in ``dwh`` with
-#: ``pv_votes`` and the EC spine (D021); the resolution views join the two by source.
-PV_SOURCE_SCHEMA = "dwh"
+#: The warehouse schema and reference-table name. ``pv_source`` co-locates in the same
+#: schema as ``pv_votes`` and the EC spine (D021), and the resolution views join the two
+#: on ``source`` **within one schema** — so this is *aliased* to
+#: :data:`usvote.pv.schema.PV_SCHEMA` rather than a second ``"dwh"`` literal, and the
+#: view's ``JOIN {schema}.pv_source`` and this loader's target can never drift apart.
+PV_SOURCE_SCHEMA = PV_SCHEMA
 PV_SOURCE_TABLE = "pv_source"
 
 #: The ``pv_source`` columns, in load order. ``precedence_rank`` orders

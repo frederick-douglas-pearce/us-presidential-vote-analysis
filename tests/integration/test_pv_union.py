@@ -223,12 +223,21 @@ def test_union_over_a_real_two_source_load(
             WHERE u.source = '{SOURCE_UCSB}' AND u.year = 2016
         """
         both = dbc.select_query_to_df(overlap)
-        if not both.empty:
-            preferred_sources = dbc.select_query_to_df(
-                f"SELECT DISTINCT source FROM {SCHEMA}.{PV_PREFERRED_VIEW} p "
-                f"WHERE p.year = 2016 AND (p.state, p.candidate) IN ({overlap})"
-            )
-            assert set(preferred_sources["source"]) == {SOURCE_MIT}
+        # The 2016 fusion sample (NY Clinton/Trump) and real UCSB 2016 both reconcile to
+        # the same canonical (state, candidate), so the overlap MUST be non-empty. Assert
+        # it — otherwise the precedence check below would never run and the test would
+        # pass vacuously, defeating the one check meant to prove MIT precedence on real
+        # data (an empty overlap signals the MIT/UCSB reconciliations disagree on the key).
+        assert not both.empty, (
+            "expected a non-empty MIT/UCSB 2016 overlap; an empty one makes the "
+            "precedence assertion vacuous — check the two sources' candidate "
+            "reconciliations agree on the canonical (state, candidate) key"
+        )
+        preferred_sources = dbc.select_query_to_df(
+            f"SELECT DISTINCT source FROM {SCHEMA}.{PV_PREFERRED_VIEW} p "
+            f"WHERE p.year = 2016 AND (p.state, p.candidate) IN ({overlap})"
+        )
+        assert set(preferred_sources["source"]) == {SOURCE_MIT}
 
         # No UCSB row ever reaches the public surface, over real data.
         n_ucsb_public = dbc.select_query_to_df(
