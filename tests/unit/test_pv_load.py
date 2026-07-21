@@ -13,7 +13,14 @@ import pandas as pd
 import pytest
 
 from tests._helpers import RecordingConnection, make_dbc, record_inserts
-from usvote.pv.load import load_pv_records, load_pv_status
+from usvote.pv.load import (
+    assert_db_provenance_coverage,
+    build_pv_union,
+    create_pv_views,
+    load_pv_records,
+    load_pv_source,
+    load_pv_status,
+)
 from usvote.pv.schema import (
     PV_SCHEMA,
     PV_TABLE,
@@ -23,6 +30,7 @@ from usvote.pv.schema import (
     assert_pv_shape,
     build_pv_column_defs,
 )
+from usvote.pv.source import PV_SOURCE_SCHEMA, PV_SOURCE_TABLE, SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -31,6 +39,12 @@ from usvote.pv.status import (
     ROSTER_SCHEMA,
     ROSTER_TABLE,
     PVRosterError,
+)
+from usvote.pv.views import (
+    PV_PREFERRED_VIEW,
+    PV_REDISTRIBUTABLE_VIEW,
+    PV_UCSB_VIEW,
+    PVViewError,
 )
 
 # --- column definitions ----------------------------------------------------
@@ -341,3 +355,176 @@ def test_load_status_close_flag_closes_connection(
     record_inserts(monkeypatch)
     load_pv_status(make_dbc(recording_conn), _valid_roster(), close=True)
     assert recording_conn.closed is True
+
+
+# --- load_pv_source: the D017 reference-table seed (#68) --------------------
+
+
+def test_load_source_creates_and_seeds_the_reference_table(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inserts = record_inserts(monkeypatch)
+    seeded = load_pv_source(make_dbc(recording_conn))
+
+    assert any(
+        q.startswith(f"CREATE TABLE IF NOT EXISTS {PV_SOURCE_SCHEMA}.{PV_SOURCE_TABLE}")
+        for q in recording_conn.executed
+    )
+    # The two D017 rows are inserted; the seed IS the contract (no frame is passed in).
+    (sql, argslist) = inserts[0]
+    assert f"INSERT INTO {PV_SOURCE_SCHEMA}.{PV_SOURCE_TABLE}" in sql
+    assert set(seeded["source"]) == {SOURCE_MIT, SOURCE_UCSB}
+    assert len(argslist) == 2
+
+
+def test_load_source_non_destructive_by_default(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_inserts(monkeypatch)
+    load_pv_source(make_dbc(recording_conn))
+    assert not any("DROP" in q for q in recording_conn.executed)
+
+
+def test_load_source_replace_drops_only_the_table_never_the_schema(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same footgun guard as the fact/roster loaders: a reference-table replace must not
+    # cascade-drop the dwh schema (wiping the EC spine). Exactly one drop, the table.
+    record_inserts(monkeypatch)
+    load_pv_source(make_dbc(recording_conn), replace=True)
+
+    drops = [q for q in recording_conn.executed if q.startswith("DROP")]
+    assert drops == [
+        f"DROP TABLE IF EXISTS {PV_SOURCE_SCHEMA}.{PV_SOURCE_TABLE} Cascade"
+    ]
+    assert not any("DROP SCHEMA" in q for q in recording_conn.executed)
+
+
+# --- create_pv_views: the three resolution views (#68) ---------------------
+
+
+def test_create_views_issues_three_create_or_replace_views(
+    recording_conn: RecordingConnection,
+) -> None:
+    create_pv_views(make_dbc(recording_conn))
+    views = [q for q in recording_conn.executed if "VIEW" in q]
+    assert len(views) == 3
+    # Default replace=True → non-destructive CREATE OR REPLACE, and never a schema drop.
+    assert all(q.startswith("CREATE OR REPLACE VIEW") for q in views)
+    for name in (PV_PREFERRED_VIEW, PV_REDISTRIBUTABLE_VIEW, PV_UCSB_VIEW):
+        assert any(f"{PV_SCHEMA}.{name} AS" in q for q in views)
+    assert not any("DROP" in q for q in recording_conn.executed)
+
+
+def test_create_views_plain_create_when_not_replacing(
+    recording_conn: RecordingConnection,
+) -> None:
+    create_pv_views(make_dbc(recording_conn), replace=False)
+    views = [q for q in recording_conn.executed if "VIEW" in q]
+    assert len(views) == 3
+    assert all(q.startswith("CREATE VIEW") for q in views)
+
+
+# --- build_pv_union: the #68 orchestrator ----------------------------------
+#
+# build_pv_union runs two live DB-side guards (pv_votes exists; every source covered by
+# pv_source) via select_query_to_df, which the recording fake cannot serve — so these
+# tests stub it. `_covered_db_reads` is the happy path: pv_votes exists and its sources
+# {MIT, UCSB} are all in pv_source.
+
+
+def _covered_db_reads(query: str, close: bool = False) -> pd.DataFrame:
+    if "to_regclass" in query:
+        return pd.DataFrame({"relation": [f"{PV_SCHEMA}.{PV_TABLE}"]})
+    if PV_SOURCE_TABLE in query:  # SELECT source FROM dwh.pv_source
+        return pd.DataFrame({"source": [SOURCE_MIT, SOURCE_UCSB]})
+    return pd.DataFrame({"source": [SOURCE_MIT, SOURCE_UCSB]})  # DISTINCT pv_votes.source
+
+
+def test_build_union_seeds_source_then_creates_views(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The single #68 entry point: seed pv_source, then CREATE OR REPLACE the three
+    # views. It writes NO new fact table — the raw union is the already-loaded pv_votes.
+    record_inserts(monkeypatch)
+    dbc = make_dbc(recording_conn)
+    monkeypatch.setattr(dbc, "select_query_to_df", _covered_db_reads)
+    build_pv_union(dbc)
+
+    executed = recording_conn.executed
+    assert any(
+        f"{PV_SOURCE_TABLE}" in q and q.startswith("CREATE TABLE") for q in executed
+    )
+    view_stmts = [q for q in executed if "VIEW" in q]
+    assert len(view_stmts) == 3
+    # pv_source is created before the views that join it.
+    src_idx = next(
+        i for i, q in enumerate(executed) if PV_SOURCE_TABLE in q and "CREATE TABLE" in q
+    )
+    first_view_idx = next(i for i, q in enumerate(executed) if "VIEW" in q)
+    assert src_idx < first_view_idx
+    # No new pv_votes fact write, and never a schema drop (EC spine survives).
+    assert not any(
+        f"CREATE TABLE IF NOT EXISTS {PV_SCHEMA}.{PV_TABLE}" in q for q in executed
+    )
+    assert not any("DROP SCHEMA" in q for q in executed)
+
+
+def test_build_union_close_flag_closes_connection(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_inserts(monkeypatch)
+    dbc = make_dbc(recording_conn)
+    monkeypatch.setattr(dbc, "select_query_to_df", _covered_db_reads)
+    build_pv_union(dbc, close=True)
+    assert recording_conn.closed is True
+
+
+def test_build_union_raises_when_pv_votes_absent(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #3: a union built before any PV source load must raise a clear precondition error
+    # (not an opaque UndefinedTable inside CREATE VIEW), and create nothing.
+    record_inserts(monkeypatch)
+    dbc = make_dbc(recording_conn)
+
+    def _missing_pv_votes(query: str, close: bool = False) -> pd.DataFrame:
+        if "to_regclass" in query:
+            return pd.DataFrame({"relation": [None]})
+        return pd.DataFrame({"source": []})
+
+    monkeypatch.setattr(dbc, "select_query_to_df", _missing_pv_votes)
+    with pytest.raises(PVViewError, match="does not exist"):
+        build_pv_union(dbc)
+    # Bailed before seeding pv_source or creating any view.
+    assert not any("CREATE" in q for q in recording_conn.executed)
+
+
+def test_build_union_raises_on_uncovered_source(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #1: a pv_votes source with no pv_source row would be silently dropped by the
+    # inner-join views — build_pv_union must fail loudly, after seeding pv_source but
+    # before creating the views.
+    record_inserts(monkeypatch)
+    dbc = make_dbc(recording_conn)
+
+    def _uncovered(query: str, close: bool = False) -> pd.DataFrame:
+        if "to_regclass" in query:
+            return pd.DataFrame({"relation": [f"{PV_SCHEMA}.{PV_TABLE}"]})
+        if PV_SOURCE_TABLE in query:
+            return pd.DataFrame({"source": [SOURCE_MIT, SOURCE_UCSB]})
+        return pd.DataFrame({"source": [SOURCE_MIT, "ICPSR"]})  # ICPSR uncovered
+
+    monkeypatch.setattr(dbc, "select_query_to_df", _uncovered)
+    with pytest.raises(PVViewError, match="no pv_source row"):
+        build_pv_union(dbc)
+    assert not any("VIEW" in q for q in recording_conn.executed)
+
+
+def test_assert_db_provenance_coverage_passes_when_covered(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dbc = make_dbc(recording_conn)
+    monkeypatch.setattr(dbc, "select_query_to_df", _covered_db_reads)
+    assert_db_provenance_coverage(dbc)  # does not raise

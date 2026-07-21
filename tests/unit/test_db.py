@@ -115,6 +115,25 @@ def test_delete_table_default_option(recording_conn: RecordingConnection) -> Non
     assert recording_conn.executed == ["DROP TABLE IF EXISTS dwh.state Restrict"]
 
 
+def test_create_view_default_is_plain_create(
+    recording_conn: RecordingConnection,
+) -> None:
+    make_dbc(recording_conn).create_view("dwh", "pv_ucsb", "SELECT 1")
+    assert recording_conn.executed == ["CREATE VIEW dwh.pv_ucsb AS SELECT 1"]
+
+
+def test_create_view_replace_is_create_or_replace_not_a_drop(
+    recording_conn: RecordingConnection,
+) -> None:
+    # replace=True must be non-destructive (CREATE OR REPLACE VIEW) — no DROP, so
+    # dependent views survive. This is why the PV view loader can default replace=True.
+    make_dbc(recording_conn).create_view("dwh", "pv_ucsb", "SELECT 1", replace=True)
+    assert recording_conn.executed == [
+        "CREATE OR REPLACE VIEW dwh.pv_ucsb AS SELECT 1"
+    ]
+    assert not any("DROP" in q for q in recording_conn.executed)
+
+
 def test_copy_csv_with_and_without_header(
     recording_conn: RecordingConnection,
 ) -> None:
