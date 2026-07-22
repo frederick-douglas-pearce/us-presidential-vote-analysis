@@ -34,11 +34,13 @@ import pytest
 
 from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
 from usvote.db import DBC
+from usvote.getters import EC_GETTERS_WITHOUT_POPULAR_VOTE
 from usvote.join import (
     EC_PV_PREFERRED_VIEW,
     EC_PV_REDISTRIBUTABLE_VIEW,
     JoinError,
     assert_db_ec_dims_cover_pv,
+    assert_winners_have_pv,
     create_ec_pv_views,
 )
 from usvote.load import SCHEMA
@@ -234,6 +236,31 @@ def test_join_over_a_real_two_source_load(
             f"WHERE source = '{SOURCE_UCSB}' OR redistributable = false"
         )
         assert leak["n"].iloc[0] == 0
+
+        # Winner-has-PV coverage over the ANALYSIS series (the D026 crux guard, on real
+        # reconciled data — the one path that catches a name-reconciliation miss where an
+        # EC winner silently fails to match PV). Run on ec_pv_preferred only: UCSB is dense
+        # across both corpus years, so the check is non-vacuous; ec_pv_redistributable
+        # (MIT = the NY-only fusion sample here) would need a huge exemption set and is
+        # deferred to E8 when the full MIT load lands. Exempt only the getters that
+        # legitimately held no popular vote (the 2016 faithless set for this corpus).
+        preferred = dbc.select_query_to_df(
+            f"SELECT * FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW}"
+        )
+        # Scope guard: the exemption set is curated for the 2016/2020 corpus, so fail loud
+        # if a future corpus widening slips a year past it (rather than exempting silently).
+        assert {int(y) for y in preferred["year"]} <= years, (
+            "ec_pv_preferred carries a year outside the loaded corpus; widen the "
+            "winner-has-PV exemption scope deliberately (EC_GETTERS_WITHOUT_POPULAR_VOTE)"
+        )
+        # A first real run may flag a genuine UCSB coverage gap — treat a modern flag as a
+        # reconciliation miss to FIX, not an exemption to add (per the architect).
+        inspected = assert_winners_have_pv(
+            preferred, exemptions=EC_GETTERS_WITHOUT_POPULAR_VOTE
+        )
+        # Vacuity floor: 2016+2020 have ~100+ EC-winner state rows; a guard that inspected
+        # near-zero would pass vacuously (mirrors this file's ``assert not both.empty``).
+        assert inspected >= 50, f"winner-has-PV inspected only {inspected} rows (vacuous?)"
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()

@@ -299,5 +299,24 @@ def test_winner_has_pv_raises_on_a_reconciliation_miss() -> None:
 
 
 def test_winner_has_pv_passes_with_the_getter_exempted() -> None:
-    # Exempt the legitimately-PV-less faithless getter → the guard is quiet.
-    assert_winners_have_pv(_joined(), exemptions={(2020, "Faithless F")})
+    # Exempt the legitimately-PV-less faithless getter → the guard is quiet, and it
+    # returns the count of in-window EC-winner rows it inspected (all 6 state rows: TX/A,
+    # CA/B, NE/A, NE/B, WA/A, WA/F) — the vacuity floor a caller asserts against.
+    inspected = assert_winners_have_pv(_joined(), exemptions={(2020, "Faithless F")})
+    assert inspected == 6
+
+
+def test_oracle_without_pv_source_leaves_redistributable_null() -> None:
+    # pv_source_df is optional (the redistributable attribute is a nice-to-have for the
+    # offline oracle); omitting it yields an all-NA redistributable column, not an error.
+    joined = join_ec_pv(_votes(), _CANDIDATES, _pv())
+    assert joined["redistributable"].isna().all()
+
+
+def test_no_fan_out_raises_on_a_duplicated_key() -> None:
+    # A duplicated (year, state, candidate) — the shape a raw-union double-count would
+    # produce — must fail loud.
+    joined = _joined()
+    dup = pd.concat([joined, joined.iloc[[0]]], ignore_index=True)
+    with pytest.raises(JoinError, match="fanned out"):
+        assert_no_fan_out(dup)

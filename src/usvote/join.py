@@ -408,7 +408,7 @@ def assert_winners_have_pv(
     *,
     exemptions: Collection[tuple[int, str]] = (),
     error_cls: type[Exception] = JoinError,
-) -> None:
+) -> int:
     """Assert every EC winner **inside the PV window** has PV, bar known exemptions.
 
     The asymmetric, one-directional coverage guard (the architect's crux): an EC winner
@@ -421,17 +421,20 @@ def assert_winners_have_pv(
     The window is derived from the frame itself (years with any PV present), so a year
     the series does not cover (pre-1976 for ``pv_redistributable``) is out of scope
     automatically. ``exemptions`` is the set of ``(year, candidate)`` getters that
-    legitimately held no popular vote (faithless/unpledged/legislature-chosen) — and for
-    the ``pv_redistributable`` view, the non-D/R getters MIT does not cover; it differs
-    per view, so it is injected rather than hardcoded here.
+    legitimately held no popular vote (faithless/unpledged/legislature-chosen — see
+    :data:`usvote.getters.EC_GETTERS_WITHOUT_POPULAR_VOTE`) — and for the
+    ``pv_redistributable`` view, the non-D/R getters MIT does not cover; it differs per
+    view, so it is injected rather than hardcoded here.
+
+    **Returns the number of in-window EC-winner rows it inspected** — the population the
+    guard evaluated, so a caller can assert a **vacuity floor** (``>= N``): a guard that
+    silently inspected zero winners — an empty frame, a window that excluded everything,
+    or a wrong-typed ``year`` — would otherwise pass vacuously, defeating its purpose.
     """
     exempt = set(exemptions)
     pv_years = set(joined_df.loc[joined_df["candidate_votes"].notna(), "year"])
-    suspects = joined_df.loc[
-        joined_df["has_ec_state_row"]
-        & joined_df["candidate_votes"].isna()
-        & joined_df["year"].isin(pv_years)
-    ]
+    in_window_winner = joined_df["has_ec_state_row"] & joined_df["year"].isin(pv_years)
+    suspects = joined_df.loc[in_window_winner & joined_df["candidate_votes"].isna()]
     missing = [
         (int(r.year), r.candidate)
         for r in suspects.itertuples()
@@ -442,6 +445,7 @@ def assert_winners_have_pv(
             "EC winner(s) inside the PV window with no matching PV (likely a name "
             f"reconciliation miss; exempt it if legitimately PV-less): {missing}"
         )
+    return int(in_window_winner.sum())
 
 
 def coverage_report(joined_df: pd.DataFrame) -> dict[str, object]:
