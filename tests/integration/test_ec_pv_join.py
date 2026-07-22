@@ -27,6 +27,7 @@ Config + skip-if-unset come from the shared ``integration_db_config`` fixture.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import pandas as pd
@@ -100,6 +101,10 @@ def test_join_resolves_a_synthetic_participant_set(
 
         winner16, loser16 = _top_two_getters(dbc, 2016)   # Trump won Texas; runner-up did not
         _winner20, loser20 = _top_two_getters(dbc, 2020)  # Biden won California; runner-up did not
+        # Fail fast if the fixtures ever shift the setup's assumptions out from under the
+        # assertions (a tie or a data change): the two must be distinct getters, and the
+        # ev==0 / ev>0 checks below are what actually encode "loser lost / winner won".
+        assert winner16 != loser16 and loser16 != loser20
 
         # 2. Fabricated PV over REAL names: a winner+PV and a loser (a real 0-EV EC row,
         #    2016 Texas), plus a UCSB analysis-only loser (2020 California).
@@ -140,6 +145,23 @@ def test_join_resolves_a_synthetic_participant_set(
         assert winner["ev"].iloc[0] > 0
         assert winner["cv"].iloc[0] == 4_500_000
 
+        # national_electoral_votes is a window SUM over the candidate's state rows — the
+        # one non-trivial piece of live SQL. Verify it directly: it must be CONSTANT across
+        # winner16's state rows (one DISTINCT value — a wrong PARTITION would give per-state
+        # values) and equal the published national total on that candidate's is_total row.
+        natl_view = dbc.select_query_to_df(
+            f"SELECT DISTINCT national_electoral_votes AS n "
+            f"FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
+            f"WHERE year = 2016 AND candidate = '{winner16}'"
+        )
+        natl_ec = dbc.select_query_to_df(
+            f"SELECT v.president_electoral_votes AS n FROM {SCHEMA}.votes v "
+            f"JOIN {SCHEMA}.candidate c ON v.candidate_id = c.candidate_id "
+            f"WHERE v.is_total AND v.year = 2016 AND c.name = '{winner16}'"
+        )
+        assert len(natl_view) == 1                       # constant across state rows
+        assert natl_view["n"].iloc[0] == natl_ec["n"].iloc[0]  # == published national total
+
         # The UCSB analysis-only row IS in the preferred series (as UCSB), tagged
         # redistributable = false — a loser with EC 0.
         ucsb_pref = dbc.select_query_to_df(
@@ -179,6 +201,82 @@ def test_join_resolves_a_synthetic_participant_set(
         load_pv_records(dbc, orphan, replace=False)
         with pytest.raises(JoinError, match="match no EC votes row"):
             assert_db_pv_matches_ec(dbc, PV_PREFERRED_VIEW)
+    finally:
+        dbc.delete_schema(SCHEMA, option="Cascade")
+        dbc.close_connection()
+
+
+@pytest.mark.integration
+def test_winner_has_pv_runs_end_to_end_on_the_live_view(
+    integration_db_config: dict[str, Any],
+) -> None:
+    """Exercise the winner-has-PV guard end-to-end on a live ``ec_pv_preferred`` view.
+
+    The real-corpus wiring below is UCSB-gated (skipped in CI), so this **ungated** test is
+    what actually proves the guard's mechanics against real DB-typed columns: it fabricates
+    PV for every EC state winner in the seeded spine, then checks both directions — the
+    **raise** path (one major winner deliberately left PV-less) and the **pass** path (all
+    winners covered), with the inspected-count vacuity floor. Real names, invented counts
+    (D022-safe: the string ``'MIT'``, not UCSB bytes).
+    """
+    from usvote.pipeline import run_ec_pipeline
+    from usvote.scrape import fetch_from_dir
+
+    dbc = DBC(integration_db_config)
+    try:
+        run_ec_pipeline(
+            dbc,
+            "unused.shp",
+            replace=True,
+            years={2016, 2020},
+            fetch=fetch_from_dir(FIXTURES_DIR),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+        # Every EC state winner (>0 EV): (year, state, canonical name).
+        winners = dbc.select_query_to_df(
+            f"SELECT v.year, v.state, c.name AS candidate FROM {SCHEMA}.votes v "
+            f"JOIN {SCHEMA}.candidate c ON v.candidate_id = c.candidate_id "
+            f"WHERE v.state IS NOT NULL AND v.president_electoral_votes > 0"
+        )
+        # Deliberately omit one unambiguous major winner (2020 California = Biden) so the
+        # guard has exactly one miss to name.
+        winner20 = _top_two_getters(dbc, 2020)[0]
+        omit = (
+            (winners["year"] == 2020)
+            & (winners["state"] == "California")
+            & (winners["candidate"] == winner20)
+        )
+        assert omit.sum() == 1, "expected exactly one 2020 California winner to omit"
+        kept = winners.loc[~omit]
+
+        pv = pd.DataFrame([
+            _pv_row(SOURCE_MIT, int(r.year), r.state, r.candidate, 1_000)
+            for r in kept.itertuples()
+        ])[list(SHARED_PV_COLUMNS)]
+        load_pv_records(dbc, pv, replace=False)
+        build_pv_union(dbc)
+        create_ec_pv_views(dbc)
+
+        # Raise path: the omitted winner (Biden/CA) is an EC winner with no PV → fails loud,
+        # naming it. Exemptions cover the faithless getters (who here do have fabricated PV).
+        frame = dbc.select_query_to_df(f"SELECT * FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW}")
+        with pytest.raises(JoinError, match=re.escape(winner20)):
+            assert_winners_have_pv(frame, exemptions=EC_GETTERS_WITHOUT_POPULAR_VOTE)
+
+        # Pass path: load the omitted winner's PV (the view reflects it live — no rebuild),
+        # then every winner has PV; the guard passes and inspects every winner row.
+        load_pv_records(
+            dbc,
+            pd.DataFrame([
+                _pv_row(SOURCE_MIT, 2020, "California", winner20, 1_000)
+            ])[list(SHARED_PV_COLUMNS)],
+            replace=False,
+        )
+        frame2 = dbc.select_query_to_df(f"SELECT * FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW}")
+        inspected = assert_winners_have_pv(
+            frame2, exemptions=EC_GETTERS_WITHOUT_POPULAR_VOTE
+        )
+        assert inspected == len(winners) > 50  # non-vacuous: ~100+ winner rows across 2016+2020
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()

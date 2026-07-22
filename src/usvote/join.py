@@ -112,6 +112,18 @@ class JoinError(RuntimeError):
 # --- SQL builder (drives the live views) ------------------------------------
 
 
+def _relation_exists(dbc: DBC, schema: str, name: str) -> bool:
+    """Return whether ``schema.name`` exists, via ``to_regclass`` (NULL when absent).
+
+    The cheap, non-raising existence probe :func:`create_ec_pv_views` uses to turn a
+    missing resolved PV view into a clear precondition error — the same idiom as
+    :func:`usvote.pv.load._relation_exists` (kept local so ``usvote.join`` does not
+    reach into another module's private helper).
+    """
+    got = dbc.select_query_to_df(f"SELECT to_regclass('{schema}.{name}') AS relation")
+    return got["relation"].iloc[0] is not None
+
+
 def build_ec_pv_join_sql(
     pv_view: str,
     *,
@@ -185,9 +197,19 @@ def create_ec_pv_views(
     Both ``dwh.pv_votes`` + ``dwh.pv_source`` and the resolved PV views must already
     exist
     (run after :func:`usvote.pv.load.build_pv_union`) and the EC spine must be loaded.
-    ``replace`` defaults to ``True`` — ``CREATE OR REPLACE VIEW`` is non-destructive and
-    idempotent (see :meth:`usvote.db.DBC.create_view`).
+    A missing resolved view is turned into a clear precondition error here rather than
+    an opaque ``UndefinedTable`` deep inside the anti-join / ``CREATE VIEW`` — mirroring
+    :func:`usvote.pv.load.build_pv_union`'s own existence probe. ``replace`` defaults to
+    ``True`` — ``CREATE OR REPLACE VIEW`` is non-destructive and idempotent (see
+    :meth:`usvote.db.DBC.create_view`).
     """
+    for view in (PV_PREFERRED_VIEW, PV_REDISTRIBUTABLE_VIEW):
+        if not _relation_exists(dbc, pv_schema, view):
+            raise JoinError(
+                f"{pv_schema}.{view} does not exist — run "
+                f"usvote.pv.load.build_pv_union (which creates the resolved PV views) "
+                f"before create_ec_pv_views."
+            )
     assert_db_pv_matches_ec(dbc, PV_PREFERRED_VIEW, schema=schema, pv_schema=pv_schema)
     dbc.create_view(
         schema,

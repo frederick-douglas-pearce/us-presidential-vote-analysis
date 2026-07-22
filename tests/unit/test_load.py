@@ -42,6 +42,16 @@ def test_column_defs_default_to_dwh_schema() -> None:
     assert refs == [f"REFERENCES {SCHEMA}.state", f"REFERENCES {SCHEMA}.candidate"]
 
 
+def test_candidate_name_is_unique() -> None:
+    # The canonical candidate key `name` carries a DB-level UNIQUE constraint so the
+    # EC<->PV join (usvote.join, #69/D026) can resolve a PV loser row's candidate_id by
+    # name unambiguously. Locked here so a DDL edit can't silently drop it and reintroduce
+    # a fan-out risk (the transform-time uniqueness assert is the only other guard).
+    candidate = dict(zip(TABLE_NAMES, build_table_column_defs(), strict=True))["candidate"]
+    name_col = next(col for col in candidate if col[0] == "name")
+    assert "unique" in name_col, f"candidate.name must be UNIQUE, got {name_col}"
+
+
 # --- load_dataframes: order + inserts --------------------------------------
 
 

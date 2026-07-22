@@ -548,6 +548,48 @@ def test_assert_rectangular_state_grain_raises_on_a_missing_loser_row() -> None:
         T.assert_rectangular_state_grain(votes)
 
 
+def test_assert_rectangular_state_grain_catches_a_duplicate_masking_a_drop() -> None:
+    # The blind spot a pure count check would miss: Ohio duplicates candidate 1 and Texas
+    # drops it, so rows (4) == states (2) x getters (2) — yet Texas/candidate-1 is absent.
+    # The duplicate-grain check must catch it before the count test passes vacuously.
+    votes = pd.DataFrame({
+        "year": [2020, 2020, 2020, 2020],
+        "state": ["Ohio", "Ohio", "Ohio", "Texas"],
+        "candidate_id": [1, 1, 2, 2],  # Ohio/1 duplicated; Texas/1 missing
+        "president_electoral_votes": [18, 18, 0, 40],
+    })
+    with pytest.raises(TransformError, match="duplicate"):
+        T.assert_rectangular_state_grain(votes)
+
+
+def test_build_votes_fact_raises_on_a_ragged_non_rectangular_year() -> None:
+    # Drive a ragged parsed year (Texas lists only the winner, so the loser's 0-EV row is
+    # never created) through the FULL transform, proving assert_rectangular_state_grain is
+    # actually wired into build_votes_fact — not merely unit-tested in isolation.
+    ragged = {
+        "year": 2012,
+        "t1": [
+            {"president_candidate_name": "Alice Winner", "president_candidate_party": "D"},
+            {"president_candidate_name": "Bob Loser", "president_candidate_party": "R"},
+        ],
+        "t2": {
+            "candidate_state": [
+                {"president_candidate_name": "Alice Winner", "col_ind": 1,
+                 "president_candidate_state": "Ohio"},
+                {"president_candidate_name": "Bob Loser", "col_ind": 2,
+                 "president_candidate_state": "Texas"},
+            ],
+            "votes_by_state": [
+                {"state": "Ohio", "total_electoral_votes": 5, 1: 3, 2: 2},
+                {"state": "Texas", "total_electoral_votes": 5, 1: 5},  # no candidate 2 cell
+                {"state": "Totals", "total_electoral_votes": 10, 1: 8, 2: 2},
+            ],
+        },
+    }
+    with pytest.raises(TransformError, match="not rectangular"):
+        transform_parsed_years([ragged], fake_state_geo())
+
+
 def test_assert_state_count_by_year_raises_on_dropped_state() -> None:
     # Parsed says 2 states (Ohio + Totals); votes has only Ohio -> a row was lost.
     parsed = [{"year": 2020, "t2": {"votes_by_state": [{"state": "Ohio"}, {"state": "Totals"}]}}]

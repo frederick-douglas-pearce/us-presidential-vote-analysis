@@ -992,8 +992,23 @@ def assert_rectangular_state_grain(votes: pd.DataFrame) -> None:
     :func:`assert_state_count_by_year` only checks the rank-1 winner per state, and
     :func:`assert_totals_equal_state_sum` is blind to a dropped 0-row — this closes that
     seam. Verified to hold across all 49 currently-loaded years.
+
+    Both a duplicate ``(state, candidate)`` row **and** full ``rows == states x
+    getters`` coverage are checked: a pure count test alone has a blind spot — a
+    duplicated pair
+    masking a dropped one satisfies the product — so the duplicate check runs first, and
+    together they prove every ``(state, candidate)`` pair is present exactly once.
     """
     state_rows = votes.loc[votes["state"].notna()]
+
+    grain = ["year", "state", "candidate_id"]
+    dupes = state_rows.loc[state_rows.duplicated(grain, keep=False)]
+    if not dupes.empty:
+        raise TransformError(
+            "EC votes fact has duplicate (year, state, candidate_id) row(s) — grain "
+            f"broken (D026): {dupes[grain].drop_duplicates().values.tolist()}"
+        )
+
     offenders: dict[int, tuple[int, int, int]] = {}
     for year, grp in state_rows.groupby("year"):
         n_states = grp["state"].nunique()
