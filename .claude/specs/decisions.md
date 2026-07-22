@@ -1164,3 +1164,112 @@ EC-getters only and guard completeness reciprocally.
   (`president_electoral_votes > 0`, totals rows excluded) and runs reconcile before the load.
 - **#69 (E6)** — carries the reciprocal join-side guard that every reconciled UCSB/MIT name is
   present in the EC `candidate` dim.
+
+---
+
+## D026: The EC↔PV join is a full-outer *participant* view at (year, state, candidate), not an EC-left annotation
+
+**Date:** 2026-07-21
+**Context:** E6-S2 (#69) joins the resolved PV series onto the EC spine — `pv_preferred` for the
+analysis path (E7), `pv_redistributable` for the API path (E8) — reading a **resolved view, never
+the raw `dwh.pv_votes` union** (D017; joining the union fans the 1976–2024 overlap out 2× and
+double-counts every downstream sum/margin). D017 framed the join as "EC on the left, PV attaches,
+missing PV surfaces as an explicit gap," a natural reading of D006 (EC is the source of truth PV
+joins *onto*). Designing #69 with the architect surfaced that the naive **EC-left** reading breaks
+the project's primary thesis.
+
+The critical realization: **the EC `votes` fact is sparse.** `build_votes_fact` drops every
+candidate/state cell with no electoral votes (`.dropna(subset=["president_electoral_votes"])`), so
+`dwh.votes` holds only **winners' state-rows** plus the national `is_total` rows. A losing
+candidate's per-state popular vote — Biden in Texas 2020, Trump in California 2020 — has **no EC
+row at all**. An EC-**left** join therefore drops every loser's state row, which is exactly the
+data D001's what-if explorer needs: "where does a candidate lose the EC but win the PV" is a
+per-state and national **margin** question, and a margin needs *both* majors' popular votes in
+every state. EC-left yields only the winner's column — useless for the thesis. So D006's "EC-left"
+framing is **refined here**, not overturned: EC remains authoritative on participation and on which
+candidates are in scope; it simply is not the correct *join side*.
+
+**Decision:** Join the EC state-level `votes` rows to the resolved PV view with a **FULL OUTER
+JOIN** on `(year, state, candidate)`, producing a **participant view** at that grain. This is
+subordinate to D006 (EC still governs the participant universe; see §3) and to D017 (reads a
+resolved view, not the union).
+
+1. **Two views, one parameterized builder.** `ec_pv_preferred` (over `pv_preferred`, for E7) and
+   `ec_pv_redistributable` (over `pv_redistributable`, for E8) are the same join over a different
+   resolved PV view. **Views, not materialized tables** (D017's default — low-thousands of rows
+   resolve in milliseconds; `CREATE MATERIALIZED VIEW` stays the one-line escape hatch).
+2. **Three row types the grain must express:**
+   - **winner+PV** — EC actual (electoral votes > 0), PV actual. The ordinary joined row.
+   - **loser-in-state** — EC electoral votes = **0**, PV actual. The rows an EC-left join drops;
+     the ones the thesis is *about*.
+   - **getter-without-PV** — EC actual, PV **NULL**. Pre-1976 getters with no reconciled PV, or
+     faithless getters with no popular-vote row — an honest D005 gap, **never a fabricated PV**.
+3. **Scope is per-year EC-getters, achieved for free.** `pv_preferred` is already D007/D019-scoped
+   to per-year EC-getters (D025), and `dwh.votes` only holds getters, so the participant universe
+   for a year is exactly "candidates who received ≥1 electoral vote that year." No popular-vote-only
+   minor (Perot, Nader, …) leaks in through either join side — the scope is inherited, not
+   re-enforced here.
+4. **EC = 0 is a derived fact, not a D005 fabrication — but the 0-fill is guarded.** Under
+   winner-take-all, a candidate absent from `dwh.votes` for a **contested** (year, state) genuinely
+   received 0 electoral votes there; filling 0 states a fact the source implies. The guard: fill 0
+   **only when the state ran an EC contest that year** (its per-(year, state) total electoral votes
+   is known from the spine); otherwise the EC side stays **NULL**. A tested assert forbids any row
+   with PV present while the state's EC contest is absent — that combination is a D024 roster leak,
+   not a legitimate loser-in-state. The asymmetry is deliberate: **EC = 0 is derivable** (from
+   winner-take-all + a known state contest), a fabricated **PV = 0 is not** (D005 still binds the
+   PV side — a winner with no reconciled PV keeps NULL PV, never a 0).
+5. **National context rides on every participant row.** National electoral votes, electoral rank,
+   and `took_office` are carried onto every row — losers included — from the `is_total` national
+   rows, so flip detection (EC winner vs. PV/hybrid winner) is computable from this one view
+   without a second pass.
+6. **This module is EC-domain.** It lands as `src/usvote/join.py`, a **sibling to `usvote/spine.py`**
+   (not under `usvote/pv/`), because it names `dwh.votes`/`dwh.candidate` — and the greppable
+   invariant "**nothing under `usvote/pv/` names `dwh.votes`**" forbids a `pv/` home. Its precedent
+   is `usvote/spine.py`/`usvote/years.py`: EC-domain modules a PV stage reads *from* (D006), never
+   the reverse.
+7. **The reciprocal DIM guard is a view-creation precondition** — this is the guard #69 owns per
+   `docs/canonical-keys.md`. Every reconciled PV `candidate`/`state` value must exist in the EC dims
+   (`dwh.candidate.name` / `dwh.state`), **failing loud** rather than vanishing in an inner join
+   (the inner-join silent-drop hazard). Supporting this, **`UNIQUE(name)` is added to
+   `dwh.candidate`** (D021's table carries `candidate_id` as PK, `name` unconstrained), because the
+   loser-in-state row resolves its `candidate_id` by keying on the canonical `name`.
+8. **Honest consumer split.** E7 (analysis) reads `ec_pv_preferred`; E8 (API) reads
+   `ec_pv_redistributable`, which **never surfaces a `redistributable=false` (UCSB) row** — the
+   D002/D014/D016 licensing boundary stays structural, inherited from `pv_redistributable`'s
+   independent `WHERE redistributable` definition (D017), not re-derived at the join.
+
+**Rationale:**
+- **Thesis-fitness is decisive.** The full-outer participant grain is the *only* shape that
+  expresses "lost the EC, won the PV" — per-state and national margins need both majors' state
+  popular votes, and EC-left structurally cannot carry the loser's column. The join side is chosen
+  by what D001 must compute, not by which source is authoritative.
+- **The EC-0 / fabricated-PV asymmetry is principled, not convenient.** A missing EC row under
+  winner-take-all *plus a known state contest* determines a real 0; a missing PV row determines
+  nothing, so it stays NULL (D005). The guard is what keeps the derivable 0 from becoming a
+  roster-leak 0.
+- **Forward-compatible.** A third PV source drops in via #68's data-driven precedence
+  (`pv_source.precedence_rank`) with **no change to the join** — the join reads whatever
+  `pv_preferred`/`pv_redistributable` resolve to.
+- **Views, not materialized,** at this scale (D017): no second artifact to keep consistent, and the
+  resolution logic stays in exactly one place.
+
+**Related:** **D017** (resolved views not the raw union; the join reads `pv_preferred` /
+`pv_redistributable`); **D006** (EC as source of truth — refined: authoritative on participant
+scope, not the join side); **D005** (no fabricated PV — the NULL-not-zero rule on the PV side);
+**D024** (the roster the EC-contest guard leans on to tell a legitimate loser from a leak);
+**D021** (the `dwh.candidate` DDL this adds `UNIQUE(name)` to); **D002**/**D014**/**D016** (the
+`redistributable=false` boundary `ec_pv_redistributable` must not cross); **D020**/**D025** (#69
+also carries the reciprocal name-in-dim guard those decisions defer to it).
+
+**Action required:**
+- **#69 (E6-S2)** — implement `usvote/join.py`: the parameterized participant-view builder, the two
+  views (`ec_pv_preferred`, `ec_pv_redistributable`), the guarded EC-0 fill, the national-context
+  carry, and the reciprocal DIM-coverage precondition guard.
+- Add **`UNIQUE(name)` to the `dwh.candidate` DDL** (supports loser-row `candidate_id` resolution
+  by name); a schema-conformance test covers it.
+- **Automated tests:** no-fan-out over the 1976–2024 overlap (the raw-union double-count guard);
+  dim-coverage precondition (an unreconciled PV name/state fails loud, not silently dropped);
+  EC-zero-fabrication guard (no PV-present row where the state's EC contest is absent);
+  **NE-2020 split-state** (electoral-vote splitting under the district method — a loser-in-state
+  with EC = 0 alongside a getter row in the same state); and the `ec_pv_redistributable`
+  leak-guard (no `redistributable=false` row on the API path).
