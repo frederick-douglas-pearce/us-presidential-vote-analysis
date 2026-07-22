@@ -523,6 +523,31 @@ def test_assert_totals_equal_state_sum_raises() -> None:
         T.assert_totals_equal_state_sum(votes)
 
 
+def test_assert_rectangular_state_grain_passes_on_dense_fact() -> None:
+    # Two states x two candidates = 4 rows, every (state, candidate) present incl. a 0-EV
+    # loser — the dense shape the real fact always has (D026). is_total rows are ignored.
+    votes = pd.DataFrame({
+        "year": [2020, 2020, 2020, 2020, 2020],
+        "state": ["Ohio", "Ohio", "Texas", "Texas", None],
+        "candidate_id": [1, 2, 1, 2, 1],
+        "president_electoral_votes": [18, 0, 0, 40, 18],  # 0-EV losers present
+    })
+    T.assert_rectangular_state_grain(votes)  # does not raise
+
+
+def test_assert_rectangular_state_grain_raises_on_a_missing_loser_row() -> None:
+    # Ohio has both candidates but Texas has only the winner — a getter's 0-EV row was
+    # dropped, breaking the dense-fact invariant the EC-left join relies on.
+    votes = pd.DataFrame({
+        "year": [2020, 2020, 2020],
+        "state": ["Ohio", "Ohio", "Texas"],
+        "candidate_id": [1, 2, 2],
+        "president_electoral_votes": [18, 0, 40],
+    })
+    with pytest.raises(TransformError, match="not rectangular"):
+        T.assert_rectangular_state_grain(votes)
+
+
 def test_assert_state_count_by_year_raises_on_dropped_state() -> None:
     # Parsed says 2 states (Ohio + Totals); votes has only Ohio -> a row was lost.
     parsed = [{"year": 2020, "t2": {"votes_by_state": [{"state": "Ohio"}, {"state": "Totals"}]}}]

@@ -1,21 +1,21 @@
-"""Live-Postgres integration tests for the EC<->PV participant join (#69 / D026).
+"""Live-Postgres integration tests for the EC-left EC<->PV join (#69 / D026).
 
 Excluded from the default suite by the ``integration`` marker; run with
-``pytest -m integration`` against a real database. The join is SQL-heavy (a FULL OUTER
-with a guarded CASE and three CTEs), so the live view is where the emitted SQL is proven
-to behave like the pure oracle in ``tests/unit/test_join.py``.
+``pytest -m integration`` against a real database. The join uses a window SUM and a
+LEFT JOIN over a resolved view, so the live view is where the emitted SQL is proven to
+behave like the pure oracle in ``tests/unit/test_join.py``.
 
 Two tests, split by what each needs:
 
 - **``test_join_resolves_a_synthetic_participant_set``** — the crux, **not** gated on the
   UCSB corpus. It seeds the real EC spine for 2016+2020, then loads a small **fabricated**
   PV union that reuses **real** canonical candidate/state names (so the D026 reciprocal
-  dim-coverage precondition passes) — a winner+PV, a loser-in-state (a getter who won no
-  EC votes in that state → EC 0), and a UCSB analysis-only row — and asserts the live
+  anti-join precondition passes) — a winner+PV, a loser (a real 0-EV EC row) with PV, and
+  a UCSB analysis-only row — and asserts the live
   ``ec_pv_preferred``/``ec_pv_redistributable`` views resolve exactly as D026 requires
-  (no fan-out; loser-in-state EC 0 with PV; the UCSB row never on the redistributable
-  surface). The counts are invented; only the names are real (D022 forbids UCSB *bytes*,
-  not the string ``'UCSB'``).
+  (no fan-out; loser EC 0 with PV; the UCSB row never on the redistributable surface).
+  The counts are invented; only the names are real (D022 forbids UCSB *bytes*, not the
+  string ``'UCSB'``).
 
 - **``test_join_over_a_real_two_source_load``** — end-to-end, doubly gated
   (``integration`` + ``USVOTE_UCSB_HTML_DIR``): real MIT + UCSB for 2016+2020, then the
@@ -39,7 +39,7 @@ from usvote.join import (
     EC_PV_PREFERRED_VIEW,
     EC_PV_REDISTRIBUTABLE_VIEW,
     JoinError,
-    assert_db_ec_dims_cover_pv,
+    assert_db_pv_matches_ec,
     assert_winners_have_pv,
     create_ec_pv_views,
 )
@@ -101,18 +101,18 @@ def test_join_resolves_a_synthetic_participant_set(
         winner16, loser16 = _top_two_getters(dbc, 2016)   # Trump won Texas; runner-up did not
         _winner20, loser20 = _top_two_getters(dbc, 2020)  # Biden won California; runner-up did not
 
-        # 2. Fabricated PV over REAL names: a winner+PV and a loser-in-state (2016 Texas),
-        #    plus a UCSB analysis-only loser-in-state (2020 California).
+        # 2. Fabricated PV over REAL names: a winner+PV and a loser (a real 0-EV EC row,
+        #    2016 Texas), plus a UCSB analysis-only loser (2020 California).
         union = pd.DataFrame([
             _pv_row(SOURCE_MIT, 2016, "Texas", winner16, 4_500_000),   # winner + PV
-            _pv_row(SOURCE_MIT, 2016, "Texas", loser16, 3_800_000),    # loser-in-state (EC 0)
+            _pv_row(SOURCE_MIT, 2016, "Texas", loser16, 3_800_000),    # loser, EC 0-row
             _pv_row(SOURCE_UCSB, 2020, "California", loser20, 6_000_000),  # UCSB analysis-only
         ])[list(SHARED_PV_COLUMNS)]
         load_pv_records(dbc, union, replace=False)
         build_pv_union(dbc)
         create_ec_pv_views(dbc)
 
-        # No fan-out: one participant row per (year, state, candidate) in both views.
+        # No fan-out: one row per (year, state, candidate) in both views.
         for view in (EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW):
             dupes = dbc.select_query_to_df(
                 f"SELECT year, state, candidate FROM {SCHEMA}.{view} "
@@ -120,29 +120,28 @@ def test_join_resolves_a_synthetic_participant_set(
             )
             assert dupes.empty, f"{view} fanned out"
 
-        # Loser-in-state: the 2016 Texas runner-up has no EC row there → EC 0, PV present.
+        # Loser: the 2016 Texas runner-up has a real EC 0-row (dense fact), PV attached —
+        # exactly the row an EC-left join keeps (and the sparse-premise draft mis-handled).
         loser = dbc.select_query_to_df(
-            f"SELECT president_electoral_votes AS ev, has_ec_state_row AS has_ec, "
-            f"candidate_votes AS cv, source FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
+            f"SELECT president_electoral_votes AS ev, candidate_votes AS cv, source "
+            f"FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
             f"WHERE year = 2016 AND state = 'Texas' AND candidate = '{loser16}'"
         )
         assert loser["ev"].iloc[0] == 0
-        assert not bool(loser["has_ec"].iloc[0])
         assert loser["cv"].iloc[0] == 3_800_000
         assert loser["source"].iloc[0] == SOURCE_MIT
 
-        # Winner+PV: the 2016 Texas winner has a real EC row (EV > 0) and the PV attached.
+        # Winner+PV: the 2016 Texas winner has EC votes (EV > 0) and the PV attached.
         winner = dbc.select_query_to_df(
-            f"SELECT president_electoral_votes AS ev, has_ec_state_row AS has_ec, "
-            f"candidate_votes AS cv FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
+            f"SELECT president_electoral_votes AS ev, candidate_votes AS cv "
+            f"FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
             f"WHERE year = 2016 AND state = 'Texas' AND candidate = '{winner16}'"
         )
-        assert bool(winner["has_ec"].iloc[0])
         assert winner["ev"].iloc[0] > 0
         assert winner["cv"].iloc[0] == 4_500_000
 
         # The UCSB analysis-only row IS in the preferred series (as UCSB), tagged
-        # redistributable = false — a loser-in-state with EC 0.
+        # redistributable = false — a loser with EC 0.
         ucsb_pref = dbc.select_query_to_df(
             f"SELECT president_electoral_votes AS ev, source, redistributable "
             f"FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
@@ -165,15 +164,16 @@ def test_join_resolves_a_synthetic_participant_set(
         )
         assert absent.empty
 
-        # Reciprocal dim-coverage precondition: an orphan PV candidate (absent from the EC
-        # dims) must fail loud — the guard the join owns (docs/canonical-keys.md). Inject
-        # one and confirm the live guard raises rather than silently dropping the row.
+        # Reciprocal anti-join precondition: a PV row matching no EC votes row (an orphan
+        # candidate) must fail loud — the EC-left join would otherwise silently drop it
+        # (the guard the join owns, docs/canonical-keys.md). Inject one and confirm the
+        # live guard raises.
         orphan = pd.DataFrame([
             _pv_row(SOURCE_MIT, 2016, "Texas", "Nonexistent Q. Candidate", 1),
         ])[list(SHARED_PV_COLUMNS)]
         load_pv_records(dbc, orphan, replace=False)
-        with pytest.raises(JoinError, match="absent from the EC dims"):
-            assert_db_ec_dims_cover_pv(dbc, PV_PREFERRED_VIEW)
+        with pytest.raises(JoinError, match="match no EC votes row"):
+            assert_db_pv_matches_ec(dbc, PV_PREFERRED_VIEW)
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()
@@ -211,7 +211,7 @@ def test_join_over_a_real_two_source_load(
         run_mit_pipeline(dbc, path=MIT_FUSION_SAMPLE_CSV, years={2016}, replace=False)
         run_ucsb_pipeline(dbc, _CORPUS, years=years, replace=False)
         build_pv_union(dbc)
-        create_ec_pv_views(dbc)  # its reciprocal dim-coverage precondition runs here
+        create_ec_pv_views(dbc)  # its reciprocal anti-join precondition runs here
 
         # No fan-out over real reconciled data (the raw-union double-count guard, live).
         for view in (EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW):
@@ -221,12 +221,11 @@ def test_join_over_a_real_two_source_load(
             )
             assert dupes.empty, f"{view} fanned out"
 
-        # A known loser-in-state exists with EC 0 (a getter who won no EC votes in a state
-        # they contested), proving the full-outer keeps the rows an EC-left join would drop.
+        # Losers are kept: a getter who won no EC votes in a state they contested is a real
+        # 0-EV EC row with PV attached — the dense-fact rows the EC-left join preserves.
         losers = dbc.select_query_to_df(
             f"SELECT count(*) AS n FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW} "
-            f"WHERE has_ec_state_row = false AND candidate_votes IS NOT NULL "
-            f"AND president_electoral_votes = 0"
+            f"WHERE candidate_votes IS NOT NULL AND president_electoral_votes = 0"
         )
         assert losers["n"].iloc[0] > 0
 
