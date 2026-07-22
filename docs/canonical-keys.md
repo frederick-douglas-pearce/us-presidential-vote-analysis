@@ -137,4 +137,15 @@ a one-row edit with no view or DDL change.
 **The join (#69) reads a resolved view, never the raw union.** Joining the EC spine to
 `dwh.pv_votes` directly would fan the overlap out 2× and double-count every downstream
 sum/margin — the raw tagged union and the resolved single-row series are deliberately
-named apart to prevent that mistake.
+named apart to prevent that mistake. It landed as
+[`src/usvote/join.py`](../src/usvote/join.py) (D026): an **EC-left join**
+(`ec_pv_preferred` for analysis, `ec_pv_redistributable` for the API) at the canonical
+`(year, state, candidate)` grain. EC-left works because the EC votes fact is **dense** —
+the Archives prints `-` for "no electoral votes here", read as `0`, so a candidate who
+*lost* a state's electoral votes is a real `0`-EV row (not a missing one), and the LEFT
+JOIN keeps it with its popular votes attached — exactly the "lost the EC, won the PV" data
+the thesis explores. That module is also where **this page's promised reciprocal guard
+runs**, now at the fact grain: a `NOT EXISTS` anti-join asserts every resolved PV
+`(year, state, candidate)` matches an EC votes row, enforced as a view-creation
+precondition — an unmatched value fails loud there rather than being silently dropped by
+the LEFT JOIN.

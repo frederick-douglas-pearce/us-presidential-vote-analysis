@@ -66,7 +66,13 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
         ],
         [  # candidate dimension
             ("candidate_id", "smallint", "primary key"),
-            ("name", "varchar", "not null"),
+            # UNIQUE so the EC<->PV join (usvote.join, #69) can resolve a PV loser
+            # row's candidate_id by canonical ``name`` unambiguously — the surrogate
+            # candidate_id is not carried on PV rows, so the name is the join key, and
+            # the one-row-per-name grain (only a transform-time assert until now) must
+            # hold at the DB level too. See docs/canonical-keys.md (name is the
+            # canonical candidate key) and transform.assert_unique_grain.
+            ("name", "varchar", "not null", "unique"),
             ("name_first", "varchar", "not null"),
             ("name_middle", "varchar"),
             ("name_last", "varchar"),

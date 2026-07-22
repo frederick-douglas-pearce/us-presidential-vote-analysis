@@ -796,6 +796,7 @@ def build_votes_fact(
 
     assert_totals_equal_state_sum(votes)
     assert_state_count_by_year(parsed_years, votes)
+    assert_rectangular_state_grain(votes)
     return votes
 
 
@@ -973,6 +974,51 @@ def assert_state_count_by_year(
     if mismatched:
         raise TransformError(
             f"Per-year state count changed (year: parsed -> votes): {mismatched}"
+        )
+
+
+def assert_rectangular_state_grain(votes: pd.DataFrame) -> None:
+    """Raise unless each year's state-level fact is rectangular: one row per
+    ``(state, candidate)`` — i.e. every getter has a row in every participating state.
+
+    The EC votes fact is **dense**: the Archives Table 2 prints ``-`` for "won no
+    electoral votes here", which :func:`usvote.parse.parse_t2_votes_by_state` reads as
+    ``0``, so a losing candidate is an explicit ``president_electoral_votes = 0`` row —
+    never a dropped one. The EC<->PV join (:mod:`usvote.join`, D026) rests on this: an
+    EC-left join preserves every loser only because their 0-EV rows exist. This asserts
+    the premise (per year, ``rows == states x getters``) rather than leaving it
+    emergent, so a future coverage extension below 1892 (#32) with a ragged early table
+    fails loud here instead of silently dropping a loser row into a downstream gap.
+    :func:`assert_state_count_by_year` only checks the rank-1 winner per state, and
+    :func:`assert_totals_equal_state_sum` is blind to a dropped 0-row — this closes that
+    seam. Verified to hold across all 49 currently-loaded years.
+
+    Both a duplicate ``(state, candidate)`` row **and** full ``rows == states x
+    getters`` coverage are checked: a pure count test alone has a blind spot — a
+    duplicated pair
+    masking a dropped one satisfies the product — so the duplicate check runs first, and
+    together they prove every ``(state, candidate)`` pair is present exactly once.
+    """
+    state_rows = votes.loc[votes["state"].notna()]
+
+    grain = ["year", "state", "candidate_id"]
+    dupes = state_rows.loc[state_rows.duplicated(grain, keep=False)]
+    if not dupes.empty:
+        raise TransformError(
+            "EC votes fact has duplicate (year, state, candidate_id) row(s) — grain "
+            f"broken (D026): {dupes[grain].drop_duplicates().values.tolist()}"
+        )
+
+    offenders: dict[int, tuple[int, int, int]] = {}
+    for year, grp in state_rows.groupby("year"):
+        n_states = grp["state"].nunique()
+        n_getters = grp["candidate_id"].nunique()
+        if len(grp) != n_states * n_getters:
+            offenders[int(year)] = (len(grp), n_states, n_getters)
+    if offenders:
+        raise TransformError(
+            "EC votes fact not rectangular — a getter is missing a state row "
+            f"(dense-fact invariant, D026). year: (rows, states, getters) = {offenders}"
         )
 
 

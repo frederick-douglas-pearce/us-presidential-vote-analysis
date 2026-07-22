@@ -61,6 +61,7 @@ from collections.abc import Collection
 
 import pandas as pd
 
+from usvote.getters import EC_GETTERS_WITHOUT_POPULAR_VOTE
 from usvote.pv.status import assert_roster_covers_facts
 from usvote.ucsb.transform import (
     SOURCE_UCSB,
@@ -269,37 +270,12 @@ UCSB_NON_GETTER_COLUMNS: frozenset[tuple[int, str]] = frozenset({
     (2016, "GARY JOHNSON"),      # Libertarian
 })
 
-# --- EC-getters that held no popular vote (completeness-guard exemptions) --------
-# EC-getters (president EVs > 0) who, by design, have NO UCSB popular-vote row — so the
-# reciprocal completeness guard (:func:`_assert_getter_completeness`) must not require
-# one. Two causes, both historically closed:
-#   - a state chose its electors by legislature and awarded them to this candidate, who
-#     was never on a popular-vote ballot (1832 Floyd, 1836 Mangum — both South Carolina,
-#     whose roster row is `legislature_chosen`); and
-#   - a *faithless* or *unpledged* elector cast a presidential vote for someone who was
-#     not a presidential candidate that year (all the rest).
-# Keyed by the canonical EC name, matching ec_getters. Without this exemption the guard
-# would false-positive on every one of these (the exact hazard the #38 architect review
-# flagged: 1960 Byrd, the 2016 faithless set, 2004 Edwards, …). The litmus for what
-# stays REQUIRED: Wallace 1968, Thurmond 1948, T. Roosevelt 1912, La Follette 1924,
-# Weaver 1892 all received EVs *and* popular votes and are absent here.
-# Source: the National Archives per-year Notes (faithless/unpledged electors) and the
-# `legislature_chosen` roster rows (D024); verified against the EC president-EV getters.
-EC_GETTERS_WITHOUT_POPULAR_VOTE: frozenset[tuple[int, str]] = frozenset({
-    (1832, "John Floyd"),          # SC legislature-chosen (Nullifier), 11 EV
-    (1836, "Willie P. Mangum"),    # SC legislature-chosen, 11 EV
-    (1956, "Walter B. Jones"),     # faithless AL elector, 1 EV
-    (1960, "Harry F. Byrd"),       # unpledged Southern electors, 15 EV
-    (1972, "John Hospers"),        # faithless VA elector (Libertarian), 1 EV
-    (1976, "Ronald Reagan"),       # faithless WA elector, 1 EV
-    (1988, "Lloyd Bentsen"),       # faithless WV elector (VP got the pres. vote), 1 EV
-    (2004, "John Edwards"),        # faithless MN elector, 1 EV
-    (2016, "Colin Powell"),        # 3 faithless WA electors, 3 EV
-    (2016, "Bernie Sanders"),      # faithless HI elector, 1 EV
-    (2016, "Ron Paul"),            # faithless TX elector, 1 EV
-    (2016, "John Kasich"),         # faithless TX elector, 1 EV
-    (2016, "Faith Spotted Eagle"),  # faithless WA elector, 1 EV
-})
+# EC-getters who hold no popular vote in any source (faithless/unpledged/legislature-
+# chosen) — the exemptions the reciprocal completeness guard (:func:`_assert_getter_
+# completeness`) must not require a UCSB row for. Promoted to the dependency-free
+# EC-domain module :mod:`usvote.getters` (#69/D026) once the EC<->PV join's coverage
+# guard became a second cross-boundary consumer. Imported above and used by bare name
+# below, so this module's public surface is unchanged.
 
 #: Columns the injected ``ec_getters`` frame must carry (D006 spine, president EVs).
 EC_GETTERS_COLUMNS: tuple[str, ...] = ("year", "candidate", "president_electoral_votes")
