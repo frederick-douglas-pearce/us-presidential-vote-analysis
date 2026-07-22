@@ -157,12 +157,17 @@ def test_join_resolves_a_synthetic_participant_set(
             f"WHERE source = '{SOURCE_UCSB}' OR redistributable = false"
         )
         assert leak["n"].iloc[0] == 0
-        # ...and the specific UCSB loser row is absent from it.
-        absent = dbc.select_query_to_df(
-            f"SELECT * FROM {SCHEMA}.{EC_PV_REDISTRIBUTABLE_VIEW} "
+        # The EC row (2020, CA, loser20) still appears on the public surface — EC-left keeps
+        # every EC state row — but the UCSB PV must NOT attach: its candidate_votes/source
+        # stay NULL (pv_redistributable excludes UCSB), so the 6M UCSB votes never leak.
+        pub = dbc.select_query_to_df(
+            f"SELECT candidate_votes AS cv, source FROM "
+            f"{SCHEMA}.{EC_PV_REDISTRIBUTABLE_VIEW} "
             f"WHERE year = 2020 AND state = 'California' AND candidate = '{loser20}'"
         )
-        assert absent.empty
+        assert len(pub) == 1
+        assert pd.isna(pub["cv"].iloc[0])
+        assert pd.isna(pub["source"].iloc[0])
 
         # Reciprocal anti-join precondition: a PV row matching no EC votes row (an orphan
         # candidate) must fail loud — the EC-left join would otherwise silently drop it
