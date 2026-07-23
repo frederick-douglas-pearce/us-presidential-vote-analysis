@@ -6,13 +6,15 @@ loading through the shared, source-neutral :mod:`usvote.pv.load` seam. Each PV s
 owns its own pipeline (the EC ``pipeline.py`` docstring's design), so this lives under
 ``usvote/ucsb/``.
 
-**``__main__`` means *snapshot*, not *run this pipeline*.** Unlike the EC spine —
-where ``python -m usvote`` runs the whole pipeline — ``python -m usvote.ucsb`` runs
-:func:`usvote.ucsb.scrape.snapshot_elections` (the D023 reproducible network refresh).
-This module is driven directly (like ``run_mit_pipeline``, whose ``__main__`` entry
-point is likewise deferred); the integration test is its caller. The asymmetry is
-principled: MIT reads a local CSV and has no network stage to snapshot, so only UCSB
-carries a snapshot command.
+**``python -m usvote.ucsb`` defaults to *snapshot*, not *run this pipeline*.** The UCSB
+``__main__`` is subcommand-based (#84b): ``load`` runs this pipeline, while the **bare**
+``python -m usvote.ucsb`` (the ``snapshot`` default) runs
+:func:`usvote.ucsb.scrape.snapshot_elections` — the D023 reproducible network refresh.
+So bare UCSB snapshots while bare ``python -m usvote`` loads; the asymmetry is
+principled (MIT reads a local CSV and has no network stage to snapshot, so only UCSB
+carries a snapshot command) and is now a *documented default subcommand* rather than a
+surprise (D027). This pipeline is also invoked by the whole-warehouse build
+(:func:`usvote.warehouse.run_warehouse`).
 
 **Two tables, one ``replace``, loaded atomically.** A UCSB run loads *both* shared PV
 tables — the ``dwh.pv_votes`` fact and the ``dwh.pv_state_status`` roster — the two

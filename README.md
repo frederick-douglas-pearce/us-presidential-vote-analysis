@@ -34,9 +34,19 @@ $ uv sync
 3. Run the Electoral College ingestion. With the environment configured (see [Configuration](#configuration)), the packaged pipeline is the primary path:
 
 ```
-$ python -m usvote            # create-if-absent load
+$ python -m usvote            # create-if-absent load (bare = the EC spine)
 $ python -m usvote --replace  # destructive: drop and recreate the dwh schema first
 ```
+
+  The entry points are subcommand-based; bare `python -m usvote` stays the EC spine for backward compatibility. To build the **whole** warehouse — the EC spine plus the popular-vote sources (MIT, and UCSB when its snapshot is present) plus the EC↔PV join views — in one command:
+
+```
+$ python -m usvote all              # EC + MIT + (auto-detected) UCSB + join views
+$ python -m usvote all --replace    # clean full rebuild (drops the schema, then reloads all)
+$ python -m usvote all --no-ucsb    # EC + MIT only (the redistributable public core)
+```
+
+  `all` also needs `USVOTE_MIT_CSV_PATH` (and, for UCSB, `USVOTE_UCSB_HTML_DIR`); it prints a loud notice and builds without UCSB when that snapshot is absent (pass `--require-ucsb` to fail instead). A single popular-vote source can also be loaded on its own with `python -m usvote.mit load` or `python -m usvote.ucsb load` (both require the EC spine already loaded); `python -m usvote.ucsb` (bare) still *snapshots* the raw UCSB pages.
 
   Alternatively, open the original notebook in JupyterLab to run or explore step 1 interactively:
 
