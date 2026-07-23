@@ -46,6 +46,12 @@ _DB_PARAMS: tuple[tuple[str, str, str], ...] = (
 #: Environment variable holding the path to the TIGER2019 US states shapefile.
 SHAPEFILE_PATH_VAR = "USVOTE_SHAPEFILE_PATH"
 
+#: Environment variable holding the path to the read-only API snapshot (E8, D028).
+#: The snapshot build (:mod:`usvote.snapshot`) *writes* it; the API (``usvote/api/``)
+#: *reads* it. App-level (not per-source), so it lives here in the source-agnostic
+#: top-level config rather than a subpackage config module.
+API_SNAPSHOT_PATH_VAR = "USVOTE_API_SNAPSHOT_PATH"
+
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or invalid.
@@ -94,6 +100,35 @@ def require_path_from_env(
         raise ConfigError(f"{var_name} is not set. {unset_hint}")
     if not os.path.exists(path):
         raise ConfigError(f"{var_name}={path!r} does not exist. {missing_hint}")
+    return path
+
+
+def snapshot_path_from_env(
+    environ: Mapping[str, str] = os.environ, *, must_exist: bool = False
+) -> str:
+    """Return the API snapshot path from ``USVOTE_API_SNAPSHOT_PATH``.
+
+    Unlike the shapefile/CSV getters this path is not always an *input*: the snapshot
+    build (:mod:`usvote.snapshot`) resolves it as an **output** target that need not
+    exist yet, so ``must_exist`` defaults to ``False`` (require the variable to be set,
+    but not the file to be present). The API's serve path (E8-S2) resolves the same
+    variable with ``must_exist=True`` — a missing snapshot must fail loud at startup,
+    not 500 at request time. An unset/empty variable is always a :class:`ConfigError`.
+    ``environ`` is injectable for testing.
+    """
+    path = environ.get(API_SNAPSHOT_PATH_VAR)
+    if not path:
+        raise ConfigError(
+            f"{API_SNAPSHOT_PATH_VAR} is not set. Point it at the SQLite snapshot path "
+            "the API serves — the build target for `python -m usvote.snapshot` and the "
+            "read path for the API app (E8, D028)."
+        )
+    if must_exist and not os.path.exists(path):
+        raise ConfigError(
+            f"{API_SNAPSHOT_PATH_VAR}={path!r} does not exist. Build it first with "
+            "`python -m usvote.snapshot` (needs the local warehouse), or point the "
+            "variable at an existing snapshot."
+        )
     return path
 
 
