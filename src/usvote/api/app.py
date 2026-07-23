@@ -77,12 +77,17 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.add_exception_handler(NotModified, not_modified_handler)
+    # No credentials mode: this is unauthenticated, read-only public data with no
+    # cookies, so `allow_credentials` buys nothing — and enabling it turns an operator's
+    # explicit `USVOTE_API_CORS_ORIGINS=*` into reflect-any-origin-*with-credentials*
+    # (Starlette echoes the caller's Origin instead of a static `*`), the exact silent-
+    # wildcard hazard D031 forbids. With credentials off, an explicit `*` degrades to a
+    # plain `Access-Control-Allow-Origin: *` — the correct, safe behavior for a public
+    # reference API. Methods are GET-only; no custom request headers are needed.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
         allow_methods=["GET"],
-        allow_headers=["*"],
     )
 
     @app.get("/health", tags=["ops"])

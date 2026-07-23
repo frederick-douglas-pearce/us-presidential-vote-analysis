@@ -29,12 +29,25 @@ def _run_serve(host: str, port: int) -> int:
     import uvicorn
 
     from usvote.api import create_app
+    from usvote.api.repository import SnapshotError, SnapshotRepository
 
     try:
         app = create_app()  # eager config resolution — fail loud before binding
     except ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 2
+
+    # Pre-flight the snapshot itself. create_app only resolves config (path exists); the
+    # repository open — which validates schema_version and the meta table — otherwise
+    # runs inside the lifespan once uvicorn is starting, surfacing a bad snapshot as an
+    # ugly "Application startup failed" traceback after the port is claimed. Opening it
+    # here (cheap, read-only; the lifespan re-opens it) keeps the "fail loud before
+    # binding a port" promise for the mismatched/corrupt case too, not just missing.
+    try:
+        SnapshotRepository.open(app.state.settings.snapshot_path)
+    except SnapshotError as e:
+        print(f"Snapshot error: {e}", file=sys.stderr)
+        return 3
 
     uvicorn.run(app, host=host, port=port)
     return 0

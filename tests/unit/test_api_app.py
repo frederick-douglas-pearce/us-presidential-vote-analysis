@@ -107,6 +107,20 @@ def test_missing_snapshot_raises_config_error_at_startup(tmp_path: Path) -> None
         create_app(ApiSettings.from_env({"USVOTE_API_SNAPSHOT_PATH": absent}))
 
 
+def test_opens_snapshot_path_with_spaces(tmp_path: Path) -> None:
+    """A path with a space (or other URI-special char) must still open read-only.
+
+    Guards the SQLite URI construction: a raw f-string would leave the space unencoded
+    and mis-parse the ``?mode=ro`` query; ``Path.as_uri`` percent-encodes it.
+    """
+    spaced = tmp_path / "My Snapshots"
+    spaced.mkdir()
+    out = str(spaced / "snap.sqlite")
+    build_snapshot(_frame(), out, build_timestamp=_TS)
+    repo = SnapshotRepository.open(out)
+    assert repo.meta().year_min == 2020
+
+
 def test_schema_version_mismatch_fails_loud_at_open(
     snapshot_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -165,9 +179,12 @@ def test_conditional_get_returns_200_when_version_differs(client: TestClient) ->
 # --- CORS -------------------------------------------------------------------
 
 
-def test_cors_echoes_allowlisted_origin(client: TestClient) -> None:
+def test_cors_echoes_allowlisted_origin_without_credentials(client: TestClient) -> None:
     resp = client.get("/v1/meta", headers={"Origin": "http://localhost:5173"})
     assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
+    # Credentials mode is off (read-only public data): never advertise it, so an
+    # explicit `*` can't degrade into reflect-any-origin-with-credentials (D031).
+    assert "access-control-allow-credentials" not in resp.headers
 
 
 def test_cors_does_not_echo_unlisted_origin(client: TestClient) -> None:

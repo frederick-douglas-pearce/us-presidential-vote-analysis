@@ -82,8 +82,13 @@ class SnapshotRepository:
     @staticmethod
     def _connect(snapshot_path: str) -> sqlite3.Connection:
         """Open a fresh read-only, immutable connection to the snapshot file."""
-        uri = f"file:{Path(snapshot_path).resolve()}?mode=ro&immutable=1"
-        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        # ``as_uri`` percent-encodes the path (spaces, ``?``, ``#``, ``%``); a raw
+        # f-string would let a ``?`` in the path start the query component early and
+        # drop ``mode=ro``/``immutable=1``. Append our params to the encoded base.
+        base = Path(snapshot_path).resolve().as_uri()
+        conn = sqlite3.connect(
+            f"{base}?mode=ro&immutable=1", uri=True, check_same_thread=False
+        )
         conn.row_factory = sqlite3.Row
         return conn
 

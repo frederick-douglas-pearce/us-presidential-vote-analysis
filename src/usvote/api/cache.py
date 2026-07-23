@@ -86,8 +86,10 @@ def not_modified_handler(request: Request, exc: Exception) -> Response:
     A 304 carries no body; only the validators are echoed. Registered on the app in
     :func:`usvote.api.app.create_app`.
     """
-    etag = exc.etag if isinstance(exc, NotModified) else ""
+    # Registered only for NotModified, so this always holds; assert rather than fall
+    # back to an empty ETag, which would silently mask a mis-registration.
+    assert isinstance(exc, NotModified)
     return Response(
         status_code=HTTP_304_NOT_MODIFIED,
-        headers={"ETag": etag, "Cache-Control": CACHE_CONTROL},
+        headers={"ETag": exc.etag, "Cache-Control": CACHE_CONTROL},
     )
