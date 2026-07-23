@@ -42,9 +42,12 @@ honest gap, never a fabricated 0.
 
 ### `ec_pv` — the joined fact
 
-One row per `(year, state, candidate_slug)` over the window, indexed on `year` / `state` /
-`candidate_slug`. Every EC state row is kept — winners **and** 0-EV losers (the dense-fact
-rows the thesis explores: "lost the EC, won the PV").
+One row per `(year, state, candidate_slug)` over the window — that grain is the table's
+**PRIMARY KEY**, so a join-view or slug-mapping fan-out fails loud at build (INSERT) rather
+than silently shipping duplicates the content hash would bless. Secondary indexes on
+`state` / `state_usps` / `candidate_slug` serve the by-state/by-candidate endpoints (the
+`year` lookups ride the PK's leftmost prefix). Every EC state row is kept — winners **and**
+0-EV losers (the dense-fact rows the thesis explores: "lost the EC, won the PV").
 
 | column | type | notes |
 |---|---|---|
@@ -69,9 +72,10 @@ distinct names colliding onto one slug (the same-name residual) fails the build 
 
 One row per `(year, candidate_slug)` so `/v1/elections/{year}/summary` **reads** instead of
 computing in a route handler: `national_electoral_votes`, `national_pv_votes` (NULL for a
-no-PV getter), and `national_pv_denominator` (each state's total counted once). Safe to
-precompute because the window is single-source (MIT), so there is no cross-source
-denominator ambiguity (D017).
+no-PV getter), and `national_pv_denominator` (each state's total counted once — the
+**non-null** `state_total_votes` per state, so a no-PV getter's NULL row never drops the
+state from the sum). Safe to precompute because the window is single-source (MIT), so there
+is no cross-source denominator ambiguity (D017).
 
 ### `snapshot_meta` — one provenance row
 

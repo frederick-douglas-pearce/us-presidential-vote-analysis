@@ -208,10 +208,17 @@ def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
     - ``national_pv_votes`` — ``sum(candidate_votes)`` over the candidate's state rows,
       with ``min_count=1`` so a getter with **no** PV stays NULL (honest), not a fake 0.
     - ``national_pv_denominator`` — the year's total votes cast: each state's
-      ``state_total_votes`` counted **once** (deduped on ``(year, state)``) then summed.
-      This pins to MIT's *provided* per-state denominator, never a re-sum of candidate
-      rows (D017). Single-source (MIT) window, so there is no cross-source denominator
-      ambiguity to reconcile.
+      ``state_total_votes`` counted **once** then summed. This pins to MIT's *provided*
+      per-state denominator, never a re-sum of candidate rows (D017). Single-source
+      (MIT) window, so there is no cross-source denominator ambiguity to reconcile.
+
+    The per-state total is taken as the **non-null** ``state_total_votes`` for each
+    ``(year, state)`` (``max`` skips NA), *not* an arbitrary deduped row: MIT broadcasts
+    the same per-state denominator onto every candidate row in the state, but a no-PV
+    getter (a faithless elector) carries a NULL ``state_total_votes``. A plain
+    ``drop_duplicates(["year", "state"])`` keeps the first row in ``(year, state,
+    candidate_slug)`` order, which is that NULL row whenever the getter's slug sorts
+    first — silently dropping the whole state from the national denominator.
     """
     per_candidate = (
         data_df.groupby(["year", "candidate_slug"], as_index=False)
@@ -224,7 +231,9 @@ def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
             national_pv_votes=("candidate_votes", lambda s: s.sum(min_count=1)),
         )
     )
-    per_state = data_df.drop_duplicates(subset=["year", "state"])
+    per_state = data_df.groupby(["year", "state"], as_index=False)[
+        "state_total_votes"
+    ].max()
     denom = (
         per_state.groupby("year", as_index=False)["state_total_votes"]
         .sum(min_count=1)
@@ -398,9 +407,15 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " party TEXT,"
         " candidate_votes INTEGER,"
         " state_total_votes INTEGER,"
-        " reliability TEXT)"
+        " reliability TEXT,"
+        # Canonical grain (D026): one row per (year, state, candidate_slug). A PRIMARY
+        # KEY makes a join-view / slug-mapping fan-out fail loud at INSERT (matching
+        # national_rollup's own PK guard and the "validation is load-bearing" rule)
+        # rather than silently shipping duplicates the content hash would bless.
+        " PRIMARY KEY (year, state, candidate_slug))"
     )
-    conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_year ON {DATA_TABLE}(year)")
+    # No separate year index: the (year, ...) PRIMARY KEY already serves year lookups
+    # via its leftmost-prefix. state / state_usps / slug each need their own.
     conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_state ON {DATA_TABLE}(state)")
     conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_usps ON {DATA_TABLE}(state_usps)")
     conn.execute(

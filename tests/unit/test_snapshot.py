@@ -256,6 +256,20 @@ def test_national_rollup_ec_and_pv_totals(tmp_path: Path) -> None:
     assert c["national_pv_denominator"] == 24000000
 
 
+def test_denominator_survives_no_pv_getter_sorting_first(tmp_path: Path) -> None:
+    # Regression (code-review): national_pv_denominator must count every state once even
+    # when the alphabetically-first candidate_slug in a state is a no-PV getter (NULL
+    # state_total_votes). Rename the faithless getter so its slug sorts BEFORE the real
+    # candidates in every 2016 state; the denominator must stay 9M + 12M + 3M = 24M. With
+    # the old drop_duplicates(["year","state"]) this would keep the NULL row per state
+    # and understate the denominator (here, drop to 0).
+    frame = _ec_pv_frame()
+    frame.loc[frame["candidate"] == "Faithless F", "candidate"] = "Aardvark Faithless"
+    out, _ = _build(tmp_path, frame)
+    rollup = _read(out, ROLLUP_TABLE).set_index(["year", "candidate_slug"])
+    assert rollup.loc[(2016, "cand-c"), "national_pv_denominator"] == 24000000
+
+
 def test_rollup_null_pv_getter_has_null_pv_total(tmp_path: Path) -> None:
     out, _ = _build(tmp_path)
     rollup = _read(out, ROLLUP_TABLE).set_index(["year", "candidate_slug"])
@@ -326,6 +340,20 @@ def test_non_mit_source_fails_loud() -> None:
 
 
 # --- atomic write -----------------------------------------------------------
+
+
+def test_duplicate_grain_row_fails_loud(tmp_path: Path) -> None:
+    # The ec_pv PRIMARY KEY (year, state, candidate_slug) makes a grain fan-out fail loud
+    # at INSERT rather than silently shipping duplicates the content hash would bless.
+    frame = _ec_pv_frame()
+    dup = frame[
+        (frame["year"] == 2020)
+        & (frame["state"] == "Texas")
+        & (frame["candidate"] == "Cand A")
+    ]
+    frame = pd.concat([frame, dup], ignore_index=True)
+    with pytest.raises(sqlite3.IntegrityError):
+        build_snapshot(frame, str(tmp_path / "snapshot.sqlite"), build_timestamp=_TS)
 
 
 def test_build_is_idempotent_overwrite(tmp_path: Path) -> None:
