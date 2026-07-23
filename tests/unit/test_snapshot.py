@@ -40,6 +40,10 @@ from usvote.snapshot import (
 
 _TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 
+#: The state->USPS enrichment read_redistributable adds from dwh.state; the synthetic
+#: frame carries it directly (it is the shape build_snapshot consumes).
+_USPS = {"Texas": "TX", "California": "CA", "Washington": "WA"}
+
 
 def _row(
     year: int,
@@ -63,6 +67,7 @@ def _row(
     return {
         "year": year,
         "state": state,
+        "state_usps": _USPS[state],
         "candidate_id": candidate_id,
         "candidate": candidate,
         "total_electoral_votes": total_ev,
@@ -120,7 +125,8 @@ def _ec_pv_frame() -> pd.DataFrame:
         _row(2020, "California", 2, "Cand B", 55, 55, 1, True,
              candidate_votes=11000000, state_total=17000000, total_ev=55),
     ]
-    return pd.DataFrame(rows)[list(EC_PV_COLUMNS)]
+    # The enriched shape build_snapshot consumes: the view columns + state_usps.
+    return pd.DataFrame(rows)[[*EC_PV_COLUMNS, "state_usps"]]
 
 
 def _build(
@@ -163,12 +169,22 @@ def test_empty_slug_fails_loud() -> None:
 
 def test_slug_collision_fails_loud() -> None:
     # Two DISTINCT canonical names that fold to one slug — the docs/canonical-keys.md
-    # same-name residual — must raise, not silently merge two people.
+    # same-name residual — must raise, not silently merge two people (in-window).
     frame = _ec_pv_frame()
     frame.loc[frame["candidate"] == "Cand A", "candidate"] = "José Foo"
     frame.loc[frame["candidate"] == "Cand B", "candidate"] = "Jose Foo"
     with pytest.raises(SnapshotError, match="slug collision"):
         build_snapshot(frame, "/dev/null")
+
+
+def test_pre_window_slug_collision_is_tolerated(tmp_path: Path) -> None:
+    # A slug collision among candidates that never ship (pre-1976, filtered out) must
+    # NOT fail the build — slug uniqueness is enforced only over the served window.
+    frame = _ec_pv_frame()
+    frame.loc[frame["candidate"] == "Richard Nixon", "candidate"] = "José Foo"
+    frame.loc[frame["candidate"] == "George McGovern", "candidate"] = "Jose Foo"
+    out, meta = _build(tmp_path, frame)  # does not raise
+    assert set(_read(out, DATA_TABLE)["year"]) == {2016, 2020}
 
 
 # --- shape / candidate_id drop ---------------------------------------------
@@ -187,6 +203,8 @@ def test_snapshot_tables_have_expected_shape(tmp_path: Path) -> None:
     assert "candidate_id" not in data.columns
     # Slug is minted for every row.
     assert (data["candidate_slug"] == data["candidate"].map(candidate_slug)).all()
+    # state_usps is carried for the /v1/states/{...} path key (#97).
+    assert set(data.loc[data["state"] == "California", "state_usps"]) == {"CA"}
 
 
 def test_add_candidate_slug_is_pure() -> None:
@@ -332,7 +350,13 @@ class _StubDBC:
         if "to_regclass" in query:
             rel = "dwh.ec_pv_redistributable" if self._exists else None
             return pd.DataFrame({"relation": [rel]})
-        return _ec_pv_frame()
+        if "state_usps" in query:  # SELECT state, state_usps FROM dwh.state
+            return pd.DataFrame(
+                {"state": list(_USPS), "state_usps": list(_USPS.values())}
+            )
+        # The view read: return the frame WITHOUT the enrichment column (the view
+        # itself does not carry state_usps — read_redistributable merges it in).
+        return _ec_pv_frame().drop(columns=["state_usps"])
 
     def close_connection(self) -> None:
         self.closed = True
@@ -343,9 +367,10 @@ def test_read_missing_view_fails_loud() -> None:
         read_redistributable(_StubDBC(exists=False))  # type: ignore[arg-type]
 
 
-def test_read_present_view_returns_frame() -> None:
+def test_read_present_view_enriches_with_state_usps() -> None:
     df = read_redistributable(_StubDBC(exists=True))  # type: ignore[arg-type]
-    assert list(df.columns) == list(EC_PV_COLUMNS)
+    assert list(df.columns) == [*EC_PV_COLUMNS, "state_usps"]
+    assert set(df["state_usps"]) == {"TX", "CA", "WA"}
 
 
 def test_build_from_db_reads_then_builds(tmp_path: Path) -> None:

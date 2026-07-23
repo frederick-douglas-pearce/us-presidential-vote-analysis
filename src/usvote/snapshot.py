@@ -19,7 +19,8 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     ``candidate_slug`` for the by-year/by-state/by-candidate endpoints (#97). The
     internal surrogate ``candidate_id`` is **dropped** (D006 /
     ``docs/canonical-keys.md``) and replaced by ``candidate_slug`` — the durable public
-    candidate id minted here.
+    candidate id minted here. ``state_usps`` is carried alongside the full
+    ``state`` name as a clean URL/path key for ``/v1/states/{...}`` (#97).
 
 ``national_rollup`` — one row per ``(year, candidate_slug)`` with the per-candidate
     national EC total (the view's window sum) and national PV total (+ denominator), so
@@ -61,7 +62,7 @@ import sqlite3
 import sys
 import tempfile
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -75,49 +76,21 @@ from usvote.join import EC_PV_REDISTRIBUTABLE_VIEW
 from usvote.load import SCHEMA
 from usvote.pv.source import SOURCE_MIT, build_pv_source_frame
 from usvote.slug import candidate_slug
-
-#: Bump when the snapshot's table shape changes (a consumer keys compatibility off it,
-#: and it is folded into the content hash so a shape change forces a new version).
-SNAPSHOT_SCHEMA_VERSION = 1
-
-#: The three snapshot tables (the serving contract E8-S2/S3 read).
-DATA_TABLE = "ec_pv"
-ROLLUP_TABLE = "national_rollup"
-META_TABLE = "snapshot_meta"
-
-#: The ``ec_pv`` fact columns, in order. This is ``usvote.join.EC_PV_COLUMNS`` with the
-#: internal ``candidate_id`` **dropped** (D006), ``candidate_slug`` inserted after the
-#: canonical ``candidate`` name, and ``redistributable`` dropped (constant-true on this
-#: surface — the fact is recorded once in ``snapshot_meta.source``, not per row).
-DATA_COLUMNS: tuple[str, ...] = (
-    "year",
-    "state",
-    "candidate",
-    "candidate_slug",
-    "total_electoral_votes",
-    "president_electoral_votes",
-    "national_electoral_votes",
-    "president_electoral_rank",
-    "took_office",
-    "source",
-    "party",
-    "candidate_votes",
-    "state_total_votes",
-    "reliability",
+from usvote.snapshot_schema import (
+    DATA_COLUMNS,
+    DATA_TABLE,
+    META_TABLE,
+    ROLLUP_COLUMNS,
+    ROLLUP_TABLE,
+    SNAPSHOT_SCHEMA_VERSION,
+    SnapshotMeta,
 )
 
-#: The precomputed national roll-up columns, one row per ``(year, candidate_slug)``.
-ROLLUP_COLUMNS: tuple[str, ...] = (
-    "year",
-    "candidate",
-    "candidate_slug",
-    "party",
-    "national_electoral_votes",
-    "president_electoral_rank",
-    "took_office",
-    "national_pv_votes",
-    "national_pv_denominator",
-)
+#: The name of the EC state dimension the build reads ``state_usps`` from. Reading a
+#: second *relation* (not a second path to the join view) is fine — the AC's "reuse the
+#: view, no second hand-rolled SQL path" is about the view, and ``state_usps`` is a
+#: clean URL/path key for ``/v1/states/{...}`` (#97) the view itself does not carry.
+STATE_DIM = "state"
 
 #: Integer-valued columns that the EC-left join returns as float64 (LEFT-JOIN NULLs make
 #: NaN). Cast to nullable ``Int64`` before hashing/writing so ``150`` never becomes
@@ -143,26 +116,6 @@ class SnapshotError(RuntimeError):
     (``docs/canonical-keys.md`` same-name residual), or a missing source view — each a
     fail-loud condition rather than a silently degraded snapshot.
     """
-
-
-@dataclass(frozen=True)
-class SnapshotMeta:
-    """The provenance row written to ``snapshot_meta`` and returned by the build.
-
-    ``snapshot_version`` is the content hash (D028); ``build_timestamp`` is
-    informational only and **excluded** from that hash, so two builds of the same
-    warehouse data share a version even though their timestamps differ.
-    """
-
-    snapshot_version: str
-    schema_version: int
-    row_count: int
-    candidate_count: int
-    year_min: int
-    year_max: int
-    source: str
-    license: str
-    build_timestamp: str
 
 
 def _mit_license() -> str:
@@ -332,24 +285,31 @@ def build_snapshot(
 ) -> SnapshotMeta:
     """Build the SQLite snapshot from an ``ec_pv_redistributable``-shaped frame.
 
-    The pure core, unit-tested offline from a synthetic frame (no DB). Steps: assert
-    redistributable-only (D030), mint the candidate slug + drop ``candidate_id`` (D006),
-    restrict to the redistributable window (:func:`_covered_years`), precompute the
-    national roll-up, content-hash the fact rows (D028), and write the three tables to
-    ``out_path`` atomically (temp file + ``os.replace``) so a partial write never leaves
-    a corrupt snapshot in place. ``build_timestamp`` is injectable for deterministic
-    tests; it is informational metadata only, never part of the version.
+    ``ec_pv_df`` is the view frame (:data:`usvote.join.EC_PV_COLUMNS`) enriched with
+    ``state_usps`` — exactly what :func:`read_redistributable` produces. The pure core,
+    unit-tested offline from a synthetic frame (no DB). Steps: assert
+    redistributable-only
+    (D030); **restrict to the redistributable window first** (:func:`_covered_years`),
+    *then* mint the candidate slug + drop ``candidate_id`` (D006) — so a slug collision
+    between candidates that never ship (e.g. two pre-1976 names) can't fail a build over
+    data the snapshot won't even contain; precompute the national roll-up; content-hash
+    the fact rows (D028); and write the three tables to ``out_path`` atomically
+    (temp file + ``os.replace``) so a partial write never leaves a corrupt snapshot.
+
+    ``build_timestamp`` is injectable for deterministic tests; it is informational
+    metadata only, never part of the version.
     """
     assert_redistributable_only(ec_pv_df)
-    slugged = add_candidate_slug(ec_pv_df)
 
-    covered = _covered_years(slugged)
+    covered = _covered_years(ec_pv_df)
     if not covered:
         raise SnapshotError(
             "no redistributable PV rows in the source view — the snapshot would be "
             "empty; build the warehouse (run_warehouse) with MIT loaded first."
         )
-    in_window = slugged[slugged["year"].isin(covered)].copy()
+    # Filter to the served window BEFORE minting/validating slugs, so slug uniqueness is
+    # only enforced over candidates that actually ship (the architect-review fix).
+    in_window = add_candidate_slug(ec_pv_df[ec_pv_df["year"].isin(covered)].copy())
 
     data_df = _to_int64(in_window, _INTEGER_COLUMNS)[list(DATA_COLUMNS)]
     data_df = data_df.sort_values(list(_ORDER_BY), kind="stable").reset_index(drop=True)
@@ -426,6 +386,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         f"CREATE TABLE {DATA_TABLE} ("
         " year INTEGER NOT NULL,"
         " state TEXT NOT NULL,"
+        " state_usps TEXT NOT NULL,"
         " candidate TEXT NOT NULL,"
         " candidate_slug TEXT NOT NULL,"
         " total_electoral_votes INTEGER,"
@@ -441,6 +402,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_year ON {DATA_TABLE}(year)")
     conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_state ON {DATA_TABLE}(state)")
+    conn.execute(f"CREATE INDEX idx_{DATA_TABLE}_usps ON {DATA_TABLE}(state_usps)")
     conn.execute(
         f"CREATE INDEX idx_{DATA_TABLE}_slug ON {DATA_TABLE}(candidate_slug)"
     )
@@ -488,13 +450,16 @@ def _relation_exists(dbc: DBC, schema: str, name: str) -> bool:
 
 
 def read_redistributable(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
-    """Read ``ec_pv_redistributable`` in full, failing loud if the view is absent.
+    """Read ``ec_pv_redistributable`` (+ ``state_usps``), failing loud if absent.
 
     Reuses the ``join.py`` view-name **constant** (no second hand-rolled SQL path to the
     view) and the shared existence probe, turning a missing view into a clear
     precondition pointing the operator at ``run_warehouse`` — not an opaque
-    ``OperationalError`` deep in the read. Local Postgres is required here, at build
-    time **only**; the served API never opens this connection (D028).
+    ``OperationalError`` deep in the read. Then left-joins ``state_usps`` from the
+    ``dwh.state`` dimension (a different relation, not a second path to the view) so the
+    snapshot carries a clean URL/path key for ``/v1/states/{...}`` (#97) that the view
+    itself does not expose. Local Postgres is required here, at build time **only**; the
+    served API never opens this connection (D028).
     """
     if not _relation_exists(dbc, schema, EC_PV_REDISTRIBUTABLE_VIEW):
         raise SnapshotError(
@@ -502,9 +467,13 @@ def read_redistributable(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
             "warehouse first (`python -m usvote all`, i.e. usvote.warehouse."
             "run_warehouse, which creates the EC<->PV join views)."
         )
-    return dbc.select_query_to_df(
+    ec_pv = dbc.select_query_to_df(
         f"SELECT * FROM {schema}.{EC_PV_REDISTRIBUTABLE_VIEW}"
     )
+    state_usps = dbc.select_query_to_df(
+        f"SELECT state, state_usps FROM {schema}.{STATE_DIM}"
+    )
+    return ec_pv.merge(state_usps, on="state", how="left")
 
 
 def build_snapshot_from_db(

@@ -49,6 +49,7 @@ rows the thesis explores: "lost the EC, won the PV").
 | column | type | notes |
 |---|---|---|
 | `year`, `state` | INTEGER, TEXT | canonical grain |
+| `state_usps` | TEXT | USPS code (`CA`), a clean path key for `/v1/states/{...}` (#97) |
 | `candidate` | TEXT | canonical display name |
 | `candidate_slug` | TEXT | **public** candidate id (see below) |
 | `total_electoral_votes` | INTEGER | the state's EV allotment |
@@ -78,6 +79,11 @@ denominator ambiguity (D017).
 `source` = MIT, `license` = CC0-1.0 (read from the `pv_source` reference data), and an
 informational `build_timestamp`. Feeds the API `meta` block and the ETag.
 
+`year_min`/`year_max` are **descriptive of the snapshot's actual content** — the
+redistributable years it contains — not a promise of completeness. A full warehouse build
+yields 1976–2024; a warehouse built over a scoped subset of years (e.g. the integration
+fixtures) yields a correspondingly narrower window, honestly reported.
+
 ## `snapshot_version` is a content hash, not a timestamp
 
 `snapshot_version` is a SHA-256 over the `ec_pv` rows in a deterministic
@@ -85,3 +91,8 @@ informational `build_timestamp`. Feeds the API `meta` block and the ETag.
 **excluded** from it. This is the single value that reconciles reproducibility ("same
 warehouse, same version") with the freshness/ETag contract ("identical data, identical
 version") the API (E8-S2) serves.
+
+Because the hash covers only the `ec_pv` data rows — **not** the derived `national_rollup`
+— a change to how the roll-up is *computed* over identical underlying data would not move
+the hash on its own. Such a change therefore **must** bump `SNAPSHOT_SCHEMA_VERSION` (which
+is folded into the hash), so cached consumers see a new version.
