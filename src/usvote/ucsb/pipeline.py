@@ -14,19 +14,18 @@ point is likewise deferred); the integration test is its caller. The asymmetry i
 principled: MIT reads a local CSV and has no network stage to snapshot, so only UCSB
 carries a snapshot command.
 
-**Two tables, one ``replace``, and a non-atomic gap.** A UCSB run loads *both* shared
-PV tables — the ``dwh.pv_votes`` fact and the ``dwh.pv_state_status`` roster — the two
+**Two tables, one ``replace``, loaded atomically.** A UCSB run loads *both* shared PV
+tables — the ``dwh.pv_votes`` fact and the ``dwh.pv_state_status`` roster — the two
 frames :func:`usvote.ucsb.transform.transform_ucsb` emits. One ``replace`` flag drives
-both loads (never two knobs). The roster loads **first**: its ``state`` FK targets
-``dwh.state`` (tautologically safe once the EC spine is loaded), and the surviving
-partial state after an interrupted run — a roster with no facts — is *obviously*
-incomplete, whereas facts-with-no-roster is indistinguishable from a valid MIT-shaped
-load. The two writes are **not** one transaction (``DBC`` commits per statement), so a
-crash between them can leave the D024 two-way invariant broken in the database, where
-no ``assert_roster_covers_facts`` runs. That is an accepted limitation of this story;
-follow-up #84 adds ``DBC.transaction()`` and wraps both loads. The likeliest symptom of
-a re-run over already-loaded data is a unique-constraint violation on the second table
-after the first committed — the intended non-destructive guard, not silent corruption.
+both loads (never two knobs), and both writes run inside a single
+:meth:`usvote.db.DBC.transaction` (#84a), so the D024 two-way roster/fact invariant can
+never be left half-written in the database: a crash rolls the pair back together. The
+roster still loads **first** — its ``state`` FK targets ``dwh.state`` (safe once the
+EC spine is loaded) — but that ordering is now a readability choice, not the
+blast-radius guard it had to be when the two writes committed separately. A re-run over
+already-loaded data still raises a unique-constraint violation (the intended
+non-destructive guard); the transaction now also rolls back the first table's write when
+the second fails, rather than leaving it committed.
 """
 
 from __future__ import annotations
@@ -91,10 +90,18 @@ def run_ucsb_pipeline(
     ec_getters = read_ec_getters(dbc, years=in_scope)
     reconciled = reconcile_ucsb(pv_votes, roster, ec_getters, years=in_scope)
 
-    # Roster first: its state FK is safe the moment the EC spine is loaded, and a
-    # roster-without-facts is obviously incomplete if the run dies between the two
-    # writes. Both loads share the single ``replace`` flag; ``close`` fires only on the
-    # last one (the pipeline, not a loader, owns the connection lifetime).
-    loaded_roster = load_pv_status(dbc, roster, replace=replace)
-    loaded_pv = load_pv_records(dbc, reconciled, replace=replace, close=close)
+    # Both writes in ONE transaction (#84a), so the D024 two-way roster/fact invariant
+    # can never be left half-written in the DB. This pipeline OWNS the transaction; the
+    # #84b orchestrator sequences pipelines and must not wrap them again
+    # (DBC.transaction() is single-level and raises on a nested open). Roster still
+    # loads first — its state FK is safe once the EC spine is loaded — but the ordering
+    # is now a readability choice, not the corruption guard it had to be when the two
+    # writes committed separately. Scrape/parse/transform/reconcile above (including the
+    # spine reads) stay OUTSIDE the transaction; ``close`` fires after the commit, since
+    # a loader closing the connection mid-block would abort it.
+    with dbc.transaction():
+        loaded_roster = load_pv_status(dbc, roster, replace=replace)
+        loaded_pv = load_pv_records(dbc, reconciled, replace=replace)
+    if close:
+        dbc.close_connection()
     return loaded_pv, loaded_roster

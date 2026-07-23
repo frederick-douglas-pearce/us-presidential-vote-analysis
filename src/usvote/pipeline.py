@@ -104,12 +104,21 @@ def run_ec_pipeline(
     candidates_df, state_df, votes_df = transform.transform_parsed_years(
         parsed_years, state_geo
     )
-    load.load_dataframes(
-        dbc,
-        state_df=state_df,
-        candidates_df=candidates_df,
-        votes_df=votes_df,
-        replace=replace,
-        close=close,
-    )
+    # Load the three star-schema tables atomically (#84a): this pipeline OWNS the
+    # transaction, so a caller above it (the #84b warehouse orchestrator) sequences
+    # pipelines without wrapping them. On the ``replace=True`` path the schema drop +
+    # rebuild is inside the transaction too, so an interrupted rebuild rolls back to the
+    # previous warehouse rather than a dropped/half-built one. ``close`` fires after the
+    # commit — a loader closing the connection mid-block would abort it. Scrape/parse/
+    # transform above stay outside the transaction (no network holds it open).
+    with dbc.transaction():
+        load.load_dataframes(
+            dbc,
+            state_df=state_df,
+            candidates_df=candidates_df,
+            votes_df=votes_df,
+            replace=replace,
+        )
+    if close:
+        dbc.close_connection()
     return candidates_df, state_df, votes_df

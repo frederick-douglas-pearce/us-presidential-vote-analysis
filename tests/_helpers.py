@@ -187,21 +187,42 @@ class RecordingCursor:
 class RecordingConnection:
     """Fake psycopg2 connection that records SQL and its own close state.
 
-    Supports the context-manager protocol (``with self.conn as conn``) the way
-    psycopg2 connections do — yielding the connection itself.
+    Supports the context-manager protocol (``with self.conn as conn``) the way psycopg2
+    connections do — yielding the connection itself and, on exit, committing on a clean
+    block or rolling back on an exception. ``commit``/``rollback`` are counted (and the
+    ``with``-exit routes through them) so a test can assert how a load transacts:
+    ``DBC.transaction`` calls them explicitly, and the per-statement ``with self.conn``
+    path in :meth:`usvote.db.DBC._execute` records one commit per statement. ``autocommit``
+    defaults to ``False`` (as a fresh psycopg2 connection does) and is readable/settable so
+    the ``transaction()`` autocommit guard can be exercised.
     """
 
     def __init__(self) -> None:
         self.executed: list[str] = []
         self.closed = False
+        self.commits = 0
+        self.rollbacks = 0
+        self.autocommit = False
 
     def cursor(self) -> RecordingCursor:
         return RecordingCursor(self.executed)
 
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+
     def __enter__(self) -> RecordingConnection:
         return self
 
-    def __exit__(self, *exc: object) -> Literal[False]:
+    def __exit__(self, exc_type: object, *rest: object) -> Literal[False]:
+        # Mirror psycopg2: a ``with connection`` block commits on clean exit, rolls back
+        # on exception. Neither closes the connection. Never suppress the exception.
+        if exc_type is None:
+            self.commits += 1
+        else:
+            self.rollbacks += 1
         return False
 
     def close(self) -> None:

@@ -18,7 +18,8 @@ Original references:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager, suppress
 from typing import Any
 
 import numpy as np
@@ -74,6 +75,11 @@ class DBC:
         connect: Callable[..., Any] = pg.connect,
     ) -> None:
         self.config = db_config
+        # Set to True only for the duration of a ``transaction()`` block, so the write
+        # chokepoints (``_execute``) know to skip their own per-statement commit and let
+        # the context manager own the single commit/rollback. Single-level by design:
+        # ``transaction()`` raises rather than nest (see its docstring).
+        self._in_txn = False
         try:
             self.conn = connect(**db_config)
         except pg.DatabaseError as e:
@@ -82,9 +88,87 @@ class DBC:
     def close_connection(self) -> None:
         self.conn.close()
 
+    @contextmanager
+    def transaction(self) -> Iterator[DBC]:
+        """Run the wrapped writes as one all-or-nothing transaction.
+
+        Every DDL/DML method funnels through :meth:`_execute`, which normally wraps each
+        statement in ``with self.conn`` so psycopg2 commits it on success (or rolls it
+        back on error) — one statement, one commit. Inside this block that per-statement
+        commit is suppressed: the writes run on a bare cursor and accumulate, and this
+        manager issues a **single** ``commit()`` on clean exit or ``rollback()`` on any
+        exception. So a multi-table load (the D024 roster + fact pair in
+        :func:`usvote.ucsb.pipeline.run_ucsb_pipeline`, the EC star-schema's three
+        tables) can never be left half-written in the database. Postgres DDL is
+        transactional, so a wrapped ``CREATE``/``DROP`` rolls back too — an interrupted
+        ``replace`` rebuild leaves the previous warehouse intact rather than
+        dropped-and-half-built.
+
+        **Ownership rule (why it is not re-entrant).** The owning *pipeline* holds the
+        transaction; a caller layered above it — the #84b warehouse orchestrator that
+        sequences ``run_ec_pipeline`` / ``run_mit_pipeline`` / ``run_ucsb_pipeline`` —
+        must **not** wrap those calls in a second transaction. A nested open is a bug
+        (it would make the outer block silently non-atomic, committing the inner half
+        early), so this raises rather than reference-count. Keep network/scrape and
+        heavy transforms *outside* the block; wrap only the DB-write phase, so a slow
+        fetch never holds a transaction (and its locks) open.
+
+        ``close`` is deliberately not handled here — a loader closing the connection
+        mid-block would abort the commit; callers close *after* the ``with`` exits.
+        """
+        if self._in_txn:
+            raise RuntimeError(
+                "DBC.transaction() is not re-entrant — a transaction is already "
+                "open. The owning pipeline holds it; callers above (e.g. the #84b "
+                "warehouse orchestrator) must sequence pipelines without nesting one."
+            )
+        # A transaction is meaningless under autocommit — psycopg2 would commit each
+        # statement independently, so the block would not be atomic. Fail loud. This is
+        # forward-looking: DBC never enables autocommit and psycopg2 defaults it off, so
+        # no current caller can trip it — it guards a future one (e.g. #84b) from wiring
+        # an autocommit connection and getting a silently non-atomic block.
+        if getattr(self.conn, "autocommit", False):
+            raise RuntimeError(
+                "DBC.transaction() requires the connection's autocommit to be off; "
+                "under autocommit each statement commits on its own and the block "
+                "would not be atomic."
+            )
+        self._in_txn = True
+        try:
+            yield self
+            self.conn.commit()
+        except BaseException:
+            # Roll back, but never let a rollback failure mask the original error: a
+            # broken connection is a plausible cause of the body exception AND makes
+            # rollback() raise, so a bare ``self.conn.rollback()`` here would replace
+            # the real traceback with an opaque InterfaceError. Suppress the rollback's
+            # own exception and re-raise the original (the bare ``raise`` re-raises it).
+            with suppress(Exception):
+                self.conn.rollback()
+            raise
+        finally:
+            self._in_txn = False
+
+    def _execute(self, run: Callable[[Any], Any]) -> None:
+        """Run ``run(cursor)`` inside or outside a transaction.
+
+        The single write chokepoint both :meth:`execute_query` and
+        :meth:`insert_df_into_table` funnel through, so :meth:`transaction` can toggle
+        the commit behavior in one place. Outside a transaction (the default) it wraps
+        the statement in ``with self.conn`` — psycopg2 commits on success, rolls back on
+        error, one statement at a time (the original behavior). Inside a
+        ``transaction()`` block it runs on a bare cursor and does **not** commit; the
+        context manager owns the one commit/rollback for the whole block.
+        """
+        if self._in_txn:
+            with self.conn.cursor() as cur:
+                run(cur)
+        else:
+            with self.conn as conn, conn.cursor() as cur:
+                run(cur)
+
     def execute_query(self, query: str, close: bool = False) -> None:
-        with self.conn as conn, conn.cursor() as curs:
-            curs.execute(query)
+        self._execute(lambda cur: cur.execute(query))
         if close:
             self.close_connection()
 
@@ -201,8 +285,11 @@ class DBC:
         if len(df) > 0:
             columns = ",".join(list(df.columns))
             insert_stmt = f"INSERT INTO {schema}.{table_name} ({columns}) VALUES %s"
-            with self.conn as conn, conn.cursor() as cur:
-                execute_values(cur, insert_stmt, _df_to_sql_rows(df), **kwargs)
+            self._execute(
+                lambda cur: execute_values(
+                    cur, insert_stmt, _df_to_sql_rows(df), **kwargs
+                )
+            )
         else:
             print("Input dataframe, df, is empty: No data was written to the database!")
         if close:

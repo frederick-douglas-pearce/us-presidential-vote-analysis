@@ -56,6 +56,20 @@ def test_pipeline_creates_pv_table_and_inserts(
     assert [sql.split()[2] for sql, _ in inserts] == [f"{PV_SCHEMA}.{PV_TABLE}"]
 
 
+def test_pipeline_loads_in_one_transaction(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every pipeline owns its DB-write transaction (#84a), so the #84b orchestrator can
+    # sequence them without nesting. MIT's load is create-schema + create-table + insert;
+    # wrapped, that is exactly ONE commit. Removing the ``with dbc.transaction():`` would
+    # make each statement commit on its own and push this above 1.
+    record_inserts(monkeypatch)
+    run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
+
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 0
+
+
 def test_pipeline_without_year_filter_loads_all_years(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
