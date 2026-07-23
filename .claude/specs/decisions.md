@@ -1367,3 +1367,169 @@ always-rebuild step and the `WarehouseResult` receipt are designed for).
   path) — done.
 - A future `views` subcommand (rebuild views without re-scraping) is a thin wrapper over
   `rebuild_views`; the dispatch is left open for it (#84 follow-up).
+
+---
+
+## D028: The E8 API serves a read-only embedded snapshot, not a live database
+
+**Date:** 2026-07-23
+**Context:** E8 (#94) exposes `ec_pv_redistributable` over HTTP. The obvious design points the
+API at the warehouse Postgres, but that makes Postgres a production runtime dependency — the one
+component that will not scale to zero (a managed instance carries a monthly floor even at zero
+traffic) and the one most likely to fail a request. The redistributable dataset is tiny and
+read-mostly (~a dozen elections × ~51 jurisdictions × the D/R nominees, refreshed on a ~4-year
+cadence + occasional corrections), so a live query engine is disproportionate to the workload.
+
+**Decision:** The API reads a **read-only embedded snapshot** materialized from
+`ec_pv_redistributable`, with **no live DB at serve time**. Postgres stays the *local* warehouse /
+source of truth. Refined per the E8 architect review (three parts):
+
+1. **The snapshot store is SQLite** (stdlib `sqlite3` driver — zero runtime deps, indexed
+   by-year/by-state/by-candidate filtering, a `meta` table for provenance), not static JSON. The CDN
+   caches API *responses*, not the store, so JSON buys no caching edge; SQLite ages better as
+   coverage widens (S8 hybrid columns, a possible pre-1976 extension).
+2. **"No live DB at serve time" is a structural import-graph invariant, not a runtime property.**
+   The snapshot *build* reads Postgres, so it lives in a new top-level `usvote/snapshot.py` (an
+   EC-domain consumer of `ec_pv_redistributable`, in the `spine.py`/`join.py`/`warehouse.py` family,
+   composition-root-exempt from D015 per D027) — **not** inside `usvote/api/`. `usvote/api/` imports
+   only the snapshot artifact + a thin `SnapshotRepository`, and a unit test asserts nothing under
+   `usvote/api/` imports `usvote.db` or psycopg2 — mirroring the project's existing greppable layering
+   guards (`dwh.votes` not named under `pv/`; `usvote.warehouse` not imported under the sources).
+3. **The snapshot version is a content hash, not a build timestamp.** `snapshot_version` = a hash of
+   the data rows extracted with a deterministic `ORDER BY (year, state, candidate)` (+ a schema
+   version); the build timestamp is informational metadata only, excluded from the version and the
+   ETag. A timestamp would break both the byte-reproducibility AC and cache correctness (identical
+   data must yield an identical ETag).
+
+**Rationale:**
+- Cost/reliability/ease all point the same way: a scale-to-zero container serving an immutable
+  SQLite file has no DB to provision, connection to drop, or floor to pay, and runs standalone in
+  local dev with Postgres stopped.
+- Making the DB-free property *structural* means a future change can't quietly reintroduce a live
+  query path without failing a test — the same discipline the rest of the package already relies on.
+- A content-derived version is the single value that reconciles reproducibility with the freshness
+  contract (D-below) and lets a second consumer cache honestly.
+
+**Related:** **#94/#95/#96** (E8 epic + the snapshot-build and app-skeleton stories); **D026**
+(`ec_pv_redistributable`, the view the snapshot reads); **D027** (composition-root exemption reused by
+`usvote/snapshot.py`); **D017** (redistributable surface); **[[nan-none-db-boundary]]**-style single
+write chokepoint, applied here to the single *read/materialize* chokepoint.
+
+**Action required:**
+- Add `usvote/snapshot.py` (materialize `ec_pv_redistributable` → SQLite; content-hash version;
+  national roll-up table; drop `candidate_id`, mint the public slug — see D-slug below) and its build
+  entry point.
+- Add the `usvote/api/`-imports-no-DB guard test.
+
+---
+
+## D029: E8's API MVP is decoupled from E7 — it depends only on E6's join view
+
+**Date:** 2026-07-23
+**Context:** The ROADMAP's original critical path read `E7 (hybrid) + E9 (mart) → E8 (API)`. But E6
+landed `ec_pv_redistributable`, and the API MVP (redistributable EC+PV at the canonical grain) needs
+nothing from the hybrid computation to be useful and to power our app.
+
+**Decision:** The **E8 API MVP depends only on E6** (`ec_pv_redistributable`), not on E7 or E9. Hybrid
+/ flip / margin fields are added to the API as a **later story (E8-S8, #102), gated on E7** — arriving
+as new *optional* response fields under the same `/v1` (additive, non-breaking) and flowing through
+the same snapshot materialization seam (no second extract path). The ROADMAP critical-path note is
+updated to match; E9 (mart) may later become an additional read source behind the same
+`SnapshotRepository` seam but is not an MVP dependency.
+
+**Rationale:**
+- Shipping the foundation now (a robust, public-graduation-ready surface over data that already
+  exists) beats waiting on hybrid work for a first release, and matches the "running quickly on a
+  robust foundation" goal.
+- Because hybrid is only defined on the redistributable window, S8 stays automatically D030-consistent
+  and additive — so decoupling costs no rework, it only reorders.
+
+**Related:** **#94/#102** (epic + the E7-gated hybrid story); **D011** (hybrid computation, E7);
+**D026** (the E6 view); ROADMAP "First-cut epic outline" critical path (edited alongside this entry).
+
+**Action required:** Edit `docs/ROADMAP.md` so the critical path reflects E6 → E8 (MVP) directly,
+with E7 + E9 → the explorer and E8's later hybrid fields — done alongside this entry.
+
+---
+
+## D030: The API surface is redistributable-only from day one
+
+**Date:** 2026-07-23
+**Context:** E8 will eventually graduate to a public/third-party API (D002), gated on PV licensing
+(D008/D014). UCSB PV is `redistributable=false`; MIT is the redistributable modern core (D016). The
+question was whether the *internal* MVP could serve everything and filter later, or exclude
+non-redistributable rows from the start.
+
+**Decision:** The API serves **only redistributable rows from the first release** — it reads
+`ec_pv_redistributable`, which wraps `pv_redistributable`, defined *independently* as
+`WHERE redistributable` (D017). No preference-resolution or later feature change can leak a UCSB row
+onto the API surface. Defense-in-depth: the redistributable-only guarantee is re-asserted at the
+snapshot source (E8-S1), the endpoints (E8-S3), and a regression test (E8-S5).
+
+**Rationale:**
+- Building the internal MVP on exactly the surface the public API will use means **zero rework at
+  graduation** — the licensing boundary is structural (an invalid state is unrepresentable), not a
+  filter someone must remember to apply.
+- The CC0/UCSB stakes justify the triple guard as proportionate, not gold-plating.
+
+**Related:** **#94** (epic); **D002** (public-API deliverable + gate); **D008/D014** (PV licensing);
+**D016** (EC + MIT = redistributable core, UCSB = analysis-only); **D017** (`pv_redistributable`
+defined independently as `WHERE redistributable`); **[[inner-join-silent-drop]]** (why the guard is
+tested, not assumed).
+
+---
+
+## D031: The API is FastAPI/REST with `/v1` and OpenAPI-as-a-deliverable, not GraphQL
+
+**Date:** 2026-07-23
+**Context:** The stack choice was FastAPI/REST vs. GraphQL (both viable in Python). The dataset is
+small and tabular with a few obvious query patterns (by year / state / candidate + a national
+summary), and a near-term goal is advertising the API to the MIT Election Lab.
+
+**Decision:** **FastAPI (REST)**, versioned `/v1` from day one, with the **auto-generated
+OpenAPI/Swagger docs treated as a first-class deliverable** (its own story, E8-S4) — the
+self-documenting surface *is* half the pitch to external consumers. No pagination for the MVP (every
+endpoint is already scoped by year/state/candidate; the whole corpus is low-thousands of rows), but
+`meta.count` is retained and a server-side cap prevents any unbounded path, so pagination stays an
+additive change. Freshness contract: a **content-hash ETag** (per D028) plus
+`Cache-Control: public, max-age=3600, stale-while-revalidate=...`, emitted from the app locally so the
+CDN step (E8-S7) is config, not code. CORS via a `USVOTE_API_CORS_ORIGINS` env allow-list (localhost
+default, never a silent `*`).
+
+**Rationale:**
+- GraphQL's flexibility buys little for a handful of fixed query shapes and costs a learning curve,
+  harder CDN caching (POST queries don't cache as cleanly as REST GETs), and more surface area.
+- REST GETs + OpenAPI are the more discoverable, cacheable, standard choice for a public reference-data
+  API; a GraphQL layer can be added later if a real consumer demands it.
+- `/v1` and cache headers on day one are near-free hedges that make the public/Cloud-Run graduation a
+  config step rather than a rewrite.
+
+**Related:** **#94/#96/#97/#98** (epic + skeleton/endpoints/docs stories); **D002** (public-API
+graduation the OpenAPI asset serves).
+
+---
+
+## D032: The API ships as a cloud-agnostic container with the snapshot baked in; Cloud Run is the post-MVP target
+
+**Date:** 2026-07-23
+**Context:** Hosting was Open Question #3 (undecided infra). Priorities: cost > reliability > ease,
+with initial traffic tiny (our own dashboard) and a likely later pivot to a cloud provider once the
+API is advertised. Candidates considered: Cloud Run, Fly.io, Render/Railway, Vercel.
+
+**Decision:** The MVP **runs locally** and ships as a **cloud-agnostic container** (no
+provider-specific coupling), with the **snapshot baked into the image** (snapshot-version ==
+image-version, so no runtime mount and no artifact/code version skew). The **eventual cloud target is
+Google Cloud Run** — scale-to-zero, pay-per-request, portable container, generous free tier — but the
+actual deploy (+ CDN, custom domain, auth/rate-limiting posture) is a **later/stretch story
+(E8-S7, #101)**, not an MVP commitment. Vercel is rejected as a Python-second-class frontend platform;
+Fly.io/Render remain fallbacks if Cloud Run's cost profile changes.
+
+**Rationale:**
+- A baked-in immutable snapshot on a scale-to-zero container is the cheapest and most reliable option
+  at our volume, and the refresh path (rebuild-and-redeploy) is fine precisely because data changes
+  every ~4 years.
+- Keeping the container provider-agnostic means the hosting decision can be deferred/changed without
+  touching application code — cost is the top priority and the market moves.
+
+**Related:** **#94/#100/#101** (epic + Dockerfile + Cloud-Run-deploy stories); **D028** (the baked-in
+snapshot); ROADMAP Open Question #3 (this decision resolves the API-hosting half).

@@ -162,13 +162,15 @@ E5–E9 are named for a later backlog round.
 | **E5** | MIT PV ingestion | load clean MIT 1976–2024 CSV; API-eligible modern core (covers 2000/2016 splits); `source=MIT` | M2 (named) |
 | **E6** | Canonical key + cross-source join | shared candidate/state spine; conform MIT + UCSB onto EC as source of truth | M2 (named) |
 | **E7** | Hybrid computation | EC/PV average; flip detection; three-method margin comparison | M3 (named) |
-| **E8** | Internal API | expose joined dataset; MVP bar = powers our app; exclude non-redistributable rows | M3 (named) |
+| **E8** | Internal API | FastAPI/REST over `ec_pv_redistributable` via a read-only embedded snapshot (no live DB); redistributable-only; MVP bar = powers our app; **depends only on E6, not E7** (D028–D032) | M3 (scoped + filed, #94) |
 | **E9** | Analytical explorer data mart | query surface for flips/margins/maps/narrative | M3 (named) |
 
 **Critical path:** E1 → E2 (backbone) with E3 running in parallel. PV is dual-source
 (D014): **E4 (UCSB historical, un-deferred, high-priority)** and E5 (MIT modern) feed E6
-(canonical join); then E7 + E9 → E8 (the explorer + API). PV ingestion and the `src/`
-backbone precede the explorer and API by design.
+(canonical join). **E6 then unblocks the E8 API MVP directly** — the API serves
+`ec_pv_redistributable` and does **not** wait on E7 (D029). E7 + E9 → the explorer, and
+E7 later feeds E8's hybrid/flip/margin fields (E8-S8, gated on E7). PV ingestion and the
+`src/` backbone precede the explorer and API by design.
 
 ---
 
