@@ -86,11 +86,12 @@ def _resolve_ucsb_dir(
     """
     if args.no_ucsb:
         return None
-    if args.require_ucsb:
-        return ucsb_html_dir_from_env(environ)
     try:
         return ucsb_html_dir_from_env(environ)
     except config.ConfigError:
+        # Absent snapshot: a hard failure only under --require-ucsb; otherwise skip.
+        if args.require_ucsb:
+            raise
         return None
 
 
@@ -123,14 +124,23 @@ def _run_all(args: argparse.Namespace) -> int:
         return 2
 
     if ucsb_html_dir is None:
-        # D024/D016: a build missing UCSB is never silent. UCSB is the analysis-only
-        # consistency control; a hybrid/analysis run over a warehouse that quietly lacks
-        # it would produce subtly wrong numbers with no signal.
+        # D024/D016: a build missing UCSB is never silent — loud either way. UCSB is the
+        # analysis-only consistency control; a hybrid/analysis run over a warehouse that
+        # quietly lacks it would produce subtly wrong numbers with no signal. The remedy
+        # differs by cause: --no-ucsb is a deliberate choice (nothing to fix), whereas
+        # an auto-skip means the snapshot was simply not found (point to the fix).
+        remedy = (
+            "This was requested with --no-ucsb."
+            if args.no_ucsb
+            else (
+                "Pass --require-ucsb to demand the full set, or set "
+                "USVOTE_UCSB_HTML_DIR to the snapshot directory to include it."
+            )
+        )
         print(
             "NOTICE: building WITHOUT UCSB — the warehouse will hold only the "
             "redistributable EC + MIT core, and any hybrid analysis will lack the UCSB "
-            "consistency control. Pass --require-ucsb to demand the full set, or set "
-            "USVOTE_UCSB_HTML_DIR to the snapshot directory.",
+            f"consistency control. {remedy}",
             file=sys.stderr,
         )
 
@@ -206,14 +216,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    # argparse leaves ``replace`` set by the top-level parser (default False) unless a
-    # subcommand overrode it; ``command`` is None for the bare invocation -> EC.
-    replace = getattr(args, "replace", False)
 
     if args.command == "all":
         return _run_all(args)
-    # Bare (``command is None``) and explicit ``ec`` both run the EC pipeline.
-    return _run_ec(replace)
+    # Bare (``command is None``) and explicit ``ec`` both run the EC pipeline. argparse
+    # leaves ``replace`` set by the top-level parser (default False) unless the ``ec``
+    # subcommand overrode it.
+    return _run_ec(getattr(args, "replace", False))
 
 
 if __name__ == "__main__":

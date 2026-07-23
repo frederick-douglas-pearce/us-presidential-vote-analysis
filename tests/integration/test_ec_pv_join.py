@@ -295,9 +295,11 @@ def test_join_over_a_real_two_source_load(
     The only check that resolves the join over genuinely reconciled two-source data, and
     it drives the **shipped** whole-warehouse path (:func:`usvote.warehouse.run_warehouse`,
     #84b) rather than a hand-wired stage sequence — so the tested path is the shipped path.
-    ``run_warehouse`` threads one ``years`` to every source; the fusion sample only carries
-    2016, so MIT loads its 2016 New York rows exactly as the old ``years={2016}`` wiring
-    did. Doubly gated so CI never touches the UCSB snapshot (D022).
+    ``run_warehouse`` threads one ``years={2016, 2020}`` to every source. The fusion
+    sample carries 2000 + 2016 rows, but MIT's ``year.isin(years)`` filter drops 2000 and
+    the sample has no 2020, so MIT still loads exactly its 2016 New York rows — the same
+    result as the old ``years={2016}`` wiring, now via the shared warehouse scope. Doubly
+    gated so CI never touches the UCSB snapshot (D022).
     """
     from usvote.scrape import fetch_from_dir
     from usvote.warehouse import SOURCE_EC as WH_EC

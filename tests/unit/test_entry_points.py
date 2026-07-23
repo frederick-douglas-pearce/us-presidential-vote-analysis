@@ -98,7 +98,9 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
 
 
 def test_all_no_ucsb_skips_without_probing_env(
-    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     # ``--no-ucsb`` must skip even if a snapshot exists, and must not consult the env.
     def boom(*a: Any, **k: Any) -> str:
@@ -107,6 +109,12 @@ def test_all_no_ucsb_skips_without_probing_env(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", boom)
     assert top.main(["all", "--no-ucsb"]) == 0
     assert top_env["warehouse"] == [{"ucsb_html_dir": None, "replace": False}]
+    # Still loud (D024), but the remedy acknowledges the deliberate choice rather than
+    # suggesting --require-ucsb / USVOTE_UCSB_HTML_DIR as if UCSB were missing by accident.
+    err = capsys.readouterr().err
+    assert "WITHOUT UCSB" in err
+    assert "--no-ucsb" in err
+    assert "--require-ucsb" not in err
 
 
 def test_all_require_ucsb_fails_when_snapshot_absent(

@@ -152,47 +152,56 @@ def run_warehouse(
     forwarded to :func:`~usvote.pipeline.run_ec_pipeline` untouched (defaults are live
     HTTP + the real shapefile); they let the integration test drive *this* shipped path
     over saved fixtures instead of a hand-wired parallel copy. ``close`` closes ``dbc``
-    after the views are built — the orchestrator owns the connection across the whole
-    build, so the individual pipelines are called with their default ``close=False``.
+    when the build finishes — on success *after* the views are built, and also if a
+    pipeline raises mid-build (in a ``finally``), so a caller passing ``close=True``
+    never leaks the connection on a partial build. The orchestrator owns the connection
+    across the whole build, so the individual pipelines are called with their default
+    ``close=False``.
 
     Opens no transaction itself; see the module docstring for the per-source-atomic
     model and why a failed build is recovered with ``replace=True``, not a bare re-run.
     """
-    candidates_df, state_df, votes_df = run_ec_pipeline(
-        dbc,
-        shapefile_path,
-        replace=replace,
-        years=years,
-        fetch=fetch,
-        load_geo=load_geo,
-    )
-    ec_rows = len(votes_df)
-
-    mit_loaded = run_mit_pipeline(
-        dbc, mit_csv_path, years=years, environ=environ, replace=False
-    )
-    mit_rows = len(mit_loaded)
-
-    sources = {SOURCE_EC, SOURCE_MIT}
-    ucsb_pv_rows: int | None = None
-    ucsb_roster_rows: int | None = None
-    if ucsb_html_dir is not None:
-        pv_votes, roster = run_ucsb_pipeline(
-            dbc, ucsb_html_dir, years=years, environ=environ, replace=False
+    try:
+        candidates_df, state_df, votes_df = run_ec_pipeline(
+            dbc,
+            shapefile_path,
+            replace=replace,
+            years=years,
+            fetch=fetch,
+            load_geo=load_geo,
         )
-        ucsb_pv_rows = len(pv_votes)
-        ucsb_roster_rows = len(roster)
-        sources.add(SOURCE_UCSB)
+        ec_rows = len(votes_df)
 
-    rebuild_views(dbc)
-    if close:
-        dbc.close_connection()
+        mit_loaded = run_mit_pipeline(
+            dbc, mit_csv_path, years=years, environ=environ, replace=False
+        )
+        mit_rows = len(mit_loaded)
 
-    return WarehouseResult(
-        ec_rows=ec_rows,
-        mit_rows=mit_rows,
-        ucsb_pv_rows=ucsb_pv_rows,
-        ucsb_roster_rows=ucsb_roster_rows,
-        sources_loaded=frozenset(sources),
-        views_built=True,
-    )
+        sources = {SOURCE_EC, SOURCE_MIT}
+        ucsb_pv_rows: int | None = None
+        ucsb_roster_rows: int | None = None
+        if ucsb_html_dir is not None:
+            pv_votes, roster = run_ucsb_pipeline(
+                dbc, ucsb_html_dir, years=years, environ=environ, replace=False
+            )
+            ucsb_pv_rows = len(pv_votes)
+            ucsb_roster_rows = len(roster)
+            sources.add(SOURCE_UCSB)
+
+        rebuild_views(dbc)
+
+        return WarehouseResult(
+            ec_rows=ec_rows,
+            mit_rows=mit_rows,
+            ucsb_pv_rows=ucsb_pv_rows,
+            ucsb_roster_rows=ucsb_roster_rows,
+            sources_loaded=frozenset(sources),
+            views_built=True,
+        )
+    finally:
+        # Close on either exit — success after the views, or a mid-build failure — so a
+        # ``close=True`` caller never leaks the connection on a partial build. Each
+        # source's commit/rollback is already owned by that pipeline's transaction
+        # (#84a); closing here only releases the connection, not affecting atomicity.
+        if close:
+            dbc.close_connection()
