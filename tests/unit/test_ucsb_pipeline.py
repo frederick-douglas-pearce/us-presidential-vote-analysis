@@ -124,6 +124,23 @@ def test_pipeline_loads_roster_before_facts(
     ]
 
 
+def test_pipeline_loads_both_tables_in_one_transaction(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The #84a headline guard: the roster + fact writes are ONE transaction, so the D024
+    # two-way invariant can never be left half-written. The recording connection commits
+    # once per ``with self.conn`` block (per statement) and once per explicit
+    # ``transaction()`` commit, so a wrapped load is exactly ONE commit; drop the
+    # ``with dbc.transaction():`` and the create/insert statements would each commit,
+    # pushing this well above 1. That is the regression this test exists to catch.
+    SeamSpy(monkeypatch)
+    record_inserts(monkeypatch)
+    run_ucsb_pipeline(make_dbc(recording_conn), years={2016})
+
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 0
+
+
 def test_pipeline_returns_facts_then_roster(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

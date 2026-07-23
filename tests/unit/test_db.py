@@ -235,3 +235,134 @@ def test_select_query_to_df_delegates_to_read_sql(
     assert result is sentinel
     assert seen["query"] == "SELECT n FROM t"
     assert seen["conn"] is recording_conn
+
+
+# --- transaction() (#84a) --------------------------------------------------
+
+
+def test_statements_commit_per_statement_outside_a_transaction(
+    recording_conn: RecordingConnection,
+) -> None:
+    # Baseline the transaction tests contrast against: with no open transaction each
+    # statement commits on its own (psycopg2's ``with self.conn`` semantics), so three
+    # statements are three commits. The refactor must preserve this.
+    dbc = make_dbc(recording_conn)
+    dbc.execute_query("INSERT 1")
+    dbc.execute_query("INSERT 2")
+    dbc.execute_query("INSERT 3")
+    assert recording_conn.commits == 3
+    assert recording_conn.rollbacks == 0
+
+
+def test_transaction_commits_once_spanning_every_statement(
+    recording_conn: RecordingConnection,
+) -> None:
+    # The core guarantee: N statements inside the block yield exactly ONE commit (not N),
+    # so the writes land all-or-nothing. This is what makes the UCSB roster+fact pair
+    # atomic.
+    dbc = make_dbc(recording_conn)
+    with dbc.transaction():
+        dbc.execute_query("INSERT roster")
+        dbc.execute_query("INSERT facts")
+    assert recording_conn.executed == ["INSERT roster", "INSERT facts"]
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 0
+    assert dbc._in_txn is False  # flag cleared on the way out
+
+
+def test_transaction_rolls_back_and_re_raises_on_exception(
+    recording_conn: RecordingConnection,
+) -> None:
+    # An exception mid-block rolls the whole thing back (one rollback, zero commits) and
+    # propagates — the first statement's write does not survive the second's failure.
+    dbc = make_dbc(recording_conn)
+    with pytest.raises(ValueError, match="boom"), dbc.transaction():
+        dbc.execute_query("INSERT roster")
+        raise ValueError("boom")
+    assert recording_conn.executed == ["INSERT roster"]
+    assert recording_conn.commits == 0
+    assert recording_conn.rollbacks == 1
+    assert dbc._in_txn is False
+
+
+def test_insert_df_participates_in_the_open_transaction(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # insert_df_into_table routes through the same chokepoint as execute_query, so it too
+    # is suppressed inside a transaction: two inserts, one commit.
+    monkeypatch.setattr(db_module, "execute_values", lambda *_, **__: None)
+    dbc = make_dbc(recording_conn)
+    df = pd.DataFrame({"a": [1]})
+    with dbc.transaction():
+        dbc.insert_df_into_table("dwh", "pv_state_status", df)
+        dbc.insert_df_into_table("dwh", "pv_votes", df)
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 0
+
+
+def test_transaction_is_not_re_entrant(
+    recording_conn: RecordingConnection,
+) -> None:
+    # Single-level by design: a nested open is a bug (it would commit the inner half
+    # early and make the outer block non-atomic), so it raises. The RuntimeError
+    # propagating through the outer block rolls the outer transaction back.
+    dbc = make_dbc(recording_conn)
+    with (
+        pytest.raises(RuntimeError, match="not re-entrant"),
+        dbc.transaction(),
+        dbc.transaction(),
+    ):
+        pass
+    assert recording_conn.commits == 0
+    assert recording_conn.rollbacks == 1
+    assert dbc._in_txn is False
+
+
+def test_transaction_rollback_failure_does_not_mask_the_original_error(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # If rollback() itself fails — a broken connection is a plausible cause of BOTH the
+    # body error and the rollback failure — the original exception must still propagate,
+    # not the rollback's. Otherwise the traceback blames rollback and hides the root
+    # cause.
+    def boom_rollback() -> None:
+        raise RuntimeError("connection is broken")
+
+    monkeypatch.setattr(recording_conn, "rollback", boom_rollback)
+    dbc = make_dbc(recording_conn)
+    with pytest.raises(ValueError, match="original"), dbc.transaction():
+        raise ValueError("original")
+    assert dbc._in_txn is False  # flag still cleared despite the rollback failure
+
+
+def test_transaction_requires_autocommit_off(
+    recording_conn: RecordingConnection,
+) -> None:
+    # A transaction is meaningless under autocommit (each statement commits on its own),
+    # so the block refuses to run rather than give a false atomicity guarantee. It fails
+    # before opening anything: no commit, no rollback, flag untouched.
+    recording_conn.autocommit = True
+    dbc = make_dbc(recording_conn)
+    with pytest.raises(RuntimeError, match="autocommit"), dbc.transaction():
+        dbc.execute_query("INSERT roster")
+    assert recording_conn.executed == []
+    assert recording_conn.commits == 0
+    assert recording_conn.rollbacks == 0
+    assert dbc._in_txn is False
+
+
+def test_transaction_flag_resets_so_the_dbc_is_reusable_after_a_failure(
+    recording_conn: RecordingConnection,
+) -> None:
+    # The ``finally`` clears ``_in_txn`` even when the block raised, so a later
+    # transaction on the same DBC is not wedged shut.
+    dbc = make_dbc(recording_conn)
+    with pytest.raises(ValueError), dbc.transaction():
+        raise ValueError("first")
+    assert dbc._in_txn is False
+
+    with dbc.transaction():
+        dbc.execute_query("SELECT 1")
+    assert recording_conn.executed == ["SELECT 1"]
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 1  # the first block's rollback

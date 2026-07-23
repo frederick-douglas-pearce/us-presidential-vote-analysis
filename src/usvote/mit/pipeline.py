@@ -69,4 +69,12 @@ def run_mit_pipeline(
 
     shaped = transform_mit(raw)
     reconciled = reconcile_mit(shaped)
-    return load_pv_records(dbc, reconciled, replace=replace, close=close)
+    # One write, but wrapped for the uniform ownership rule (#84a): every pipeline owns
+    # its DB-write transaction so the #84b orchestrator can sequence them without ever
+    # nesting one. The load still does create-schema + create-table + insert, so the
+    # transaction also makes those three all-or-nothing. ``close`` after the commit.
+    with dbc.transaction():
+        loaded = load_pv_records(dbc, reconciled, replace=replace)
+    if close:
+        dbc.close_connection()
+    return loaded

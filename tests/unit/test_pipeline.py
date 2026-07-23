@@ -108,6 +108,29 @@ def test_run_ec_pipeline_wires_all_stages_offline(
     ]
 
 
+def test_run_ec_pipeline_loads_the_star_schema_in_one_transaction(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The three-table star-schema load is atomic (#84a): drop/create-schema, three
+    # create-tables and three inserts all land in ONE transaction, so an interrupted
+    # ``replace`` rebuild rolls back to the previous warehouse rather than a
+    # dropped/half-built one. The recording connection commits once per statement's
+    # ``with self.conn`` block and once per explicit ``transaction()`` commit, so a
+    # wrapped load is exactly ONE commit; removing the wrapper would push it well above 1.
+    record_inserts(monkeypatch)
+    run_ec_pipeline(
+        make_dbc(recording_conn),
+        "unused.shp",
+        replace=True,
+        years={2016, 2020},
+        fetch=fetch_from_dir(FIXTURES_DIR),
+        load_geo=lambda _p: fake_state_geo(),
+    )
+
+    assert recording_conn.commits == 1
+    assert recording_conn.rollbacks == 0
+
+
 def test_run_ec_pipeline_pre1892_spine_offline(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

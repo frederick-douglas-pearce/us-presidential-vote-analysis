@@ -12,10 +12,10 @@ writes the D024 ``dwh.pv_state_status`` roster (the second frame a source's tran
 emits). Both are source-neutral — UCSB (#37) is the first caller of the roster loader,
 but E6's MIT roster backfill is the second, so neither can live under a source
 subpackage. A source that loads both (UCSB) applies **one** ``replace`` flag to both
-calls; the two writes are not one transaction (``DBC`` commits per statement), so a
-failure between them can leave the roster/fact pair inconsistent in the DB — see
-:func:`usvote.ucsb.pipeline.run_ucsb_pipeline` for the load order that minimizes the
-blast radius and follow-up #84, which would make it atomic.
+calls. These loaders do not open a transaction themselves — atomicity is the *caller's*
+to own: :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` wraps both writes in a single
+:meth:`usvote.db.DBC.transaction` (#84a), so the roster/fact pair is written
+all-or-nothing and the D024 two-way invariant can never be left half-written in the DB.
 
 The union story (#68, D017) adds three more seams here, over the *already-loaded*
 per-source facts rather than writing a new one: :func:`load_pv_source` seeds the small
