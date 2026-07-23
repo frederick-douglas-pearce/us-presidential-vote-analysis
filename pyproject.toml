@@ -28,6 +28,13 @@ dependencies = [
     "geopandas>=1.0",
     "psycopg2-binary>=2.9",
     "matplotlib>=3.8",
+    # E8 internal API (usvote/api/): serves the read-only snapshot over HTTP with no
+    # live DB (D028/D031). fastapi is the app; uvicorn is the ASGI server (D032). These
+    # ride in the base dependencies, not an extra: the heavy stack (pandas/geopandas/
+    # psycopg2) is already mandatory, so an `api` extra would buy no install-size lever
+    # while forcing `--extra api` onto every CI gate that lints/types/tests usvote/api/.
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
 ]
 
 [project.urls]

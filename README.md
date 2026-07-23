@@ -50,6 +50,18 @@ $ python -m usvote all --no-ucsb    # EC + MIT only (the redistributable public 
 
   `all` also needs `USVOTE_MIT_CSV_PATH` (and, for UCSB, `USVOTE_UCSB_HTML_DIR`); it prints a loud notice and builds without UCSB when that snapshot is absent (pass `--require-ucsb` to fail instead). A single popular-vote source can also be loaded on its own with `python -m usvote.mit load` or `python -m usvote.ucsb load` (both require the EC spine already loaded); `python -m usvote.ucsb` (bare) still *snapshots* the raw UCSB pages.
 
+### The internal API (E8)
+
+The `usvote/api/` subpackage serves the redistributable EC+PV data over HTTP from a **read-only SQLite snapshot** — with **no live database at serve time** ([D028](.claude/specs/decisions.md); the app never imports `usvote.db`/psycopg2, enforced by a test). Postgres is the local source of truth, read only when the snapshot is *built*. Two steps:
+
+```
+$ export USVOTE_API_SNAPSHOT_PATH=/path/to/snapshot.sqlite
+$ python -m usvote.snapshot     # build the snapshot from dwh.ec_pv_redistributable (needs the warehouse)
+$ python -m usvote.api          # serve it locally (no DB needed); or `python -m usvote.api serve --port 8000`
+```
+
+For production/container use, point an ASGI server straight at the app factory: `uvicorn --factory usvote.api:create_app`. The server starts and answers requests with Postgres **stopped** — that is the point. `GET /health` reports the loaded snapshot's version and coverage; the data endpoints live under the versioned `/v1` prefix ([`GET /v1/meta`](docs/api-snapshot.md) is the provenance block; the by-year/state/candidate reads land in E8-S3). CORS defaults to localhost and is overridden with `USVOTE_API_CORS_ORIGINS`.
+
   Alternatively, open the original notebook in JupyterLab to run or explore step 1 interactively:
 
 ```
@@ -84,6 +96,8 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `USVOTE_SHAPEFILE_PATH` | path to the unzipped TIGER2019 STATE shapefile (`.shp`) | *(required)* |
 | `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
 | `USVOTE_UCSB_HTML_DIR` | path to the local UCSB raw-HTML snapshot directory | *(required for the UCSB popular-vote scrape)* |
+| `USVOTE_API_SNAPSHOT_PATH` | path to the read-only SQLite API snapshot — written by `python -m usvote.snapshot`, read by `python -m usvote.api` | *(required for the snapshot build and the API)* |
+| `USVOTE_API_CORS_ORIGINS` | comma-separated CORS allow-list for the API | *(unset &rarr; localhost dev origins; never a silent `*`)* |
 
 Database settings use the standard libpq `PG*` names, so the same values are shared
 with `psql`, `pg_dump`, and other Postgres tools. The TIGER2019 STATE shapefile is a
