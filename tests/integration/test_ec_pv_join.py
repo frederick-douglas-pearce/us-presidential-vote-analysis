@@ -292,29 +292,37 @@ def test_join_over_a_real_two_source_load(
 ) -> None:
     """End-to-end: real MIT + real UCSB for 2016+2020, then the D026 join views.
 
-    The only check that resolves the join over genuinely reconciled two-source data.
-    Doubly gated so CI never touches the UCSB snapshot (D022).
+    The only check that resolves the join over genuinely reconciled two-source data, and
+    it drives the **shipped** whole-warehouse path (:func:`usvote.warehouse.run_warehouse`,
+    #84b) rather than a hand-wired stage sequence — so the tested path is the shipped path.
+    ``run_warehouse`` threads one ``years={2016, 2020}`` to every source. The fusion
+    sample carries 2000 + 2016 rows, but MIT's ``year.isin(years)`` filter drops 2000 and
+    the sample has no 2020, so MIT still loads exactly its 2016 New York rows — the same
+    result as the old ``years={2016}`` wiring, now via the shared warehouse scope. Doubly
+    gated so CI never touches the UCSB snapshot (D022).
     """
-    from usvote.mit.pipeline import run_mit_pipeline
-    from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir
-    from usvote.ucsb.pipeline import run_ucsb_pipeline
+    from usvote.warehouse import SOURCE_EC as WH_EC
+    from usvote.warehouse import SOURCE_MIT as WH_MIT
+    from usvote.warehouse import SOURCE_UCSB as WH_UCSB
+    from usvote.warehouse import run_warehouse
 
     years = {2016, 2020}
     dbc = DBC(integration_db_config)
     try:
-        run_ec_pipeline(
+        result = run_warehouse(
             dbc,
             "unused.shp",
-            replace=True,
+            MIT_FUSION_SAMPLE_CSV,
+            ucsb_html_dir=_CORPUS,
             years=years,
+            replace=True,
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),
         )
-        run_mit_pipeline(dbc, path=MIT_FUSION_SAMPLE_CSV, years={2016}, replace=False)
-        run_ucsb_pipeline(dbc, _CORPUS, years=years, replace=False)
-        build_pv_union(dbc)
-        create_ec_pv_views(dbc)  # its reciprocal anti-join precondition runs here
+        # The build receipt: all three sources loaded, join views (re)built.
+        assert result.sources_loaded == frozenset({WH_EC, WH_MIT, WH_UCSB})
+        assert result.views_built is True
 
         # No fan-out over real reconciled data (the raw-union double-count guard, live).
         for view in (EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW):
@@ -363,6 +371,60 @@ def test_join_over_a_real_two_source_load(
         # Vacuity floor: 2016+2020 have ~100+ EC-winner state rows; a guard that inspected
         # near-zero would pass vacuously (mirrors this file's ``assert not both.empty``).
         assert inspected >= 50, f"winner-has-PV inspected only {inspected} rows (vacuous?)"
+    finally:
+        dbc.delete_schema(SCHEMA, option="Cascade")
+        dbc.close_connection()
+
+
+@pytest.mark.integration
+def test_warehouse_builds_the_redistributable_core_end_to_end(
+    integration_db_config: dict[str, Any],
+) -> None:
+    """Drive ``run_warehouse`` over EC fixtures + the MIT fusion sample, no UCSB.
+
+    The **ungated** end-to-end check of the shipped whole-warehouse path (#84b): it
+    exercises ``run_warehouse``'s real sequencing — EC spine, MIT PV, the D024 explicit
+    UCSB skip (``ucsb_html_dir=None``), then the always-rebuilt join views — against a
+    live DB with no UCSB corpus. This is what proves the ``replace=True`` schema rebuild
+    still leaves the EC<->PV views in place (the #84b blocking fix): without the final
+    ``rebuild_views`` step the ``DROP SCHEMA ... CASCADE`` would leave no
+    ``ec_pv_preferred`` to query.
+    """
+    from usvote.scrape import fetch_from_dir
+    from usvote.warehouse import SOURCE_EC as WH_EC
+    from usvote.warehouse import SOURCE_MIT as WH_MIT
+    from usvote.warehouse import run_warehouse
+
+    dbc = DBC(integration_db_config)
+    try:
+        result = run_warehouse(
+            dbc,
+            "unused.shp",
+            MIT_FUSION_SAMPLE_CSV,
+            ucsb_html_dir=None,  # explicit skip — the redistributable EC + MIT core only
+            years={2016, 2020},
+            replace=True,
+            fetch=fetch_from_dir(FIXTURES_DIR),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+        # Receipt: only EC + MIT loaded, UCSB counts None, views built.
+        assert result.sources_loaded == frozenset({WH_EC, WH_MIT})
+        assert result.ucsb_pv_rows is None and result.ucsb_roster_rows is None
+        assert result.ec_rows > 0 and result.mit_rows > 0
+        assert result.views_built is True
+
+        # The blocking fix, proven live: the join views survive the replace=True schema
+        # rebuild because run_warehouse rebuilt them. Query one and confirm it resolves.
+        preferred = dbc.select_query_to_df(
+            f"SELECT count(*) AS n FROM {SCHEMA}.{EC_PV_PREFERRED_VIEW}"
+        )
+        assert preferred["n"].iloc[0] > 0
+        # No fan-out on the redistributable public surface over the EC + MIT core.
+        dupes = dbc.select_query_to_df(
+            f"SELECT year, state, candidate FROM {SCHEMA}.{EC_PV_REDISTRIBUTABLE_VIEW} "
+            f"GROUP BY year, state, candidate HAVING count(*) > 1"
+        )
+        assert dupes.empty
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()

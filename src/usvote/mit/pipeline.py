@@ -13,8 +13,10 @@ years the EC fixtures also cover (so the ``state`` FK resolves). Year filtering 
 on the raw frame *before* transform, keeping every ``(year, state)`` group whole, so
 transform's pre-filter totals reconciliation still holds.
 
-A user-facing ``python -m usvote.mit`` entry point is intentionally deferred; the
-integration test drives :func:`run_mit_pipeline` directly.
+``python -m usvote.mit load`` (bare ``python -m usvote.mit`` — ``load`` is the default
+subcommand) runs this via :mod:`usvote.mit.__main__` (#84b); the whole-warehouse build
+(:func:`usvote.warehouse.run_warehouse`) also calls it. There is no ``snapshot``
+subcommand — MIT reads a local CSV, so unlike UCSB it has no network stage to reproduce.
 """
 
 from __future__ import annotations

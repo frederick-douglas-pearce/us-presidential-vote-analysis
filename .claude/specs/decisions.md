@@ -1283,3 +1283,87 @@ HTML snapshot that made verifying density require a full live re-scrape).
   rectangularity (a dropped loser row fails at the transform); a **split-vote state** (ME/NE — each
   getter keeps its real EC count); winner-has-PV over the real corpus with the exemption set + a
   vacuity floor; and the `ec_pv_redistributable` leak-guard.
+
+## D027: Package entry points are subcommand-based, with a top-level `warehouse.py` composition root
+
+**Date:** 2026-07-22
+**Context:** #84b, split out of #84 (84a landed the `DBC.transaction()` primitive + the uniform
+per-pipeline ownership rule). Before this, the three ingest entry points disagreed on what
+`python -m X` meant: `python -m usvote` ran the whole EC pipeline, `python -m usvote.ucsb`
+*snapshotted* raw HTML (not a pipeline run), and `usvote.mit` had no `__main__` at all. The same
+spelling meant "run the pipeline" for EC and "fetch raw data" for UCSB. E6 also needs a single
+one-command build of the entire warehouse (EC spine + both PV sources + the E6-S2 join views), which
+no entry point provided.
+
+**Decision (five parts):**
+
+1. **All package `__main__`s are subcommand-based, but every bare invocation keeps its historical
+   meaning as a *named default subcommand*.** `python -m usvote` → EC (subcommands `ec`, `all`);
+   `python -m usvote.ucsb` → snapshot (subcommands `snapshot`, `load`); `python -m usvote.mit` → load
+   (single `load` subcommand). The issue framed the wart as "same spelling, different meaning"; this
+   **reduces it to a documented default, not eliminates it** — `python -m usvote` loads and
+   `python -m usvote.ucsb` snapshots still differ, but each is now a discoverable default, and the
+   asymmetry is principled (only UCSB has a network stage to snapshot; MIT reads a local CSV).
+
+2. **Bare `python -m usvote` stays EC — it is *not* re-pointed at `all`.** `all` additionally requires
+   `USVOTE_MIT_CSV_PATH` (and the UCSB snapshot for the full set), so making bare mean `all` would
+   *raise* the config bar on the single most common command and break a CLAUDE.md-documented
+   invocation. Backward compatibility (including bare `--replace`) is preserved; the whole-warehouse
+   build is the explicit `all` subcommand.
+
+3. **The whole-warehouse orchestrator lives in a new top-level `usvote/warehouse.py`
+   (`run_warehouse`), a composition root — NOT inside `usvote/pipeline.py`.** `warehouse.py` imports
+   *from* every source (EC + `usvote/mit` + `usvote/ucsb`). Putting that wiring in `pipeline.py` (an
+   EC-spine module) would make the EC spine import the PV sources — the exact D015 source-to-source
+   inversion. A composition root sits **above** both EC and PV, like `usvote/__main__`, so it is
+   exempt from the prohibition for the same reason `__main__` is. The exemption is kept honest by the
+   reverse invariant — **nothing under `usvote/{mit,ucsb,pv}/` imports `usvote.warehouse`** — enforced
+   by a test mirroring the greppable `dwh.votes` guard (a back-import would invert D015 into a cycle).
+
+4. **The build is per-source atomic, not globally atomic; recovery is `--replace`, not a bare
+   re-run.** `run_warehouse` opens **no** transaction of its own — each pipeline already owns its
+   DB-write transaction (84a's uniform rule), and `DBC.transaction()` raises on a nested open, so the
+   orchestrator sequences them and never wraps them. Consequence: a mid-build failure leaves the
+   already-committed sources in place and later ones absent. Because the PV/EC loaders are
+   create-if-absent/append, a bare re-run raises a unique/PK violation on the first already-loaded
+   source before it reaches the missing one, so the honest recovery path is
+   `run_warehouse(..., replace=True)` (a clean full rebuild). Network/scrape stays outside every
+   transaction, so no build holds one open across HTTP.
+
+5. **`--replace` maps EC-destructive + PV-additive, and the join views are always rebuilt.** For `all`,
+   `--replace` forwards to `run_ec_pipeline(replace=True)` (which does `DROP SCHEMA dwh CASCADE`,
+   taking the PV tables *and* the E6-S2 views with it) while the PV sources load `replace=False` onto
+   the fresh schema — the only sane mapping, and exactly the integration-test order. The resolved-PV +
+   EC↔PV join views are therefore **always rebuilt as the final step** (`build_pv_union` +
+   `create_ec_pv_views`, both idempotent, both transaction-free): without that rebuild a `--replace`
+   build would leave the warehouse with fact tables but no `ec_pv_preferred`/`ec_pv_redistributable`
+   for E7/E8 to read. For a single-source subcommand (`usvote.mit load --replace`,
+   `usvote.ucsb load --replace`) `--replace` is instead *table-level* (rebuild that source's PV
+   table(s), never the schema) — one flag, two scopes, spelled out in `--help`.
+
+**Alternatives rejected:** bare `python -m usvote` → `all` (raises the config bar, breaks a documented
+command — part 2); orchestrator inside `pipeline.py` (D015 inversion — part 3); a global transaction
+across the whole build (would hold one open across HTTP scrapes, and 84a's raise-on-nest forbids it —
+part 4); a per-source `--replace` matrix (overkill — part 5); env-magic UCSB gating inside
+`run_warehouse` (the programmatic seam takes an explicit `ucsb_html_dir=None` to skip; only the CLI
+auto-detects `USVOTE_UCSB_HTML_DIR`, and only *loudly* with a printed notice + `--require-ucsb`, so a
+warehouse silently missing the UCSB analysis-only control can never happen — D024/D017).
+
+**Related:** **#84a** (the `DBC.transaction()` primitive + uniform per-pipeline ownership this builds
+on); **D015** (source-namespacing / no source-to-source imports — the composition-root carve-out
+here); **D023** (the UCSB snapshot, why `python -m usvote.ucsb` defaults to `snapshot`); **D024**/
+**D017** (missing data modeled explicitly, never silent — the loud UCSB gating and the structured
+`WarehouseResult`); **D016** (EC + MIT = the redistributable public core, UCSB = the analysis-only
+control — why a fresh public clone builds EC + MIT and skips UCSB); **D026** (the join views
+`run_warehouse` rebuilds); **E7/E8** (the `ec_pv_preferred`/`ec_pv_redistributable` consumers the
+always-rebuild step and the `WarehouseResult` receipt are designed for).
+
+**Action required:**
+- Add `usvote/warehouse.py` (`run_warehouse`, `rebuild_views`, `WarehouseResult`) — done.
+- Rewrite `usvote/__main__.py` (subcommands `ec`/`all`, bare = EC), add `usvote/mit/__main__.py`
+  (`load`), rewrite `usvote/ucsb/__main__.py` (subcommands `snapshot`/`load`, bare = snapshot) — done.
+- Add the reverse-import guard test (nothing under `usvote/{mit,ucsb,pv}/` imports `usvote.warehouse`)
+  and CLI/orchestrator unit tests; point the live-DB integration test at `run_warehouse` (the shipped
+  path) — done.
+- A future `views` subcommand (rebuild views without re-scraping) is a thin wrapper over
+  `rebuild_views`; the dispatch is left open for it (#84 follow-up).
