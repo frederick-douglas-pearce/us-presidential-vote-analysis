@@ -33,6 +33,9 @@ dependencies = [
     # ride in the base dependencies, not an extra: the heavy stack (pandas/geopandas/
     # psycopg2) is already mandatory, so an `api` extra would buy no install-size lever
     # while forcing `--extra api` onto every CI gate that lints/types/tests usvote/api/.
+    # The CONTAINER's size lever is a different mechanism — the `serve` dependency-group
+    # below installed with `--no-deps` (D033), NOT an extra (extras can't subtract the
+    # heavy base deps).
     "fastapi>=0.115",
     "uvicorn>=0.34",
 ]
@@ -50,6 +53,20 @@ dev = [
     "mypy>=1.15",
     # Notebook remains runnable during the incremental notebook->package migration.
     "jupyterlab>=4.0",
+]
+
+# The API container's serve-time closure (D033). `usvote/api/` imports ONLY
+# fastapi/starlette/pydantic + stdlib (enforced by tests/unit/test_api_import_graph.py),
+# so the container installs the package with `--no-deps` and adds just this group,
+# leaving the heavy warehouse/analysis stack (pandas/geopandas/GDAL/psycopg2/matplotlib)
+# out of the image. Versions are single-sourced from uv.lock (the Dockerfile resolves
+# `uv sync --frozen --only-group serve`) — never hand-pinned in the Dockerfile. pydantic
+# is listed explicitly because usvote/api/models.py imports it directly (it otherwise
+# arrives only transitively via fastapi).
+serve = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "pydantic>=2",
 ]
 
 [build-system]

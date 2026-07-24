@@ -107,3 +107,59 @@ jobs:
           USVOTE_TEST_DB_USER: postgres
           USVOTE_TEST_DB_PASSWORD: postgres
         run: uv run pytest -m integration
+
+  # Build the API container and boot it (E8-S6, #100 / D033). This is the drift guard
+  # for the SLIM serve-only image: the import-graph test (a denylist) catches new db/
+  # pandas imports under usvote/api/, but NOT an allowed-but-unpackaged import (e.g.
+  # httpx) that would pass every unit gate yet crash the --no-deps container at runtime.
+  # Building + booting the real image + curling /health catches exactly that, plus
+  # Dockerfile rot and the $PORT/CMD wiring. CI has no warehouse, so we bake a
+  # schema-valid PLACEHOLDER snapshot (synthetic MIT/CC0 data); real snapshot *contents*
+  # are not validated here.
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      # Reuse the committed synthetic snapshot frame so the placeholder carries the
+      # current SNAPSHOT_SCHEMA_VERSION and passes the app's schema check at boot.
+      - name: Build placeholder snapshot (no warehouse needed)
+        run: uv run python scripts/make_placeholder_snapshot.py api_snapshot.sqlite
+
+      - name: Build image
+        run: docker build -t usvote-api:ci .
+
+      # Boot the container on the Cloud-Run-style $PORT and confirm the slim serve
+      # closure imports and the app answers /health with no DB.
+      - name: Run + smoke-test /health
+        run: |
+          docker run -d --name usvote-api-ci -e PORT=8080 -p 8080:8080 usvote-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health > /tmp/health.json; then
+              echo "healthy after ${i}s"; cat /tmp/health.json; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not become healthy in 30s"
+          docker logs usvote-api-ci
+          exit 1
+
+      - name: Container logs (always)
+        if: ${{ always() }}
+        run: docker logs usvote-api-ci || true
+
+      - name: Stop container
+        if: ${{ always() }}
+        run: docker rm -f usvote-api-ci || true

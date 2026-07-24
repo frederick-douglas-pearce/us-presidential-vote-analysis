@@ -56,6 +56,17 @@ python -m usvote.api             # serve the snapshot over HTTP (E8-S2; no live 
 uv run jupyter lab               # or open the step-1 notebook interactively
 ```
 
+The API also ships as a **cloud-agnostic container** (E8-S6, #100 / D032). Build the snapshot first, copy it into the build context, then `docker build` + `docker run` (the running image needs no DB — the snapshot is baked in, so snapshot-version == image-version):
+
+```
+python -m usvote.snapshot                    # build the snapshot (needs the warehouse)
+cp "$USVOTE_API_SNAPSHOT_PATH" ./api_snapshot.sqlite   # into the build context (git-ignored)
+docker build -t usvote-api .                 # slim (~150MB): serve-only deps, snapshot baked in
+docker run --rm -p 8080:8080 usvote-api      # listens on $PORT (default 8080); curl /health
+```
+
+The image is **slim by design** ([D033](.claude/specs/decisions.md)): `usvote/api/` imports only FastAPI + stdlib (the D028 import-graph invariant), so the container installs the package `--no-deps` plus the lock-pinned `serve` dependency-group — the heavy stack (pandas/geopandas/psycopg2/matplotlib) stays out. Serve versions come from `uv.lock`, never hand-pinned in the `Dockerfile`. A CI `docker-build` job builds + boots the image against a synthetic placeholder snapshot (`scripts/make_placeholder_snapshot.py`) — the drift guard that catches an allowed-but-unpackaged import the denylist import-graph test would miss.
+
 Python >=3.11 (developed on 3.14). Dependencies are pinned in `pyproject.toml` + `uv.lock` (`beautifulsoup4`, `requests`, `pandas`, `geopandas`, `matplotlib`, `psycopg2`, plus the dev/notebook tools).
 
 Prerequisites before running step 1 (both the package and the notebook read these from the environment — see the README "Configuration" section; externalized in #31):

@@ -24,6 +24,14 @@ coverage/
 .env
 .env.local
 
+# API snapshot copied into the repo root for `docker build` (the baked-in artifact,
+# built outside the tree by `python -m usvote.snapshot`). Gitignored so it is never
+# committed and — because hatchling's `packages` layout respects .gitignore — never
+# bundled into the wheel either. It is still available to `docker build` (.dockerignore
+# keeps it in the build context).
+/api_snapshot.sqlite
+*.sqlite
+
 # Claude Code local settings
 .claude/settings.local.json
 
