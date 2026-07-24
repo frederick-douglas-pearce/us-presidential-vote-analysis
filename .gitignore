@@ -31,3 +31,6 @@ coverage/
 .vscode/
 .idea/
 .DS_Store
+
+# dev-loop ledger (local working state, never committed)
+.claude/loop/
