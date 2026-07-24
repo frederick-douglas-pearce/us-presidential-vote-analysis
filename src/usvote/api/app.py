@@ -21,7 +21,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from usvote.api import provenance, routes
@@ -48,8 +47,11 @@ _ERROR_CACHE_CONTROL = "no-store"
 # real description, grouped tags, and a first-class provenance/licensing statement,
 # so the docs are hand-off-ready (e.g. to the MIT Election Lab).
 
-#: The public data source + license, resolved once from the code→display mappings so
-#: the names in this prose can't drift from what rides in every ``meta.provenance``.
+#: D016 policy defaults, used only for the *static fallback* schema (the constructor
+#: description + license block, served if the schema is somehow built before the
+#: snapshot is open). The **served** schema re-derives source/license/coverage from the
+#: loaded snapshot in :func:`_install_live_openapi`, so the advertised provenance always
+#: matches ``meta.provenance`` rather than a literal that could drift.
 _MIT = provenance.source_display("MIT")
 _CC0 = provenance.license_display("CC0-1.0")
 
@@ -62,12 +64,14 @@ API_SUMMARY = (
     "redistributable modern era."
 )
 
-#: Replaced at ``/openapi.json`` build time with the loaded snapshot's real year
-#: window (:func:`_install_live_openapi`), so the headline coverage line always
-#: matches the data actually served rather than a hard-coded span that could go stale.
-_COVERAGE_PLACEHOLDER = "{coverage_window}"
+#: Tokens filled per-schema by :func:`_render_description` — from the loaded snapshot
+#: for the served schema, or the D016 defaults for the static fallback.
+_COVERAGE_TOKEN = "{coverage_window}"
+_NOTE_TOKEN = "{provenance_note}"
 
-API_DESCRIPTION = f"""\
+#: A plain template, **not** an f-string: the literal ``{data, meta}`` must survive, and
+#: the two tokens above are filled by :func:`_render_description`.
+_DESCRIPTION_TEMPLATE = """\
 A read-only HTTP API over a joined **Electoral College + popular vote** dataset for US
 presidential elections, at the `(year, state, candidate)` grain plus a per-year national
 roll-up.
@@ -78,16 +82,31 @@ when a candidate loses the national popular vote yet still takes office. Each
 candidate's national electoral-vote total, finishing rank, and whether they took
 office sit alongside the popular-vote totals.
 
-**Coverage:** {_COVERAGE_PLACEHOLDER} (US presidential elections).
+**Coverage:** {coverage_window} (US presidential elections).
 
-**Data provenance & licensing.** {provenance.redistributable_note(_MIT, _CC0)} Every
-response carries the exact source, license, coverage window, and snapshot version under
-`meta.provenance`; the same block, with build details, is at `GET /v1/meta`.
+**Data provenance & licensing.** {provenance_note} Every response carries the exact
+source, license, coverage window, and snapshot version under `meta.provenance`; the same
+block, with build details, is at `GET /v1/meta`.
 
 **Getting started.** Browse the interactive docs at `/docs` (Swagger UI) or `/redoc`
-(ReDoc). Every response is JSON in a `{{data, meta}}` envelope and carries an `ETag` and
+(ReDoc). Every response is JSON in a `{data, meta}` envelope and carries an `ETag` and
 `Cache-Control` for conditional requests.
 """
+
+
+def _render_description(coverage_window: str, provenance_note: str) -> str:
+    """Fill the description template's coverage + provenance-note tokens."""
+    return _DESCRIPTION_TEMPLATE.replace(_COVERAGE_TOKEN, coverage_window).replace(
+        _NOTE_TOKEN, provenance_note
+    )
+
+
+#: The static fallback description — valid standalone (a generic coverage phrase + the
+#: D016 note). The served schema overwrites it with live snapshot values.
+API_DESCRIPTION = _render_description(
+    "the redistributable modern era (1976 onward)",
+    provenance.redistributable_note(_MIT, _CC0),
+)
 
 #: Tag groups, ordered as they should read in Swagger UI / ReDoc.
 _OPENAPI_TAGS: list[dict[str, Any]] = [
@@ -129,30 +148,39 @@ API_LICENSE_INFO = {"name": _CC0.name, "url": _CC0.url}
 
 
 def _install_live_openapi(app: FastAPI) -> None:
-    """Override ``app.openapi()`` so the description's coverage window is read live.
+    """Override ``app.openapi()`` so provenance + coverage are read from the snapshot.
 
-    FastAPI builds the schema lazily on the first ``/openapi.json`` (or ``/docs`` /
-    ``/redoc``) request — always **after** the lifespan opened the snapshot — so reading
-    ``app.state.repository`` here is safe and never double-opens. The built schema is
-    cached on ``app.openapi_schema`` as FastAPI's default does, so this runs once.
+    Delegates to FastAPI's own ``openapi()`` — so every constructor option is honored
+    and nothing is silently dropped — then overwrites only the dynamic bits (the
+    description's coverage window + provenance note, and the license block) with values
+    resolved from the loaded snapshot, so the advertised provenance matches
+    ``meta.provenance`` exactly.
+
+    FastAPI builds the schema lazily on the first ``/openapi.json`` / ``/docs`` /
+    ``/redoc`` request — normally **after** the lifespan opened the snapshot. If it is
+    somehow built first (e.g. ``create_app(...).openapi()`` offline, with no lifespan),
+    the repository is absent and the **static fallback** schema is served, never a 500.
     """
+    base_openapi = app.openapi
 
     def openapi() -> dict[str, Any]:
         if app.openapi_schema:
             return app.openapi_schema
-        meta = app.state.repository.meta()
-        window = f"{meta.year_min}–{meta.year_max}"
-        app.openapi_schema = get_openapi(
-            title=API_TITLE,
-            version=API_VERSION,
-            summary=API_SUMMARY,
-            description=API_DESCRIPTION.replace(_COVERAGE_PLACEHOLDER, window),
-            routes=app.routes,
-            tags=_OPENAPI_TAGS,
-            contact=API_CONTACT,
-            license_info=API_LICENSE_INFO,
-        )
-        return app.openapi_schema
+        # Builds + caches app.openapi_schema from the constructor config (this same dict
+        # object is what we patch and return, so the cache holds the live version).
+        schema = base_openapi()
+        repo: SnapshotRepository | None = getattr(app.state, "repository", None)
+        if repo is not None:
+            meta = repo.meta()
+            src = provenance.source_display(meta.source)
+            lic = provenance.license_display(meta.license)
+            info = schema["info"]
+            info["description"] = _render_description(
+                f"{meta.year_min}–{meta.year_max}",
+                provenance.redistributable_note(src, lic),
+            )
+            info["license"] = {"name": lic.name, "url": lic.url}
+        return schema
 
     app.openapi = openapi  # type: ignore[method-assign]
 

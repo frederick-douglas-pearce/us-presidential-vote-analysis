@@ -40,11 +40,14 @@ def test_redistributable_note_names_source_license_and_excludes_ucsb() -> None:
     assert "UCSB" in note
 
 
-def test_maps_cover_every_code_the_snapshot_can_emit() -> None:
-    """The public API is redistributable-only (D016/D030): MIT / CC0-1.0 must be mapped.
+def test_redistributable_codes_are_mapped() -> None:
+    """Smoke check: the D016/D030 redistributable codes (MIT / CC0-1.0) are mapped.
 
-    A future PV source cleared for public redistribution must add its display row here (and
-    would trip this test until it does), so the map can never fall behind the snapshot.
+    This is a static presence check, not proof the map tracks the snapshot — the codes the
+    build can emit aren't enumerable here (that would import the build stack, across the
+    D028 boundary). The real backstop is the fail-loud ``UnknownProvenanceCode`` in
+    ``Provenance.from_snapshot_meta`` at serve time if a snapshot ever carries an unmapped
+    code; a new redistributable source must add its display row here.
     """
     assert "MIT" in provenance._SOURCES
     assert "CC0-1.0" in provenance._LICENSES

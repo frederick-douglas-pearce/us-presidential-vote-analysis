@@ -96,6 +96,22 @@ def test_openapi_description_reflects_live_coverage_window(client: TestClient) -
     assert "{coverage_window}" not in desc  # placeholder was substituted
 
 
+def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None:
+    """Building the schema before startup (no open repository) must not raise.
+
+    Guards the fallback in ``_install_live_openapi``: an offline
+    ``create_app(...).openapi()`` (no lifespan, so ``app.state.repository`` is absent)
+    serves the fully-rendered static description instead of crashing.
+    """
+    out = str(tmp_path / "snapshot.sqlite")
+    build_snapshot(_frame(), out, build_timestamp=_TS)
+    settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
+    app = create_app(settings)  # no `with TestClient` → lifespan not run
+    desc = app.openapi()["info"]["description"]
+    assert "{coverage_window}" not in desc  # static fallback is fully rendered
+    assert "Electoral College" in desc
+
+
 # --- tags -------------------------------------------------------------------
 
 

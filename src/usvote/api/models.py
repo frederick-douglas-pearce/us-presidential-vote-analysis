@@ -82,18 +82,21 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
 
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {"year": 2000, "candidate_count": 7}
 
+# Derive every display field from the provenance maps (not literals), so the shipped
+# example can't drift from _SOURCES / _LICENSES if a name or URL is ever edited.
+_EX_SRC = provenance.source_display("MIT")
+_EX_LIC = provenance.license_display("CC0-1.0")
+
 _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "snapshot_version": (
         "bc6056f38fd9ed04f396a2e54a38a657994a4d8f0a8a317526e47bfb92cd33f2"
     ),
-    "source": "MIT",
-    "source_name": "MIT Election Lab",
-    "license": "CC0-1.0",
-    "license_url": "http://creativecommons.org/publicdomain/zero/1.0",
+    "source": _EX_SRC.code,
+    "source_name": _EX_SRC.name,
+    "license": _EX_LIC.code,
+    "license_url": _EX_LIC.url,
     "coverage": _COVERAGE_EXAMPLE,
-    "redistributable_note": provenance.redistributable_note(
-        provenance.source_display("MIT"), provenance.license_display("CC0-1.0")
-    ),
+    "redistributable_note": provenance.redistributable_note(_EX_SRC, _EX_LIC),
 }
 
 _META_EXAMPLE: dict[str, Any] = {"provenance": _PROVENANCE_EXAMPLE, "count": 2}
