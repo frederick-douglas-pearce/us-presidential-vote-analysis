@@ -1533,3 +1533,37 @@ Fly.io/Render remain fallbacks if Cloud Run's cost profile changes.
 
 **Related:** **#94/#100/#101** (epic + Dockerfile + Cloud-Run-deploy stories); **D028** (the baked-in
 snapshot); ROADMAP Open Question #3 (this decision resolves the API-hosting half).
+
+## D033: The API container installs a slim serve-only dependency closure, not the full package deps
+
+**Date:** 2026-07-24
+**Context:** E8-S6 (#100) containerizes the API (D032: cloud-agnostic image, snapshot
+baked in). A full package install drags the warehouse/analysis stack — pandas, geopandas,
+GDAL, psycopg2, matplotlib — into the image (hundreds of MB, slow cold start), failing the
+AC that the image be "reasonably small and starts fast (scale-to-zero friendly)." But the
+API serve path never uses that stack: `usvote/api/` imports only fastapi/starlette/pydantic
++ `usvote.snapshot_schema`/`usvote.config` (both stdlib-only) + stdlib — the D028
+import-graph invariant.
+
+**Decision:** The container installs the `usvote` package with `--no-deps` and adds only the
+serve-time closure (fastapi, uvicorn, pydantic), whose versions are resolved from `uv.lock`
+via a dedicated `serve` dependency-group (never hand-pinned literals in the Dockerfile, which
+would fork the version truth from the lock). The container's runtime dependency closure thus
+**intentionally diverges** from the package's declared base dependencies — the D028
+import-graph invariant is what makes that divergence safe, and this decision elevates that
+invariant from a code-layering guard to a load-bearing deployment guarantee. An `api` *extra*
+is explicitly **not** the mechanism: extras are additive and cannot subtract the heavy base
+deps; the size lever comes from `--no-deps` + the lock-derived serve group.
+
+**Rationale:**
+- Slim is required to meet the scale-to-zero AC; the import graph is already test-enforced,
+  so the closure divergence rests on an existing invariant, not a new hope.
+- Sourcing serve versions from `uv.lock` keeps a single version source of truth; CI and the
+  container resolve the same fastapi/uvicorn/pydantic.
+- The divergence introduces a silent-drift failure mode (an allowed-but-unpackaged import
+  added to `usvote/api/` — e.g. httpx — passes the denylist import-graph test but breaks the
+  slim image at `docker run`). This is guarded by the CI docker job running the built image
+  and hitting `/health` (a container smoke test), not by a bespoke positive-allowlist test.
+
+**Related:** **D028** (import-graph invariant this exploits), **D032** (the container/hosting
+decision this refines), **#100** (E8-S6), `tests/unit/test_api_import_graph.py`.

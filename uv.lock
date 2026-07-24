@@ -3004,6 +3004,11 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+serve = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3024,6 +3029,11 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.11" },
+]
+serve = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "uvicorn", specifier = ">=0.34" },
 ]
 
 [[package]]

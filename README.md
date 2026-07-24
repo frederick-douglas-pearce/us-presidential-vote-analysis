@@ -64,6 +64,29 @@ For production/container use, point an ASGI server straight at the app factory: 
 
 **Browsing the docs (start here as an external developer).** Interactive OpenAPI docs render at **`/docs`** (Swagger UI) and **`/redoc`** (ReDoc) — the hand-off surface. They carry the thesis, the endpoint reference with realistic examples, and a first-class **data-provenance & licensing** statement up front: the popular-vote data is sourced from the **MIT Election Lab** under **CC0 1.0** (public domain), and non-redistributable UCSB data is excluded ([D016](.claude/specs/decisions.md)/[D030](.claude/specs/decisions.md)). That same provenance — source, license, coverage window, and snapshot version — also travels in every response under `meta.provenance`, so it can never drift from what was actually built.
 
+#### Running the API in a container
+
+The API also ships as a **cloud-agnostic Docker image** with the snapshot **baked in** — the MVP's single runnable deliverable ([D032](.claude/specs/decisions.md)). Because the snapshot is copied *into* the image (never mounted), the container's data version equals its image version, so there is no artifact/code skew. The running container needs **no database and no network** — Postgres can be stopped.
+
+Build the snapshot first (that step, and only that step, needs the warehouse), copy it into the build context, then build and run:
+
+```
+# 1. Build the snapshot from the warehouse (needs Postgres) — see the smoke test below.
+$ python -m usvote.snapshot                        # writes $USVOTE_API_SNAPSHOT_PATH
+
+# 2. Copy it into the build context (it lives outside the repo; the copy is git-ignored).
+$ cp "$USVOTE_API_SNAPSHOT_PATH" ./api_snapshot.sqlite
+
+# 3. Build the image and run it (no DB needed at runtime).
+$ docker build -t usvote-api .
+$ docker run --rm -p 8080:8080 usvote-api          # Cloud-Run-style: listens on $PORT (default 8080)
+
+$ curl -s localhost:8080/health | jq -c '{v: .snapshot_version[0:8], rows: .row_count, years: .coverage}'
+# → {"v":"bc6056f3","rows":1734,"years":{"year_min":1976,"year_max":2024}}
+```
+
+The image is **slim by design** (~150 MB): the API serve path imports only FastAPI + stdlib, so the container installs the package with `--no-deps` plus a lock-pinned `serve` dependency-group — the heavy warehouse/analysis stack (pandas/GDAL/psycopg2/matplotlib) never enters the image ([D033](.claude/specs/decisions.md)). It is cloud-agnostic (listens on `$PORT`, no vendor SDKs, no baked-in secrets), so the eventual Cloud Run deploy (E8-S7, #101) is a deploy step, not a rebuild. To refresh the data, rebuild the snapshot and the image (acceptable given the ~4-yearly refresh cadence). A CI job builds and boots the image against a synthetic placeholder snapshot to catch Dockerfile rot.
+
 #### Local smoke test (full pipeline → live API)
 
 The end-to-end check we run repeatedly while building out E8: warehouse → snapshot → HTTP, then hit the live endpoints against real 1976&ndash;2024 data. Configure the environment first (see [Configuration](#configuration)) — the build steps read `PGPASSWORD` from your git-ignored `.env`, so load it into the shell once:
