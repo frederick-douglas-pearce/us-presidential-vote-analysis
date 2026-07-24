@@ -17,10 +17,17 @@ from __future__ import annotations
 from fastapi import Request, Response
 from starlette.status import HTTP_304_NOT_MODIFIED
 
-#: The ``Cache-Control`` served on every ``/v1`` response (D031). ``max-age`` bounds
-#: freshness; ``stale-while-revalidate`` lets a CDN serve slightly-stale while it
-#: refreshes, so the ~4-year data cadence never forces a cold fetch on a client.
-CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
+#: The ``Cache-Control`` served on every ``/v1`` response (D031/D034). Deliberately a
+#: *moderate* browser ``max-age`` — **not** ``immutable, max-age=1yr`` — so a rare
+#: bug-fix redeploy reflects promptly instead of stranding a stale response in a browser
+#: for a year. The *long* hold lives at the CDN edge (a Cloudflare Edge Cache TTL,
+#: purged on each new snapshot version — D034), which is purge-reachable; a long
+#: ``s-maxage`` here is not, so unreachable intermediaries could strand stale data.
+#: ``stale-while-revalidate`` lets the edge serve slightly-stale while it refreshes;
+#: ``stale-if-error`` keeps reads answerable if the zero-scaled origin is unreachable.
+CACHE_CONTROL = (
+    "public, max-age=3600, stale-while-revalidate=86400, stale-if-error=86400"
+)
 
 
 def etag_for(snapshot_version: str) -> str:

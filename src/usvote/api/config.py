@@ -40,6 +40,14 @@ DEFAULT_CORS_ORIGINS: tuple[str, ...] = (
 #: step, not a breaking change (D031).
 API_VERSION_PREFIX = "/v1"
 
+#: Environment variable holding the **origin lock-down secret** (E8-S7, #101 / D034).
+#: When the deployed API is fronted by Cloudflare, a Transform Rule injects this secret
+#: on every proxied request; the app then rejects any ``/v1`` request that lacks it, so
+#: a bot cannot bypass the edge rate-limits/WAF by hitting the raw Cloud Run URL.
+#: **Opt-in and fail-open:** unset (local dev, the unit suite, the D033 container smoke
+#: test) means no enforcement — the origin guard is a deploy control, not a local one.
+ORIGIN_SECRET_VAR = "USVOTE_API_ORIGIN_SECRET"
+
 
 def cors_origins_from_env(
     environ: Mapping[str, str] = os.environ,
@@ -68,6 +76,10 @@ class ApiSettings:
     snapshot_path: str
     cors_origins: list[str] = field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     version_prefix: str = API_VERSION_PREFIX
+    #: The origin lock-down secret (D034). ``None`` ⇒ the origin guard is inactive
+    #: (fail-open) — the local/CI default; set only in the deployed (Cloudflare-fronted)
+    #: environment via :data:`ORIGIN_SECRET_VAR`.
+    origin_secret: str | None = None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> ApiSettings:
@@ -75,10 +87,12 @@ class ApiSettings:
 
         The snapshot path is required **and must exist** (``must_exist=True``): the API
         cannot serve without its data, so an unset variable or absent file is a
-        :class:`usvote.config.ConfigError` at startup, not a request-time surprise.
+        :class:`usvote.config.ConfigError` at startup, not a request-time surprise. The
+        origin secret is optional (unset ⇒ the origin guard stays fail-open).
         """
         return cls(
             snapshot_path=config.snapshot_path_from_env(environ, must_exist=True),
             cors_origins=cors_origins_from_env(environ),
             version_prefix=API_VERSION_PREFIX,
+            origin_secret=environ.get(ORIGIN_SECRET_VAR) or None,
         )

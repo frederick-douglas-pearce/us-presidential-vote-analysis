@@ -26,6 +26,7 @@ coverage/
 tests/
 docs/
 scripts/
+deploy/
 *.ipynb
 db_tools.py
 dist/

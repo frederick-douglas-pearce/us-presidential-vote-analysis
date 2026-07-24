@@ -32,6 +32,7 @@ from usvote.api.models import (
     Provenance,
     SnapshotMetaResponse,
 )
+from usvote.api.origin_guard import install_origin_guard
 from usvote.api.repository import SnapshotRepository
 from usvote.api.routes import ResourceNotFound
 
@@ -261,13 +262,25 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_methods=["GET"],
     )
+    # Origin lock-down (D034): reject direct-to-run.app /v1 hits that skip Cloudflare.
+    # Opt-in + fail-open — active only when the secret is configured (deployed env); the
+    # returned flag is surfaced on /health so the posture is observable, never silent.
+    app.state.origin_guard_enforced = install_origin_guard(
+        app, secret=settings.origin_secret, protected_prefix=settings.version_prefix
+    )
 
     @app.get("/health", tags=["Ops"])
     def health() -> JSONResponse:
         """Liveness + snapshot-loaded status (uncached; an infra probe, not the API)."""
         repo: SnapshotRepository = app.state.repository
+        origin_guard = "enforced" if app.state.origin_guard_enforced else "open"
         return JSONResponse(
-            content={"status": "ok", "snapshot_loaded": True, **_meta_block(repo)},
+            content={
+                "status": "ok",
+                "snapshot_loaded": True,
+                "origin_guard": origin_guard,
+                **_meta_block(repo),
+            },
             headers={"Cache-Control": _HEALTH_CACHE_CONTROL},
         )
 
