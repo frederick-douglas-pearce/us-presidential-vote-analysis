@@ -1,103 +1,27 @@
 """Unit tests for the ``/v1`` data endpoints (``usvote.api.routes``, E8-S3 #97).
 
-All offline, **no live DB** (D028): a small multi-year synthetic
-``ec_pv_redistributable``-shaped frame is materialized into a real SQLite snapshot via
-:func:`usvote.snapshot.build_snapshot`, and the app serves that file. Covers each
-endpoint's happy path, the ``state`` / ``candidate`` / ``year_from`` / ``year_to``
-filters, 404 (unknown / out-of-window identifier) vs. 200-empty (empty filter), 422 (bad /
-inverted params), the ETag / 304 freshness — including the architect's *404-not-304* case
-— the server-side cap failing loud, and the D006 / D030 guards (no ``candidate_id``, no
-non-MIT row reachable).
+All offline, **no live DB** (D028): the shared synthetic ``ec_pv_redistributable``-shaped
+frame (``tests/fixtures/api_snapshot.py``) is materialized into a real SQLite snapshot via
+:func:`usvote.snapshot.build_snapshot`, and the app serves that file. The
+``snapshot_path`` / ``settings`` / ``client`` fixtures come from ``tests/unit/conftest.py``
+(#99). Covers each endpoint's happy path, the ``state`` / ``candidate`` / ``year_from`` /
+``year_to`` filters, 404 (unknown / out-of-window identifier) vs. 200-empty (empty filter),
+422 (bad / inverted params), the ETag / 304 freshness — including the architect's
+*404-not-304* case — the server-side cap failing loud, and the D006 / D030 guards (no
+``candidate_id``, no non-MIT row reachable).
+
+The shared 2020 rows match this story's original fixture, so the value-specific rollup
+assertions below are unchanged; 2016 is the shared flip year (structural assertions only
+here — the flip itself is asserted in ``test_api_e2e``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, datetime
-from pathlib import Path
-
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
-from usvote.snapshot import build_snapshot
-
-_TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
-_USPS = {"Texas": "TX", "California": "CA"}
-
-
-def _row(
-    year: int,
-    state: str,
-    candidate_id: int,
-    candidate: str,
-    president_ev: int,
-    national_ev: int,
-    rank: int,
-    took_office: bool,
-    candidate_votes: int | None,
-    state_total: int | None,
-    total_ev: int,
-) -> dict:
-    has_pv = candidate_votes is not None
-    return {
-        "year": year,
-        "state": state,
-        "state_usps": _USPS[state],
-        "candidate_id": candidate_id,
-        "candidate": candidate,
-        "total_electoral_votes": total_ev,
-        "president_electoral_votes": president_ev,
-        "national_electoral_votes": national_ev,
-        "president_electoral_rank": rank,
-        "took_office": took_office,
-        "source": "MIT" if has_pv else None,
-        "party": ("DEMOCRAT" if candidate == "Cand B" else "REPUBLICAN")
-        if has_pv
-        else None,
-        "candidate_votes": candidate_votes,
-        "state_total_votes": state_total,
-        "reliability": "exact" if has_pv else None,
-        "redistributable": True,
-    }
-
-
-def _frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            # 2016 — Cand A wins both states (national 93, rank 1, took office).
-            _row(2016, "Texas", 1, "Cand A", 38, 93, 1, True, 6_000_000, 11_000_000, 38),
-            _row(2016, "Texas", 2, "Cand B", 0, 0, 2, False, 5_000_000, 11_000_000, 38),
-            _row(2016, "California", 1, "Cand A", 55, 93, 1, True, 9_000_000, 17_000_000, 55),
-            _row(2016, "California", 2, "Cand B", 0, 0, 2, False, 8_000_000, 17_000_000, 55),
-            # 2020 — split: A wins TX (38), B wins CA (55, rank 1, took office).
-            _row(2020, "Texas", 1, "Cand A", 38, 38, 2, False, 5_000_000, 11_000_000, 38),
-            _row(2020, "Texas", 2, "Cand B", 0, 55, 1, True, 6_000_000, 11_000_000, 38),
-            _row(2020, "California", 1, "Cand A", 0, 38, 2, False, 6_000_000, 17_000_000, 55),
-            _row(2020, "California", 2, "Cand B", 55, 55, 1, True, 11_000_000, 17_000_000, 55),
-        ]
-    )
-
-
-@pytest.fixture
-def snapshot_path(tmp_path: Path) -> str:
-    out = str(tmp_path / "snapshot.sqlite")
-    build_snapshot(_frame(), out, build_timestamp=_TS)
-    return out
-
-
-@pytest.fixture
-def settings(snapshot_path: str) -> ApiSettings:
-    return ApiSettings(snapshot_path=snapshot_path, cors_origins=["http://localhost:5173"])
-
-
-@pytest.fixture
-def client(settings: ApiSettings) -> Iterator[TestClient]:
-    with TestClient(create_app(settings)) as c:
-        yield c
-
 
 # --- list years -------------------------------------------------------------
 
