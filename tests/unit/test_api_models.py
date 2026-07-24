@@ -11,6 +11,8 @@ single-source-of-truth role of ``snapshot_schema``.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pydantic
 
 from usvote.api import models
@@ -43,3 +45,45 @@ def test_candidate_id_is_never_a_model_field() -> None:
     for model in (models.EcPvRow, models.NationalSummaryRow, models.YearListItem):
         assert "candidate_id" not in _mapped_columns(model)
         assert "candidate_id" not in model.model_fields
+
+
+def _models_with_examples() -> list[tuple[type[pydantic.BaseModel], Any]]:
+    """Every model that ships an OpenAPI ``examples`` list, paired with its examples."""
+    out: list[tuple[type[pydantic.BaseModel], Any]] = []
+    for name in dir(models):
+        obj = getattr(models, name)
+        if not (isinstance(obj, type) and issubclass(obj, pydantic.BaseModel)):
+            continue
+        extra = obj.model_config.get("json_schema_extra")
+        if isinstance(extra, dict) and "examples" in extra:
+            out.append((obj, extra["examples"]))
+    return out
+
+
+def test_every_shipped_example_validates() -> None:
+    """The hand-authored OpenAPI examples must validate against their model (E8-S4 #98).
+
+    Examples are authored in the **public** field names Swagger renders; ``model_validate``
+    catches any key/type drift the same way the column guard catches snapshot drift — so a
+    stale example fails CI rather than misleading an external developer.
+    """
+    pairs = _models_with_examples()
+    assert pairs, "no models ship OpenAPI examples — did the config helper regress?"
+    for model, examples in pairs:
+        for ex in examples:
+            model.model_validate(ex)  # raises on drift
+
+
+def test_key_public_models_ship_an_example() -> None:
+    """The public-facing response models each advertise at least one example."""
+    with_examples = {model for model, _ in _models_with_examples()}
+    for model in (
+        models.EcPvRow,
+        models.NationalSummaryRow,
+        models.YearListItem,
+        models.Provenance,
+        models.Meta,
+        models.SnapshotMetaResponse,
+        models.ErrorBody,
+    ):
+        assert model in with_examples, model.__name__

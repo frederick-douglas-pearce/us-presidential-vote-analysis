@@ -30,7 +30,7 @@ from usvote.api.repository import SnapshotRepository
 #: constant's name (``…_ENTITY`` → ``…_CONTENT``); the code itself is stable.
 _HTTP_422 = 422
 
-router = APIRouter(tags=["elections"])
+router = APIRouter()
 
 _NOT_FOUND_RESPONSE: dict[int | str, dict[str, object]] = {
     HTTP_404_NOT_FOUND: {"model": models.ErrorBody}
@@ -56,13 +56,13 @@ def _repo(request: Request) -> SnapshotRepository:
 
 
 def _meta(repo: SnapshotRepository, count: int) -> models.Meta:
-    """Build the envelope ``meta`` from cached provenance; ``count`` = len(data)."""
-    m = repo.meta()
+    """Build the envelope ``meta`` — snapshot provenance + this response's ``count``.
+
+    Provenance comes straight from the cached snapshot metadata (drift-proof),
+    resolved to its public display via ``Provenance.from_snapshot_meta``.
+    """
     return models.Meta(
-        snapshot_version=m.snapshot_version,
-        source=m.source,
-        license=m.license,
-        coverage=models.Coverage(year_min=m.year_min, year_max=m.year_max),
+        provenance=models.Provenance.from_snapshot_meta(repo.meta()),
         count=count,
     )
 
@@ -84,6 +84,7 @@ _YEAR_TO = Query(None, description="Only include years <= this value.")
     "/elections",
     response_model=models.Envelope[models.YearListItem],
     summary="List the election years the snapshot covers.",
+    tags=["Elections"],
 )
 def list_elections(
     request: Request,
@@ -105,6 +106,7 @@ def list_elections(
     response_model=models.ElectionResponse,
     responses=_NOT_FOUND_RESPONSE,
     summary="One election: per-state rows plus the national roll-up.",
+    tags=["Elections"],
 )
 def get_election(
     year: int,
@@ -141,6 +143,7 @@ def get_election(
     response_model=models.Envelope[models.NationalSummaryRow],
     responses=_NOT_FOUND_RESPONSE,
     summary="The national roll-up for one election year.",
+    tags=["Elections"],
 )
 def get_election_summary(
     year: int,
@@ -169,6 +172,7 @@ def get_election_summary(
     response_model=models.Envelope[models.EcPvRow],
     responses=_NOT_FOUND_RESPONSE,
     summary="One state's rows across every covered year.",
+    tags=["States"],
 )
 def get_state(
     usps: str,
@@ -196,6 +200,7 @@ def get_state(
     response_model=models.Envelope[models.EcPvRow],
     responses=_NOT_FOUND_RESPONSE,
     summary="One candidate's rows across every covered year.",
+    tags=["Candidates"],
 )
 def get_candidate(
     slug: str,
