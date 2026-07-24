@@ -1,10 +1,12 @@
 """Unit tests for the FastAPI app skeleton (``usvote.api``, E8-S2 #96).
 
-All offline, **no live DB** — the whole point of D028. A small synthetic
-``ec_pv_redistributable``-shaped frame is materialized into a real SQLite snapshot via
-:func:`usvote.snapshot.build_snapshot` (tests may touch the build stack; only ``src/
-usvote/api/`` may not — see ``test_api_import_graph``), and the app serves that file. The
-app never opens Postgres, which is exactly what "starts and answers with Postgres stopped"
+All offline, **no live DB** — the whole point of D028. The shared synthetic
+``ec_pv_redistributable``-shaped frame (``tests/fixtures/api_snapshot.py``) is
+materialized into a real SQLite snapshot via :func:`usvote.snapshot.build_snapshot`
+(tests may touch the build stack; only ``src/usvote/api/`` may not — see
+``test_api_import_graph``), and the app serves that file. The ``snapshot_path`` /
+``settings`` / ``client`` fixtures come from ``tests/unit/conftest.py`` (#99). The app
+never opens Postgres, which is exactly what "starts and answers with Postgres stopped"
 means in a unit context.
 
 Covered: startup fails loud on a missing/mismatched snapshot (not a request-time 500);
@@ -15,85 +17,17 @@ CORS echoes an allow-listed origin and never a silent ``*``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fixtures.api_snapshot import SNAPSHOT_TS, synthetic_ec_pv_frame
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
 from usvote.api.repository import SnapshotError, SnapshotRepository
 from usvote.config import ConfigError
 from usvote.snapshot import build_snapshot
-
-_TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
-_USPS = {"Texas": "TX", "California": "CA"}
-
-
-def _row(
-    state: str,
-    candidate_id: int,
-    candidate: str,
-    president_ev: int,
-    national_ev: int,
-    rank: int,
-    took_office: bool,
-    candidate_votes: int,
-    state_total: int,
-    total_ev: int,
-) -> dict:
-    return {
-        "year": 2020,
-        "state": state,
-        "state_usps": _USPS[state],
-        "candidate_id": candidate_id,
-        "candidate": candidate,
-        "total_electoral_votes": total_ev,
-        "president_electoral_votes": president_ev,
-        "national_electoral_votes": national_ev,
-        "president_electoral_rank": rank,
-        "took_office": took_office,
-        "source": "MIT",
-        "party": "DEMOCRAT" if candidate == "Cand B" else "REPUBLICAN",
-        "candidate_votes": candidate_votes,
-        "state_total_votes": state_total,
-        "reliability": "exact",
-        "redistributable": True,
-    }
-
-
-def _frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            _row("Texas", 1, "Cand A", 38, 38, 2, False, 5_000_000, 11_000_000, 38),
-            _row("Texas", 2, "Cand B", 0, 306, 1, True, 6_000_000, 11_000_000, 38),
-            _row("California", 1, "Cand A", 0, 38, 2, False, 6_000_000, 17_000_000, 55),
-            _row("California", 2, "Cand B", 55, 306, 1, True, 11_000_000, 17_000_000, 55),
-        ]
-    )
-
-
-@pytest.fixture
-def snapshot_path(tmp_path: Path) -> str:
-    out = str(tmp_path / "snapshot.sqlite")
-    build_snapshot(_frame(), out, build_timestamp=_TS)
-    return out
-
-
-@pytest.fixture
-def settings(snapshot_path: str) -> ApiSettings:
-    return ApiSettings(snapshot_path=snapshot_path, cors_origins=["http://localhost:5173"])
-
-
-@pytest.fixture
-def client(settings: ApiSettings) -> Iterator[TestClient]:
-    # ``with`` runs the lifespan, so app.state.repository is opened (no live DB).
-    with TestClient(create_app(settings)) as c:
-        yield c
-
 
 # --- startup / config -------------------------------------------------------
 
@@ -116,9 +50,9 @@ def test_opens_snapshot_path_with_spaces(tmp_path: Path) -> None:
     spaced = tmp_path / "My Snapshots"
     spaced.mkdir()
     out = str(spaced / "snap.sqlite")
-    build_snapshot(_frame(), out, build_timestamp=_TS)
+    build_snapshot(synthetic_ec_pv_frame(), out, build_timestamp=SNAPSHOT_TS)
     repo = SnapshotRepository.open(out)
-    assert repo.meta().year_min == 2020
+    assert repo.meta().year_min == 2016
 
 
 def test_schema_version_mismatch_fails_loud_at_open(
@@ -142,7 +76,7 @@ def test_health_reports_status_and_snapshot_meta(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert body["snapshot_loaded"] is True
     assert body["snapshot_version"]  # the content hash from the build
-    assert body["coverage"] == {"year_min": 2020, "year_max": 2020}
+    assert body["coverage"] == {"year_min": 2016, "year_max": 2020}
     assert body["source"] == "MIT"
 
 
