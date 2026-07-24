@@ -27,10 +27,22 @@ from dataclasses import fields
 from pathlib import Path
 
 from usvote.snapshot_schema import (
+    DATA_COLUMNS,
+    DATA_TABLE,
     META_TABLE,
+    ROLLUP_COLUMNS,
+    ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotMeta,
 )
+
+#: Server-side row cap (D031 / #97). No legitimate scoped query approaches it: the whole
+#: redistributable window is ~a few thousand ``ec_pv`` rows and the widest endpoint
+#: (one candidate across the window) is ≈13 years × 51 states ≈ 660 rows — so hitting it
+#: means a grain/fan-out regression, not a large-but-valid result. We therefore fetch
+#: ``LIMIT MAX_ROWS + 1`` and **fail loud** on overflow (:class:`SnapshotError`) rather
+#: than silently truncate: silent truncation is exactly the drop this codebase forbids.
+MAX_ROWS = 5000
 
 
 class SnapshotError(RuntimeError):
@@ -123,3 +135,139 @@ class SnapshotRepository:
     def snapshot_version(self) -> str:
         """The content-hash version — the ETag value and the freshness key (D028)."""
         return self._meta.snapshot_version
+
+    # --- data reads (E8-S3, #97) --------------------------------------------
+    #
+    # Each returns plain ``dict`` rows keyed by snapshot column (the route layer maps
+    # them to public Pydantic models). Column lists are module constants, never user
+    # input, so the f-string interpolation is safe (the S608 noqa).
+
+    def _select(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        """Run a capped SELECT; fail loud if it would exceed :data:`MAX_ROWS`.
+
+        Fetches ``LIMIT MAX_ROWS + 1`` and raises :class:`SnapshotError` on overflow — a
+        grain/fan-out regression, never a silent truncation (see :data:`MAX_ROWS`).
+        """
+        conn = self._connect(self._path)
+        try:
+            rows = conn.execute(f"{sql} LIMIT ?", (*params, MAX_ROWS + 1)).fetchall()
+        finally:
+            conn.close()
+        if len(rows) > MAX_ROWS:
+            raise SnapshotError(
+                f"query returned more than the {MAX_ROWS}-row cap "
+                f"({sql!r}, params={params!r}) — a grain/fan-out regression; "
+                "no legitimate scoped query is this large."
+            )
+        return [dict(r) for r in rows]
+
+    def _exists(self, column: str, value: object) -> bool:
+        """Whether any ``ec_pv`` row has ``column == value`` (for clean 404s)."""
+        conn = self._connect(self._path)
+        try:
+            row = conn.execute(
+                f"SELECT 1 FROM {DATA_TABLE} WHERE {column} = ? LIMIT 1",  # noqa: S608
+                (value,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+
+    def list_years(
+        self, year_from: int | None = None, year_to: int | None = None
+    ) -> list[dict[str, object]]:
+        """Covered years with a distinct-candidate count, from the roll-up table."""
+        clauses, params = _year_range_clauses(year_from, year_to)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return self._select(
+            f"SELECT year, COUNT(*) AS candidate_count FROM {ROLLUP_TABLE}"  # noqa: S608
+            f"{where} GROUP BY year ORDER BY year",
+            tuple(params),
+        )
+
+    def year_exists(self, year: int) -> bool:
+        """Whether the snapshot contains this year (pre-1976 / unknown → 404)."""
+        return self._exists("year", year)
+
+    def rows_by_year(
+        self, year: int, state: str | None = None, candidate: str | None = None
+    ) -> list[dict[str, object]]:
+        """All ``ec_pv`` state rows for a year, optionally narrowed by state/cand."""
+        clauses = ["year = ?"]
+        params: list[object] = [year]
+        if state is not None:
+            clauses.append("state_usps = ?")
+            params.append(state.upper())
+        if candidate is not None:
+            clauses.append("candidate_slug = ?")
+            params.append(candidate.lower())
+        cols = ", ".join(DATA_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
+            "ORDER BY state, candidate_slug",
+            tuple(params),
+        )
+
+    def rollup_by_year(self, year: int) -> list[dict[str, object]]:
+        """The precomputed national roll-up rows for a year (no handler computation)."""
+        cols = ", ".join(ROLLUP_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {ROLLUP_TABLE} WHERE year = ? "  # noqa: S608
+            "ORDER BY president_electoral_rank",
+            (year,),
+        )
+
+    def state_exists(self, usps: str) -> bool:
+        """Whether the snapshot contains this USPS state code (else 404)."""
+        return self._exists("state_usps", usps.upper())
+
+    def rows_by_state(
+        self, usps: str, year_from: int | None = None, year_to: int | None = None
+    ) -> list[dict[str, object]]:
+        """All ``ec_pv`` rows for one state across years (optional year window)."""
+        clauses = ["state_usps = ?"]
+        params: list[object] = [usps.upper()]
+        extra, extra_params = _year_range_clauses(year_from, year_to)
+        clauses += extra
+        params += extra_params
+        cols = ", ".join(DATA_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
+            "ORDER BY year, candidate_slug",
+            tuple(params),
+        )
+
+    def candidate_exists(self, slug: str) -> bool:
+        """Whether the snapshot contains this candidate slug (else 404)."""
+        return self._exists("candidate_slug", slug.lower())
+
+    def rows_by_candidate(
+        self, slug: str, year_from: int | None = None, year_to: int | None = None
+    ) -> list[dict[str, object]]:
+        """All ``ec_pv`` rows for one candidate across years (optional year window)."""
+        clauses = ["candidate_slug = ?"]
+        params: list[object] = [slug.lower()]
+        extra, extra_params = _year_range_clauses(year_from, year_to)
+        clauses += extra
+        params += extra_params
+        cols = ", ".join(DATA_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
+            "ORDER BY year, state",
+            tuple(params),
+        )
+
+
+def _year_range_clauses(
+    year_from: int | None, year_to: int | None
+) -> tuple[list[str], list[object]]:
+    """Build ``year >= ?`` / ``year <= ?`` SQL fragments for an optional window."""
+    clauses: list[str] = []
+    params: list[object] = []
+    if year_from is not None:
+        clauses.append("year >= ?")
+        params.append(year_from)
+    if year_to is not None:
+        clauses.append("year <= ?")
+        params.append(year_to)
+    return clauses, params
