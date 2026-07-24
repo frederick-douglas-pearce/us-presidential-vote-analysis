@@ -116,8 +116,11 @@ def get_election(
     """The state fact rows for a year (``data``) plus its roll-up (``summary``).
 
     An unknown or out-of-window year (e.g. pre-1976) is a 404, not an error. The
-    optional ``state`` / ``candidate`` filters narrow ``data``; a filter that matches
-    nothing is a 200 with an empty ``data`` (a filter, not a missing resource).
+    optional ``state`` / ``candidate`` filters narrow ``data`` (and ``meta.count``); a
+    filter that matches nothing is a 200 with an empty ``data`` (a filter, not a missing
+    resource). ``summary`` is the **national** roll-up for the whole year and is
+    deliberately *not* narrowed by those filters — national totals are the flip context,
+    unchanged by a per-state/candidate view of the rows.
     """
     repo = _repo(request)
     if not repo.year_exists(year):
@@ -150,10 +153,13 @@ def get_election_summary(
     hybrid / flip / margin (those are E8-S8).
     """
     repo = _repo(request)
-    if not repo.year_exists(year):
+    # Gate on the roll-up itself (not ``ec_pv`` via ``year_exists``): existence and the
+    # data served are then the *same* source, so this can't 200-with-empty on a
+    # (build-regression) year present in the fact but absent from the roll-up.
+    rows = repo.rollup_by_year(year)
+    if not rows:
         raise ResourceNotFound("year_not_found", _unknown_year_message(repo, year))
     cache_dependency(request, response)
-    rows = repo.rollup_by_year(year)
     data = [models.NationalSummaryRow.model_validate(r) for r in rows]
     return models.Envelope(data=data, meta=_meta(repo, len(data)))
 

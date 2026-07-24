@@ -189,6 +189,22 @@ class SnapshotRepository:
         """Whether the snapshot contains this year (pre-1976 / unknown → 404)."""
         return self._exists("year", year)
 
+    def _data_rows(
+        self, clauses: list[str], params: list[object], order_by: str
+    ) -> list[dict[str, object]]:
+        """Capped SELECT of the full ``ec_pv`` projection under a WHERE + ORDER BY.
+
+        The one shared seam for the by-year / by-state / by-candidate fact reads, so the
+        column projection and the cap live in one place. ``clauses`` and ``order_by``
+        come only from module constants, never user input (the S608 noqa).
+        """
+        cols = ", ".join(DATA_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {DATA_TABLE} "  # noqa: S608
+            f"WHERE {' AND '.join(clauses)} ORDER BY {order_by}",
+            tuple(params),
+        )
+
     def rows_by_year(
         self, year: int, state: str | None = None, candidate: str | None = None
     ) -> list[dict[str, object]]:
@@ -201,12 +217,7 @@ class SnapshotRepository:
         if candidate is not None:
             clauses.append("candidate_slug = ?")
             params.append(candidate.lower())
-        cols = ", ".join(DATA_COLUMNS)
-        return self._select(
-            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
-            "ORDER BY state, candidate_slug",
-            tuple(params),
-        )
+        return self._data_rows(clauses, params, "state, candidate_slug")
 
     def rollup_by_year(self, year: int) -> list[dict[str, object]]:
         """The precomputed national roll-up rows for a year (no handler computation)."""
@@ -230,12 +241,7 @@ class SnapshotRepository:
         extra, extra_params = _year_range_clauses(year_from, year_to)
         clauses += extra
         params += extra_params
-        cols = ", ".join(DATA_COLUMNS)
-        return self._select(
-            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
-            "ORDER BY year, candidate_slug",
-            tuple(params),
-        )
+        return self._data_rows(clauses, params, "year, candidate_slug")
 
     def candidate_exists(self, slug: str) -> bool:
         """Whether the snapshot contains this candidate slug (else 404)."""
@@ -250,12 +256,7 @@ class SnapshotRepository:
         extra, extra_params = _year_range_clauses(year_from, year_to)
         clauses += extra
         params += extra_params
-        cols = ", ".join(DATA_COLUMNS)
-        return self._select(
-            f"SELECT {cols} FROM {DATA_TABLE} WHERE {' AND '.join(clauses)} "  # noqa: S608
-            "ORDER BY year, state",
-            tuple(params),
-        )
+        return self._data_rows(clauses, params, "year, state")
 
 
 def _year_range_clauses(

@@ -190,6 +190,14 @@ def test_get_summary_unknown_year_404(client: TestClient) -> None:
     assert resp.json()["error"]["code"] == "year_not_found"
 
 
+def test_summary_ignores_row_filters_on_the_year_endpoint(client: TestClient) -> None:
+    """The national ``summary`` is not narrowed by a ``data`` filter (documented)."""
+    body = client.get("/v1/elections/2020", params={"candidate": "cand-b"}).json()
+    assert {r["candidate_slug"] for r in body["data"]} == {"cand-b"}
+    # summary still lists every candidate — it's the national roll-up for the year.
+    assert {r["candidate_slug"] for r in body["summary"]} == {"cand-a", "cand-b"}
+
+
 # --- one state --------------------------------------------------------------
 
 
