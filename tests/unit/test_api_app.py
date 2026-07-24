@@ -160,7 +160,17 @@ def test_v1_meta_carries_etag_and_cache_control(client: TestClient) -> None:
     assert resp.status_code == 200
     assert resp.headers["cache-control"].startswith("public, max-age=3600")
     etag = resp.headers["etag"]
-    assert etag == f'"{resp.json()["snapshot_version"]}"'
+    assert etag == f'"{resp.json()["provenance"]["snapshot_version"]}"'
+
+
+def test_v1_meta_carries_human_provenance(client: TestClient) -> None:
+    """/v1/meta spells out the source/license and the redistributable boundary (#98)."""
+    prov = client.get("/v1/meta").json()["provenance"]
+    assert prov["source"] == "MIT"
+    assert prov["source_name"] == "MIT Election Lab"
+    assert prov["license"] == "CC0-1.0"
+    assert prov["license_url"].startswith("http")
+    assert "UCSB" in prov["redistributable_note"]
 
 
 def test_conditional_get_returns_304_when_version_matches(client: TestClient) -> None:

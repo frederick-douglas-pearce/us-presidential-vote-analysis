@@ -107,10 +107,14 @@ def test_list_elections_returns_years_with_counts(client: TestClient) -> None:
     assert [item["year"] for item in body["data"]] == [2016, 2020]
     assert all(item["candidate_count"] == 2 for item in body["data"])
     assert body["meta"]["count"] == 2
-    assert body["meta"]["source"] == "MIT"
-    assert body["meta"]["license"]
-    assert body["meta"]["coverage"] == {"year_min": 2016, "year_max": 2020}
-    assert body["meta"]["snapshot_version"]
+    prov = body["meta"]["provenance"]
+    assert prov["source"] == "MIT"
+    assert prov["source_name"] == "MIT Election Lab"
+    assert prov["license"] == "CC0-1.0"
+    assert prov["license_url"]
+    assert "UCSB" in prov["redistributable_note"]
+    assert prov["coverage"] == {"year_min": 2016, "year_max": 2020}
+    assert prov["snapshot_version"]
 
 
 def test_list_elections_year_filter(client: TestClient) -> None:
