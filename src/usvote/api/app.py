@@ -18,16 +18,34 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from usvote.api import routes
 from usvote.api.cache import NotModified, cache_dependency, not_modified_handler
 from usvote.api.config import ApiSettings
+from usvote.api.models import ErrorBody, ErrorDetail
 from usvote.api.repository import SnapshotRepository
+from usvote.api.routes import ResourceNotFound
 
 #: ``Cache-Control`` for the liveness probe — never cached, unlike the ``/v1`` surface.
 _HEALTH_CACHE_CONTROL = "no-store"
+
+#: ``Cache-Control`` for a 404: a not-found body must never be cached as if it were the
+#: resource (the #97 architect note — a 404 is not a representation of the URL).
+_ERROR_CACHE_CONTROL = "no-store"
+
+
+def resource_not_found_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Render :class:`~usvote.api.routes.ResourceNotFound` as a typed, uncached 404."""
+    assert isinstance(exc, ResourceNotFound)
+    body = ErrorBody(error=ErrorDetail(code=exc.code, message=exc.message))
+    return JSONResponse(
+        status_code=404,
+        content=body.model_dump(),
+        headers={"Cache-Control": _ERROR_CACHE_CONTROL},
+    )
 
 
 @asynccontextmanager
@@ -77,6 +95,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.add_exception_handler(NotModified, not_modified_handler)
+    app.add_exception_handler(ResourceNotFound, resource_not_found_handler)
     # No credentials mode: this is unauthenticated, read-only public data with no
     # cookies, so `allow_credentials` buys nothing — and enabling it turns an operator's
     # explicit `USVOTE_API_CORS_ORIGINS=*` into reflect-any-origin-*with-credentials*
@@ -115,4 +134,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         return _meta_block(app.state.repository)
 
     app.include_router(v1)
+    # The data endpoints (E8-S3) live on their own router: they must NOT carry the
+    # blanket ``cache_dependency`` (which would 304 an unknown resource before the
+    # handler's 404 check), so each calls it manually after existence. See routes.py.
+    app.include_router(routes.router, prefix=settings.version_prefix)
     return app
