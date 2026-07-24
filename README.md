@@ -60,7 +60,41 @@ $ python -m usvote.snapshot     # build the snapshot from dwh.ec_pv_redistributa
 $ python -m usvote.api          # serve it locally (no DB needed); or `python -m usvote.api serve --port 8000`
 ```
 
-For production/container use, point an ASGI server straight at the app factory: `uvicorn --factory usvote.api:create_app`. The server starts and answers requests with Postgres **stopped** — that is the point. `GET /health` reports the loaded snapshot's version and coverage; the data endpoints live under the versioned `/v1` prefix ([`GET /v1/meta`](docs/api-snapshot.md) is the provenance block; the by-year/state/candidate reads land in E8-S3). CORS defaults to localhost and is overridden with `USVOTE_API_CORS_ORIGINS`.
+For production/container use, point an ASGI server straight at the app factory: `uvicorn --factory usvote.api:create_app`. The server starts and answers requests with Postgres **stopped** — that is the point. `GET /health` reports the loaded snapshot's version and coverage; the data endpoints live under the versioned `/v1` prefix: `GET /v1/elections` (list covered years), `/v1/elections/{year}` (per-state rows + national summary), `/v1/elections/{year}/summary` (the national roll-up), `/v1/states/{usps}`, and `/v1/candidates/{slug}` (each a typed Pydantic model in a shared `{data, meta}` envelope; [`GET /v1/meta`](docs/api-snapshot.md) is the provenance block). Interactive OpenAPI docs are served at `/docs`. CORS defaults to localhost and is overridden with `USVOTE_API_CORS_ORIGINS`.
+
+#### Local smoke test (full pipeline → live API)
+
+The end-to-end check we run repeatedly while building out E8: warehouse → snapshot → HTTP, then hit the live endpoints against real 1976&ndash;2024 data. Configure the environment first (see [Configuration](#configuration)) — the build steps read `PGPASSWORD` from your git-ignored `.env`, so load it into the shell once:
+
+```
+$ set -a; source .env; set +a               # load PG* + USVOTE_* (never commit .env)
+
+# 1. Build the warehouse (needs Postgres). ~30s; scrapes the Archives + loads MIT.
+$ python -m usvote all                       # a fresh/empty DB needs no --replace
+
+# 2. Materialize the read-only snapshot (needs Postgres; reads dwh.ec_pv_redistributable).
+$ python -m usvote.snapshot
+
+# 3. Serve it (no DB — only USVOTE_API_SNAPSHOT_PATH). Pick a free port if 8000 is taken.
+$ python -m usvote.api serve --port 8000     # Swagger UI at http://127.0.0.1:8000/docs
+```
+
+Then, in a second shell, sanity-check the live surface (these need only the running server — no database):
+
+```
+$ B=http://127.0.0.1:8000/v1
+$ curl -s "$B/elections" | jq -c '{count: .meta.count, first: .data[0], last: .data[-1]}'
+# → {"count":13,"first":{"year":1976,...},"last":{"year":2024,...}}
+
+$ curl -s "$B/elections/2000/summary" \
+    | jq -c '.data[] | {slug: .candidate_slug, ec: .national_electoral_votes, pv: .national_pv_votes, took_office}'
+# → Bush: 271 EC / 50,456,169 PV / took_office true
+#   Gore: 266 EC / 50,996,062 PV / took_office false   ← the thesis: lost the EC, won the popular vote
+
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/elections/1900"   # → 404 (pre-1976, outside the window)
+```
+
+`GET /health` (unversioned) reports the loaded snapshot's version and coverage with no database at all. Stop the server with Ctrl-C.
 
   Alternatively, open the original notebook in JupyterLab to run or explore step 1 interactively:
 
