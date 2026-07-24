@@ -60,6 +60,17 @@ def test_enforced_allows_v1_with_correct_secret(enforced_client: TestClient) -> 
     assert resp.status_code == 200
 
 
+def test_enforced_non_ascii_header_is_403_not_500(enforced_client: TestClient) -> None:
+    # A non-ASCII secret header must be a clean 403, not a 500. Sent as raw *bytes*
+    # (as a real client would): uvicorn/Starlette decode header bytes as latin-1, so the
+    # guard sees a non-ASCII str — and str hmac.compare_digest raises TypeError (→ 500).
+    # The guard compares bytes to avoid that (regression for the code-review finding).
+    resp = enforced_client.get(
+        "/v1/meta", headers={ORIGIN_SECRET_HEADER: b"\xff\xfe\x80"}
+    )
+    assert resp.status_code == 403
+
+
 def test_enforced_covers_data_routes(enforced_client: TestClient) -> None:
     # A data route (not just /meta) is protected too — the synthetic frame has 2016.
     assert enforced_client.get("/v1/elections/2016").status_code == 403

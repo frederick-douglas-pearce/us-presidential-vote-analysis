@@ -61,12 +61,18 @@ def _make_guard(
     compare); all other paths pass through untouched.
     """
 
+    # Compare as bytes, not str: Starlette decodes header values as latin-1, so a
+    # client can send a non-ASCII secret header — and hmac.compare_digest raises
+    # TypeError on non-ASCII *str* (→ a 500 instead of a clean 403). Bytes comparison
+    # has no ASCII restriction and is still constant-time.
+    expected = secret.encode("utf-8")
+
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if request.url.path.startswith(protected_prefix):
-            provided = request.headers.get(ORIGIN_SECRET_HEADER, "")
-            if not hmac.compare_digest(provided, secret):
+            provided = request.headers.get(ORIGIN_SECRET_HEADER, "").encode("utf-8")
+            if not hmac.compare_digest(provided, expected):
                 return JSONResponse(
                     status_code=403,
                     content=_FORBIDDEN_BODY,
