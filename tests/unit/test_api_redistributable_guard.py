@@ -64,4 +64,6 @@ def test_no_endpoint_surfaces_a_non_mit_row(client: TestClient) -> None:
     for path in paths:
         body = client.get(path).json()
         for row in body["data"]:
-            assert row.get("source") in (None, "MIT"), f"{path}: {row}"
+            # ``row["source"]`` (not ``.get``) so a dropped/renamed field fails loud
+            # rather than silently matching the allowed ``None``.
+            assert row["source"] in (None, "MIT"), f"{path}: {row}"

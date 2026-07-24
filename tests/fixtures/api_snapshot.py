@@ -33,8 +33,8 @@ import pandas as pd
 #: stable across test runs. Informational only — excluded from the content hash (D028).
 SNAPSHOT_TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 
-#: State full-name → USPS code, for the states this fixture uses.
-_USPS = {"Texas": "TX", "California": "CA", "Florida": "FL"}
+#: State full-name → USPS code, for the states this fixture builds rows for.
+_USPS = {"Texas": "TX", "California": "CA"}
 
 
 def api_snapshot_row(
@@ -91,34 +91,37 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
     two years:
 
     - **2016 — the flip.** ``Cand B`` takes office with the larger national EC total
-      (100 vs 80) but the *smaller* national popular vote (13,000,000 vs 18,000,000):
+      (55 vs 38) but the *smaller* national popular vote (13,000,000 vs 18,000,000):
       an "EC winner ≠ PV winner" year, so ``/v1/elections/2016/summary`` can be asserted
-      to expose the flip.
+      to expose the flip. (``national_electoral_votes`` equals the sum of the candidate's
+      per-state ``president_electoral_votes``, matching the real view's window sum.)
     - **2020 — ordinary split.** ``Cand A`` wins Texas, ``Cand B`` wins California and
       takes office (national EC 55 vs 38). These rows match #97's original fixture so its
       value-specific rollup assertions carry over unchanged.
     """
     return pd.DataFrame(
         [
-            # 2016 — national flip: B took office (EC 100) but A won the PV (18M vs 13M).
+            # 2016 — national flip: B took office (EC 55) but A won the PV (18M vs 13M).
+            # national_ev == sum of the candidate's per-state president_ev (A: 38+0=38,
+            # B: 0+55=55), so the fixture matches the real view's window sum.
             api_snapshot_row(
                 year=2016, state="Texas", candidate_id=1, candidate="Cand A",
-                president_ev=38, national_ev=80, rank=2, took_office=False,
+                president_ev=38, national_ev=38, rank=2, took_office=False,
                 candidate_votes=8_000_000, state_total=14_000_000, total_ev=38,
             ),
             api_snapshot_row(
                 year=2016, state="California", candidate_id=1, candidate="Cand A",
-                president_ev=0, national_ev=80, rank=2, took_office=False,
+                president_ev=0, national_ev=38, rank=2, took_office=False,
                 candidate_votes=10_000_000, state_total=17_000_000, total_ev=55,
             ),
             api_snapshot_row(
                 year=2016, state="Texas", candidate_id=2, candidate="Cand B",
-                president_ev=0, national_ev=100, rank=1, took_office=True,
+                president_ev=0, national_ev=55, rank=1, took_office=True,
                 candidate_votes=6_000_000, state_total=14_000_000, total_ev=38,
             ),
             api_snapshot_row(
                 year=2016, state="California", candidate_id=2, candidate="Cand B",
-                president_ev=55, national_ev=100, rank=1, took_office=True,
+                president_ev=55, national_ev=55, rank=1, took_office=True,
                 candidate_votes=7_000_000, state_total=17_000_000, total_ev=55,
             ),
             # 2020 — split: A wins TX (38), B wins CA (55, rank 1, took office).

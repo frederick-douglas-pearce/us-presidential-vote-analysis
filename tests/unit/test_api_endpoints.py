@@ -222,11 +222,8 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
         assert "candidate_id" not in client.get(path).text, path
 
 
-def test_every_served_pv_row_is_mit(client: TestClient) -> None:
-    """Defense-in-depth: no non-MIT (``redistributable=false``) row is reachable."""
-    for path in ("/v1/elections/2020", "/v1/states/CA", "/v1/candidates/cand-a"):
-        for row in client.get(path).json()["data"]:
-            assert row["source"] in (None, "MIT"), path
+# The "no served row is non-MIT" sweep now lives in test_api_redistributable_guard.py
+# (full year/state/candidate sweep), superseding the old three-path spot-check here.
 
 
 # --- server-side cap fails loud, never truncates ----------------------------
