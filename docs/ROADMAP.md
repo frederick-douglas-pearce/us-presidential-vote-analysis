@@ -187,8 +187,10 @@ decision or research task later.
    analysis back to 1976 is in hand (E3, D008, D014).
 2. **Fate of the existing notebook.** Keep it as a research artifact vs. fully migrate
    into `src/` — an architecture decision, deferred to E1/E2 design.
-3. **API + DB hosting.** Currently local Postgres. Hosting for both the DB and the API
-   is deferred infra, undecided.
+3. **API + DB hosting.** **API-hosting half RESOLVED (D032/D034)** — the API deploys to
+   Cloud Run behind Cloudflare (free), keyless via WIF (E8-S7, #101). The **DB-hosting**
+   half remains open: the warehouse is still local Postgres, read only at snapshot-build
+   time (D028), so no live DB is hosted; whether/where to host Postgres is still undecided.
 4. **Detailed hybrid-method spec.** Including the no-270 contingent-election legal
    treatment. Largely settled in Fred's head but unwritten; a named future workstream,
    not an MVP blocker (D010, D011).

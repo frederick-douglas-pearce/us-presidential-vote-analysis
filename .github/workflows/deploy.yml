@@ -1,0 +1,176 @@
+# Deploy the API to Cloud Run behind Cloudflare (E8-S7, #101 / D034).
+#
+# Owner-run, keyless (Workload Identity Federation — no long-lived service-account key).
+# It pulls the pre-built snapshot from a private GCS bucket, builds the slim image in CI
+# (D033), pushes to Artifact Registry, deploys to Cloud Run with the cost knobs, purges
+# the Cloudflare edge cache AFTER the new revision serves traffic (D034 fork 3), and runs
+# post-deploy assertions (origin lock 403 + Cloudflare 200 + /health).
+#
+# ALL environment-specific values come from repo Variables/Secrets so nothing is
+# hardcoded — set them once during provisioning (see docs/deploy-cloud-run.md):
+#   Variables: GCP_PROJECT_ID, GCP_REGION, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SA,
+#              GCP_RUNTIME_SA, ARTIFACT_IMAGE (region-docker.pkg.dev/proj/repo/usvote-api),
+#              SNAPSHOT_GCS_URI (gs://bucket/api_snapshot.sqlite), CLOUD_RUN_SERVICE,
+#              API_CORS_ORIGINS, ORIGIN_SECRET_NAME (Secret Manager secret id),
+#              CLOUDFLARE_HOSTNAME (api.example.org)  [optional until Cloudflare is live]
+#   Secrets:   CLOUDFLARE_API_TOKEN (Cache Purge, single zone), CLOUDFLARE_ZONE_ID
+#              [both optional until Cloudflare is live]
+#
+# Trigger is workflow_dispatch ONLY — never pull_request (a forked PR must not deploy or
+# read secrets). Gated behind the `production` GitHub Environment (add a required reviewer
+# in repo settings for an extra human gate on this irreversible public deploy).
+
+name: Deploy (Cloud Run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this deploy (audit note; e.g. 'refresh snapshot 2028')"
+        required: false
+        default: "manual deploy"
+
+permissions:
+  contents: read      # checkout
+  id-token: write     # mint the WIF OIDC token
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false   # never cancel an in-flight deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production   # add a required reviewer in repo settings (human gate)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keyless auth via Workload Identity Federation. The provider must be attribute-
+      # locked to THIS repo (see runbook) so no other repo can impersonate the SA.
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # The snapshot is a DATA input built from the local warehouse and uploaded to GCS
+      # (D034 fork 1); CI never builds it. Pull it into the Docker build context.
+      - name: Fetch snapshot from GCS
+        env:
+          SNAPSHOT_GCS_URI: ${{ vars.SNAPSHOT_GCS_URI }}
+        run: |
+          set -euo pipefail
+          gcloud storage cp "$SNAPSHOT_GCS_URI" ./api_snapshot.sqlite
+          test -s ./api_snapshot.sqlite
+
+      # Tag the image with the snapshot content hash (== snapshot_version) so "which data
+      # is live" is a first-class, greppable fact and the cache purge has a natural key.
+      - name: Derive image tag from snapshot version
+        id: ver
+        run: |
+          set -euo pipefail
+          VER=$(python -c "import sqlite3;print(sqlite3.connect('api_snapshot.sqlite').execute('select snapshot_version from snapshot_meta').fetchone()[0])")
+          echo "snapshot_version=$VER" >> "$GITHUB_OUTPUT"
+          echo "short=${VER:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Docker for Artifact Registry
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ vars.ARTIFACT_IMAGE }}
+          TAG: ${{ steps.ver.outputs.short }}
+        run: |
+          set -euo pipefail
+          docker build -t "${IMAGE}:${TAG}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${TAG}"
+          docker push "${IMAGE}:latest"
+
+      # Deploy with the cost knobs (D034 fork 1). --set-secrets binds the runtime origin
+      # secret from Secret Manager (the workflow never sees its value). The runtime SA is
+      # least-privilege (secretAccessor only). Traffic migrates to the new revision on
+      # success, so the subsequent purge runs strictly AFTER cutover (D034 fork 3).
+      - name: Deploy to Cloud Run
+        id: deploy
+        env:
+          SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          IMAGE: ${{ vars.ARTIFACT_IMAGE }}
+          TAG: ${{ steps.ver.outputs.short }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
+          CORS_ORIGINS: ${{ vars.API_CORS_ORIGINS }}
+          ORIGIN_SECRET_NAME: ${{ vars.ORIGIN_SECRET_NAME }}
+          SNAPSHOT_VERSION: ${{ steps.ver.outputs.snapshot_version }}
+        run: |
+          set -euo pipefail
+          args=(
+            "$SERVICE"
+            --image "${IMAGE}:${TAG}"
+            --region "$REGION"
+            --service-account "$RUNTIME_SA"
+            --min-instances=0
+            --max-instances=1
+            --cpu=1
+            --memory=512Mi
+            --concurrency=80
+            --timeout=30
+            --no-cpu-boost
+            --execution-environment=gen1
+            --allow-unauthenticated
+            --ingress=all
+            --labels "snapshot-version=${SNAPSHOT_VERSION:0:63}"
+            --set-env-vars "USVOTE_API_CORS_ORIGINS=${CORS_ORIGINS}"
+          )
+          # Bind the origin lock-down secret only when configured (fail-open until then).
+          if [ -n "${ORIGIN_SECRET_NAME}" ]; then
+            args+=(--update-secrets "USVOTE_API_ORIGIN_SECRET=${ORIGIN_SECRET_NAME}:latest")
+          fi
+          gcloud run deploy "${args[@]}"
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      # Purge the Cloudflare edge cache AFTER cutover so the edge refills from the NEW
+      # revision (D034 fork 3). No-op until Cloudflare is provisioned (secrets unset).
+      - name: Purge Cloudflare cache
+        if: ${{ vars.CLOUDFLARE_HOSTNAME != '' }}
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/purge_cache" \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}' | python -c "import sys,json;d=json.load(sys.stdin);sys.exit(0 if d.get('success') else 1)"
+
+      # Post-deploy assertions (D034 fork 2): the origin lock actually rejects direct
+      # run.app /v1 hits, Cloudflare serves /v1, and /health is up. Turns "is the lock on"
+      # into a tested gate rather than hope.
+      - name: Post-deploy smoke test
+        env:
+          RAW_URL: ${{ steps.deploy.outputs.url }}
+          ORIGIN_SECRET_NAME: ${{ vars.ORIGIN_SECRET_NAME }}
+          CF_HOST: ${{ vars.CLOUDFLARE_HOSTNAME }}
+        run: |
+          set -euo pipefail
+          echo "raw origin: $RAW_URL"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${RAW_URL}/health")
+          test "$code" = "200" || { echo "::error::/health on raw origin returned $code"; exit 1; }
+          if [ -n "${ORIGIN_SECRET_NAME}" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${RAW_URL}/v1/meta")
+            test "$code" = "403" || { echo "::error::origin lock OFF — raw /v1 returned $code, expected 403"; exit 1; }
+            echo "origin lock verified: raw /v1 -> 403"
+          fi
+          if [ -n "${CF_HOST}" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${CF_HOST}/v1/meta")
+            test "$code" = "200" || { echo "::error::Cloudflare host /v1 returned $code, expected 200"; exit 1; }
+            echo "Cloudflare path verified: https://${CF_HOST}/v1 -> 200"
+          fi
