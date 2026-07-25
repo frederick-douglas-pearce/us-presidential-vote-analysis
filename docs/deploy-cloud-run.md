@@ -141,6 +141,18 @@ uv run python -m usvote.snapshot          # writes $USVOTE_API_SNAPSHOT_PATH
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
 
+`usvote all` is a create-if-absent load — it assumes empty tables. If the warehouse **already
+has data** (you've built it before), a bare `all` fails with
+`UniqueViolation: … "state_pkey" … Key (state)=(Alabama) already exists`. Use **`--replace`**
+for a clean rebuild (drops + recreates the `dwh` schema, re-scrapes, reloads — destructive to
+the local warehouse only):
+
+```
+uv run python -m usvote all --replace     # rebuild an already-populated warehouse from scratch
+uv run python -m usvote.snapshot
+gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
+```
+
 **Redistributable-only (AC5)** is guaranteed at the source: the snapshot is built from
 `ec_pv_redistributable` (MIT/CC0 only, [D030](../.claude/specs/decisions.md)), re-asserted at
 build time. Nothing non-redistributable can reach the bucket or the hosted service.
