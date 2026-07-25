@@ -84,19 +84,22 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 
 ## 4. Origin secret in Secret Manager (D034 fork 2)
 
-A random shared secret. Cloudflare injects it as a header on every proxied request; the app
-rejects any `/v1` request that lacks it, so bots can't bypass the edge by hitting the raw
-`run.app` URL. The **runtime** SA (only) can read it. `openssl rand -hex 32` avoids the
-repo's `python` (pyenv pins 3.14 via `.python-version`, which may not be installed — a bare
-`python` there produces no output and creates an *empty* secret); hex is also clean to paste
-into the Cloudflare Transform Rule.
+A random shared secret. The Cloudflare Worker (§7) injects it as a header on every proxied
+request; the app rejects any `/v1` request that lacks it, so bots can't bypass the edge by
+hitting the raw `run.app` URL. The **runtime** SA (only) can read it.
+
+**Store it with `printf '%s'`, not a bare `openssl … | gcloud`.** `openssl rand -hex 32`
+appends a trailing newline; piped straight in, that `\n` is stored *in* the secret and Cloud
+Run injects it — so the origin lock **403s forever** (the Worker's clean header value never
+matches `value + \n`). `printf '%s' "$(…)"` strips it. (`openssl` also sidesteps the repo's
+pyenv `python` pin, which can silently create an empty secret.)
 
 ```
-openssl rand -hex 32 | \
+printf '%s' "$(openssl rand -hex 32)" | \
   gcloud secrets create usvote-origin-secret --data-file=- --replication-policy=automatic
 gcloud secrets add-iam-policy-binding usvote-origin-secret \
   --member="serviceAccount:${RUNTIME_SA}" --role=roles/secretmanager.secretAccessor
-# Note the value — you'll paste it into the Cloudflare Transform Rule in §7.
+# Note the value — you'll paste it into the Worker's ORIGIN_SECRET secret in §7.
 gcloud secrets versions access latest --secret=usvote-origin-secret
 ```
 
@@ -173,36 +176,78 @@ build time. Nothing non-redistributable can reach the bucket or the hosted servi
 | `CLOUD_RUN_SERVICE` | `$SERVICE` |
 | `API_CORS_ORIGINS` | your dashboard origin(s), comma-separated (never `*`) |
 | `ORIGIN_SECRET_NAME` | `usvote-origin-secret` |
-| `CLOUDFLARE_HOSTNAME` | `api.<domain>` — **leave unset for the very first deploy** |
+| `CLOUDFLARE_HOSTNAME` | `api.<domain>` — **don't create it for the first deploy** (see note) |
+
+> **`CLOUDFLARE_HOSTNAME`:** simply *don't create the variable* for the first (origin-only)
+> deploy — a variable that doesn't exist reads as empty and the workflow skips the Cloudflare
+> steps. Do **not** set a placeholder like `NA`: a non-empty value makes the purge + smoke
+> steps run and fail (the Cloudflare secrets aren't set yet).
 
 Add a protected **`production` Environment** (Settings → Environments) with yourself as a
-**required reviewer** — a human gate on this irreversible public deploy.
+**required reviewer** — a human gate on this irreversible public deploy. The reviewer rule
+must sit on the environment named exactly **`production`** (what the workflow references); a
+differently-named environment is ignored.
 
 **First deploy (origin still open, no public DNS yet):** run **Actions → Deploy (Cloud Run)
 → Run workflow**. It builds, pushes, deploys, and asserts `/health`. Grab the `run.app` URL
 from the deploy log.
 
-**Cloudflare setup** (now that the service exists), on your zone:
-1. **DNS:** add a **proxied** (orange-cloud) `CNAME api → <service>.run.app`; map the custom
-   domain to the service (`gcloud run domain-mappings create --service=$SERVICE
-   --domain=api.<domain> --region=$REGION`) and set SSL/TLS mode **Full (strict)**.
-2. **Cache Rule:** for `Hostname eq api.<domain> and URI Path starts_with "/v1"` → **Eligible
-   for cache**, **Edge Cache TTL** a long hold (e.g. 1 month) — this is the *long* hold the
-   [D034 caching model](../.claude/specs/decisions.md) relies on; the deploy purges it on
-   each new version. Leave `/health` uncached.
-3. **Transform Rule (origin lock):** add a request header
-   `X-Usvote-Origin-Secret: <the secret from §4>` on requests to `api.<domain>`.
-4. **Rate limiting:** a reasonable per-IP rule (e.g. 60 req/min on `/v1*`, block/challenge on
-   exceed) + enable **Bot Fight Mode** (Security → Bots).
-5. Get the **Zone ID** (zone Overview) and create a scoped **API Token** (My Profile → API
-   Tokens → *Zone → Cache Purge* on this zone only).
+**Cloudflare setup — a Worker front door** (now that the service exists). Cloud Run's
+`run.app` endpoint routes by the HTTP `Host` header, so a plain proxied `CNAME api → run.app`
+returns a **Google 404** (Cloudflare forwards the visitor's `Host: api.<domain>`, which Cloud
+Run doesn't recognize). Rewriting the Host needs Cloudflare's Origin Rules "Host Header
+Override" — **paywalled on the free plan** — so a free **Worker** does it instead, and also
+injects the origin secret and caches `/v1` at the edge (this replaces the DNS/Cache-Rule/
+Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decisions.md)).
 
-**Lock the origin + wire Cloudflare into CI:** set the GitHub **Secrets**
-`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ZONE_ID`, set the **Variable** `CLOUDFLARE_HOSTNAME =
-api.<domain>`, then **re-run the workflow**. This deploy binds the origin secret (now the raw
-`run.app` `/v1` returns **403**), purges Cloudflare, and the post-deploy smoke asserts raw
-`/v1` → 403 **and** `https://api.<domain>/v1` → 200. From here the origin is reachable only
-through Cloudflare's rate-limited, cached edge.
+1. **Create the Worker.** Workers & Pages → Create → **Start with Hello World!** → name it
+   `usvote-api-proxy` → Deploy → **Edit code**, replace the scaffold with this (set `ORIGIN`
+   to your `run.app` URL from the first deploy), and Deploy:
+   ```js
+   export default {
+     async fetch(request, env, ctx) {
+       const ORIGIN = "https://<service>-<projnum>.<region>.run.app"; // your run.app URL
+       const url = new URL(request.url);
+       const cacheable = request.method === "GET" && url.pathname.startsWith("/v1");
+       const cache = caches.default;
+       if (cacheable) { const hit = await cache.match(request); if (hit) return hit; }
+
+       // Rebuilding against the run.app URL makes the outbound Host = run.app (fixes the
+       // Google 404); then inject the origin secret from the Worker secret binding.
+       const req = new Request(ORIGIN + url.pathname + url.search, request);
+       req.headers.set("X-Usvote-Origin-Secret", env.ORIGIN_SECRET);
+       let resp = await fetch(req);
+
+       // Cache only successful /v1 responses: long EDGE hold (s-maxage) so the zero-scaled
+       // origin isn't woken between versions; moderate BROWSER max-age so a bug-fix deploy
+       // reflects promptly. Purged on deploy (purge_everything clears caches.default).
+       if (cacheable && resp.status === 200) {
+         resp = new Response(resp.body, resp);
+         resp.headers.set(
+           "Cache-Control",
+           "public, max-age=3600, s-maxage=2592000, stale-while-revalidate=86400"
+         );
+         ctx.waitUntil(cache.put(request, resp.clone()));
+       }
+       return resp;
+     },
+   };
+   ```
+2. **Bind the secret.** Worker → Settings → Variables and Secrets → add a **Secret** named
+   `ORIGIN_SECRET` = the value from §4 (no trailing space/newline) → Deploy.
+3. **Route it.** Worker → Settings → Domains & Routes → Add → **Custom Domain** →
+   `api.<domain>` (auto-creates the proxied DNS + cert). SSL/TLS mode → **Full (strict)**.
+   Test: `curl https://api.<domain>/health` → 200.
+4. **Rate limiting** (the Worker does NOT rate-limit): Security → WAF → Rate limiting rules →
+   `Hostname eq api.<domain> and URI Path starts_with "/v1"` → 60 req/min per IP → Block.
+   Enable **Bot Fight Mode** (Security → Bots).
+5. **Zone ID + Cache-Purge token:** zone Overview → copy the **Zone ID**; My Profile → API
+   Tokens → create a token scoped to **Zone · Cache Purge** on this zone only.
+
+**Wire Cloudflare into CI:** set the GitHub **Secrets** `CLOUDFLARE_API_TOKEN` +
+`CLOUDFLARE_ZONE_ID` and the **Variable** `CLOUDFLARE_HOSTNAME = api.<domain>`, then **re-run
+the workflow**. Now the raw `run.app` `/v1` returns **403** while `https://api.<domain>/v1`
+returns **200** through the cached, rate-limited edge — the post-deploy smoke asserts both.
 
 ## 8. Refreshing the data (the snapshot-refresh story, AC4)
 
