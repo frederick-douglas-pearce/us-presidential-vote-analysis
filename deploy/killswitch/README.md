@@ -12,7 +12,7 @@ of the budget. Un-pause by redeploying (`.github/workflows/deploy.yml` re-sets
 ## Deploy
 
 ```
-PROJECT=usvote-api ; REGION=us-west1 ; SERVICE=usvote-api
+PROJECT=uspv-api ; REGION=us-west1 ; SERVICE=usvote-api
 
 # 1. Pub/Sub topic the budget publishes to.
 gcloud pubsub topics create budget-alerts
