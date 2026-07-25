@@ -86,10 +86,13 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 
 A random shared secret. Cloudflare injects it as a header on every proxied request; the app
 rejects any `/v1` request that lacks it, so bots can't bypass the edge by hitting the raw
-`run.app` URL. The **runtime** SA (only) can read it.
+`run.app` URL. The **runtime** SA (only) can read it. `openssl rand -hex 32` avoids the
+repo's `python` (pyenv pins 3.14 via `.python-version`, which may not be installed — a bare
+`python` there produces no output and creates an *empty* secret); hex is also clean to paste
+into the Cloudflare Transform Rule.
 
 ```
-python -c "import secrets;print(secrets.token_urlsafe(32))" | \
+openssl rand -hex 32 | \
   gcloud secrets create usvote-origin-secret --data-file=- --replication-policy=automatic
 gcloud secrets add-iam-policy-binding usvote-origin-secret \
   --member="serviceAccount:${RUNTIME_SA}" --role=roles/secretmanager.secretAccessor
@@ -128,10 +131,13 @@ gcloud iam workload-identity-pools providers describe github-actions \
 The snapshot can only be built from the local warehouse (needs Postgres). CI never builds
 it — it's a **data input** pulled from GCS.
 
+Run these with `uv run` so the project's managed Python 3.14 + all deps are used (a bare
+`python` hits the pyenv `.python-version` pin — see §4):
+
 ```
 # Build the warehouse + snapshot locally (see README "Local smoke test").
-python -m usvote all
-python -m usvote.snapshot                 # writes $USVOTE_API_SNAPSHOT_PATH
+uv run python -m usvote all
+uv run python -m usvote.snapshot          # writes $USVOTE_API_SNAPSHOT_PATH
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
 
@@ -191,7 +197,7 @@ through Cloudflare's rate-limited, cached edge.
 Data changes rarely (a bug fix, or every ~4 years for a new election):
 
 ```
-python -m usvote all && python -m usvote.snapshot        # rebuild from the warehouse
+uv run python -m usvote all && uv run python -m usvote.snapshot   # rebuild from the warehouse
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
 
