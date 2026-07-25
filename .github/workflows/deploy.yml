@@ -160,17 +160,28 @@ jobs:
           ORIGIN_SECRET_NAME: ${{ vars.ORIGIN_SECRET_NAME }}
           CF_HOST: ${{ vars.CLOUDFLARE_HOSTNAME }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           echo "raw origin: $RAW_URL"
-          code=$(curl -s -o /dev/null -w '%{http_code}' "${RAW_URL}/health")
-          test "$code" = "200" || { echo "::error::/health on raw origin returned $code"; exit 1; }
+          # Cold-start-aware checks: the service scales to zero and this step runs right
+          # after a cache purge + revision cutover, so the first hits can wake a cold
+          # container or miss the just-purged edge and briefly return the wrong code.
+          # Retry each assertion (up to ~60s) before failing, so a warm-up race isn't a
+          # false deploy failure.
+          wait_for() {  # wait_for <url> <expected-code> <label>
+            local url="$1" want="$2" label="$3" code=""
+            for i in $(seq 1 15); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo 000)
+              if [ "$code" = "$want" ]; then
+                echo "  ✓ ${label}: ${code} (try ${i})"; return 0
+              fi
+              echo "  … ${label}: got ${code}, want ${want} (try ${i}); retrying"; sleep 4
+            done
+            echo "::error::${label} never returned ${want} (last=${code})"; return 1
+          }
+          wait_for "${RAW_URL}/health" 200 "raw /health" || exit 1
           if [ -n "${ORIGIN_SECRET_NAME}" ]; then
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${RAW_URL}/v1/meta")
-            test "$code" = "403" || { echo "::error::origin lock OFF — raw /v1 returned $code, expected 403"; exit 1; }
-            echo "origin lock verified: raw /v1 -> 403"
+            wait_for "${RAW_URL}/v1/meta" 403 "raw /v1 origin-lock" || exit 1
           fi
           if [ -n "${CF_HOST}" ]; then
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${CF_HOST}/v1/meta")
-            test "$code" = "200" || { echo "::error::Cloudflare host /v1 returned $code, expected 200"; exit 1; }
-            echo "Cloudflare path verified: https://${CF_HOST}/v1 -> 200"
+            wait_for "https://${CF_HOST}/v1/meta" 200 "cloudflare /v1" || exit 1
           fi
