@@ -19,7 +19,9 @@ from usvote.mit.transform import (
     RELIABILITY_EXACT,
     SOURCE_MIT,
     MITTransformError,
+    _filter_ec_getters,
     assert_shape,
+    assert_totals_not_exceeded,
     assert_totals_reconcile,
     transform_mit,
 )
@@ -80,6 +82,24 @@ class TestShape:
         # makes it possible, this fails HERE rather than silently loading a null party.
         assert not out["party"].isna().any()
         assert set(out["party"]) <= set(EC_GETTER_PARTIES)
+
+    def test_ec_getter_filter_drops_a_null_party_row(self) -> None:
+        # The structural half of the premise above. The test on the sample fixture can
+        # only show that no null party comes OUT — the fixture has none going in, so it
+        # cannot prove the mechanism. This injects one and pins that `.isin` treats NA
+        # as False, which is the single fact the assert_shape delegation rests on.
+        df = pd.DataFrame({"party": pd.array(["DEMOCRAT", None, "OTHER"], dtype="string")})
+        assert list(_filter_ec_getters(df)["party"]) == ["DEMOCRAT"]
+
+    def test_assert_totals_not_exceeded_raises_mit_typed_error(self) -> None:
+        # Same reasoning as the assert_shape test: the shared implementation must still
+        # fail as MITTransformError for MIT's callers.
+        df = pd.DataFrame({
+            "year": [2016], "state": ["NEW YORK"],
+            "candidate_votes": [101], "state_total_votes": [100],
+        })
+        with pytest.raises(MITTransformError, match="exceed the state total"):
+            assert_totals_not_exceeded(df)
 
 
 class TestFusionAggregation:
