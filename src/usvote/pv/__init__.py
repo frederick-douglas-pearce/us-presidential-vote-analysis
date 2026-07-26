@@ -14,6 +14,11 @@ It holds the shared PV contract, deliberately owned by no single source:
   shape guard (``assert_pv_shape``).
 - :mod:`usvote.pv.status` — the D024 ``pv_state_status`` roster contract and the
   two-way roster/fact silent-drop guard.
+- :mod:`usvote.pv.validate` — the frame invariants both sources assert (#82):
+  ``assert_pv_grain`` (one row per ``(year, state, candidate)``) and
+  ``assert_totals_not_exceeded``. Separate from ``schema.py`` because those are
+  invariants over the data *values*, not the D018 column/DDL contract — a frame can
+  satisfy the shape exactly and still violate both.
 - :mod:`usvote.pv.source` — the ``pv_source`` reference table (#68, D017): the SSOT for
   per-source attributes (``precedence_rank``/``redistributable``/``license``) *and* the
   source-name literals ``SOURCE_MIT``/``SOURCE_UCSB`` both source transforms stamp.

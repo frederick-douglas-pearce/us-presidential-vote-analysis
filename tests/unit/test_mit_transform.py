@@ -61,6 +61,16 @@ class TestShape:
         # redistributable is a per-source pv_source attribute (D017/D018), not a fact column.
         assert "redistributable" not in out.columns
 
+    def test_transform_emits_no_null_party(self, out: pd.DataFrame) -> None:
+        # The premise behind assert_shape delegating to the shared assert_pv_shape (#82).
+        # MIT's private shape check used to non-null EVERY shared column; the shared guard
+        # permits a null party (UCSB forward-compat, D018). Delegating is only
+        # behavior-preserving because _filter_ec_getters (party.isin(...), False on NA)
+        # drops null-party rows first — so no MIT frame can carry one. If a future change
+        # makes it possible, this fails HERE rather than silently loading a null party.
+        assert not out["party"].isna().any()
+        assert set(out["party"]) <= set(EC_GETTER_PARTIES)
+
 
 class TestFusionAggregation:
     def test_clinton_fusion_lines_collapse_and_sum(self, out: pd.DataFrame) -> None:

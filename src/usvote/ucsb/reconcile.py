@@ -337,7 +337,7 @@ def reconcile_ucsb(
 
     out = _rewrite_and_scope(pv_votes)
 
-    assert_pv_grain(out, error_cls=UCSBReconcileError)
+    assert_pv_grain(out, error_cls=UCSBReconcileError, stage="reconcile")
     assert_pv_columns(out, error_cls=UCSBReconcileError)
     _assert_getter_completeness(out, ec_getters, in_scope)
     assert_roster_covers_facts(

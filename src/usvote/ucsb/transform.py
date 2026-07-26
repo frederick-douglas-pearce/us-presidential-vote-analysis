@@ -69,6 +69,10 @@ from usvote.pv.status import (
     assert_roster_shape,
     assert_unique_roster_grain,
 )
+from usvote.pv.validate import assert_pv_grain as _assert_pv_grain
+from usvote.pv.validate import (
+    assert_totals_not_exceeded as _assert_totals_not_exceeded,
+)
 from usvote.ucsb.parse import (
     NO_POPULAR_VOTE_YEARS,
     PERCENT_TOLERANCE,
@@ -740,20 +744,23 @@ def assert_absence_matches_zero_ev(
 
 
 def assert_pv_grain(
-    df: pd.DataFrame, *, error_cls: type[Exception] = UCSBTransformError
+    df: pd.DataFrame,
+    *,
+    error_cls: type[Exception] = UCSBTransformError,
+    stage: str = "transform",
 ) -> None:
     """Assert one PV row per ``(year, state, candidate)`` (``source`` is constant).
 
     ``error_cls`` lets the reconcile stage (#38) re-run this after its candidate rewrite
     and raise its own :class:`~usvote.ucsb.reconcile.UCSBReconcileError`, mirroring how
-    :func:`usvote.mit.transform.assert_unique_grain` is reused across MIT's stages.
+    :func:`usvote.mit.transform.assert_unique_grain` is reused across MIT's stages;
+    ``stage`` (#82) makes the *message* name that stage too, which it previously did
+    not — a reconcile-stage duplicate used to report itself as a "transform" failure.
+
+    Delegates to :func:`usvote.pv.validate.assert_pv_grain` (#82) — MIT asserts the
+    identical invariant, and sibling sources cannot import each other (D015).
     """
-    dupes = df.loc[df.duplicated(["year", "state", "candidate"], keep=False)]
-    if not dupes.empty:
-        raise error_cls(
-            "UCSB transform grain violated — duplicate (year, state, candidate): "
-            f"{dupes[['year', 'state', 'candidate']].values.tolist()}"
-        )
+    _assert_pv_grain(df, error_cls=error_cls, source=SOURCE_UCSB, stage=stage)
 
 
 def assert_no_zero_votes(df: pd.DataFrame) -> None:
@@ -779,18 +786,10 @@ def assert_totals_not_exceeded(df: pd.DataFrame) -> None:
     Not equality: the dropped "OTHERS" aggregate columns are a legitimate residual, so
     only an *excess* over the state's published total signals a bug. (The exact
     reconciliation of every column against the totals row is the parser's, and runs on
-    the complete pre-drop candidate set.)
+    the complete pre-drop candidate set.) Delegates to the shared
+    :func:`usvote.pv.validate.assert_totals_not_exceeded` (#82).
     """
-    grouped = df.groupby(["year", "state"], as_index=False).agg(
-        csum=("candidate_votes", "sum"),
-        total=("state_total_votes", "first"),
-    )
-    over = grouped.loc[grouped["csum"] > grouped["total"]]
-    if not over.empty:
-        raise UCSBTransformError(
-            "UCSB candidate votes exceed the state total for "
-            f"{len(over)} (year, state) cell(s): {over.values.tolist()}"
-        )
+    _assert_totals_not_exceeded(df, error_cls=UCSBTransformError, source=SOURCE_UCSB)
 
 
 def assert_pv_columns(
