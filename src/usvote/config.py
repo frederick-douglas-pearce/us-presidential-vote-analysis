@@ -52,6 +52,12 @@ SHAPEFILE_PATH_VAR = "USVOTE_SHAPEFILE_PATH"
 #: top-level config rather than a subpackage config module.
 API_SNAPSHOT_PATH_VAR = "USVOTE_API_SNAPSHOT_PATH"
 
+#: Environment variable holding the path to the local Archives raw-HTML corpus (#89).
+#: EC-specific but top-level, because the EC pipeline *is* the flat top-level package
+#: (D006/D015) — there is no ``usvote/ec/`` config module for it to live in. Named to
+#: match ``USVOTE_UCSB_HTML_DIR``, whose corpus layout this one mirrors.
+EC_HTML_DIR_VAR = "USVOTE_EC_HTML_DIR"
+
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or invalid.
@@ -151,5 +157,33 @@ def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
         ),
         missing_hint=(
             "Check the path points at the unzipped TIGER2019 STATE shapefile (.shp)."
+        ),
+    )
+
+
+def ec_html_dir_from_env(environ: Mapping[str, str] = os.environ) -> str:
+    """Return the Archives raw-HTML corpus directory from ``USVOTE_EC_HTML_DIR``.
+
+    Required when asked for, and deliberately with no default — the mirror of
+    :func:`usvote.ucsb.config.ucsb_html_dir_from_env`, for the same reason: there is no
+    sensible default for a machine-local data directory, and defaulting would risk
+    snapshotting into (or replaying from) the wrong place.
+
+    Unlike UCSB's, this corpus is **optional to the pipeline**: Archives data is public
+    domain and the live scrape still works without it, so nothing calls this unless the
+    caller asked for corpus-backed behavior. What the variable buys is a warehouse
+    rebuild that costs zero requests — the path that feeds the public API snapshot
+    (D034) — rather than re-scraping ~49 pages of a site whose ``robots.txt`` asks for a
+    10-second crawl delay. ``environ`` is injectable for testing.
+    """
+    return require_path_from_env(
+        EC_HTML_DIR_VAR,
+        environ,
+        unset_hint=(
+            "Point it at a local Archives HTML corpus directory, then populate it "
+            "with: python -m usvote snapshot"
+        ),
+        missing_hint=(
+            "Create it and populate it with: python -m usvote snapshot"
         ),
     )

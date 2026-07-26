@@ -44,12 +44,17 @@ import sys
 from collections.abc import Mapping
 from typing import Any
 
-from usvote import config
+from usvote import config, scrape
 from usvote.db import DBC, DBConnectionError
 from usvote.mit.config import mit_csv_path_from_env
 from usvote.pipeline import run_ec_pipeline
 from usvote.ucsb.config import ucsb_html_dir_from_env
 from usvote.warehouse import SOURCE_UCSB, run_warehouse
+
+_NO_CORPUS_HELP = (
+    "Scrape archives.gov live even when USVOTE_EC_HTML_DIR points at a local corpus. "
+    "By default a complete corpus is used, which makes the rebuild network-free."
+)
 
 _REPLACE_HELP = (
     "Drop and recreate the dwh schema before loading (destructive full rebuild). "
@@ -95,7 +100,60 @@ def _resolve_ucsb_dir(
         return None
 
 
-def _run_ec(replace: bool) -> int:
+def _resolve_ec_fetch(
+    args: argparse.Namespace, environ: Mapping[str, str]
+) -> scrape.Fetch:
+    """Resolve the EC fetch seam: the local Archives corpus, or the live network.
+
+    Mirrors :func:`_resolve_ucsb_dir`'s posture — auto-detect, but **loudly** — with
+    one deliberate difference in strictness. Skipping UCSB merely builds without an
+    optional control; swapping the EC fetch source changes where the *spine's* data
+    comes from, so a detected corpus is verified complete
+    (:func:`usvote.scrape.assert_corpus_covers_years`) before it is used. A stale
+    corpus fails here, by name, instead of silently building a warehouse short a year.
+
+    ``--no-corpus`` forces the live scrape. When ``USVOTE_EC_HTML_DIR`` is unset we
+    scrape live, as before — the corpus is an optimization, never a requirement.
+    """
+    if getattr(args, "no_corpus", False):
+        return scrape.fetch_url
+    try:
+        html_dir = config.ec_html_dir_from_env(environ)
+    except config.ConfigError:
+        return scrape.fetch_url
+    scrape.assert_corpus_covers_years(html_dir)
+    print(f"Using the local Archives corpus at {html_dir} (no network requests).")
+    return scrape.fetch_from_corpus(html_dir)
+
+
+def _run_snapshot(args: argparse.Namespace) -> int:
+    """Fetch the Archives corpus to ``USVOTE_EC_HTML_DIR``. No DB involved."""
+    try:
+        html_dir = (
+            args.ec_dir
+            if args.ec_dir
+            else config.ec_html_dir_from_env(os.environ)
+        )
+    except config.ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+
+    print(
+        f"Snapshotting the Archives into {html_dir}. Pages already present are "
+        f"skipped; new ones are fetched {scrape.CRAWL_DELAY_SECONDS}s apart to honor "
+        f"archives.gov/robots.txt, so a full first run takes several minutes."
+    )
+    try:
+        manifest = scrape.snapshot_election_years(html_dir)
+    except scrape.ScrapeError as e:
+        print(f"Snapshot failed: {e}", file=sys.stderr)
+        return 1
+    pages = sum(1 for k in manifest if k != "index")
+    print(f"Archives corpus complete: {pages} year page(s) + the index in {html_dir}.")
+    return 0
+
+
+def _run_ec(replace: bool, fetch: scrape.Fetch = scrape.fetch_url) -> int:
     try:
         shapefile_path = config.shapefile_path_from_env()
         db_config = config.db_config_from_env()
@@ -107,7 +165,7 @@ def _run_ec(replace: bool) -> int:
     if dbc is None:
         return 1
 
-    run_ec_pipeline(dbc, shapefile_path, replace=replace, close=True)
+    run_ec_pipeline(dbc, shapefile_path, replace=replace, fetch=fetch, close=True)
     print("EC ingestion complete.")
     return 0
 
@@ -154,6 +212,7 @@ def _run_all(args: argparse.Namespace) -> int:
         mit_csv_path,
         ucsb_html_dir=ucsb_html_dir,
         replace=args.replace,
+        fetch=_resolve_ec_fetch(args, environ),
         environ=environ,
         close=True,
     )
@@ -179,6 +238,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Kept at the top level too, so bare ``python -m usvote --replace`` (the historical
     # spelling, no subcommand) still works and maps to the EC rebuild.
     parser.add_argument("--replace", action="store_true", help=_REPLACE_HELP)
+    parser.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
     sub = parser.add_subparsers(dest="command")
 
     ec_p = sub.add_parser(
@@ -189,6 +249,17 @@ def _build_parser() -> argparse.ArgumentParser:
     # subparser-default-clobber gotcha).
     ec_p.add_argument(
         "--replace", action="store_true", default=argparse.SUPPRESS, help=_REPLACE_HELP
+    )
+    ec_p.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
+
+    snap_p = sub.add_parser(
+        "snapshot",
+        help="Fetch the Archives HTML corpus to USVOTE_EC_HTML_DIR (no DB needed).",
+    )
+    snap_p.add_argument(
+        "--ec-dir",
+        default=None,
+        help="Write the corpus here instead of USVOTE_EC_HTML_DIR.",
     )
 
     all_p = sub.add_parser(
@@ -210,6 +281,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip UCSB unconditionally (build only the EC + MIT core).",
     )
+    all_p.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
     return parser
 
 
@@ -217,12 +289,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "snapshot":
+        return _run_snapshot(args)
     if args.command == "all":
         return _run_all(args)
     # Bare (``command is None``) and explicit ``ec`` both run the EC pipeline. argparse
     # leaves ``replace`` set by the top-level parser (default False) unless the ``ec``
     # subcommand overrode it.
-    return _run_ec(getattr(args, "replace", False))
+    return _run_ec(getattr(args, "replace", False), _resolve_ec_fetch(args, os.environ))
 
 
 if __name__ == "__main__":

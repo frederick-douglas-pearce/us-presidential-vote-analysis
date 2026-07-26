@@ -37,9 +37,15 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     monkeypatch.setattr(top, "DBC", lambda cfg: "DBC")
 
     def ec(
-        dbc: object, shapefile_path: str, *, replace: bool = False, close: bool = False
+        dbc: object,
+        shapefile_path: str,
+        *,
+        replace: bool = False,
+        fetch: Any = None,
+        close: bool = False,
     ) -> None:
-        calls["ec"].append({"replace": replace})
+        # ``fetch`` recorded so the corpus-vs-live choice (#89) is observable here.
+        calls["ec"].append({"replace": replace, "fetch": fetch})
 
     def wh(
         dbc: object,
@@ -48,6 +54,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         *,
         ucsb_html_dir: Any,
         replace: bool,
+        fetch: Any = None,
         environ: Any,
         close: bool,
     ) -> WarehouseResult:
@@ -72,7 +79,7 @@ def test_bare_and_ec_run_the_ec_pipeline(
     # Bare ``python -m usvote`` stays EC (backward compat), and ``--replace`` still works
     # bare (top-level) as well as on the explicit ``ec`` subcommand.
     assert top.main(argv) == 0
-    assert top_env["ec"] == [{"replace": replace}]
+    assert top_env["ec"] == [{"replace": replace, "fetch": top.scrape.fetch_url}]
     assert top_env["warehouse"] == []
 
 

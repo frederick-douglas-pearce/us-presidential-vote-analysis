@@ -18,7 +18,7 @@ its own pipeline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Container
+from collections.abc import Callable, Container, Mapping
 
 import pandas as pd
 
@@ -55,6 +55,39 @@ __all__ = [
     "election_years",
     "run_ec_pipeline",
 ]
+
+
+class PipelineError(RuntimeError):
+    """Raised when a pipeline precondition fails (e.g. an incompletely scraped span)."""
+
+
+def _assert_years_scraped(
+    raw_tables: Mapping[int, object], year_filter: Container[int]
+) -> None:
+    """Raise unless every requested year actually came back from the scrape.
+
+    Closes a silent-drop hole that predates the corpus (#89) and affects the live path
+    too. :func:`usvote.scrape.scrape_raw_election_tables` iterates the links found *in
+    the results index* and only warns about years it does not recognize — so a year
+    that is requested but simply **absent from the index** is never fetched and never
+    reported, and the build exits 0 having ingested one year less. Nothing downstream
+    notices: :func:`usvote.transform.assert_state_count_by_year` iterates the years that
+    *are* present, so a wholly-missing year is invisible to it, and that short warehouse
+    is what feeds the public API snapshot (D034).
+
+    Two ways to reach it: an archives.gov index change (live path), or a stale local
+    corpus whose saved index predates a new election (corpus path — guarded earlier and
+    more specifically by :func:`usvote.scrape.assert_corpus_covers_years`, which can
+    name the stale directory; this is the backstop that covers both).
+    """
+    wanted = {y for y in ec_ingest_years() if y in year_filter}
+    missing = sorted(wanted - set(raw_tables))
+    if missing:
+        raise PipelineError(
+            f"Scrape returned no tables for {len(missing)} requested year(s): "
+            f"{missing}. The Archives results index did not link them (or the local "
+            f"corpus is stale). Refusing to build a warehouse silently missing years."
+        )
 
 
 def run_ec_pipeline(
@@ -99,6 +132,7 @@ def run_ec_pipeline(
     year_filter = ec_ingest_years() if years is None else years
     links = scrape.scrape_election_links(fetch=fetch)
     raw_tables = scrape.scrape_raw_election_tables(links, year_filter, fetch=fetch)
+    _assert_years_scraped(raw_tables, year_filter)
     parsed_years = parse.parse_election_years(raw_tables, state_names)
 
     candidates_df, state_df, votes_df = transform.transform_parsed_years(
