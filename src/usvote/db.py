@@ -176,7 +176,7 @@ class DBC:
         self, schema: str, option: str = "Restrict", close: bool = False
     ) -> None:
         """Delete schema. Option can be "Cascade" or "Restrict" (default):
-        https://www.postgresql.org/docs/14/sql-dropschema.html
+        https://www.postgresql.org/docs/16/sql-dropschema.html
         """
         self.execute_query(f"DROP SCHEMA IF EXISTS {schema} {option}", close=close)
 
@@ -184,7 +184,7 @@ class DBC:
         self, schema: str, replace: bool = False, close: bool = False
     ) -> None:
         """Create schema.
-        https://www.postgresql.org/docs/14/sql-createschema.html
+        https://www.postgresql.org/docs/16/sql-createschema.html
         """
         if replace:
             self.delete_schema(schema, option="Cascade")
@@ -198,7 +198,7 @@ class DBC:
         close: bool = False,
     ) -> None:
         """Delete table in schema. Option can be "Cascade" or "Restrict" (default):
-        https://www.postgresql.org/docs/14/sql-droptable.html
+        https://www.postgresql.org/docs/16/sql-droptable.html
         """
         self.execute_query(
             f"DROP TABLE IF EXISTS {schema}.{table_name} {option}", close=close
@@ -217,7 +217,7 @@ class DBC:
         constraint strings (e.g. ``("state", "varchar", "primary key")`` or a FK
         ``("candidate_id", "smallint", "not null", "REFERENCES dwh.candidate")``);
         every element is space-joined into the column clause.
-        https://www.postgresql.org/docs/14/sql-createtable.html
+        https://www.postgresql.org/docs/16/sql-createtable.html
         """
         column_str = ", ".join(map(" ".join, table_columns))
         if replace:
