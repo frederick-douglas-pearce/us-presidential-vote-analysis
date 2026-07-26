@@ -22,7 +22,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). Current active epic: `epic:internal-api` (E8) | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation) | inferred from available agent roster |
-| `CODE_REVIEW` | `/code-review` (Claude Code built-in) | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
+| `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the step-9 gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
 | `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching the API serve surface (`usvote/api/`), the DB write path, or scraping/network code | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
 | `PRIORITY_LABELS` | `priority:high` > `priority:medium` > `priority:low`; tiebreak issue number ascending | inferred from `gh label list` (`priority:high`=Must have, `medium`=Should have, `low`=Nice to have) |
@@ -40,6 +40,26 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `PERMISSION_POSTURE` | Subagents / background agents are **validate-only** (scope, design review, AC-verify, code-review); the **parent loop performs all edits, commits, and merges**. Delegated agents never write files or push | Confirmed — mirrors the AgentFluent supervised posture; shapes fan-out |
 | `LEDGER_ROOT` | `.claude/loop/` | **gitignored** — local working state, never committed |
 | `RELEASE_SCHEME` | No release cycle. `pyproject.toml` version = `0.1.0` (`Development Status :: 3 - Alpha`), no release-please/semantic-release config | merge gate reads "≤ patch bump or no bump" |
+
+### `CODE_REVIEW` — the step-9 gate is `/code-review`, and **not** these three
+
+Three neighbouring commands are easy to reach for by mistake. Only the first satisfies the gate:
+
+- ✅ **`/code-review`** — the bug-hunting review of the working diff. **This is `CODE_REVIEW`.**
+  Run it after the AC-verifier (engine step 9), address viable findings, and land them as the
+  repo's conventional `Address code-review findings on X (#NN)` follow-up commit.
+- ❌ **`/review <PR#>`** — reviews a *GitHub PR*. Useful, and past iterations journaled it in this
+  slot, but it is a different tool with a different scope (the PR as published, not your working
+  diff) and it does **not** discharge the gate. If a run uses it, say so explicitly in the journal
+  rather than recording it as `CODE_REVIEW`.
+- ❌ **`/simplify`** — quality only (reuse / simplification / efficiency / altitude). It states
+  outright that it does not hunt for correctness bugs, which is exactly what this gate is for.
+  Optional extra polish, never a substitute.
+- ❌ **`/code-review ultra`** — the multi-agent cloud review. It is **user-triggered and billed**;
+  the loop cannot launch it. Recommend it to the human for a high-stakes branch instead.
+
+Corrected 2026-07-26 after the #82 iteration ran `/review 115` in this slot. The mistake was the
+invocation, not this binding — the row above already said `/code-review`.
 
 ## 2. `ARCHITECT_TRIGGERS`
 
