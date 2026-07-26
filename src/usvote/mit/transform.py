@@ -44,8 +44,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from usvote.pv.schema import SHARED_PV_COLUMNS
+from usvote.pv.schema import SHARED_PV_COLUMNS, assert_pv_shape
 from usvote.pv.source import SOURCE_MIT
+from usvote.pv.validate import assert_pv_grain
+from usvote.pv.validate import (
+    assert_totals_not_exceeded as _assert_totals_not_exceeded,
+)
 
 # --- provenance literals ----------------------------------------------------
 # The D018 shared PV record shape (SHARED_PV_COLUMNS) is the source-neutral SSOT in
@@ -273,45 +277,38 @@ def assert_unique_grain(
     Shared by the transform (default `MITTransformError`) and the reconcile stage,
     which passes ``error_cls=MITReconcileError`` / ``context="reconcile"`` so the same
     grain check reports under its own error type and stage name.
+
+    Delegates to :func:`usvote.pv.validate.assert_pv_grain` (#82) rather than
+    re-implementing it — UCSB asserts the identical invariant, and sibling sources
+    cannot import each other (D015), so the one definition lives in ``usvote/pv/``.
     """
-    dupes = df.loc[df.duplicated(["year", "state", "candidate"], keep=False)]
-    if not dupes.empty:
-        raise error_cls(
-            f"MIT {context} grain violated — duplicate (year, state, candidate): "
-            f"{dupes[['year', 'state', 'candidate']].values.tolist()}"
-        )
+    assert_pv_grain(df, error_cls=error_cls, source=SOURCE_MIT, stage=context)
 
 
 def assert_totals_not_exceeded(df: pd.DataFrame) -> None:
     """Assert ``sum(candidate_votes) <= state_total_votes`` per ``(year, state)``.
 
     Post-filter, the dropped minor candidates are the residual, so equality is *not*
-    expected; only an *excess* over the state total signals a bug.
+    expected; only an *excess* over the state total signals a bug. Delegates to the
+    shared :func:`usvote.pv.validate.assert_totals_not_exceeded` (#82).
     """
-    grouped = df.groupby(["year", "state"], as_index=False).agg(
-        csum=("candidate_votes", "sum"),
-        total=("state_total_votes", "first"),
-    )
-    over = grouped.loc[grouped["csum"] > grouped["total"]]
-    if not over.empty:
-        raise MITTransformError(
-            "MIT scoped candidate votes exceed the state total for "
-            f"{len(over)} (year, state) cell(s): {over.values.tolist()}"
-        )
+    _assert_totals_not_exceeded(df, error_cls=MITTransformError, source=SOURCE_MIT)
 
 
 def assert_shape(df: pd.DataFrame) -> None:
-    """Assert the exact D018 shape: columns, key non-nullity, and vote dtypes."""
-    if list(df.columns) != list(SHARED_PV_COLUMNS):
-        raise MITTransformError(
-            f"MIT transform columns {list(df.columns)} != shared PV shape "
-            f"{list(SHARED_PV_COLUMNS)}"
-        )
-    for col in SHARED_PV_COLUMNS:
-        if df[col].isna().any():
-            raise MITTransformError(f"MIT transform column {col!r} has null values")
-    for col in ("candidate_votes", "state_total_votes"):
-        if not pd.api.types.is_integer_dtype(df[col]):
-            raise MITTransformError(
-                f"MIT transform column {col!r} must be integer, got {df[col].dtype}"
-            )
+    """Assert the exact D018 shape: columns, key non-nullity, and vote dtypes.
+
+    Delegates to the shared :func:`usvote.pv.schema.assert_pv_shape` (#82), closing the
+    last of the three duplicated guards — UCSB was migrated to delegate in #36 and MIT
+    was not, which is how the two drifted: this re-implementation asserted non-null on
+    *every* :data:`SHARED_PV_COLUMNS` column, while the shared guard asserts non-null
+    on ``REQUIRED_NON_NULL`` and deliberately permits a null ``party`` (UCSB
+    forward-compat, D018). The extra strictness was unreachable rather than
+    load-bearing, so delegating is behavior-preserving on every frame this transform
+    can emit: :func:`_filter_ec_getters` drops any null-``party`` row (``.isin`` is
+    False on NA) and :func:`_project_shared_shape` stamps ``reliability`` as a
+    constant, both before this runs — and ``party``/``reliability`` are the only
+    shared columns outside ``REQUIRED_NON_NULL``. The test
+    ``test_transform_emits_no_null_party`` pins that premise.
+    """
+    assert_pv_shape(df, error_cls=MITTransformError)

@@ -19,6 +19,9 @@ from usvote.mit.transform import (
     RELIABILITY_EXACT,
     SOURCE_MIT,
     MITTransformError,
+    _filter_ec_getters,
+    assert_shape,
+    assert_totals_not_exceeded,
     assert_totals_reconcile,
     transform_mit,
 )
@@ -60,6 +63,43 @@ class TestShape:
     def test_no_redistributable_column(self, out: pd.DataFrame) -> None:
         # redistributable is a per-source pv_source attribute (D017/D018), not a fact column.
         assert "redistributable" not in out.columns
+
+    def test_assert_shape_raises_mit_typed_error(self, out: pd.DataFrame) -> None:
+        # assert_shape delegates to the shared assert_pv_shape (#82) but must keep
+        # failing as MITTransformError, which is what callers catch. Without this,
+        # dropping the error_cls= argument would silently leak PVShapeError and no
+        # test would notice.
+        bad = out.drop(columns=["reliability"])
+        with pytest.raises(MITTransformError, match="shared PV shape"):
+            assert_shape(bad)
+
+    def test_transform_emits_no_null_party(self, out: pd.DataFrame) -> None:
+        # The premise behind assert_shape delegating to the shared assert_pv_shape (#82).
+        # MIT's private shape check used to non-null EVERY shared column; the shared guard
+        # permits a null party (UCSB forward-compat, D018). Delegating is only
+        # behavior-preserving because _filter_ec_getters (party.isin(...), False on NA)
+        # drops null-party rows first — so no MIT frame can carry one. If a future change
+        # makes it possible, this fails HERE rather than silently loading a null party.
+        assert not out["party"].isna().any()
+        assert set(out["party"]) <= set(EC_GETTER_PARTIES)
+
+    def test_ec_getter_filter_drops_a_null_party_row(self) -> None:
+        # The structural half of the premise above. The test on the sample fixture can
+        # only show that no null party comes OUT — the fixture has none going in, so it
+        # cannot prove the mechanism. This injects one and pins that `.isin` treats NA
+        # as False, which is the single fact the assert_shape delegation rests on.
+        df = pd.DataFrame({"party": pd.array(["DEMOCRAT", None, "OTHER"], dtype="string")})
+        assert list(_filter_ec_getters(df)["party"]) == ["DEMOCRAT"]
+
+    def test_assert_totals_not_exceeded_raises_mit_typed_error(self) -> None:
+        # Same reasoning as the assert_shape test: the shared implementation must still
+        # fail as MITTransformError for MIT's callers.
+        df = pd.DataFrame({
+            "year": [2016], "state": ["NEW YORK"],
+            "candidate_votes": [101], "state_total_votes": [100],
+        })
+        with pytest.raises(MITTransformError, match="exceed the state total"):
+            assert_totals_not_exceeded(df)
 
 
 class TestFusionAggregation:
