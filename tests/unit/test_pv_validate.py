@@ -14,7 +14,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from usvote.pv.schema import SHARED_PV_COLUMNS
+from usvote.pv.schema import NATURAL_KEY, SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.validate import (
     PV_GRAIN_COLUMNS,
@@ -56,10 +56,13 @@ def test_grain_accepts_one_row_per_key() -> None:
     assert_pv_grain(df, source=SOURCE_MIT)  # does not raise
 
 
-def test_grain_key_excludes_source() -> None:
-    # These validators run on ONE source's frame, where source is constant; the
-    # cross-source key belongs to the union guard in usvote.pv.views.
-    assert PV_GRAIN_COLUMNS == ("year", "state", "candidate")
+def test_grain_key_is_the_natural_key_minus_source() -> None:
+    # Pins the DERIVATION, not a re-spelled literal: these validators run on one
+    # source's frame (where source is constant), so the grain is NATURAL_KEY minus
+    # source. If NATURAL_KEY ever gains a column, this catches a grain check that
+    # silently kept checking the old key.
+    assert tuple(c for c in NATURAL_KEY if c != "source") == PV_GRAIN_COLUMNS
+    assert "source" not in PV_GRAIN_COLUMNS
 
 
 def test_grain_accepts_same_candidate_in_different_states() -> None:

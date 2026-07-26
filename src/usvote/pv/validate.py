@@ -30,11 +30,15 @@ from __future__ import annotations
 
 import pandas as pd
 
-#: The D018 natural key *within* a single source. ``source`` is excluded on purpose:
-#: these validators run on one source's frame, where it is constant. The full
-#: cross-source key (``source``, year, state, candidate) is the union's grain and is
-#: checked in :mod:`usvote.pv.views`.
-PV_GRAIN_COLUMNS: tuple[str, ...] = ("year", "state", "candidate")
+from usvote.pv.schema import NATURAL_KEY
+
+#: The D018 natural key *within* a single source — :data:`~usvote.pv.schema.NATURAL_KEY`
+#: minus ``source``, **derived rather than re-spelled** so the two cannot drift (writing
+#: the tuple out again would reintroduce, inside this module, the duplication #82 exists
+#: to remove). ``source`` is excluded because these validators run on one source's
+#: frame, where it is constant; the full cross-source key is the *union's* grain,
+#: checked against ``NATURAL_KEY`` itself in :mod:`usvote.pv.views`.
+PV_GRAIN_COLUMNS: tuple[str, ...] = tuple(c for c in NATURAL_KEY if c != "source")
 
 
 class PVValidationError(RuntimeError):

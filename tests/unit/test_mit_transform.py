@@ -19,6 +19,7 @@ from usvote.mit.transform import (
     RELIABILITY_EXACT,
     SOURCE_MIT,
     MITTransformError,
+    assert_shape,
     assert_totals_reconcile,
     transform_mit,
 )
@@ -60,6 +61,15 @@ class TestShape:
     def test_no_redistributable_column(self, out: pd.DataFrame) -> None:
         # redistributable is a per-source pv_source attribute (D017/D018), not a fact column.
         assert "redistributable" not in out.columns
+
+    def test_assert_shape_raises_mit_typed_error(self, out: pd.DataFrame) -> None:
+        # assert_shape delegates to the shared assert_pv_shape (#82) but must keep
+        # failing as MITTransformError, which is what callers catch. Without this,
+        # dropping the error_cls= argument would silently leak PVShapeError and no
+        # test would notice.
+        bad = out.drop(columns=["reliability"])
+        with pytest.raises(MITTransformError, match="shared PV shape"):
+            assert_shape(bad)
 
     def test_transform_emits_no_null_party(self, out: pd.DataFrame) -> None:
         # The premise behind assert_shape delegating to the shared assert_pv_shape (#82).
