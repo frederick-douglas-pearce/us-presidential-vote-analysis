@@ -230,3 +230,78 @@ def test_mit_bare_and_load_run_pipeline(
     # Bare ``python -m usvote.mit`` loads (the single subcommand's default).
     assert mit_main.main(argv) == 0
     assert mit_env == [{"path": "mit.csv", "replace": replace}]
+
+
+# --- corpus resolution at the CLI (#89) -------------------------------------
+# The tests the top_env fixture's comment claimed existed but did not. Without them
+# three separate mutations disabled the offline-rebuild feature with a green suite:
+# main() never calling _resolve_ec_fetch, _resolve_ec_fetch returning fetch_url
+# immediately, and the `corpus` subcommand falling through to the DB load path. Each
+# was invisible because the fixture unsets USVOTE_EC_HTML_DIR, so every other
+# entry-point test exercises only the live branch — where the expected fetch is
+# fetch_url either way, i.e. identical in the working and broken states.
+
+
+def _valid_corpus(tmp_path: Any) -> str:
+    """A corpus that satisfies assert_corpus_covers_years for the years it holds."""
+    from usvote import scrape as ec_scrape
+    from usvote.years import ec_ingest_years
+
+    years = sorted(ec_ingest_years())
+
+    def fetch(url: str) -> tuple[int, bytes]:
+        if url.endswith("/results"):
+            links = "".join(
+                f'<a href="/electoral-college/{y}">{y}</a>' for y in years
+            )
+            return 200, f'<div id="main-col"><table>{links}</table></div>'.encode()
+        return 200, b'<div id="main-col"><table><tr><td>x</td></tr></table></div>'
+
+    ec_scrape.snapshot_election_years(tmp_path, fetch=fetch, sleep=lambda s: None)
+    return str(tmp_path)
+
+
+def test_ec_uses_the_corpus_when_the_env_var_points_at_a_complete_one(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
+    assert top.main([]) == 0
+    # The whole point of the feature: a corpus-backed fetch, NOT the live one.
+    assert top_env["ec"][0]["fetch"] is not top.scrape.fetch_url
+
+
+def test_no_corpus_forces_the_live_fetch_even_with_a_corpus_present(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
+    assert top.main(["--no-corpus", "ec"]) == 0
+    assert top_env["ec"][0]["fetch"] is top.scrape.fetch_url
+
+
+def test_all_uses_the_corpus_too(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["fetch"] is not top.scrape.fetch_url
+
+
+def test_a_stale_corpus_exits_cleanly_without_running_the_pipeline(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    # Set-but-incomplete must be a hard error, never a silent fall back to ~50 live
+    # requests, and never a raw traceback. The pipeline must not run at all.
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(tmp_path / "empty"))
+    assert top.main([]) == 2
+    assert top_env["ec"] == []
+
+
+def test_corpus_subcommand_dispatches_to_the_corpus_runner(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[str] = []
+    monkeypatch.setattr(top, "_run_corpus", lambda args: called.append("ran") or 0)
+    assert top.main(["corpus"]) == 0
+    assert called == ["ran"]

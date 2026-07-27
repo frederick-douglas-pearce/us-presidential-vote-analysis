@@ -172,9 +172,12 @@ def test_snapshot_halts_on_non_200_and_records_it(tmp_path: Path) -> None:
     assert read_manifest(tmp_path)["1824"]["http_status"] == 429
 
 
-def test_manifest_write_is_atomic(tmp_path: Path) -> None:
+def test_manifest_write_leaves_no_temp_file(tmp_path: Path) -> None:
+    # Globbed, not a fixed name: write_manifest uses tempfile.mkstemp, so the literal
+    # "manifest.json.tmp" this once asserted against is a path EC can never produce —
+    # the assertion was vacuous and a non-atomic writer passed it.
     write_manifest(tmp_path, {"2020": {"file": "2020.html"}})
-    assert not (tmp_path / f"{MANIFEST_FILENAME}.tmp").exists()
+    assert list(tmp_path.glob("*.tmp")) == []
     assert json.loads((tmp_path / MANIFEST_FILENAME).read_text())["2020"]["file"] == (
         "2020.html"
     )
@@ -308,6 +311,23 @@ def test_snapshot_repairs_a_corpus_whose_manifest_was_lost(tmp_path: Path) -> No
     snapshot_election_years(
         tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
     )
+    assert_corpus_covers_years(tmp_path, {2020})  # does not raise
+
+
+def test_snapshot_repairs_a_corpus_whose_year_page_was_lost(tmp_path: Path) -> None:
+    # The mirror of the manifest-lost case, and the other half of the two-part skip
+    # predicate. Only the manifest half was tested, so dropping the file-exists half
+    # survived the suite — and its consequence is the same deadlock: a corpus that loses
+    # a page but keeps its manifest would skip the re-fetch and then fail the guard,
+    # prescribing the command that just declined to do anything.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    (tmp_path / "2020.html").unlink()
+    again = _fake_fetch([2020])
+    snapshot_election_years(tmp_path, years={2020}, fetch=again, sleep=lambda s: None)
+    assert (tmp_path / "2020.html").exists()
+    assert any(u.endswith("/2020") for u in again.seen)
     assert_corpus_covers_years(tmp_path, {2020})  # does not raise
 
 
