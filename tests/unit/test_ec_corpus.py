@@ -130,10 +130,11 @@ def test_snapshot_skips_pages_already_on_disk(tmp_path: Path) -> None:
 
     again = _fake_fetch([1824, 2020])
     snapshot_election_years(tmp_path, years={1824, 2020}, fetch=again, sleep=lambda s: None)
-    # Re-running is free: nothing re-fetched. This is what makes an interrupted
-    # ~8.5-minute run resumable rather than restart-from-scratch.
-    assert first > 0
-    assert again.seen == []
+    # Re-running re-fetches ONLY the index; the year pages are skipped. That is what
+    # makes an interrupted ~8.5-minute run resumable, while still letting a stale
+    # corpus discover years added upstream (see the refresh test below).
+    assert first == 3  # index + 2 years
+    assert again.seen == [INDEX_URL]
 
 
 def test_snapshot_waits_between_fetches_but_not_before_the_first(tmp_path: Path) -> None:
@@ -184,7 +185,7 @@ def test_fetch_from_corpus_replays_saved_bytes(tmp_path: Path) -> None:
 
 
 def test_fetch_from_corpus_names_the_missing_page(tmp_path: Path) -> None:
-    with pytest.raises(ScrapeError, match="python -m usvote snapshot"):
+    with pytest.raises(ScrapeError, match="python -m usvote corpus"):
         fetch_from_corpus(tmp_path)("https://www.archives.gov/electoral-college/1888")
 
 
@@ -262,3 +263,206 @@ class TestRealCorpus:
         # of layout drift, not geography, so it must not require the TIGER shapefile.
         parsed = parse.parse_election_years(raw, state_names=_AnyState())
         assert len(parsed) == len(years)
+
+
+# --- refresh / recovery (defects found in review) ---------------------------
+
+
+def test_snapshot_repairs_a_corpus_whose_index_predates_a_new_election(
+    tmp_path: Path,
+) -> None:
+    # THE deadlock this feature shipped with in review: the index was skipped as
+    # "already on disk", so the year list could never grow, and the completeness guard
+    # failed forever while prescribing this very command as the remedy.
+    snapshot_election_years(
+        tmp_path, years={2016, 2020}, fetch=_fake_fetch([2016, 2020]), sleep=lambda s: None
+    )
+    upstream = _fake_fetch([2016, 2020, 2024])  # a new election is now published
+    snapshot_election_years(
+        tmp_path, years={2016, 2020, 2024}, fetch=upstream, sleep=lambda s: None
+    )
+    assert (tmp_path / "2024.html").exists()
+    assert_corpus_covers_years(tmp_path, {2016, 2020, 2024})  # does not raise
+
+
+def test_snapshot_repairs_a_corpus_whose_manifest_was_lost(tmp_path: Path) -> None:
+    # Skipping on file-existence alone let the manifest and the files disagree with no
+    # way back: the guard keys on the manifest, so a corpus copied without its
+    # manifest.json was permanently unrepairable.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    (tmp_path / MANIFEST_FILENAME).unlink()
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    assert_corpus_covers_years(tmp_path, {2020})  # does not raise
+
+
+def test_guard_requires_the_index(tmp_path: Path) -> None:
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    (tmp_path / EC_INDEX_FILENAME).unlink()
+    # Without it the year list cannot be enumerated at all, so the corpus is unusable
+    # even though every year page is present.
+    with pytest.raises(ScrapeError, match="no _index_results.html"):
+        assert_corpus_covers_years(tmp_path, {2020})
+
+
+def test_guard_checks_an_explicitly_requested_out_of_scope_year(tmp_path: Path) -> None:
+    # The guard used to intersect with ec_ingest_years(), so a deliberate
+    # years={1868} passed vacuously on an empty corpus — contradicting usvote.years'
+    # contract that an explicit year fails loudly rather than being silently dropped.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    with pytest.raises(ScrapeError, match="1868"):
+        assert_corpus_covers_years(tmp_path, {1868})
+
+
+def test_non_year_link_in_the_index_is_skipped_not_fatal(tmp_path: Path) -> None:
+    # "The Archives restructured the index" is what the corpus exists to survive; a
+    # non-year link must not abort a crawl minutes deep with a bare ValueError.
+    class WithJunkLink(_FakeFetch):
+        def __call__(self, url: str) -> tuple[int, bytes]:
+            if url == INDEX_URL:
+                self.seen.append(url)
+                return 200, (
+                    b'<div id="main-col"><table>'
+                    b'<a href="/electoral-college/about">about</a>'
+                    b'<a href="/electoral-college/2020">2020</a>'
+                    b"</table></div>"
+                )
+            return super().__call__(url)
+
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=WithJunkLink([2020]), sleep=lambda s: None
+    )
+    assert (tmp_path / "2020.html").exists()
+
+
+def test_corrupt_manifest_raises_a_typed_error(tmp_path: Path) -> None:
+    (tmp_path / MANIFEST_FILENAME).write_text("{not json", encoding="utf-8")
+    with pytest.raises(ScrapeError, match="not valid JSON"):
+        read_manifest(tmp_path)
+
+
+def test_network_error_becomes_a_typed_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A ~50-request crawl will meet a blip; it must not end in a raw traceback.
+    import requests
+
+    def boom(*a: object, **k: object) -> object:
+        raise requests.ConnectionError("connection reset")
+
+    monkeypatch.setattr(requests, "get", boom)
+    with pytest.raises(ScrapeError, match="Network error"):
+        scrape.fetch_page_with_status("https://www.archives.gov/electoral-college/2020")
+
+
+def test_redirect_is_refused_rather_than_saved_under_the_wrong_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A retired year page 302'ing to the index would otherwise be saved as <year>.html
+    # at status 200 and pass every check the guard makes.
+    class Resp:
+        status_code = 200
+        content = b"<html>index</html>"
+        url = "https://www.archives.gov/electoral-college/results"
+        history = ["302"]
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: Resp())
+    with pytest.raises(ScrapeError, match="redirected"):
+        scrape.fetch_page_with_status("https://www.archives.gov/electoral-college/2020")
+
+
+def test_fetch_page_sends_the_truthful_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The one behavior whose loss is silent and whose cost lands on archives.gov.
+    captured: dict[str, object] = {}
+
+    class Resp:
+        status_code = 200
+        content = b"ok"
+        history: list[str] = []
+
+    def fake_get(url: str, **kwargs: object) -> Resp:
+        captured.update(kwargs)
+        return Resp()
+
+    monkeypatch.setattr("requests.get", fake_get)
+    scrape.fetch_page_with_status("https://www.archives.gov/electoral-college/2020")
+    assert captured["headers"] == {"User-Agent": scrape.USER_AGENT}
+
+
+# --- structural guards for the duplication this design rests on -------------
+
+
+def test_ec_and_ucsb_manifest_entries_have_the_same_shape(tmp_path: Path) -> None:
+    """Pin the EC/UCSB manifest parity the duplication in ``scrape.py`` claims.
+
+    The manifest helpers are duplicated rather than imported because a top-level EC
+    module importing from a PV subpackage would invert the D006/D015 dependency
+    direction. Duplication is only safe if something holds the two shapes together —
+    this drives **both** writers and compares the resulting keys, rather than asserting
+    EC against a hand-copied literal (which would pin EC to itself and notice nothing).
+    """
+    from usvote.ucsb import scrape as ucsb_scrape
+
+    ec_dir, ucsb_dir = tmp_path / "ec", tmp_path / "ucsb"
+    ec_dir.mkdir()
+    ucsb_dir.mkdir()
+
+    snapshot_election_years(
+        ec_dir, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    ec_entry = read_manifest(ec_dir)["2020"]
+
+    ucsb_scrape.write_manifest(
+        ucsb_dir,
+        {
+            "2020": {
+                "bytes": 1,
+                "file": "2020.html",
+                "http_status": 200,
+                "sha256": "x",
+                "timestamp": "t",
+                "url": "u",
+            }
+        },
+    )
+    ucsb_entry = ucsb_scrape.read_manifest(ucsb_dir)["2020"]
+    assert set(ec_entry) == set(ucsb_entry)
+
+
+def test_no_top_level_module_imports_a_source_subpackage() -> None:
+    """The EC spine must never import from a PV source subpackage (D006/D015).
+
+    The greppable invariant that makes the duplicated manifest helpers *deliberate*
+    rather than an oversight: without it, the obvious "simplification" is to import
+    ``usvote.ucsb.scrape.write_manifest`` into ``usvote/scrape.py``, inverting the
+    dependency direction with a green suite. Mirrors the existing warehouse and
+    api-import-graph guards.
+
+    Scoped to the **source** subpackages only. ``usvote/pv/`` is the shared,
+    source-neutral contract, and top-level EC-domain modules import it by design
+    (``join.py`` reads the resolved PV views, ``snapshot.py`` reads ``pv_source``) — an
+    earlier draft of this test forbade it and correctly failed.
+    """
+    import usvote
+
+    package_root = Path(usvote.__file__).parent
+    exempt = {"warehouse.py", "__main__.py"}  # composition roots sit ABOVE both (D027)
+    offenders = []
+    for module in sorted(package_root.glob("*.py")):
+        if module.name in exempt:
+            continue
+        source = module.read_text(encoding="utf-8")
+        for pv in ("usvote.mit", "usvote.ucsb"):
+            for line in source.splitlines():
+                stripped = line.strip()
+                if stripped.startswith(("import ", "from ")) and pv in stripped:
+                    offenders.append(f"{module.name}: {stripped}")
+    assert not offenders, (
+        "top-level EC modules must not import PV source subpackages "
+        f"(D006/D015): {offenders}"
+    )

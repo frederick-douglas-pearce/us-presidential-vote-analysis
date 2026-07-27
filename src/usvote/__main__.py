@@ -117,23 +117,27 @@ def _resolve_ec_fetch(
     """
     if getattr(args, "no_corpus", False):
         return scrape.fetch_url
-    try:
-        html_dir = config.ec_html_dir_from_env(environ)
-    except config.ConfigError:
+    if not environ.get(config.EC_HTML_DIR_VAR):
+        # Genuinely unconfigured: scrape live, as before. Distinguished from a
+        # configured-but-broken corpus below, which must NOT silently hit the network —
+        # a typo'd path or an unmounted volume would otherwise fire ~50 live requests
+        # at a user who asked for an offline rebuild.
         return scrape.fetch_url
+    html_dir = config.ec_html_dir_from_env(environ)
     scrape.assert_corpus_covers_years(html_dir)
     print(f"Using the local Archives corpus at {html_dir} (no network requests).")
     return scrape.fetch_from_corpus(html_dir)
 
 
-def _run_snapshot(args: argparse.Namespace) -> int:
-    """Fetch the Archives corpus to ``USVOTE_EC_HTML_DIR``. No DB involved."""
+def _run_corpus(args: argparse.Namespace) -> int:
+    """Fetch the Archives corpus to ``USVOTE_EC_HTML_DIR``. No DB involved.
+
+    Resolves with ``must_exist=False``: this is the one command for which the
+    directory is an *output*, so requiring it to pre-exist would make the first run on
+    a fresh machine fail with advice to run this very command.
+    """
     try:
-        html_dir = (
-            args.ec_dir
-            if args.ec_dir
-            else config.ec_html_dir_from_env(os.environ)
-        )
+        html_dir = config.ec_html_dir_from_env(os.environ, must_exist=False)
     except config.ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 2
@@ -146,9 +150,18 @@ def _run_snapshot(args: argparse.Namespace) -> int:
     try:
         manifest = scrape.snapshot_election_years(html_dir)
     except scrape.ScrapeError as e:
-        print(f"Snapshot failed: {e}", file=sys.stderr)
+        print(f"Corpus fetch failed: {e}", file=sys.stderr)
         return 1
-    pages = sum(1 for k in manifest if k != "index")
+    except OSError as e:
+        print(f"Cannot write the corpus to {html_dir}: {e}", file=sys.stderr)
+        return 1
+    # Count files on disk, not manifest keys: a stale key (an out-of-scope year, or a
+    # recorded non-200 attempt) would otherwise inflate the reported page count.
+    pages = sum(
+        1
+        for k, v in manifest.items()
+        if k != "index" and v.get("http_status") == 200
+    )
     print(f"Archives corpus complete: {pages} year page(s) + the index in {html_dir}.")
     return 0
 
@@ -177,8 +190,14 @@ def _run_all(args: argparse.Namespace) -> int:
         mit_csv_path = mit_csv_path_from_env(environ)
         ucsb_html_dir = _resolve_ucsb_dir(args, environ)
         db_config = config.db_config_from_env(environ)
+        # Resolved BEFORE _connect: a stale corpus must not abort after the user has
+        # typed a DB password, leaving an open connection that close=True never reaches.
+        ec_fetch = _resolve_ec_fetch(args, environ)
     except config.ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+    except scrape.ScrapeError as e:
+        print(f"Archives corpus error: {e}", file=sys.stderr)
         return 2
 
     if ucsb_html_dir is None:
@@ -212,7 +231,7 @@ def _run_all(args: argparse.Namespace) -> int:
         mit_csv_path,
         ucsb_html_dir=ucsb_html_dir,
         replace=args.replace,
-        fetch=_resolve_ec_fetch(args, environ),
+        fetch=ec_fetch,
         environ=environ,
         close=True,
     )
@@ -250,16 +269,23 @@ def _build_parser() -> argparse.ArgumentParser:
     ec_p.add_argument(
         "--replace", action="store_true", default=argparse.SUPPRESS, help=_REPLACE_HELP
     )
-    ec_p.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
-
-    snap_p = sub.add_parser(
-        "snapshot",
-        help="Fetch the Archives HTML corpus to USVOTE_EC_HTML_DIR (no DB needed).",
+    # SUPPRESS for the same reason as --replace above: without it the subparser's
+    # False default clobbers a top-level ``--no-corpus ec``, silently ignoring the flag.
+    ec_p.add_argument(
+        "--no-corpus",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=_NO_CORPUS_HELP,
     )
-    snap_p.add_argument(
-        "--ec-dir",
-        default=None,
-        help="Write the corpus here instead of USVOTE_EC_HTML_DIR.",
+
+    # Named ``corpus``, not ``snapshot``: ``python -m usvote.snapshot`` already builds
+    # the API SQLite artifact, and a ``python -m usvote snapshot`` one character away
+    # meaning "fetch Archives HTML" is exactly the same-spelling-different-meaning
+    # collision D027/#84b exists to avoid. Every other name in this feature already
+    # says corpus (corpus_filename, fetch_from_corpus, assert_corpus_covers_years).
+    sub.add_parser(
+        "corpus",
+        help="Fetch the Archives HTML corpus to USVOTE_EC_HTML_DIR (no DB needed).",
     )
 
     all_p = sub.add_parser(
@@ -281,7 +307,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip UCSB unconditionally (build only the EC + MIT core).",
     )
-    all_p.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
+    all_p.add_argument(
+        "--no-corpus",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=_NO_CORPUS_HELP,
+    )
     return parser
 
 
@@ -289,14 +320,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "snapshot":
-        return _run_snapshot(args)
+    if args.command == "corpus":
+        return _run_corpus(args)
     if args.command == "all":
         return _run_all(args)
     # Bare (``command is None``) and explicit ``ec`` both run the EC pipeline. argparse
     # leaves ``replace`` set by the top-level parser (default False) unless the ``ec``
     # subcommand overrode it.
-    return _run_ec(getattr(args, "replace", False), _resolve_ec_fetch(args, os.environ))
+    try:
+        fetch = _resolve_ec_fetch(args, os.environ)
+    except (config.ConfigError, scrape.ScrapeError) as e:
+        print(f"Archives corpus error: {e}", file=sys.stderr)
+        return 2
+    return _run_ec(getattr(args, "replace", False), fetch)
 
 
 if __name__ == "__main__":

@@ -131,7 +131,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' "$B/elections/1900"   # → 404 (pre-
 $ uv run jupyter lab
 ```
   * Once a JupyterLab session is running in your browser, find the notebook you want to work with using the File Browser in the left panel, then double click on the notebook to open it.
-  * Both paths require an internet connection for scraping data, plus the US States shapefile downloaded and pointed to via `USVOTE_SHAPEFILE_PATH`.
+  * Both paths need the US States shapefile, downloaded and pointed to via `USVOTE_SHAPEFILE_PATH`. They also need an internet connection to scrape the Archives — **unless** a local HTML corpus is present: `python -m usvote corpus` saves every in-scope year page to `USVOTE_EC_HTML_DIR`, after which `python -m usvote [ec|all]` rebuilds with zero network requests (`--no-corpus` forces the live scrape).
 
 
 ## Configuration
@@ -159,6 +159,7 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `USVOTE_SHAPEFILE_PATH` | path to the unzipped TIGER2019 STATE shapefile (`.shp`) | *(required)* |
 | `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
 | `USVOTE_UCSB_HTML_DIR` | path to the local UCSB raw-HTML snapshot directory | *(required for the UCSB popular-vote scrape)* |
+| `USVOTE_EC_HTML_DIR` | path to the local Archives raw-HTML corpus (`python -m usvote corpus`) | *(optional — set it to rebuild without scraping)* |
 | `USVOTE_API_SNAPSHOT_PATH` | path to the read-only SQLite API snapshot — written by `python -m usvote.snapshot`, read by `python -m usvote.api` | *(required for the snapshot build and the API)* |
 | `USVOTE_API_CORS_ORIGINS` | comma-separated CORS allow-list for the API | *(unset &rarr; localhost dev origins; never a silent `*`)* |
 

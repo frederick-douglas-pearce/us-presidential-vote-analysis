@@ -25,8 +25,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
-from collections.abc import Callable, Container, Iterable, Mapping
+from collections.abc import Callable, Collection, Container, Iterable, Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -35,6 +36,9 @@ from typing import Any, Literal, overload
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import Tag
+
+from usvote import config
+from usvote.years import ec_ingest_years
 
 # Archives site parameters (notebook Section 1.3). Exposed as defaults so callers
 # and tests need not repeat them.
@@ -232,10 +236,14 @@ def fetch_from_dir(source_dir: str | Path) -> Fetch:
 # (their committed files and tests depend on it), the corpus uses UCSB's. The two
 # readers coexist exactly as they do on the UCSB side.
 #
-# The manifest helpers below duplicate ~40 lines of usvote/ucsb/scrape.py rather
-# than importing them: a top-level EC module importing *from* a PV source would
-# invert D006/D015 (the spine must not depend on a source). A parity test pins
-# the two shapes together instead.
+# The manifest helpers below duplicate ~40 lines of usvote/ucsb/scrape.py rather than
+# importing them. Importing usvote.ucsb here would invert D006/D015 (the spine must not
+# depend on a source), which a test enforces. A source-neutral third home (usvote/pv/,
+# or a new shared module) WOULD satisfy D015 and was available; ~40 lines of JSON
+# read/write did not seem worth a new shared module, so the cost is paid instead by
+# test_ec_and_ucsb_manifest_entries_have_the_same_shape, which drives both writers and
+# compares the results. If a third consumer ever appears, extract rather than duplicate
+# again.
 
 #: Identify truthfully, as the UCSB scraper does. archives.gov's robots.txt sets
 #: ``Crawl-delay: 10`` for ``User-agent: *`` and does not disallow
@@ -263,9 +271,20 @@ def corpus_filename(url: str) -> str:
     trailing path segment (``.../electoral-college/2020`` -> ``2020.html``), which is
     what makes the directory human-browsable and diffable against ``ucsb_raw/``.
     """
-    if url.rstrip("/").endswith(ARCHIVE_URL_BASE.strip("/")):
+    if url.rstrip("/") == (ARCHIVE_URL_DOMAIN + ARCHIVE_URL_BASE).rstrip("/"):
         return EC_INDEX_FILENAME
-    return f"{url.rstrip('/').rsplit('/', 1)[-1]}.html"
+    return f"{_year_segment(url)}.html"
+
+
+def _year_segment(url: str) -> str:
+    """Return a URL's trailing path segment — the year, for an Archives year page.
+
+    One spelling for what was three (here, the snapshot loop, and the pre-existing
+    :func:`scrape_raw_election_tables`), which disagreed on trailing slashes: a
+    ``.../1824/`` href produced ``1824`` in one and ``""`` in another, so the snapshot
+    would succeed and the pipeline then die on ``int("")``.
+    """
+    return url.rstrip("/").rsplit("/", 1)[-1]
 
 
 def read_manifest(html_dir: str | Path) -> dict[str, Any]:
@@ -276,7 +295,18 @@ def read_manifest(html_dir: str | Path) -> dict[str, Any]:
     path = Path(html_dir) / MANIFEST_FILENAME
     if not path.exists():
         return {}
-    loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        # Recoverable and message-worthy, not a stack trace (UCSB's wording).
+        raise ScrapeError(
+            f"{path} is not valid JSON ({exc}). Delete it and re-run "
+            f"`python -m usvote corpus` to rebuild the record from the saved pages."
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise ScrapeError(
+            f"{path} must contain a JSON object, got {type(loaded).__name__}."
+        )
     return loaded
 
 
@@ -291,11 +321,21 @@ def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
     """
     directory = Path(html_dir)
     path = directory / MANIFEST_FILENAME
-    tmp = directory / f"{MANIFEST_FILENAME}.tmp"
-    tmp.write_text(
-        json.dumps(dict(manifest), indent=2, sort_keys=True), encoding="utf-8"
+    # A unique temp name, not a fixed one: two concurrent runs sharing
+    # ``manifest.json.tmp`` would interleave writes into it and then *atomically
+    # install* the corrupt result.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=directory, prefix=MANIFEST_FILENAME, suffix=".tmp"
     )
-    tmp.replace(path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(dict(manifest), fh, indent=2, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        Path(tmp_name).replace(path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def fetch_page_with_status(url: str) -> tuple[int, bytes]:
@@ -308,16 +348,33 @@ def fetch_page_with_status(url: str) -> tuple[int, bytes]:
     path up to the same politeness is deliberately a separate change: it would add
     :data:`CRAWL_DELAY_SECONDS` between every page of a cold ``--replace``.
     """
-    response = requests.get(
-        url, timeout=FETCH_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT}
-    )
+    try:
+        response = requests.get(
+            url, timeout=FETCH_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT}
+        )
+    except requests.RequestException as exc:
+        # A ~50-request crawl spread over ~8.5 minutes will eventually meet a blip.
+        # Surface it as the typed error the CLI already handles, not a traceback; saved
+        # pages persist, so the documented remedy (re-run, it resumes) is accurate.
+        raise ScrapeError(
+            f"Network error fetching {url}: {exc}. Pages already saved are kept — "
+            f"re-run `python -m usvote corpus` to resume."
+        ) from exc
+    if response.history:
+        # A retired page 302'd to the index would otherwise be saved under the year's
+        # name, at status 200, and pass every check the guard makes — silently feeding
+        # the wrong markup to every future offline rebuild.
+        raise ScrapeError(
+            f"{url} redirected to {response.url}; refusing to save the response under "
+            f"the requested year's name. The Archives layout may have changed."
+        )
     return response.status_code, response.content
 
 
 def snapshot_election_years(
     html_dir: str | Path | None = None,
     *,
-    years: Container[int] | None = None,
+    years: Collection[int] | None = None,
     fetch: Callable[[str], tuple[int, bytes]] = fetch_page_with_status,
     sleep: Callable[[float], None] = time.sleep,
     environ: Mapping[str, str] | None = None,
@@ -336,9 +393,6 @@ def snapshot_election_years(
     page already present is skipped, so an interrupted run resumes where it stopped
     rather than restarting the ~8.5-minute crawl.
     """
-    from usvote import config
-    from usvote.years import ec_ingest_years
-
     directory = Path(
         html_dir
         if html_dir is not None
@@ -347,24 +401,34 @@ def snapshot_election_years(
     directory.mkdir(parents=True, exist_ok=True)
     wanted = ec_ingest_years() if years is None else years
     manifest = read_manifest(directory)
-    state = {"fetched_any": False}
+    fetched_any = False
 
-    def capture(url: str) -> None:
+    def capture(url: str, *, force: bool = False) -> None:
         """Fetch, record, and save one page — the single write path.
 
         Every page including the index goes through here, so the manifest is a
         complete provenance record. An earlier draft let the index be written
         separately while enumerating years, which silently left the index with no
         manifest entry — exactly the page whose staleness the guard needs to audit.
+
+        ``force`` re-fetches even when the page is on disk; the index always sets it
+        (see the call site). Skipping requires **both** the file and a 200 manifest
+        entry, so a corpus whose ``manifest.json`` was lost or never copied repairs
+        itself on the next run instead of being permanently unrepairable: the guard
+        keys on the manifest, and skipping on file-existence alone let the two stores
+        disagree with no way back.
         """
         name = corpus_filename(url)
-        if (directory / name).exists():
+        key = "index" if name == EC_INDEX_FILENAME else name.removesuffix(".html")
+        recorded = manifest.get(key)
+        has_record = isinstance(recorded, dict) and recorded.get("http_status") == 200
+        if not force and (directory / name).exists() and has_record:
             return
-        if state["fetched_any"]:
+        nonlocal fetched_any
+        if fetched_any:
             sleep(CRAWL_DELAY_SECONDS)
         status, body = fetch(url)
-        state["fetched_any"] = True
-        key = "index" if name == EC_INDEX_FILENAME else name.removesuffix(".html")
+        fetched_any = True
         manifest[key] = {
             "bytes": len(body),
             "file": name,
@@ -383,14 +447,27 @@ def snapshot_election_years(
         (directory / name).write_bytes(body)
         write_manifest(directory, manifest)
 
-    # The index first: year URLs are enumerated *from it*, so it must be on disk
-    # before the corpus reader can walk it.
-    capture(ARCHIVE_URL_DOMAIN + ARCHIVE_URL_BASE)
+    # The index first: year URLs are enumerated *from it*, so it must be on disk before
+    # the corpus reader can walk it — and it is re-fetched **every run** (``force``).
+    # Skipping it would make a stale corpus permanently unrepairable: the year list
+    # comes from the saved index, so a corpus snapshotted before a new election could
+    # never discover that election, and the completeness guard would fail forever while
+    # prescribing this very command as the remedy. One extra request per run is the
+    # whole cost; the index is the one page that must be current.
+    capture(ARCHIVE_URL_DOMAIN + ARCHIVE_URL_BASE, force=True)
     for url in scrape_election_links(fetch=fetch_from_corpus(directory)):
-        if int(url.rstrip("/").rsplit("/", 1)[-1]) in wanted:
+        segment = _year_segment(url)
+        if not segment.isdigit():
+            # "The Archives restructured the index" is exactly what the corpus exists to
+            # survive; a non-year link must not abort a crawl minutes deep.
+            print(f"Skipping non-year link in the Archives index: {url}")
+            continue
+        if int(segment) in wanted:
             capture(url)
 
-    _assert_manifest_covers(directory, manifest, wanted)
+    # The on-disk manifest is authoritative here: write_manifest flushed after every
+    # capture, and on a fully-cached run it is the prior run's record that matters.
+    assert_corpus_covers_years(directory, wanted)
     return manifest
 
 
@@ -409,39 +486,52 @@ def fetch_from_corpus(html_dir: str | Path) -> Fetch:
         if not path.exists():
             raise ScrapeError(
                 f"{path} is missing from the Archives corpus. Populate it with "
-                f"`python -m usvote snapshot`, or drop --ec-dir to scrape live."
+                f"`python -m usvote corpus`, or pass --no-corpus to scrape live."
             )
         return path.read_bytes()
 
     return _fetch
 
 
-def _assert_manifest_covers(
-    directory: Path, manifest: Mapping[str, Any], years: Container[int]
+def assert_corpus_covers_years(
+    html_dir: str | Path, years: Collection[int] | None = None
 ) -> None:
     """Raise unless every requested year is present, 200, and on disk.
 
-    **The corpus completeness guard.** Without it a stale corpus fails silently rather
-    than loudly: :func:`scrape_raw_election_tables` iterates the links found *in the
-    index* and only warns about years it does not recognize, so a year that is
-    requested but simply absent from a stale index is never fetched and never
-    reported — the build exits 0 having ingested a year less, and that partial
-    warehouse feeds the public API snapshot (D034). Nothing downstream catches it
-    either: :func:`usvote.transform.assert_state_count_by_year` iterates the years that
-    *are* present, so a wholly-missing year is invisible to it. This is the same
-    silent-drop hazard the roster assert (D024) exists to close on the PV side.
+    **The corpus completeness guard**, run before an offline rebuild so a stale corpus
+    fails here by name rather than surfacing later as a mysteriously short warehouse.
 
-    Reached by construction on the next-cycle path: when ``LATEST_ELECTION_YEAR``
-    moves to 2028, a corpus snapshotted today is missing 2028 and every rebuild would
-    quietly produce a 2028-less warehouse.
+    Without it a stale corpus fails *silently*: :func:`scrape_raw_election_tables`
+    iterates the links found in the *index* and only warns about years it does not
+    recognize, so a year that is requested but simply absent from a stale index is
+    never fetched and never reported — the build exits 0 having ingested a year less,
+    and that partial warehouse feeds the public API snapshot (D034). Nothing downstream
+    catches it either: :func:`usvote.transform.assert_state_count_by_year` iterates the
+    years that *are* present, so a wholly-missing year is invisible to it. This is the
+    same silent-drop hazard the roster assert (D024) closes on the PV side.
+
+    Reached by construction on the next-cycle path: when ``LATEST_ELECTION_YEAR`` moves
+    to 2028, a corpus snapshotted today is missing 2028 and every rebuild would quietly
+    produce a 2028-less warehouse.
     """
-    from usvote.years import ec_ingest_years
-
-    wanted = {y for y in ec_ingest_years() if y in years}
+    directory = Path(html_dir)
+    manifest = read_manifest(directory)
+    # No intersection with ec_ingest_years(): an explicitly requested out-of-scope year
+    # (years={1868}) must still be checked, or the guard passes vacuously on an empty
+    # corpus — contradicting usvote.years' contract that an explicit year "fails loudly
+    # rather than being silently dropped".
+    wanted = set(ec_ingest_years() if years is None else years)
+    if not (directory / EC_INDEX_FILENAME).exists():
+        raise ScrapeError(
+            f"Archives corpus at {directory} has no {EC_INDEX_FILENAME}. The year list "
+            f"is enumerated from it, so the corpus is unusable. Build it with "
+            f"`python -m usvote corpus`."
+        )
     missing = sorted(
         y
         for y in wanted
         if str(y) not in manifest
+        or not isinstance(manifest[str(y)], dict)
         or manifest[str(y)].get("http_status") != 200
         or not (directory / f"{y}.html").exists()
     )
@@ -449,25 +539,6 @@ def _assert_manifest_covers(
         raise ScrapeError(
             f"Archives corpus at {directory} is incomplete — missing or non-200 for "
             f"{len(missing)} year(s): {missing}. Refresh it with "
-            f"`python -m usvote snapshot` before rebuilding from the corpus; a partial "
+            f"`python -m usvote corpus` before rebuilding from the corpus; a partial "
             f"corpus would silently build a warehouse missing those years."
         )
-
-
-def assert_corpus_covers_years(
-    html_dir: str | Path, years: Container[int] | None = None
-) -> None:
-    """Public precondition: the corpus covers every year a rebuild will ask for.
-
-    Called before an offline rebuild so the failure names the stale corpus, rather
-    than surfacing later as a mysteriously short warehouse. See
-    :func:`_assert_manifest_covers`.
-    """
-    from usvote.years import ec_ingest_years
-
-    directory = Path(html_dir)
-    _assert_manifest_covers(
-        directory,
-        read_manifest(directory),
-        ec_ingest_years() if years is None else years,
-    )

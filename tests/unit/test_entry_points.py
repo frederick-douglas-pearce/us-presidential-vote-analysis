@@ -35,6 +35,11 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     monkeypatch.setattr(top.config, "db_config_from_env", lambda *a, **k: dict(_DB))
     monkeypatch.setattr(top, "mit_csv_path_from_env", lambda *a, **k: "mit.csv")
     monkeypatch.setattr(top, "DBC", lambda cfg: "DBC")
+    # Hermetic: without this, anyone who exports USVOTE_EC_HTML_DIR — which this
+    # feature's own TestRealCorpus REQUIRES — fails these tests, because main() resolves
+    # the corpus from the real os.environ. Corpus-specific behavior is asserted in the
+    # dedicated tests below, which set the variable explicitly.
+    monkeypatch.delenv(top.config.EC_HTML_DIR_VAR, raising=False)
 
     def ec(
         dbc: object,
@@ -54,11 +59,15 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         *,
         ucsb_html_dir: Any,
         replace: bool,
-        fetch: Any = None,
+        fetch: Any,
         environ: Any,
         close: bool,
     ) -> WarehouseResult:
-        calls["warehouse"].append({"ucsb_html_dir": ucsb_html_dir, "replace": replace})
+        # No default on `fetch`, matching its siblings: if _run_all stopped forwarding
+        # it, this double must fail rather than silently accept None.
+        calls["warehouse"].append(
+            {"ucsb_html_dir": ucsb_html_dir, "replace": replace, "fetch": fetch}
+        )
         loaded = {SOURCE_EC, SOURCE_MIT} | (
             {SOURCE_UCSB} if ucsb_html_dir is not None else set()
         )
@@ -88,7 +97,9 @@ def test_all_autodetects_ucsb_when_snapshot_present(
 ) -> None:
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     assert top.main(["all", "--replace"]) == 0
-    assert top_env["warehouse"] == [{"ucsb_html_dir": "snap/", "replace": True}]
+    assert top_env["warehouse"] == [
+        {"ucsb_html_dir": "snap/", "replace": True, "fetch": top.scrape.fetch_url}
+    ]
 
 
 def test_all_skips_ucsb_loudly_when_snapshot_absent(
@@ -99,7 +110,9 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
 
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", absent)
     assert top.main(["all"]) == 0
-    assert top_env["warehouse"] == [{"ucsb_html_dir": None, "replace": False}]
+    assert top_env["warehouse"] == [
+        {"ucsb_html_dir": None, "replace": False, "fetch": top.scrape.fetch_url}
+    ]
     # The skip must be loud (D024): a prominent notice on stderr.
     assert "WITHOUT UCSB" in capsys.readouterr().err
 
@@ -115,7 +128,9 @@ def test_all_no_ucsb_skips_without_probing_env(
 
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", boom)
     assert top.main(["all", "--no-ucsb"]) == 0
-    assert top_env["warehouse"] == [{"ucsb_html_dir": None, "replace": False}]
+    assert top_env["warehouse"] == [
+        {"ucsb_html_dir": None, "replace": False, "fetch": top.scrape.fetch_url}
+    ]
     # Still loud (D024), but the remedy acknowledges the deliberate choice rather than
     # suggesting --require-ucsb / USVOTE_UCSB_HTML_DIR as if UCSB were missing by accident.
     err = capsys.readouterr().err

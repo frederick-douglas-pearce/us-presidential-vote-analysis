@@ -161,13 +161,21 @@ def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
     )
 
 
-def ec_html_dir_from_env(environ: Mapping[str, str] = os.environ) -> str:
+def ec_html_dir_from_env(
+    environ: Mapping[str, str] = os.environ, *, must_exist: bool = True
+) -> str:
     """Return the Archives raw-HTML corpus directory from ``USVOTE_EC_HTML_DIR``.
 
     Required when asked for, and deliberately with no default — the mirror of
     :func:`usvote.ucsb.config.ucsb_html_dir_from_env`, for the same reason: there is no
     sensible default for a machine-local data directory, and defaulting would risk
     snapshotting into (or replaying from) the wrong place.
+
+    ``must_exist`` mirrors :func:`snapshot_path_from_env`, and for the same reason: this
+    path is an **output** for ``python -m usvote corpus`` (which creates the directory)
+    and an **input** for every rebuild that replays it. Requiring it to pre-exist on the
+    build side would fail a fresh machine with advice to run the very command that just
+    failed. Read paths keep the default.
 
     Unlike UCSB's, this corpus is **optional to the pipeline**: Archives data is public
     domain and the live scrape still works without it, so nothing calls this unless the
@@ -176,14 +184,18 @@ def ec_html_dir_from_env(environ: Mapping[str, str] = os.environ) -> str:
     (D034) — rather than re-scraping ~49 pages of a site whose ``robots.txt`` asks for a
     10-second crawl delay. ``environ`` is injectable for testing.
     """
+    unset_hint = (
+        "Point it at a local Archives HTML corpus directory, then populate it with: "
+        "python -m usvote corpus"
+    )
+    if not must_exist:
+        path = environ.get(EC_HTML_DIR_VAR)
+        if not path:
+            raise ConfigError(f"{EC_HTML_DIR_VAR} is not set. {unset_hint}")
+        return path
     return require_path_from_env(
         EC_HTML_DIR_VAR,
         environ,
-        unset_hint=(
-            "Point it at a local Archives HTML corpus directory, then populate it "
-            "with: python -m usvote snapshot"
-        ),
-        missing_hint=(
-            "Create it and populate it with: python -m usvote snapshot"
-        ),
+        unset_hint=unset_hint,
+        missing_hint="Populate it with: python -m usvote corpus",
     )

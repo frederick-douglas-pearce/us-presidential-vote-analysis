@@ -18,7 +18,7 @@ its own pipeline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Container, Mapping
+from collections.abc import Callable, Collection, Mapping
 
 import pandas as pd
 
@@ -49,6 +49,7 @@ from usvote.years import (
 # sees and would be a silently-passing no-op.
 __all__ = [
     "EC_SPINE_FLOOR",
+    "PipelineError",
     "LATEST_ELECTION_YEAR",
     "UNSUPPORTED_EC_YEARS",
     "ec_ingest_years",
@@ -62,7 +63,7 @@ class PipelineError(RuntimeError):
 
 
 def _assert_years_scraped(
-    raw_tables: Mapping[int, object], year_filter: Container[int]
+    raw_tables: Mapping[int, object], year_filter: Collection[int]
 ) -> None:
     """Raise unless every requested year actually came back from the scrape.
 
@@ -80,8 +81,11 @@ def _assert_years_scraped(
     more specifically by :func:`usvote.scrape.assert_corpus_covers_years`, which can
     name the stale directory; this is the backstop that covers both).
     """
-    wanted = {y for y in ec_ingest_years() if y in year_filter}
-    missing = sorted(wanted - set(raw_tables))
+    # NOT intersected with ec_ingest_years(): an explicitly requested out-of-scope year
+    # (years={1868}) must still be checked, else the guard passes vacuously on an empty
+    # scrape — contradicting usvote.years' contract that an explicit year "fails loudly
+    # rather than being silently dropped". This is why the parameter is a Collection.
+    missing = sorted(set(year_filter) - set(raw_tables))
     if missing:
         raise PipelineError(
             f"Scrape returned no tables for {len(missing)} requested year(s): "
@@ -95,7 +99,7 @@ def run_ec_pipeline(
     shapefile_path: str,
     *,
     replace: bool = False,
-    years: Container[int] | None = None,
+    years: Collection[int] | None = None,
     fetch: Fetch = fetch_url,
     load_geo: Callable[[str], pd.DataFrame] = transform.load_state_geo,
     close: bool = False,
