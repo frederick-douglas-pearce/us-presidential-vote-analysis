@@ -36,11 +36,23 @@ from usvote.scrape import (
 INDEX_URL = scrape.ARCHIVE_URL_DOMAIN + scrape.ARCHIVE_URL_BASE
 
 
-class _AnyState:
-    """A ``Container[str]`` accepting every label (see the real-corpus test)."""
+def _real_state_names() -> set[str]:
+    """Every state name the EC spine has ever carried, from the committed roster.
 
-    def __contains__(self, item: object) -> bool:
-        return True
+    The real-corpus test needs a *real* state-name set, not a permissive one. An
+    earlier draft passed a container accepting every label, to avoid depending on the
+    TIGER shapefile — which silently broke the test on every real Archives page:
+    Table 2 carries footnote/notes rows that are filtered out **precisely because**
+    their text is not a state name, so accepting everything makes them parse as state
+    rows and raise. Sourcing the names from ``ec_state_roster_by_year.json`` (real,
+    committed, public-domain Archives data — test input only, D006) keeps the test
+    offline without disabling the filter.
+    """
+    roster = json.loads(
+        (Path(__file__).parent.parent / "fixtures" / "ec_state_roster_by_year.json")
+        .read_text(encoding="utf-8")
+    )
+    return {s for year in roster["years"].values() for s in year["states"]}
 
 
 def _index_html(years: list[int]) -> bytes:
@@ -259,9 +271,9 @@ class TestRealCorpus:
         raw = scrape.scrape_raw_election_tables(links, years, fetch=fetch)
         _assert_years_scraped(raw, years)
 
-        # Accept any state label: this test is about MARKUP coverage across 200 years
-        # of layout drift, not geography, so it must not require the TIGER shapefile.
-        parsed = parse.parse_election_years(raw, state_names=_AnyState())
+        # Real state names, from the committed roster — not a permissive container.
+        # See _real_state_names for why the permissive version silently broke this.
+        parsed = parse.parse_election_years(raw, state_names=_real_state_names())
         assert len(parsed) == len(years)
 
 
@@ -417,21 +429,24 @@ def test_ec_and_ucsb_manifest_entries_have_the_same_shape(tmp_path: Path) -> Non
     )
     ec_entry = read_manifest(ec_dir)["2020"]
 
-    ucsb_scrape.write_manifest(
-        ucsb_dir,
-        {
-            "2020": {
-                "bytes": 1,
-                "file": "2020.html",
-                "http_status": 200,
-                "sha256": "x",
-                "timestamp": "t",
-                "url": "u",
-            }
-        },
+    # Drive UCSB's REAL entry construction (snapshot_elections), not a hand-written
+    # dict round-tripped through its writer — that would return whatever it was given
+    # and pin nothing, which is exactly the failure mode this test exists to avoid.
+    (ucsb_dir / ucsb_scrape.INDEX_FILENAME).write_text(
+        '<a href="/statistics/elections/2020">2020</a>', encoding="utf-8"
     )
-    ucsb_entry = ucsb_scrape.read_manifest(ucsb_dir)["2020"]
-    assert set(ec_entry) == set(ucsb_entry)
+    ucsb_scrape.snapshot_elections(
+        ucsb_dir,
+        fetch=lambda url: ucsb_scrape.FetchResult(200, b"<html>ucsb</html>", None),
+        sleep=lambda s: None,
+    )
+    ucsb_manifest = ucsb_scrape.read_manifest(ucsb_dir)
+    ucsb_entry = ucsb_manifest[next(k for k in ucsb_manifest if k != "index")]
+    assert set(ec_entry) == set(ucsb_entry), (
+        f"EC manifest entry {sorted(ec_entry)} has drifted from UCSB's "
+        f"{sorted(ucsb_entry)} — the duplication in usvote/scrape.py is only safe "
+        f"while these agree."
+    )
 
 
 def test_no_top_level_module_imports_a_source_subpackage() -> None:
