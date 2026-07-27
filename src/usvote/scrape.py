@@ -163,7 +163,16 @@ def scrape_raw_election_tables(
     """
     raw_election_tables: dict[int, list[Tag]] = {}
     for link in election_links:
-        link_year = int(link.split("/")[-1])
+        segment = _year_segment(link)
+        if not segment.isdigit():
+            # Matches the snapshot driver's tolerance (#89). Without this, a non-year
+            # link the driver skipped and saved into the corpus index would crash every
+            # later rebuild with a bare ValueError and no remedy text. Skipping is safe
+            # because a genuinely missing year still fails loudly in
+            # usvote.pipeline._assert_years_scraped.
+            print(f"Skipping non-year link in the Archives index: {link}")
+            continue
+        link_year = int(segment)
         if link_year in us_election_years:
             raw_election_tables[link_year] = get_html_tables(
                 link, find_all=True, fetch=fetch
@@ -280,7 +289,7 @@ def corpus_filename(url: str) -> str:
 def _year_segment(url: str) -> str:
     """Return a URL's trailing path segment — the year, for an Archives year page.
 
-    One spelling for what was three (here, the snapshot loop, and the pre-existing
+    One spelling for what was three (here, the snapshot loop, and
     :func:`scrape_raw_election_tables`), which disagreed on trailing slashes: a
     ``.../1824/`` href produced ``1824`` in one and ``""`` in another, so the snapshot
     would succeed and the pipeline then die on ``int("")``.
@@ -309,6 +318,28 @@ def read_manifest(html_dir: str | Path) -> dict[str, Any]:
             f"{path} must contain a JSON object, got {type(loaded).__name__}."
         )
     return loaded
+
+
+def _atomic_write_bytes(path: Path, body: bytes) -> None:
+    """Write ``body`` to ``path`` atomically (temp file in the same dir, then replace).
+
+    Used for **both** the pages and the manifest. An earlier version wrote pages with a
+    plain ``write_bytes`` while going to real trouble for the manifest, which left the
+    more valuable artifact less protected: two concurrent ``corpus`` runs interleaved
+    into one ``<year>.html``, and the winner then recorded a sha256 of what it *sent*
+    rather than what landed — a corrupt page that passes the completeness guard forever.
+    A rebuild reading the directory mid-run could likewise see a half-written page.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        Path(tmp_name).replace(path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
@@ -399,7 +430,19 @@ def snapshot_election_years(
         if html_dir is not None
         else config.ec_html_dir_from_env(os.environ if environ is None else environ)
     )
-    directory.mkdir(parents=True, exist_ok=True)
+    # parents=False on purpose: if USVOTE_EC_HTML_DIR points into an unmounted external
+    # volume, parents=True would silently build the whole tree on the root filesystem,
+    # crawl for ~8.5 minutes, report success, and leave an invisible corpus under the
+    # mountpoint. A missing *parent* is nearly always a wrong or unmounted path; a
+    # missing leaf is the legitimate first-run case.
+    try:
+        directory.mkdir(exist_ok=True)
+    except FileNotFoundError as exc:
+        raise ScrapeError(
+            f"Cannot create {directory}: its parent does not exist. Check "
+            f"{config.EC_HTML_DIR_VAR} — if it points into an external or network "
+            f"volume, that volume may not be mounted."
+        ) from exc
     wanted = ec_ingest_years() if years is None else years
     manifest = read_manifest(directory)
     fetched_any = False
@@ -445,7 +488,7 @@ def snapshot_election_years(
                 f"rather than saving an error page as data. The manifest records the "
                 f"failure; re-run to resume once the site recovers."
             )
-        (directory / name).write_bytes(body)
+        _atomic_write_bytes(directory / name, body)
         write_manifest(directory, manifest)
 
     # The index first: year URLs are enumerated *from it*, so it must be on disk before
@@ -470,6 +513,31 @@ def snapshot_election_years(
     # capture, and on a fully-cached run it is the prior run's record that matters.
     assert_corpus_covers_years(directory, wanted)
     return manifest
+
+
+def describe_corpus_age(html_dir: str | Path) -> str:
+    """Summarize the corpus for the rebuild banner: page count + fetch date range.
+
+    The cheapest mitigation for the D036 content-divergence residual. The manifest has
+    recorded a per-page ``timestamp`` all along and nothing read it, so "how old is the
+    data this warehouse was built from?" was unanswerable from the output — and a stale
+    corpus is indistinguishable from "nothing changed upstream" all the way through to
+    the deployed snapshot hash. Printing the range converts an invisible condition into
+    a date the operator can judge.
+
+    The ``index`` entry is excluded deliberately: it is re-fetched every run, so it
+    would always read as today and would mask genuinely old year pages.
+    """
+    stamps = sorted(
+        entry["timestamp"]
+        for key, entry in read_manifest(html_dir).items()
+        if key != "index" and isinstance(entry, dict) and "timestamp" in entry
+    )
+    if not stamps:
+        return "no dated pages"
+    oldest, newest = stamps[0][:10], stamps[-1][:10]
+    span = oldest if oldest == newest else f"{oldest} .. {newest}"
+    return f"{len(stamps)} year pages, fetched {span}"
 
 
 def fetch_from_corpus(html_dir: str | Path) -> Fetch:

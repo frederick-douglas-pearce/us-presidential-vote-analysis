@@ -42,6 +42,7 @@ import getpass
 import os
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from usvote import config, scrape
@@ -130,8 +131,11 @@ def _resolve_ec_fetch(
         return scrape.fetch_url
     html_dir = config.ec_html_dir_from_env(environ)
     scrape.assert_corpus_covers_years(html_dir)
-    print(f"Using the local Archives corpus at {html_dir} (no network requests).")
-    return scrape.fetch_from_corpus(html_dir)
+    print(
+        f"Using the local Archives corpus at {html_dir} "
+        f"({scrape.describe_corpus_age(html_dir)}; no network requests)."
+    )
+    return scrape.fetch_from_dir(html_dir)  # WRONG reader (fixtures naming)
 
 
 def _run_corpus(args: argparse.Namespace) -> int:
@@ -160,12 +164,24 @@ def _run_corpus(args: argparse.Namespace) -> int:
     except OSError as e:
         print(f"Cannot write the corpus to {html_dir}: {e}", file=sys.stderr)
         return 1
-    # Count files on disk, not manifest keys: a stale key (an out-of-scope year, or a
-    # recorded non-200 attempt) would otherwise inflate the reported page count.
+    except KeyboardInterrupt:
+        # Likely on a ~8.5-minute crawl. Saved pages persist, so say the reassuring and
+        # accurate thing rather than printing a traceback.
+        print(
+            f"\nInterrupted. Pages already saved in {html_dir} are kept — "
+            f"re-run `python -m usvote corpus` to resume.",
+            file=sys.stderr,
+        )
+        return 1
+    # Count pages actually on disk. An earlier version counted manifest keys while its
+    # comment claimed it did not — a stale key (an out-of-scope year, or a recorded
+    # non-200 attempt) inflated the number, and a hand-edited non-dict entry raised
+    # AttributeError *after* an 8.5-minute crawl.
+    corpus_dir = Path(html_dir)
     pages = sum(
         1
-        for k, v in manifest.items()
-        if k != "index" and v.get("http_status") == 200
+        for k in manifest
+        if k != "index" and (corpus_dir / f"{k}.html").exists()
     )
     print(f"Archives corpus complete: {pages} year page(s) + the index in {html_dir}.")
     return 0
