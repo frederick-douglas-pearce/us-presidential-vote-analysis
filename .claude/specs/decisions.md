@@ -1656,3 +1656,18 @@ delay, while `archives.gov/robots.txt` asks for `Crawl-delay: 10` and the new sn
 honors both. Bringing the live path up to the same posture would make a cold `--replace` ~8.5
 minutes for anyone without a corpus — a real behavior change, so it is tracked as its own issue
 rather than smuggled into #89.
+
+**Acknowledged residual (added after the post-implementation architect pass, 2026-07-26):**
+The guards close **presence** divergence — a year missing from the corpus, the index, or the
+manifest fails loudly. They do **not** close **content** divergence:
+
+- an Archives **in-place correction** to a page that is present and 200 is never noticed, because
+  a year page on disk is not re-fetched; the old bytes are replayed forever, and
+- a year file corrupted **after** it was saved passes the presence guard, because the `sha256` the
+  manifest records is written but never read back.
+
+Both are low-likelihood and cheap to close (a `--refresh` flag that re-fetches all and diffs the
+recorded hashes; verify-on-read in `fetch_from_corpus`), and both are filed as follow-ups rather
+than fixed here. Until then, "a corpus-backed rebuild equals a live-scraped one, or fails loudly"
+holds for *presence* only — which is the property the silent-partial-warehouse hazard needed, but
+it is not the whole claim, and this paragraph exists so the gap is not mistaken for coverage.

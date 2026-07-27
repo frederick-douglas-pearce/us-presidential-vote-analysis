@@ -58,6 +58,12 @@ API_SNAPSHOT_PATH_VAR = "USVOTE_API_SNAPSHOT_PATH"
 #: match ``USVOTE_UCSB_HTML_DIR``, whose corpus layout this one mirrors.
 EC_HTML_DIR_VAR = "USVOTE_EC_HTML_DIR"
 
+#: How this project identifies itself to every site it fetches. **Project identity, not
+#: a per-source fact**, so it lives here rather than being restated per scraper: it was
+#: copied in three places (both scrapers plus UCSB's bootstrap hint) with nothing
+#: binding them together, so a contact address added to one would silently disagree.
+USER_AGENT = "us-presidential-vote-analysis-research/0.1 (personal academic research)"
+
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or invalid.

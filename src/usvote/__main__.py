@@ -120,8 +120,13 @@ def _resolve_ec_fetch(
     if not environ.get(config.EC_HTML_DIR_VAR):
         # Genuinely unconfigured: scrape live, as before. Distinguished from a
         # configured-but-broken corpus below, which must NOT silently hit the network —
-        # a typo'd path or an unmounted volume would otherwise fire ~50 live requests
-        # at a user who asked for an offline rebuild.
+        # an unmounted volume would otherwise fire ~50 live requests at a user who asked
+        # for an offline rebuild. Announced because a *misspelled* variable name is
+        # indistinguishable from an unset one, and the two differ by ~50 requests.
+        print(
+            f"{config.EC_HTML_DIR_VAR} is not set — scraping archives.gov live. "
+            f"Build a local corpus with `python -m usvote corpus` to rebuild offline."
+        )
         return scrape.fetch_url
     html_dir = config.ec_html_dir_from_env(environ)
     scrape.assert_corpus_covers_years(html_dir)

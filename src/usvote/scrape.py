@@ -245,10 +245,11 @@ def fetch_from_dir(source_dir: str | Path) -> Fetch:
 # compares the results. If a third consumer ever appears, extract rather than duplicate
 # again.
 
-#: Identify truthfully, as the UCSB scraper does. archives.gov's robots.txt sets
-#: ``Crawl-delay: 10`` for ``User-agent: *`` and does not disallow
-#: ``/electoral-college/``; the snapshot driver honors both.
-USER_AGENT = "us-presidential-vote-analysis-research/0.1 (personal academic research)"
+#: Identify truthfully, as the UCSB scraper does — one shared string (D015-legal:
+#: ``source -> shared``). archives.gov's robots.txt sets ``Crawl-delay: 10`` for
+#: ``User-agent: *`` and does not disallow ``/electoral-college/``; the snapshot driver
+#: honors both.
+USER_AGENT = config.USER_AGENT
 
 #: Seconds between snapshot fetches, from archives.gov/robots.txt (``Crawl-delay: 10``).
 #: A full ~50-page run therefore takes ~8.5 minutes. That cost is paid **once**; every

@@ -70,6 +70,7 @@ from typing import Any, NamedTuple
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from usvote import config as _config
 from usvote.ucsb.config import ucsb_html_dir_from_env
 
 #: The American Presidency Project's origin and its election-statistics index path.
@@ -80,7 +81,7 @@ ELECTIONS_INDEX_PATH = "/statistics/elections"
 #: UCSB's operators can identify the traffic and contact us. It matches robots.txt's
 #: ``User-agent: *`` rules -- it is deliberately not ClaudeBot, which those rules govern
 #: separately and which this scrape is not.
-USER_AGENT = "us-presidential-vote-analysis-research/0.1 (personal academic research)"
+USER_AGENT = _config.USER_AGENT  # one shared identity (#89); see usvote.config
 
 #: Seconds between fetches, from the site's robots.txt ``Crawl-delay: 10`` for
 #: ``User-agent: *``. A full 60-election run therefore takes ~10 minutes. That is the
