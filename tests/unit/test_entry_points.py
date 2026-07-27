@@ -9,6 +9,7 @@ loud/explicit UCSB gating for ``usvote all``. No DB, no network.
 
 from __future__ import annotations
 
+import argparse
 from typing import Any
 
 import pytest
@@ -266,8 +267,13 @@ def test_ec_uses_the_corpus_when_the_env_var_points_at_a_complete_one(
 ) -> None:
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
     assert top.main([]) == 0
-    # The whole point of the feature: a corpus-backed fetch, NOT the live one.
-    assert top_env["ec"][0]["fetch"] is not top.scrape.fetch_url
+    # Assert what the resolved fetch actually READS, not merely that it differs from
+    # fetch_url. The negative identity check this replaces was satisfied by any other
+    # callable — and a wrong reader (fetch_from_dir, which resolves to the fixtures
+    # naming) once shipped on this branch and went green through the whole suite.
+    fetch = top_env["ec"][0]["fetch"]
+    body = fetch("https://www.archives.gov/electoral-college/2020")
+    assert b"main-col" in body
 
 
 def test_no_corpus_forces_the_live_fetch_even_with_a_corpus_present(
@@ -284,7 +290,8 @@ def test_all_uses_the_corpus_too(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
     assert top.main(["all"]) == 0
-    assert top_env["warehouse"][0]["fetch"] is not top.scrape.fetch_url
+    fetch = top_env["warehouse"][0]["fetch"]
+    assert b"main-col" in fetch("https://www.archives.gov/electoral-college/2020")
 
 
 def test_a_stale_corpus_exits_cleanly_without_running_the_pipeline(
@@ -310,3 +317,81 @@ def test_corpus_subcommand_dispatches_to_the_corpus_runner(
     monkeypatch.setattr(top, "_run_corpus", fake_corpus)
     assert top.main(["corpus"]) == 0
     assert called == ["ran"]
+
+
+# --- _run_corpus: the runner itself, not just its dispatch (#89) ------------
+# Round 3 pinned that `corpus` DISPATCHES; the runner it dispatches to stayed 0%
+# covered — poisoning its whole body with `raise AssertionError` left the suite green.
+# These cover the exit codes, the fresh-machine path, and the page count.
+
+
+def test_corpus_runner_reports_pages_and_exits_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture
+) -> None:
+    corpus = _valid_corpus(tmp_path)
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, corpus)
+    assert top._run_corpus(argparse.Namespace()) == 0
+    out = capsys.readouterr().out
+    # Counted from files on disk, so a stale manifest key cannot inflate it.
+    assert "49 year page(s)" in out
+
+
+def test_corpus_runner_resolves_a_directory_that_does_not_exist_yet(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    # must_exist=False on this path only: the corpus dir is an OUTPUT here. Requiring
+    # it to pre-exist made a fresh machine fail with advice to run this very command.
+    target = tmp_path / "not-yet"
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(target))
+    monkeypatch.setattr(
+        top.scrape, "snapshot_election_years", lambda d: {"2020": {"http_status": 200}}
+    )
+    assert top._run_corpus(argparse.Namespace()) == 0
+
+
+def test_corpus_runner_exits_2_when_the_variable_is_unset(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.delenv(top.config.EC_HTML_DIR_VAR, raising=False)
+    assert top._run_corpus(argparse.Namespace()) == 2
+    assert "Configuration error" in capsys.readouterr().err
+
+
+def test_corpus_runner_exits_1_on_a_scrape_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(tmp_path))
+
+    def boom(_d: Any) -> None:
+        raise top.scrape.ScrapeError("archives returned 503")
+
+    monkeypatch.setattr(top.scrape, "snapshot_election_years", boom)
+    assert top._run_corpus(argparse.Namespace()) == 1
+    assert "503" in capsys.readouterr().err
+
+
+def test_corpus_runner_reports_progress_on_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture
+) -> None:
+    # Ctrl-C is likely on a ~8.5-minute crawl; saved pages persist, so the message must
+    # be the accurate reassuring one rather than a traceback.
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(tmp_path))
+
+    def interrupted(_d: Any) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(top.scrape, "snapshot_election_years", interrupted)
+    assert top._run_corpus(argparse.Namespace()) == 1
+    assert "are kept" in capsys.readouterr().err
+
+
+def test_corpus_banner_reports_the_corpus_age(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # The cheapest mitigation for the D036 content-divergence residual: a stale corpus
+    # is otherwise indistinguishable from "nothing changed upstream", all the way
+    # through to the deployed snapshot hash.
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
+    assert top.main([]) == 0
+    assert "49 year pages, fetched" in capsys.readouterr().out

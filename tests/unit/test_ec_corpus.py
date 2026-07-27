@@ -501,3 +501,140 @@ def test_no_top_level_module_imports_a_source_subpackage() -> None:
         "top-level EC modules must not import PV source subpackages "
         f"(D006/D015): {offenders}"
     )
+
+
+# --- behaviors added by the production-readiness pass (#89) -----------------
+# That commit added ~120 production lines with no tests; all of it survived mutation.
+
+
+def test_describe_corpus_age_reports_count_and_date_range(tmp_path: Path) -> None:
+    snapshot_election_years(
+        tmp_path, years={2016, 2020}, fetch=_fake_fetch([2016, 2020]), sleep=lambda s: None
+    )
+    described = scrape.describe_corpus_age(tmp_path)
+    assert described.startswith("2 year pages, fetched ")
+
+
+def test_describe_corpus_age_excludes_the_always_refetched_index(tmp_path: Path) -> None:
+    # The index is force-refetched every run, so including it would always read as
+    # "today" and mask genuinely old year pages — the exact staleness this reports on.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    manifest = read_manifest(tmp_path)
+    manifest["2020"]["timestamp"] = "1999-01-01T00:00:00+00:00"
+    write_manifest(tmp_path, manifest)
+    described = scrape.describe_corpus_age(tmp_path)
+    assert "1999-01-01" in described
+    assert "1 year pages" in described
+
+
+def test_describe_corpus_age_handles_an_empty_corpus(tmp_path: Path) -> None:
+    assert scrape.describe_corpus_age(tmp_path) == "no dated pages"
+
+
+def test_snapshot_writes_pages_through_the_atomic_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin the call site, not just the outcome.
+
+    An earlier version of this test asserted "no .tmp left behind, content matches" —
+    which a plain ``write_bytes`` satisfies too, so reverting to the non-atomic write
+    survived it. Observing *which* writer is used is the only thing that catches that.
+    """
+    routed: list[Path] = []
+    real = scrape._atomic_write_bytes
+
+    def recording_write(path: Path, body: bytes) -> None:
+        routed.append(path)
+        real(path, body)
+
+    monkeypatch.setattr(scrape, "_atomic_write_bytes", recording_write)
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    assert (tmp_path / "2020.html") in routed
+
+
+def test_atomic_write_leaves_no_partial_file_when_the_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The property that matters: a crash mid-write must leave the destination absent or
+    # whole, never partial. A plain write_bytes leaves a truncated page that then passes
+    # the completeness guard forever.
+    def boom(_fd: int) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(scrape.os, "fsync", boom)
+    with pytest.raises(OSError):
+        scrape._atomic_write_bytes(tmp_path / "2020.html", b"partial")
+    assert not (tmp_path / "2020.html").exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_snapshot_refuses_a_directory_whose_parent_is_missing(tmp_path: Path) -> None:
+    # An unmounted external volume would otherwise have the whole tree silently built
+    # on the root filesystem, crawled for ~8.5 minutes, and reported as success.
+    missing_parent = tmp_path / "not-mounted" / "corpus"
+    with pytest.raises(ScrapeError, match="parent does not exist"):
+        snapshot_election_years(
+            missing_parent, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+        )
+
+
+def test_scrape_raw_election_tables_skips_a_non_year_link(tmp_path: Path) -> None:
+    # The snapshot driver was taught to skip these, but the pipeline's own scraper still
+    # crashed on them with a bare ValueError — so a non-year link saved into the corpus
+    # index would poison every later rebuild with no remedy text.
+    links = [
+        "https://www.archives.gov/electoral-college/about",
+        "https://www.archives.gov/electoral-college/2020",
+    ]
+    tables = scrape.scrape_raw_election_tables(
+        links, {2020}, fetch=lambda url: _year_html(2020)
+    )
+    assert sorted(tables) == [2020]
+
+
+def test_scrape_raw_election_tables_tolerates_a_trailing_slash(tmp_path: Path) -> None:
+    # The three spellings of "the year is the last URL segment" disagreed here: one
+    # yielded "1824" and another "", so a snapshot succeeded and the pipeline then died
+    # on int("").
+    tables = scrape.scrape_raw_election_tables(
+        ["https://www.archives.gov/electoral-college/2020/"],
+        {2020},
+        fetch=lambda url: _year_html(2020),
+    )
+    assert sorted(tables) == [2020]
+
+
+def test_snapshot_verifies_itself_before_reporting_success(tmp_path: Path) -> None:
+    """The final self-check must fire when nothing else has already raised.
+
+    An earlier version used a 404, which halts inside ``capture`` *before* the final
+    guard — so it passed for the wrong reason and removing the guard survived it. The
+    honest scenario is an index that simply does not link a requested year: every fetch
+    succeeds, nothing errors, and only the closing self-check notices the corpus is
+    short. Without it, `usvote corpus` reports "complete" for an incomplete corpus.
+    """
+    with pytest.raises(ScrapeError, match="incomplete"):
+        snapshot_election_years(
+            tmp_path,
+            years={2020, 2024},
+            fetch=_fake_fetch([2020]),  # index links 2020 only
+            sleep=lambda s: None,
+        )
+
+
+def test_guard_rejects_a_year_recorded_as_non_200(tmp_path: Path) -> None:
+    # Reachable: manifest lost, refresh 503s, the stale <year>.html from an earlier run
+    # is still on disk — so the file-exists clause passes and only the status clause
+    # stops the rebuild replaying stale bytes.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    manifest = read_manifest(tmp_path)
+    manifest["2020"]["http_status"] = 503
+    write_manifest(tmp_path, manifest)
+    with pytest.raises(ScrapeError, match="incomplete"):
+        assert_corpus_covers_years(tmp_path, {2020})
