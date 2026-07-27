@@ -135,7 +135,7 @@ def _resolve_ec_fetch(
         f"Using the local Archives corpus at {html_dir} "
         f"({scrape.describe_corpus_age(html_dir)}; no network requests)."
     )
-    return scrape.fetch_from_dir(html_dir)  # WRONG reader (fixtures naming)
+    return scrape.fetch_from_corpus(html_dir)
 
 
 def _run_corpus(args: argparse.Namespace) -> int:
