@@ -302,6 +302,11 @@ def test_corpus_subcommand_dispatches_to_the_corpus_runner(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called: list[str] = []
-    monkeypatch.setattr(top, "_run_corpus", lambda args: called.append("ran") or 0)
+
+    def fake_corpus(args: Any) -> int:
+        called.append("ran")
+        return 0
+
+    monkeypatch.setattr(top, "_run_corpus", fake_corpus)
     assert top.main(["corpus"]) == 0
     assert called == ["ran"]
