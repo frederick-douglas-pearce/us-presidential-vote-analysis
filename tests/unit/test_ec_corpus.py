@@ -817,3 +817,20 @@ def test_snapshot_reads_the_injected_environ_not_the_process_one(
     )
     assert (wanted / "2020.html").exists()
     assert not (tmp_path / "ambient").exists()
+
+
+def test_manifest_is_written_sorted_and_indented(tmp_path: Path) -> None:
+    # write_manifest's docstring promises "sorted, indented", and the corpus is meant to
+    # be human-browsable and diffable against ucsb_raw/ — unsorted or unindented, every
+    # rewrite (one per page) churns the whole file and the diff stops being readable.
+    # Dropping either flag survived AC-verify round 6; the JSON stays valid, so only an
+    # explicit assertion catches it.
+    # Insertion order must DIFFER from sorted order, or sort_keys is unobservable: a
+    # first draft passed {"2020": ..., "index": ...}, which is already sorted, so
+    # dropping the flag produced byte-identical output and survived.
+    write_manifest(tmp_path, {"index": {"bytes": 1}, "2020": {"http_status": 200}})
+    text = (tmp_path / MANIFEST_FILENAME).read_text(encoding="utf-8")
+    assert text.index('"2020"') < text.index('"index"')
+    assert text == json.dumps(
+        {"2020": {"http_status": 200}, "index": {"bytes": 1}}, indent=2, sort_keys=True
+    )

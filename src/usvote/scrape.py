@@ -329,6 +329,13 @@ def _atomic_write_bytes(path: Path, body: bytes) -> None:
     into one ``<year>.html``, and the winner then recorded a sha256 of what it *sent*
     rather than what landed — a corrupt page that passes the completeness guard forever.
     A rebuild reading the directory mid-run could likewise see a half-written page.
+
+    ``mkstemp`` gives a **unique** temp name, not a fixed ``<name>.tmp``: two concurrent
+    runs sharing one temp path would interleave writes into it and then *atomically
+    install* the corrupt result — atomicity that faithfully publishes garbage. This
+    rationale was recorded on ``write_manifest`` before it delegated here; it is kept
+    because nothing tests it (a fixed name behaves correctly single-threaded, so the
+    comment is the only thing standing between a future edit and the bug).
     """
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
     try:
