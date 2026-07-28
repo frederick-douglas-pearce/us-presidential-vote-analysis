@@ -13,6 +13,7 @@ silently missing that year, and that warehouse feeds the public API snapshot (D0
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -351,6 +352,15 @@ def test_guard_checks_an_explicitly_requested_out_of_scope_year(tmp_path: Path) 
     )
     with pytest.raises(ScrapeError, match="1868"):
         assert_corpus_covers_years(tmp_path, {1868})
+
+
+def test_pipeline_guard_checks_an_explicitly_requested_out_of_scope_year() -> None:
+    # The pipeline-side twin of the test above. Its comment states "NOT intersected with
+    # ec_ingest_years() ... This is why the parameter is a Collection" — but only the
+    # scrape-side guard had a test for it, so adding the intersection back here passed.
+    # Vacuous-pass is the failure mode: years={1868} over an empty scrape must RAISE.
+    with pytest.raises(PipelineError, match="1868"):
+        _assert_years_scraped({}, {1868})
 
 
 def test_non_year_link_in_the_index_is_skipped_not_fatal(tmp_path: Path) -> None:
@@ -715,3 +725,95 @@ def test_snapshot_resolves_a_not_yet_created_dir_from_the_environment(
         years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
     )
     assert (target / "2020.html").exists()
+
+
+# --- AC-verify round 5: the manifest's VALUES, and the remaining seams ------
+# The manifest's key *set* was pinned; its values were not, so the corpus's provenance
+# record could lie while every test stayed green.
+
+
+def test_manifest_records_the_hash_of_the_bytes_actually_saved(tmp_path: Path) -> None:
+    # D036 names this hash as the integrity mechanism. Only its LENGTH was asserted, so
+    # hashing the wrong bytes survived — a corpus that certifies content it does not
+    # hold, which is worse than no hash at all.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    entry = read_manifest(tmp_path)["2020"]
+    on_disk = (tmp_path / "2020.html").read_bytes()
+    assert entry["sha256"] == hashlib.sha256(on_disk).hexdigest()
+    assert entry["bytes"] == len(on_disk)
+
+
+def test_manifest_records_the_url_fetched(tmp_path: Path) -> None:
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    manifest = read_manifest(tmp_path)
+    assert manifest["2020"]["url"] == "https://www.archives.gov/electoral-college/2020"
+    assert manifest["index"]["url"] == INDEX_URL
+
+
+def test_manifest_timestamps_advance_between_runs(tmp_path: Path) -> None:
+    # describe_corpus_age — the D036 staleness mitigation, and the only signal an
+    # operator gets that a corpus predates an election — reads this field. Frozen to a
+    # constant it would report a confidently false age, and only key-presence was pinned.
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    first = read_manifest(tmp_path)["index"]["timestamp"]
+    snapshot_election_years(
+        tmp_path, years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    # The index is force-refetched every run, so its stamp must move.
+    assert read_manifest(tmp_path)["index"]["timestamp"] > first
+
+
+def test_manifest_is_written_through_the_atomic_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mechanism, not outcome — the page writer's test, now for the manifest.
+
+    ``test_manifest_write_leaves_no_temp_file`` asserts "no stray .tmp, content correct",
+    which a plain ``write_text`` satisfies exactly, so swapping the atomic write out
+    survived it. The manifest is rewritten after *every* page precisely so an interrupt
+    leaves a parseable record; a truncate-then-write defeats that and looks identical
+    afterwards. ``write_manifest`` now delegates to the one atomic writer, so observing
+    that call is the check.
+    """
+    routed: list[Path] = []
+    real = scrape._atomic_write_bytes
+
+    def recording_write(path: Path, body: bytes) -> None:
+        routed.append(path)
+        real(path, body)
+
+    monkeypatch.setattr(scrape, "_atomic_write_bytes", recording_write)
+    write_manifest(tmp_path, {"2020": {"http_status": 200}})
+    assert routed == [tmp_path / MANIFEST_FILENAME]
+
+
+def test_read_manifest_rejects_a_non_object_document(tmp_path: Path) -> None:
+    # Valid JSON, wrong shape: every later `.get("http_status")` would raise
+    # AttributeError deep inside the guard instead of naming the file.
+    (tmp_path / MANIFEST_FILENAME).write_text("[1, 2, 3]", encoding="utf-8")
+    with pytest.raises(ScrapeError, match="must contain a JSON object"):
+        read_manifest(tmp_path)
+
+
+def test_snapshot_reads_the_injected_environ_not_the_process_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The `environ` DI seam had no test at all: ignoring it and always reading
+    # os.environ left the suite green, which would make every injected-config caller
+    # silently resolve the ambient corpus instead of the one it asked for.
+    monkeypatch.setenv(scrape.config.EC_HTML_DIR_VAR, str(tmp_path / "ambient"))
+    wanted = tmp_path / "injected"
+    snapshot_election_years(
+        years={2020},
+        fetch=_fake_fetch([2020]),
+        sleep=lambda s: None,
+        environ={scrape.config.EC_HTML_DIR_VAR: str(wanted)},
+    )
+    assert (wanted / "2020.html").exists()
+    assert not (tmp_path / "ambient").exists()

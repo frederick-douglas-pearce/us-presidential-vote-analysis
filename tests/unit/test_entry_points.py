@@ -330,6 +330,11 @@ def test_corpus_runner_reports_pages_and_exits_zero(
 ) -> None:
     corpus = _valid_corpus(tmp_path)
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, corpus)
+    # MUST stub the snapshot. Without it this test hit archives.gov for real: _run_corpus
+    # calls snapshot_election_years with its default live fetch, and the index is
+    # force-refetched every run by design, so the "offline unit suite" invariant broke and
+    # the live index silently overwrote the synthetic one under test.
+    monkeypatch.setattr(top.scrape, "snapshot_election_years", lambda d: None)
     assert top._run_corpus(argparse.Namespace()) == 0
     out = capsys.readouterr().out
     # Counted from files on disk, so a stale manifest key cannot inflate it.
@@ -491,3 +496,64 @@ def test_corpus_page_count_ignores_a_stale_out_of_scope_manifest_key(
     monkeypatch.setattr(top.scrape, "snapshot_election_years", lambda d: None)
     assert top._run_corpus(argparse.Namespace()) == 0
     assert "49 year page(s)" in capsys.readouterr().out
+
+
+# --- AC-verify round 5: the `all` corpus branch, unguarded until now --------
+# `all` is the front door the API-snapshot refresh runs through (D034), yet only the
+# bare/`ec` path had corpus tests. Three mutations survived: `all` returning 0 on a
+# broken corpus, the resolve-before-connect ordering, and `--no-corpus` on its parser.
+
+
+def test_all_exits_2_on_a_stale_corpus_without_building(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    # The whole ScrapeError branch of _run_all was untested: returning 0 here left the
+    # suite green while `python -m usvote all` reported SUCCESS having built nothing.
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(tmp_path / "empty"))
+    assert top.main(["all"]) == 2
+    assert top_env["warehouse"] == []
+
+
+def test_all_resolves_the_corpus_before_connecting(
+    top_env: dict[str, list],
+    recording_dbc: list[_RecordingDBC],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """Pin the ordering the code claims but nothing enforced.
+
+    ``_run_all`` resolves the fetch inside the same try as the config, *before*
+    ``_connect``, so a stale corpus aborts before the operator types a DB password —
+    otherwise the run dies holding an open connection that ``close=True`` never reaches.
+    Moving the resolve after ``_connect`` left the whole suite green.
+    """
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, str(tmp_path / "empty"))
+    assert top.main(["all"]) == 2
+    assert recording_dbc == []
+
+
+def test_all_accepts_no_corpus(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    # --no-corpus was only ever exercised on `ec`; dropping it from the `all` subparser
+    # turned `usvote all --no-corpus` into an argparse error with the suite still green.
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
+    assert top.main(["all", "--no-corpus"]) == 0
+    assert top_env["warehouse"][0]["fetch"] is top.scrape.fetch_url
+
+
+def test_an_unset_corpus_variable_is_announced(
+    top_env: dict[str, list], capsys: pytest.CaptureFixture
+) -> None:
+    # A *misspelled* variable name is indistinguishable from an unset one, and the two
+    # differ by ~50 live requests — so the fallback to live scraping must say so. The
+    # top_env fixture unsets the variable, which is exactly this case.
+    assert top.main([]) == 0
+    out = capsys.readouterr().out
+    assert top.config.EC_HTML_DIR_VAR in out
+    assert "scraping archives.gov live" in out

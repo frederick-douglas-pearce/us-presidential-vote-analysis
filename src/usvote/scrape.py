@@ -351,23 +351,15 @@ def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
     that by leaving an unparseable half-file behind on a crash. The temp-file swap
     guarantees readers see either the old complete version or the new one.
     """
-    directory = Path(html_dir)
-    path = directory / MANIFEST_FILENAME
-    # A unique temp name, not a fixed one: two concurrent runs sharing
-    # ``manifest.json.tmp`` would interleave writes into it and then *atomically
-    # install* the corrupt result.
-    fd, tmp_name = tempfile.mkstemp(
-        dir=directory, prefix=MANIFEST_FILENAME, suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(dict(manifest), fh, indent=2, sort_keys=True)
-            fh.flush()
-            os.fsync(fh.fileno())
-        Path(tmp_name).replace(path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    # Delegated to _atomic_write_bytes rather than repeating its mkstemp/fsync/replace
+    # dance, which is what this function used to do. Its docstring already claimed it
+    # was "used for both the pages and the manifest" — it was not, and the copy was the
+    # weaker of the two: the page writer had a test observing which writer runs, while
+    # this one had only an outcome test that a plain write_text passes identically.
+    # One writer, one mechanism test, one place for the atomicity to be true.
+    path = Path(html_dir) / MANIFEST_FILENAME
+    body = json.dumps(dict(manifest), indent=2, sort_keys=True)
+    _atomic_write_bytes(path, body.encode("utf-8"))
 
 
 def fetch_page_with_status(url: str) -> tuple[int, bytes]:
