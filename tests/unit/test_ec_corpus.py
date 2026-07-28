@@ -638,3 +638,80 @@ def test_guard_rejects_a_year_recorded_as_non_200(tmp_path: Path) -> None:
     write_manifest(tmp_path, manifest)
     with pytest.raises(ScrapeError, match="incomplete"):
         assert_corpus_covers_years(tmp_path, {2020})
+
+
+# --- code-review round 3 findings (#89) -------------------------------------
+
+
+def _redirecting_response(final_url: str) -> type:
+    class Resp:
+        status_code = 200
+        content = b"<html>ok</html>"
+        url = final_url
+        history = ["302"]
+
+    return Resp
+
+
+@pytest.mark.parametrize(
+    "requested,final",
+    [
+        # Canonical trailing slash on the index — the case that would have broken the
+        # corpus on its very FIRST request the day archives.gov adds one, while the live
+        # scrape (which follows redirects silently) kept working.
+        (
+            "https://www.archives.gov/electoral-college/results",
+            "https://www.archives.gov/electoral-college/results/",
+        ),
+        # http -> https, a year page. Same corpus name, so nothing can be mis-saved.
+        (
+            "http://www.archives.gov/electoral-college/2020",
+            "https://www.archives.gov/electoral-college/2020",
+        ),
+    ],
+)
+def test_a_redirect_landing_on_the_same_corpus_name_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, requested: str, final: str
+) -> None:
+    """The refusal is about the NAME, not about redirects as such.
+
+    The hazard is answering for one page under another page's name. A redirect that
+    resolves to the same corpus filename cannot do that, so refusing it has no upside —
+    and the index in particular has no year name to be mis-saved under at all.
+    """
+    monkeypatch.setattr("requests.get", lambda *a, **k: _redirecting_response(final)())
+    status, body = scrape.fetch_page_with_status(requested)
+    assert (status, body) == (200, b"<html>ok</html>")
+
+
+def test_a_redirect_to_a_different_year_is_still_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The narrowing must not reopen the hole it narrowed: a year->year redirect saves
+    # one year's markup under another year's name, silently, at status 200.
+    monkeypatch.setattr(
+        "requests.get",
+        lambda *a, **k: _redirecting_response(
+            "https://www.archives.gov/electoral-college/2016"
+        )(),
+    )
+    with pytest.raises(ScrapeError, match="redirected"):
+        scrape.fetch_page_with_status("https://www.archives.gov/electoral-college/2020")
+
+
+def test_snapshot_resolves_a_not_yet_created_dir_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The env-resolving branch is the WRITE side: the directory is an output.
+
+    Resolving it with the read-side default (``must_exist=True``) failed a fresh machine
+    with "does not exist. Populate it with: python -m usvote corpus" — advice to run the
+    command that just failed — and contradicted the mkdir five lines below. The shipped
+    CLI always passes ``html_dir`` explicitly, so only a library caller reached it.
+    """
+    target = tmp_path / "not-yet"
+    monkeypatch.setenv(scrape.config.EC_HTML_DIR_VAR, str(target))
+    snapshot_election_years(
+        years={2020}, fetch=_fake_fetch([2020]), sleep=lambda s: None
+    )
+    assert (target / "2020.html").exists()

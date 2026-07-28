@@ -48,9 +48,10 @@ from typing import Any
 from usvote import config, scrape
 from usvote.db import DBC, DBConnectionError
 from usvote.mit.config import mit_csv_path_from_env
-from usvote.pipeline import run_ec_pipeline
+from usvote.pipeline import PipelineError, run_ec_pipeline
 from usvote.ucsb.config import ucsb_html_dir_from_env
 from usvote.warehouse import SOURCE_UCSB, run_warehouse
+from usvote.years import ec_ingest_years
 
 _NO_CORPUS_HELP = (
     "Scrape archives.gov live even when USVOTE_EC_HTML_DIR points at a local corpus. "
@@ -77,6 +78,26 @@ def _connect(db_config: dict[str, Any]) -> DBC | None:
     except DBConnectionError as e:
         print(e, file=sys.stderr)
         return None
+
+
+def _report_incomplete_scrape(error: PipelineError, dbc: DBC) -> int:
+    """Report an incompletely-scraped span as a message, not a traceback.
+
+    :func:`usvote.pipeline._assert_years_scraped` is reachable in normal operation, so
+    its carefully-worded refusal must survive to the operator. Two ways in, neither
+    caught by :func:`usvote.scrape.assert_corpus_covers_years`: that guard audits the
+    year *pages* and the manifest but never reads the saved ``_index_results.html``, so
+    a corpus whose index is stale (an earlier run's index fetch failed and left the old
+    one; a directory copied without its index) passes it and trips here — and on the
+    live path, any archives.gov index restructure does the same.
+
+    Closes the connection ``close=True`` never reached, since the pipeline raises before
+    its own close: an un-closed connection on the error path is a leak the success path
+    does not have.
+    """
+    print(f"Incomplete scrape: {error}", file=sys.stderr)
+    dbc.close_connection()
+    return 1
 
 
 def _resolve_ucsb_dir(
@@ -157,7 +178,7 @@ def _run_corpus(args: argparse.Namespace) -> int:
         f"archives.gov/robots.txt, so a full first run takes several minutes."
     )
     try:
-        manifest = scrape.snapshot_election_years(html_dir)
+        scrape.snapshot_election_years(html_dir)
     except scrape.ScrapeError as e:
         print(f"Corpus fetch failed: {e}", file=sys.stderr)
         return 1
@@ -173,16 +194,15 @@ def _run_corpus(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    # Count pages actually on disk. An earlier version counted manifest keys while its
-    # comment claimed it did not — a stale key (an out-of-scope year, or a recorded
-    # non-200 attempt) inflated the number, and a hand-edited non-dict entry raised
-    # AttributeError *after* an 8.5-minute crawl.
+    # Count in-scope year pages present on disk. Driven by ec_ingest_years(), NOT by the
+    # manifest: two earlier versions iterated manifest keys while claiming otherwise,
+    # and and-ing a file-existence check onto that did not fix it — a stale out-of-scope
+    # key exists *because* the page was once fetched, so its file is on disk and it
+    # still inflated the count, while a page on disk with no manifest entry went
+    # uncounted. Iterating the scope answers the question the message actually asks
+    # ("is the corpus complete?") and cannot be moved by a hand-edited manifest.
     corpus_dir = Path(html_dir)
-    pages = sum(
-        1
-        for k in manifest
-        if k != "index" and (corpus_dir / f"{k}.html").exists()
-    )
+    pages = sum(1 for y in ec_ingest_years() if (corpus_dir / f"{y}.html").exists())
     print(f"Archives corpus complete: {pages} year page(s) + the index in {html_dir}.")
     return 0
 
@@ -199,7 +219,10 @@ def _run_ec(replace: bool, fetch: scrape.Fetch = scrape.fetch_url) -> int:
     if dbc is None:
         return 1
 
-    run_ec_pipeline(dbc, shapefile_path, replace=replace, fetch=fetch, close=True)
+    try:
+        run_ec_pipeline(dbc, shapefile_path, replace=replace, fetch=fetch, close=True)
+    except PipelineError as e:
+        return _report_incomplete_scrape(e, dbc)
     print("EC ingestion complete.")
     return 0
 
@@ -246,16 +269,19 @@ def _run_all(args: argparse.Namespace) -> int:
     if dbc is None:
         return 1
 
-    result = run_warehouse(
-        dbc,
-        shapefile_path,
-        mit_csv_path,
-        ucsb_html_dir=ucsb_html_dir,
-        replace=args.replace,
-        fetch=ec_fetch,
-        environ=environ,
-        close=True,
-    )
+    try:
+        result = run_warehouse(
+            dbc,
+            shapefile_path,
+            mit_csv_path,
+            ucsb_html_dir=ucsb_html_dir,
+            replace=args.replace,
+            fetch=ec_fetch,
+            environ=environ,
+            close=True,
+        )
+    except PipelineError as e:
+        return _report_incomplete_scrape(e, dbc)
     sources = ", ".join(sorted(result.sources_loaded))
     ucsb_note = (
         f", UCSB {result.ucsb_pv_rows} PV / {result.ucsb_roster_rows} roster rows"

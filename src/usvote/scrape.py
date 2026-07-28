@@ -392,10 +392,19 @@ def fetch_page_with_status(url: str) -> tuple[int, bytes]:
             f"Network error fetching {url}: {exc}. Pages already saved are kept — "
             f"re-run `python -m usvote corpus` to resume."
         ) from exc
-    if response.history:
+    if response.history and corpus_filename(response.url) != corpus_filename(url):
         # A retired page 302'd to the index would otherwise be saved under the year's
         # name, at status 200, and pass every check the guard makes — silently feeding
         # the wrong markup to every future offline rebuild.
+        #
+        # Keyed on the *filename*, not on `response.history` alone: the hazard is
+        # answering for one page under another page's name, so a redirect landing on the
+        # same corpus name is harmless (http->https, a canonical trailing slash — both
+        # normalized by corpus_filename). Refusing those blanket-style would have made
+        # the corpus unbuildable the day archives.gov adds a canonical redirect on the
+        # index, on the very first request, while the live scrape kept working — a
+        # failure mode with no upside, since the index has no year name to be mis-saved
+        # under in the first place.
         raise ScrapeError(
             f"{url} redirected to {response.url}; refusing to save the response under "
             f"the requested year's name. The Archives layout may have changed."
@@ -425,10 +434,18 @@ def snapshot_election_years(
     page already present is skipped, so an interrupted run resumes where it stopped
     rather than restarting the ~8.5-minute crawl.
     """
+    # must_exist=False: this is the WRITE side, where the directory is an output. The
+    # default (True) would fail a fresh machine with "does not exist. Populate it with:
+    # python -m usvote corpus" — advice to run the command that just failed — and it
+    # would contradict the mkdir below, which exists precisely because a missing leaf is
+    # the legitimate first-run case. The shipped CLI passes html_dir explicitly and so
+    # never hit this; a library caller would have. Read paths keep must_exist=True.
     directory = Path(
         html_dir
         if html_dir is not None
-        else config.ec_html_dir_from_env(os.environ if environ is None else environ)
+        else config.ec_html_dir_from_env(
+            os.environ if environ is None else environ, must_exist=False
+        )
     )
     # parents=False on purpose: if USVOTE_EC_HTML_DIR points into an unmounted external
     # volume, parents=True would silently build the whole tree on the root filesystem,

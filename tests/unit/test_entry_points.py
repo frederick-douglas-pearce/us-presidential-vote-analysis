@@ -395,3 +395,99 @@ def test_corpus_banner_reports_the_corpus_age(
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
     assert top.main([]) == 0
     assert "49 year pages, fetched" in capsys.readouterr().out
+
+
+# --- PipelineError must reach the operator as a message, not a traceback ----
+# _assert_years_scraped is reachable in normal operation (a stale saved index passes
+# assert_corpus_covers_years, which never reads _index_results.html), but neither
+# _run_ec nor _run_all handled it — so its carefully-worded refusal arrived as an
+# uncaught traceback, and the connection leaked because close=True is never reached.
+
+
+class _RecordingDBC:
+    """A DBC double that records whether the CLI closed it."""
+
+    def __init__(self, _cfg: Any) -> None:
+        self.closed = False
+
+    def close_connection(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def recording_dbc(monkeypatch: pytest.MonkeyPatch) -> list[_RecordingDBC]:
+    made: list[_RecordingDBC] = []
+
+    def make(cfg: Any) -> _RecordingDBC:
+        made.append(_RecordingDBC(cfg))
+        return made[-1]
+
+    monkeypatch.setattr(top, "DBC", make)
+    return made
+
+
+def _raise_incomplete(*a: Any, **k: Any) -> None:
+    raise top.PipelineError("Scrape returned no tables for 1 requested year(s): [2024].")
+
+
+def test_ec_reports_an_incomplete_scrape_without_a_traceback(
+    top_env: dict[str, list],
+    recording_dbc: list[_RecordingDBC],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    monkeypatch.setattr(top, "run_ec_pipeline", _raise_incomplete)
+    assert top.main([]) == 1
+    err = capsys.readouterr().err
+    # The guard's own wording must survive to the operator — it is the only place the
+    # remedy (stale corpus / changed index) is stated.
+    assert "2024" in err
+    assert "Incomplete scrape" in err
+
+
+def test_ec_closes_the_connection_when_the_scrape_is_incomplete(
+    top_env: dict[str, list],
+    recording_dbc: list[_RecordingDBC],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # close=True never fires: the pipeline raises before its own close. Without an
+    # explicit close here the error path leaks a connection the success path does not.
+    monkeypatch.setattr(top, "run_ec_pipeline", _raise_incomplete)
+    assert top.main([]) == 1
+    assert [d.closed for d in recording_dbc] == [True]
+
+
+def test_all_reports_an_incomplete_scrape_without_a_traceback(
+    top_env: dict[str, list],
+    recording_dbc: list[_RecordingDBC],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # run_warehouse sequences run_ec_pipeline, so the same guard fires on this path;
+    # `all` needs its own handler because _run_all's try covers only config resolution.
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", _raise_incomplete)
+    assert top.main(["all"]) == 1
+    assert "Incomplete scrape" in capsys.readouterr().err
+    assert [d.closed for d in recording_dbc] == [True]
+
+
+def test_corpus_page_count_ignores_a_stale_out_of_scope_manifest_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture
+) -> None:
+    """The count must come from the in-scope years, not from manifest keys.
+
+    A stale out-of-scope key exists *because* the page was once fetched, so its file is
+    on disk too — and-ing a file-existence check onto a manifest iteration therefore
+    does not stop it inflating the count. 1868 is the realistic case: it is in
+    UNSUPPORTED_EC_YEARS, so a corpus built before that gate would carry exactly this.
+    """
+    corpus = _valid_corpus(tmp_path)
+    (tmp_path / "1868.html").write_bytes(b"<html></html>")
+    manifest = top.scrape.read_manifest(corpus)
+    manifest["1868"] = {"http_status": 200, "file": "1868.html"}
+    top.scrape.write_manifest(corpus, manifest)
+    monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, corpus)
+    monkeypatch.setattr(top.scrape, "snapshot_election_years", lambda d: None)
+    assert top._run_corpus(argparse.Namespace()) == 0
+    assert "49 year page(s)" in capsys.readouterr().out
