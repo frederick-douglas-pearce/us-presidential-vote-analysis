@@ -42,14 +42,21 @@ import getpass
 import os
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-from usvote import config
+from usvote import config, scrape
 from usvote.db import DBC, DBConnectionError
 from usvote.mit.config import mit_csv_path_from_env
-from usvote.pipeline import run_ec_pipeline
+from usvote.pipeline import PipelineError, run_ec_pipeline
 from usvote.ucsb.config import ucsb_html_dir_from_env
 from usvote.warehouse import SOURCE_UCSB, run_warehouse
+from usvote.years import ec_ingest_years
+
+_NO_CORPUS_HELP = (
+    "Scrape archives.gov live even when USVOTE_EC_HTML_DIR points at a local corpus. "
+    "By default a complete corpus is used, which makes the rebuild network-free."
+)
 
 _REPLACE_HELP = (
     "Drop and recreate the dwh schema before loading (destructive full rebuild). "
@@ -71,6 +78,26 @@ def _connect(db_config: dict[str, Any]) -> DBC | None:
     except DBConnectionError as e:
         print(e, file=sys.stderr)
         return None
+
+
+def _report_incomplete_scrape(error: PipelineError, dbc: DBC) -> int:
+    """Report an incompletely-scraped span as a message, not a traceback.
+
+    :func:`usvote.pipeline._assert_years_scraped` is reachable in normal operation, so
+    its carefully-worded refusal must survive to the operator. Two ways in, neither
+    caught by :func:`usvote.scrape.assert_corpus_covers_years`: that guard audits the
+    year *pages* and the manifest but never reads the saved ``_index_results.html``, so
+    a corpus whose index is stale (an earlier run's index fetch failed and left the old
+    one; a directory copied without its index) passes it and trips here — and on the
+    live path, any archives.gov index restructure does the same.
+
+    Closes the connection ``close=True`` never reached, since the pipeline raises before
+    its own close: an un-closed connection on the error path is a leak the success path
+    does not have.
+    """
+    print(f"Incomplete scrape: {error}", file=sys.stderr)
+    dbc.close_connection()
+    return 1
 
 
 def _resolve_ucsb_dir(
@@ -95,7 +122,92 @@ def _resolve_ucsb_dir(
         return None
 
 
-def _run_ec(replace: bool) -> int:
+def _resolve_ec_fetch(
+    args: argparse.Namespace, environ: Mapping[str, str]
+) -> scrape.Fetch:
+    """Resolve the EC fetch seam: the local Archives corpus, or the live network.
+
+    Mirrors :func:`_resolve_ucsb_dir`'s posture — auto-detect, but **loudly** — with
+    one deliberate difference in strictness. Skipping UCSB merely builds without an
+    optional control; swapping the EC fetch source changes where the *spine's* data
+    comes from, so a detected corpus is verified complete
+    (:func:`usvote.scrape.assert_corpus_covers_years`) before it is used. A stale
+    corpus fails here, by name, instead of silently building a warehouse short a year.
+
+    ``--no-corpus`` forces the live scrape. When ``USVOTE_EC_HTML_DIR`` is unset we
+    scrape live, as before — the corpus is an optimization, never a requirement.
+    """
+    if getattr(args, "no_corpus", False):
+        return scrape.fetch_url
+    if not environ.get(config.EC_HTML_DIR_VAR):
+        # Genuinely unconfigured: scrape live, as before. Distinguished from a
+        # configured-but-broken corpus below, which must NOT silently hit the network —
+        # an unmounted volume would otherwise fire ~50 live requests at a user who asked
+        # for an offline rebuild. Announced because a *misspelled* variable name is
+        # indistinguishable from an unset one, and the two differ by ~50 requests.
+        print(
+            f"{config.EC_HTML_DIR_VAR} is not set — scraping archives.gov live. "
+            f"Build a local corpus with `python -m usvote corpus` to rebuild offline."
+        )
+        return scrape.fetch_url
+    html_dir = config.ec_html_dir_from_env(environ)
+    scrape.assert_corpus_covers_years(html_dir)
+    print(
+        f"Using the local Archives corpus at {html_dir} "
+        f"({scrape.describe_corpus_age(html_dir)}; no network requests)."
+    )
+    return scrape.fetch_from_corpus(html_dir)
+
+
+def _run_corpus(args: argparse.Namespace) -> int:
+    """Fetch the Archives corpus to ``USVOTE_EC_HTML_DIR``. No DB involved.
+
+    Resolves with ``must_exist=False``: this is the one command for which the
+    directory is an *output*, so requiring it to pre-exist would make the first run on
+    a fresh machine fail with advice to run this very command.
+    """
+    try:
+        html_dir = config.ec_html_dir_from_env(os.environ, must_exist=False)
+    except config.ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+
+    print(
+        f"Snapshotting the Archives into {html_dir}. Pages already present are "
+        f"skipped; new ones are fetched {scrape.CRAWL_DELAY_SECONDS}s apart to honor "
+        f"archives.gov/robots.txt, so a full first run takes several minutes."
+    )
+    try:
+        scrape.snapshot_election_years(html_dir)
+    except scrape.ScrapeError as e:
+        print(f"Corpus fetch failed: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"Cannot write the corpus to {html_dir}: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        # Likely on a ~8.5-minute crawl. Saved pages persist, so say the reassuring and
+        # accurate thing rather than printing a traceback.
+        print(
+            f"\nInterrupted. Pages already saved in {html_dir} are kept — "
+            f"re-run `python -m usvote corpus` to resume.",
+            file=sys.stderr,
+        )
+        return 1
+    # Count in-scope year pages present on disk. Driven by ec_ingest_years(), NOT by the
+    # manifest: two earlier versions iterated manifest keys while claiming otherwise,
+    # and and-ing a file-existence check onto that did not fix it — a stale out-of-scope
+    # key exists *because* the page was once fetched, so its file is on disk and it
+    # still inflated the count, while a page on disk with no manifest entry went
+    # uncounted. Iterating the scope answers the question the message actually asks
+    # ("is the corpus complete?") and cannot be moved by a hand-edited manifest.
+    corpus_dir = Path(html_dir)
+    pages = sum(1 for y in ec_ingest_years() if (corpus_dir / f"{y}.html").exists())
+    print(f"Archives corpus complete: {pages} year page(s) + the index in {html_dir}.")
+    return 0
+
+
+def _run_ec(replace: bool, fetch: scrape.Fetch = scrape.fetch_url) -> int:
     try:
         shapefile_path = config.shapefile_path_from_env()
         db_config = config.db_config_from_env()
@@ -107,7 +219,10 @@ def _run_ec(replace: bool) -> int:
     if dbc is None:
         return 1
 
-    run_ec_pipeline(dbc, shapefile_path, replace=replace, close=True)
+    try:
+        run_ec_pipeline(dbc, shapefile_path, replace=replace, fetch=fetch, close=True)
+    except PipelineError as e:
+        return _report_incomplete_scrape(e, dbc)
     print("EC ingestion complete.")
     return 0
 
@@ -119,8 +234,14 @@ def _run_all(args: argparse.Namespace) -> int:
         mit_csv_path = mit_csv_path_from_env(environ)
         ucsb_html_dir = _resolve_ucsb_dir(args, environ)
         db_config = config.db_config_from_env(environ)
+        # Resolved BEFORE _connect: a stale corpus must not abort after the user has
+        # typed a DB password, leaving an open connection that close=True never reaches.
+        ec_fetch = _resolve_ec_fetch(args, environ)
     except config.ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+    except scrape.ScrapeError as e:
+        print(f"Archives corpus error: {e}", file=sys.stderr)
         return 2
 
     if ucsb_html_dir is None:
@@ -148,15 +269,19 @@ def _run_all(args: argparse.Namespace) -> int:
     if dbc is None:
         return 1
 
-    result = run_warehouse(
-        dbc,
-        shapefile_path,
-        mit_csv_path,
-        ucsb_html_dir=ucsb_html_dir,
-        replace=args.replace,
-        environ=environ,
-        close=True,
-    )
+    try:
+        result = run_warehouse(
+            dbc,
+            shapefile_path,
+            mit_csv_path,
+            ucsb_html_dir=ucsb_html_dir,
+            replace=args.replace,
+            fetch=ec_fetch,
+            environ=environ,
+            close=True,
+        )
+    except PipelineError as e:
+        return _report_incomplete_scrape(e, dbc)
     sources = ", ".join(sorted(result.sources_loaded))
     ucsb_note = (
         f", UCSB {result.ucsb_pv_rows} PV / {result.ucsb_roster_rows} roster rows"
@@ -179,6 +304,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Kept at the top level too, so bare ``python -m usvote --replace`` (the historical
     # spelling, no subcommand) still works and maps to the EC rebuild.
     parser.add_argument("--replace", action="store_true", help=_REPLACE_HELP)
+    parser.add_argument("--no-corpus", action="store_true", help=_NO_CORPUS_HELP)
     sub = parser.add_subparsers(dest="command")
 
     ec_p = sub.add_parser(
@@ -189,6 +315,24 @@ def _build_parser() -> argparse.ArgumentParser:
     # subparser-default-clobber gotcha).
     ec_p.add_argument(
         "--replace", action="store_true", default=argparse.SUPPRESS, help=_REPLACE_HELP
+    )
+    # SUPPRESS for the same reason as --replace above: without it the subparser's
+    # False default clobbers a top-level ``--no-corpus ec``, silently ignoring the flag.
+    ec_p.add_argument(
+        "--no-corpus",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=_NO_CORPUS_HELP,
+    )
+
+    # Named ``corpus``, not ``snapshot``: ``python -m usvote.snapshot`` already builds
+    # the API SQLite artifact, and a ``python -m usvote snapshot`` one character away
+    # meaning "fetch Archives HTML" is exactly the same-spelling-different-meaning
+    # collision D027/#84b exists to avoid. Every other name in this feature already
+    # says corpus (corpus_filename, fetch_from_corpus, assert_corpus_covers_years).
+    sub.add_parser(
+        "corpus",
+        help="Fetch the Archives HTML corpus to USVOTE_EC_HTML_DIR (no DB needed).",
     )
 
     all_p = sub.add_parser(
@@ -210,6 +354,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip UCSB unconditionally (build only the EC + MIT core).",
     )
+    all_p.add_argument(
+        "--no-corpus",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=_NO_CORPUS_HELP,
+    )
     return parser
 
 
@@ -217,12 +367,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "corpus":
+        return _run_corpus(args)
     if args.command == "all":
         return _run_all(args)
     # Bare (``command is None``) and explicit ``ec`` both run the EC pipeline. argparse
     # leaves ``replace`` set by the top-level parser (default False) unless the ``ec``
     # subcommand overrode it.
-    return _run_ec(getattr(args, "replace", False))
+    try:
+        fetch = _resolve_ec_fetch(args, os.environ)
+    except (config.ConfigError, scrape.ScrapeError) as e:
+        print(f"Archives corpus error: {e}", file=sys.stderr)
+        return 2
+    return _run_ec(getattr(args, "replace", False), fetch)
 
 
 if __name__ == "__main__":

@@ -20,17 +20,19 @@ from tests._helpers import (
     make_dbc,
     record_inserts,
 )
+from usvote import scrape
 from usvote.load import SCHEMA
 from usvote.parse import ParseError
 from usvote.pipeline import (
     EC_SPINE_FLOOR,
     LATEST_ELECTION_YEAR,
     UNSUPPORTED_EC_YEARS,
+    PipelineError,
     ec_ingest_years,
     election_years,
     run_ec_pipeline,
 )
-from usvote.scrape import fetch_from_dir
+from usvote.scrape import Fetch, fetch_from_dir
 from usvote.transform import TransformError
 
 # --- election_years --------------------------------------------------------
@@ -240,3 +242,74 @@ def test_run_ec_pipeline_leaves_connection_open_by_default(
     )
     # The caller owns the dbc; the pipeline must not close it by default.
     assert recording_conn.closed is False
+
+
+def _fetch_with_stale_index(years: tuple[int, ...]) -> Fetch:
+    """Serve the real fixture pages, but an index linking only ``years``.
+
+    The shape of a stale corpus (or a restructured Archives index): the year pages are
+    fine, the *index* is what has fallen behind, so a requested year is never
+    enumerated and therefore never fetched.
+    """
+    real = fetch_from_dir(FIXTURES_DIR)
+    index_url = scrape.ARCHIVE_URL_DOMAIN + scrape.ARCHIVE_URL_BASE
+
+    def fetch(url: str) -> bytes:
+        if url == index_url:
+            links = "".join(
+                f'<a href="/electoral-college/{y}">{y}</a>' for y in years
+            )
+            return f'<div id="main-col"><table>{links}</table></div>'.encode()
+        return real(url)
+
+    return fetch
+
+
+def test_run_ec_pipeline_refuses_a_scrape_missing_a_requested_year(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pipeline must *invoke* the completeness guard, not merely define it.
+
+    ``_assert_years_scraped`` had unit tests calling it directly, but nothing pinned
+    that ``run_ec_pipeline`` calls it — deleting the call site left the whole suite
+    green. That is the guard whose entire job is to stop a silently-partial warehouse
+    reaching the public API snapshot, so its call site matters as much as its logic.
+
+    2024 is requested but the fixture index does not link it, so the scrape returns
+    nothing for it: exactly the stale-corpus / restructured-index shape.
+    """
+    record_inserts(monkeypatch)
+
+    with pytest.raises(PipelineError, match=r"2024"):
+        run_ec_pipeline(
+            make_dbc(recording_conn),
+            "unused.shp",
+            years={2016, 2020, 2024},
+            fetch=_fetch_with_stale_index((2016, 2020)),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+
+
+def test_run_ec_pipeline_fails_before_touching_the_database(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An incomplete scrape must abort *before* the transaction, not during it.
+
+    On the ``replace=True`` path the load opens with ``DROP SCHEMA dwh CASCADE``. If
+    the guard ran after that, a stale corpus would leave the operator with **no**
+    warehouse rather than the previous good one. Ordering is the safety property here.
+    """
+    inserts = record_inserts(monkeypatch)
+
+    with pytest.raises(PipelineError):
+        run_ec_pipeline(
+            make_dbc(recording_conn),
+            "unused.shp",
+            replace=True,
+            years={2016, 2020, 2024},
+            fetch=_fetch_with_stale_index((2016, 2020)),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+
+    assert inserts == []
+    assert not any("DROP SCHEMA" in q.upper() for q in recording_conn.executed)

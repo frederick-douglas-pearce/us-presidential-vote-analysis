@@ -52,6 +52,18 @@ SHAPEFILE_PATH_VAR = "USVOTE_SHAPEFILE_PATH"
 #: top-level config rather than a subpackage config module.
 API_SNAPSHOT_PATH_VAR = "USVOTE_API_SNAPSHOT_PATH"
 
+#: Environment variable holding the path to the local Archives raw-HTML corpus (#89).
+#: EC-specific but top-level, because the EC pipeline *is* the flat top-level package
+#: (D006/D015) — there is no ``usvote/ec/`` config module for it to live in. Named to
+#: match ``USVOTE_UCSB_HTML_DIR``, whose corpus layout this one mirrors.
+EC_HTML_DIR_VAR = "USVOTE_EC_HTML_DIR"
+
+#: How this project identifies itself to every site it fetches. **Project identity, not
+#: a per-source fact**, so it lives here rather than being restated per scraper: it was
+#: copied in three places (both scrapers plus UCSB's bootstrap hint) with nothing
+#: binding them together, so a contact address added to one would silently disagree.
+USER_AGENT = "us-presidential-vote-analysis-research/0.1 (personal academic research)"
+
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or invalid.
@@ -152,4 +164,44 @@ def shapefile_path_from_env(environ: Mapping[str, str] = os.environ) -> str:
         missing_hint=(
             "Check the path points at the unzipped TIGER2019 STATE shapefile (.shp)."
         ),
+    )
+
+
+def ec_html_dir_from_env(
+    environ: Mapping[str, str] = os.environ, *, must_exist: bool = True
+) -> str:
+    """Return the Archives raw-HTML corpus directory from ``USVOTE_EC_HTML_DIR``.
+
+    Required when asked for, and deliberately with no default — the mirror of
+    :func:`usvote.ucsb.config.ucsb_html_dir_from_env`, for the same reason: there is no
+    sensible default for a machine-local data directory, and defaulting would risk
+    snapshotting into (or replaying from) the wrong place.
+
+    ``must_exist`` mirrors :func:`snapshot_path_from_env`, and for the same reason: this
+    path is an **output** for ``python -m usvote corpus`` (which creates the directory)
+    and an **input** for every rebuild that replays it. Requiring it to pre-exist on the
+    build side would fail a fresh machine with advice to run the very command that just
+    failed. Read paths keep the default.
+
+    Unlike UCSB's, this corpus is **optional to the pipeline**: Archives data is public
+    domain and the live scrape still works without it, so nothing calls this unless the
+    caller asked for corpus-backed behavior. What the variable buys is a warehouse
+    rebuild that costs zero requests — the path that feeds the public API snapshot
+    (D034) — rather than re-scraping ~49 pages of a site whose ``robots.txt`` asks for a
+    10-second crawl delay. ``environ`` is injectable for testing.
+    """
+    unset_hint = (
+        "Point it at a local Archives HTML corpus directory, then populate it with: "
+        "python -m usvote corpus"
+    )
+    if not must_exist:
+        path = environ.get(EC_HTML_DIR_VAR)
+        if not path:
+            raise ConfigError(f"{EC_HTML_DIR_VAR} is not set. {unset_hint}")
+        return path
+    return require_path_from_env(
+        EC_HTML_DIR_VAR,
+        environ,
+        unset_hint=unset_hint,
+        missing_hint="Populate it with: python -m usvote corpus",
     )

@@ -139,10 +139,17 @@ Run these with `uv run` so the project's managed Python 3.14 + all deps are used
 
 ```
 # Build the warehouse + snapshot locally (see README "Local smoke test").
+uv run python -m usvote corpus            # optional: refresh $USVOTE_EC_HTML_DIR first (#89)
 uv run python -m usvote all
 uv run python -m usvote.snapshot          # writes $USVOTE_API_SNAPSHOT_PATH
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
+
+Env vars this step reads: `USVOTE_SHAPEFILE_PATH`, `USVOTE_MIT_CSV_PATH`, `PG*`, and
+`USVOTE_API_SNAPSHOT_PATH` as the output. Two optional ones change **where the data comes
+from**: `USVOTE_UCSB_HTML_DIR` (adds the UCSB popular-vote control) and `USVOTE_EC_HTML_DIR`
+(rebuilds the EC spine from the local Archives corpus instead of scraping — see the caveat in
+§8 before relying on it for a refresh).
 
 `usvote all` is a create-if-absent load — it assumes empty tables. If the warehouse **already
 has data** (you've built it before), a bare `all` fails with
@@ -254,9 +261,30 @@ returns **200** through the cached, rate-limited edge — the post-deploy smoke 
 Data changes rarely (a bug fix, or every ~4 years for a new election):
 
 ```
+uv run python -m usvote corpus                                    # refresh the Archives HTML first
 uv run python -m usvote all && uv run python -m usvote.snapshot   # rebuild from the warehouse
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
+
+> **Read this before refreshing (#89 / D036).** If `USVOTE_EC_HTML_DIR` is set, `usvote all`
+> rebuilds from the **local Archives corpus** rather than scraping — that is the point of the
+> corpus (a rebuild costs zero requests instead of ~49 against a site asking for a 10-second
+> crawl delay), but it means the rebuild replays **saved bytes**.
+>
+> Consequences to hold in mind:
+> - **A new election year is caught.** The corpus completeness guard fails loudly the moment
+>   `LATEST_ELECTION_YEAR` moves past what the corpus holds, naming the stale directory.
+> - **An in-place Archives correction is NOT caught.** A page that is present and 200 is never
+>   re-fetched, so a corrected footnote or elector count would be replayed indefinitely.
+> - **An unchanged `snapshot_version` therefore means the *bytes* were unchanged — not that the
+>   Archives were checked.** A stale-corpus rebuild is *safe* (no wrong data ships; the API keeps
+>   serving the previous correct version) but it is **uninformative**, and nothing downstream
+>   distinguishes it from "nothing changed upstream".
+>
+> So: run `usvote corpus` **first** whenever you are refreshing because you expect new or
+> corrected data. The rebuild prints the corpus's page count and fetch-date range — check it. To
+> force a live scrape instead, pass `--no-corpus`. To re-fetch one suspect year, delete that
+> `<year>.html` and re-run `usvote corpus`.
 
 Then **Actions → Deploy (Cloud Run) → Run workflow**. The image is tagged with the new
 `snapshot_version`, Cloud Run cuts over, and the workflow **purges Cloudflare after cutover**

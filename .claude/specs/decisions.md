@@ -1598,3 +1598,76 @@ decision this refines), **#100** (E8-S6), `tests/unit/test_api_import_graph.py`.
 **Also recorded here:** the origin secret must be stored **without a trailing newline**. `openssl rand -hex 32 | gcloud secrets versions add` stores the `\n`, which Cloud Run injects, so the lock 403s (the Worker's clean header value ≠ stored `value + \n`). Use `printf '%s' "$(openssl rand -hex 32)"`.
 
 **Related:** **D034** (the deploy decision whose Cloudflare mechanism this revises), **#101**, `docs/deploy-cloud-run.md` (§4 + §7 updated), `.github/workflows/deploy.yml` (unchanged). Live at `https://api.us-presidential-election-center.org`.
+
+---
+
+## D036: The Archives HTML corpus lives outside the tree, mirrors the UCSB corpus, and is guarded for completeness
+
+**Date:** 2026-07-26 (#89)
+
+**Context:** Refreshing the SQLite snapshot that serves the public API (D034) meant rebuilding the
+warehouse, and rebuilding the warehouse re-scraped ~49 archives.gov pages every time. The
+capability to avoid that already existed but was unreachable: `run_ec_pipeline` and
+`run_warehouse` both accept a `fetch` seam, and `__main__` never passed one. Unlike UCSB, Archives
+data is **public domain**, so D022's licensing prohibition does not apply and committing the
+corpus into the repo was genuinely available.
+
+**Decision:**
+
+1. **Stored outside the tree** (owner's call, 2026-07-26), at `USVOTE_EC_HTML_DIR`, alongside
+   `ucsb_raw/` — *not* committed. The reason differs from UCSB's: UCSB is **forced** out of the
+   tree by D022 licensing; EC is a **deliberate choice** for public-domain data. The benefit is a
+   uniform rule ("raw source HTML lives outside the tree, full stop") with no per-source exception
+   to remember. The accepted cost is that the network-free-CI benefit #89 originally claimed is
+   **unreachable, not deferred** — CI has no corpus, so the all-years parser regression is a
+   local-only test that skips when the variable is unset, exactly like UCSB's `TestRealCorpus`.
+2. **Layout mirrors the UCSB corpus exactly** — `<year>.html`, `_index_results.html`, and a
+   `manifest.json` whose per-entry keys are `bytes`/`file`/`http_status`/`sha256`/`timestamp`/`url`.
+   This required a **second reader**: `fetch_from_dir` resolves URLs through `_snapshot_filename`
+   to `www_archives_gov_electoral_college_1824.html`, the naming the committed `tests/fixtures/`
+   pages use and must keep. The two readers coexist as they already do on the UCSB side.
+3. **The corpus is optional and auto-detected, but verified before use.** Skipping UCSB merely
+   builds without an optional control; swapping the EC fetch source changes where the *spine's*
+   data comes from, so a detected corpus is checked complete first. A **set-but-broken**
+   `USVOTE_EC_HTML_DIR` is an error, never a silent fallback to live scraping — the whole point is
+   that an operator who asked for an offline rebuild does not silently get 50 live requests.
+4. **The index is re-fetched every run.** Year URLs are enumerated *from* the saved index, so
+   skipping it made a stale corpus permanently unrepairable: it could never discover a
+   newly-published election, and the completeness guard failed forever while prescribing the very
+   command that did nothing. Skipping a *year page* additionally requires a matching 200 manifest
+   entry, so a corpus copied without its manifest repairs itself instead of bricking.
+5. **Two completeness guards, because a frozen corpus makes an existing silent-drop hazard
+   likelier.** `scrape_raw_election_tables` iterates the links found in the index and only warns
+   about years it does not *recognize* — so a year that is requested but absent from a stale index
+   was never fetched and never reported, the build exited 0 one year short, and
+   `assert_state_count_by_year` could not see it (it iterates the years that *are* present). That
+   partial warehouse feeds the public API snapshot. `scrape.assert_corpus_covers_years` is the
+   corpus-side precondition; `pipeline._assert_years_scraped` is the backstop covering the **live**
+   path too. Neither intersects with `ec_ingest_years()`, so an explicitly requested out-of-scope
+   year still fails loudly (the `usvote.years` contract).
+
+**Rationale:** The corpus is a *cache of immutable historical fact*, not a source of truth — the
+warehouse remains that. What makes it safe to build on is that every way it can be wrong (stale,
+partial, manifest-less, redirected, corrupt JSON) fails loudly at a named boundary rather than
+silently producing a short warehouse.
+
+**Action required:** The **live** scrape path (`fetch_url`) still sends no User-Agent and no crawl
+delay, while `archives.gov/robots.txt` asks for `Crawl-delay: 10` and the new snapshot driver
+honors both. Bringing the live path up to the same posture would make a cold `--replace` ~8.5
+minutes for anyone without a corpus — a real behavior change, so it is tracked as its own issue
+rather than smuggled into #89.
+
+**Acknowledged residual (added after the post-implementation architect pass, 2026-07-26):**
+The guards close **presence** divergence — a year missing from the corpus, the index, or the
+manifest fails loudly. They do **not** close **content** divergence:
+
+- an Archives **in-place correction** to a page that is present and 200 is never noticed, because
+  a year page on disk is not re-fetched; the old bytes are replayed forever, and
+- a year file corrupted **after** it was saved passes the presence guard, because the `sha256` the
+  manifest records is written but never read back.
+
+Both are low-likelihood and cheap to close (a `--refresh` flag that re-fetches all and diffs the
+recorded hashes; verify-on-read in `fetch_from_corpus`), and both are filed as follow-ups rather
+than fixed here. Until then, "a corpus-backed rebuild equals a live-scraped one, or fails loudly"
+holds for *presence* only — which is the property the silent-partial-warehouse hazard needed, but
+it is not the whole claim, and this paragraph exists so the gap is not mistaken for coverage.
