@@ -1671,3 +1671,189 @@ recorded hashes; verify-on-read in `fetch_from_corpus`), and both are filed as f
 than fixed here. Until then, "a corpus-backed rebuild equals a live-scraped one, or fails loudly"
 holds for *presence* only — which is the property the silent-partial-warehouse hazard needed, but
 it is not the whole claim, and this paragraph exists so the gap is not mistaken for coverage.
+
+---
+
+## D037: The hybrid is the average of a candidate's EC-vote share and PV share; highest average wins
+
+**Date:** 2026-07-28
+
+**Context:** E7 (Milestone 3) must compute the project's third method of determining a winner — the
+**hybrid**, Fred's original contribution — but the roadmap named it in one line and never scoped the
+formula, the computation's home, or how one computation serves both the analysis surface and the
+public (redistributable) surface. E6's EC↔PV join views (`ec_pv_preferred`, `ec_pv_redistributable`,
+D026) have shipped and are the substrate E7 reads.
+
+**Decision:** `hybrid_score = (ec_share_hybrid + pv_share) / 2` — for each candidate in an election,
+average their share of the electoral votes with their share of the national popular vote; the highest
+average wins. The EC share is deliberately **split in two**: `ec_share_full` (policy-invariant, the
+**only** input to `ec_determinative`) and `ec_share_hybrid` (policy-selected, feeds `hybrid_score`
+only) — so no coverage policy can ever manufacture or destroy an EC majority. The computation lands as
+**`src/usvote/hybrid.py`**, a top-level EC-domain module (sibling of `join.py`, D015/D027), a **pure
+computation parameterized by which resolved join view it reads** ("two views, one builder", D026): over
+`ec_pv_preferred` it emits `hybrid_preferred` (analysis, full history); over `ec_pv_redistributable`
+it emits `hybrid_redistributable` (API, MIT-only). Margins are **percentage-point** top-2 gaps only.
+The deliverable is computed data + validated logic, not charts (D001/D011). **Roll-up ownership (OQ4,
+resolved by the architect):** the shared national-aggregation derivation is single-sourced **now** —
+the primitive is extracted into `usvote/hybrid.py` and `snapshot.build_national_rollup`
+(`snapshot.py:203`) calls it, touching neither the snapshot's source view, public columns, nor
+`SNAPSHOT_SCHEMA_VERSION`; the two roll-up **tables** stay separate for MVP (D029).
+
+**Rationale:**
+- Splitting the EC share is the load-bearing safety property: a coverage-restricted share must never
+  be able to push a candidate over 0.5 and assert a constitutional majority that never existed (the
+  1824 hazard). Keeping `ec_share_full` policy-invariant makes that structurally impossible.
+- Parameterizing one builder by view reuses the exact shape `join.py` already proves, and guarantees
+  the public surface is computed by the same code as the analysis surface — no divergence.
+- Single-sourcing the national roll-up now (not "reconcile later") prevents two hand-written copies of
+  a subtle dedup (per-state max-then-sum, `min_count=1`) from drifting once #102 puts both under one
+  public artifact.
+
+**Intent (Fred — drives the design, not over-formalized per D011):** the hybrid exists to circumvent
+the House choosing the President when no candidate wins an EC majority — "let the people decide when
+the EC is very close." So "no EC majority" is a first-class expected outcome (`ec_determinative =
+false`), not an error; and a hybrid is computed for **every** in-scope year (D038), never withheld on
+partial PV coverage.
+
+---
+
+## D038: The hybrid is computed for every in-scope year and flagged with `pv_coverage`; denominator policy (b) is settled
+
+**Date:** 2026-07-28
+
+**Context:** The hybrid needs a *national* PV total, which is only strictly apples-to-apples where
+every state that cast electoral votes also held a popular vote. For partial-PV years — those with a
+`legislature_chosen` state that cast EC votes but never held a popular vote (D024) — the EC and PV
+shares are computed over different-sized electorates. Three treatments were on the table: **(a)**
+withhold the hybrid for such years; **(b)** compute with the mismatched denominators and flag via
+`pv_coverage`; **(c)** restrict both shares to the popular-vote-holding states so the denominators
+match.
+
+**Decision:** Rule (a) is **rejected** — it would suppress the House-contingent, no-EC-majority
+elections (including 1824) the hybrid exists to speak to. E7 **always computes a hybrid** and flags
+coverage via `pv_coverage` (D024 §8, the EV-weighted share of the year's electoral votes cast by
+`popular_vote` states). The denominator policy is **settled: (b)** (Fred, 2026-07-28) — compute with
+the mismatched denominators (EC over all EC-casting states, PV over the PV states), flagged by
+`pv_coverage < 1.0`. Rule (c) is **not shipped**; the `apply_coverage_policy` seam keeps it a
+swappable one-line policy at zero cost, but (b) is the only configured rule and applies globally to
+every affected year. An explanatory note (E7-S6) ships with any surface exposing a partial-coverage
+hybrid.
+
+**Rationale:**
+- Fred's words: *"I vote for b. Simpler and sticks more closely to the historical record for ec, so
+  as not to cause as much confusion, just needs an explanatory footnote or similar."* (b) reports the
+  national picture as it existed with an honest coverage caveat, rather than silently re-scoping the
+  EC electorate.
+- Keeping the policy factored (even though only (b) ships) costs nothing and leaves (c) available if
+  the future explorer wants a same-electorate view.
+- **1824 rationale (verified):** Jackson led both the EC (99 of 261 cast, 131 needed) and the PV
+  (~151k vs ~113k) with a majority of neither; the House elected Adams (`took_office = Adams`,
+  `president_electoral_rank == 1 = Jackson`). The hybrid returns **Jackson** under both (b) and (c),
+  so the pick moves the **margin, not the winner** — a calibration question, not a correctness one
+  (1824 → Jackson is pinned as a test fixture). `ec_determinative` and `pv_coverage` are **orthogonal**
+  (both populated for 1824).
+
+Extends D005/D024.
+
+---
+
+## D039: The #102 read seam is `hybrid_redistributable` (+ `hybrid_summary`), materialized by `usvote/snapshot.py`
+
+**Date:** 2026-07-28
+
+**Context:** #102 (E8-S8) adds the hybrid/flip/margin fields to the public API but was filed before E7
+was scoped; its implementation note said only "reads E7's output wherever E7 materializes it;
+coordinate the read seam." E7 must decide that seam.
+
+**Decision:** E7 exposes **`hybrid_redistributable`** (+ its per-election `hybrid_summary`) — resolved
+warehouse views alongside the join views, rebuilt by `warehouse.rebuild_views`. #102 materializes them
+into the SQLite snapshot in `usvote/snapshot.py` (the same module that already materializes
+`ec_pv_redistributable`), minting the public `candidate_slug` and dropping `candidate_id` there (D006),
+exactly as it does for `ec_pv` today. The redistributable hybrid views wrap the **independently
+defined** redistributable join view (`WHERE redistributable`, D017), so **no UCSB-derived number can
+structurally reach the public surface** (extends D030). Because that surface is MIT-only 1976–2024
+where every state holds a popular vote, `apply_coverage_policy` **degrades to identity** on it
+(`ec_share_hybrid == ec_share_full`, `pv_coverage == 1.0`), so `hybrid_redistributable` is **provably
+policy-invariant** and #102 is unblocked regardless of the D038 machinery. **#102 must bump
+`SNAPSHOT_SCHEMA_VERSION`** (`snapshot_schema.py:21`): the content hash covers only the `ec_pv` data
+rows, so a roll-up/shape change is invisible to it and the version must be moved manually or consumers
+will not see the new shape. Per the resolved OQ4, #102's `build_national_rollup` becomes a **reader**
+of E7's single-sourced national derivation (D037), not a parallel one.
+
+**Rationale:**
+- Reusing the existing snapshot materialization path keeps E7's views warehouse-internal (carrying the
+  internal `candidate_id`, no public-id leak) and makes the hybrid fields a straight materialization
+  onto the existing `national_rollup` table (or a sibling `hybrid_rollup` — architect's call).
+- The structural redistributable-only property (independent view definition) is stronger than a data
+  filter and matches D030's day-one guarantee.
+- The schema-version bump is easy to miss precisely because the hash does not cover roll-up shape;
+  recording it here makes the obligation explicit.
+
+The E9 mart may later slot in behind the same seam but is not a dependency.
+
+---
+
+## D040: #70 is folded into E7 and re-labeled in place (`epic:hybrid`), not re-filed
+
+**Date:** 2026-07-28
+
+**Context:** #70 ("Quantify MIT vs. UCSB PV discrepancies across the 1976–2024 overlap") was filed
+2026-07-13 under `epic:pv-join` (#63), before the E6 join views existed; its body refers to them
+speculatively. It is E7's empirical trust prerequisite (the benign-seam evidence behind cross-1976
+margin/flip trends). It is referenced by number in D017's action items and calibrates D017 layer 3.
+
+**Decision:** **Re-label #70 in place** — retitle unchanged, swap `epic:pv-join` → `epic:hybrid`, keep
+`research` + `priority:medium`, keep the issue number and its existing AC, repoint the body's
+`**Epic:** #63` line to the E7 epic (#120). **Do not close-and-refile.** Amend its AC to reflect that
+E6 has shipped: compute the MIT−UCSB delta directly off the shipped `dwh.pv_votes` union / `pv_ucsb` /
+`pv_redistributable` views (not a throwaway re-extract), and flow the finding into **D017 layer 3 +
+E7's margin/flip benign-seam caveat** (not "the E6 join design", now shipped). It is distinct from
+E7-S6 (the coverage/denominator explanatory artifact) and must not be merged with it.
+
+**Rationale:** A relabel preserves the reference graph (D017's action items, the issue's history) at
+zero cost; a fresh number would orphan those references. The AC amendments only update stale
+forward-references now that the relations #70 measures have shipped — the **finding** remains the
+deliverable.
+
+---
+
+## D041: The EC is determinative only on a strict majority of the appointed electoral allotment (`ec_share_full > 0.5`)
+
+**Date:** 2026-07-28
+
+**Context:** The hybrid's flip logic needs a precise rule for when the EC "determines" an election.
+Fred's principle: use the most historically accurate vote that actually elected the president, "not a
+simplification on our part," and the EC is determinative only if the leader has "50% or more" of the
+electoral votes. A prior architect pass raised a "cast vs appointed" concern — claiming the formula's
+denominator was cast-basis while the 12th Amendment's bar is "appointed" — and proposed treating the
+divergence as a documented simplification.
+
+**Decision:** Implement a **strict majority: `ec_determinative = true` iff `ec_share_full(ec_winner) >
+0.5`**; otherwise `false` (no EC majority — the hybrid's motivating case). An exact 50/50 tie is
+treated as the **same branch** as no-majority (not a tie to break), because "≥ 50%" names two winners
+at the boundary and is ill-defined there. `ec_determinative` reads **only** `ec_share_full`
+(policy-invariant, D037). **The majority basis is the appointed allotment — settled and
+constitutionally correct.** `ec_denominator` = Σ `total_electoral_votes` (each state counted once) is
+the **appointed** electoral total, exactly the 12th Amendment's "majority of the whole number of
+Electors **appointed**," while the numerator (`president_electoral_votes`) is the electoral votes
+actually **cast**. The earlier "cast vs appointed" concern was a **misreading** of
+`total_electoral_votes` and is resolved, not carried as open.
+
+**Rationale:**
+- Verified in code: `total_electoral_votes` is each state's **allotment**, not votes cast.
+  `docs/corrections.md` is explicit for the 2000 DC abstention — the allotment
+  (`total_electoral_votes=3`) is preserved, with the 1-vote gap tracked separately in
+  `ELECTORAL_VOTE_SHORTFALLS` / `_expected_shortfall`, and `assert_row_votes_sum_to_total` checking
+  candidate votes == total − shortfall. So `ec_denominator` is an **appointed** denominator and the
+  numerator is **cast** — precisely the 12th Amendment's formulation. 2000 is Bush **271 of 538
+  appointed** (270 needed), not 269 of 537 cast — matching the historical record Fred asked for.
+- **Derived requirement:** because shortfalls are real, Σ `president_electoral_votes` can be **less**
+  than `ec_denominator`, so candidate EC shares in such a year sum to slightly **under** 1.0. That is
+  correct, not a bug — validation must assert shares sum to **≤ 1.0**, never == 1.0, with 2000 (537
+  cast of 538 appointed) pinned as the fixture.
+- A strict `> 0.5` resolves the boundary cleanly; treating an exact tie as "the EC did not settle it"
+  is exactly the condition the hybrid exists to address.
+
+`ec_determinative` is a first-class, populated output; contingent / no-majority elections (1824) are
+**flagged and computed**, with the who-takes-office legal treatment left to the D010/D011 future
+workstream.
