@@ -23,17 +23,20 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from usvote.hybrid import roll_up_national
 from usvote.join import EC_PV_COLUMNS
 from usvote.slug import candidate_slug
 from usvote.snapshot import (
     DATA_COLUMNS,
     DATA_TABLE,
     META_TABLE,
+    ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotError,
     SnapshotMeta,
     add_candidate_slug,
+    build_national_rollup,
     build_snapshot,
     read_redistributable,
 )
@@ -283,6 +286,57 @@ def test_rollup_one_row_per_year_candidate(tmp_path: Path) -> None:
     rollup = _read(out, ROLLUP_TABLE)
     assert not rollup.duplicated(["year", "candidate_slug"]).any()
     assert set(rollup["year"]) == {2016, 2020}
+
+
+# --- the shared national-aggregation primitive (D037/F, #121) ---------------
+
+
+def test_rollup_delegates_to_the_shared_primitive() -> None:
+    """The roll-up arithmetic is single-sourced in :mod:`usvote.hybrid` (D037/F).
+
+    Two hand-written copies of the ``min_count=1`` + skip-NA-dedup subtleties would drift,
+    and #102 puts both roll-ups under one public artifact. This pins that
+    ``build_national_rollup`` is a thin contract wrapper — the snapshot's public group key
+    (``candidate_slug``, D006) and column set — over the shared derivation, so the two can
+    no longer disagree.
+    """
+    frame = add_candidate_slug(_ec_pv_frame())
+    direct = roll_up_national(
+        frame,
+        key=("year", "candidate_slug"),
+        carry={
+            "candidate": "candidate",
+            "party": "party",
+            "national_electoral_votes": "national_electoral_votes",
+            "president_electoral_rank": "president_electoral_rank",
+            "took_office": "took_office",
+        },
+    )
+    via_snapshot = build_national_rollup(frame)
+    # Project the reference onto ROLLUP_COLUMNS, not onto whatever build_national_rollup
+    # happened to return — reprojecting onto its own output can never detect a change to
+    # the snapshot's column selection or order, which is half of what this pins.
+    assert list(via_snapshot.columns) == list(ROLLUP_COLUMNS)
+    pd.testing.assert_frame_equal(
+        via_snapshot.reset_index(drop=True),
+        direct[list(ROLLUP_COLUMNS)].reset_index(drop=True),
+    )
+
+
+def test_rollup_keeps_an_all_null_pv_year_denominator_null_not_zero() -> None:
+    """The **second** ``min_count=1``, on the per-year denominator sum.
+
+    Called directly rather than through :func:`build_snapshot`, which filters to the
+    covered window (so 1972 never reaches the roll-up there) — that filtering is exactly
+    why losing this ``min_count`` would go unnoticed on the snapshot path while silently
+    producing a divide-by-zero ``pv_share`` for every pre-1976 year of E7's
+    ``hybrid_preferred``, which shares this derivation.
+    """
+    rollup = build_national_rollup(add_candidate_slug(_ec_pv_frame()))
+    pre_window = rollup.loc[rollup["year"] == 1972]
+    assert not pre_window.empty  # the year is present when not window-filtered
+    assert pre_window["national_pv_denominator"].isna().all()
+    assert (pre_window["national_pv_denominator"] == 0).sum() == 0
 
 
 # --- metadata / content-hash version ---------------------------------------
