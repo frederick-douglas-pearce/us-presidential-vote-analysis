@@ -242,18 +242,24 @@ class TestRollUpNational:
         the per-state ``max`` skips it, so the state stays in the national denominator; a
         naive first-row dedup would drop the whole state whenever the NULL row sorted
         first.
+
+        **The NULL-bearing getter is named so it sorts first**, which is what lets this
+        test fail: with the non-NULL row sorting first, a ``drop_duplicates`` regression
+        would keep the good row and the assertion would still pass — pinning the outcome
+        on a fixture that cannot express the hazard its own docstring names.
         """
         df = ec_pv_frame([
-            {"year": 1976, "state": "Ohio", "candidate": "A",
+            {"year": 1976, "state": "Ohio", "candidate": "Zeta",
              "total_electoral_votes": 25, "president_electoral_votes": 25,
              "candidate_votes": 60.0, "state_total_votes": 100.0},
-            {"year": 1976, "state": "Ohio", "candidate": "B",
+            # Sorts before "Zeta", so a first-row dedup keeps THIS row and loses Ohio.
+            {"year": 1976, "state": "Ohio", "candidate": "Aardvark",
              "total_electoral_votes": 25, "president_electoral_votes": 0,
              "candidate_votes": np.nan, "state_total_votes": np.nan},
-            {"year": 1976, "state": "Iowa", "candidate": "A",
+            {"year": 1976, "state": "Iowa", "candidate": "Zeta",
              "total_electoral_votes": 8, "president_electoral_votes": 0,
              "candidate_votes": 30.0, "state_total_votes": 70.0},
-            {"year": 1976, "state": "Iowa", "candidate": "B",
+            {"year": 1976, "state": "Iowa", "candidate": "Aardvark",
              "total_electoral_votes": 8, "president_electoral_votes": 8,
              "candidate_votes": 40.0, "state_total_votes": 70.0},
         ])
@@ -714,11 +720,34 @@ class TestEcDeterminativeBoundary:
 
         1824's coverage-restricted EC share would push Jackson to 99/190 = 0.52 — over the
         line. ``ec_determinative`` must ignore it and stay ``False`` on 99/261 = 0.379.
+
+        **The two shares are overwritten to diverge before the summary is built.** Under
+        the only shipped policy (b) they are equal by construction, so a summary builder
+        that read ``ec_share_hybrid`` instead would produce identical output on every
+        natural fixture and this test could not fail — it would pin the *outcome* while
+        leaving the *mechanism* free. Injecting the divergence is what makes it
+        falsifiable, and that matters most **before #122 lands policy (c)**, which is when
+        the two columns start differing on real data.
         """
         df, roster = frame_1824()
         frame = hybrid.build_hybrid_frame(df, roster)
         restricted = 99 / (261 - 71)
         assert restricted > 0.5  # the hazard is real, not hypothetical
+
+        # Simulate what policy (c) would produce: the EC share restricted to the
+        # popular-vote states, which puts Jackson over the line.
+        diverged = frame.copy()
+        diverged["ec_share_hybrid"] = (
+            diverged["national_electoral_votes"] / (261 - 71)
+        )
+        assert diverged.loc[
+            diverged["candidate"] == "Jackson", "ec_share_hybrid"
+        ].iloc[0] > 0.5
+        summary = hybrid.build_hybrid_summary(diverged)
+        assert not summary["ec_determinative"].iloc[0]
+        assert summary["ec_winner"].iloc[0] == "Jackson"
+
+        # ...and unmodified, for the same reason.
         assert not hybrid.build_hybrid_summary(frame)["ec_determinative"].iloc[0]
 
 
