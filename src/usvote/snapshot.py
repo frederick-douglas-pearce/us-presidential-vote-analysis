@@ -72,6 +72,7 @@ import pandas as pd
 from usvote import config
 from usvote.config import ConfigError
 from usvote.db import DBC, DBConnectionError
+from usvote.hybrid import roll_up_national
 from usvote.join import EC_PV_REDISTRIBUTABLE_VIEW
 from usvote.load import SCHEMA
 from usvote.pv.source import SOURCE_MIT, build_pv_source_frame
@@ -219,27 +220,30 @@ def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
     ``drop_duplicates(["year", "state"])`` keeps the first row in ``(year, state,
     candidate_slug)`` order, which is that NULL row whenever the getter's slug sorts
     first — silently dropping the whole state from the national denominator.
+
+    **The derivation itself lives in** :func:`usvote.hybrid.roll_up_national` **(D037/F,
+    OQ4-resolved)** — E7's hybrid frame needs the identical roll-up at the identical
+    grain, and two hand-written copies of the subtleties above would drift. This
+    function keeps ownership of the snapshot's *contract* (the group key is the public
+    ``candidate_slug``, D006; the column set is :data:`ROLLUP_COLUMNS`) and delegates
+    the arithmetic. The extraction is behaviour-preserving: neither the source view, nor
+    the public columns, nor ``SNAPSHOT_SCHEMA_VERSION`` changes.
+
+    Importing ``usvote.hybrid`` here is a build-side import and crosses no boundary —
+    this module already carries pandas and the DB stack. It is ``usvote/api/`` that may
+    never reach either (D028), which ``tests/unit/test_api_import_graph.py`` enforces.
     """
-    per_candidate = (
-        data_df.groupby(["year", "candidate_slug"], as_index=False)
-        .agg(
-            candidate=("candidate", "first"),
-            party=("party", "first"),
-            national_electoral_votes=("national_electoral_votes", "first"),
-            president_electoral_rank=("president_electoral_rank", "first"),
-            took_office=("took_office", "first"),
-            national_pv_votes=("candidate_votes", lambda s: s.sum(min_count=1)),
-        )
+    rollup = roll_up_national(
+        data_df,
+        key=("year", "candidate_slug"),
+        carry={
+            "candidate": "candidate",
+            "party": "party",
+            "national_electoral_votes": "national_electoral_votes",
+            "president_electoral_rank": "president_electoral_rank",
+            "took_office": "took_office",
+        },
     )
-    per_state = data_df.groupby(["year", "state"], as_index=False)[
-        "state_total_votes"
-    ].max()
-    denom = (
-        per_state.groupby("year", as_index=False)["state_total_votes"]
-        .sum(min_count=1)
-        .rename(columns={"state_total_votes": "national_pv_denominator"})
-    )
-    rollup = per_candidate.merge(denom, on="year", how="left")
     return rollup[list(ROLLUP_COLUMNS)]
 
 

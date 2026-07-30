@@ -3,9 +3,17 @@
 The API serves a read-only snapshot with **no live DB at serve time**. The plan makes
 that structural, not incidental: nothing under ``usvote/api/`` may import
 :mod:`usvote.db`, psycopg2, :mod:`usvote.snapshot` (the build module, which drags pandas
-+ the DB stack), or pandas itself. This mirrors the project's other greppable layering
-guards (the ``dwh.votes`` guard; ``test_warehouse.test_no_pv_source_imports_the_warehouse
-_composition_root``) — a violation fails this test, not review.
++ the DB stack), :mod:`usvote.hybrid` (E7's computation core — pandas again), or pandas
+itself. This mirrors the project's other greppable layering guards
+(``test_layering.test_no_pv_module_names_the_ec_votes_fact``;
+``test_warehouse.test_no_pv_source_imports_the_warehouse_composition_root``) — a violation
+fails this test, not review.
+
+**Read the matcher before adding a module.** It greps each file's own text for a literal
+module name; it does **not** follow transitive imports. So an allowed module that itself
+pulls a forbidden one is invisible here — which is exactly why the D033 ``docker-build`` CI
+job boots the slim image against a placeholder snapshot as the backstop. Every heavy module
+reachable from ``usvote/api/`` must therefore be named in :data:`_FORBIDDEN` explicitly.
 """
 
 from __future__ import annotations
@@ -15,10 +23,12 @@ from pathlib import Path
 
 import usvote.api as api
 
-#: The forbidden imports under ``usvote/api/``. ``usvote.snapshot`` (build) and pandas are
-#: forbidden alongside the obvious DB modules because importing either would transitively
-#: pull the whole build/DB stack across the serve-time boundary D028 draws.
-_FORBIDDEN = ("usvote.db", "psycopg2", "usvote.snapshot", "pandas")
+#: The forbidden imports under ``usvote/api/``. ``usvote.snapshot`` (build),
+#: ``usvote.hybrid`` (E7's computation core) and pandas are forbidden alongside the obvious
+#: DB modules because importing any of them would transitively pull the whole build/DB stack
+#: across the serve-time boundary D028 draws — and the slim D033 container installs the
+#: serve dependency group only, so such an import fails at *runtime*, not at test time.
+_FORBIDDEN = ("usvote.db", "psycopg2", "usvote.snapshot", "usvote.hybrid", "pandas")
 
 
 def test_api_imports_no_db_or_build_stack() -> None:

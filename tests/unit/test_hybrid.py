@@ -89,12 +89,22 @@ def ec_pv_frame(
 def roster_frame(
     statuses: dict[int, dict[str, str]], *, source: str = "test"
 ) -> pd.DataFrame:
-    """Build a ``dwh.pv_state_status``-shaped roster from ``{year: {state: status}}``."""
-    return pd.DataFrame([
-        {"source": source, "year": year, "state": state, "pv_status": status, "note": None}
-        for year, per_state in statuses.items()
-        for state, status in per_state.items()
-    ])
+    """Build a ``dwh.pv_state_status``-shaped roster from ``{year: {state: status}}``.
+
+    Columns are declared explicitly so the **empty** roster still carries them — a
+    ``SELECT`` against an empty table returns a column-bearing frame, and an
+    ``EC``-only warehouse (``python -m usvote`` with no PV source loaded) really does
+    produce one.
+    """
+    return pd.DataFrame(
+        [
+            {"source": source, "year": year, "state": state,
+             "pv_status": status, "note": None}
+            for year, per_state in statuses.items()
+            for state, status in per_state.items()
+        ],
+        columns=["source", "year", "state", "pv_status", "note"],
+    )
 
 
 def all_popular_vote(df: pd.DataFrame, **overrides: dict[str, str]) -> pd.DataFrame:
@@ -651,14 +661,19 @@ class TestAppointedAllotment:
 
 class TestEcDeterminativeBoundary:
     @staticmethod
-    def _two_way(leader_ev: int, total_ev: int) -> pd.DataFrame:
+    def _summary(allocation: dict[str, int], total_ev: int = 538) -> pd.DataFrame:
+        """Summary for one 538-vote "state" with ``allocation`` electoral votes each.
+
+        The allocation is given **per candidate explicitly** rather than as
+        leader-plus-remainder: a two-way split cannot express "the leader falls just short
+        of a majority" at all, because whatever the leader does not take, the runner-up
+        does — so the runner-up wins with a majority and the fixture silently tests the
+        opposite of its name. Three candidates are needed for the just-under case.
+        """
         df = ec_pv_frame([
-            {"year": 1900, "state": "Ohio", "candidate": "A",
-             "total_electoral_votes": total_ev,
-             "president_electoral_votes": leader_ev},
-            {"year": 1900, "state": "Ohio", "candidate": "B",
-             "total_electoral_votes": total_ev,
-             "president_electoral_votes": total_ev - leader_ev},
+            {"year": 1900, "state": "Ohio", "candidate": candidate,
+             "total_electoral_votes": total_ev, "president_electoral_votes": ev}
+            for candidate, ev in allocation.items()
         ])
         return hybrid.build_hybrid_summary(
             hybrid.build_hybrid_frame(df, all_popular_vote(df))
@@ -666,17 +681,20 @@ class TestEcDeterminativeBoundary:
 
     def test_an_exact_half_is_not_determinative(self) -> None:
         """``> 0.5`` is **strict** — a 269-269 split elects nobody (D041)."""
-        assert not self._two_way(269, 538)["ec_determinative"].iloc[0]
+        assert not self._summary({"A": 269, "B": 269})["ec_determinative"].iloc[0]
 
     def test_just_under_a_majority_is_not_determinative(self) -> None:
-        assert not self._two_way(268, 538)["ec_determinative"].iloc[0]
+        """269 is the majority threshold's floor; 268 with a third getter is short."""
+        summary = self._summary({"A": 268, "B": 267, "C": 3})
+        assert summary["ec_winner"].iloc[0] == "A"  # A really is the leader
+        assert not summary["ec_determinative"].iloc[0]
 
     def test_just_over_a_majority_is_determinative(self) -> None:
-        assert self._two_way(270, 538)["ec_determinative"].iloc[0]
+        assert self._summary({"A": 270, "B": 268})["ec_determinative"].iloc[0]
 
     def test_the_ec_winner_is_still_populated_when_not_determinative(self) -> None:
         """``false`` means "no EC majority", never "we could not compute a winner"."""
-        summary = self._two_way(268, 538)
+        summary = self._summary({"A": 268, "B": 267, "C": 3})
         assert summary["ec_winner"].iloc[0] == "A"
         assert pd.notna(summary["ec_winner"].iloc[0])
 
