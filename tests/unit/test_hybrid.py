@@ -48,7 +48,11 @@ def ec_pv_frame(
     descending, so rank 1 is the EC leader).
 
     ``took_office`` maps year → the canonical name of whoever assumed the presidency
-    (defaults to the rank-1 candidate, i.e. the non-contingent case).
+    (defaults to the rank-1 candidate, i.e. the non-contingent case). It is written out
+    as the **boolean** the real column is — ``transform._add_took_office`` sets
+    ``president_electoral_rank == 1`` with a ``candidate_id`` override for contingent
+    years, and ``load.py`` declares it ``boolean not null`` — so a fixture cannot assert a
+    string contract the live view can never produce.
     """
     df = pd.DataFrame(rows)
     for col in ("candidate_votes", "state_total_votes"):
@@ -75,8 +79,11 @@ def ec_pv_frame(
         .first()
         .to_dict()
     )
-    took = {**leaders, **(took_office or {})}
-    df["took_office"] = df["year"].map(took)
+    holder = {**leaders, **(took_office or {})}
+    df["took_office"] = [
+        candidate == holder[year]
+        for year, candidate in zip(df["year"], df["candidate"], strict=True)
+    ]
 
     df["source"] = "test"
     df["reliability"] = "high"
@@ -533,8 +540,12 @@ class TestThreeMethodScores:
         assert row["ec_winner"] == "Jackson"
         assert row["pv_winner"] == "Jackson"
         assert row["hybrid_winner"] == "Jackson"
-        # Yet the House chose Adams — rank 1 and took_office genuinely diverge.
-        assert set(frame["took_office"]) == {"Adams"}
+        # Yet the House chose Adams — rank 1 and took_office genuinely diverge, and
+        # took_office is the per-candidate boolean the spine actually carries.
+        by_name = frame.set_index("candidate")["took_office"]
+        assert bool(by_name["Adams"]) is True
+        assert bool(by_name["Jackson"]) is False
+        assert by_name.sum() == 1  # exactly one office-holder
         jackson = frame.loc[frame["candidate"] == "Jackson"].iloc[0]
         assert jackson["president_electoral_rank"] == 1
         # A majority of neither: 99/261 electoral, 151,271/352,780 popular.
@@ -965,3 +976,110 @@ def test_the_rank_cross_check_catches_a_misaligned_winner() -> None:
     summary = pd.DataFrame({"year": [1900], "ec_winner": ["B"]})
     with pytest.raises(hybrid.HybridError, match="rank"):
         hybrid.assert_ec_winner_matches_rank(frame, summary)
+
+
+# --- the DB entry point (code-review fixes, #126) ---------------------------
+
+
+class _StubDBC:
+    """A minimal ``DBC`` stand-in: answers by matching the relation in the query.
+
+    Deliberately not a mock — the point is to prove ``build_hybrid_from_db`` issues the
+    reads it claims and wires their results together, so it must serve real frames.
+    """
+
+    def __init__(self, ec_pv: pd.DataFrame, roster: pd.DataFrame) -> None:
+        self.ec_pv = ec_pv
+        self.roster = roster
+        self.queries: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        if "pv_state_status" in query:
+            return self.roster.copy()
+        return self.ec_pv.copy()
+
+
+def _mixed_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A 1900 (UCSB-only, no PV on the MIT surface) + 1976 (MIT) two-year warehouse."""
+    rows: list[dict[str, object]] = []
+    for year, pv in ((1900, None), (1976, 600.0)):
+        for candidate, ev in (("A", 20), ("B", 0)):
+            rows.append({
+                "year": year, "state": "Ohio", "candidate": candidate,
+                "total_electoral_votes": 20, "president_electoral_votes": ev,
+                "candidate_votes": pv if candidate == "A" else (
+                    None if pv is None else 400.0
+                ),
+                "state_total_votes": None if pv is None else 1000.0,
+            })
+    df = ec_pv_frame(rows)
+    # The MIT-only surface: 1900 carries no PV at all, so it carries no source either.
+    df["source"] = df["year"].map({1900: None, 1976: "mit"})
+    roster = pd.concat([
+        roster_frame({1900: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="ucsb"),
+        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="ucsb"),
+        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="mit"),
+    ])
+    return df, roster
+
+
+def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries() -> None:
+    """Code review, #126: a full roster on the MIT-only surface fakes full coverage.
+
+    UCSB's roster marks every 1900 state ``popular_vote``, but ``ec_pv_redistributable``
+    carries no 1900 popular vote whatsoever — so an unscoped roster would report
+    ``pv_coverage == 1.0`` for a year whose ``pv_share`` and ``hybrid_score`` are entirely
+    NULL. That is the exact inverse of what the flag is for, so the read is scoped to the
+    sources present in the chosen view.
+    """
+    df, roster = _mixed_surface()
+    dbc = _StubDBC(df, roster)
+    frame, summary = hybrid.build_hybrid_from_db(
+        dbc, view="ec_pv_redistributable"
+    )
+    by_year = summary.set_index("year")
+    # 1900: no PV on this surface, and no MIT roster rows for it → coverage unknown.
+    assert pd.isna(by_year.loc[1900, "pv_coverage"])
+    assert pd.isna(by_year.loc[1900, "hybrid_winner"])
+    # 1976: MIT covers it → coverage is a real 1.0.
+    assert by_year.loc[1976, "pv_coverage"] == 1.0
+    assert by_year.loc[1976, "hybrid_winner"] == "A"
+    # The EC half is computed for both years regardless.
+    assert set(frame["ec_denominator"]) == {20}
+
+
+def test_the_unscoped_roster_would_have_claimed_full_coverage() -> None:
+    """Pin the bug the scoping fixes, so a regression is visibly a regression."""
+    df, roster = _mixed_surface()
+    unscoped = hybrid.build_hybrid_summary(
+        hybrid.build_hybrid_frame(df, roster)
+    ).set_index("year")
+    assert unscoped.loc[1900, "pv_coverage"] == 1.0  # the wrong answer
+    assert pd.isna(unscoped.loc[1900, "hybrid_winner"])  # ...next to no hybrid at all
+
+
+def test_the_entry_point_runs_the_guards_not_just_the_tests() -> None:
+    """Code review, #126: the asserts must guard live builds, not only fixtures.
+
+    A denominator bug on real warehouse data can only surface at build time, which is
+    exactly where nothing was checking. Mirrors ``join.create_ec_pv_views`` running
+    ``assert_db_pv_matches_ec`` as a precondition.
+    """
+    df, roster = _mixed_surface()
+    # A dead heat in 1976: both candidates take half the state's electoral votes and half
+    # the popular vote, so every method ties.
+    df.loc[(df["year"] == 1976), "president_electoral_votes"] = 10
+    df.loc[(df["year"] == 1976), "candidate_votes"] = 500.0
+    df["national_electoral_votes"] = df.groupby(["year", "candidate_id"])[
+        "president_electoral_votes"
+    ].transform("sum")
+    with pytest.raises(hybrid.HybridError, match="tie"):
+        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="ec_pv_redistributable")
+
+
+def test_the_entry_point_rejects_an_unresolved_view() -> None:
+    """Reading the raw union would fan the 1976-2024 overlap out 2x (D017)."""
+    df, roster = _mixed_surface()
+    with pytest.raises(hybrid.HybridError, match="resolved"):
+        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="pv_votes")

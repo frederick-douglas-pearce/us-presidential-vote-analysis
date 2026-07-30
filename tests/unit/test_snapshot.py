@@ -30,6 +30,7 @@ from usvote.snapshot import (
     DATA_COLUMNS,
     DATA_TABLE,
     META_TABLE,
+    ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotError,
@@ -312,9 +313,13 @@ def test_rollup_delegates_to_the_shared_primitive() -> None:
         },
     )
     via_snapshot = build_national_rollup(frame)
+    # Project the reference onto ROLLUP_COLUMNS, not onto whatever build_national_rollup
+    # happened to return — reprojecting onto its own output can never detect a change to
+    # the snapshot's column selection or order, which is half of what this pins.
+    assert list(via_snapshot.columns) == list(ROLLUP_COLUMNS)
     pd.testing.assert_frame_equal(
         via_snapshot.reset_index(drop=True),
-        direct[list(via_snapshot.columns)].reset_index(drop=True),
+        direct[list(ROLLUP_COLUMNS)].reset_index(drop=True),
     )
 
 

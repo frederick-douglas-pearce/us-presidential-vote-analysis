@@ -56,7 +56,7 @@ shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 import pandas as pd
 
@@ -275,9 +275,11 @@ def _resolve_roster(roster_df: pd.DataFrame) -> pd.DataFrame:
     bug, not something to break arbitrarily, so it raises.
     """
     if roster_df.empty:
-        # A real state, not a defensive nicety: an EC-only build (`python -m usvote`, no
-        # PV source loaded) leaves dwh.pv_state_status empty, and every year's coverage
-        # is then honestly unknown rather than zero.
+        # Reached when a caller passes an empty roster, or when the roster read is
+        # scoped to a source with no rows (read_pv_status_roster's `sources`). NOT the
+        # EC-only-warehouse case: dwh.pv_state_status is created only by a PV source
+        # load (usvote/pv/load.py), so on an EC-only build the relation does not exist
+        # and the read raises UndefinedTable long before this. Coverage stays unknown.
         return pd.DataFrame({"year": [], "state": [], "pv_status": []})
     statuses = roster_df.groupby(["year", "state"], as_index=False)["pv_status"].agg(
         ["nunique", "first"]
@@ -615,19 +617,30 @@ def read_ec_pv_join(
 def read_pv_status_roster(
     dbc: object,
     *,
+    sources: Collection[str] | None = None,
     schema: str = ROSTER_SCHEMA,
     table: str = ROSTER_TABLE,
 ) -> pd.DataFrame:
-    """Read the whole ``dwh.pv_state_status`` roster (every source).
+    """Read ``dwh.pv_state_status``, optionally scoped to ``sources``.
 
-    Every source's rows are read, not one source's: the statuses agree wherever sources
-    overlap, and :func:`_resolve_roster` collapses them and raises on a genuine
-    disagreement. Pre-filtering to one source would instead silently *hide* such a
-    disagreement.
+    ``sources=None`` reads every source's rows. Where sources overlap their statuses
+    agree, and :func:`_resolve_roster` collapses them — raising on a genuine
+    disagreement, which reading only one source would silently hide. So the *unscoped*
+    read is the right default for the widest analysis surface.
+
+    **But the roster must match the surface being computed** (code review, #126). The
+    roster is keyed on ``(source, year, state)`` while the coverage denominator is the
+    EC allotment, so pointing a UCSB-bearing roster at the MIT-only
+    ``ec_pv_redistributable`` view would report ``pv_coverage == 1.0`` for, say, 1900 —
+    a year that surface carries no popular vote for at all. That is the exact inverse of
+    what the flag means. :func:`build_hybrid_from_db` therefore scopes this read to the
+    sources actually present in the chosen view.
     """
-    return dbc.select_query_to_df(  # type: ignore[attr-defined]
-        f"SELECT source, year, state, pv_status FROM {schema}.{table}"
-    )
+    query = f"SELECT source, year, state, pv_status FROM {schema}.{table}"
+    roster = dbc.select_query_to_df(query)  # type: ignore[attr-defined]
+    if sources is None:
+        return roster
+    return roster.loc[roster["source"].isin(set(sources))].reset_index(drop=True)
 
 
 def build_hybrid_from_db(
@@ -642,8 +655,27 @@ def build_hybrid_from_db(
     this connection (D028). #124 is what materializes the result as
     ``hybrid_preferred``/``hybrid_redistributable`` plus their ``hybrid_summary``
     companions and wires the rebuild into ``usvote.warehouse``.
+
+    **The roster read is scoped to the surface** — the sources actually present in
+    ``view`` — so the MIT-only redistributable surface is not handed UCSB's roster and
+    made to claim full coverage for years it holds no popular vote for (code review,
+    #126). A view with no PV at all yields an empty source set, hence NULL coverage.
+
+    **The guards run here, not only in tests** (code review, #126). They exist to catch
+    a denominator bug or a real dead heat, and on live warehouse data build time is the
+    only place either can arise — the same reason
+    :func:`usvote.join.create_ec_pv_views` runs
+    :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
+    its upstream. #124 inherits them as its view-creation preconditions.
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
-    roster_df = read_pv_status_roster(dbc)
+    surface_sources = set(ec_pv_df["source"].dropna().unique())
+    roster_df = read_pv_status_roster(dbc, sources=surface_sources)
     frame = build_hybrid_frame(ec_pv_df, roster_df)
-    return frame, build_hybrid_summary(frame)
+    summary = build_hybrid_summary(frame)
+
+    assert_ec_shares_le_one(frame)
+    for score in ("ec_share_full", "pv_share", "hybrid_score"):
+        assert_no_winner_tie(frame, score)
+    assert_ec_winner_matches_rank(frame, summary)
+    return frame, summary

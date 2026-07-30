@@ -33,7 +33,6 @@ would hide.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
@@ -70,6 +69,29 @@ def code_only(source: str) -> str:
 
 def _modules_under(*subpackages: str) -> list[Path]:
     return [py for sub in subpackages for py in sorted((PKG_ROOT / sub).rglob("*.py"))]
+
+
+def imports(source: str, module: str) -> bool:
+    """Whether ``source`` imports ``module``, in **any** of the spellings Python allows.
+
+    Naively matching only ``import usvote.hybrid`` / ``from usvote.hybrid`` misses
+    ``from usvote import hybrid`` — which is the prevailing style in this repo, including
+    inside the very subpackages being guarded (``usvote/mit/__main__.py``,
+    ``usvote/ucsb/scrape.py``). A guard blind to the common spelling is worse than none,
+    since it reads as enforcement. Parsed rather than grepped, so it also cannot
+    false-positive on a docstring that quotes an import line.
+    """
+    package, _, name = module.rpartition(".")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            if any(a.name == module or a.name.startswith(f"{module}.") for a in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == module or (node.module or "").startswith(f"{module}."):
+                return True
+            if node.module == package and any(a.name == name for a in node.names):
+                return True
+    return False
 
 
 # --- the scan mechanism itself ----------------------------------------------
@@ -135,15 +157,43 @@ def test_no_lower_subpackage_imports_the_hybrid_computation() -> None:
     would invert the dependency exactly as a ``usvote.warehouse`` back-import would (the
     sibling guard in ``test_warehouse.py``).
     """
-    pattern = re.compile(r"(^|\W)(import\s+usvote\.hybrid|from\s+usvote\.hybrid)")
     modules = _modules_under(*_LOWER_SUBPACKAGES)
     assert modules, "found no lower-subpackage modules — the guard would pass vacuously"
     offenders = [
         py.relative_to(PKG_ROOT).as_posix()
         for py in modules
-        if pattern.search(py.read_text())
+        if imports(py.read_text(), "usvote.hybrid")
     ]
     assert not offenders, f"these must not import usvote.hybrid: {offenders}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "import usvote.hybrid",
+        "from usvote.hybrid import build_hybrid_frame",
+        "from usvote import hybrid",
+        "from usvote import config, hybrid",
+        "import usvote.hybrid as h",
+    ],
+)
+def test_the_import_guard_catches_every_spelling(line: str) -> None:
+    """Including ``from usvote import hybrid`` — the spelling this repo prefers."""
+    assert imports(line, "usvote.hybrid")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from usvote import config",
+        "import usvote.join",
+        "x = 'from usvote import hybrid'",
+        '"""A docstring naming from usvote import hybrid."""',
+    ],
+)
+def test_the_import_guard_does_not_over_match(line: str) -> None:
+    """A near-miss import, or the words quoted in a string, is not a dependency."""
+    assert not imports(line, "usvote.hybrid")
 
 
 def test_hybrid_is_a_top_level_ec_domain_module() -> None:
