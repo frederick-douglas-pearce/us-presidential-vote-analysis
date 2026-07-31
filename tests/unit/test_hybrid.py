@@ -18,6 +18,7 @@ fixtures, not illustrations.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -772,16 +773,41 @@ def test_nothing_configures_a_policy_other_than_b() -> None:
     production call site passes one: #124 materializes the views from the default, and
     ``warehouse.py`` never names a policy. Greppable, in the manner of the repo's other
     layering invariants — a future call site that hardcodes (c) has to defeat this test.
+
+    **Both spellings are checked.** AC-verify (#122) found that scanning only for the
+    constant names let a bare ``policy="restricted"`` through — and mypy accepts it, since
+    it is a valid member of the ``Literal``. So the ``policy=`` keyword is caught too,
+    whichever way its value is written; the argument that #102 needs no policy parameter
+    rests entirely on this test, so it may not have a hole that wide.
     """
     src = Path(hybrid.__file__).parent
-    offenders = [
-        path.relative_to(src).as_posix()
-        for path in src.rglob("*.py")
-        if path.name != "hybrid.py"
-        and "COVERAGE_POLICY" in path.read_text(encoding="utf-8")
-    ]
+    offenders = []
+    for path in src.rglob("*.py"):
+        if path.name == "hybrid.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "COVERAGE_POLICY" in text or "policy=" in text:
+            offenders.append(path.relative_to(src).as_posix())
     assert offenders == [], (
-        f"these modules configure a coverage policy; (b) is the only shipped rule: {offenders}"
+        "these modules configure a coverage policy; (b) is the only shipped rule "
+        f"and no production caller may select one: {offenders}"
+    )
+
+
+def test_the_policy_functions_own_default_is_b() -> None:
+    """Pin the exported function's documented default, not only the builders' (#122).
+
+    ``apply_coverage_policy`` is in ``__all__``, so its default is part of the contract
+    even though every in-repo caller passes ``policy=`` explicitly. AC-verify caught that
+    flipping it to (c) killed no test.
+    """
+    df, roster = frame_1824()
+    national = _national_1824(df)
+    defaulted = hybrid.apply_coverage_policy(national, df, roster)
+    assert (defaulted["ec_share_hybrid"] == defaulted["ec_share_full"]).all()
+    assert (
+        inspect.signature(hybrid.apply_coverage_policy).parameters["policy"].default
+        == hybrid.COVERAGE_POLICY_MISMATCHED
     )
 
 

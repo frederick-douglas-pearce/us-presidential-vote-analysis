@@ -452,13 +452,19 @@ def apply_coverage_policy(
     candidate key the caller rolled up on, so a future slug-grained caller (D006) is a
     parameter rather than a fork. (b) never touches it.
 
-    **The empty restricted set yields NULL, never a divide-by-zero**, and there are two
-    distinct ways to reach it: a year the roster does not cover has a NULL
-    ``covered_electoral_votes`` and the division propagates NULL on its own; a year the
-    roster *does* cover with no ``popular_vote`` state has a real ``0``, which the
-    ``replace`` below turns into NULL rather than ``inf``/NaN. On today's MIT-only
-    redistributable surface the first case is *every* year — the roster carries no MIT
-    rows at all (#127) — so (c) returns NULL throughout there.
+    **The empty restricted set yields NULL, never a divide-by-zero — and it needs no
+    zero-denominator guard to do so.** Two paths reach it, and they differ in what
+    ``pv_coverage`` reports, not in how the share becomes NULL: a year the roster does
+    not cover has a NULL ``covered_electoral_votes`` (coverage *unknown*), while a year
+    the roster *does* cover with no ``popular_vote`` state has a real ``0`` (coverage
+    known, and known to be none). Either way :func:`_restricted_ec_numerator` finds no
+    rows, so the merged numerator is NULL and the division propagates NULL on its own.
+    An earlier draft replaced a ``0`` denominator with NULL defensively; it was
+    **unreachable** — a non-NULL numerator over a zero denominator would require
+    ``popular_vote`` states whose allotments sum to zero, which the join view cannot
+    produce — and a guard no mutation can kill is dead code, so it is gone (AC-verify,
+    #122). On today's MIT-only redistributable surface the first path is *every* year:
+    the roster carries no MIT rows at all (#127), so (c) returns NULL throughout there.
 
     ``ec_share_full`` and ``ec_determinative`` are deliberately **outside this
     function's reach** (D037/A) — policy-invariant, computed in
@@ -484,10 +490,10 @@ def apply_coverage_policy(
         out = out.merge(
             _restricted_ec_numerator(ec_pv_df, roster_df, key), on=list(key), how="left"
         )
-        # A real 0 denominator (roster-covered year, no popular-vote state) would give
-        # inf; NULL is the honest answer, and matches the NULL a roster-absent year
-        # already propagates.
-        denominator = out["covered_electoral_votes"].replace(0, pd.NA).astype("Float64")
+        # No zero-denominator guard: an empty restricted set leaves the numerator NULL,
+        # which is what carries the NULL through (see the docstring). Float64 (nullable)
+        # so the NULL survives the division rather than becoming a NaN sentinel.
+        denominator = out["covered_electoral_votes"].astype("Float64")
         numerator = out.get(
             "restricted_electoral_votes", pd.Series(pd.NA, index=out.index)
         ).astype("Float64")
