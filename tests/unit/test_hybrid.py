@@ -18,11 +18,16 @@ fixtures, not illustrations.
 
 from __future__ import annotations
 
+import ast
+import inspect
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from usvote import hybrid
+from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -210,6 +215,23 @@ def frame_1824() -> tuple[pd.DataFrame, pd.DataFrame]:
         }
     })
     return df, roster
+
+
+def full_coverage_frame() -> pd.DataFrame:
+    """A two-state, two-candidate year where every state held a popular vote.
+
+    The generic full-coverage shape: pair it with :func:`all_popular_vote` and both
+    coverage policies must agree exactly, since there is nothing to restrict.
+    """
+    return ec_pv_frame([
+        {"year": 2000, "state": s, "candidate": c,
+         "total_electoral_votes": ev,
+         "president_electoral_votes": ev if c == w else 0,
+         "candidate_votes": v, "state_total_votes": 100.0}
+        for s, ev, w, votes in (("Ohio", 21, "A", (60.0, 40.0)),
+                                ("Iowa", 7, "B", (45.0, 55.0)))
+        for c, v in zip(("A", "B"), votes, strict=True)
+    ])
 
 
 # --- roll_up_national (the extracted primitive) -----------------------------
@@ -508,19 +530,373 @@ class TestCoveragePolicy:
         assert frame["pv_coverage"].iloc[0] < 1.0
 
     def test_a_full_coverage_year_degrades_the_policy_to_identity(self) -> None:
-        """The property #102 depends on: policy-invariance on the MIT-only surface."""
-        df = ec_pv_frame([
-            {"year": 2000, "state": s, "candidate": c,
-             "total_electoral_votes": ev,
-             "president_electoral_votes": ev if c == w else 0,
-             "candidate_votes": v, "state_total_votes": 100.0}
-            for s, ev, w, votes in (("Ohio", 21, "A", (60.0, 40.0)),
-                                    ("Iowa", 7, "B", (45.0, 55.0)))
-            for c, v in zip(("A", "B"), votes, strict=True)
-        ])
+        """Where coverage is 1.0 there is nothing to restrict, so (b) is the identity."""
+        df = full_coverage_frame()
         frame = hybrid.build_hybrid_frame(df, all_popular_vote(df))
         assert (frame["ec_share_hybrid"] == frame["ec_share_full"]).all()
         assert (frame["pv_coverage"] == 1.0).all()
+
+
+def _national_1824(df: pd.DataFrame) -> pd.DataFrame:
+    """The national frame ``apply_coverage_policy`` expects, built the way the builder does."""
+    national = hybrid.roll_up_national(
+        df,
+        key=hybrid.HYBRID_CANDIDATE_GRAIN,
+        carry={"candidate": "candidate", "national_electoral_votes":
+               "national_electoral_votes"},
+    ).merge(hybrid.ec_denominator_by_year(df), on="year", how="left")
+    national["ec_share_full"] = (
+        national["national_electoral_votes"] / national["ec_denominator"]
+    )
+    return national
+
+
+class TestCoveragePolicySwitch:
+    """E7-S3 (#122): the ``policy`` argument and the (c) restricted-denominator branch."""
+
+    def test_the_two_policies_are_named_constants_with_a_literal_alias(self) -> None:
+        """mypy is enforced, so the switch is a ``Literal``, not a bare string."""
+        assert hybrid.COVERAGE_POLICIES == (
+            hybrid.COVERAGE_POLICY_MISMATCHED,
+            hybrid.COVERAGE_POLICY_RESTRICTED,
+        )
+        assert hybrid.COVERAGE_POLICY_MISMATCHED != hybrid.COVERAGE_POLICY_RESTRICTED
+
+    def test_the_policy_argument_is_keyword_only(self) -> None:
+        """Positional use must fail: the shipped signature is ``(national, ec, roster)``."""
+        df, roster = frame_1824()
+        national = _national_1824(df)
+        with pytest.raises(TypeError):
+            hybrid.apply_coverage_policy(  # type: ignore[misc]
+                national, df, roster, hybrid.COVERAGE_POLICY_RESTRICTED
+            )
+
+    def test_the_default_is_b_the_shipped_rule(self) -> None:
+        """D038: (b) is settled and stays the only configured rule."""
+        df, roster = frame_1824()
+        default = hybrid.build_hybrid_frame(df, roster)
+        explicit_b = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_MISMATCHED
+        )
+        pd.testing.assert_frame_equal(default, explicit_b)
+
+    def test_an_unrecognized_policy_raises(self) -> None:
+        df, roster = frame_1824()
+        with pytest.raises(hybrid.HybridError, match="coverage policy"):
+            hybrid.build_hybrid_frame(df, roster, policy="restrict-everything")  # type: ignore[arg-type]
+
+    def test_c_restricts_both_halves_of_the_ec_share(self) -> None:
+        """1824 under (c): Jackson 84/190, Adams 48/190 — numerator restricted too.
+
+        The six legislature-chosen states hold 71 of 261 electoral votes, so the
+        restricted denominator is 190. Jackson holds 15 EV *in those states* (New York 1,
+        Louisiana 3, South Carolina 11), so his restricted numerator is 99 - 15 = **84**.
+        Adams holds 36 there (New York 26, Louisiana 2, Vermont 7, Delaware 1) → 48.
+        """
+        df, roster = frame_1824()
+        frame = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        ).set_index("candidate")
+        assert frame.loc["Jackson", "ec_share_hybrid"] == pytest.approx(84 / 190)
+        assert frame.loc["Adams", "ec_share_hybrid"] == pytest.approx(48 / 190)
+        assert frame.loc["Crawford", "ec_share_hybrid"] == pytest.approx(25 / 190)
+        assert frame.loc["Clay", "ec_share_hybrid"] == pytest.approx(33 / 190)
+
+    def test_c_does_not_reuse_the_all_states_window_sum_as_its_numerator(self) -> None:
+        """The bug the AC names: a full numerator over a restricted denominator.
+
+        ``national_electoral_votes`` is the window SUM over *every* state, so pairing it
+        with the 190 denominator would read Jackson at 99/190 = 0.52 — over the majority
+        line, and the exact mistake the D037/A split exists to make harmless. Pin that the
+        implementation does **not** do it.
+        """
+        df, roster = frame_1824()
+        frame = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        ).set_index("candidate")
+        assert frame.loc["Jackson", "ec_share_hybrid"] != pytest.approx(99 / 190)
+        assert frame.loc["Jackson", "ec_share_hybrid"] < 0.5
+
+    def test_1824_same_winner_but_the_margin_nearly_doubles(self) -> None:
+        """The whole reason the switch exists: (b) and (c) are not the same answer."""
+        df, roster = frame_1824()
+        margins = {}
+        for policy in hybrid.COVERAGE_POLICIES:
+            frame = hybrid.build_hybrid_frame(df, roster, policy=policy)
+            top2 = frame["hybrid_score"].nlargest(2)
+            summary = hybrid.build_hybrid_summary(frame)
+            assert summary["hybrid_winner"].iloc[0] == "Jackson"
+            margins[policy] = top2.iloc[0] - top2.iloc[1]
+        assert margins[hybrid.COVERAGE_POLICY_MISMATCHED] == pytest.approx(0.0828, abs=1e-4)
+        assert margins[hybrid.COVERAGE_POLICY_RESTRICTED] == pytest.approx(0.1488, abs=1e-4)
+
+    def test_pv_share_is_untouched_by_the_policy(self) -> None:
+        """(c) restricts the EC half alone — the PV denominator is already PV-only."""
+        df, roster = frame_1824()
+        b = hybrid.build_hybrid_frame(df, roster)
+        c = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        )
+        pd.testing.assert_series_equal(b["pv_share"], c["pv_share"])
+        pd.testing.assert_series_equal(b["pv_coverage"], c["pv_coverage"])
+
+    def test_ec_share_full_and_determinative_survive_both_policies(self) -> None:
+        """D037/A on the first policy that could break it, asserted directly."""
+        df, roster = frame_1824()
+        b = hybrid.build_hybrid_frame(df, roster)
+        c = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        )
+        pd.testing.assert_series_equal(b["ec_share_full"], c["ec_share_full"])
+        for frame in (b, c):
+            summary = hybrid.build_hybrid_summary(frame)
+            # Populated-and-False, not NULL: 1824 had no EC majority, which is a known
+            # fact about the election, never a "we could not tell" (D041).
+            assert summary["ec_determinative"].notna().all()
+            assert bool(summary["ec_determinative"].iloc[0]) is False
+            assert summary["ec_winner"].iloc[0] == "Jackson"
+
+    def test_a_full_coverage_year_makes_the_two_policies_identical(self) -> None:
+        """Property (i): where coverage is 1.0 the restriction is a genuine no-op.
+
+        Surface-independent — a property of the policy function, not of any view. This is
+        the real content behind "the redistributable surface is policy-invariant", and it
+        holds for every fully-covered year on every surface.
+        """
+        df = full_coverage_frame()
+        roster = all_popular_vote(df)
+        pd.testing.assert_frame_equal(
+            hybrid.build_hybrid_frame(df, roster),
+            hybrid.build_hybrid_frame(
+                df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+            ),
+        )
+
+    def test_a_roster_absent_year_yields_null_never_a_divide_by_zero(self) -> None:
+        """NULL path (a): the year is not in the roster, so the numerator is already NA.
+
+        Distinct from path (b) below — here ``covered_electoral_votes`` is NA and the
+        division propagates NA without the zero-denominator guard ever firing.
+        """
+        df = full_coverage_frame()
+        empty = roster_frame({})
+        frame = hybrid.build_hybrid_frame(
+            df, empty, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        )
+        assert frame["ec_share_hybrid"].isna().all()
+        assert frame["hybrid_score"].isna().all()
+        assert not np.isinf(frame["ec_share_hybrid"].astype("float64").fillna(0)).any()
+        # ...while the policy-invariant half is computed exactly as always.
+        assert frame["ec_share_full"].notna().all()
+
+    def test_an_all_absence_year_in_the_roster_yields_null_not_infinity(self) -> None:
+        """NULL path (b): the year *is* in the roster, with zero ``popular_vote`` states.
+
+        It differs from the test above in what ``pv_coverage`` **reports** — a real
+        ``0.0`` (coverage known, and known to be none) rather than NULL (unknown) — not in
+        how the share becomes NULL. Both reach NULL through the *numerator*: the restricted
+        state set is empty either way, so ``_restricted_ec_numerator`` returns no rows.
+
+        An earlier commit added a zero-denominator guard for this case and this test
+        claimed to exercise it; AC-verify proved the guard **unreachable** (deleting it
+        killed no test) and it was removed. Nothing here covers a zero-denominator path,
+        because the join view cannot produce a non-NULL numerator over one.
+        """
+        df = full_coverage_frame()
+        roster = roster_frame({
+            2000: {
+                "Ohio": PV_STATUS_LEGISLATURE_CHOSEN,
+                "Iowa": PV_STATUS_NOT_PARTICIPATING,
+            }
+        })
+        frame = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        )
+        # The year IS in the roster, so coverage is a real 0.0 — not NULL. That is what
+        # makes this a different path from the test above.
+        assert (frame["pv_coverage"] == 0.0).all()
+        assert frame["ec_share_hybrid"].isna().all()
+        assert not np.isinf(frame["ec_share_hybrid"].astype("float64").fillna(0)).any()
+        assert frame["hybrid_score"].isna().all()
+
+    def test_the_two_null_paths_are_genuinely_different_code_paths(self) -> None:
+        """Guard the distinction itself: same NULL share, different ``pv_coverage``."""
+        df = full_coverage_frame()
+        absent = hybrid.build_hybrid_frame(
+            df, roster_frame({}), policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        )
+        all_absence = hybrid.build_hybrid_frame(
+            df,
+            roster_frame({2000: {"Ohio": PV_STATUS_LEGISLATURE_CHOSEN,
+                                 "Iowa": PV_STATUS_LEGISLATURE_CHOSEN}}),
+            policy=hybrid.COVERAGE_POLICY_RESTRICTED,
+        )
+        assert absent["pv_coverage"].isna().all()      # unknown
+        assert (all_absence["pv_coverage"] == 0.0).all()  # known, and known to be zero
+        assert absent["ec_share_hybrid"].isna().all()
+        assert all_absence["ec_share_hybrid"].isna().all()
+
+    def test_the_policy_reaches_the_db_entry_point(self) -> None:
+        """Plumbed all the way through, so a whole frame can be built either way."""
+        df, roster = _mixed_surface()
+        frame, _ = hybrid.build_hybrid_from_db(
+            _StubDBC(df, roster),
+            view="ec_pv_redistributable",
+            policy=hybrid.COVERAGE_POLICY_RESTRICTED,
+        )
+        assert frame["ec_share_hybrid"].isna().all()
+
+    def test_the_redistributable_surface_diverges_until_the_mit_roster_lands(self) -> None:
+        """Property (ii): today the two policies do **not** agree on the public surface.
+
+        The original AC claimed byte-identity here, on the premise that 1976+ reads
+        ``pv_coverage == 1.0``. It does not: the roster is UCSB-only (#127), so scoping to
+        MIT finds nothing, and (c) restricts to an empty state set in *every* year while
+        (b) keeps the full EC share. Pinned as a canary — when #127 backfills MIT's roster
+        rows, 1976+ becomes fully covered, the restriction becomes a no-op there, and this
+        assertion must be revisited. What actually unblocks #102 is
+        :func:`test_nothing_configures_a_policy_other_than_b`, not any identity property.
+        """
+        df, roster = _mixed_surface()
+        b, _ = hybrid.build_hybrid_from_db(
+            _StubDBC(df, roster), view="ec_pv_redistributable"
+        )
+        c, _ = hybrid.build_hybrid_from_db(
+            _StubDBC(df, roster),
+            view="ec_pv_redistributable",
+            policy=hybrid.COVERAGE_POLICY_RESTRICTED,
+        )
+        assert b["ec_share_hybrid"].notna().all()
+        assert c["ec_share_hybrid"].isna().all()
+        with pytest.raises(AssertionError):
+            pd.testing.assert_frame_equal(b, c)
+
+
+#: The three functions that actually accept a ``policy``. A ``policy=`` keyword on
+#: anything else is somebody's unrelated kwarg, not a coverage selection.
+_POLICY_TAKERS = frozenset(
+    {"apply_coverage_policy", "build_hybrid_frame", "build_hybrid_from_db"}
+)
+
+
+def _policy_selections(source: str, module: str) -> list[str]:
+    """Every place ``source`` selects a coverage policy, as ``module:line`` strings.
+
+    Three ways to select one: name a ``COVERAGE_POLICY_*`` constant, **import** one under
+    an alias (which erases the name from every later reference, so the import itself is
+    the only place it is visible), or pass ``policy=`` to a function that takes one.
+    Parsed rather than grepped — see the guard test below for why both substring attempts
+    had holes.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            found += [
+                f"{module}:{node.lineno} imports {alias.name}"
+                for alias in node.names
+                if alias.name.startswith("COVERAGE_POLICY")
+            ]
+        elif isinstance(node, ast.Name) and node.id.startswith("COVERAGE_POLICY"):
+            found.append(f"{module}:{node.lineno} names {node.id}")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("COVERAGE_POLICY"):
+            found.append(f"{module}:{node.lineno} names {node.attr}")
+        elif isinstance(node, ast.Call):
+            called = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", None)
+            )
+            if called in _POLICY_TAKERS and any(
+                kw.arg == "policy" for kw in node.keywords
+            ):
+                found.append(f"{module}:{node.lineno} passes policy= to {called}")
+    return found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'build_hybrid_from_db(dbc, policy="restricted")',
+        'build_hybrid_from_db(dbc, policy = "restricted")',  # the whitespace hole
+        "hybrid.build_hybrid_frame(df, roster, policy=chosen)",
+        "apply_coverage_policy(n, e, r, policy=COVERAGE_POLICY_RESTRICTED)",
+        "x = hybrid.COVERAGE_POLICY_RESTRICTED",
+        "from usvote.hybrid import COVERAGE_POLICY_RESTRICTED as p\nuse(p)",
+    ],
+)
+def test_the_policy_guard_catches_every_way_of_selecting_one(source: str) -> None:
+    """Positive cases — each must be flagged (#122, code review)."""
+    assert _policy_selections(source, "m.py")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "build_hybrid_from_db(dbc)",
+        "build_hybrid_from_db(dbc, view=EC_PV_REDISTRIBUTABLE_VIEW)",
+        'fetch(url, retry_policy="aggressive")',  # somebody else's kwarg
+        'cache(key, cache_policy="lru")',
+        '"""Docs mentioning policy= and COVERAGE_POLICY_RESTRICTED."""',
+        "# a comment about policy = restricted",
+    ],
+)
+def test_the_policy_guard_does_not_cry_wolf(source: str) -> None:
+    """Negative cases — none configures coverage, so none may fail CI (#122)."""
+    assert _policy_selections(source, "m.py") == []
+
+
+def test_nothing_configures_a_policy_other_than_b() -> None:
+    """Property (iii) — what actually unblocks #102 (#122).
+
+    (b) is the shipped rule (D038) and (c) is reachable only by an explicit argument. No
+    production call site passes one: #124 materializes the views from the default, and
+    ``warehouse.py`` never names a policy. Greppable, in the manner of the repo's other
+    layering invariants — a future call site that hardcodes (c) has to defeat this test.
+
+    **Matched on the AST, not on source text**, following the precedent #121 set when its
+    back-import guard missed ``from usvote import hybrid``. Two rounds of substring
+    matching each had a hole: scanning for the constant names alone let a bare
+    ``policy="restricted"`` through (AC-verify), and scanning for the literal ``"policy="``
+    missed ``policy = "restricted"`` with spaces — which ruff does **not** reject either,
+    since E251 is not in the project's stable ``E`` selection and CI never runs
+    ``ruff format --check`` (code review). mypy accepts both, since ``"restricted"`` is a
+    valid ``Literal`` member. The argument that #102 needs no policy parameter rests
+    entirely on this test, so it may not have a hole that wide.
+
+    Matching the parsed tree also makes it **narrow**: a ``policy=`` keyword counts only on
+    a call to one of the three functions that actually take one, so an unrelated
+    ``cache_policy=``/``retry_policy=`` elsewhere in the package — or the word in a comment
+    or docstring — is not a false accusation of configuring coverage.
+    """
+    src = Path(hybrid.__file__).parent
+    offenders: list[str] = []
+    for path in sorted(src.rglob("*.py")):
+        if path.name == "hybrid.py":
+            continue
+        offenders += _policy_selections(
+            path.read_text(encoding="utf-8"), path.relative_to(src).as_posix()
+        )
+    assert offenders == [], (
+        "these call sites select a coverage policy; (b) is the only shipped rule (D038) "
+        f"and no production caller may choose one: {offenders}"
+    )
+
+
+def test_the_policy_functions_own_default_is_b() -> None:
+    """Pin the exported function's documented default, not only the builders' (#122).
+
+    ``apply_coverage_policy`` is in ``__all__``, so its default is part of the contract
+    even though every in-repo caller passes ``policy=`` explicitly. AC-verify caught that
+    flipping it to (c) killed no test.
+    """
+    df, roster = frame_1824()
+    national = _national_1824(df)
+    defaulted = hybrid.apply_coverage_policy(national, df, roster)
+    assert (defaulted["ec_share_hybrid"] == defaulted["ec_share_full"]).all()
+    assert (
+        inspect.signature(hybrid.apply_coverage_policy).parameters["policy"].default
+        == hybrid.COVERAGE_POLICY_MISMATCHED
+    )
 
 
 # --- the three method scores + winners --------------------------------------
@@ -1030,7 +1406,19 @@ class _StubDBC:
 
 
 def _mixed_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """A 1900 (UCSB-only, no PV on the MIT surface) + 1976 (MIT) two-year warehouse."""
+    """A 1900 (UCSB-only, no PV on the MIT surface) + 1976 (MIT) two-year warehouse.
+
+    **The roster carries UCSB rows only, because that is what the warehouse holds**
+    (#127). ``usvote/ucsb/pipeline.py`` calls ``load_pv_status``; ``usvote/mit/pipeline.py``
+    calls only ``load_pv_records``, and ``transform_mit`` returns a single frame rather
+    than the ``(votes, roster)`` pair UCSB's transform returns — so MIT contributes **no**
+    ``pv_state_status`` rows at all. An earlier version of this fixture fabricated one
+    (``source="mit"``, lowercase, where the real literal is ``SOURCE_MIT == "MIT"``) and
+    asserted ``pv_coverage == 1.0`` for 1976; it was internally consistent, so it passed
+    green while modelling data the warehouse cannot produce — the same
+    fixture-disagrees-with-reality class as #121's ``took_office`` bug. The source tags
+    below come from :mod:`usvote.pv.source`, never hand-spelled.
+    """
     rows: list[dict[str, object]] = []
     for year, pv in ((1900, None), (1976, 600.0)):
         for candidate, ev in (("A", 20), ("B", 0)):
@@ -1044,11 +1432,10 @@ def _mixed_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
             })
     df = ec_pv_frame(rows)
     # The MIT-only surface: 1900 carries no PV at all, so it carries no source either.
-    df["source"] = df["year"].map({1900: None, 1976: "mit"})
+    df["source"] = df["year"].map({1900: None, 1976: SOURCE_MIT})
     roster = pd.concat([
-        roster_frame({1900: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="ucsb"),
-        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="ucsb"),
-        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source="mit"),
+        roster_frame({1900: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source=SOURCE_UCSB),
+        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source=SOURCE_UCSB),
     ])
     return df, roster
 
@@ -1061,6 +1448,11 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     ``pv_coverage == 1.0`` for a year whose ``pv_share`` and ``hybrid_score`` are entirely
     NULL. That is the exact inverse of what the flag is for, so the read is scoped to the
     sources present in the chosen view.
+
+    **Scoping to MIT today matches nothing** (#127): the roster is UCSB-only, so coverage
+    comes back NULL for *both* years — honestly "unknown", not a fabricated ``1.0``. When
+    #127 backfills MIT's rows, 1976 becomes a real ``1.0`` and this test's second block
+    flips. That is the intended signal, not a regression.
     """
     df, roster = _mixed_surface()
     dbc = _StubDBC(df, roster)
@@ -1071,11 +1463,27 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     # 1900: no PV on this surface, and no MIT roster rows for it → coverage unknown.
     assert pd.isna(by_year.loc[1900, "pv_coverage"])
     assert pd.isna(by_year.loc[1900, "hybrid_winner"])
-    # 1976: MIT covers it → coverage is a real 1.0.
-    assert by_year.loc[1976, "pv_coverage"] == 1.0
+    # 1976: MIT carries the popular vote, but no roster row asserts coverage (#127).
+    assert pd.isna(by_year.loc[1976, "pv_coverage"])
+    # The hybrid itself is unaffected — (b) never reads coverage to compute a score.
     assert by_year.loc[1976, "hybrid_winner"] == "A"
     # The EC half is computed for both years regardless.
     assert set(frame["ec_denominator"]) == {20}
+
+
+def test_a_populated_roster_still_yields_real_coverage_on_the_preferred_surface() -> None:
+    """The coverage-``1.0`` assertion belongs where the roster is real (architect, #122).
+
+    ``ec_pv_preferred`` carries UCSB, whose roster *is* loaded — so scoping the read to
+    that surface's sources finds rows and coverage is a genuine ``1.0``. Pairing this with
+    the test above is what keeps "scoped read" and "empty MIT roster" as two separately
+    visible facts rather than one conflated one.
+    """
+    df, roster = _mixed_surface()
+    df["source"] = SOURCE_UCSB
+    frame, summary = hybrid.build_hybrid_from_db(_StubDBC(df, roster))
+    assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
+    assert not frame.empty
 
 
 def test_the_unscoped_roster_would_have_claimed_full_coverage() -> None:

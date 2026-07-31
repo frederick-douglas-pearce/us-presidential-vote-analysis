@@ -1857,3 +1857,56 @@ actually **cast**. The earlier "cast vs appointed" concern was a **misreading** 
 `ec_determinative` is a first-class, populated output; contingent / no-majority elections (1824) are
 **flagged and computed**, with the who-takes-office legal treatment left to the D010/D011 future
 workstream.
+
+---
+
+## D042: D039's "policy-invariant redistributable surface" premise is false; #102 is unblocked by configuration, not by invariance
+
+**Date:** 2026-07-31
+
+**Context:** D039 (2026-07-28) settled #102's read seam and justified it, in part, with this claim:
+
+> Because that surface is MIT-only 1976–2024 where every state holds a popular vote,
+> `apply_coverage_policy` **degrades to identity** on it (`ec_share_hybrid == ec_share_full`,
+> `pv_coverage == 1.0`), so `hybrid_redistributable` is **provably policy-invariant** and #102 is
+> unblocked regardless of the D038 machinery.
+
+#122 (E7-S3) built the (c) branch that premise was about, and found it does not hold. Raised by the
+`/code-review` gate on PR #128: the correction had landed only in a module docstring and a test
+docstring, so a reader planning #102/#124 off the decision record would still get the falsified claim.
+
+**Decision:** The **conclusion stands — #102 is unblocked — but the mechanism is different**, and the
+D039 sentence above is superseded by this entry (the log is append-only; D039 is not edited).
+
+1. **The premise is false in two independent ways.** (i) `dwh.pv_state_status` carries **no MIT rows
+   at all** — only UCSB calls `load_pv_status` — so `build_hybrid_from_db`, which correctly scopes the
+   roster read to the sources present in the chosen view (#126), scopes `ec_pv_redistributable` to
+   `{"MIT"}` and matches nothing. `pv_coverage` is therefore **NULL for every year** on that surface,
+   1976–2024 included, not `1.0`. That gap is now **#127**. (ii) Even setting the roster aside, "the
+   two policies agree" would not follow from an empty restricted set: (b) keeps the full EC share
+   while (c) restricts to nothing and returns NULL, so today the two policies **diverge** on the
+   public surface rather than coincide.
+2. **What actually unblocks #102** is that **(b) is the only configured rule**. `policy` defaults to
+   (b) everywhere, and no production call site passes one — enforced by an AST-matching test
+   (`test_nothing_configures_a_policy_other_than_b`) that flags a `COVERAGE_POLICY_*` reference, an
+   aliased import of one, or a `policy=` keyword on any of the three functions that take one. The
+   guarantee is *configuration*, checkable and enforced, rather than a *numerical identity* that
+   happened not to be true.
+3. **The invariance claim is still true where it was really about the policy function**: (b) and (c)
+   coincide **exactly on any full-coverage year**, on any surface. That is surface-independent and is
+   pinned by `test_a_full_coverage_year_makes_the_two_policies_identical`. Once #127 lands, 1976+ on
+   the redistributable surface becomes fully covered and D039's original sentence becomes true for
+   the reason it stated — at which point it is a fact about the data, not a structural guarantee.
+4. **Consequence for #124:** materialize `hybrid_redistributable` from the default policy and do not
+   thread a policy argument into `warehouse.py`. **#127 blocks #124's public surface** — without it
+   the materialized `pv_coverage` column ships all-NULL.
+
+**Rationale:**
+- A decision record whose stated justification is known-false is worse than one that is silent: the
+  next reader plans against it. Recording the correction as its own entry keeps the append-only
+  guarantee (C1) while making the superseding relationship explicit at both ends.
+- Preferring an enforced configuration invariant over a numerical coincidence is the more durable
+  guarantee anyway — it survives #127 changing the data underneath it, and it fails loud in CI.
+- The general lesson is the one #121's `took_office` fixture and this story's fabricated `source="mit"`
+  roster row both taught: a claim about live warehouse shape needs checking **against the warehouse**,
+  not against a fixture that models what we assumed it contains.
