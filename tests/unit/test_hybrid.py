@@ -18,6 +18,7 @@ fixtures, not illustrations.
 
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 
@@ -691,10 +692,15 @@ class TestCoveragePolicySwitch:
     def test_an_all_absence_year_in_the_roster_yields_null_not_infinity(self) -> None:
         """NULL path (b): the year *is* in the roster, with zero ``popular_vote`` states.
 
-        This is the one that exercises the zero-denominator guard — the restricted
-        denominator is a real ``0``, not NA, so an unguarded divide gives ``inf`` (or
-        ``0/0`` → NaN) rather than an honest NULL. The MIT-empty surface never reaches
-        this path, so it needs its own fixture (architect finding, #122).
+        It differs from the test above in what ``pv_coverage`` **reports** — a real
+        ``0.0`` (coverage known, and known to be none) rather than NULL (unknown) — not in
+        how the share becomes NULL. Both reach NULL through the *numerator*: the restricted
+        state set is empty either way, so ``_restricted_ec_numerator`` returns no rows.
+
+        An earlier commit added a zero-denominator guard for this case and this test
+        claimed to exercise it; AC-verify proved the guard **unreachable** (deleting it
+        killed no test) and it was removed. Nothing here covers a zero-denominator path,
+        because the join view cannot produce a non-NULL numerator over one.
         """
         df = full_coverage_frame()
         roster = roster_frame({
@@ -766,6 +772,79 @@ class TestCoveragePolicySwitch:
             pd.testing.assert_frame_equal(b, c)
 
 
+#: The three functions that actually accept a ``policy``. A ``policy=`` keyword on
+#: anything else is somebody's unrelated kwarg, not a coverage selection.
+_POLICY_TAKERS = frozenset(
+    {"apply_coverage_policy", "build_hybrid_frame", "build_hybrid_from_db"}
+)
+
+
+def _policy_selections(source: str, module: str) -> list[str]:
+    """Every place ``source`` selects a coverage policy, as ``module:line`` strings.
+
+    Three ways to select one: name a ``COVERAGE_POLICY_*`` constant, **import** one under
+    an alias (which erases the name from every later reference, so the import itself is
+    the only place it is visible), or pass ``policy=`` to a function that takes one.
+    Parsed rather than grepped — see the guard test below for why both substring attempts
+    had holes.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            found += [
+                f"{module}:{node.lineno} imports {alias.name}"
+                for alias in node.names
+                if alias.name.startswith("COVERAGE_POLICY")
+            ]
+        elif isinstance(node, ast.Name) and node.id.startswith("COVERAGE_POLICY"):
+            found.append(f"{module}:{node.lineno} names {node.id}")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("COVERAGE_POLICY"):
+            found.append(f"{module}:{node.lineno} names {node.attr}")
+        elif isinstance(node, ast.Call):
+            called = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", None)
+            )
+            if called in _POLICY_TAKERS and any(
+                kw.arg == "policy" for kw in node.keywords
+            ):
+                found.append(f"{module}:{node.lineno} passes policy= to {called}")
+    return found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'build_hybrid_from_db(dbc, policy="restricted")',
+        'build_hybrid_from_db(dbc, policy = "restricted")',  # the whitespace hole
+        "hybrid.build_hybrid_frame(df, roster, policy=chosen)",
+        "apply_coverage_policy(n, e, r, policy=COVERAGE_POLICY_RESTRICTED)",
+        "x = hybrid.COVERAGE_POLICY_RESTRICTED",
+        "from usvote.hybrid import COVERAGE_POLICY_RESTRICTED as p\nuse(p)",
+    ],
+)
+def test_the_policy_guard_catches_every_way_of_selecting_one(source: str) -> None:
+    """Positive cases — each must be flagged (#122, code review)."""
+    assert _policy_selections(source, "m.py")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "build_hybrid_from_db(dbc)",
+        "build_hybrid_from_db(dbc, view=EC_PV_REDISTRIBUTABLE_VIEW)",
+        'fetch(url, retry_policy="aggressive")',  # somebody else's kwarg
+        'cache(key, cache_policy="lru")',
+        '"""Docs mentioning policy= and COVERAGE_POLICY_RESTRICTED."""',
+        "# a comment about policy = restricted",
+    ],
+)
+def test_the_policy_guard_does_not_cry_wolf(source: str) -> None:
+    """Negative cases — none configures coverage, so none may fail CI (#122)."""
+    assert _policy_selections(source, "m.py") == []
+
+
 def test_nothing_configures_a_policy_other_than_b() -> None:
     """Property (iii) — what actually unblocks #102 (#122).
 
@@ -774,23 +853,32 @@ def test_nothing_configures_a_policy_other_than_b() -> None:
     ``warehouse.py`` never names a policy. Greppable, in the manner of the repo's other
     layering invariants — a future call site that hardcodes (c) has to defeat this test.
 
-    **Both spellings are checked.** AC-verify (#122) found that scanning only for the
-    constant names let a bare ``policy="restricted"`` through — and mypy accepts it, since
-    it is a valid member of the ``Literal``. So the ``policy=`` keyword is caught too,
-    whichever way its value is written; the argument that #102 needs no policy parameter
-    rests entirely on this test, so it may not have a hole that wide.
+    **Matched on the AST, not on source text**, following the precedent #121 set when its
+    back-import guard missed ``from usvote import hybrid``. Two rounds of substring
+    matching each had a hole: scanning for the constant names alone let a bare
+    ``policy="restricted"`` through (AC-verify), and scanning for the literal ``"policy="``
+    missed ``policy = "restricted"`` with spaces — which ruff does **not** reject either,
+    since E251 is not in the project's stable ``E`` selection and CI never runs
+    ``ruff format --check`` (code review). mypy accepts both, since ``"restricted"`` is a
+    valid ``Literal`` member. The argument that #102 needs no policy parameter rests
+    entirely on this test, so it may not have a hole that wide.
+
+    Matching the parsed tree also makes it **narrow**: a ``policy=`` keyword counts only on
+    a call to one of the three functions that actually take one, so an unrelated
+    ``cache_policy=``/``retry_policy=`` elsewhere in the package — or the word in a comment
+    or docstring — is not a false accusation of configuring coverage.
     """
     src = Path(hybrid.__file__).parent
-    offenders = []
-    for path in src.rglob("*.py"):
+    offenders: list[str] = []
+    for path in sorted(src.rglob("*.py")):
         if path.name == "hybrid.py":
             continue
-        text = path.read_text(encoding="utf-8")
-        if "COVERAGE_POLICY" in text or "policy=" in text:
-            offenders.append(path.relative_to(src).as_posix())
+        offenders += _policy_selections(
+            path.read_text(encoding="utf-8"), path.relative_to(src).as_posix()
+        )
     assert offenders == [], (
-        "these modules configure a coverage policy; (b) is the only shipped rule "
-        f"and no production caller may select one: {offenders}"
+        "these call sites select a coverage policy; (b) is the only shipped rule (D038) "
+        f"and no production caller may choose one: {offenders}"
     )
 
 
