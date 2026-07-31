@@ -40,10 +40,14 @@ denominators below look parallel and are not:
 ``ec_share_full`` divides by the first and is **policy-invariant**; it is the *only*
 input to ``ec_determinative``. ``ec_share_hybrid`` is the policy-selected share that
 feeds ``hybrid_score`` and can never reach ``ec_determinative``. That is what stops a
-coverage policy from manufacturing a constitutional majority that never existed:
-restricting 1824's EC share to the popular-vote states would put Jackson at
-99/190 = 0.52 — over the line — when the real answer is 99/261 = 0.379 and the House
-decided the election.
+coverage policy from manufacturing a constitutional majority that never existed. The
+failure it guards against is the **naive** restriction — trimming 1824's denominator to
+the popular-vote states while leaving the numerator alone, which reads Jackson at
+99/190 = 0.52, over the line, when the real answer is 99/261 = 0.379 and the House
+decided the election. Policy (c) as implemented does *not* make that mistake (it
+restricts both halves, giving 84/190 = 0.442 — see :data:`COVERAGE_POLICIES`), but the
+split is what makes the mistake **unable to matter** even if some future policy commits
+it: ``ec_determinative`` simply does not read that column.
 
 **The majority basis is the appointed allotment** (D041), exactly the 12th Amendment's
 "majority of the whole number of Electors **appointed**", while the numerators are votes
@@ -57,6 +61,7 @@ shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from typing import Literal
 
 import pandas as pd
 
@@ -69,11 +74,15 @@ from usvote.pv.status import (
 )
 
 __all__ = [
+    "COVERAGE_POLICIES",
+    "COVERAGE_POLICY_MISMATCHED",
+    "COVERAGE_POLICY_RESTRICTED",
     "HYBRID_CANDIDATE_COLUMNS",
     "HYBRID_CANDIDATE_GRAIN",
     "HYBRID_SUMMARY_COLUMNS",
     "HYBRID_SUMMARY_GRAIN",
     "REQUIRED_JOIN_COLUMNS",
+    "CoveragePolicy",
     "HybridError",
     "apply_coverage_policy",
     "assert_ec_shares_le_one",
@@ -88,6 +97,29 @@ __all__ = [
     "read_pv_status_roster",
     "roll_up_national",
 ]
+
+#: The ``Literal`` alias, so mypy rejects a misspelled policy at the call site rather
+#: than leaving it to the runtime ``HybridError`` (which stays, for untyped callers).
+#: Declared before the constants so each can be annotated with it — a bare ``str``
+#: constant would not satisfy the ``Literal``-typed parameters below.
+CoveragePolicy = Literal["mismatched", "restricted"]
+
+#: The two honest denominator treatments for a partial-coverage year (D038), and
+#: deliberately only two — rule (a), withholding the hybrid entirely, is **rejected**
+#: because it would suppress precisely the no-EC-majority elections the hybrid exists to
+#: speak to. ``mismatched`` (b) is **settled and shipped**: compute the EC share over
+#: all EC-casting states and the PV share over the popular-vote states, and *flag* the
+#: mismatch with ``pv_coverage < 1.0``. ``restricted`` (c) narrows **both halves of the
+#: EC share** to the popular-vote states so both denominators span one sub-electorate.
+#: (c) is reachable only by an explicit argument; nothing in ``warehouse.py`` or #124
+#: passes one, which is what makes the public surface's treatment fixed rather than
+#: configurable (the property #102 relies on).
+COVERAGE_POLICY_MISMATCHED: CoveragePolicy = "mismatched"
+COVERAGE_POLICY_RESTRICTED: CoveragePolicy = "restricted"
+COVERAGE_POLICIES: tuple[CoveragePolicy, ...] = (
+    COVERAGE_POLICY_MISMATCHED,
+    COVERAGE_POLICY_RESTRICTED,
+)
 
 #: The per-candidate frame's grain — one row per election candidate. ``candidate_id``
 #: (the warehouse-internal key), never the public ``candidate_slug``: minting that is a
@@ -317,6 +349,15 @@ def pv_coverage_by_year(
     A year the roster says nothing about gets **NULL** coverage, not ``0.0``: unknown is
     not "no state voted" (D005). That is the honest answer for a warehouse whose roster
     does not reach that year.
+
+    Returns ``covered_electoral_votes`` alongside the ratio, because it is exactly
+    policy (c)'s restricted EC denominator (#122). Carrying it out rather than
+    recomputing it there keeps **one** derivation of "the electoral weight of the
+    popular-vote states" — two would drift, and the drift would be invisible: both would
+    still produce plausible ratios. Note the two are on different footings — it is NULL
+    for a roster-absent year (unknown) and a real ``0`` for a year the roster reaches
+    with no popular-vote state (known, and known to be none), a distinction (c)'s divide
+    has to respect.
     """
     denominators = ec_denominator_by_year(ec_pv_df)
     resolved = _resolve_roster(roster_df)
@@ -341,55 +382,129 @@ def pv_coverage_by_year(
     )
     out["pv_coverage"] = out["covered_electoral_votes"] / out["ec_denominator"]
     out.loc[~in_roster, "pv_coverage"] = pd.NA
-    return out[["year", "ec_denominator", "pv_coverage"]]
+    return out[["year", "ec_denominator", "covered_electoral_votes", "pv_coverage"]]
 
 
 # --- the coverage policy (D038: (b) is settled) -----------------------------
+
+
+def _restricted_ec_numerator(
+    ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame, key: Sequence[str]
+) -> pd.DataFrame:
+    """Per-``key`` Σ ``president_electoral_votes``, ``popular_vote`` states only.
+
+    Policy (c)'s EC numerator, and it must be **recomputed from the state rows** — the
+    carried ``national_electoral_votes`` is a window SUM over *every* state, so pairing
+    it with the restricted denominator would silently mix a full numerator with a
+    partial one. On 1824 that mistake reads Jackson at 99/190 = 0.52 rather than
+    84/190 = 0.442 — a fabricated majority, exactly the failure mode the D037/A split
+    makes harmless (``ec_determinative`` never reads this column) and that this function
+    must not commit anyway.
+
+    No dedup, unlike :func:`ec_denominator_by_year`: ``president_electoral_votes`` is
+    genuinely per ``(state, candidate)``, not a per-state allotment broadcast across
+    candidate rows, so a straight sum over the restricted state set is correct.
+    """
+    resolved = _resolve_roster(roster_df)
+    pv_states = resolved.loc[
+        resolved["pv_status"] == PV_STATUS_POPULAR_VOTE, ["year", "state"]
+    ]
+    restricted = ec_pv_df.merge(pv_states, on=["year", "state"], how="inner")
+    return (
+        restricted.groupby(list(key), as_index=False)["president_electoral_votes"]
+        .sum()
+        .rename(columns={"president_electoral_votes": "restricted_electoral_votes"})
+    )
 
 
 def apply_coverage_policy(
     national: pd.DataFrame,
     ec_pv_df: pd.DataFrame,
     roster_df: pd.DataFrame,
+    *,
+    policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
+    key: Sequence[str] = HYBRID_CANDIDATE_GRAIN,
 ) -> pd.DataFrame:
-    """Own both hybrid numerators and both hybrid denominators — policy **(b)**.
+    """Own both hybrid numerators and both hybrid denominators — (b) or (c).
 
     The hybrid averages an EC share against a PV share, and for a partial-coverage year
     those shares are computed over differently-sized electorates. Rule (a) — withhold
     the hybrid for such years — is **rejected** (D038): it would suppress precisely the
     no-EC-majority, House-contingent elections the hybrid exists to speak to. Of the two
-    honest treatments, **(b) is settled** (D038, Fred 2026-07-28): compute with the
-    mismatched denominators and *flag* the mismatch with ``pv_coverage < 1.0``.
+    honest treatments, **(b) is settled and shipped** (D038, Fred 2026-07-28); (c)
+    exists so the rejected alternative is *executable* rather than merely asserted —
+    #125's methodology note can state what it would have produced.
 
-    Under (b): ``ec_share_hybrid == ec_share_full`` (the EC share is not restricted),
-    and
-    ``pv_share`` divides the candidate's national PV by the source's provided per-state
-    totals, which a no-popular-vote state simply does not contribute to.
+    - **(b) ``mismatched``, the default:** ``ec_share_hybrid == ec_share_full`` — the EC
+      share is not restricted — and the mismatch is *flagged* by ``pv_coverage < 1.0``.
+    - **(c) ``restricted``:** both halves of the EC share narrow to the ``popular_vote``
+      states — numerator via :func:`_restricted_ec_numerator`, denominator the
+      ``covered_electoral_votes`` that :func:`pv_coverage_by_year` already computed as
+      its own numerator. ``pv_share`` is **untouched**: its denominator is the source's
+      provided per-state totals, which a no-popular-vote state never contributed to, so
+      it is already restricted. (c) therefore moves the EC half alone.
+
+    Both branches keep every step relationally expressible (group-by aggregate, join),
+    so #124's translation to SQL stays mechanical.
+
+    ``key`` is the grain ``national`` is on, and exists for the same reason
+    :func:`roll_up_national` takes one: (c)'s numerator must be grouped by *whatever*
+    candidate key the caller rolled up on, so a future slug-grained caller (D006) is a
+    parameter rather than a fork. (b) never touches it.
+
+    **The empty restricted set yields NULL, never a divide-by-zero**, and there are two
+    distinct ways to reach it: a year the roster does not cover has a NULL
+    ``covered_electoral_votes`` and the division propagates NULL on its own; a year the
+    roster *does* cover with no ``popular_vote`` state has a real ``0``, which the
+    ``replace`` below turns into NULL rather than ``inf``/NaN. On today's MIT-only
+    redistributable surface the first case is *every* year — the roster carries no MIT
+    rows at all (#127) — so (c) returns NULL throughout there.
 
     ``ec_share_full`` and ``ec_determinative`` are deliberately **outside this
-    function's reach** (D037/A) — they are policy-invariant, computed in
-    :func:`build_hybrid_frame`, so no coverage policy can move them.
-
-    **E7-S3 (#122) is where the (c) branch and the ``policy`` argument land.** (c)
-    restricts *both* shares' denominators to the ``popular_vote`` states, at which point
-    ``ec_share_hybrid`` may diverge from ``ec_share_full``. Keeping the whole policy
-    inside one pure function is what makes that a switch rather than a rework of
-    denominator logic — and on the MIT-only redistributable surface every state held a
-    popular vote, so the policy degrades to identity and ``hybrid_redistributable`` is
-    provably policy-invariant either way (the property #102 relies on).
+    function's reach** (D037/A) — policy-invariant, computed in
+    :func:`build_hybrid_frame` before this is called and read by
+    :func:`build_hybrid_summary` — so no coverage policy can move them. That is what
+    makes (c) safe to ship at all.
     """
+    if policy not in COVERAGE_POLICIES:
+        raise HybridError(
+            f"{policy!r} is not a known coverage policy (expected one of "
+            f"{COVERAGE_POLICIES}); (b) {COVERAGE_POLICY_MISMATCHED!r} is the shipped "
+            "rule (D038) and (c) is reachable only by an explicit argument."
+        )
     coverage = pv_coverage_by_year(ec_pv_df, roster_df)
-    out = national.merge(coverage[["year", "pv_coverage"]], on="year", how="left")
-    out["ec_share_hybrid"] = out["ec_share_full"]
+    out = national.merge(
+        coverage[["year", "covered_electoral_votes", "pv_coverage"]],
+        on="year",
+        how="left",
+    )
+    if policy == COVERAGE_POLICY_MISMATCHED:
+        out["ec_share_hybrid"] = out["ec_share_full"]
+    else:
+        out = out.merge(
+            _restricted_ec_numerator(ec_pv_df, roster_df, key), on=list(key), how="left"
+        )
+        # A real 0 denominator (roster-covered year, no popular-vote state) would give
+        # inf; NULL is the honest answer, and matches the NULL a roster-absent year
+        # already propagates.
+        denominator = out["covered_electoral_votes"].replace(0, pd.NA).astype("Float64")
+        numerator = out.get(
+            "restricted_electoral_votes", pd.Series(pd.NA, index=out.index)
+        ).astype("Float64")
+        out["ec_share_hybrid"] = (numerator / denominator).astype("float64")
+        out = out.drop(columns=["restricted_electoral_votes"], errors="ignore")
     out["pv_share"] = out["national_pv_votes"] / out["national_pv_denominator"]
-    return out
+    return out.drop(columns=["covered_electoral_votes"])
 
 
 # --- the two builders -------------------------------------------------------
 
 
 def build_hybrid_frame(
-    ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame
+    ec_pv_df: pd.DataFrame,
+    roster_df: pd.DataFrame,
+    *,
+    policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
 ) -> pd.DataFrame:
     """Per-``(year, candidate)`` EC / PV / hybrid scores over a resolved join view.
 
@@ -413,6 +528,11 @@ def build_hybrid_frame(
     that is every pre-1976 candidate: ``hybrid_preferred`` becomes a 1976-only surface
     and does
     **not** assert UCSB presence (settled, Fred 2026-07-28).
+
+    ``policy`` selects the D038 denominator treatment and defaults to the shipped (b);
+    see :func:`apply_coverage_policy`. It is threaded here so a caller can build a
+    *whole frame* either way — the comparison #125's methodology note needs — rather
+    than only the policy function's output in isolation.
     """
     national = roll_up_national(
         ec_pv_df,
@@ -429,7 +549,9 @@ def build_hybrid_frame(
     national["ec_share_full"] = (
         national["national_electoral_votes"] / national["ec_denominator"]
     )
-    frame = apply_coverage_policy(national, ec_pv_df, roster_df)
+    frame = apply_coverage_policy(
+        national, ec_pv_df, roster_df, policy=policy, key=HYBRID_CANDIDATE_GRAIN
+    )
     # D037: the average of the two ratios. NULL-propagating by construction, so a
     # candidate with no popular vote scores NULL rather than half an EC share.
     frame["hybrid_score"] = (frame["ec_share_hybrid"] + frame["pv_share"]) / 2
@@ -648,6 +770,7 @@ def build_hybrid_from_db(
     *,
     view: str = EC_PV_PREFERRED_VIEW,
     schema: str = SCHEMA,
+    policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read the join view + roster; return ``(candidate frame, election summary)``.
 
@@ -661,6 +784,17 @@ def build_hybrid_from_db(
     made to claim full coverage for years it holds no popular vote for (code review,
     #126). A view with no PV at all yields an empty source set, hence NULL coverage.
 
+    **On ``ec_pv_redistributable`` that scope currently matches nothing** (#127): MIT
+    writes no ``pv_state_status`` rows — only UCSB calls ``load_pv_status`` — so the
+    public surface reports NULL ``pv_coverage`` for every year, 1976-2024 included,
+    where the true EV-weighted coverage is ``1.0``. #127 backfills those rows; until it
+    lands, NULL is the honest reading of an absent roster, not a bug in this scoping.
+
+    ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
+    anything else** — #124 materializes the views from this default and ``warehouse.py``
+    never names a policy, which is why the public surface's treatment is fixed rather
+    than configurable (a test pins that no other module even mentions the constants).
+
     **The guards run here, not only in tests** (code review, #126). They exist to catch
     a denominator bug or a real dead heat, and on live warehouse data build time is the
     only place either can arise — the same reason
@@ -671,7 +805,7 @@ def build_hybrid_from_db(
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
     surface_sources = set(ec_pv_df["source"].dropna().unique())
     roster_df = read_pv_status_roster(dbc, sources=surface_sources)
-    frame = build_hybrid_frame(ec_pv_df, roster_df)
+    frame = build_hybrid_frame(ec_pv_df, roster_df, policy=policy)
     summary = build_hybrid_summary(frame)
 
     assert_ec_shares_le_one(frame)

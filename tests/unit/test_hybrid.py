@@ -648,7 +648,10 @@ class TestCoveragePolicySwitch:
         pd.testing.assert_series_equal(b["ec_share_full"], c["ec_share_full"])
         for frame in (b, c):
             summary = hybrid.build_hybrid_summary(frame)
-            assert summary["ec_determinative"].iloc[0] is False
+            # Populated-and-False, not NULL: 1824 had no EC majority, which is a known
+            # fact about the election, never a "we could not tell" (D041).
+            assert summary["ec_determinative"].notna().all()
+            assert bool(summary["ec_determinative"].iloc[0]) is False
             assert summary["ec_winner"].iloc[0] == "Jackson"
 
     def test_a_full_coverage_year_makes_the_two_policies_identical(self) -> None:
