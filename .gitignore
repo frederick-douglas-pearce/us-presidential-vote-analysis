@@ -42,3 +42,7 @@ coverage/
 
 # dev-loop ledger (local working state, never committed)
 .claude/loop/
+
+# Outreach working area (blog post drafts, social copy, etc.). Local-only —
+# nothing here is part of the shipped project.
+/social/
