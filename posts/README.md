@@ -73,7 +73,9 @@ Two carry over from `social/README.md` and apply to anything published here:
 
 ## Not yet ported
 
-The publish path from `claude-code-sessions` is **not** wired up here yet:
+The publish path from `claude-code-sessions` is **not** wired up here yet — tracked in
+[#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132),
+which captures the port's design constraints and the required one-time PAT setup:
 
 - `tooling/publish-to-pages.py` — resolves each post's `og_card_source`, copies the
   rendered card into the Pages repo, and fails closed if it can't.
