@@ -1,0 +1,82 @@
+# OG share-card brief — Post 2, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card in the series shows a real fragment of
+# the actual record rather than an illustration of one. This post's specimen is the
+# 1864 participation gap — the National Archives lists 36 states, the American
+# Presidency Project lists 25, and the eleven Confederate states are the difference.
+# The two panels are index-aligned so the absences line up as visible holes: at
+# thumbnail size the eye lands on the gap before reading a word.
+#
+# The slice runs Alabama–Mississippi (alphabetical) because that window carries six
+# of the eleven absences — enough that the holes read as a pattern rather than as a
+# rendering fault. The trailing "…" is doing honest work: it says the record
+# continues, so nobody reads 20 rows as the whole election.
+#
+# Data provenance: state list derived from tests/fixtures/ec_state_roster_by_year.json
+# (1864 — 36 states, 11 with total_electoral_votes == 0), itself sourced from the
+# public-domain National Archives EC pages. No UCSB bytes appear here (D022): the
+# right-hand panel is the *complement* of the EC zero-EV set, not a UCSB transcription.
+
+[card]
+title = ["Presidential Elections Are Messy.", "The Data Has to Say How."]
+subhead = "1864: one election, two records, eleven states apart."
+series_mark = "Counted, Not Assumed · 2 of 10"
+
+# Rows are index-aligned across panels. An empty string renders as a blank slot —
+# that is the whole point of the card, so blanks are deliberate, not missing data.
+[[panel]]
+label = "National Archives"
+sublabel = "36 states listed"
+rows = [
+  "Alabama",
+  "Arkansas",
+  "California",
+  "Connecticut",
+  "Delaware",
+  "Florida",
+  "Georgia",
+  "Illinois",
+  "Indiana",
+  "Iowa",
+  "Kansas",
+  "Kentucky",
+  "Louisiana",
+  "Maine",
+  "Maryland",
+  "Massachusetts",
+  "Michigan",
+  "Minnesota",
+  "Mississippi",
+  "…",
+]
+
+[[panel]]
+label = "American Presidency Project"
+sublabel = "25 listed · 11 absent"
+rows = [
+  "",
+  "",
+  "California",
+  "Connecticut",
+  "Delaware",
+  "",
+  "",
+  "Illinois",
+  "Indiana",
+  "Iowa",
+  "Kansas",
+  "Kentucky",
+  "",
+  "Maine",
+  "Maryland",
+  "Massachusetts",
+  "Michigan",
+  "Minnesota",
+  "",
+  "…",
+]
