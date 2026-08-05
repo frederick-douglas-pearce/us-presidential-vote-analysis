@@ -23,8 +23,8 @@
 # right-hand panel is the *complement* of the EC zero-EV set, not a UCSB transcription.
 
 [card]
-title = ["Presidential Elections Are Messy.", "The Data Has to Say How."]
-subhead = "1864: one election, two records, eleven states apart."
+title = ["Presidential Elections Are Messy.", "The Data Has to Carry the Story."]
+subhead = "1864: one election, two records — and eleven states only one of them carries."
 series_mark = "Counted, Not Assumed · 2 of 10"
 
 # Rows are index-aligned across panels. An empty string renders as a blank slot —
