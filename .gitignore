@@ -43,6 +43,12 @@ coverage/
 # dev-loop ledger (local working state, never committed)
 .claude/loop/
 
-# Outreach working area (blog post drafts, social copy, etc.). Local-only —
-# nothing here is part of the shipped project.
-/social/
+# Outreach working area (blog post drafts, social copy, etc.). Mirrors the
+# claude-code-sessions policy — pre-publication scratch stays untracked, curated
+# assets are tracked — with one deviation that matters here: `social/candidates.md`
+# carries `outreach`-lane entries, which are findings about a data provider that
+# guardrail G1 says go to that provider privately and are never published. This repo
+# is public, so the ledger (and the drafts, and the scout config) stay untracked.
+# Only the rendered OG cards and their committable build inputs are versioned.
+/social/*
+!/social/images/
