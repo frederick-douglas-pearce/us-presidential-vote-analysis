@@ -1846,7 +1846,10 @@ actually **cast**. The earlier "cast vs appointed" concern was a **misreading** 
   `ELECTORAL_VOTE_SHORTFALLS` / `_expected_shortfall`, and `assert_row_votes_sum_to_total` checking
   candidate votes == total − shortfall. So `ec_denominator` is an **appointed** denominator and the
   numerator is **cast** — precisely the 12th Amendment's formulation. 2000 is Bush **271 of 538
-  appointed** (270 needed), not 269 of 537 cast — matching the historical record Fred asked for.
+  appointed**, clearing an appointed-basis threshold of **270** — not the **269** a cast-basis
+  threshold (537 ÷ 2, rounded up) would have set. The contrast is between the two *thresholds*, not
+  between two tallies of Bush's votes: Bush cast 271 either way (271 + Gore's 266 = 537 cast, of 538
+  appointed). Matches the historical record Fred asked for.
 - **Derived requirement:** because shortfalls are real, Σ `president_electoral_votes` can be **less**
   than `ec_denominator`, so candidate EC shares in such a year sum to slightly **under** 1.0. That is
   correct, not a bug — validation must assert shares sum to **≤ 1.0**, never == 1.0, with 2000 (537
