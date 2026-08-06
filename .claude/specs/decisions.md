@@ -1846,7 +1846,10 @@ actually **cast**. The earlier "cast vs appointed" concern was a **misreading** 
   `ELECTORAL_VOTE_SHORTFALLS` / `_expected_shortfall`, and `assert_row_votes_sum_to_total` checking
   candidate votes == total − shortfall. So `ec_denominator` is an **appointed** denominator and the
   numerator is **cast** — precisely the 12th Amendment's formulation. 2000 is Bush **271 of 538
-  appointed** (270 needed), not 269 of 537 cast — matching the historical record Fred asked for.
+  appointed**, clearing an appointed-basis threshold of **270** — not the **269** a cast-basis
+  threshold (537 ÷ 2, rounded up) would have set. The contrast is between the two *thresholds*, not
+  between two tallies of Bush's votes: Bush cast 271 either way (271 + Gore's 266 = 537 cast, of 538
+  appointed). Matches the historical record Fred asked for.
 - **Derived requirement:** because shortfalls are real, Σ `president_electoral_votes` can be **less**
   than `ec_denominator`, so candidate EC shares in such a year sum to slightly **under** 1.0. That is
   correct, not a bug — validation must assert shares sum to **≤ 1.0**, never == 1.0, with 2000 (537
@@ -1910,3 +1913,94 @@ D039 sentence above is superseded by this entry (the log is append-only; D039 is
 - The general lesson is the one #121's `took_office` fixture and this story's fabricated `source="mit"`
   roster row both taught: a claim about live warehouse shape needs checking **against the warehouse**,
   not against a fixture that models what we assumed it contains.
+
+---
+
+## D043: 1868/1872 counting anomalies are a per-`(year, state, candidate)` `count_status` on `dwh.votes`, not a choice between totals rows
+
+**Date:** 2026-08-06
+
+**Context:** #57 (ingest the gated Reconstruction years) named its own blocker as a modeling
+question: *"decide how the model represents the contested/uncounted Georgia votes and the dual
+'excluding/including' totals — likely a small modeling decision (which total is authoritative for
+the votes fact)."* Drafting blog post 3 forced it, because the post cannot describe how the record
+handles 1868 without the record having decided.
+
+The source shapes, from the committed fixtures:
+
+- **1868** (`www_archives_gov_electoral_college_1868.html`) ends with **two totals rows** —
+  `Totals (excluding Georgia's votes) 285` and `Totals (including Georgia's votes) 294` — and marks
+  neither authoritative. The note: *"The electoral votes of Georgia were contested and the Senate and
+  the House of Representatives could not agree whether to accept – and count – them or not."*
+  Georgia's 9 appear parenthesized, `(9)`, in Seymour's column. Mississippi, Texas, and Virginia
+  carry a dash in the allotment column itself — not readmitted, no electors appointed.
+- **1872** (`..._1872.html`) totals **352**, with Grant 286 + Others 63 = **349** counted for
+  president. Note 1: Greeley's 3 votes *"were not counted"* by House resolution. Note 3: *"Arkansas
+  and Louisiana were unable to certify their election results and did not submit any electoral votes
+  to be counted"* — 6 and 8 respectively, so 352 + 14 = the 366 electors the states were entitled to.
+
+**Decision:** Model the *count* as a status carried by the vote rows. Do **not** resolve 1868 by
+picking a totals row.
+
+1. **The appointed denominator is never an editorial choice.** The 12th Amendment's denominator is
+   "the whole number of Electors **appointed**" (D041/D037/A). 1868 Georgia's nine electors *were*
+   appointed — undisputed; the open question was only whether their **votes counted**. So 1868's
+   `ec_denominator` is **294**, and that follows from the existing rule rather than from taking a
+   side in the congressional dispute. The 285-vs-294 question is not a denominator question at all.
+2. **1872's denominator is 366, not the Archives' printed 352.** Arkansas and Louisiana appointed
+   electors; their returns were never accepted into the count. That is materially different from
+   1868's Mississippi/Texas/Virginia, which appointed **none** (no readmitted government to do it)
+   and therefore genuinely contribute 0. Keeping those two situations distinct requires AR/LA in the
+   appointed total, flagged at the count. This **diverges from the Archives' own totals row** and so
+   ships as a documented correction (constant + test + `docs/corrections.md` row), like every other
+   spine anomaly.
+3. **`count_status` is a three-value enum on `dwh.votes`, plus a free-text reason** in the source's
+   own words: `counted` (default) / `not_counted` (settled — Congress decided *no*) / `disputed`
+   (unresolved — Congress decided *nothing*). This mirrors `pv_status` + `note` and its
+   CHECK-built-from-a-value-tuple pattern (`usvote/pv/status.py`, D024 §4) so the enum has one
+   definition. Assignments: 1868 Georgia → `disputed`; 1872 Georgia's 3 Greeley votes,
+   1872 Arkansas, 1872 Louisiana → `not_counted`.
+4. **The grain is `(year, state, candidate)` — a column on the fact, not a sibling roster.** 1872
+   Georgia is the proof: of its 11 votes, Greeley's 3 were rejected while B. Gratz Brown's 6 and
+   Jenkins's 2 were counted. Status varies *within* a state, so the `pv_state_status` shape (a
+   `(year, state)` roster) cannot express it. Because `dwh.votes` is already dense and rectangular
+   (`assert_rectangular_state_grain`), "complete rather than exceptions-only" (D024 §3) comes free —
+   every row carries a status and there is no second table to keep in sync.
+5. **`disputed` is not the `unknown` bucket D024 §4 forbids.** `unknown` means *we do not know what
+   happened*; `disputed` means *we know exactly what happened — the Senate and House deadlocked and
+   never resolved it*. That is a recorded fact about the world, not a gap in our knowledge, and every
+   such row carries the Archives' sentence saying so. The no-`unknown` prohibition stands unamended.
+6. **Two mechanisms stay separate because they encode two different failures.**
+   `ELECTORAL_VOTE_SHORTFALLS` means *votes never cast* (appointed > cast: 1832 Maryland's two
+   electors in ill health, 2000 DC's protest abstention). `count_status` means *cast, then not
+   counted* (cast > counted: 1868, 1872). Consequently `assert_row_votes_sum_to_total` is
+   **unchanged** and passes for 1872 Georgia — 6 + 2 + 3 = 11 = the allotment — because rejected
+   votes remain *rows*, merely flagged. No Reconstruction entries leak into the shortfall constant.
+7. **Nothing downstream flips.** Grant is 214/294 = 0.728 in 1868 and 286/366 = 0.781 in 1872, so
+   `ec_determinative` is `true` under every reading of either year; no outcome depends on this
+   choice. Both years are pre-1976, so the D028 snapshot and the public API are unaffected.
+   Surfacing `count_status` through `EC_PV_COLUMNS`/the snapshot is **deferred** until a public
+   surface actually covers these years.
+
+**Rationale:**
+- The series' thesis (post 2, D024) is that a record must hold *why* a number is absent, and that the
+  failure mode is a structure forced to answer a question its source left open. 1868 is that case in
+  its purest form: the official record prints two totals and declines to choose. A schema that
+  collapses them answers Congress's question by accident, in whichever direction the parser leaned.
+- Splitting "appointed" from "counted" costs nothing here and is the same two-numbers-kept-apart move
+  that already earned its keep in D041 (appointed denominator vs cast numerator). 1872 simply shows
+  the ladder has a third rung: **366 appointed → 352 submitted → 349 counted**.
+- A boolean `contested` was the first proposal and is not enough: it cannot distinguish *Congress
+  decided no* (1872) from *Congress never decided* (1868), which is precisely the distinction the
+  years exist to teach.
+- Choosing 366 over the Archives' 352 accepts a documented divergence from the source in exchange for
+  keeping "appointed no electors" and "appointed electors whose votes were not counted" as separate
+  facts. Collapsing them would reintroduce the missing-vs-zero conflation at the state level.
+
+**Action required:**
+- #57: implement `count_status` + reason, the 366/294 denominators, and the four flagged rows; add
+  the 1872 AR/LA denominator divergence to `docs/corrections.md`; drop 1868/1872 from
+  `UNSUPPORTED_EC_YEARS` and update the gate test. Downstream UCSB roster effects are already
+  enumerated in #57 and unchanged by this entry.
+- Blog post 3 states this handling as shipped-by-decision; if #57 lands differently, the post is the
+  thing that has to change.
