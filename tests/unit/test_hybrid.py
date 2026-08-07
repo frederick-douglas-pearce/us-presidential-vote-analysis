@@ -737,25 +737,41 @@ class TestCoveragePolicySwitch:
         assert all_absence["ec_share_hybrid"].isna().all()
 
     def test_the_policy_reaches_the_db_entry_point(self) -> None:
-        """Plumbed all the way through, so a whole frame can be built either way."""
+        """Plumbed all the way through, so a whole frame can be built either way.
+
+        Post-#127 the divergence is *year-shaped*, which is a sharper signal than the
+        old all-or-nothing one: (c) restricts 1900 (no MIT roster row reaches it) to an
+        empty state set while leaving 1976 (fully covered) untouched. If the ``policy``
+        argument stopped being forwarded, 1900 would come back populated.
+        """
         df, roster = _mixed_surface()
         frame, _ = hybrid.build_hybrid_from_db(
             _StubDBC(df, roster),
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
-        assert frame["ec_share_hybrid"].isna().all()
+        # Boolean-mask form, not ``.set_index('year').loc[1900]``: the latter returns a
+        # scalar (not a Series) the moment a year has a single candidate, and ``.isna()``
+        # would raise AttributeError — reading as a broken test, not a policy regression.
+        assert frame.loc[frame["year"] == 1900, "ec_share_hybrid"].isna().all()
+        assert frame.loc[frame["year"] == 1976, "ec_share_hybrid"].notna().all()
 
-    def test_the_redistributable_surface_diverges_until_the_mit_roster_lands(self) -> None:
-        """Property (ii): today the two policies do **not** agree on the public surface.
+    def test_the_two_policies_agree_exactly_where_the_mit_roster_reaches(self) -> None:
+        """Property (ii), resolved by #127 — the canary #122 left has now fired.
 
-        The original AC claimed byte-identity here, on the premise that 1976+ reads
-        ``pv_coverage == 1.0``. It does not: the roster is UCSB-only (#127), so scoping to
-        MIT finds nothing, and (c) restricts to an empty state set in *every* year while
-        (b) keeps the full EC share. Pinned as a canary — when #127 backfills MIT's roster
-        rows, 1976+ becomes fully covered, the restriction becomes a no-op there, and this
-        assertion must be revisited. What actually unblocks #102 is
-        :func:`test_nothing_configures_a_policy_other_than_b`, not any identity property.
+        #122 pinned the *pre-backfill* truth: the roster was UCSB-only, so scoping to MIT
+        found nothing and (c) restricted to an empty state set in **every** year, making
+        the two policies differ everywhere. Its docstring said this assertion "must be
+        revisited when #127 backfills MIT's roster rows". It has been.
+
+        The post-backfill truth is the one the original AC actually wanted, now scoped
+        honestly: **the policies agree exactly where coverage is complete** — 1976 reads
+        ``pv_coverage == 1.0``, so restricting to popular-vote states is a no-op and (b)
+        and (c) produce identical shares. They still differ on 1900, and must: no
+        MIT-sourced roster row reaches that year, so (c) has no covered states to restrict
+        to. Agreement is therefore a *property of coverage*, not of the surface — which is
+        why it could never have been the byte-identity the AC first claimed. What
+        unblocks #102 remains :func:`test_nothing_configures_a_policy_other_than_b`.
         """
         df, roster = _mixed_surface()
         b, _ = hybrid.build_hybrid_from_db(
@@ -766,10 +782,14 @@ class TestCoveragePolicySwitch:
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
-        assert b["ec_share_hybrid"].notna().all()
-        assert c["ec_share_hybrid"].isna().all()
-        with pytest.raises(AssertionError):
-            pd.testing.assert_frame_equal(b, c)
+        # Fully covered → the restriction is a no-op and the two policies coincide.
+        pd.testing.assert_frame_equal(
+            b[b["year"] == 1976].reset_index(drop=True),
+            c[c["year"] == 1976].reset_index(drop=True),
+        )
+        # Uncovered → (b) keeps the full EC share, (c) has nothing to restrict to.
+        assert b.loc[b["year"] == 1900, "ec_share_hybrid"].notna().all()
+        assert c.loc[c["year"] == 1900, "ec_share_hybrid"].isna().all()
 
 
 #: The three functions that actually accept a ``policy``. A ``policy=`` keyword on
@@ -1408,16 +1428,20 @@ class _StubDBC:
 def _mixed_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
     """A 1900 (UCSB-only, no PV on the MIT surface) + 1976 (MIT) two-year warehouse.
 
-    **The roster carries UCSB rows only, because that is what the warehouse holds**
-    (#127). ``usvote/ucsb/pipeline.py`` calls ``load_pv_status``; ``usvote/mit/pipeline.py``
-    calls only ``load_pv_records``, and ``transform_mit`` returns a single frame rather
-    than the ``(votes, roster)`` pair UCSB's transform returns — so MIT contributes **no**
-    ``pv_state_status`` rows at all. An earlier version of this fixture fabricated one
-    (``source="mit"``, lowercase, where the real literal is ``SOURCE_MIT == "MIT"``) and
-    asserted ``pv_coverage == 1.0`` for 1976; it was internally consistent, so it passed
-    green while modelling data the warehouse cannot produce — the same
-    fixture-disagrees-with-reality class as #121's ``took_office`` bug. The source tags
-    below come from :mod:`usvote.pv.source`, never hand-spelled.
+    **The roster now carries MIT rows for 1976, because that is what the warehouse
+    holds** — #127 gave ``run_mit_pipeline`` its ``load_pv_status`` call, so MIT
+    contributes one ``popular_vote`` row per ``(year, state)`` it loads. 1900 stays
+    UCSB-only: MIT's span starts at 1976, so nothing MIT-sourced attests to it.
+
+    Before #127 the roster held **no** MIT rows at all, and an even earlier version of
+    this fixture papered over that by fabricating one — ``source="mit"``, lowercase,
+    where the real literal is ``SOURCE_MIT == "MIT"``, so the live source-scoped read
+    would have matched it *twice* over — and asserting ``pv_coverage == 1.0`` for 1976.
+    It was internally consistent, so it passed green while modelling data the warehouse
+    could not produce: the same fixture-disagrees-with-reality class as #121's
+    ``took_office`` bug. The row below is the honest version of that row, and it is
+    honest because the pipeline now writes it. Every source tag comes from
+    :mod:`usvote.pv.source`, never hand-spelled.
     """
     rows: list[dict[str, object]] = []
     for year, pv in ((1900, None), (1976, 600.0)):
@@ -1436,6 +1460,8 @@ def _mixed_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
     roster = pd.concat([
         roster_frame({1900: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source=SOURCE_UCSB),
         roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source=SOURCE_UCSB),
+        # #127: MIT's own roster row for the year MIT actually covers.
+        roster_frame({1976: {"Ohio": PV_STATUS_POPULAR_VOTE}}, source=SOURCE_MIT),
     ])
     return df, roster
 
@@ -1449,10 +1475,11 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     NULL. That is the exact inverse of what the flag is for, so the read is scoped to the
     sources present in the chosen view.
 
-    **Scoping to MIT today matches nothing** (#127): the roster is UCSB-only, so coverage
-    comes back NULL for *both* years — honestly "unknown", not a fabricated ``1.0``. When
-    #127 backfills MIT's rows, 1976 becomes a real ``1.0`` and this test's second block
-    flips. That is the intended signal, not a regression.
+    **Scoping to MIT now matches MIT's own rows** (#127, landed): 1976 reports a real
+    ``1.0`` and 1900 stays NULL. Before the backfill the MIT scope matched *nothing*, so
+    coverage came back NULL for both years — honest, but uselessly so: the flag that
+    exists to say "this year's PV is partial" said "unknown" for a year that is
+    completely covered. This test pins both halves of the fix at once.
     """
     df, roster = _mixed_surface()
     dbc = _StubDBC(df, roster)
@@ -1460,15 +1487,53 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
         dbc, view="ec_pv_redistributable"
     )
     by_year = summary.set_index("year")
-    # 1900: no PV on this surface, and no MIT roster rows for it → coverage unknown.
+    # 1900: no PV on this surface, and no MIT roster row for it → coverage unknown.
+    # NULL, never 0.0 — "we hold nothing for this year", not "nobody voted".
     assert pd.isna(by_year.loc[1900, "pv_coverage"])
     assert pd.isna(by_year.loc[1900, "hybrid_winner"])
-    # 1976: MIT carries the popular vote, but no roster row asserts coverage (#127).
-    assert pd.isna(by_year.loc[1976, "pv_coverage"])
+    # 1976: MIT carries the popular vote AND the roster row that attests to it (#127).
+    assert by_year.loc[1976, "pv_coverage"] == 1.0
     # The hybrid itself is unaffected — (b) never reads coverage to compute a score.
     assert by_year.loc[1976, "hybrid_winner"] == "A"
     # The EC half is computed for both years regardless.
     assert set(frame["ec_denominator"]) == {20}
+
+
+def test_the_real_builders_output_yields_coverage_1_0_end_to_end() -> None:
+    """Close the fixture-vs-reality loop: the roster here is *built*, not hand-written.
+
+    Every other coverage test feeds ``roster_frame`` — a hand-authored frame that merely
+    *resembles* what the pipeline writes. That is the shape of the bug #127 was filed to
+    close, so at least one test must consume :func:`build_popular_vote_roster`'s actual
+    output. A dtype or spelling drift in the builder (a ``StringDtype`` ``year``, a
+    differently-cased ``state``) would still match ``read_pv_status_roster``'s ``source``
+    filter while missing ``pv_coverage_by_year``'s merge on ``['year', 'state']`` —
+    giving NULL coverage in production while every hand-written fixture stayed green.
+    """
+    from usvote.pv.status import build_popular_vote_roster
+
+    df = ec_pv_frame([
+        {"year": 1976, "state": "Ohio", "candidate": "A",
+         "total_electoral_votes": 20, "president_electoral_votes": 20,
+         "candidate_votes": 600.0, "state_total_votes": 1000.0},
+        {"year": 1976, "state": "Iowa", "candidate": "A",
+         "total_electoral_votes": 8, "president_electoral_votes": 8,
+         "candidate_votes": 300.0, "state_total_votes": 500.0},
+    ])
+    df["source"] = SOURCE_MIT
+    # The roster exactly as run_mit_pipeline derives it: from the EC spine's
+    # participation frame, not from the PV facts (D024 / decisions.md).
+    spine = pd.DataFrame([
+        {"year": 1976, "state": "Ohio", "is_total": False},
+        {"year": 1976, "state": "Iowa", "is_total": False},
+        {"year": 1976, "state": None, "is_total": True},
+    ])
+    roster = build_popular_vote_roster(spine, source=SOURCE_MIT, years={1976})
+
+    _, summary = hybrid.build_hybrid_from_db(
+        _StubDBC(df, roster), view="ec_pv_redistributable"
+    )
+    assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
 
 
 def test_a_populated_roster_still_yields_real_coverage_on_the_preferred_surface() -> None:

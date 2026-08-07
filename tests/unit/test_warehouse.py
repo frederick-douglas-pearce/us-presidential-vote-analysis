@@ -54,9 +54,9 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     def mit(
         dbc: object, path: Any = None, *, years: Any = None,
         environ: Any = None, replace: bool = False, **_: Any,
-    ) -> list[int]:
+    ) -> tuple[list[int], list[int]]:
         calls.append(("mit", {"path": path, "replace": replace, "years": years}))
-        return [0] * 3  # 3 PV rows
+        return ([0] * 3, [0] * 6)  # 3 pv_votes, 6 roster (#127)
 
     def ucsb(
         dbc: object, html_dir: Any = None, *, years: Any = None,
@@ -88,6 +88,7 @@ def test_full_build_sequences_ec_mit_ucsb_views(
     assert result == WarehouseResult(
         ec_rows=5,
         mit_rows=3,
+        mit_roster_rows=6,
         ucsb_pv_rows=2,
         ucsb_roster_rows=4,
         sources_loaded=frozenset({SOURCE_EC, SOURCE_MIT, SOURCE_UCSB}),
@@ -149,7 +150,7 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
         order.append("views")
 
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
-    monkeypatch.setattr(warehouse, "run_mit_pipeline", lambda *a, **k: [])
+    monkeypatch.setattr(warehouse, "run_mit_pipeline", lambda *a, **k: ([], []))
     monkeypatch.setattr(warehouse, "rebuild_views", views)
 
     conn = RecordingConnection()

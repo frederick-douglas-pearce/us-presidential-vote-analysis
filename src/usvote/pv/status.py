@@ -2,11 +2,11 @@
 
 The sibling of :mod:`usvote.pv.schema`, and source-neutral for the same reason: the
 ``dwh.pv_state_status`` roster is a **shared** PV structure, not a UCSB one. Three
-consumers are already known — #37's DDL (whose ``pv_status`` CHECK is built from
-:data:`PV_STATUS_VALUES`), E6's mechanical MIT roster backfill (D024 §6/§Rationale),
-and #38's re-run of the two-way assert after it narrows candidates — so the contract
-lives here and the dependency runs ``source -> pv``, never ``pv -> ucsb`` or, worse,
-``mit -> ucsb``.
+consumers are known — #37's DDL (whose ``pv_status`` CHECK is built from
+:data:`PV_STATUS_VALUES`), the mechanical MIT roster backfill (D024 §6/§Rationale,
+landed in #127 via :func:`build_popular_vote_roster`), and #38's re-run of the two-way
+assert after it narrows candidates — so the contract lives here and the dependency runs
+``source -> pv``, never ``pv -> ucsb`` or, worse, ``mit -> ucsb``.
 
 **What the roster is (D024 §3/§6).** One row per ``(source, year, state)`` for *every*
 state in that year's election, including ordinary ones. It is a **complete roster, not
@@ -113,6 +113,102 @@ def build_status_column_defs(schema: str = ROSTER_SCHEMA) -> list[tuple[str, ...
             "(source, year, state)",
         ),
     ]
+
+
+#: The ``read_ec_participation`` columns :func:`build_popular_vote_roster` requires.
+#: ``total_electoral_votes`` is deliberately **not** among them — D024 §5 keeps the EC
+#: fact the single source of electoral-vote truth, and the roster never loads an EV.
+_PARTICIPATION_COLUMNS: tuple[str, ...] = ("year", "state", "is_total")
+
+
+def build_popular_vote_roster(
+    ec_participation: pd.DataFrame,
+    *,
+    source: str,
+    years: Collection[int],
+    error_cls: type[Exception] = PVRosterError,
+) -> pd.DataFrame:
+    """Return an all-``popular_vote`` roster over the EC spine's participating states.
+
+    The **mechanical** roster derivation D024 §6/§Rationale anticipated (#127) — the
+    ``INSERT ... SELECT DISTINCT`` over ``dwh.votes`` — for a source whose whole span
+    held a popular vote in every state. MIT is the first caller: it covers 1976-2024,
+    where no state was ever ``legislature_chosen`` or ``not_participating``, so none of
+    UCSB's absence derivation applies and MIT stays "not taxed" by the roster design.
+
+    Source-neutral and living here rather than under ``usvote/mit/`` for the same reason
+    :func:`assert_roster_covers_facts` does: there is no source-specific logic to write,
+    and any future whole-span source qualifies on the same terms.
+
+    **The roster derives from the EC spine, not from the source's own facts — and that
+    is the whole point.** ``ec_participation`` is
+    :func:`usvote.spine.read_ec_participation`'s frame, the same independent input UCSB
+    builds its roster from; D024's clarification names ``dwh.votes`` with totals rows
+    excluded for *both* sources. Deriving from the source's own loaded facts instead
+    would make :func:`assert_roster_covers_facts` compare a frame against itself —
+    checks 1 and 3 holding by construction, check 2 vacuous — so the guard would be
+    nominal exactly where D024 §7 needs it to bite. Against the spine it is real: a
+    ``(year, state)`` that vanished during transform becomes a ``popular_vote`` roster
+    state with no vote rows, and check 1 fails loudly instead of the year quietly
+    reporting ``pv_coverage`` below ``1.0``. **Nothing else in the pipeline catches
+    that** — the #69 join-side guard (:func:`usvote.join.assert_db_pv_matches_ec`) is a
+    PV->EC anti-join that finds *phantom* rows, the opposite direction, and no sum
+    validator can see a state that took its votes with it.
+
+    **Totals rows are excluded explicitly** — ``votes.state`` is NULL on them, so a bare
+    ``DISTINCT year, state`` yields a NULL roster entry per year, which becomes garbage
+    or a NOT NULL violation at load (D024 §6). States with ``total_electoral_votes = 0``
+    are **kept**: the Archives carries rows for non-participating states, so the spine
+    already is the complete roster. Such a state inside this source's span would be
+    marked ``popular_vote`` and then fail check 1 for want of vote rows — correctly, in
+    that a whole-span source claiming a state which cast no electoral votes needs the
+    absence derivation this function deliberately does not do.
+
+    ``years`` is **required and explicit**, never inferred — the module docstring's
+    rule.
+    A year in ``years`` with no spine rows simply yields no roster rows for it, which
+    :func:`assert_roster_covers_facts` reports as the pipeline-sequencing failure it is
+    (the EC spine was never loaded for that year).
+
+    ``note`` is null on every row by construction: it exists only to carry an absence's
+    cause, and there are no absences here.
+
+    The returned frame is sorted on ``(year, state)`` so this function has a
+    deterministic *return* value for a caller inspecting or asserting on it.
+    :func:`usvote.pv.load.load_pv_status` re-sorts on the full
+    :data:`ROSTER_NATURAL_KEY` before inserting — the **insert** order is the loader's
+    to own, not this function's, and the two are deliberately not coupled.
+    """
+    absent = [c for c in _PARTICIPATION_COLUMNS if c not in ec_participation.columns]
+    if absent:
+        raise error_cls(
+            f"build_popular_vote_roster({source!r}) needs the EC participation columns "
+            f"{list(_PARTICIPATION_COLUMNS)}; missing {absent}. Pass "
+            "usvote.spine.read_ec_participation's frame, not the source's PV facts."
+        )
+    in_scope = frozenset(years)
+    rows = ec_participation[
+        (~ec_participation["is_total"].astype(bool))
+        & ec_participation["state"].notna()
+        & ec_participation["year"].isin(in_scope)
+    ]
+    keys = (
+        rows[["year", "state"]]
+        .drop_duplicates()
+        .sort_values(["year", "state"], kind="stable")
+        .reset_index(drop=True)
+    )
+    roster = pd.DataFrame(
+        {
+            "source": source,
+            "year": keys["year"].astype("int64"),
+            "state": keys["state"],
+            "pv_status": PV_STATUS_POPULAR_VOTE,
+            "note": pd.Series([None] * len(keys), dtype="object"),
+        },
+        columns=list(ROSTER_COLUMNS),
+    )
+    return roster
 
 
 def assert_roster_shape(

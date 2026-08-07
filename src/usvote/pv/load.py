@@ -8,14 +8,22 @@ table if absent, and inserts — tagged by whatever ``source`` value the frame c
 
 Two per-source loaders write the raw facts, deliberately parallel:
 :func:`load_pv_records` writes the ``dwh.pv_votes`` fact, and :func:`load_pv_status`
-writes the D024 ``dwh.pv_state_status`` roster (the second frame a source's transform
-emits). Both are source-neutral — UCSB (#37) is the first caller of the roster loader,
-but E6's MIT roster backfill is the second, so neither can live under a source
-subpackage. A source that loads both (UCSB) applies **one** ``replace`` flag to both
-calls. These loaders do not open a transaction themselves — atomicity is the *caller's*
-to own: :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` wraps both writes in a single
+writes the D024 ``dwh.pv_state_status`` roster. Both are source-neutral — UCSB (#37)
+was the first caller of the roster loader and MIT's backfill (#127) is the second, so
+neither can live under a source subpackage. **Both PV sources now load both tables**, so
+each applies **one** ``replace`` flag to its pair. These loaders do not open a
+transaction themselves — atomicity is the *caller's* to own: each pipeline
+(:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`, :func:`usvote.mit.pipeline.
+run_mit_pipeline`) wraps both of its writes in a single
 :meth:`usvote.db.DBC.transaction` (#84a), so the roster/fact pair is written
 all-or-nothing and the D024 two-way invariant can never be left half-written in the DB.
+
+**``replace`` is table-level but not source-level.** Both tables are shared across
+sources (D021), so ``replace=True`` from *either* pipeline discards the *other*
+source's rows as well — most consequentially UCSB's pre-1976
+``legislature_chosen``/``not_participating`` roster. That is why the whole-warehouse
+build (:func:`usvote.warehouse.run_warehouse`) forwards ``replace`` only to the EC
+spine and loads every PV source with ``replace=False``.
 
 The union story (#68, D017) adds three more seams here, over the *already-loaded*
 per-source facts rather than writing a new one: :func:`load_pv_source` seeds the small
@@ -171,12 +179,18 @@ def load_pv_status(
     - ``replace`` gates only the table-level rebuild — never the schema, so the EC spine
       sharing ``dwh`` survives a roster reload.
 
-    Unlike :func:`load_pv_records`, this does **not** create the schema: a roster load
-    always runs after the EC spine (its ``state`` FK needs ``dwh.state``, and the
-    pipeline's :func:`usvote.spine.read_ec_participation` has already read ``dwh.votes``
-    by the time this is called), so ``dwh`` provably exists and re-issuing
-    ``CREATE SCHEMA`` would only add a redundant round-trip. The fact loader keeps its
-    own create-if-absent for its #66 standalone contract.
+    Like :func:`load_pv_records`, this creates the schema if absent. It used to skip
+    that on the argument that ``dwh`` provably existed by the time it ran — a roster
+    load always follows the EC spine, and UCSB's pipeline had already read
+    ``dwh.votes`` via :func:`usvote.spine.read_ec_participation` before calling this.
+    **That proof died with #127**: MIT derives its roster from its own facts, makes no
+    spine read, and loads the roster *first*, so this is now the very first DDL a
+    standalone MIT load issues. Rather than restate a narrower invariant that holds for
+    only one of two callers, both loaders now create-if-absent — one redundant
+    round-trip in exchange for a precondition neither has to reason about. (The
+    ``state`` FK still requires the spine, so a roster load into an empty database
+    fails either way; it now fails on the missing FK target rather than on a missing
+    schema.)
 
     Returns the sorted roster frame as inserted (without ``status_id``).
     """
@@ -187,10 +201,10 @@ def load_pv_status(
         list(ROSTER_NATURAL_KEY), kind="stable"
     ).reset_index(drop=True)
 
-    # No create_schema here (unlike load_pv_records): dwh always pre-exists a roster
-    # load — the EC spine created it and the pipeline read from it first — so this would
-    # be a redundant round-trip. ``replace`` is still gated at the table level only; it
-    # drops at most pv_state_status, never the schema.
+    # NEVER forward ``replace`` to create_schema — that cascades a drop of the whole
+    # ``dwh`` schema and wipes the EC spine (see load_pv_records). Create-if-absent
+    # only; ``replace`` is gated at the table level, dropping at most pv_state_status.
+    dbc.create_schema(schema, replace=False)
     dbc.create_table(
         schema, ROSTER_TABLE, build_status_column_defs(schema), replace=replace
     )

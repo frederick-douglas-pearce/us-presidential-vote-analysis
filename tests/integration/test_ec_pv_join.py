@@ -33,7 +33,12 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
+from tests._helpers import (
+    FIXTURES_DIR,
+    MIT_FUSION_SAMPLE_CSV,
+    fake_state_geo,
+    narrow_mit_spine_to_sample,
+)
 from usvote.db import DBC
 from usvote.getters import EC_GETTERS_WITHOUT_POPULAR_VOTE
 from usvote.join import (
@@ -289,6 +294,7 @@ def test_winner_has_pv_runs_end_to_end_on_the_live_view(
 )
 def test_join_over_a_real_two_source_load(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: real MIT + real UCSB for 2016+2020, then the D026 join views.
 
@@ -301,6 +307,9 @@ def test_join_over_a_real_two_source_load(
     result as the old ``years={2016}`` wiring, now via the shared warehouse scope. Doubly
     gated so CI never touches the UCSB snapshot (D022).
     """
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.scrape import fetch_from_dir
     from usvote.warehouse import SOURCE_EC as WH_EC
     from usvote.warehouse import SOURCE_MIT as WH_MIT
@@ -379,6 +388,7 @@ def test_join_over_a_real_two_source_load(
 @pytest.mark.integration
 def test_warehouse_builds_the_redistributable_core_end_to_end(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Drive ``run_warehouse`` over EC fixtures + the MIT fusion sample, no UCSB.
 
@@ -390,6 +400,9 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
     ``rebuild_views`` step the ``DROP SCHEMA ... CASCADE`` would leave no
     ``ec_pv_preferred`` to query.
     """
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.scrape import fetch_from_dir
     from usvote.warehouse import SOURCE_EC as WH_EC
     from usvote.warehouse import SOURCE_MIT as WH_MIT

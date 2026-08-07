@@ -312,15 +312,18 @@ def test_load_status_creates_table_and_is_non_destructive_by_default(
     )
 
 
-def test_load_status_does_not_create_the_schema(
+def test_load_status_creates_the_schema_if_absent(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Unlike load_pv_records, the roster loader does NOT re-issue CREATE SCHEMA: dwh
-    # always pre-exists a roster load (the EC spine created it and the pipeline read
-    # from it first), so a second CREATE SCHEMA would be a redundant round-trip.
+    # The roster loader used to skip CREATE SCHEMA, on the argument that dwh always
+    # pre-existed a roster load: UCSB's pipeline read dwh.votes via the spine before
+    # calling it. #127 killed that proof — MIT derives its roster from its own facts,
+    # makes no spine read, and loads the roster FIRST, so this became the very first
+    # DDL a standalone MIT load issues. Both loaders now create-if-absent rather than
+    # leaving one caller relying on an invariant only the other establishes.
     record_inserts(monkeypatch)
     load_pv_status(make_dbc(recording_conn), _valid_roster())
-    assert not any(q.startswith("CREATE SCHEMA") for q in recording_conn.executed)
+    assert any(q.startswith("CREATE SCHEMA") for q in recording_conn.executed)
 
 
 def test_load_status_replace_drops_only_the_table_never_the_schema(

@@ -8,11 +8,15 @@ canonical-key reconciliation makes the ``pv_votes.state`` FK resolve.
 Both tests first drive the EC pipeline over the 2016 + 2020 Archives fixtures to seed
 ``dwh.state``/``dwh.candidate``/``dwh.votes`` (the FK targets):
 
-- **MIT (#66):** runs the MIT pipeline over the fusion fixture scoped to 2016 (a subset
-  of the seeded years). Asserts row counts, grain (unique ``pv_id`` + natural key),
-  FK/containment (every ``pv_votes.state``/``candidate`` resolves into the EC dims), and
-  the MIT provenance tagging. The 2016 New York rows are a fusion case, so aggregation is
-  exercised end-to-end into Postgres.
+- **MIT (#66, + the #127 roster):** runs the MIT pipeline over the fusion fixture scoped
+  to 2016 (a subset of the seeded years). Asserts row counts, grain (unique ``pv_id`` +
+  natural key), FK/containment (every ``pv_votes.state``/``candidate`` resolves into the
+  EC dims), and the MIT provenance tagging. The 2016 New York rows are a fusion case, so
+  aggregation is exercised end-to-end into Postgres. Since #127 MIT loads **both** PV
+  tables, so this also asserts the roster rows land with their ``state`` FK resolved,
+  that the roster's states match the fact frame's exactly (a dtype or spelling drift in
+  ``build_popular_vote_roster`` would pass every unit test and break only here), and
+  that a re-run raises on the ``(source, year, state)`` UNIQUE rather than duplicating.
 - **UCSB (#37):** runs the whole UCSB pipeline over the real snapshot scoped to
   2016 + 2020, loading **both** PV tables (``pv_votes`` fact + ``pv_state_status``
   roster). Asserts the two-table load coexists with the EC spine and the earlier PV
@@ -31,14 +35,22 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import psycopg2
 import pytest
 
-from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
+from tests._helpers import (
+    FIXTURES_DIR,
+    MIT_FUSION_SAMPLE_CSV,
+    fake_state_geo,
+    narrow_mit_spine_to_sample,
+)
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.schema import PV_TABLE
+from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import (
     PV_STATUS_POPULAR_VOTE,
+    ROSTER_SCHEMA,
     ROSTER_TABLE,
     assert_roster_covers_facts,
 )
@@ -49,8 +61,12 @@ _CORPUS = os.environ.get("USVOTE_UCSB_HTML_DIR", "")
 @pytest.mark.integration
 def test_mit_pv_loads_alongside_ec_spine(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seed the EC spine (2016+2020), then load MIT PV (2016) into the same schema."""
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.mit.pipeline import run_mit_pipeline
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir
@@ -70,7 +86,10 @@ def test_mit_pv_loads_alongside_ec_spine(
 
         # 2. Load MIT PV scoped to 2016 (a subset of the seeded years), reconciled
         #    onto the canonical keys — non-destructively, alongside the EC spine.
-        pv = run_mit_pipeline(
+        # Unpacked, NOT `pv = run_mit_pipeline(...)`: since #127 this returns the
+        # (pv_votes, roster) pair, and `len(pv)` on the tuple would be 2 whatever the
+        # row count — silently turning the assertion below into a tautology.
+        pv, roster = run_mit_pipeline(
             dbc, path=MIT_FUSION_SAMPLE_CSV, years={2016}, replace=False
         )
 
@@ -79,6 +98,30 @@ def test_mit_pv_loads_alongside_ec_spine(
             f"SELECT count(*) AS n FROM {SCHEMA}.{PV_TABLE}"
         )["n"].iloc[0]
         assert n == len(pv) == 2
+
+        # #127: the roster lands too, and its state FK to dwh.state resolved (the
+        # insert would have failed otherwise). One popular_vote row per (year, state).
+        got_roster = dbc.select_query_to_df(
+            f"SELECT source, year, state, pv_status, note "
+            f"FROM {ROSTER_SCHEMA}.{ROSTER_TABLE} ORDER BY year, state"
+        )
+        assert len(got_roster) == len(roster) == 1
+        assert got_roster["source"].tolist() == [SOURCE_MIT]
+        assert got_roster["year"].tolist() == [2016]
+        assert got_roster["pv_status"].tolist() == [PV_STATUS_POPULAR_VOTE]
+        assert got_roster["note"].isna().all()
+        # The roster's states must be exactly the fact frame's states — a dtype or
+        # spelling drift in build_popular_vote_roster would pass every unit test and
+        # only break here, where the FK and the real join live.
+        assert set(got_roster["state"]) == set(pv["state"])
+
+        # A re-run does not duplicate roster rows: the (source, year, state) UNIQUE
+        # holds, so the non-destructive guard fires (issue #127's last AC).
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            run_mit_pipeline(
+                dbc, path=MIT_FUSION_SAMPLE_CSV, years={2016}, replace=False
+            )
+        dbc.conn.rollback()
 
         # The EC spine survived the PV load (guard against a schema-level replace).
         for ec_table in ("state", "candidate", "votes"):
