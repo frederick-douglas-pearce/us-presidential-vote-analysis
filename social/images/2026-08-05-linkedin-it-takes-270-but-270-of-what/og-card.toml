@@ -1,0 +1,101 @@
+# OG share-card brief — Post 3, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card shows a real fragment of the actual
+# record. This post's specimen is unusually literal — both panels are columns the
+# 1872 Archives table already prints, side by side. The post argues that appointed,
+# cast, and counted are three different numbers; the record makes that argument
+# itself, in two adjacent columns that do not agree.
+#
+# The slice runs Alabama–Mississippi (alphabetical) because that window carries all
+# three of 1872's anomalies: Arkansas at row 2 and Louisiana at row 13 (appointed
+# electors, no votes submitted), and Georgia at row 7 (11 appointed, 8 counted —
+# the 3 votes cast for the dead Greeley were refused by resolution of the House).
+# The trailing "…" says the record continues, so nobody reads 19 states as the
+# whole election. Same window as post 2 by coincidence of the alphabet, but the
+# specimen is numeric here rather than a bare name list, so the two cards do not
+# read as the same image.
+#
+# Panel semantics differ on purpose:
+#   - Left renders Arkansas and Louisiana as "–", because the Archives *does* list
+#     both states and prints a dash in every column. They were appointed; they
+#     submitted nothing. The en dash is a typographic rendering of the record's
+#     hyphen, chosen for legibility at thumbnail size.
+#   - Right blanks those rows entirely, because nothing of theirs was counted. The
+#     index alignment is what carries the message: present, then gone.
+#
+# Data provenance: tests/fixtures/www_archives_gov_electoral_college_1872.html, a
+# committed snapshot of the public-domain National Archives page. Per-state values
+# are the table's "Electoral Vote of Each State" column and the sum of its
+# for-President columns (Grant + Others). Both sublabels are the table's own Totals
+# row: 352 allotted; 286 Grant + 63 Others = 349 counted.
+#
+# One figure in the subhead is DERIVED, not printed: 366 = 352 + Arkansas's 6 +
+# Louisiana's 8, the 1870-apportionment allotments the Archives omits because
+# neither state submitted returns. The post makes the same derivation and says so.
+
+[card]
+title = ["It Takes 270,", "But 270 of What?"]
+subhead = "1872: 366 electors appointed, 352 in the record's own total, 349 counted."
+series_mark = "Counted, Not Assumed · 3 of 10"
+
+# Rows are index-aligned across panels and given as [label, value] pairs; the value
+# is right-anchored to the panel edge so the number column is exact. An empty
+# string renders as a blank slot — deliberate, not missing data.
+[[panel]]
+label = "Electoral Vote of Each State"
+sublabel = "352 allotted"
+mono = true
+rows = [
+  ["Alabama", "10"],
+  ["Arkansas", "–"],
+  ["California", "6"],
+  ["Connecticut", "6"],
+  ["Delaware", "3"],
+  ["Florida", "4"],
+  ["Georgia", "11"],
+  ["Illinois", "21"],
+  ["Indiana", "15"],
+  ["Iowa", "11"],
+  ["Kansas", "5"],
+  ["Kentucky", "12"],
+  ["Louisiana", "–"],
+  ["Maine", "7"],
+  ["Maryland", "8"],
+  ["Massachusetts", "13"],
+  ["Michigan", "11"],
+  ["Minnesota", "5"],
+  ["Mississippi", "8"],
+  ["…", ""],
+]
+
+[[panel]]
+label = "Counted for President"
+sublabel = "349 counted · 2 states absent"
+mono = true
+rows = [
+  ["Alabama", "10"],
+  ["", ""],
+  ["California", "6"],
+  ["Connecticut", "6"],
+  ["Delaware", "3"],
+  ["Florida", "4"],
+  ["Georgia", "8"],
+  ["Illinois", "21"],
+  ["Indiana", "15"],
+  ["Iowa", "11"],
+  ["Kansas", "5"],
+  ["Kentucky", "12"],
+  ["", ""],
+  ["Maine", "7"],
+  ["Maryland", "8"],
+  ["Massachusetts", "13"],
+  ["Michigan", "11"],
+  ["Minnesota", "5"],
+  ["Mississippi", "8"],
+  ["…", ""],
+]

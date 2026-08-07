@@ -60,6 +60,11 @@ ROW_SIZE = 16
 ROW_LEAD = 18
 ROW_PAD_X = 26
 ROW_TOP_PAD = 24
+# Opt-in per panel via `mono = true`. Specimens that are *tables* (a value column
+# beside a label column) want uniform digit width; specimens that are bare name
+# lists don't. Panels without the flag render exactly as before, so already-shipped
+# briefs re-render byte-identical.
+MONO_FAMILY = "'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace"
 
 _REPO = Path(__file__).resolve().parents[1]
 TEMPLATE = _REPO / "social" / "images" / "og-card-template.svg"
@@ -83,12 +88,32 @@ def _subhead_block(text: str) -> str:
     )
 
 
-def _panel(x: float, w: float, panel: dict) -> str:
-    """One record panel: rounded card, header bar, then index-aligned rows.
+def _row(x: float, w: float, y: float, row: str | list[str], font: str) -> list[str]:
+    """One positional row: a bare label, or a [label, value] pair.
 
-    Rows are positional. An empty string emits no <text> at all — the blank slot
-    is the message, so it must render as genuine absence, not as a placeholder.
+    A pair right-anchors the value to the panel's inner edge, so the value column
+    is exact rather than depending on the font's digit metrics. Empty strings emit
+    no <text> at all — the blank slot is the message, so it must render as genuine
+    absence, not as a placeholder.
     """
+    label, value = (row, "") if isinstance(row, str) else (row[0], row[1])
+    parts = []
+    if label:
+        parts.append(
+            f'<text x="{x + ROW_PAD_X}" y="{y}"{font} fill="{FG}" '
+            f'font-size="{ROW_SIZE}" font-weight="300">{escape(label)}</text>'
+        )
+    if value:
+        parts.append(
+            f'<text x="{x + w - ROW_PAD_X}" y="{y}" text-anchor="end"{font} '
+            f'fill="{FG}" font-size="{ROW_SIZE}" font-weight="300">'
+            f"{escape(value)}</text>"
+        )
+    return parts
+
+
+def _panel(x: float, w: float, panel: dict) -> str:
+    """One record panel: rounded card, header bar, then index-aligned rows."""
     rows = panel["rows"]
     max_rows = (PANEL_H - HEAD_H - ROW_TOP_PAD) // ROW_LEAD
     if len(rows) > max_rows:
@@ -111,13 +136,10 @@ def _panel(x: float, w: float, panel: dict) -> str:
         f'fill="{MUTED}" '
         f'font-size="17" font-weight="300">{escape(panel["sublabel"])}</text>',
     ]
+    font = f' font-family="{MONO_FAMILY}"' if panel.get("mono") else ""
     y = head_y + ROW_TOP_PAD
     for row in rows:
-        if row:
-            parts.append(
-                f'<text x="{x + ROW_PAD_X}" y="{y}" fill="{FG}" font-size="{ROW_SIZE}" '
-                f'font-weight="300">{escape(row)}</text>'
-            )
+        parts.extend(_row(x, w, y, row, font))
         y += ROW_LEAD
     return "<g>\n" + "\n".join(parts) + "\n</g>"
 
