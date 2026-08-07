@@ -6,8 +6,14 @@ bare ``python -m usvote.mit`` runs the pipeline:
 
 - ``python -m usvote.mit`` / ``python -m usvote.mit load`` — read the MIT
   ``1976-2024-president.csv`` (``USVOTE_MIT_CSV_PATH``), transform + reconcile onto the
-  canonical keys, and load ``dwh.pv_votes``
-  (:func:`usvote.mit.pipeline.run_mit_pipeline`).
+  canonical keys, and load **both** shared PV tables — ``dwh.pv_votes`` and, since #127,
+  the ``dwh.pv_state_status`` roster (:func:`usvote.mit.pipeline.run_mit_pipeline`).
+
+``--replace`` rebuilds **both** of those tables, and both are shared across sources — so
+on a two-source warehouse it discards UCSB's rows as well, including the pre-1976
+``legislature_chosen`` / ``not_participating`` roster that is the only record of which
+states held no popular vote. Reload UCSB afterwards (or rebuild with
+``python -m usvote all --replace``) rather than leaving the roster MIT-only.
 
 Unlike UCSB there is no ``snapshot`` — MIT reads a single local CSV, so there is no
 network stage to reproduce (the source asymmetry the package docs describe). ``load``
@@ -60,7 +66,10 @@ def _run_load(replace: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m usvote.mit",
-        description="Load the MIT Election Lab popular-vote data into dwh.pv_votes.",
+        description=(
+            "Load the MIT Election Lab popular-vote data into dwh.pv_votes and its "
+            "coverage roster into dwh.pv_state_status."
+        ),
     )
     sub = parser.add_subparsers(dest="command")
     load_p = sub.add_parser(
@@ -70,8 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     load_p.add_argument(
         "--replace",
         action="store_true",
-        help="Rebuild dwh.pv_votes before loading. Table-level only — never touches "
-        "the EC spine or the schema.",
+        help="Rebuild both PV tables (pv_votes + pv_state_status) before loading. "
+        "Table-level only — never touches the EC spine or the schema. WARNING: both "
+        "tables are shared across sources, so this discards UCSB's rows too — "
+        "including the pre-1976 legislature_chosen / not_participating roster, which "
+        "only a UCSB reload restores.",
     )
     args = parser.parse_args(argv)
 

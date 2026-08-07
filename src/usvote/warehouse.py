@@ -74,7 +74,7 @@ SOURCE_MIT = "mit"
 SOURCE_UCSB = "ucsb"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class WarehouseResult:
     """What a :func:`run_warehouse` build loaded — the structured build receipt.
 
@@ -90,6 +90,12 @@ class WarehouseResult:
     is a query against ``dwh.pv_source`` / the ``pv_ucsb`` view at analysis time, not an
     in-process field to thread. This receipt answers "what did *this* build do", nothing
     speculative.
+
+    **Keyword-only.** This is the documented programmatic seam downstream E7/E8 callers
+    read, and #127 had to insert ``mit_roster_rows`` *between* existing fields to keep
+    the per-source pairs together — which silently re-binds every positional
+    construction. ``kw_only`` makes any future field addition a non-event instead of a
+    shifted-receipt hazard for a caller outside the type-checked set.
     """
 
     ec_rows: int

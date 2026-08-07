@@ -268,3 +268,21 @@ class TestBuildPopularVoteRoster:
                 source="MIT",
                 error_cls=MITRosterError,
             )
+
+    def test_null_source_rows_raise_rather_than_being_dropped(self) -> None:
+        """An unattributed frame must not be silently stamped as this source's.
+
+        The guard first used ``.dropna()`` before differencing, so a frame whose
+        ``source`` was entirely null passed cleanly and came back tagged ``MIT`` — the
+        exact mis-attribution the check exists to prevent, in its most total form.
+        """
+        facts = _facts(("MIT", 1976, "Ohio"))
+        facts.loc[:, "source"] = None
+        with pytest.raises(PVRosterError, match="null source"):
+            build_popular_vote_roster(facts, source="MIT")
+
+    def test_missing_source_column_raises_the_typed_error_not_a_key_error(self) -> None:
+        """This runs before the loader's ``assert_pv_shape``, so it owns its own guard."""
+        facts = _facts(("MIT", 1976, "Ohio")).drop(columns=["source"])
+        with pytest.raises(PVRosterError, match="needs a 'source' column"):
+            build_popular_vote_roster(facts, source="MIT")

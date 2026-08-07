@@ -463,8 +463,11 @@ def apply_coverage_policy(
     **unreachable** — a non-NULL numerator over a zero denominator would require
     ``popular_vote`` states whose allotments sum to zero, which the join view cannot
     produce — and a guard no mutation can kill is dead code, so it is gone (AC-verify,
-    #122). On today's MIT-only redistributable surface the first path is *every* year:
-    the roster carries no MIT rows at all (#127), so (c) returns NULL throughout there.
+    #122). On the MIT-only redistributable surface that first path is now exactly the
+    **pre-1976** years: since #127 the roster carries MIT's own rows for 1976-2024, so
+    (c) is a no-op there (every state is ``popular_vote``, so restricting changes
+    nothing) and returns NULL only for the years MIT does not reach. Before the
+    backfill the roster held no MIT rows at all and (c) returned NULL throughout.
 
     ``ec_share_full`` and ``ec_determinative`` are deliberately **outside this
     function's reach** (D037/A) — policy-invariant, computed in
@@ -790,11 +793,13 @@ def build_hybrid_from_db(
     made to claim full coverage for years it holds no popular vote for (code review,
     #126). A view with no PV at all yields an empty source set, hence NULL coverage.
 
-    **On ``ec_pv_redistributable`` that scope currently matches nothing** (#127): MIT
-    writes no ``pv_state_status`` rows — only UCSB calls ``load_pv_status`` — so the
-    public surface reports NULL ``pv_coverage`` for every year, 1976-2024 included,
-    where the true EV-weighted coverage is ``1.0``. #127 backfills those rows; until it
-    lands, NULL is the honest reading of an absent roster, not a bug in this scoping.
+    **On ``ec_pv_redistributable`` that scope now matches MIT's own rows** (#127,
+    landed): ``run_mit_pipeline`` calls ``load_pv_status``, so 1976-2024 reports the
+    true EV-weighted ``1.0`` and pre-1976 stays NULL — no PV *and* no MIT roster row
+    reaches those years, which is the honest reading of an absent roster rather than a
+    fabricated ``0.0``. Before the backfill this scope matched **nothing**, so the
+    public surface reported NULL for *every* year including the fully-covered modern
+    ones; that was the bug #127 fixed, not a flaw in this scoping.
 
     ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
     anything else** — #124 materializes the views from this default and ``warehouse.py``

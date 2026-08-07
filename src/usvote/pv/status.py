@@ -2,11 +2,11 @@
 
 The sibling of :mod:`usvote.pv.schema`, and source-neutral for the same reason: the
 ``dwh.pv_state_status`` roster is a **shared** PV structure, not a UCSB one. Three
-consumers are already known — #37's DDL (whose ``pv_status`` CHECK is built from
-:data:`PV_STATUS_VALUES`), E6's mechanical MIT roster backfill (D024 §6/§Rationale),
-and #38's re-run of the two-way assert after it narrows candidates — so the contract
-lives here and the dependency runs ``source -> pv``, never ``pv -> ucsb`` or, worse,
-``mit -> ucsb``.
+consumers are known — #37's DDL (whose ``pv_status`` CHECK is built from
+:data:`PV_STATUS_VALUES`), the mechanical MIT roster backfill (D024 §6/§Rationale,
+landed in #127 via :func:`build_popular_vote_roster`), and #38's re-run of the two-way
+assert after it narrows candidates — so the contract lives here and the dependency runs
+``source -> pv``, never ``pv -> ucsb`` or, worse, ``mit -> ucsb``.
 
 **What the roster is (D024 §3/§6).** One row per ``(source, year, state)`` for *every*
 state in that year's election, including ordinary ones. It is a **complete roster, not
@@ -135,6 +135,12 @@ def build_popular_vote_roster(
     forbids inventing roster inputs). ``note`` is null on every row by construction:
     the note exists only to carry an absence's cause, and there are no absences here.
 
+    The returned frame is sorted on ``(year, state)`` so this function has a
+    deterministic *return* value for a caller inspecting or asserting on it.
+    :func:`usvote.pv.load.load_pv_status` re-sorts on the full
+    :data:`ROSTER_NATURAL_KEY` before inserting — the **insert** order is the loader's
+    to own, not this function's, and the two are deliberately not coupled.
+
     Two consequences of self-derivation, stated plainly so nobody over-reads the guard:
     :func:`assert_roster_covers_facts` over this pair is **near-tautological** — checks
     1 and 3 hold by construction and check 2 is vacuous. Running it anyway is a
@@ -143,11 +149,26 @@ def build_popular_vote_roster(
     state dropped upstream of this call vanishes from the roster too, and only #69's
     join-side coverage guard would see it.
 
-    Raises ``error_cls`` when ``pv_df`` carries a source other than ``source`` — the
-    shared ``dwh.pv_votes`` shape holds every source's rows (D021), so deriving a
-    roster from an unscoped frame would tag another source's states as this one's.
+    Raises ``error_cls`` when ``pv_df`` lacks a ``source`` column, or carries any source
+    other than ``source`` — the shared ``dwh.pv_votes`` shape holds every source's rows
+    (D021), so deriving a roster from an unscoped frame would tag another source's
+    states as this one's. **A null ``source`` counts as foreign**, deliberately: it is
+    unattributed, and dropping nulls here would let an entirely untagged frame through
+    to be stamped with ``source`` — the exact mis-attribution this guard exists to stop.
+    The column check runs first so a malformed frame raises the typed error rather than
+    a bare ``KeyError`` (this runs *before* the loader's ``assert_pv_shape``).
     """
-    foreign = sorted(set(pv_df["source"].dropna().unique()) - {source})
+    if "source" not in pv_df.columns:
+        raise error_cls(
+            f"build_popular_vote_roster({source!r}) needs a 'source' column to verify "
+            f"provenance; got {list(pv_df.columns)}."
+        )
+    if bool(pv_df["source"].isna().any()):
+        raise error_cls(
+            f"build_popular_vote_roster({source!r}) was handed row(s) with a null "
+            "source — an unattributed frame must not be stamped as this source's."
+        )
+    foreign = sorted(set(pv_df["source"].unique()) - {source})
     if foreign:
         raise error_cls(
             f"build_popular_vote_roster({source!r}) was handed rows from {foreign} — "

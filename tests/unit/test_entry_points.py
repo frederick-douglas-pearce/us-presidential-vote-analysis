@@ -72,7 +72,15 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         loaded = {SOURCE_EC, SOURCE_MIT} | (
             {SOURCE_UCSB} if ucsb_html_dir is not None else set()
         )
-        return WarehouseResult(5, 3, 6, None, None, frozenset(loaded), True)
+        return WarehouseResult(
+            ec_rows=5,
+            mit_rows=3,
+            mit_roster_rows=6,
+            ucsb_pv_rows=None,
+            ucsb_roster_rows=None,
+            sources_loaded=frozenset(loaded),
+            views_built=True,
+        )
 
     monkeypatch.setattr(top, "run_ec_pipeline", ec)
     monkeypatch.setattr(top, "run_warehouse", wh)

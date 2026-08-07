@@ -750,9 +750,11 @@ class TestCoveragePolicySwitch:
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
-        by_year = frame.set_index("year")["ec_share_hybrid"]
-        assert by_year.loc[1900].isna().all()
-        assert by_year.loc[1976].notna().all()
+        # Boolean-mask form, not ``.set_index('year').loc[1900]``: the latter returns a
+        # scalar (not a Series) the moment a year has a single candidate, and ``.isna()``
+        # would raise AttributeError — reading as a broken test, not a policy regression.
+        assert frame.loc[frame["year"] == 1900, "ec_share_hybrid"].isna().all()
+        assert frame.loc[frame["year"] == 1976, "ec_share_hybrid"].notna().all()
 
     def test_the_two_policies_agree_exactly_where_the_mit_roster_reaches(self) -> None:
         """Property (ii), resolved by #127 — the canary #122 left has now fired.
@@ -1495,6 +1497,37 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     assert by_year.loc[1976, "hybrid_winner"] == "A"
     # The EC half is computed for both years regardless.
     assert set(frame["ec_denominator"]) == {20}
+
+
+def test_the_real_builders_output_yields_coverage_1_0_end_to_end() -> None:
+    """Close the fixture-vs-reality loop: the roster here is *built*, not hand-written.
+
+    Every other coverage test feeds ``roster_frame`` — a hand-authored frame that merely
+    *resembles* what the pipeline writes. That is the shape of the bug #127 was filed to
+    close, so at least one test must consume :func:`build_popular_vote_roster`'s actual
+    output. A dtype or spelling drift in the builder (a ``StringDtype`` ``year``, a
+    differently-cased ``state``) would still match ``read_pv_status_roster``'s ``source``
+    filter while missing ``pv_coverage_by_year``'s merge on ``['year', 'state']`` —
+    giving NULL coverage in production while every hand-written fixture stayed green.
+    """
+    from usvote.pv.status import build_popular_vote_roster
+
+    df = ec_pv_frame([
+        {"year": 1976, "state": "Ohio", "candidate": "A",
+         "total_electoral_votes": 20, "president_electoral_votes": 20,
+         "candidate_votes": 600.0, "state_total_votes": 1000.0},
+        {"year": 1976, "state": "Iowa", "candidate": "A",
+         "total_electoral_votes": 8, "president_electoral_votes": 8,
+         "candidate_votes": 300.0, "state_total_votes": 500.0},
+    ])
+    df["source"] = SOURCE_MIT
+    # The roster exactly as run_mit_pipeline derives it, from the fact frame itself.
+    roster = build_popular_vote_roster(df[["source", "year", "state"]], source=SOURCE_MIT)
+
+    _, summary = hybrid.build_hybrid_from_db(
+        _StubDBC(df, roster), view="ec_pv_redistributable"
+    )
+    assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
 
 
 def test_a_populated_roster_still_yields_real_coverage_on_the_preferred_surface() -> None:
