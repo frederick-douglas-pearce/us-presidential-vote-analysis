@@ -141,6 +141,7 @@ should be reflected back into `docs/ROADMAP.md` (and recorded as D029).
 - [ ] #N — E8-S6: Cloud-agnostic Dockerfile (local-runnable containerized deliverable)
 - [ ] #N — E8-S7 (later/stretch): Cloud Run deploy + CDN caching
 - [ ] #N — E8-S8 (later, gated on E7): Add hybrid / flip / margin fields to the API
+- [ ] #139 — E8-S9: Grow the public surface back to 1824 (pre-1976 EC facts + `pv_status` coverage roster on the snapshot). Implements the #134 decision; hard-prereq #127.
 
 ### Proposed endpoint / resource shape (for architect review)
 
@@ -530,6 +531,100 @@ API ships on `ec_pv_redistributable` without waiting for E7.
 
 ---
 
+### E8-S9: Grow the public surface back to 1824 — pre-1976 EC facts + the `pv_status` coverage roster on the snapshot
+
+**Issue title:** Grow the public API surface back to 1824: pre-1976 EC facts + the pv_status coverage roster on the snapshot
+**Labels:** `epic:internal-api`, `enhancement`, `priority:high`
+**GitHub issue:** #139
+
+**Body:**
+
+### Summary
+
+Implements **option 2 of #134** (Fred's decision, 2026-08-06): grow the EC-only public
+surface back to **1824**, **before any blog post publishes**. The public API serves the
+snapshot built from `ec_pv_redistributable`, which is MIT-filtered to **1976–2024**; Post 1's
+thesis ("a cleanly joined EC+PV record back to 1824 does not appear to exist publicly — here
+it is") links a reader to that surface to check it, and Posts 3–5 rest on pre-1976 EC facts a
+reader cannot currently verify anywhere. Nothing is published yet, so this is the cheapest
+moment to close the gap.
+
+The widening is **structurally small at the fact level**: `ec_pv_redistributable` is EC-left
+and already carries every EC state row from 1824. It is `usvote/snapshot.py::build_snapshot`
+that restricts the snapshot to `_covered_years` (years with redistributable PV) — one filter
+drops the pre-1976 EC rows that already flow into the build. The real work is shipping the
+`pv_status` coverage roster (D024) **alongside** the widened facts, so a pre-1976 NULL popular
+vote is disambiguated (no-PV-ever vs. source-doesn't-reach) rather than committing the series'
+own missing-vs-zero error on the public surface.
+
+> **Architect-review gate (do not skip):** land an implementation plan and get an architect
+> review **before writing code** — on the roster's redistributable-boundary treatment, the
+> `national_rollup` pre-1976 contract, and the `SNAPSHOT_SCHEMA_VERSION` handshake. The
+> *which-option* decision is made (#134); the *how* is not.
+
+### Scope (must-have)
+
+1. Widen the served window so the snapshot carries pre-1976 EC rows back to 1824 (relax the
+   `_covered_years` filter — the rows already arrive in the source frame).
+2. Ship the `pv_status` coverage roster onto the snapshot (new snapshot table + schema
+   addition). Ship the status **enum**; gate the free-text `note` (rights question below).
+3. Bump `SNAPSHOT_SCHEMA_VERSION` (the content hash covers only `ec_pv` data rows, so a
+   shape/coverage change is invisible to it — the D039/D042 handshake).
+4. Fix the `/v1` route contract: a pre-1976 year is currently a typed 404; post-widening those
+   years exist and must return 200 with EC facts + NULL-with-status PV. Update `year_from`/
+   `year_to` bounds, `/v1/elections` coverage metadata, and the `meta` coverage window.
+5. Re-examine the D030 `assert_redistributable_only` guard deliberately once the surface's
+   *meaning* changes (it passes NULL-PV rows today by matching only explicit `redistributable ==
+   false`).
+6. Docs + drift guards: `docs/api-snapshot.md`, the model↔column completeness test.
+7. Deploy path: snapshot rebuild → GCS upload → hash-tagged image → Cloudflare purge (D034/D035).
+
+### Open design question (architect + Fred) — the roster and the redistributable boundary
+
+Pre-1976 status rows (`legislature_chosen` / `not_participating`) are **UCSB-sourced** in
+`dwh.pv_state_status` (D024); the redistributable build reads MIT-scoped views and UCSB grants
+no republication rights (D022). **Recommended default:** ship the status **enum** as a
+public-domain historical classification, gate the free-text `note`. This extends D030's meaning
+for the roster and is a **rights call, not an engineering one** — flag for Fred.
+
+### Fallback (recommended if the rollup contract turns messy)
+
+`national_rollup` goes through `usvote.hybrid.roll_up_national`; PV share / hybrid are undefined
+without PV. Decide: NULL those columns pre-1976, or omit pre-1976 from the rollup. **If messy,
+ship widened facts + roster and defer the pre-1976 rollup** — those two alone make every
+historical post reader-checkable.
+
+### First step
+
+Run a widened build **early** to surface any pre-1976 candidate-slug collision (slug uniqueness
+is currently only enforced over the 1976–2024 window; the `snapshot.py` docstring warns of this)
+before designing around it.
+
+### Dependencies
+
+- **#127 (HARD PREREQUISITE)** — `dwh.pv_state_status` has no MIT rows, so `pv_coverage` is a
+  false "unknown" for the fully-covered 1976–2024 years until it lands.
+- #94 / E8-S1 (#95, the snapshot build being widened); #63 / `ec_pv_redistributable` (already
+  carries the pre-1976 EC rows).
+
+### Related
+
+- #134 (the decision this implements), #125 (E7-S6 partial-coverage note — reuse its wording),
+  #130 (committed evidence artifacts; guardrail **G5** becomes keepable pre-1976 once this ships).
+
+### Proposed decision
+
+Record as **D044** in `decisions.md` once the architect-review gate is passed (keeping the
+log's "record once approved" convention): *the public API surface widens to carry pre-1976 EC
+facts back to 1824, shipping the `pv_status` enum alongside so a NULL popular vote is never an
+undifferentiated gap; the free-text roster `note` is gated out under D022/D030.*
+
+### Dependencies (spec)
+
+- E8-S1 (#95, the snapshot build); E5 #127 (MIT roster backfill, hard prereq)
+
+---
+
 ## Proposed decisions (for architect + Fred approval — not yet in `decisions.md`)
 
 Record these in [`decisions.md`](decisions.md) as **D028–D032** only once approved (the log is
@@ -548,6 +643,10 @@ rationale is durable:
   REST GETs are CDN-cacheable and the auto-docs are the advertising surface for the MIT Election Lab.
 - **D032 — Cloud-agnostic container; Cloud Run is the eventual target but deploy is post-MVP.**
   MVP runs locally; the image carries no vendor lock-in so hosting is a later config step.
+- **D044 (proposed, E8-S9 / #139)** — the public surface widens to carry pre-1976 EC facts back
+  to 1824, shipping the `pv_status` enum alongside so a NULL popular vote is never an
+  undifferentiated gap; the free-text roster `note` stays gated under D022/D030. Record once the
+  #139 architect-review gate is passed.
 
 ## Open questions to resolve with the architect
 
@@ -562,5 +661,8 @@ rationale is durable:
    `candidate_id` (D006 / `docs/canonical-keys.md`).
 7. **Snapshot bundling** — baked into the image (dependency-free runtime) vs. mounted (separable
    data) (E8-S6), and the refresh path once deployed (E8-S7).
-</content>
-</invoke>
+8. **Pre-1976 widening (E8-S9 / #139)** — (a) how the `pv_status` roster crosses the
+   redistributable boundary (ship the enum, gate the UCSB-provenanced `note`? — a D022/D030
+   rights call for Fred); (b) the `national_rollup` pre-1976 contract (NULL the PV/hybrid columns
+   vs. omit pre-1976 from the rollup vs. defer the pre-1976 rollup entirely); (c) whether any
+   pre-1976 candidate-slug collision forces a slug-scheme change.
