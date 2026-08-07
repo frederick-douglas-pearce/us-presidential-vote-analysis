@@ -290,7 +290,8 @@ def _run_all(args: argparse.Namespace) -> int:
     )
     print(
         f"Warehouse build complete — sources: {sources}; "
-        f"EC {result.ec_rows} rows, MIT {result.mit_rows} rows"
+        f"EC {result.ec_rows} rows, "
+        f"MIT {result.mit_rows} PV / {result.mit_roster_rows} roster rows"
         f"{ucsb_note}; join views rebuilt."
     )
     return 0

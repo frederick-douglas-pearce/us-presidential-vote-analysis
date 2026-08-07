@@ -115,6 +115,63 @@ def build_status_column_defs(schema: str = ROSTER_SCHEMA) -> list[tuple[str, ...
     ]
 
 
+def build_popular_vote_roster(
+    pv_df: pd.DataFrame, *, source: str, error_cls: type[Exception] = PVRosterError
+) -> pd.DataFrame:
+    """Return an all-``popular_vote`` roster over the ``(year, state)`` in ``pv_df``.
+
+    The **mechanical** roster derivation D024 §6/§Rationale anticipated — a
+    ``SELECT DISTINCT`` — for a source whose whole span held a popular vote in every
+    state it reports. MIT (#127) is the first caller: it covers 1976–2024, where no
+    state was ever ``legislature_chosen`` or ``not_participating``, so none of UCSB's
+    absence derivation applies and MIT is "not taxed" by the roster design.
+
+    Source-neutral and living here rather than under ``usvote/mit/`` for the same reason
+    :func:`assert_roster_covers_facts` does: there is no source-specific logic to write,
+    and any future whole-span source qualifies on the same terms.
+
+    ``pv_df`` is the source's own **already-reconciled** D018 fact frame, so the roster
+    is derived from the states that will actually be loaded — never invented (D024 §6
+    forbids inventing roster inputs). ``note`` is null on every row by construction:
+    the note exists only to carry an absence's cause, and there are no absences here.
+
+    Two consequences of self-derivation, stated plainly so nobody over-reads the guard:
+    :func:`assert_roster_covers_facts` over this pair is **near-tautological** — checks
+    1 and 3 hold by construction and check 2 is vacuous. Running it anyway is a
+    uniformity/regression guard on the derivation itself, **not** the silent-drop
+    detector it is for UCSB (whose roster comes from the independent EC spine). A MIT
+    state dropped upstream of this call vanishes from the roster too, and only #69's
+    join-side coverage guard would see it.
+
+    Raises ``error_cls`` when ``pv_df`` carries a source other than ``source`` — the
+    shared ``dwh.pv_votes`` shape holds every source's rows (D021), so deriving a
+    roster from an unscoped frame would tag another source's states as this one's.
+    """
+    foreign = sorted(set(pv_df["source"].dropna().unique()) - {source})
+    if foreign:
+        raise error_cls(
+            f"build_popular_vote_roster({source!r}) was handed rows from {foreign} — "
+            "derive each source's roster from that source's own facts (D021/D024 §6)."
+        )
+    keys = (
+        pv_df[["year", "state"]]
+        .drop_duplicates()
+        .sort_values(["year", "state"], kind="stable")
+        .reset_index(drop=True)
+    )
+    roster = pd.DataFrame(
+        {
+            "source": source,
+            "year": keys["year"].astype("int64"),
+            "state": keys["state"],
+            "pv_status": PV_STATUS_POPULAR_VOTE,
+            "note": pd.Series([None] * len(keys), dtype="object"),
+        },
+        columns=list(ROSTER_COLUMNS),
+    )
+    return roster
+
+
 def assert_roster_shape(
     df: pd.DataFrame, *, error_cls: type[Exception] = PVRosterError
 ) -> None:

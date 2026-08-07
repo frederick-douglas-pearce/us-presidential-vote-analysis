@@ -19,6 +19,13 @@ from tests._helpers import (
 )
 from usvote.mit.pipeline import run_mit_pipeline
 from usvote.pv.schema import PV_SCHEMA, PV_TABLE, SHARED_PV_COLUMNS
+from usvote.pv.source import SOURCE_MIT
+from usvote.pv.status import (
+    PV_STATUS_POPULAR_VOTE,
+    ROSTER_COLUMNS,
+    ROSTER_SCHEMA,
+    ROSTER_TABLE,
+)
 
 
 def test_pipeline_scopes_to_years_and_reconciles(
@@ -28,7 +35,7 @@ def test_pipeline_scopes_to_years_and_reconciles(
     # Scoped to 2016 → the fusion fixture's New York rows only. After the D019
     # {DEMOCRAT, REPUBLICAN} scope + fusion aggregation that is exactly Clinton and
     # Trump, reconciled onto the canonical EC names.
-    loaded = run_mit_pipeline(
+    loaded, roster = run_mit_pipeline(
         make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016}
     )
 
@@ -41,6 +48,14 @@ def test_pipeline_scopes_to_years_and_reconciles(
     # Clinton's fusion lines summed into her main total (4379789 + 140041 + 36294).
     clinton = loaded.loc[loaded["candidate"] == "Hillary Clinton", "candidate_votes"]
     assert clinton.iloc[0] == 4556124
+    # #127: the roster is the mechanical SELECT DISTINCT over the loaded (year, state)
+    # keys — one all-``popular_vote`` row for the single state this scope covers.
+    assert list(roster.columns) == list(ROSTER_COLUMNS)
+    assert roster[["year", "state", "pv_status"]].values.tolist() == [
+        [2016, "New York", PV_STATUS_POPULAR_VOTE]
+    ]
+    assert set(roster["source"]) == {SOURCE_MIT}
+    assert roster["note"].isna().all()
 
 
 def test_pipeline_creates_pv_table_and_inserts(
@@ -53,16 +68,29 @@ def test_pipeline_creates_pv_table_and_inserts(
         q.startswith(f"CREATE TABLE IF NOT EXISTS {PV_SCHEMA}.{PV_TABLE}")
         for q in recording_conn.executed
     )
-    assert [sql.split()[2] for sql, _ in inserts] == [f"{PV_SCHEMA}.{PV_TABLE}"]
+    assert any(
+        q.startswith(f"CREATE TABLE IF NOT EXISTS {ROSTER_SCHEMA}.{ROSTER_TABLE}")
+        for q in recording_conn.executed
+    )
+    # #127: both PV tables are written, roster first — the same order (and the same
+    # single ``replace`` flag) run_ucsb_pipeline uses, so its state FK to dwh.state is
+    # resolved before the fact rows land.
+    assert [sql.split()[2] for sql, _ in inserts] == [
+        f"{ROSTER_SCHEMA}.{ROSTER_TABLE}",
+        f"{PV_SCHEMA}.{PV_TABLE}",
+    ]
 
 
 def test_pipeline_loads_in_one_transaction(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Every pipeline owns its DB-write transaction (#84a), so the #84b orchestrator can
-    # sequence them without nesting. MIT's load is create-schema + create-table + insert;
-    # wrapped, that is exactly ONE commit. Removing the ``with dbc.transaction():`` would
-    # make each statement commit on its own and push this above 1.
+    # sequence them without nesting. Since #127 MIT's load is create-schema +
+    # create-table + insert for BOTH shared PV tables; wrapped, that is exactly ONE
+    # commit, so the D024 two-way roster/fact invariant can never be left half-written
+    # (the property run_ucsb_pipeline already had). Removing the ``with
+    # dbc.transaction():`` would make each statement commit on its own and push this
+    # above 1.
     record_inserts(monkeypatch)
     run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
 
@@ -74,7 +102,9 @@ def test_pipeline_without_year_filter_loads_all_years(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record_inserts(monkeypatch)
-    loaded = run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV)
+    loaded, roster = run_mit_pipeline(
+        make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV
+    )
 
     # The fixture covers 2000 FL (Bush, Gore) + 2016 NY (Clinton, Trump) — four D/R
     # rows after scoping, spanning both years. The returned frame is the shared shape
@@ -82,6 +112,34 @@ def test_pipeline_without_year_filter_loads_all_years(
     assert set(loaded["year"]) == {2000, 2016}
     assert list(loaded.columns) == list(SHARED_PV_COLUMNS)
     assert len(loaded) == 4
+    # One roster row per distinct (year, state): 2000 Florida + 2016 New York.
+    assert roster[["year", "state"]].values.tolist() == [
+        [2000, "Florida"],
+        [2016, "New York"],
+    ]
+    assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
+
+
+def test_years_is_a_filter_not_a_demand(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A requested year the CSV lacks is absent, not a failure — and must stay so.
+
+    ``run_warehouse`` threads **one** year set to every source, but MIT's CSV covers a
+    different span than the EC spine, so a year present for EC and absent for MIT is
+    routine (``tests/integration/test_ec_pv_join.py`` depends on exactly this:
+    ``years={2016, 2020}`` against a sample holding no 2020). The D024 assert therefore
+    takes its in-scope set from the **loaded frame**; scoping it to the *requested*
+    years instead turns this documented filter into a hard failure on the shipped
+    warehouse path — which is precisely what the integration suite caught.
+    """
+    record_inserts(monkeypatch)
+    loaded, roster = run_mit_pipeline(
+        make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016, 1900}
+    )
+
+    assert set(loaded["year"]) == {2016}
+    assert set(roster["year"]) == {2016}
 
 
 def test_pipeline_raises_clearly_when_no_rows_for_requested_years(

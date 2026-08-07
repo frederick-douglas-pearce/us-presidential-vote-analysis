@@ -80,7 +80,9 @@ class WarehouseResult:
 
     ``sources_loaded`` names which of ``{"ec", "mit", "ucsb"}`` were ingested (UCSB is
     absent when ``ucsb_html_dir`` was ``None``). The ``*_rows`` counts are the loaded
-    frame lengths; the two UCSB counts are ``None`` exactly when UCSB was skipped.
+    frame lengths; both PV sources now report a fact **and** a roster count, since #127
+    gave MIT its D024 ``pv_state_status`` rows too. The two UCSB counts are ``None``
+    exactly when UCSB was skipped.
     ``views_built`` records that the resolved-PV + join views were (re)created —
     always ``True`` on a successful build, surfaced so a caller need not re-probe.
 
@@ -92,6 +94,7 @@ class WarehouseResult:
 
     ec_rows: int
     mit_rows: int
+    mit_roster_rows: int
     ucsb_pv_rows: int | None
     ucsb_roster_rows: int | None
     sources_loaded: frozenset[str]
@@ -137,7 +140,8 @@ def run_warehouse(
        forwarded here (and here only): ``replace=True`` drops and recreates the ``dwh``
        schema, which cascades away the PV tables and views, so everything downstream
        rebuilds onto a fresh schema.
-    2. :func:`usvote.mit.pipeline.run_mit_pipeline` — the MIT PV source, always
+    2. :func:`usvote.mit.pipeline.run_mit_pipeline` — the MIT PV source (both its
+       ``pv_votes`` facts and, since #127, its ``pv_state_status`` roster rows), always
        ``replace=False`` (append onto the schema EC just built). ``mit_csv_path=None``
        resolves ``USVOTE_MIT_CSV_PATH`` via ``environ`` inside the MIT pipeline.
     3. :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` — the UCSB PV source, only when
@@ -172,10 +176,11 @@ def run_warehouse(
         )
         ec_rows = len(votes_df)
 
-        mit_loaded = run_mit_pipeline(
+        mit_loaded, mit_roster = run_mit_pipeline(
             dbc, mit_csv_path, years=years, environ=environ, replace=False
         )
         mit_rows = len(mit_loaded)
+        mit_roster_rows = len(mit_roster)
 
         sources = {SOURCE_EC, SOURCE_MIT}
         ucsb_pv_rows: int | None = None
@@ -193,6 +198,7 @@ def run_warehouse(
         return WarehouseResult(
             ec_rows=ec_rows,
             mit_rows=mit_rows,
+            mit_roster_rows=mit_roster_rows,
             ucsb_pv_rows=ucsb_pv_rows,
             ucsb_roster_rows=ucsb_roster_rows,
             sources_loaded=frozenset(sources),

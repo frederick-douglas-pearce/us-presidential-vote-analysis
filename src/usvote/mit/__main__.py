@@ -49,8 +49,11 @@ def _run_load(replace: bool) -> int:
         print(e, file=sys.stderr)
         return 1
 
-    run_mit_pipeline(dbc, csv_path, replace=replace, close=True)
-    print("MIT ingestion complete.")
+    loaded, roster = run_mit_pipeline(dbc, csv_path, replace=replace, close=True)
+    print(
+        f"MIT ingestion complete — {len(loaded)} dwh.pv_votes rows, "
+        f"{len(roster)} dwh.pv_state_status roster rows."
+    )
     return 0
 
 

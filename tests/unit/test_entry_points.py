@@ -72,7 +72,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         loaded = {SOURCE_EC, SOURCE_MIT} | (
             {SOURCE_UCSB} if ucsb_html_dir is not None else set()
         )
-        return WarehouseResult(5, 3, None, None, frozenset(loaded), True)
+        return WarehouseResult(5, 3, 6, None, None, frozenset(loaded), True)
 
     monkeypatch.setattr(top, "run_ec_pipeline", ec)
     monkeypatch.setattr(top, "run_warehouse", wh)
@@ -206,6 +206,22 @@ def test_ucsb_load_runs_pipeline(
 # --- usvote.mit ------------------------------------------------------------------
 
 
+def _recording_mit_pipeline(calls: list[dict]) -> Any:
+    """A ``run_mit_pipeline`` double returning the ``(pv_votes, roster)`` pair (#127).
+
+    A named function rather than a lambda because the double must both record *and*
+    return the pair — ``__main__`` unpacks it to report each table's row count.
+    """
+
+    def _fake(
+        dbc: object, path: Any, *, replace: bool = False, close: bool = False
+    ) -> tuple[list[int], list[int]]:
+        calls.append({"path": path, "replace": replace})
+        return ([0] * 2, [0] * 3)
+
+    return _fake
+
+
 @pytest.fixture
 def mit_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     calls: list[dict] = []
@@ -215,9 +231,7 @@ def mit_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     monkeypatch.setattr(
         mit_main,
         "run_mit_pipeline",
-        lambda dbc, path, *, replace=False, close=False: calls.append(
-            {"path": path, "replace": replace}
-        ),
+        _recording_mit_pipeline(calls),
     )
     return calls
 

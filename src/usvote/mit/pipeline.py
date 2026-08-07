@@ -3,7 +3,10 @@
 The MIT analogue of :mod:`usvote.pipeline`'s :func:`run_ec_pipeline`, wiring the four
 MIT stages into one runnable path. Each PV source owns its own pipeline (the EC
 ``pipeline.py`` docstring's design), so this lives under ``usvote/mit/`` and loads
-through the shared, source-neutral :func:`usvote.pv.load.load_pv_records` seam.
+through the shared, source-neutral :mod:`usvote.pv.load` seams — both of them: the
+``pv_votes`` fact (:func:`~usvote.pv.load.load_pv_records`) and, since #127, the D024
+``pv_state_status`` roster (:func:`~usvote.pv.load.load_pv_status`), written together in
+one transaction exactly as UCSB writes its pair.
 
 Kept thin and injectable: ``path``/``environ`` drive the read the same way
 :func:`usvote.mit.read.load_mit_president_csv` does (so a test replays a fixture CSV
@@ -29,8 +32,18 @@ import pandas as pd
 from usvote.db import DBC
 from usvote.mit.read import load_mit_president_csv
 from usvote.mit.reconcile import reconcile_mit
-from usvote.mit.transform import transform_mit
-from usvote.pv.load import load_pv_records
+from usvote.mit.transform import MITTransformError, transform_mit
+from usvote.pv.load import load_pv_records, load_pv_status
+from usvote.pv.source import SOURCE_MIT
+from usvote.pv.status import assert_roster_covers_facts, build_popular_vote_roster
+
+
+class MITRosterError(MITTransformError):
+    """Raised when MIT's roster and its loaded facts disagree (D024 §7).
+
+    MIT's typed wrapper around :class:`usvote.pv.status.PVRosterError`, mirroring the
+    UCSB stage errors so a roster failure is separable by type, not only by message.
+    """
 
 
 def run_mit_pipeline(
@@ -41,20 +54,36 @@ def run_mit_pipeline(
     environ: Mapping[str, str] | None = None,
     replace: bool = False,
     close: bool = False,
-) -> pd.DataFrame:
-    """Run the end-to-end MIT PV ingestion and return the loaded frame.
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Run the end-to-end MIT PV ingestion and return the loaded frames.
 
     Reads the MIT ``1976-2024-president.csv`` (``path`` explicit, or resolved from
     ``USVOTE_MIT_CSV_PATH`` via ``environ`` when ``path`` is ``None``), optionally
     filters to ``years``, then transforms onto the D018 shared shape, reconciles
-    ``state``/``candidate`` onto the canonical keys, and loads into ``dwh.pv_votes``
-    via :func:`usvote.pv.load.load_pv_records`.
+    ``state``/``candidate`` onto the canonical keys, and loads **both** shared PV tables
+    — the ``dwh.pv_votes`` fact via :func:`usvote.pv.load.load_pv_records` and the D024
+    ``dwh.pv_state_status`` roster via :func:`usvote.pv.load.load_pv_status`.
+
+    **The roster load is #127's backfill, and it is mechanical.** MIT covers 1976–2024,
+    where every state held a popular vote, so the roster is a ``SELECT DISTINCT`` over
+    MIT's own loaded ``(year, state)`` keys tagged ``popular_vote``
+    (:func:`usvote.pv.status.build_popular_vote_roster`) — none of UCSB's absence
+    derivation, exactly as D024 §Rationale anticipated. Without it the roster held *no*
+    MIT rows at all, so :func:`usvote.hybrid.build_hybrid_from_db` — which scopes its
+    roster read to the sources present in the surface it is computing — read an empty
+    roster on the MIT-only ``ec_pv_redistributable`` view and reported ``pv_coverage``
+    NULL ("unknown") for 1976–2024, the years whose true EV-weighted coverage is a clean
+    ``1.0``.
 
     ``years`` scopes the ingest to a subset of elections (e.g. ``{2016, 2020}`` to
-    match the EC fixture years); ``None`` loads every year in the file. ``replace`` and
-    ``close`` are forwarded to the loader — ``replace=True`` rebuilds ``dwh.pv_votes``
-    only (never the schema; the EC spine survives). Returns the loaded frame (with
-    ``pv_id``) for inspection/validation.
+    match the EC fixture years); ``None`` loads every year in the file. It is a
+    **filter, not a demand** — a requested year the CSV does not cover is simply absent,
+    which is why the D024 assert's in-scope set is taken from the loaded frame rather
+    than from ``years`` (see the comment at the call site). ``replace`` gates the
+    **table**-level rebuild of both PV tables with one flag (never the schema; the EC
+    spine survives), matching
+    :func:`usvote.ucsb.pipeline.run_ucsb_pipeline`. Returns ``(pv_votes, roster)`` as
+    inserted, for inspection/validation.
     """
     raw = load_mit_president_csv(path, environ=environ)
     if years is not None:
@@ -71,12 +100,37 @@ def run_mit_pipeline(
 
     shaped = transform_mit(raw)
     reconciled = reconcile_mit(shaped)
-    # One write, but wrapped for the uniform ownership rule (#84a): every pipeline owns
-    # its DB-write transaction so the #84b orchestrator can sequence them without ever
-    # nesting one. The load still does create-schema + create-table + insert, so the
-    # transaction also makes those three all-or-nothing. ``close`` after the commit.
+
+    roster = build_popular_vote_roster(
+        reconciled, source=SOURCE_MIT, error_cls=MITRosterError
+    )
+    # In-scope years come from the frame MIT actually loaded, NOT from ``years``.
+    # ``years`` is documented as a *filter* ("scopes the ingest to a subset"), not a
+    # demand that every requested year exist: run_warehouse threads one year set to
+    # every source, and the MIT CSV legitimately covers a different span than the EC
+    # spine (tests/integration/test_ec_pv_join.py relies on exactly that — years=
+    # {2016, 2020} against a sample holding no 2020). Asserting over the requested set
+    # would turn that documented filter into a failure.
+    in_scope = frozenset(reconciled["year"].unique().tolist())
+    assert_roster_covers_facts(
+        reconciled,
+        roster,
+        source=SOURCE_MIT,
+        years=in_scope,
+        error_cls=MITRosterError,
+    )
+
+    # Both writes in ONE transaction, matching run_ucsb_pipeline (#84a): every pipeline
+    # owns its DB-write transaction so the #84b orchestrator can sequence them without
+    # ever nesting one, and the D024 two-way roster/fact invariant can never be left
+    # half-written in the database. The fact load also does create-schema +
+    # create-table + insert, so the transaction makes those all-or-nothing too. The
+    # roster loads first (its ``state`` FK targets ``dwh.state``, safe once the EC spine
+    # is loaded) — a readability choice mirroring UCSB, not a blast-radius guard, now
+    # that the pair commits together. ``close`` fires after the commit.
     with dbc.transaction():
+        loaded_roster = load_pv_status(dbc, roster, replace=replace)
         loaded = load_pv_records(dbc, reconciled, replace=replace)
     if close:
         dbc.close_connection()
-    return loaded
+    return loaded, loaded_roster

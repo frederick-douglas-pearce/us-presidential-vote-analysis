@@ -24,6 +24,7 @@ from usvote.pv.status import (
     assert_roster_covers_facts,
     assert_roster_shape,
     assert_unique_roster_grain,
+    build_popular_vote_roster,
     build_status_column_defs,
 )
 
@@ -199,4 +200,71 @@ class TestTwoWayAssert:
                 source="UCSB",
                 years={1900},
                 error_cls=UCSBRosterError,
+            )
+
+
+class TestBuildPopularVoteRoster:
+    """The mechanical roster derivation D024 §6/§Rationale anticipated (#127)."""
+
+    def test_one_popular_vote_row_per_distinct_year_state(self) -> None:
+        """A ``SELECT DISTINCT`` — candidate grain collapses, state-years do not."""
+        facts = _facts(
+            ("MIT", 1976, "Ohio"),
+            ("MIT", 1976, "Ohio"),  # a second candidate in the same state-year
+            ("MIT", 1976, "Iowa"),
+            ("MIT", 2020, "Ohio"),
+        )
+        roster = build_popular_vote_roster(facts, source="MIT")
+
+        assert list(roster.columns) == list(ROSTER_COLUMNS)
+        assert roster[["year", "state"]].values.tolist() == [
+            [1976, "Iowa"],
+            [1976, "Ohio"],
+            [2020, "Ohio"],
+        ]
+        assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
+        assert set(roster["source"]) == {"MIT"}
+
+    def test_note_is_null_on_every_row(self) -> None:
+        """``note`` carries an *absence*'s cause, and there are no absences here.
+
+        Load-bearing for D022/D030: the note is the one roster field that can hold
+        verbatim UCSB prose, so a derivation that invented note text would put
+        non-redistributable content on a source that has none.
+        """
+        roster = build_popular_vote_roster(_facts(("MIT", 1976, "Ohio")), source="MIT")
+        assert roster["note"].isna().all()
+
+    def test_derived_roster_satisfies_the_two_way_assert(self) -> None:
+        """Near-tautological by construction — the uniformity guard, pinned.
+
+        Checks 1 and 3 hold because the roster *is* the fact keys and check 2 is
+        vacuous (no absence rows). This pins that the mechanical derivation conforms to
+        the shared contract; it is deliberately **not** a silent-drop detector for MIT
+        (see ``build_popular_vote_roster``'s docstring).
+        """
+        facts = _facts(("MIT", 1976, "Ohio"), ("MIT", 2020, "Iowa"))
+        roster = build_popular_vote_roster(facts, source="MIT")
+        assert_roster_shape(roster)
+        assert_unique_roster_grain(roster)
+        assert_roster_covers_facts(facts, roster, source="MIT", years={1976, 2020})
+
+    def test_foreign_source_rows_raise(self) -> None:
+        """``dwh.pv_votes`` holds every source's rows (D021) — an unscoped frame lies.
+
+        Deriving from a frame carrying another source's states would tag them as this
+        source's, silently claiming coverage the source does not have.
+        """
+        facts = _facts(("MIT", 1976, "Ohio"), ("UCSB", 1900, "Iowa"))
+        with pytest.raises(PVRosterError, match=r"handed rows from \['UCSB'\]"):
+            build_popular_vote_roster(facts, source="MIT")
+
+    def test_error_class_is_overridable(self) -> None:
+        from usvote.mit.pipeline import MITRosterError
+
+        with pytest.raises(MITRosterError):
+            build_popular_vote_roster(
+                _facts(("UCSB", 1900, "Ohio")),
+                source="MIT",
+                error_cls=MITRosterError,
             )
