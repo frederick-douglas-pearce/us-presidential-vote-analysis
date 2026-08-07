@@ -38,7 +38,12 @@ from typing import Any
 import psycopg2
 import pytest
 
-from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
+from tests._helpers import (
+    FIXTURES_DIR,
+    MIT_FUSION_SAMPLE_CSV,
+    fake_state_geo,
+    narrow_mit_spine_to_sample,
+)
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.schema import PV_TABLE
@@ -56,8 +61,12 @@ _CORPUS = os.environ.get("USVOTE_UCSB_HTML_DIR", "")
 @pytest.mark.integration
 def test_mit_pv_loads_alongside_ec_spine(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seed the EC spine (2016+2020), then load MIT PV (2016) into the same schema."""
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.mit.pipeline import run_mit_pipeline
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir

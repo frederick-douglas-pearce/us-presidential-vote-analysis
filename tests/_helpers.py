@@ -276,3 +276,43 @@ def fake_state_geo() -> pd.DataFrame:
         "INTPTLAT": "+18.0", "INTPTLON": "-66.0",
     })
     return pd.DataFrame(rows)
+
+
+def narrow_mit_spine_to_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scope MIT's D024 roster read to the states its fusion sample actually covers.
+
+    Since #127 ``run_mit_pipeline`` derives its roster from the **EC spine** — the
+    independence that makes ``assert_roster_covers_facts`` a real silent-drop guard
+    rather than a frame compared against itself. That guard is strict by design: every
+    ``popular_vote`` roster state must have vote rows.
+
+    ``MIT_FUSION_SAMPLE_CSV`` is a deliberate **two-state extract** (2000 Florida, 2016
+    New York) chosen to exercise fusion aggregation, while the EC fixtures seed the
+    *real* Archives spine — all 51 jurisdictions per year. Run together, the guard
+    correctly reports the other 50 states as missing: the pair models an MIT load that
+    could not exist, and before #127 nothing could see that.
+
+    Rather than weaken the guard or grow the sample to 51 states x 2 years, these
+    integration tests narrow the participation read to the sample's own states. The
+    shipped path is otherwise untouched, and the derivation itself is covered
+    exhaustively offline in ``tests/unit/test_pv_status.py`` — including the case this
+    narrowing suppresses (a spine state the source lost must raise).
+    """
+    from usvote.mit import pipeline as mit_pipeline
+
+    real = mit_pipeline.read_ec_participation
+
+    def narrowed(dbc: Any, *, years: Any = None) -> pd.DataFrame:
+        frame = real(dbc, years=years)
+        sample = pd.read_csv(MIT_FUSION_SAMPLE_CSV)
+        # Narrow per ``(year, state)``, not per state: the sample carries Florida in
+        # 2000 and New York in 2016, so a state-only filter would leave Florida in the
+        # 2016 roster with no 2016 vote rows — and the guard would (correctly) fire.
+        pairs = {(int(y), str(s).title()) for y, s in zip(sample["year"], sample["state"], strict=True)}
+        keep = [
+            bool(pd.isna(s)) or (int(y), str(s)) in pairs
+            for y, s in zip(frame["year"], frame["state"], strict=True)
+        ]
+        return frame[keep]
+
+    monkeypatch.setattr(mit_pipeline, "read_ec_participation", narrowed)

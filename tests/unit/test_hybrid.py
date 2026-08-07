@@ -1521,8 +1521,14 @@ def test_the_real_builders_output_yields_coverage_1_0_end_to_end() -> None:
          "candidate_votes": 300.0, "state_total_votes": 500.0},
     ])
     df["source"] = SOURCE_MIT
-    # The roster exactly as run_mit_pipeline derives it, from the fact frame itself.
-    roster = build_popular_vote_roster(df[["source", "year", "state"]], source=SOURCE_MIT)
+    # The roster exactly as run_mit_pipeline derives it: from the EC spine's
+    # participation frame, not from the PV facts (D024 / decisions.md).
+    spine = pd.DataFrame([
+        {"year": 1976, "state": "Ohio", "is_total": False},
+        {"year": 1976, "state": "Iowa", "is_total": False},
+        {"year": 1976, "state": None, "is_total": True},
+    ])
+    roster = build_popular_vote_roster(spine, source=SOURCE_MIT, years={1976})
 
     _, summary = hybrid.build_hybrid_from_db(
         _StubDBC(df, roster), view="ec_pv_redistributable"

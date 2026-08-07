@@ -5,10 +5,17 @@ the recording fake connection (no live Postgres), asserting the four stages comp
 the raw CSV becomes reconciled, canonical-key PV rows loaded into ``dwh.pv_votes``,
 correctly scoped by ``years`` and stamped with MIT provenance. The load into a real
 database lives in ``tests/integration/test_pv_load.py``.
+
+Since #127 the pipeline also derives and loads its D024 roster from the **EC spine**,
+so these tests stub :func:`usvote.spine.read_ec_participation` on the pipeline module
+(the pattern ``test_ucsb_pipeline.py`` already uses) — the fake connection cannot serve
+a real participation frame, and stubbing it lets each test state exactly which states
+the spine believes participated.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from tests._helpers import (
@@ -17,7 +24,8 @@ from tests._helpers import (
     make_dbc,
     record_inserts,
 )
-from usvote.mit.pipeline import run_mit_pipeline
+from usvote.mit import pipeline as mit_pipeline
+from usvote.mit.pipeline import MITRosterError, run_mit_pipeline
 from usvote.pv.schema import PV_SCHEMA, PV_TABLE, SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import (
@@ -27,11 +35,37 @@ from usvote.pv.status import (
     ROSTER_TABLE,
 )
 
+#: The states the fusion fixture's two years actually carry, as the EC spine would
+#: report them: 2000 Florida and 2016 New York, plus each year's totals row (``state``
+#: NULL / ``is_total`` true) so the exclusion is exercised on every run.
+_SPINE_ROWS = [
+    {"year": 2000, "state": "Florida", "is_total": False},
+    {"year": 2000, "state": None, "is_total": True},
+    {"year": 2016, "state": "New York", "is_total": False},
+    {"year": 2016, "state": None, "is_total": True},
+]
+
+
+def _stub_spine(
+    monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]] | None = None
+) -> dict[str, object]:
+    """Stub ``read_ec_participation`` on the pipeline module; record the years it got."""
+    seen: dict[str, object] = {}
+    frame = pd.DataFrame(_SPINE_ROWS if rows is None else rows)
+
+    def participation(dbc: object, *, years: object = None) -> pd.DataFrame:
+        seen["years"] = years
+        return frame.copy()
+
+    monkeypatch.setattr(mit_pipeline, "read_ec_participation", participation)
+    return seen
+
 
 def test_pipeline_scopes_to_years_and_reconciles(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     # Scoped to 2016 → the fusion fixture's New York rows only. After the D019
     # {DEMOCRAT, REPUBLICAN} scope + fusion aggregation that is exactly Clinton and
     # Trump, reconciled onto the canonical EC names.
@@ -48,8 +82,9 @@ def test_pipeline_scopes_to_years_and_reconciles(
     # Clinton's fusion lines summed into her main total (4379789 + 140041 + 36294).
     clinton = loaded.loc[loaded["candidate"] == "Hillary Clinton", "candidate_votes"]
     assert clinton.iloc[0] == 4556124
-    # #127: the roster is the mechanical SELECT DISTINCT over the loaded (year, state)
-    # keys — one all-``popular_vote`` row for the single state this scope covers.
+    # #127: the roster is the mechanical SELECT DISTINCT over the EC spine's
+    # participating (year, state) keys — one all-``popular_vote`` row for the single
+    # state this scope covers, with the year's totals row correctly excluded.
     assert list(roster.columns) == list(ROSTER_COLUMNS)
     assert roster[["year", "state", "pv_status"]].values.tolist() == [
         [2016, "New York", PV_STATUS_POPULAR_VOTE]
@@ -62,6 +97,7 @@ def test_pipeline_creates_pv_table_and_inserts(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     inserts = record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
 
     assert any(
@@ -92,6 +128,7 @@ def test_pipeline_loads_in_one_transaction(
     # dbc.transaction():`` would make each statement commit on its own and push this
     # above 1.
     record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
 
     assert recording_conn.commits == 1
@@ -102,6 +139,7 @@ def test_pipeline_without_year_filter_loads_all_years(
     recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     loaded, roster = run_mit_pipeline(
         make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV
     )
@@ -134,6 +172,7 @@ def test_years_is_a_filter_not_a_demand(
     warehouse path — which is precisely what the integration suite caught.
     """
     record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     loaded, roster = run_mit_pipeline(
         make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016, 1900}
     )
@@ -148,7 +187,53 @@ def test_pipeline_raises_clearly_when_no_rows_for_requested_years(
     # A years set disjoint from the file must fail with a clear, actionable message
     # naming the covered years — not an opaque MITTransformError deep in transform.
     record_inserts(monkeypatch)
+    _stub_spine(monkeypatch)
     with pytest.raises(ValueError, match=r"no MIT rows for requested years.*covers"):
         run_mit_pipeline(
             make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={1900}
         )
+
+
+def test_a_state_the_spine_has_but_mit_lost_fails_the_load(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**The payoff of deriving the roster from the spine** (D024 §7, decisions.md).
+
+    The spine says Ohio participated in 2016; MIT's fixture has no Ohio rows, standing
+    in for a state lost during transform (``_drop_unattributable_rows``, the D019 party
+    filter, a join that dropped it). Because the roster comes from the spine and not
+    from MIT's own facts, Ohio lands as a ``popular_vote`` roster state with no vote
+    rows and the load fails loudly.
+
+    Derived from MIT's own facts the roster would have lost Ohio too, both sides would
+    have agreed, and 2016 would silently report ``pv_coverage`` below ``1.0`` on the
+    public surface. No sum validator can see that (the total went missing with the
+    state), and #69's join-side guard cannot either — it is a PV→EC anti-join, so it
+    finds phantom rows, not missing ones.
+    """
+    record_inserts(monkeypatch)
+    _stub_spine(
+        monkeypatch,
+        [
+            {"year": 2016, "state": "New York", "is_total": False},
+            {"year": 2016, "state": "Ohio", "is_total": False},  # MIT never loads it
+        ],
+    )
+
+    with pytest.raises(MITRosterError, match=r"have no vote rows.*Ohio"):
+        run_mit_pipeline(
+            make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016}
+        )
+    # And nothing was written: the guard runs before the transaction opens.
+    assert recording_conn.commits == 0
+
+
+def test_the_spine_read_is_scoped_to_the_years_mit_actually_loaded(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scoped, so a whole-warehouse spine is not dragged in for a one-year MIT load."""
+    record_inserts(monkeypatch)
+    seen = _stub_spine(monkeypatch)
+    run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
+
+    assert seen["years"] == frozenset({2016})

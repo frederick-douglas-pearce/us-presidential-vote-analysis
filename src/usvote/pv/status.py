@@ -115,67 +115,85 @@ def build_status_column_defs(schema: str = ROSTER_SCHEMA) -> list[tuple[str, ...
     ]
 
 
-def build_popular_vote_roster(
-    pv_df: pd.DataFrame, *, source: str, error_cls: type[Exception] = PVRosterError
-) -> pd.DataFrame:
-    """Return an all-``popular_vote`` roster over the ``(year, state)`` in ``pv_df``.
+#: The ``read_ec_participation`` columns :func:`build_popular_vote_roster` requires.
+#: ``total_electoral_votes`` is deliberately **not** among them — D024 §5 keeps the EC
+#: fact the single source of electoral-vote truth, and the roster never loads an EV.
+_PARTICIPATION_COLUMNS: tuple[str, ...] = ("year", "state", "is_total")
 
-    The **mechanical** roster derivation D024 §6/§Rationale anticipated — a
-    ``SELECT DISTINCT`` — for a source whose whole span held a popular vote in every
-    state it reports. MIT (#127) is the first caller: it covers 1976–2024, where no
-    state was ever ``legislature_chosen`` or ``not_participating``, so none of UCSB's
-    absence derivation applies and MIT is "not taxed" by the roster design.
+
+def build_popular_vote_roster(
+    ec_participation: pd.DataFrame,
+    *,
+    source: str,
+    years: Collection[int],
+    error_cls: type[Exception] = PVRosterError,
+) -> pd.DataFrame:
+    """Return an all-``popular_vote`` roster over the EC spine's participating states.
+
+    The **mechanical** roster derivation D024 §6/§Rationale anticipated (#127) — the
+    ``INSERT ... SELECT DISTINCT`` over ``dwh.votes`` — for a source whose whole span
+    held a popular vote in every state. MIT is the first caller: it covers 1976-2024,
+    where no state was ever ``legislature_chosen`` or ``not_participating``, so none of
+    UCSB's absence derivation applies and MIT stays "not taxed" by the roster design.
 
     Source-neutral and living here rather than under ``usvote/mit/`` for the same reason
     :func:`assert_roster_covers_facts` does: there is no source-specific logic to write,
     and any future whole-span source qualifies on the same terms.
 
-    ``pv_df`` is the source's own **already-reconciled** D018 fact frame, so the roster
-    is derived from the states that will actually be loaded — never invented (D024 §6
-    forbids inventing roster inputs). ``note`` is null on every row by construction:
-    the note exists only to carry an absence's cause, and there are no absences here.
+    **The roster derives from the EC spine, not from the source's own facts — and that
+    is the whole point.** ``ec_participation`` is
+    :func:`usvote.spine.read_ec_participation`'s frame, the same independent input UCSB
+    builds its roster from; D024's clarification names ``dwh.votes`` with totals rows
+    excluded for *both* sources. Deriving from the source's own loaded facts instead
+    would make :func:`assert_roster_covers_facts` compare a frame against itself —
+    checks 1 and 3 holding by construction, check 2 vacuous — so the guard would be
+    nominal exactly where D024 §7 needs it to bite. Against the spine it is real: a
+    ``(year, state)`` that vanished during transform becomes a ``popular_vote`` roster
+    state with no vote rows, and check 1 fails loudly instead of the year quietly
+    reporting ``pv_coverage`` below ``1.0``. **Nothing else in the pipeline catches
+    that** — the #69 join-side guard (:func:`usvote.join.assert_db_pv_matches_ec`) is a
+    PV->EC anti-join that finds *phantom* rows, the opposite direction, and no sum
+    validator can see a state that took its votes with it.
+
+    **Totals rows are excluded explicitly** — ``votes.state`` is NULL on them, so a bare
+    ``DISTINCT year, state`` yields a NULL roster entry per year, which becomes garbage
+    or a NOT NULL violation at load (D024 §6). States with ``total_electoral_votes = 0``
+    are **kept**: the Archives carries rows for non-participating states, so the spine
+    already is the complete roster. Such a state inside this source's span would be
+    marked ``popular_vote`` and then fail check 1 for want of vote rows — correctly, in
+    that a whole-span source claiming a state which cast no electoral votes needs the
+    absence derivation this function deliberately does not do.
+
+    ``years`` is **required and explicit**, never inferred — the module docstring's
+    rule.
+    A year in ``years`` with no spine rows simply yields no roster rows for it, which
+    :func:`assert_roster_covers_facts` reports as the pipeline-sequencing failure it is
+    (the EC spine was never loaded for that year).
+
+    ``note`` is null on every row by construction: it exists only to carry an absence's
+    cause, and there are no absences here.
 
     The returned frame is sorted on ``(year, state)`` so this function has a
     deterministic *return* value for a caller inspecting or asserting on it.
     :func:`usvote.pv.load.load_pv_status` re-sorts on the full
     :data:`ROSTER_NATURAL_KEY` before inserting — the **insert** order is the loader's
     to own, not this function's, and the two are deliberately not coupled.
-
-    Two consequences of self-derivation, stated plainly so nobody over-reads the guard:
-    :func:`assert_roster_covers_facts` over this pair is **near-tautological** — checks
-    1 and 3 hold by construction and check 2 is vacuous. Running it anyway is a
-    uniformity/regression guard on the derivation itself, **not** the silent-drop
-    detector it is for UCSB (whose roster comes from the independent EC spine). A MIT
-    state dropped upstream of this call vanishes from the roster too, and only #69's
-    join-side coverage guard would see it.
-
-    Raises ``error_cls`` when ``pv_df`` lacks a ``source`` column, or carries any source
-    other than ``source`` — the shared ``dwh.pv_votes`` shape holds every source's rows
-    (D021), so deriving a roster from an unscoped frame would tag another source's
-    states as this one's. **A null ``source`` counts as foreign**, deliberately: it is
-    unattributed, and dropping nulls here would let an entirely untagged frame through
-    to be stamped with ``source`` — the exact mis-attribution this guard exists to stop.
-    The column check runs first so a malformed frame raises the typed error rather than
-    a bare ``KeyError`` (this runs *before* the loader's ``assert_pv_shape``).
     """
-    if "source" not in pv_df.columns:
+    absent = [c for c in _PARTICIPATION_COLUMNS if c not in ec_participation.columns]
+    if absent:
         raise error_cls(
-            f"build_popular_vote_roster({source!r}) needs a 'source' column to verify "
-            f"provenance; got {list(pv_df.columns)}."
+            f"build_popular_vote_roster({source!r}) needs the EC participation columns "
+            f"{list(_PARTICIPATION_COLUMNS)}; missing {absent}. Pass "
+            "usvote.spine.read_ec_participation's frame, not the source's PV facts."
         )
-    if bool(pv_df["source"].isna().any()):
-        raise error_cls(
-            f"build_popular_vote_roster({source!r}) was handed row(s) with a null "
-            "source — an unattributed frame must not be stamped as this source's."
-        )
-    foreign = sorted(set(pv_df["source"].unique()) - {source})
-    if foreign:
-        raise error_cls(
-            f"build_popular_vote_roster({source!r}) was handed rows from {foreign} — "
-            "derive each source's roster from that source's own facts (D021/D024 §6)."
-        )
+    in_scope = frozenset(years)
+    rows = ec_participation[
+        (~ec_participation["is_total"].astype(bool))
+        & ec_participation["state"].notna()
+        & ec_participation["year"].isin(in_scope)
+    ]
     keys = (
-        pv_df[["year", "state"]]
+        rows[["year", "state"]]
         .drop_duplicates()
         .sort_values(["year", "state"], kind="stable")
         .reset_index(drop=True)
