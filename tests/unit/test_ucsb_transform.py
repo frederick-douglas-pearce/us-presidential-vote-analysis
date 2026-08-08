@@ -949,6 +949,71 @@ class TestRealCorpus:
             PV_STATUS_NOT_PARTICIPATING,
         }
 
+    # --- the #140 cross-source control: UCSB validates the in-repo catalog ---
+    def test_the_curated_catalog_agrees_with_ucsb_on_every_classification(
+        self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
+    ) -> None:
+        """The **classification** of all 2,130 ``(year, state)`` pairs, set-equal.
+
+        **The dependency is deliberately inverted.** ``usvote/pv/absences.py`` classifies
+        the pre-1976 absences from public-domain sources so the public snapshot needs no
+        UCSB input (#140, D022/D030); this test uses UCSB as the **control** that
+        validates that catalog, the same posture D016 already takes for the PV facts.
+        Nothing here feeds the catalog — :mod:`tests.unit.test_layering` proves the two
+        cannot touch in either direction, which is what keeps this from being circular.
+
+        **What this does and does not corroborate.** The two rosters take their
+        ``(year, state)`` *membership* from the same EC spine, because D024 §6 requires
+        both to — so the shared row count is the **design**, not a finding, and asserting
+        it would be asserting a tautology. What is genuinely independent is the
+        ``pv_status`` on each of those rows: UCSB's comes from parsing their markup,
+        ours from a hand-curated catalog with its own citations. So the absence sets are
+        checked first and on their own, since those 28 rows are the entire claim, and the
+        full triple-equality follows as the statement that nothing else diverges either.
+
+        ``note`` is **not** compared. UCSB's prose is theirs (``redistributable=false``);
+        ours is null by construction.
+
+        This is the only check that exercises all 28 absences against real markup, and it
+        **skips in CI**. Running it locally with ``USVOTE_UCSB_HTML_DIR`` set is a merge
+        precondition for anything touching the catalog.
+        """
+        from usvote.pv.absences import CURATED_YEARS, build_curated_roster
+        from usvote.pv.status import PV_ABSENCE_STATUSES
+
+        _, ucsb_roster = real_corpus_result
+        years = ucsb_ingest_years()
+        assert years <= CURATED_YEARS, (
+            f"UCSB covers year(s) {sorted(years - CURATED_YEARS)} the catalog has not "
+            "curated, so this control test would silently skip them"
+        )
+        ours = build_curated_roster(
+            ec_participation_frame(years), source="CURATED", years=years
+        )
+
+        def triples(df: pd.DataFrame) -> set[tuple[int, str, str]]:
+            return {
+                (int(y), s, p)
+                for y, s, p in zip(df["year"], df["state"], df["pv_status"], strict=True)
+            }
+
+        mine, theirs = triples(ours), triples(ucsb_roster)
+
+        # The claim under test: the 28 absences, and which cause each carries.
+        my_absences = {t for t in mine if t[2] in PV_ABSENCE_STATUSES}
+        their_absences = {t for t in theirs if t[2] in PV_ABSENCE_STATUSES}
+        assert len(my_absences) == 28
+        assert my_absences == their_absences, (
+            f"ours-not-UCSB: {sorted(my_absences - their_absences)}\n"
+            f"UCSB-not-ours: {sorted(their_absences - my_absences)}"
+        )
+        # And nothing else diverges. Membership is shared by construction (see above),
+        # so this adds only "no state we call popular_vote does UCSB call otherwise".
+        assert mine == theirs, (
+            f"ours-not-UCSB: {sorted(mine - theirs)}\n"
+            f"UCSB-not-ours: {sorted(theirs - mine)}"
+        )
+
     # --- reconcile (#38): the only run of reconcile over all 49 in-scope years ---
     def test_reconcile_passes_all_guards_over_the_whole_corpus(
         self, real_corpus_reconciled: pd.DataFrame

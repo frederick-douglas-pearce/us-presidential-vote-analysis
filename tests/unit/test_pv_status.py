@@ -315,8 +315,17 @@ class TestBuildPopularVoteRoster:
             )
 
     def test_pv_facts_passed_by_mistake_raise_the_typed_error(self) -> None:
-        """The PV fact frame has no ``is_total``; say so rather than KeyError."""
-        with pytest.raises(PVRosterError, match="EC participation columns"):
+        """The PV fact frame has no ``is_total``; say so rather than KeyError.
+
+        The message must name **this** function, not the shared ``build_roster`` it
+        delegates to: ``usvote/mit/`` never calls that symbol, so an operator handed it
+        would grep for something that appears nowhere on their code path.
+        """
+        with pytest.raises(PVRosterError, match="EC participation frame is missing"):
+            build_popular_vote_roster(
+                _facts(("MIT", 1976, "Ohio")), source="MIT", years={1976}
+            )
+        with pytest.raises(PVRosterError, match=r"build_popular_vote_roster\('MIT'\)"):
             build_popular_vote_roster(
                 _facts(("MIT", 1976, "Ohio")), source="MIT", years={1976}
             )

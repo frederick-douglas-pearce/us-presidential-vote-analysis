@@ -1023,6 +1023,74 @@ sibling table rather than amending the shared PV fact.
      `total_electoral_votes > 0`** — that drops exactly the states this design exists to represent.
      For **#57**: whatever spine it builds for 1868 must render that year's three non-participating
      states as zero-EV rows, or check (a) will fire.
+   - *Clarified 2026-08-07 during #140 (no part of this decision reverses; §6's wording is now
+     out of date in two ways).* §6 says the roster is "the EC spine plus a named constant",
+     singular and UCSB-scoped. Both halves of that have moved:
+     **(i) There are now two absence constants, not one.** `usvote/pv/absences.py` holds
+     `PV_ABSENCE_CATALOG` — the same 28 in-scope `(year, state)` pairs, classified from
+     **public-domain** sources with a citation per row — alongside UCSB's existing
+     `UCSB_NONPARTICIPATING_STATES`, which stays because UCSB's own transform still needs it.
+     The reason for a second constant is licensing, not disagreement: the pre-1976 classifications
+     had exactly one machine origin (parsing UCSB markup), UCSB grants no reuse rights (D022), and
+     the snapshot is redistributable-only *at the source* (D030) — so #139's public `pv_status`
+     back to 1824 cannot be built on UCSB-derived rows. The `pv_status` enum being "a bare
+     historical fact" (see the Licensing consequence below) is what makes an independent
+     compilation possible at all; what is *not* redistributable is UCSB's expression of it,
+     including their selection.
+     **(ii) UCSB's role changes from source to control.** `TestRealCorpus` now asserts the two
+     rosters agree exactly on `(year, state, pv_status)` over all 49 in-scope years, with the
+     dependency **inverted**, the same posture D016 takes for the PV facts. State precisely what
+     that corroborates: the two rosters take their `(year, state)` **membership** from the same EC
+     spine because §6 requires both to, so the shared 2,130-row count is the *design* and asserting
+     it would assert a tautology. What is independent is the `pv_status` on each row — UCSB's
+     parsed from their markup, ours curated with its own citations — so the test checks the 28
+     absences first and on their own, that being the entire claim, with full triple-equality
+     following as "nothing else diverges either". Anything downstream that cites "2,130 rows" as
+     agreement must carry the same qualifier. That
+     inversion is only meaningful if the two cannot touch, so `tests/unit/test_layering.py`
+     enforces both directions: the catalog imports and reads nothing UCSB (proved in a subprocess
+     with `usvote.ucsb` made unimportable, not grepped), and **nothing under `usvote/ucsb/` may
+     import the catalog** — a back-import would let UCSB inherit the classifications it is meant to
+     corroborate, and the control test would pass by construction.
+     Three consequences worth recording, because each was a live design choice:
+     **(a) The derivation is single-sourced, in the direction that keeps the contract clean.**
+     `usvote/pv/status.py` gained `build_roster(..., absences=...)` with `popular_vote` as the
+     **residual**; `build_popular_vote_roster` is the empty-map call and `build_curated_roster` is
+     the catalog-bound one. The dependency runs `absences -> status`, so `status.py` keeps
+     importing nothing from `usvote` and stays underneath every source *and* the catalog.
+     **(b) Scope is explicit — `CURATED_YEARS`, with a count pin.** An exceptions catalog's
+     *silence* about an un-reviewed year is indistinguishable from a reviewed "no absences here":
+     §3's own failure mode, one level up. `build_curated_roster` therefore **raises** outside
+     `frozenset(ec_ingest_years())` rather than returning an all-`popular_vote` roster. 1868's four
+     rows are catalogued but never consumed, mirroring how `UCSB_NONPARTICIPATING_STATES` retains
+     its 1868 trio. (Note for #57: 1868 Florida has **no** in-repo constant behind it today — it is
+     parser-derived from UCSB markup — so it needed its own independent citation here.)
+     **(c) `note` stays null on curated rows, and that is structural rather than tidy.** The moment
+     the catalog's own prose could reach `note`, "no `note` reaches the public snapshot" stops being
+     a property of the column's provenance and becomes a reviewed invariant. An absence's cause
+     lives in its citation, in code.
+     Scope: #140 ships the derivation and its proof only. **No DB write, no new `source` value in
+     `dwh.pv_state_status`, no warehouse change** — wiring it into the snapshot build is #139's,
+     and the recommendation there is to call the derivation **in-process** at build time rather than
+     load a `CURATED` source (a vote-less source never appears in the join view's PV rows, so
+     loading it would not have bought a live cross-check anyway).
+     **On provenance, stated precisely, because the honest version is narrower than the tempting
+     one:** the firewall is over *machine* provenance. The curator did cross-check against UCSB's
+     count while scoping the work. Every row is independently attested and independently cited, and
+     the exact coincidence with UCSB's set is **corroboration** — nothing here should be read, or
+     restated downstream, as "we never looked."
+     **CI proves 11 of the 28, and the docs say so.** The `not_participating` rows are verifiable
+     both directions against the committed public-domain EC roster fixture (they must be exactly
+     1864's zero-EV set). The 17 `legislature_chosen` rows are not — a legislature-appointed state
+     cast electoral votes like any other, so the spine cannot distinguish it from a popular-vote
+     state — and `TestRealCorpus` **skips in CI** (D022). They are pinned as an explicit expected
+     set with non-empty citations, and running that class locally with `USVOTE_UCSB_HTML_DIR` set is
+     a **merge precondition** for anything touching the catalog. A UCSB-derived roster fixture must
+     **never** be committed to close that gap: committing UCSB's *selection* of absence pairs is
+     precisely the compilation question #140 exists to answer.
+     One check was attempted and **failed**: the public-domain Archives year pages would have been a
+     committable, CI-runnable witness for the 17, but neither the 1824 nor the 1876 page's Notes
+     attests how electors were appointed (fetched 2026-08-07). Recorded so it is not re-attempted.
 7. **The silent-drop guard is a two-way tested assert**, and is the roster's primary purpose:
    every `popular_vote` roster state has **≥1** `pv_votes` row; every absence-status state has
    **exactly 0**; and every `pv_votes` (year, state) is **in** the roster. The third check is what
