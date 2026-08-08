@@ -3,7 +3,10 @@
 Each ingest patches or tolerates a handful of real historical anomalies in its source
 data. The **Electoral College** catalog comes first, then the **UCSB popular-vote**
 catalog; each source's constants live in that source's own module, per the
-source-namespacing convention (D006/D015).
+source-namespacing convention (D006/D015). A third section follows them and is a
+different kind of thing — the **in-repo popular-vote absence catalog** (#140), which
+corrects nobody's data and is instead an original compilation of historical facts this
+project asserts on its own public-domain evidence.
 
 The Electoral College pipeline patches a handful of real historical anomalies in the
 National Archives source data. Each is **hard-won correctness** — a value confirmed
@@ -68,6 +71,60 @@ Structural (rather than per-year) UCSB format quirks — the six header layouts,
 trailing summary blocks, 1976's narrower header — are **not** data corrections and are
 catalogued instead in [`ucsb-html-formats.md`](ucsb-html-formats.md) §9, with the
 reasoning that produced each rule.
+
+## In-repo popular-vote absence catalog (#140)
+
+**This is not a correction to anybody's data**, and saying so plainly matters — the two
+catalogs above are organized around fixing or tolerating what a source got wrong, and
+this third one is not that. It is an **original, in-repo compilation**: the 28 pre-1976
+`(year, state)` pairs at which no popular vote for president was held, each classified
+from public-domain sources. Nothing upstream is being corrected. It lives here because
+this file is where a reader looks for "which historical facts does this project assert,
+and on what evidence" — which is exactly the question it answers.
+
+**Why it exists.** Until #140, the pre-1976 `pv_status` classifications had one origin:
+parsing UCSB's markup. UCSB grants no reuse rights and this repo is public (D022), and
+the API snapshot is redistributable-only *at the source* (D030) — so a public surface
+reporting a `pv_status` for every `(year, state)` back to 1824 (#139) cannot be built on
+UCSB-derived rows. Enumerating the absences ourselves, with our own citations, is what
+makes the classification ours to ship.
+
+`UCSB_NONPARTICIPATING_STATES` **stays** and is not superseded: UCSB's own transform still
+needs it to derive UCSB's roster. The two are independent, and that independence is the
+whole design — `TestRealCorpus` uses UCSB as the **control** that validates this catalog,
+inverting the dependency exactly as D016 already does for the PV facts.
+
+**On provenance, stated precisely.** The firewall is over *machine* provenance: no UCSB
+byte, parse, or artifact reaches these classifications, and `tests/unit/test_layering.py`
+enforces that structurally (in both directions — a `usvote/ucsb/` back-import would make
+the control test circular). It is **not** a claim that the curator worked in ignorance of
+UCSB. Each row is independently attested and independently cited; the exact coincidence
+with UCSB's set is **corroboration**, and it is checked deliberately.
+
+| Year(s) | Absence | Classification | `pv/` constant (module) | Source / provenance |
+|---|---|---|---|---|
+| 1824 | Six states' legislatures still appointed electors directly — Delaware, Georgia, Louisiana, New York, South Carolina, Vermont — so no popular presidential vote was held in them | `legislature_chosen` (they cast electoral votes; they just held no popular vote) | `PV_ABSENCE_CATALOG` (`pv/absences.py`) | *McPherson v. Blacker*, 146 U.S. 1, 27 (1892), which names all six; U.S. Const. art. II, § 1, cl. 2 |
+| 1828 | Delaware and South Carolina alone retained legislative appointment (New York had moved to districts) | `legislature_chosen` | `PV_ABSENCE_CATALOG` | Bracketed by *McPherson* at 27–28 (legislature in 1824; general ticket in all states but S.C. "after 1832"); Delaware first voted popularly in 1832. **The Delaware Constitution of 1792 is not the instrument** — it carries no presidential-elector provision at all (checked 2026-08-07), so the appointment was statutory |
+| 1832, 1836, 1840, 1844, 1848, 1852, 1856, 1860 | South Carolina's General Assembly appointed the state's electors in every election through 1860 — the last state to adopt a popular presidential vote | `legislature_chosen` | `PV_ABSENCE_CATALOG` | *McPherson*, 146 U.S. at 28: "After 1832 electors were chosen by general ticket in all the states excepting South Carolina, where the legislature chose them up to and including 1860." S.C. first held a popular presidential vote in 1868 |
+| 1864 | The eleven Confederate states took no part. Nine appointed no electors and submitted no returns; **Louisiana and Tennessee did** submit returns via Unionist reconstruction governments, and Congress refused to count them — same classification, materially different history, so they carry their own citation | `not_participating` | `PV_ABSENCE_CATALOG` | Joint Resolution (H.R. 126, 38th Cong.), adopted before the 8 February 1865 count, declaring the states in insurrection not entitled to representation in the Electoral College. **Independently corroborated by the EC spine itself** — exactly these eleven carry `total_electoral_votes = 0` in 1864, and a test asserts the two sets are equal |
+| 1876 | Colorado was admitted 1 August 1876, three months before the election and too late to organize one; its General Assembly appointed the state's three electors. The last time any state chose electors without a popular vote | `legislature_chosen` | `PV_ABSENCE_CATALOG` | Colo. Const. of 1876, Schedule § 19 (a one-time provision); Proclamation No. 230 (admission); Colorado Enabling Act, ch. 139, 18 Stat. 474 (1875) |
+| 1868 | Florida's legislature appointed its electors (readmitted 25 June 1868, too late to organize an election); Mississippi, Texas and Virginia were not readmitted in time and cast no votes | `legislature_chosen` / `not_participating` — **catalogued but never consumed** | `PV_ABSENCE_CATALOG` (outside `CURATED_YEARS`) | Omnibus Act, 15 Stat. 73 (25 June 1868), readmitting six states but not MS/TX/VA (readmitted 1870). Gated out by `UNSUPPORTED_EC_YEARS`; recorded so the research is not redone if #57 lands |
+
+**What CI can and cannot prove, stated plainly.** The 11 `not_participating` rows are
+verified *in both directions* against the committed public-domain EC roster fixture — they
+must be exactly the 1864 zero-EV set — so those are genuinely proven in CI. The 17
+`legislature_chosen` rows are not: a legislature-appointed state cast electoral votes like
+any other, so the spine cannot distinguish it from a state that held a popular vote. They
+are pinned as an explicit expected set with non-empty citations, and independently checked
+against UCSB by `TestRealCorpus`, which **skips in CI** (D022 — no UCSB bytes are
+committed). Running that class locally with `USVOTE_UCSB_HTML_DIR` set is a **merge
+precondition** for anything touching the catalog, not a CI gate.
+
+`CURATED_YEARS` is the catalog's **scope marker**, and it is load-bearing rather than
+bookkeeping: without it, "the catalog is silent about 1868" and "1868 was reviewed and has
+no further absences" are indistinguishable — the same failure mode D024 §3 rejects for the
+roster itself, one level up. `build_curated_roster` therefore **raises** for any year
+outside it rather than quietly returning an all-`popular_vote` roster.
 
 ## Notes
 

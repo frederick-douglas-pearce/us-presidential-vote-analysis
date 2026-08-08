@@ -8,6 +8,12 @@ landed in #127 via :func:`build_popular_vote_roster`), and #38's re-run of the t
 assert after it narrows candidates — so the contract lives here and the dependency runs
 ``source -> pv``, never ``pv -> ucsb`` or, worse, ``mit -> ucsb``.
 
+A fourth consumer joined in #140: :mod:`usvote.pv.absences`, the in-repo pre-1976
+absence catalog, which binds :func:`build_roster`'s ``absences`` argument. The
+dependency runs ``absences -> status``, and **this module imports nothing from
+``usvote``** — pandas and the stdlib only. Keeping it that way is what lets the contract
+sit underneath every source *and* underneath the catalog that consumes it.
+
 **What the roster is (D024 §3/§6).** One row per ``(source, year, state)`` for *every*
 state in that year's election, including ordinary ones. It is a **complete roster, not
 an exceptions table** — that is precisely what makes absence detectable: an
@@ -29,7 +35,7 @@ exactly when it is being misused.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 import pandas as pd
 
@@ -115,30 +121,36 @@ def build_status_column_defs(schema: str = ROSTER_SCHEMA) -> list[tuple[str, ...
     ]
 
 
-#: The ``read_ec_participation`` columns :func:`build_popular_vote_roster` requires.
+#: The ``read_ec_participation`` columns :func:`build_roster` requires.
 #: ``total_electoral_votes`` is deliberately **not** among them — D024 §5 keeps the EC
 #: fact the single source of electoral-vote truth, and the roster never loads an EV.
 _PARTICIPATION_COLUMNS: tuple[str, ...] = ("year", "state", "is_total")
 
 
-def build_popular_vote_roster(
+def build_roster(
     ec_participation: pd.DataFrame,
     *,
     source: str,
     years: Collection[int],
+    absences: Mapping[tuple[int, str], str] | None = None,
     error_cls: type[Exception] = PVRosterError,
 ) -> pd.DataFrame:
-    """Return an all-``popular_vote`` roster over the EC spine's participating states.
+    """Return a roster over the EC spine's states, with ``absences`` layered on.
 
-    The **mechanical** roster derivation D024 §6/§Rationale anticipated (#127) — the
-    ``INSERT ... SELECT DISTINCT`` over ``dwh.votes`` — for a source whose whole span
-    held a popular vote in every state. MIT is the first caller: it covers 1976-2024,
-    where no state was ever ``legislature_chosen`` or ``not_participating``, so none of
-    UCSB's absence derivation applies and MIT stays "not taxed" by the roster design.
+    The one roster derivation, shared by every caller. Membership comes from the EC
+    spine; ``absences`` maps a ``(year, state)`` key to one of
+    :data:`PV_ABSENCE_STATUSES`; and **``popular_vote`` is the residual** — the status a
+    state gets by *not* appearing in the map. That residual shape is what makes an
+    absence detectable at all (D024 §3): enumerate only the absences, and a state that
+    silently vanishes from the spine cannot masquerade as one.
 
-    Source-neutral and living here rather than under ``usvote/mit/`` for the same reason
-    :func:`assert_roster_covers_facts` does: there is no source-specific logic to write,
-    and any future whole-span source qualifies on the same terms.
+    Two callers bind the map, and the dependency runs one way only:
+
+    - :func:`build_popular_vote_roster` — the empty map, for a source whose whole span
+      held a popular vote in every state (MIT, #127).
+    - :func:`usvote.pv.absences.build_curated_roster` — the in-repo pre-1976 absence
+      catalog (#140). It lives in a sibling module and imports *this* one; this module
+      imports nothing from ``usvote``, and must not start.
 
     **The roster derives from the EC spine, not from the source's own facts — and that
     is the whole point.** ``ec_participation`` is
@@ -159,10 +171,16 @@ def build_popular_vote_roster(
     ``DISTINCT year, state`` yields a NULL roster entry per year, which becomes garbage
     or a NOT NULL violation at load (D024 §6). States with ``total_electoral_votes = 0``
     are **kept**: the Archives carries rows for non-participating states, so the spine
-    already is the complete roster. Such a state inside this source's span would be
-    marked ``popular_vote`` and then fail check 1 for want of vote rows — correctly, in
-    that a whole-span source claiming a state which cast no electoral votes needs the
-    absence derivation this function deliberately does not do.
+    already is the complete roster. Such a state left out of ``absences`` is marked
+    ``popular_vote`` and then fails check 1 for want of vote rows — correctly, in that a
+    caller claiming a state which cast no electoral votes has an absence it has not
+    catalogued. (``usvote.pv.absences`` closes that loop the other way too, with a
+    cross-check that no zero-EV spine state ends up ``popular_vote``.)
+
+    Only ``("year", "state", "is_total")`` are required — **no electoral-vote column**.
+    D024 §5 keeps the EC fact the single source of EV truth, and the roster neither
+    loads an EV nor branches on one. A caller that wants the zero-EV cross-check reads
+    that column itself, outside this function.
 
     ``years`` is **required and explicit**, never inferred — the module docstring's
     rule.
@@ -170,8 +188,11 @@ def build_popular_vote_roster(
     :func:`assert_roster_covers_facts` reports as the pipeline-sequencing failure it is
     (the EC spine was never loaded for that year).
 
-    ``note`` is null on every row by construction: it exists only to carry an absence's
-    cause, and there are no absences here.
+    ``note`` is null on every row by construction, **including absence rows** (D024 §6,
+    #140). The column carries verbatim UCSB prose where UCSB fills it, so it is
+    ``redistributable=false`` content; leaving it null here is what keeps "no ``note``
+    reaches the public snapshot" a structural property rather than a reviewed one. An
+    absence's cause lives in its catalog citation, in code, not in the warehouse.
 
     The returned frame is sorted on ``(year, state)`` so this function has a
     deterministic *return* value for a caller inspecting or asserting on it.
@@ -182,9 +203,20 @@ def build_popular_vote_roster(
     absent = [c for c in _PARTICIPATION_COLUMNS if c not in ec_participation.columns]
     if absent:
         raise error_cls(
-            f"build_popular_vote_roster({source!r}) needs the EC participation columns "
+            f"build_roster({source!r}) needs the EC participation columns "
             f"{list(_PARTICIPATION_COLUMNS)}; missing {absent}. Pass "
             "usvote.spine.read_ec_participation's frame, not the source's PV facts."
+        )
+    absence_map = dict(absences or {})
+    bad = sorted(
+        {status for status in absence_map.values() if status not in PV_ABSENCE_STATUSES}
+    )
+    if bad:
+        raise error_cls(
+            f"build_roster({source!r}) got absence status(es) {bad}; an absence map "
+            f"may only carry {sorted(PV_ABSENCE_STATUSES)}. Mapping a key to "
+            f"'{PV_STATUS_POPULAR_VOTE}' is a silent no-op, since that is already the "
+            "residual."
         )
     in_scope = frozenset(years)
     rows = ec_participation[
@@ -198,17 +230,50 @@ def build_popular_vote_roster(
         .sort_values(["year", "state"], kind="stable")
         .reset_index(drop=True)
     )
+    statuses = [
+        absence_map.get((int(year), state), PV_STATUS_POPULAR_VOTE)
+        for year, state in zip(keys["year"], keys["state"], strict=True)
+    ]
     roster = pd.DataFrame(
         {
             "source": source,
             "year": keys["year"].astype("int64"),
             "state": keys["state"],
-            "pv_status": PV_STATUS_POPULAR_VOTE,
+            "pv_status": pd.Series(statuses, dtype="object"),
             "note": pd.Series([None] * len(keys), dtype="object"),
         },
         columns=list(ROSTER_COLUMNS),
     )
     return roster
+
+
+def build_popular_vote_roster(
+    ec_participation: pd.DataFrame,
+    *,
+    source: str,
+    years: Collection[int],
+    error_cls: type[Exception] = PVRosterError,
+) -> pd.DataFrame:
+    """Return an all-``popular_vote`` roster over the EC spine's participating states.
+
+    :func:`build_roster` with **no absences** — the mechanical derivation D024
+    §6/§Rationale anticipated (#127), for a source whose whole span held a popular vote
+    in every state. MIT is the first caller: it covers 1976-2024, where no state was
+    ever ``legislature_chosen`` or ``not_participating``, so none of the pre-1976
+    absence derivation applies and MIT stays "not taxed" by the roster design.
+
+    That MIT precondition is held by a **catalog-integrity test** — no
+    :data:`usvote.pv.absences.PV_ABSENCE_CATALOG` key falls in 1976-2024 — rather than a
+    runtime assert here, because MIT's path never imports the catalog and this function
+    must keep working with no knowledge that one exists.
+
+    Source-neutral and living here rather than under ``usvote/mit/`` for the same reason
+    :func:`assert_roster_covers_facts` does: there is no source-specific logic to write,
+    and any future whole-span source qualifies on the same terms.
+    """
+    return build_roster(
+        ec_participation, source=source, years=years, error_cls=error_cls
+    )
 
 
 def assert_roster_shape(
