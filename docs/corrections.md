@@ -94,6 +94,13 @@ needs it to derive UCSB's roster. The two are independent, and that independence
 whole design — `TestRealCorpus` uses UCSB as the **control** that validates this catalog,
 inverting the dependency exactly as D016 already does for the PV facts.
 
+What that control corroborates, stated precisely: both rosters take their `(year, state)`
+**membership** from the same EC spine, because D024 §6 requires both to — so the shared
+2,130-row count is the *design*, not a finding. What is genuinely independent is the
+`pv_status` on each row (UCSB's parsed from their markup, ours curated with its own
+citations), and above all the **28 absences**, which the test checks first and on their
+own because they are the entire claim.
+
 **On provenance, stated precisely.** The firewall is over *machine* provenance: no UCSB
 byte, parse, or artifact reaches these classifications, and `tests/unit/test_layering.py`
 enforces that structurally (in both directions — a `usvote/ucsb/` back-import would make

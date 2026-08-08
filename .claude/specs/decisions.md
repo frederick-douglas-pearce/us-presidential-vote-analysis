@@ -1038,8 +1038,15 @@ sibling table rather than amending the shared PV fact.
      compilation possible at all; what is *not* redistributable is UCSB's expression of it,
      including their selection.
      **(ii) UCSB's role changes from source to control.** `TestRealCorpus` now asserts the two
-     rosters agree exactly on `(year, state, pv_status)` — 2,130 rows across all 49 in-scope years
-     — with the dependency **inverted**, the same posture D016 takes for the PV facts. That
+     rosters agree exactly on `(year, state, pv_status)` over all 49 in-scope years, with the
+     dependency **inverted**, the same posture D016 takes for the PV facts. State precisely what
+     that corroborates: the two rosters take their `(year, state)` **membership** from the same EC
+     spine because §6 requires both to, so the shared 2,130-row count is the *design* and asserting
+     it would assert a tautology. What is independent is the `pv_status` on each row — UCSB's
+     parsed from their markup, ours curated with its own citations — so the test checks the 28
+     absences first and on their own, that being the entire claim, with full triple-equality
+     following as "nothing else diverges either". Anything downstream that cites "2,130 rows" as
+     agreement must carry the same qualifier. That
      inversion is only meaningful if the two cannot touch, so `tests/unit/test_layering.py`
      enforces both directions: the catalog imports and reads nothing UCSB (proved in a subprocess
      with `usvote.ucsb` made unimportable, not grepped), and **nothing under `usvote/ucsb/` may

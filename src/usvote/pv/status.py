@@ -11,8 +11,9 @@ assert after it narrows candidates — so the contract lives here and the depend
 A fourth consumer joined in #140: :mod:`usvote.pv.absences`, the in-repo pre-1976
 absence catalog, which binds :func:`build_roster`'s ``absences`` argument. The
 dependency runs ``absences -> status``, and **this module imports nothing from
-``usvote``** — pandas and the stdlib only. Keeping it that way is what lets the contract
-sit underneath every source *and* underneath the catalog that consumes it.
+``usvote``** — pandas (with its own numpy) and the stdlib only. Keeping it that way is
+what lets the contract sit underneath every source *and* underneath the catalog that
+consumes it.
 
 **What the roster is (D024 §3/§6).** One row per ``(source, year, state)`` for *every*
 state in that year's election, including ordinary ones. It is a **complete roster, not
@@ -37,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
+import numpy as np
 import pandas as pd
 
 #: The ``dwh.pv_state_status`` columns, in load order. ``note`` is nullable.
@@ -127,6 +129,57 @@ def build_status_column_defs(schema: str = ROSTER_SCHEMA) -> list[tuple[str, ...
 _PARTICIPATION_COLUMNS: tuple[str, ...] = ("year", "state", "is_total")
 
 
+def assert_participation_shape(
+    df: pd.DataFrame,
+    *,
+    error_cls: type[Exception] = PVRosterError,
+    caller: str = "build_roster",
+) -> None:
+    """Assert the injected EC frame can actually be filtered down to participants.
+
+    The whole roster rests on this frame, and it arrives across a DI seam from a caller
+    we do not control — a DB read, where ``state`` may be ``None`` rather than ``NaN``
+    and a driver may hand back ``is_total`` as something other than a Python ``bool``.
+
+    The subtle failure is why this is a hard assert rather than a coercion: a driver
+    returning ``is_total`` as ``'t'``/``'f'`` **strings** makes ``.astype(bool)`` truthy
+    for *every* row (a non-empty string is ``True``), so no row is treated as data and
+    the roster comes back **empty, with no error**. Nothing downstream can tell that
+    apart from "the EC spine was never loaded" — and for a caller with no PV facts to
+    run :func:`assert_roster_covers_facts` against (the #139 snapshot build derives the
+    roster in-process), nothing downstream would even look. So require genuine booleans:
+    an ``object`` column of real ``bool`` values is fine (what psycopg2 yields for a
+    Postgres boolean), strings and 0/1 ints are not.
+
+    The sibling guard in ``usvote/ucsb/transform.py`` predates this one and says the
+    same thing; this is the source-neutral home, so every roster derivation gets it.
+    """
+    missing = [c for c in _PARTICIPATION_COLUMNS if c not in df.columns]
+    if missing:
+        raise error_cls(
+            f"{caller}: EC participation frame is missing column(s) {missing}; the "
+            f"roster derives from {list(_PARTICIPATION_COLUMNS)} (totals rows excluded "
+            "via `is_total`). Pass usvote.spine.read_ec_participation's frame, not the "
+            "source's PV facts."
+        )
+    is_total = df["is_total"]
+    if is_total.isna().any():
+        raise error_cls(
+            f"{caller}: EC participation frame has null `is_total` value(s); totals "
+            "rows could not be excluded, and a totals row's NULL state becomes a "
+            "phantom roster entry."
+        )
+    non_bool = is_total.map(lambda v: not isinstance(v, bool | np.bool_))
+    if non_bool.any():
+        bad = sorted({repr(v) for v in is_total[non_bool]})[:5]
+        raise error_cls(
+            f"{caller}: EC participation frame has non-boolean `is_total` value(s) "
+            f"{bad}. Strings are the dangerous case — `.astype(bool)` is True for "
+            "every non-empty string, so *no* row would be read as data and the roster "
+            "would come back silently empty."
+        )
+
+
 def build_roster(
     ec_participation: pd.DataFrame,
     *,
@@ -134,6 +187,7 @@ def build_roster(
     years: Collection[int],
     absences: Mapping[tuple[int, str], str] | None = None,
     error_cls: type[Exception] = PVRosterError,
+    caller: str = "build_roster",
 ) -> pd.DataFrame:
     """Return a roster over the EC spine's states, with ``absences`` layered on.
 
@@ -194,26 +248,27 @@ def build_roster(
     reaches the public snapshot" a structural property rather than a reviewed one. An
     absence's cause lives in its catalog citation, in code, not in the warehouse.
 
+    ``caller`` is the public entry point named in error messages. It defaults to this
+    function's own name, and the two thin wrappers pass their own: an operator handed
+    ``build_roster: ...`` from a ``build_popular_vote_roster`` call site would grep for
+    a symbol that does not appear anywhere on their code path.
+
     The returned frame is sorted on ``(year, state)`` so this function has a
     deterministic *return* value for a caller inspecting or asserting on it.
     :func:`usvote.pv.load.load_pv_status` re-sorts on the full
     :data:`ROSTER_NATURAL_KEY` before inserting — the **insert** order is the loader's
     to own, not this function's, and the two are deliberately not coupled.
     """
-    absent = [c for c in _PARTICIPATION_COLUMNS if c not in ec_participation.columns]
-    if absent:
-        raise error_cls(
-            f"build_roster({source!r}) needs the EC participation columns "
-            f"{list(_PARTICIPATION_COLUMNS)}; missing {absent}. Pass "
-            "usvote.spine.read_ec_participation's frame, not the source's PV facts."
-        )
+    assert_participation_shape(
+        ec_participation, error_cls=error_cls, caller=f"{caller}({source!r})"
+    )
     absence_map = dict(absences or {})
     bad = sorted(
         {status for status in absence_map.values() if status not in PV_ABSENCE_STATUSES}
     )
     if bad:
         raise error_cls(
-            f"build_roster({source!r}) got absence status(es) {bad}; an absence map "
+            f"{caller}({source!r}) got absence status(es) {bad}; an absence map "
             f"may only carry {sorted(PV_ABSENCE_STATUSES)}. Mapping a key to "
             f"'{PV_STATUS_POPULAR_VOTE}' is a silent no-op, since that is already the "
             "residual."
@@ -272,7 +327,11 @@ def build_popular_vote_roster(
     and any future whole-span source qualifies on the same terms.
     """
     return build_roster(
-        ec_participation, source=source, years=years, error_cls=error_cls
+        ec_participation,
+        source=source,
+        years=years,
+        error_cls=error_cls,
+        caller="build_popular_vote_roster",
     )
 
 

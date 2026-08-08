@@ -39,9 +39,14 @@ years a curator has actually reviewed. Without it, "the catalog is silent about 
 and "1868 was reviewed and has no further absences" are indistinguishable — the D024 §3
 exceptions-table failure mode, one level up. So :func:`build_curated_roster` **raises**
 for any year outside it rather than quietly returning an all-``popular_vote`` roster.
-1868 and 1872 sit in the catalog as *catalogued but never consumed*, exactly as
+
+**1868** sits in the catalog as *catalogued but never consumed* — four rows, exactly as
 ``UCSB_NONPARTICIPATING_STATES`` retains its 1868 trio: the research is recorded so it
-is not redone, and :data:`CURATED_YEARS` is what stops it being used.
+is not redone, and :data:`CURATED_YEARS` is what stops it being used. **1872 has no
+entries, and its absence from the catalog is not evidence it has none** — that is the
+reason :data:`CURATED_YEARS` is a scope marker rather than a derived set. Whoever lands
+#57 must review 1872 (Greeley died after the popular vote; Congress rejected Georgia's
+electoral votes) before adding it, not read this silence as a clean bill of health.
 """
 
 from __future__ import annotations
@@ -57,6 +62,7 @@ from usvote.pv.status import (
     PV_STATUS_NOT_PARTICIPATING,
     PV_STATUS_POPULAR_VOTE,
     PVRosterError,
+    assert_participation_shape,
     build_roster,
 )
 from usvote.years import ec_ingest_years
@@ -71,8 +77,9 @@ CURATED_YEARS: frozenset[int] = frozenset(ec_ingest_years())
 
 #: Guards against a silent scope change. If a year is ever added to (or removed from)
 #: the EC ingest span, :data:`CURATED_YEARS` grows or shrinks with it — and the new year
-#: would be *derivable* while nobody has reviewed it for absences. Pinned here, and
-#: again as a test, so that change fails loudly and lands on a curator's desk.
+#: would be *derivable* while nobody has reviewed it for absences. Bumping
+#: ``LATEST_ELECTION_YEAR`` is a routine each-cycle edit, so this is a live path, not a
+#: hypothetical one.
 CURATED_YEAR_COUNT = 49
 
 
@@ -270,7 +277,7 @@ PV_ABSENCE_CATALOG: dict[tuple[int, str], PVAbsence] = {
 
 
 class PVAbsenceCatalogError(PVRosterError):
-    """Raised when the catalog and the EC spine disagree.
+    """Raised when the catalog and the EC spine disagree, or its scope has drifted.
 
     A subclass of :class:`usvote.pv.status.PVRosterError` because it is a roster failure
     of the same family, and separately typed because the fix is different: a roster
@@ -278,6 +285,35 @@ class PVAbsenceCatalogError(PVRosterError):
     typo'd state name, a year mis-keyed, or a genuine historical error — and is fixed by
     editing this module.
     """
+
+
+def _assert_curated_scope_pinned() -> None:
+    """Raise at **import** if the EC ingest span moved without a curator noticing.
+
+    :data:`CURATED_YEAR_COUNT` only guards anything if something compares it. A test
+    would catch a drift in CI, but the derivation's stated consumer (#139) runs it
+    **in-process at snapshot build time**, where an un-reviewed year silently becoming
+    derivable — and emitted as an all-``popular_vote`` roster on no evidence — is the
+    exact outcome :data:`CURATED_YEARS` exists to prevent. So the check runs where the
+    code runs, not only where the tests run.
+    """
+    if len(CURATED_YEARS) != CURATED_YEAR_COUNT:
+        raise PVAbsenceCatalogError(
+            f"CURATED_YEARS now holds {len(CURATED_YEARS)} years, not the pinned "
+            f"{CURATED_YEAR_COUNT}. The EC ingest span moved (most likely "
+            "LATEST_ELECTION_YEAR in usvote/years.py), so year(s) nobody has reviewed "
+            f"for popular-vote absences just became derivable: "
+            f"{sorted(CURATED_YEARS.symmetric_difference(_pinned_span()))}. Review "
+            "them, add any absences with citations, then bump CURATED_YEAR_COUNT."
+        )
+
+
+def _pinned_span() -> frozenset[int]:
+    """The span :data:`CURATED_YEAR_COUNT` was pinned against, for the error message."""
+    return frozenset(ec_ingest_years(2024))
+
+
+_assert_curated_scope_pinned()
 
 
 #: The columns :func:`assert_catalog_matches_spine` requires. Wider than
@@ -298,6 +334,7 @@ def assert_catalog_matches_spine(
     *,
     years: Collection[int] | None = None,
     error_cls: type[Exception] = PVAbsenceCatalogError,
+    caller: str = "assert_catalog_matches_spine",
 ) -> None:
     """Falsify the catalog against the EC spine, in **both** directions.
 
@@ -324,25 +361,52 @@ def assert_catalog_matches_spine(
     ``years`` defaults to :data:`CURATED_YEARS`. Passing a narrower set scopes the check
     to a partial run; passing a year outside :data:`CURATED_YEARS` is allowed here (the
     checks are still meaningful) but :func:`build_curated_roster` will refuse to derive.
+
+    ``caller`` names the public entry point in error messages, and
+    :func:`build_curated_roster` passes its own — an operator handed a symbol they never
+    called greps for something that is not on their code path.
     """
     absent = [c for c in _CROSS_CHECK_COLUMNS if c not in ec_participation.columns]
     if absent:
         raise error_cls(
-            f"assert_catalog_matches_spine needs the EC participation columns "
+            f"{caller} needs the EC participation columns "
             f"{list(_CROSS_CHECK_COLUMNS)}; missing {absent}. Pass "
             "usvote.spine.read_ec_participation's frame."
         )
-    in_scope = frozenset(CURATED_YEARS if years is None else years)
+    assert_participation_shape(
+        ec_participation, error_cls=error_cls, caller=caller
+    )
+    in_scope = frozenset(
+        CURATED_YEARS if years is None else (int(y) for y in years)
+    )
     rows = ec_participation[
         (~ec_participation["is_total"].astype(bool))
         & ec_participation["state"].notna()
         & ec_participation["year"].isin(in_scope)
     ]
-    spine_ev = {
-        (int(year), state): ev
-        for year, state, ev in zip(
-            rows["year"], rows["state"], rows["total_electoral_votes"], strict=True
+    # A null EV would be worse than an error in both directions: `int(nan)` raises a
+    # bare ValueError naming no year or state, and — the silent half — `nan == 0` is
+    # False, so check 3 below would skip the state entirely and let the residual absorb
+    # it. That is exactly the failure check 3 exists to catch, so a null must never
+    # reach it. Checked on participating rows only, so a null in a dropped totals row
+    # is not a false positive. (``usvote/ucsb/transform.py::_build_ec_roster`` carries
+    # the same guard for the same reason.)
+    null_ev = rows[rows["total_electoral_votes"].isna()]
+    if not null_ev.empty:
+        raise error_cls(
+            "EC participation frame has null `total_electoral_votes` for "
+            f"{null_ev[['year', 'state']].values.tolist()[:10]}; every participating "
+            "state carries an electoral-vote count in the EC fact (0 for a "
+            "non-participating state), so a null here is an upstream EC-load defect. "
+            "Left in, it would silently exempt the state from the zero-EV cross-check."
         )
+    # `.max()` per key, never a last-wins dict comprehension. `dwh.votes` is one row per
+    # (year, state, candidate), so every state contributes several rows to this frame,
+    # and `read_ec_participation` issues no ORDER BY — a comprehension would make the
+    # cross-check depend on whichever candidate row the driver happened to return last.
+    grouped = rows.groupby(["year", "state"])["total_electoral_votes"].max()
+    spine_ev = {
+        (int(year), str(state)): int(ev) for (year, state), ev in grouped.items()
     }
     catalog = {
         key: entry for key, entry in PV_ABSENCE_CATALOG.items() if key[0] in in_scope
@@ -359,7 +423,7 @@ def assert_catalog_matches_spine(
         )
 
     miscast = sorted(
-        (key, entry.pv_status, int(spine_ev[key]))
+        (key, entry.pv_status, spine_ev[key])
         for key, entry in catalog.items()
         if (entry.pv_status == PV_STATUS_NOT_PARTICIPATING) != (spine_ev[key] == 0)
     )
@@ -412,6 +476,13 @@ def build_curated_roster(
     point — see the module docstring.
     """
     requested = frozenset(int(y) for y in years)
+    if not requested:
+        raise error_cls(
+            f"build_curated_roster({source!r}) was asked for no years at all. An empty "
+            "roster is indistinguishable from a successful derivation, which is the "
+            "same 'silence carries no information' failure the year gate below "
+            "rejects — most likely an upstream year filter returned nothing."
+        )
     uncurated = sorted(requested - CURATED_YEARS)
     if uncurated:
         raise error_cls(
@@ -422,20 +493,39 @@ def build_curated_roster(
             "year (add its absences with citations) or narrow `years`."
         )
     assert_catalog_matches_spine(
-        ec_participation, years=requested, error_cls=error_cls
+        ec_participation,
+        years=requested,
+        error_cls=error_cls,
+        caller=f"build_curated_roster({source!r})",
     )
-    absences = {
-        key: entry.pv_status
-        for key, entry in PV_ABSENCE_CATALOG.items()
-        if key[0] in requested
-    }
-    return build_roster(
+    # The catalog goes in whole, deliberately un-prefiltered. `build_roster` narrows the
+    # spine to `requested` before it looks anything up, so an out-of-scope key can never
+    # match — and a second year filter here would read as a second gate on 1868, leaving
+    # a future reader unable to tell which one is load-bearing. It is the gate above.
+    roster = build_roster(
         ec_participation,
         source=source,
         years=requested,
-        absences=absences,
+        absences={key: entry.pv_status for key, entry in PV_ABSENCE_CATALOG.items()},
         error_cls=error_cls,
+        caller="build_curated_roster",
     )
+    # The converse of the catalog's phantom check, and it needs its own test because the
+    # phantom check only fires for years the catalog *mentions*: a caller that reads the
+    # spine with the wrong `years`, or against a warehouse loaded for a partial year
+    # set, otherwise gets a silently truncated roster. `assert_roster_covers_facts`
+    # would catch it for a source with PV facts — but #139 derives this in-process at
+    # snapshot build time, with no facts to run that assert against.
+    missing = sorted(requested - {int(y) for y in roster["year"].unique()})
+    if missing:
+        raise error_cls(
+            f"build_curated_roster({source!r}): the EC spine yielded no states for "
+            f"in-scope year(s) {missing}. This is a pipeline-sequencing failure, not a "
+            "classification problem: the roster derives from the EC spine, so the EC "
+            "pipeline was never run for these years (or was run for a different year "
+            "set). Load the EC spine for them, or narrow `years` to match."
+        )
+    return roster
 
 
 __all__ = [

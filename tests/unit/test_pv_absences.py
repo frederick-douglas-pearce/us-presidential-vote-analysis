@@ -42,8 +42,10 @@ from usvote.pv.status import (
     PV_STATUS_NOT_PARTICIPATING,
     PV_STATUS_POPULAR_VOTE,
     ROSTER_COLUMNS,
+    PVRosterError,
     assert_roster_shape,
     assert_unique_roster_grain,
+    build_roster,
 )
 
 SOURCE = "TEST"
@@ -112,6 +114,62 @@ def keys_with(roster: pd.DataFrame, status: str) -> set[tuple[int, str]]:
     return {key for key, value in statuses(roster).items() if value == status}
 
 
+# --- the general builder's new parameter ------------------------------------
+
+
+class TestBuildRosterAbsenceMap:
+    """``build_roster(absences=...)`` directly — the seam both callers go through.
+
+    Tested here rather than only via ``build_curated_roster`` because the catalog can
+    never produce a bad map: if the validation branch were inverted (``in`` for ``not
+    in``), every catalog-driven test would still pass while every legitimate absence
+    map raised.
+    """
+
+    def test_an_absence_map_is_layered_onto_the_residual(self) -> None:
+        roster = build_roster(
+            ec_participation_frame([2020]),
+            source=SOURCE,
+            years=[2020],
+            absences={(2020, "Ohio"): PV_STATUS_LEGISLATURE_CHOSEN},
+        )
+        by_state = statuses(roster)
+        assert by_state[(2020, "Ohio")] == PV_STATUS_LEGISLATURE_CHOSEN
+        assert by_state[(2020, "Iowa")] == PV_STATUS_POPULAR_VOTE
+
+    def test_no_absence_map_is_all_popular_vote(self) -> None:
+        roster = build_roster(ec_participation_frame([2020]), source=SOURCE,
+                              years=[2020])
+        assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
+
+    @pytest.mark.parametrize(
+        "status", [PV_STATUS_POPULAR_VOTE, "unknown", "legislature-chosen", ""]
+    )
+    def test_a_non_absence_status_in_the_map_raises(self, status: str) -> None:
+        """``popular_vote`` included: mapping to the residual is a silent no-op."""
+        with pytest.raises(PVRosterError, match="absence map"):
+            build_roster(
+                ec_participation_frame([2020]),
+                source=SOURCE,
+                years=[2020],
+                absences={(2020, "Ohio"): status},
+            )
+
+    def test_a_key_matching_no_spine_row_is_simply_never_applied(self) -> None:
+        """The general builder does not police keys — that is the catalog's job.
+
+        Stated as a test so the division of labour is deliberate rather than assumed:
+        ``assert_catalog_matches_spine`` is what turns an unmatched key into an error.
+        """
+        roster = build_roster(
+            ec_participation_frame([2020]),
+            source=SOURCE,
+            years=[2020],
+            absences={(2020, "Atlantis"): PV_STATUS_NOT_PARTICIPATING},
+        )
+        assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
+
+
 # --- catalog integrity ------------------------------------------------------
 
 
@@ -141,6 +199,24 @@ class TestCatalogIntegrity:
         assert max(CURATED_YEARS) == 2024
         assert 1868 not in CURATED_YEARS
         assert 1872 not in CURATED_YEARS
+
+    def test_the_scope_pin_is_enforced_at_runtime_not_only_by_this_test(self) -> None:
+        """Bumping ``LATEST_ELECTION_YEAR`` is a routine each-cycle edit.
+
+        A test-only pin would let the span grow, ``build_curated_roster`` stop raising
+        for the new year, and that year ship as an all-``popular_vote`` roster on no
+        review — and #139 runs this derivation **in-process at snapshot build time**,
+        where no test is watching. So the check runs where the code runs.
+        """
+        assert (
+            "_assert_curated_scope_pinned" in dir(absences)
+        ), "the runtime pin must exist, not just this assertion"
+        with (
+            pytest.MonkeyPatch.context() as mp,
+            pytest.raises(PVAbsenceCatalogError, match="just became derivable"),
+        ):
+            mp.setattr(absences, "CURATED_YEARS", CURATED_YEARS | {2028})
+            absences._assert_curated_scope_pinned()
 
     def test_the_1868_rows_are_catalogued_but_outside_curated_years(self) -> None:
         """Retained so the research is not redone; gated so it is never consumed."""
@@ -396,3 +472,115 @@ class TestCatalogMatchesSpine:
         frame = ec_participation_frame([1824]).drop(columns=["total_electoral_votes"])
         with pytest.raises(PVAbsenceCatalogError, match="total_electoral_votes"):
             assert_catalog_matches_spine(frame, years=[1824])
+
+    def test_a_null_electoral_vote_raises_instead_of_exempting_the_state(self) -> None:
+        """A null is worse than a wrong number, in both directions.
+
+        ``int(nan)`` raises a bare ``ValueError`` naming no year or state; and — the
+        silent half — ``nan == 0`` is False, so the uncatalogued-zero check would skip
+        the state entirely and let the residual absorb it. That is the exact failure
+        that check exists to catch, so a null must never reach it.
+        """
+        frame = ec_participation_frame([1864])
+        frame.loc[frame["state"] == "Texas", "total_electoral_votes"] = float("nan")
+        with pytest.raises(PVAbsenceCatalogError, match="null `total_electoral_votes`"):
+            assert_catalog_matches_spine(frame, years=[1864])
+
+    def test_duplicate_spine_rows_are_aggregated_not_last_wins(self) -> None:
+        """``dwh.votes`` is per-candidate, so every state contributes several rows.
+
+        ``read_ec_participation`` issues no ``ORDER BY``, so a last-wins lookup would
+        make the whole cross-check depend on whichever candidate row the driver returned
+        last. Both orderings must reach the same verdict.
+        """
+        base = ec_participation_frame([1876])
+        colorado = base[base["state"] == "Colorado"].copy()
+        stale = colorado.copy()
+        stale["total_electoral_votes"] = 0
+        for frame in (
+            pd.concat([base, stale], ignore_index=True),
+            pd.concat([stale, base], ignore_index=True),
+        ):
+            assert_catalog_matches_spine(frame, years=[1876])
+
+    def test_string_years_are_coerced_rather_than_passing_vacuously(self) -> None:
+        """``years=['1876']`` must not silently compare against nothing.
+
+        Catalog keys are int-keyed and ``year`` is an int column, so an uncoerced string
+        scope matches no catalog key *and* no spine row — every check then iterates an
+        empty collection and the function reports agreement it never tested.
+        """
+        frame = ec_participation_frame([1876])
+        frame.loc[frame["state"] == "Ohio", "total_electoral_votes"] = 0
+        with pytest.raises(PVAbsenceCatalogError, match="not in the absence catalog"):
+            assert_catalog_matches_spine(frame, years=["1876"])  # type: ignore[list-item]
+
+    def test_a_non_boolean_is_total_raises_rather_than_yielding_nothing(self) -> None:
+        frame = ec_participation_frame([1876])
+        frame["is_total"] = frame["is_total"].map({False: "f", True: "t"})
+        with pytest.raises(PVAbsenceCatalogError, match="non-boolean `is_total`"):
+            assert_catalog_matches_spine(frame, years=[1876])
+
+
+# --- the participation-frame guard, at the shared layer ----------------------
+
+
+class TestParticipationShape:
+    """A malformed spine frame must fail loudly, never yield an empty roster.
+
+    These live here rather than only in ``test_pv_status.py`` because the curated path
+    is the one with no PV facts downstream (#139 derives it in-process at snapshot build
+    time), so ``assert_roster_covers_facts`` is not there to notice afterwards.
+    """
+
+    def test_string_is_total_yields_no_silent_empty_roster(self) -> None:
+        """The dangerous case: every non-empty string is truthy under ``.astype(bool)``.
+
+        Left unguarded, *no* row reads as data and the roster comes back empty with no
+        error — indistinguishable downstream from "the EC spine was never loaded".
+        """
+        frame = ec_participation_frame([2020])
+        frame["is_total"] = frame["is_total"].map({False: "f", True: "t"})
+        with pytest.raises(PVAbsenceCatalogError, match="non-boolean `is_total`"):
+            build_curated_roster(frame, source=SOURCE, years=[2020])
+
+    @pytest.mark.parametrize("bad", [0, 1, "false"])
+    def test_int_and_string_is_total_are_both_rejected(self, bad: object) -> None:
+        frame = ec_participation_frame([2020])
+        frame["is_total"] = bad
+        with pytest.raises(PVAbsenceCatalogError, match="non-boolean `is_total`"):
+            build_curated_roster(frame, source=SOURCE, years=[2020])
+
+    def test_a_null_is_total_raises(self) -> None:
+        frame = ec_participation_frame([2020])
+        frame["is_total"] = frame["is_total"].astype("object")
+        frame.loc[0, "is_total"] = None
+        with pytest.raises(PVAbsenceCatalogError, match="null `is_total`"):
+            build_curated_roster(frame, source=SOURCE, years=[2020])
+
+    def test_a_year_with_no_spine_rows_raises_rather_than_truncating(self) -> None:
+        """The converse of the phantom check, and it needs its own test.
+
+        The phantom check only fires for years the catalog *mentions*, so a caller that
+        reads the spine with the wrong ``years`` gets a silently truncated roster for
+        every uncatalogued year — 2 of 3 requested elections here.
+        """
+        with pytest.raises(PVAbsenceCatalogError, match=r"\[1900, 1904\]"):
+            build_curated_roster(
+                ec_participation_frame([2020]),
+                source=SOURCE,
+                years=[1900, 1904, 2020],
+            )
+
+    def test_an_empty_year_set_raises(self) -> None:
+        """Same "silence carries no information" failure as an uncurated year."""
+        with pytest.raises(PVAbsenceCatalogError, match="no years at all"):
+            build_curated_roster(
+                ec_participation_frame([1824]), source=SOURCE, years=[]
+            )
+
+    def test_the_error_names_the_entry_point_the_caller_actually_called(self) -> None:
+        """An operator greps the symbol in the message; it must be on their code path."""
+        frame = ec_participation_frame([1824]).drop(columns=["is_total"])
+        with pytest.raises(PVAbsenceCatalogError, match="build_curated_roster"):
+            build_curated_roster(frame, source=SOURCE, years=[1824])
