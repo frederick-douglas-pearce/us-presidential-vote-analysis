@@ -42,17 +42,24 @@ EC_SPINE_FLOOR = 1824
 # Years the default ingest deliberately excludes because their Archives tables encode
 # contested/uncounted electoral votes that need dedicated modeling, not the standard
 # per-state candidate grain (#32; tracked for follow-up in #57):
-#   - 1868: Georgia's 9 votes were contested (Congress could not agree whether to count
-#     them), so the page carries dual "excluding/including Georgia" totals rows, and
-#     Mississippi, Texas and Virginia did not participate (not yet readmitted).
 #   - 1872: Horace Greeley died after the popular vote; his electoral votes scattered
-#     across several candidates and Georgia's 3 Greeley votes were rejected by Congress.
-# These are a default-scoping choice, not a hard block: an explicit ``years={1868}``
+#     across several candidates, and Georgia's 3 Greeley votes were rejected by
+#     Congress — which the Archives table does not print at all (they exist only in a
+#     footnote), so they must be synthesized before they can be flagged. Ingested
+#     by #144.
+# These are a default-scoping choice, not a hard block: an explicit ``years={1872}``
 # still attempts them and fails loudly rather than being silently dropped.
 #
+# **1868 was lifted from this set in #143.** It is now ingested with Georgia's contested
+# nine votes carried as ``count_status='disputed'`` on the fact (D043/D044) rather than
+# resolved by picking one of the page's two totals rows; Mississippi, Texas and Virginia
+# (not yet readmitted, no electors appointed) load as genuine 0-electoral-vote rows.
+#
 # This constant is the **single gate** on both sources: UCSB derives its own scope from
-# ``ec_ingest_years()`` (D024 §6), so removing a year here admits it to E4 as well.
-UNSUPPORTED_EC_YEARS = frozenset({1868, 1872})
+# ``ec_ingest_years()`` (D024 §6), so removing a year here admits it to E4 as well — and
+# it likewise widens ``usvote.pv.absences.CURATED_YEARS``, whose import-time pin
+# (``CURATED_YEAR_COUNT``) is what forces an un-reviewed year to be noticed.
+UNSUPPORTED_EC_YEARS = frozenset({1872})
 
 
 def election_years(latest: int = LATEST_ELECTION_YEAR) -> set[int]:

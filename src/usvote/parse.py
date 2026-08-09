@@ -38,6 +38,7 @@ downstream, so the port preserves it rather than tidying it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Container, Iterable, Sequence
 from typing import TypedDict
 
@@ -49,13 +50,50 @@ from bs4.element import Tag
 T1_ROW_INDS = (0, 1)
 T1_ROW_HEADERS = ("President", "Main Opponent")
 
-# Column-0 labels that mark the electoral-vote totals row rather than a state.
+# Column-0 labels that mark the electoral-vote totals row rather than a state. Kept as
+# an **exact** membership test, deliberately: this is the ``<td>``-in-column-0 path, and
+# on a page whose trailing Notes row has no ``<th>`` the notes *prose* is column 0. A
+# prefix match there would capture any notes cell opening with "Total ..." and slice the
+# prose into the vote window.
 TOTALS_LABELS = frozenset({"Total", "Totals"})
+
+# The ``<th>`` totals-header path is matched by **prefix** instead, because a year whose
+# count was contested qualifies its totals labels: 1868 ends with both
+# ``Totals (excluding Georgia's votes)`` and ``Totals (including Georgia's votes)``, and
+# an exact match recognises neither — both would fall through as unlabelled rows and the
+# year would load with no totals row at all, which empties the electoral rank downstream
+# (the rank derives from it). The blast radius is confined to ``<th>`` cells, which
+# carry a row label and never prose. Which of several totals rows survives is decided by
+# :func:`_select_totals_row`, not here.
+TOTALS_LABEL_PREFIX = "Total"
+
+# The literal ``state`` value the parser gives a totals row (mirrored by
+# ``usvote.transform.TOTALS_ROW_LABEL``, which is where it stops being a state).
+TOTALS_ROW_STATE = "Totals"
 
 
 def _is_totals_label(text: str | None) -> bool:
-    """True if ``text`` is a ``Total``/``Totals`` label (whitespace-trimmed)."""
-    return text is not None and text.strip() in TOTALS_LABELS
+    """True if a ``<th>`` label marks a totals row (``Total``/``Totals``, however
+    qualified).
+
+    Used **only** for the ``<th>`` header path — see :data:`TOTALS_LABELS` for why the
+    column-0 ``<td>`` path stays an exact match.
+    """
+    return text is not None and _clean_label(text).startswith(TOTALS_LABEL_PREFIX)
+
+
+# A fully-parenthesized electoral-vote cell, e.g. 1868 Georgia's contested ``(9)``.
+# The Archives parenthesizes votes that were **cast but whose counting was in
+# question** — the nine Georgia votes the Senate and House could not agree to accept.
+# The parenthesis is read as the number it wraps; what it *means* is decided in
+# :data:`usvote.transform.COUNT_STATUS_OVERRIDES` (D043 §3), because the notation
+# alone does not distinguish "Congress decided no" from "Congress never decided".
+#
+# Deliberately anchored on both ends, so it matches ONLY a wholly-parenthesized
+# number. The pre-1824 totals notation ``176 (175)`` (appointed (cast), see
+# ``usvote.years.EC_SPINE_FLOOR``) is a *mixed* cell carrying two different facts,
+# and must keep raising ParseError rather than being silently read as one of them.
+_PARENTHESIZED_VOTES_RE = re.compile(r"^\((\d+)\)$")
 
 
 def _clean_label(text: str) -> str:
@@ -105,11 +143,34 @@ class CandidateState(TypedDict):
 StateVotes = dict[str | int, str | int]
 
 
+class ContestedCell(TypedDict):
+    """One vote cell the Archives printed **parenthesized** — 1868 Georgia's ``(9)``.
+
+    Reported alongside the parsed votes rather than only read, so the *meaning* of the
+    marking can be required to be catalogued. The parser reads ``(9)`` as ``9``; without
+    this, a parenthesized cell in a year with no
+    :data:`usvote.transform.COUNT_STATUS_OVERRIDES` entry would load as an ordinary
+    ``counted`` vote and read as entirely unremarkable — the same silent-no-op failure
+    ``apply_other_candidates`` raises on for an unregistered "Other(s)" column.
+    ``usvote.transform.assert_contested_cells_catalogued`` is the reciprocal check.
+
+    **Scoped to the ``For President`` columns**, like everything else this parser reads:
+    1868 Georgia's ``(9)`` also appears in the Vice-President column, which sits outside
+    the ``num_candidates`` window and so is never reported. Harmless while VP votes are
+    unmodelled, but the "every parenthesized cell is catalogued" guarantee holds over
+    the president columns only — stated here so it is a scope, not an oversight.
+    """
+
+    state: str
+    col_ind: int
+
+
 class ParsedTable2(TypedDict):
-    """Table 2 parsed into its two parts: candidate home states + vote matrix."""
+    """Table 2 parsed into its parts: home states, the vote matrix, contested cells."""
 
     candidate_state: list[CandidateState]
     votes_by_state: list[StateVotes]
+    contested_cells: list[ContestedCell]
 
 
 class ParsedYear(TypedDict):
@@ -250,11 +311,17 @@ def parse_table2(t2_rows: Sequence[Tag], state_names: Container[str]) -> ParsedT
         strip_footnotes(row)
     num_candidates = parse_t2_num_candidates(t2_rows[0])
     candidate_state = parse_t2_candidate_state(t2_rows[1], num_candidates)
-    votes_by_state = parse_t2_votes_by_state(t2_rows[2:], num_candidates, state_names)
+    votes_by_state, contested_cells = parse_t2_votes_by_state(
+        t2_rows[2:], num_candidates, state_names
+    )
     _assert_candidate_columns_consistent(
         num_candidates, candidate_state, votes_by_state
     )
-    return {"candidate_state": candidate_state, "votes_by_state": votes_by_state}
+    return {
+        "candidate_state": candidate_state,
+        "votes_by_state": votes_by_state,
+        "contested_cells": contested_cells,
+    }
 
 
 def _assert_candidate_columns_consistent(
@@ -338,40 +405,55 @@ def parse_t2_votes_by_state(
     states_rows: Iterable[Tag],
     num_candidates: int,
     state_names: Container[str],
-) -> list[StateVotes]:
+) -> tuple[list[StateVotes], list[ContestedCell]]:
     """Parse the per-state vote rows into ``{state, votes...}`` records.
 
     Resolving column 0 tells three row kinds apart: a state name (present in
-    ``state_names``), a ``Total``/``Totals`` label in column 0, or a
-    ``<th>Total(s)</th>`` header row — the last shifts the column window left by
-    one since it has no state ``<td>``. Any other row (e.g. the trailing Notes row)
-    has no valid state and is skipped, which is the notebook's parse-time check.
+    ``state_names``), a totals label in column 0, or a ``<th>`` totals header row —
+    the last shifts the column window left by one since it has no state ``<td>``. Any
+    other row (e.g. the trailing Notes row) has no valid state and is skipped, which
+    is the notebook's parse-time check.
 
     Within a kept row, column 0 of the vote window is the state's electoral-vote
     total (stored under ``'total_electoral_votes'``); the remaining columns are
     per-candidate electoral votes keyed by integer column index, with ``'-'``
-    read as ``0``.
+    read as ``0`` and a fully-parenthesized ``(9)`` read as ``9``.
+
+    A page may print **more than one** totals row (1868's excluding/including-Georgia
+    pair); :func:`_select_totals_row` resolves that down to the single row the rest of
+    the pipeline expects, and the surviving totals row is always appended last.
+
+    Returns ``(votes_by_state, contested_cells)`` — the second being every
+    parenthesized cell encountered (:class:`ContestedCell`), so the transform can
+    require each to be catalogued rather than silently reading it as an ordinary vote.
     """
     votes_by_state: list[StateVotes] = []
+    contested_cells: list[ContestedCell] = []
+    totals_rows: list[tuple[str, StateVotes]] = []
     for sr in states_rows:
         state_cols = sr.find_all("td")
         # An empty `if state_cols` yields col-0 "" which resolves to no state and
         # is skipped — a deliberate softening of the notebook's IndexError on a
         # cell-less row, so a stray blank/separator row can't crash a full run.
         col_0_text = _clean_label(state_cols[0].get_text()) if state_cols else ""
+        totals_header = sr.find("th", string=_is_totals_label)
         state: str | None
+        totals_label: str | None = None
         if col_0_text in state_names:
             state = col_0_text
             start_ind, end_ind = 1, num_candidates + 2
         elif col_0_text in TOTALS_LABELS:
-            state = "Totals"
+            state = TOTALS_ROW_STATE
+            totals_label = col_0_text
             start_ind, end_ind = 1, num_candidates + 2
-        elif sr.find("th", string=_is_totals_label):
+        elif totals_header is not None:
             # A ``<th>`` totals header (no state ``<td>``): the window starts at 0.
-            # Older pages use the plural ``<th>Totals</th>`` (e.g. 1824), so match
-            # both labels — a singular-only check silently drops the totals row,
-            # which empties the whole votes fact downstream (rank derives from it).
-            state = "Totals"
+            # Older pages use the plural ``<th>Totals</th>`` (e.g. 1824) and 1868
+            # qualifies it further, which is why the match is a prefix — an exact
+            # ``Total``/``Totals`` check silently drops the totals row, and that
+            # empties the whole votes fact downstream (rank derives from it).
+            state = TOTALS_ROW_STATE
+            totals_label = _clean_label(totals_header.get_text())
             start_ind, end_ind = 0, num_candidates + 1
         else:
             state = None
@@ -382,18 +464,107 @@ def parse_t2_votes_by_state(
             for si, sv in enumerate(state_cols[start_ind:end_ind]):
                 votes = sv.get_text().strip()  # strip() also clears a footnote nbsp
                 key: str | int = "total_electoral_votes" if si == 0 else si
-                if votes == "-":
-                    state_votes[key] = 0
-                    continue
-                try:
-                    state_votes[key] = int(votes)
-                except ValueError as exc:
-                    # A non-numeric electoral-vote cell is an un-modelled vote
-                    # notation, e.g. 1868's contested "(9)" for Georgia. Fail with a
-                    # typed, located error instead of a bare int() ValueError.
-                    raise ParseError(
-                        f"Table 2 row {state!r}: non-numeric electoral-vote cell "
-                        f"{votes!r} (column {key}) — an un-modelled vote notation"
-                    ) from exc
-            votes_by_state.append(state_votes)
-    return votes_by_state
+                state_votes[key] = _parse_vote_cell(votes, state=state, column=key)
+                if si and _PARENTHESIZED_VOTES_RE.match(votes):
+                    contested_cells.append({"state": state, "col_ind": si})
+            if totals_label is None:
+                votes_by_state.append(state_votes)
+            else:
+                totals_rows.append((totals_label, state_votes))
+    votes_by_state.extend(_select_totals_row(totals_rows, votes_by_state))
+    return votes_by_state, contested_cells
+
+
+def _parse_vote_cell(text: str, *, state: str, column: str | int) -> int:
+    """Read one electoral-vote cell: ``'-'`` -> 0, ``'(9)'`` -> 9, else ``int``.
+
+    Raises :class:`ParseError` — not a bare ``int()`` ``ValueError`` — on any other
+    notation, naming the row and column, so an un-modelled marking on a newly-covered
+    year surfaces where it occurred instead of as an anonymous cast failure.
+    """
+    if text == "-":
+        return 0
+    parenthesized = _PARENTHESIZED_VOTES_RE.match(text)
+    if parenthesized:
+        return int(parenthesized.group(1))
+    try:
+        return int(text)
+    except ValueError as exc:
+        raise ParseError(
+            f"Table 2 row {state!r}: non-numeric electoral-vote cell {text!r} "
+            f"(column {column}) — an un-modelled vote notation"
+        ) from exc
+
+
+def _select_totals_row(
+    totals_rows: Sequence[tuple[str, StateVotes]], state_rows: Sequence[StateVotes]
+) -> list[StateVotes]:
+    """Reduce one page's totals row(s) to the single row downstream expects.
+
+    Everything after the parser treats ``state == "Totals"`` as one row per year
+    (``usvote.transform._add_electoral_rank`` ranks off it,
+    ``assert_totals_equal_state_sum`` compares against it,
+    ``assert_state_count_by_year`` counts it), so two totals rows cannot both
+    survive. 1868 prints exactly that: the Archives ends the table with ``Totals
+    (excluding Georgia's votes) 285`` and ``Totals (including Georgia's votes) 294``
+    and **marks neither authoritative**, because the Senate and House deadlocked over
+    whether Georgia's nine votes counted.
+
+    The surviving row is the one whose ``total_electoral_votes`` equals the sum of
+    the page's own per-state allotments. That rule is **derived from the source
+    rather than asserted about it** — no curated per-year literal to go stale — and it
+    is not a way of taking a side in the congressional dispute: the allotment column
+    counts electors **appointed**, and Georgia's nine were appointed beyond dispute
+    (only their *counting* was open). It is the same 12th-Amendment "whole number of
+    Electors appointed" basis D041 already fixes for the denominator, so 1868
+    resolves to 294 by the existing rule (D043 §1, D044). Verified against the
+    fixture's own tokens: its 37 state rows sum to 294 / Grant 214 / Seymour 80,
+    matching the *including* row exactly — the *excluding* row disagrees with the very
+    state rows printed above it and would fail
+    :func:`usvote.transform.assert_totals_equal_state_sum`.
+
+    Comparing **allotments** on both sides (never the per-candidate vote columns) is
+    what keeps the rule sound on shortfall years: 1832's totals row carries 288
+    appointed, matching its state-allotment sum, even though only 286 votes were cast
+    (:data:`usvote.transform.ELECTORAL_VOTE_SHORTFALLS`).
+
+    Raises :class:`ParseError` if zero or several rows reconcile — never silently
+    picks one, since picking wrong is exactly the failure that answers Congress's
+    question by accident.
+    """
+    if len(totals_rows) <= 1:
+        return [record for _label, record in totals_rows]
+    ragged = [
+        record.get("state")
+        for record in (*state_rows, *(r for _label, r in totals_rows))
+        if "total_electoral_votes" not in record
+    ]
+    if ragged:
+        # Reached before _assert_candidate_columns_consistent can speak, so without this
+        # a cell-less row escapes as a bare KeyError naming no row — against the
+        # module's contract that a malformed table raises a located ParseError. The
+        # 1868 page already interleaves an empty <tr> between its two totals rows, so
+        # ragged rows in exactly this region are real.
+        raise ParseError(
+            f"Table 2 row(s) {ragged} carry no electoral-vote cells, so the totals row "
+            "cannot be resolved against the per-state allotment sum. The table is "
+            "malformed (a row with no <td> cells in the vote window)."
+        )
+    allotted = sum(int(row["total_electoral_votes"]) for row in state_rows)
+    reconciling = [
+        (label, record)
+        for label, record in totals_rows
+        if record["total_electoral_votes"] == allotted
+    ]
+    if len(reconciling) != 1:
+        printed = {
+            label: record["total_electoral_votes"] for label, record in totals_rows
+        }
+        raise ParseError(
+            f"Table 2 prints {len(totals_rows)} totals rows {printed} and "
+            f"{len(reconciling)} of them match the per-state allotment sum "
+            f"({allotted}); exactly one must, since the appointed allotment is not an "
+            "editorial choice (D044). Either the state rows were mis-parsed or this "
+            "page needs its own handling — do not guess which total is authoritative."
+        )
+    return [reconciling[0][1]]

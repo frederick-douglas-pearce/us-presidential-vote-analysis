@@ -12,7 +12,7 @@ Table 2 prints ``-`` for "won no electoral votes here" and the parser reads it a
 (:func:`usvote.parse.parse_t2_votes_by_state`), so every getter has a state row in every
 participating state — a loser is an explicit ``president_electoral_votes = 0`` row,
 not a
-missing one (verified rectangular across all 49 years; ~59% of state rows are such
+missing one (verified rectangular across all 50 years; ~59% of state rows are such
 0-rows, now guarded by :func:`usvote.transform.assert_rectangular_state_grain`). So a
 plain **EC-left** join already keeps every loser's per-state row — the "lost the EC, won
 the PV" rows this project's thesis explores — with the national rank/``took_office``

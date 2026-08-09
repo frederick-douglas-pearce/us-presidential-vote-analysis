@@ -5,7 +5,7 @@ far had exactly one origin: parsing UCSB's markup (``usvote/ucsb/transform.py``)
 grants no reuse rights and this repo is public (D022), and the API snapshot is
 redistributable-only *at the source* (D030) — so a public surface that reports a
 ``pv_status`` for every ``(year, state)`` back to 1824 cannot be built on UCSB-derived
-rows. This module is the alternative: the 28 pre-1976 absences, enumerated in code, each
+rows. This module is the alternative: the 32 pre-1976 absences, enumerated in code, each
 carrying a **public-domain citation**, so the classification is ours to ship.
 
 **On provenance, stated precisely.** The firewall this module establishes is over
@@ -40,13 +40,18 @@ and "1868 was reviewed and has no further absences" are indistinguishable — th
 exceptions-table failure mode, one level up. So :func:`build_curated_roster` **raises**
 for any year outside it rather than quietly returning an all-``popular_vote`` roster.
 
-**1868** sits in the catalog as *catalogued but never consumed* — four rows, exactly as
-``UCSB_NONPARTICIPATING_STATES`` retains its 1868 trio: the research is recorded so it
-is not redone, and :data:`CURATED_YEARS` is what stops it being used. **1872 has no
-entries, and its absence from the catalog is not evidence it has none** — that is the
-reason :data:`CURATED_YEARS` is a scope marker rather than a derived set. Whoever lands
-#57 must review 1872 (Greeley died after the popular vote; Congress rejected Georgia's
-electoral votes) before adding it, not read this silence as a clean bill of health.
+**1868** was catalogued here before it could be consumed — four rows carried while the
+year sat in ``UNSUPPORTED_EC_YEARS``, so the research would not be redone. #143 ingested
+the year, which admitted those four rows to :data:`CURATED_YEARS` with **no new
+research**: that is the payoff of recording an out-of-scope finding rather than
+deferring it.
+
+**1872 has no entries, and its absence from the catalog is not evidence it has none** —
+that is the reason :data:`CURATED_YEARS` is a scope marker rather than a derived set.
+Whoever lands #144 must review 1872 (Greeley died after the popular vote; Congress
+rejected Georgia's electoral votes) before adding it, not read this silence as a clean
+bill of health. Until then the year stays in ``UNSUPPORTED_EC_YEARS`` and
+:func:`build_curated_roster` refuses to derive for it.
 """
 
 from __future__ import annotations
@@ -80,7 +85,7 @@ CURATED_YEARS: frozenset[int] = frozenset(ec_ingest_years())
 #: would be *derivable* while nobody has reviewed it for absences. Bumping
 #: ``LATEST_ELECTION_YEAR`` is a routine each-cycle edit, so this is a live path, not a
 #: hypothetical one.
-CURATED_YEAR_COUNT = 49
+CURATED_YEAR_COUNT = 50
 
 
 @dataclass(frozen=True)
@@ -193,23 +198,27 @@ _CITE_1864_RETURNS_REJECTED = (
     "electoral votes for the state in 1864."
 )
 
-#: 1868, catalogued but **never consumed** — 1868 is in ``UNSUPPORTED_EC_YEARS`` and so
-#: outside :data:`CURATED_YEARS`. Recorded so the research is not redone if the
-#: Reconstruction elections are ever brought into scope. It needs its own citation
-#: precisely because there is no in-repo constant behind it today: UCSB's 1868 Florida
-#: row is parser-derived from UCSB markup, which is what this module exists to avoid.
+#: 1868 Florida. Curated ahead of the year's ingest (#140) and consumed unchanged when
+#: #143 lifted 1868 from ``UNSUPPORTED_EC_YEARS``. It needs its own citation precisely
+#: because there is no in-repo constant behind it: UCSB's 1868 Florida row is
+#: parser-derived from UCSB markup, which is what this module exists to avoid.
 _CITE_FL_1868 = (
     "Readmitted by the Omnibus Act, 15 Stat. 73 (25 June 1868), too late to organize a "
     "presidential election; the Legislature appointed the state's three electors. The "
     "only time Florida's popular vote did not decide a presidential election, and — "
     "with Colorado in 1876 — one of only two such instances after the Civil War. — "
-    f"{_ELECTORS_CLAUSE}. NOT CURATED: 1868 is in UNSUPPORTED_EC_YEARS."
+    f"{_ELECTORS_CLAUSE}."
 )
+#: 1868 Mississippi/Texas/Virginia. Independently corroborated by the EC spine, which
+#: carries a dash in the *allotment* column for all three — no electors appointed at
+#: all, which is materially different from 1872's Arkansas and Louisiana, who appointed
+#: electors whose returns were never counted (D043 §2).
 _CITE_1868_UNREADMITTED = (
     "Not readmitted to representation in time for the 1868 election, so the state "
     "appointed no electors and cast no votes. The Omnibus Act, 15 Stat. 73 (25 June "
     "1868), readmitted six other states; Virginia, Mississippi and Texas were not "
-    "readmitted until 1870. NOT CURATED: 1868 is in UNSUPPORTED_EC_YEARS."
+    "readmitted until 1870. Independently corroborated by the EC spine itself, which "
+    "records zero electoral votes for the state in 1868."
 )
 
 
@@ -224,8 +233,9 @@ def _absent(citation: str) -> PVAbsence:
 #: The catalog: every ``(year, state)`` in the EC spine at which **no popular vote for
 #: president was held**, keyed on the canonical ``dwh.state`` PK (the full state name).
 #:
-#: 28 entries fall inside :data:`CURATED_YEARS` — 17 ``legislature_chosen`` and 11
-#: ``not_participating``. A further 4 sit in 1868 and are catalogued but never consumed.
+#: All 32 entries fall inside :data:`CURATED_YEARS` — 18 ``legislature_chosen`` and 14
+#: ``not_participating``. (The four 1868 rows were catalogued out of scope in #140 and
+#: admitted unchanged when #143 ingested the year.)
 #:
 #: **Only absences are enumerated.** Every other participating state is the residual,
 #: and :func:`usvote.pv.status.build_roster` marks it ``popular_vote`` by not finding
@@ -264,15 +274,16 @@ PV_ABSENCE_CATALOG: dict[tuple[int, str], PVAbsence] = {
     (1864, "Tennessee"): _absent(_CITE_1864_RETURNS_REJECTED),
     (1864, "Texas"): _absent(_CITE_1864_NO_RETURNS),
     (1864, "Virginia"): _absent(_CITE_1864_NO_RETURNS),
-    # 1876 — Colorado, admitted 1 August, too late to hold an election.
-    (1876, "Colorado"): _legislature(_CITE_CO_1876),
-    # --- beyond CURATED_YEARS: catalogued, never consumed -----------------------
-    # 1868 is in UNSUPPORTED_EC_YEARS, so build_curated_roster raises for it. These rows
-    # record the research; CURATED_YEARS is what keeps them out of any derivation.
+    # 1868 — Florida's legislature appointed its three electors (readmitted too late
+    # to organize an election); Mississippi, Texas and Virginia were not readmitted at
+    # all and appointed none. Catalogued out of scope in #140, consumed unchanged
+    # by #143.
     (1868, "Florida"): _legislature(_CITE_FL_1868),
     (1868, "Mississippi"): _absent(_CITE_1868_UNREADMITTED),
     (1868, "Texas"): _absent(_CITE_1868_UNREADMITTED),
     (1868, "Virginia"): _absent(_CITE_1868_UNREADMITTED),
+    # 1876 — Colorado, admitted 1 August, too late to hold an election.
+    (1876, "Colorado"): _legislature(_CITE_CO_1876),
 }
 
 

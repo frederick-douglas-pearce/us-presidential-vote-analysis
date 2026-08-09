@@ -257,7 +257,7 @@ class TestRealCorpus:
     """Replay the real corpus. Mirrors UCSB's ``TestRealCorpus`` posture (D022-style
     out-of-tree storage, though here by choice rather than by licence).
 
-    This is the payoff of #89: 38 of the 49 in-scope years have no committed fixture,
+    This is the payoff of #89: 41 of the 50 in-scope years have no committed fixture,
     so before this ran, a ``parse.py`` refactor could break a 19th-century layout with
     nothing to catch it.
     """

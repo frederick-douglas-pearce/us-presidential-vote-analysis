@@ -268,7 +268,7 @@ gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 
 > **Read this before refreshing (#89 / D036).** If `USVOTE_EC_HTML_DIR` is set, `usvote all`
 > rebuilds from the **local Archives corpus** rather than scraping — that is the point of the
-> corpus (a rebuild costs zero requests instead of ~49 against a site asking for a 10-second
+> corpus (a rebuild costs zero requests instead of ~50 against a site asking for a 10-second
 > crawl delay), but it means the rebuild replays **saved bytes**.
 >
 > Consequences to hold in mind:

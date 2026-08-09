@@ -49,6 +49,15 @@ from typing import Any
 
 import pandas as pd
 
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_COUNTED,
+    COUNT_STATUS_DISPUTED,
+    COUNT_STATUS_REASON_COLUMN,
+    COUNT_STATUS_UNCOUNTED,
+    COUNT_STATUS_VALUES,
+)
+
 # --- historical corrections (provenance-carrying constants) ----------------
 # 2016 faithless/"Other" electors. The Archives Table 2 for 2016 collapses the
 # faithless votes into two unnamed "Other" columns (parsed col_ind 2 & 4); the
@@ -302,7 +311,80 @@ CONTINGENT_OFFICE_HOLDERS: Mapping[int, str] = {
 
 # The literal state label the parser gives the per-year national totals row (Table 2's
 # final row). The votes matrix carries it verbatim until build_votes_fact NULLs it out.
+# Spelled out rather than imported from ``usvote.parse.TOTALS_ROW_STATE``: importing it
+# would put ``usvote.transform -> usvote.parse -> bs4`` in the graph for one string,
+# which is the same shape D044 created ``usvote.count_status`` to avoid. The two are
+# kept from drifting by a test that asserts they are equal, not by a dependency.
 TOTALS_ROW_LABEL = "Totals"
+
+# Electoral votes that were CAST and then not counted — the ``count_status``
+# mechanism (D043 §3/§6, enum in :mod:`usvote.count_status`). Deliberately disjoint
+# from :data:`ELECTORAL_VOTE_SHORTFALLS` above, which records votes **never cast**: a
+# row here still sums to its allotment, so no shortfall entry belongs to these years,
+# and a spurious one would be caught by assert_row_votes_sum_to_total.
+#
+# Keyed at the D043 §4 grain — ``(year, state, canonical candidate name)`` — because
+# the status varies *within* a state (1872 Georgia rejects Greeley's 3 while counting
+# Brown's 6 and Jenkins's 2, #144). The name must be the canonical,
+# post-reconciliation spelling; the apply step asserts each key matches exactly one
+# row, so a typo fails loud rather than silently leaving the row ``counted`` (the
+# inner-join silent-drop hazard, one level down).
+#
+# 1868 Georgia: the state's nine electors were appointed and cast their votes for
+# Seymour, and the two chambers never agreed whether to accept them — so the Archives
+# prints the year's totals twice, excluding (285) and including (294) Georgia, and
+# marks neither authoritative. ``disputed``, not ``not_counted``: Congress decided
+# *nothing* here, where in 1872 it decided *no*. The reason is the Archives' own
+# sentence, verbatim (a US Government work, so unlike UCSB prose it carries no
+# redistribution restriction).
+# Source: https://www.archives.gov/electoral-college/1868 (Notes section); see
+# docs/corrections.md.
+_ARCHIVES_NOTE_1868_GEORGIA = (
+    "The electoral votes of Georgia were contested and the Senate and the House of "
+    "Representatives could not agree whether to accept – and count – them or not."
+)
+COUNT_STATUS_OVERRIDES: Mapping[tuple[int, str, str], tuple[str, str]] = {
+    (1868, "Georgia", "Horatio Seymour"): (
+        COUNT_STATUS_DISPUTED,
+        _ARCHIVES_NOTE_1868_GEORGIA,
+    ),
+}
+
+
+def _assert_overrides_well_formed() -> None:
+    """Raise at **import** if an override names a status outside the enum, or no reason.
+
+    The mirror of :data:`usvote.pv.absences.PV_ABSENCE_CATALOG`'s integrity check, and
+    it runs at import for the same reason the catalog's scope pin does: a typo'd status
+    (``"not-counted"``) would otherwise be written verbatim, and
+    :func:`assert_count_status_reasons` would then report it as a *spurious reason on a
+    counted row* — an error naming the wrong problem, sending the reader hunting for a
+    stray reason instead of a bad enum value. Only the database's CHECK would catch it,
+    after a full scrape and transform.
+
+    A blank reason is rejected for the same reason ``PVAbsence`` requires a non-empty
+    citation: ``notna()`` is satisfied by ``""``, and a flagged row whose grounds are
+    empty is an assertion the reader cannot check.
+    """
+    for key, (status, reason) in COUNT_STATUS_OVERRIDES.items():
+        if status not in COUNT_STATUS_VALUES:
+            raise TransformError(
+                f"count_status override {key} names status {status!r}, which is not in "
+                f"the enum {list(COUNT_STATUS_VALUES)} (usvote.count_status)."
+            )
+        if status == COUNT_STATUS_COUNTED:
+            raise TransformError(
+                f"count_status override {key} names {COUNT_STATUS_COUNTED!r}, which is "
+                "already the default for every row — a silent no-op, not a correction."
+            )
+        if not reason.strip():
+            raise TransformError(
+                f"count_status override {key} carries no reason. Every flagged row "
+                "must carry the source's own sentence why (see PVAbsence.citation)."
+            )
+
+
+_assert_overrides_well_formed()
 
 # The TIGER state shapefile carries these five US territories in its NAME column;
 # they are not states and are dropped so the state dimension is the 50 states + DC.
@@ -351,6 +433,10 @@ VOTES_COLUMN_ORDER: tuple[str, ...] = (
     "president_electoral_votes",
     "president_electoral_rank",
     "took_office",
+    # Appended, never inserted: keeping new columns at the end leaves an existing
+    # consumer's column slice stable.
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_REASON_COLUMN,
 )
 
 # --- canonical keys (the cross-source reconciliation spine, D006 / #30) ----
@@ -781,6 +867,10 @@ def build_votes_fact(
     )
     votes["is_total"] = votes["_merge"].eq("left_only")
     votes.loc[votes["is_total"], "state"] = None
+    # Before the name column is dropped: COUNT_STATUS_OVERRIDES keys on the canonical
+    # candidate name, and after the NULLing above a totals row can no longer match a
+    # state-keyed override — which is the intent (aggregates stay `counted`, D044).
+    votes = _add_count_status(votes)
     votes = votes.drop(columns=["president_candidate_name", "name", "_merge"])
 
     votes = _add_electoral_rank(votes)
@@ -797,6 +887,8 @@ def build_votes_fact(
     assert_totals_equal_state_sum(votes)
     assert_state_count_by_year(parsed_years, votes)
     assert_rectangular_state_grain(votes)
+    assert_contested_cells_catalogued(parsed_years)
+    assert_count_status_reasons(votes)
     return votes
 
 
@@ -846,6 +938,52 @@ def _add_electoral_rank(votes: pd.DataFrame) -> pd.DataFrame:
         totals, how="inner", on=["year", "candidate_id", "col_ind"], validate="m:1"
     )
     return ranked.drop(columns=["col_ind"])
+
+
+def _add_count_status(votes: pd.DataFrame) -> pd.DataFrame:
+    """Attach ``count_status``/``count_status_reason``, defaulting to ``counted``.
+
+    The column is **complete, not exceptions-only** (D024 §3 applied to the fact):
+    every row carries a status, so "counted" is stated rather than inferred from a
+    null. Only the rows named in :data:`COUNT_STATUS_OVERRIDES` differ, and each
+    carries the source's own sentence as its reason.
+
+    Each override key must match **exactly one** row of a year that is actually in
+    this run. A key that matches none — a typo'd state or a non-canonical candidate
+    spelling — would otherwise leave the row silently ``counted``, which is the same
+    class of silent no-op the name-reconciliation asserts exist to catch, and worse
+    here: the row would look ordinary rather than missing. A key matching several
+    means the fact's ``(year, state, candidate)`` grain is broken, which
+    :func:`assert_rectangular_state_grain` also guards.
+
+    Years absent from ``votes`` are skipped, so a subset run (e.g. ``years={2020}``)
+    never indicts another year's overrides — the same pattern as
+    :func:`apply_other_candidates` and :func:`_add_took_office`.
+    """
+    votes = votes.copy()
+    votes[COUNT_STATUS_COLUMN] = COUNT_STATUS_COUNTED
+    votes[COUNT_STATUS_REASON_COLUMN] = None
+    for (year, state, candidate), (status, reason) in COUNT_STATUS_OVERRIDES.items():
+        year_rows = votes["year"] == year
+        if not year_rows.any():
+            continue  # this year not in the current (possibly subset) run
+        match = (
+            year_rows
+            & (votes["state"] == state)
+            & (votes["president_candidate_name"] == candidate)
+        )
+        matched = int(match.sum())
+        if matched != 1:
+            raise TransformError(
+                f"count_status override ({year}, {state!r}, {candidate!r}) matched "
+                f"{matched} vote rows, expected exactly 1. A zero match is the "
+                "dangerous "
+                "case: the row stays 'counted' and reads as ordinary. Check the state "
+                "label and the canonical candidate spelling (see CANDIDATE_NAME_FIXES)."
+            )
+        votes.loc[match, COUNT_STATUS_COLUMN] = status
+        votes.loc[match, COUNT_STATUS_REASON_COLUMN] = reason
+    return votes
 
 
 def _add_took_office(votes: pd.DataFrame, candidates: pd.DataFrame) -> pd.DataFrame:
@@ -991,7 +1129,7 @@ def assert_rectangular_state_grain(votes: pd.DataFrame) -> None:
     fails loud here instead of silently dropping a loser row into a downstream gap.
     :func:`assert_state_count_by_year` only checks the rank-1 winner per state, and
     :func:`assert_totals_equal_state_sum` is blind to a dropped 0-row — this closes that
-    seam. Verified to hold across all 49 currently-loaded years.
+    seam. Verified to hold across all 50 currently-loaded years.
 
     Both a duplicate ``(state, candidate)`` row **and** full ``rows == states x
     getters`` coverage are checked: a pure count test alone has a blind spot — a
@@ -1019,6 +1157,82 @@ def assert_rectangular_state_grain(votes: pd.DataFrame) -> None:
         raise TransformError(
             "EC votes fact not rectangular — a getter is missing a state row "
             f"(dense-fact invariant, D026). year: (rows, states, getters) = {offenders}"
+        )
+
+
+def assert_contested_cells_catalogued(
+    parsed_years: Sequence[Mapping[str, Any]],
+) -> None:
+    """Raise unless every parenthesized source cell has a :data:`COUNT_STATUS_OVERRIDES`
+    entry.
+
+    The **reciprocal** of the guard inside :func:`_add_count_status`, and the direction
+    that actually bites. That one runs catalog -> data (an override matching no row
+    raises); this runs data -> catalog. Without it, the ``(9)`` relaxation in
+    :func:`usvote.parse._parse_vote_cell` is a global loosening: before #143 *every*
+    parenthesized cell raised ``ParseError``, and afterwards one appearing in a year
+    with no catalog entry would load as an ordinary ``counted`` vote with every sum
+    validator passing — precisely the "the row reads as ordinary" failure, reached from
+    the other side. 41 of the 50 in-scope years have no committed fixture, so a
+    re-scrape or an Archives edit is a live path, not a hypothetical one.
+
+    Modelled on :func:`apply_other_candidates`, which raises the same way for an
+    unregistered "Other(s)" placeholder column.
+    """
+    uncatalogued: list[tuple[int, str, str]] = []
+    for py in parsed_years:
+        year = int(py["year"])
+        by_col = {
+            int(cs["col_ind"]): cs["president_candidate_name"]
+            for cs in py["t2"]["candidate_state"]
+        }
+        for cell in py["t2"].get("contested_cells", []):
+            candidate = by_col.get(int(cell["col_ind"]), "")
+            if (year, cell["state"], candidate) not in COUNT_STATUS_OVERRIDES:
+                uncatalogued.append((year, cell["state"], candidate))
+    if uncatalogued:
+        raise TransformError(
+            f"The source printed parenthesized (contested) electoral votes for "
+            f"{uncatalogued}, which have no COUNT_STATUS_OVERRIDES entry. The parser "
+            "reads the number, but what the marking *means* — 'Congress decided no' vs "
+            "'Congress never decided' — is a curated fact (D043 §3). Left uncatalogued "
+            "the votes would load as ordinary 'counted' rows. Add an entry with the "
+            "source's own sentence, plus a test and a docs/corrections.md row."
+        )
+
+
+def assert_count_status_reasons(votes: pd.DataFrame) -> None:
+    """Raise unless ``count_status`` and ``count_status_reason`` agree, both ways.
+
+    A row whose votes did not enter the count
+    (:data:`~usvote.count_status.COUNT_STATUS_UNCOUNTED`) must carry the source's
+    sentence saying so, and a ``counted`` row must carry none. The biconditional is
+    the point: a flagged row with no grounds is an assertion the reader cannot check,
+    and a reason attached to an ordinary row is a claim the status contradicts. This
+    is the fact-level analogue of :class:`usvote.pv.absences.PVAbsence` requiring a
+    citation.
+    """
+    uncounted = votes[COUNT_STATUS_COLUMN].isin(COUNT_STATUS_UNCOUNTED)
+    # `.str.strip().astype(bool)` rather than `.notna()`: an empty (or whitespace)
+    # reason satisfies notna() while being exactly the unverifiable assertion this
+    # guard exists to reject — the same reason PVAbsence checks `citation.strip()`.
+    has_reason = (
+        votes[COUNT_STATUS_REASON_COLUMN].fillna("").astype(str).str.strip() != ""
+    )
+    keys = ["year", "state", "candidate_id"]
+
+    unexplained = votes.loc[uncounted & ~has_reason]
+    if len(unexplained):
+        raise TransformError(
+            "count_status rows are flagged as uncounted but carry no "
+            f"{COUNT_STATUS_REASON_COLUMN}: {unexplained[keys].values.tolist()}"
+        )
+    spurious = votes.loc[~uncounted & has_reason]
+    if len(spurious):
+        raise TransformError(
+            f"count_status is '{COUNT_STATUS_COUNTED}' but a "
+            f"{COUNT_STATUS_REASON_COLUMN} is set for: "
+            f"{spurious[keys].values.tolist()}"
         )
 
 

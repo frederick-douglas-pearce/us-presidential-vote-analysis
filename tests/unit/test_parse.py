@@ -26,6 +26,7 @@ from usvote.parse import (
     ParseError,
     _assert_candidate_columns_consistent,
     _clean_label,
+    _is_totals_label,
     parse_election_years,
     parse_t1_candidate_party,
     parse_t2_num_candidates,
@@ -62,7 +63,13 @@ def test_parse_election_years_shape(parsed: dict[int, ParsedYear]) -> None:
         rec = parsed[year]
         assert set(rec) == {"t1", "t2", "year"}
         assert rec["year"] == year
-        assert set(rec["t2"]) == {"candidate_state", "votes_by_state"}
+        assert set(rec["t2"]) == {
+            "candidate_state",
+            "votes_by_state",
+            "contested_cells",
+        }
+        # No modern year prints a parenthesized (contested) vote cell.
+        assert rec["t2"]["contested_cells"] == []
 
 
 # --- 2020: simple modern year ----------------------------------------------
@@ -141,9 +148,10 @@ def test_votes_by_state_plain_td_totals_row() -> None:
         "<table><tr><td>Total</td><td>538</td><td>306</td><td>232</td></tr></table>",
         "html.parser",
     ).find_all("tr")
-    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == [
-        {"state": "Totals", "total_electoral_votes": 538, 1: 306, 2: 232},
-    ]
+    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == (
+        [{"state": "Totals", "total_electoral_votes": 538, 1: 306, 2: 232}],
+        [],
+    )
 
 
 def test_votes_by_state_skips_non_state_rows() -> None:
@@ -152,7 +160,7 @@ def test_votes_by_state_skips_non_state_rows() -> None:
     rows = BeautifulSoup(
         "<table><tr><td>Notes</td><td>see below</td></tr></table>", "html.parser"
     ).find_all("tr")
-    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == []
+    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == ([], [])
 
 
 # --- parse_t2_num_candidates -----------------------------------------------
@@ -253,9 +261,10 @@ def test_th_totals_plural_header_recognized() -> None:
         "<table><tr><th>Totals</th><td>261</td><td>99</td><td>84</td></tr></table>",
         "html.parser",
     ).find_all("tr")
-    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == [
-        {"state": "Totals", "total_electoral_votes": 261, 1: 99, 2: 84},
-    ]
+    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == (
+        [{"state": "Totals", "total_electoral_votes": 261, 1: 99, 2: 84}],
+        [],
+    )
 
 
 def test_strip_footnotes_removes_sup_markers_and_digits() -> None:
@@ -311,11 +320,214 @@ def test_2024_footnoted_state_is_not_dropped() -> None:
 
 
 def test_vote_cell_non_numeric_raises_parse_error() -> None:
-    # A non-numeric electoral-vote cell (e.g. 1868's contested "(9)") must raise a
-    # typed, located ParseError rather than a bare int() ValueError.
+    # An un-modelled electoral-vote notation must raise a typed, located ParseError
+    # rather than a bare int() ValueError. This guard predates 1868 (whose "(9)" it used
+    # to catch, before #143 modelled it) and stays: it is what makes the *next*
+    # un-modelled marking surface at the row that carried it.
     rows = BeautifulSoup(
-        "<table><tr><td>Georgia</td><td>9</td><td>(9)</td><td>-</td></tr></table>",
+        "<table><tr><td>Georgia</td><td>9</td><td>9?</td><td>-</td></tr></table>",
         "html.parser",
     ).find_all("tr")
     with pytest.raises(ParseError, match="un-modelled vote notation"):
         parse_t2_votes_by_state(rows, 2, STATE_NAMES)
+
+
+def test_mixed_parenthesized_vote_cell_still_raises() -> None:
+    """``176 (175)`` is appointed-then-cast, not a contested count — it must NOT parse.
+
+    The negative half of the ``(9)`` rule. The pre-1824 pages carry this notation in the
+    totals cell, and reading it as either number would silently pick one of two different
+    facts. Only a *wholly* parenthesized cell is a contested-vote marking.
+    """
+    rows = BeautifulSoup(
+        "<table><tr><td>Georgia</td><td>176 (175)</td><td>9</td><td>-</td></tr></table>",
+        "html.parser",
+    ).find_all("tr")
+    with pytest.raises(ParseError, match="un-modelled vote notation"):
+        parse_t2_votes_by_state(rows, 2, STATE_NAMES)
+
+
+# --- 1868: the contested-count year (#143) ---------------------------------
+
+
+@pytest.fixture(scope="module")
+def parsed_1868() -> ParsedYear:
+    """The 1868 page: two totals rows, a parenthesized ``(9)``, three dash allotments."""
+    tables = {1868: _year_tables(1868)}
+    return next(iter(parse_election_years(tables, STATE_NAMES)))
+
+
+def test_1868_parses_the_contested_parenthesized_votes(parsed_1868: ParsedYear) -> None:
+    # Georgia's row is ['Georgia*', '9', '-', '(9)', ...]: nine electors appointed, none
+    # for Grant, nine cast for Seymour with their counting in question. The parser reads
+    # the number; usvote.transform.COUNT_STATUS_OVERRIDES decides what it means (D043 §3).
+    by_state = {v["state"]: v for v in parsed_1868["t2"]["votes_by_state"]}
+    assert by_state["Georgia"]["total_electoral_votes"] == 9
+    assert (by_state["Georgia"][1], by_state["Georgia"][2]) == (0, 9)
+
+
+def test_1868_dash_in_the_allotment_column_is_a_real_zero(
+    parsed_1868: ParsedYear,
+) -> None:
+    # Mississippi/Texas/Virginia print '-' in *Electoral Vote of Each State*, not just in
+    # the vote columns: not readmitted, no electors appointed, so they genuinely
+    # contribute 0 — the fact usvote.pv.absences' zero-EV cross-check keys on.
+    by_state = {v["state"]: v for v in parsed_1868["t2"]["votes_by_state"]}
+    for state in ("Mississippi", "Texas", "Virginia"):
+        assert by_state[state]["total_electoral_votes"] == 0
+        assert (by_state[state][1], by_state[state][2]) == (0, 0)
+
+
+def test_1868_selects_the_totals_row_that_reconciles_with_its_own_state_rows(
+    parsed_1868: ParsedYear,
+) -> None:
+    """The dual-totals resolution (D044): 294, because the state rows say 294.
+
+    The page prints ``Totals (excluding Georgia's votes) 285`` and ``Totals (including
+    Georgia's votes) 294`` and marks neither authoritative. Exactly one survives, and it
+    is chosen by agreeing with the per-state allotments the same page prints — not by
+    position, and not by a curated literal. Verified independently: the 37 state rows sum
+    to 294 / Grant 214 / Seymour 80.
+    """
+    rows = parsed_1868["t2"]["votes_by_state"]
+    totals = [v for v in rows if v["state"] == "Totals"]
+    assert len(totals) == 1, "exactly one totals row may survive"
+    assert totals[0]["total_electoral_votes"] == 294
+    assert (totals[0][1], totals[0][2]) == (214, 80)
+
+    states = [v for v in rows if v["state"] != "Totals"]
+    assert len(states) == 37
+    assert sum(int(v["total_electoral_votes"]) for v in states) == 294
+    assert sum(int(v[1]) for v in states) == 214
+    assert sum(int(v[2]) for v in states) == 80
+
+
+def test_1868_recognizes_both_totals_rows_before_choosing_one() -> None:
+    """Pins *recognition*, which the surviving-row test alone cannot.
+
+    With a single totals row `_select_totals_row` returns it unvalidated, so a regression
+    that left the 285 row **unrecognised** — rather than recognised-and-rejected — would
+    still leave 294 surviving and the sibling test green. The dangerous direction (a 285
+    row surviving) is caught by `assert_totals_equal_state_sum`; this closes the other
+    one, so "two candidates were considered" is asserted rather than assumed.
+    """
+    rows = _year_tables(1868)[1].find_all("tr")
+    for row in rows:
+        strip_footnotes(row)
+    labels = [
+        _clean_label(th.get_text())
+        for row in rows
+        for th in row.find_all("th")
+        if _is_totals_label(th.get_text())
+    ]
+    assert labels == [
+        "Totals (excluding Georgia's votes)",
+        "Totals (including Georgia's votes)",
+    ]
+
+
+def test_multiple_totals_rows_none_reconciling_raises() -> None:
+    """Never guess. Two totals rows and no agreement with the states is a parse failure.
+
+    The failure this protects against is silent and consequential: picking the wrong
+    totals row answers Congress's 1868 question by accident, in whichever direction the
+    parser leaned.
+    """
+    rows = BeautifulSoup(
+        "<table>"
+        "<tr><td>Ohio</td><td>10</td><td>10</td><td>-</td></tr>"
+        "<tr><th>Totals (one way)</th><td>11</td><td>11</td><td>-</td></tr>"
+        "<tr><th>Totals (another)</th><td>12</td><td>12</td><td>-</td></tr>"
+        "</table>",
+        "html.parser",
+    ).find_all("tr")
+    with pytest.raises(ParseError, match="0 of them match the per-state allotment sum"):
+        parse_t2_votes_by_state(rows, 2, STATE_NAMES)
+
+
+def test_multiple_totals_rows_both_reconciling_raises() -> None:
+    """Two rows agreeing with the allotment sum is equally un-resolvable — also raises."""
+    rows = BeautifulSoup(
+        "<table>"
+        "<tr><td>Ohio</td><td>10</td><td>10</td><td>-</td></tr>"
+        "<tr><th>Totals (one way)</th><td>10</td><td>10</td><td>-</td></tr>"
+        "<tr><th>Totals (another)</th><td>10</td><td>-</td><td>10</td></tr>"
+        "</table>",
+        "html.parser",
+    ).find_all("tr")
+    with pytest.raises(ParseError, match="2 of them match the per-state allotment sum"):
+        parse_t2_votes_by_state(rows, 2, STATE_NAMES)
+
+
+def test_a_single_totals_row_is_kept_without_reconciling() -> None:
+    """A lone totals row is never subjected to the sum rule — 1832 is the reason.
+
+    1832's totals row carries 288 electors **appointed** while only 286 votes were *cast*
+    (two Maryland electors did not vote — ``ELECTORAL_VOTE_SHORTFALLS``). Its allotment
+    column still reconciles, but the rule must not be reached at all when there is nothing
+    to disambiguate, or a future shortfall year with a genuinely off-by-N total would be
+    rejected outright rather than handled by the documented shortfall mechanism.
+    """
+    tables = {1832: _year_tables(1832)}
+    parsed_1832 = next(iter(parse_election_years(tables, STATE_NAMES)))
+    rows = parsed_1832["t2"]["votes_by_state"]
+    totals = [v for v in rows if v["state"] == "Totals"]
+    assert len(totals) == 1
+    assert totals[0]["total_electoral_votes"] == 288
+    states = [v for v in rows if v["state"] != "Totals"]
+    # The allotment column reconciles; the *cast* votes are 2 short, which is the
+    # separate ELECTORAL_VOTE_SHORTFALLS mechanism, not a totals-selection problem.
+    assert sum(int(v["total_electoral_votes"]) for v in states) == 288
+    cast = sum(
+        int(votes)
+        for v in states
+        for key, votes in v.items()
+        if isinstance(key, int)
+    )
+    assert cast == 286
+
+
+def test_1868_reports_georgia_as_a_contested_cell(parsed_1868: ParsedYear) -> None:
+    """The parenthesized cell is *reported*, not merely read (the #143 review's finding).
+
+    Reading `(9)` as 9 without reporting it makes the relaxation global: a parenthesized
+    cell in any year with no `COUNT_STATUS_OVERRIDES` entry would load as an ordinary
+    counted vote, where before #143 it raised. `transform.assert_contested_cells_
+    catalogued` is the reciprocal check, and this is the signal it consumes.
+    """
+    assert parsed_1868["t2"]["contested_cells"] == [{"state": "Georgia", "col_ind": 2}]
+
+
+def test_a_totals_row_with_no_vote_cells_raises_a_located_error() -> None:
+    """A ragged row must raise ParseError, not a bare KeyError naming nothing.
+
+    `_select_totals_row` runs before `_assert_candidate_columns_consistent` can speak,
+    and the 1868 page already interleaves an empty `<tr>` between its two totals rows —
+    so ragged rows in exactly this region are real, not hypothetical.
+    """
+    rows = BeautifulSoup(
+        "<table>"
+        "<tr><td>Ohio</td><td>10</td><td>10</td><td>-</td></tr>"
+        "<tr><th>Totals (one way)</th></tr>"
+        "<tr><th>Totals (another)</th><td>10</td><td>10</td><td>-</td></tr>"
+        "</table>",
+        "html.parser",
+    ).find_all("tr")
+    with pytest.raises(ParseError, match="carry no electoral-vote cells"):
+        parse_t2_votes_by_state(rows, 2, STATE_NAMES)
+
+
+def test_a_notes_row_opening_with_total_is_not_read_as_a_totals_row() -> None:
+    """The column-0 `<td>` path stays an EXACT match; only `<th>` labels are prefixed.
+
+    On a page whose Notes row carries no `<th>`, column 0 is the notes *prose*. A prefix
+    match there would slice that prose into the vote window and feed it to
+    `_parse_vote_cell`. Widening only the `<th>` path confines the blast radius to cells
+    that carry a row label and never prose.
+    """
+    rows = BeautifulSoup(
+        "<table><tr><td>Total electoral votes cast: see below</td>"
+        "<td>irrelevant</td><td>prose</td></tr></table>",
+        "html.parser",
+    ).find_all("tr")
+    assert parse_t2_votes_by_state(rows, 2, STATE_NAMES) == ([], [])
