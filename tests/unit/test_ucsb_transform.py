@@ -164,11 +164,14 @@ class TestYearScope:
         years = ucsb_ingest_years()
         assert min(years) == 1824
         assert max(years) == 2024
-        assert len(years) == 49
+        assert len(years) == 50
 
     def test_reconstruction_years_excluded_via_the_ec_spine(self) -> None:
-        # Not by a local literal — see the grep test below.
-        assert 1868 not in ucsb_ingest_years()
+        # Not by a local literal — see the grep test below. 1868 was admitted by #143
+        # lifting it from UNSUPPORTED_EC_YEARS, with no edit under usvote/ucsb/: exactly
+        # the self-healing property the derivation was built for (D024 §6). 1872 is still
+        # gated, pending #144.
+        assert 1868 in ucsb_ingest_years()
         assert 1872 not in ucsb_ingest_years()
 
     def test_pre_1824_no_popular_vote_years_excluded(self) -> None:
@@ -448,16 +451,18 @@ class TestRoster:
             transform_ucsb(parsed, ec, years={1900})
 
     def test_nonparticipating_constant_keeps_all_fourteen_entries(self) -> None:
-        """All 14 are catalogued; only in-scope years are consumed (D024 §6).
+        """All 14 are catalogued, and since #143 all 14 are consumed (D024 §6).
 
-        1868's three are deferred behind #57, not deleted — deferring an ingest is not
-        hiding a fact. This count flips 11 -> 14 automatically when #57 lands.
+        The three 1868 rows were carried while the year was gated behind
+        ``UNSUPPORTED_EC_YEARS`` — deferring an ingest is not hiding a fact. #143 lifted
+        the gate and the count went 11 -> 14 with **no edit in this module**, which is the
+        derived-scope property this constant was written to allow.
         """
         assert len(UCSB_NONPARTICIPATING_STATES) == 14
         in_scope = ucsb_ingest_years()
         consumed = {k for k in UCSB_NONPARTICIPATING_STATES if k[0] in in_scope}
-        assert len(consumed) == 11
-        assert {k[0] for k in consumed} == {1864}
+        assert len(consumed) == 14
+        assert {k[0] for k in consumed} == {1864, 1868}
 
     def test_every_in_scope_constant_entry_produces_a_roster_row(self) -> None:
         parsed = [_year(1864, state_rows=[_state_row("Ohio", 100, 100)])]
@@ -864,7 +869,7 @@ def real_corpus_reconciled(
     reason="USVOTE_UCSB_HTML_DIR unset; the UCSB snapshot lives outside the repo",
 )
 class TestRealCorpus:
-    """The acceptance check the synthetics cannot deliver: all 49 in-scope years.
+    """The acceptance check the synthetics cannot deliver: all 50 in-scope years.
 
     Skipped whenever the snapshot is absent, so CI stays green and never touches UCSB
     (D014/D016/D022) — the same contract as ``test_ucsb_parse.TestRealCorpus``. The EC
@@ -881,26 +886,32 @@ class TestRealCorpus:
         assert set(pv["year"]) == ucsb_ingest_years()
         assert set(roster["year"]) == ucsb_ingest_years()
 
-    def test_seventeen_legislature_chosen_rows_reach_the_roster(
+    def test_eighteen_legislature_chosen_rows_reach_the_roster(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
-        """18 in the corpus, 17 in the roster — 1868 FL is outside the EC spine.
+        """18 in the corpus, and since #143 all 18 in the roster — 1868 FL joined.
 
-        Not a regression: the count moves to 18 when #57 admits 1868. Stated at the
-        layer it measures (see ``docs/ucsb-html-formats.md`` §4 case 1).
+        It was 18-in-corpus / 17-in-roster while 1868 sat outside the EC spine; admitting
+        the year closed the gap with no UCSB-side change (see ``docs/ucsb-html-formats.md``
+        §4 case 1). 1868 Florida is also the one row that lets the corpus corroborate the
+        in-repo catalog's ``legislature_chosen`` classification for that year.
         """
         _, roster = real_corpus_result
         legislature = roster[roster["pv_status"] == PV_STATUS_LEGISLATURE_CHOSEN]
-        assert len(legislature) == 17
-        assert 1868 not in set(legislature["year"])
+        assert len(legislature) == 18
+        assert (1868, "Florida") in set(
+            zip(legislature["year"], legislature["state"], strict=True)
+        )
 
-    def test_eleven_non_participating_rows_reach_the_roster(
+    def test_fourteen_non_participating_rows_reach_the_roster(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
+        # 11 (the 1864 Confederate states) + the three 1868 states not yet readmitted,
+        # admitted when #143 lifted the year's gate.
         _, roster = real_corpus_result
         marked = roster[roster["pv_status"] == PV_STATUS_NOT_PARTICIPATING]
-        assert len(marked) == 11
-        assert set(marked["year"]) == {1864}
+        assert len(marked) == 14
+        assert set(marked["year"]) == {1864, 1868}
 
     def test_state_labels_are_all_canonical(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
@@ -943,7 +954,7 @@ class TestRealCorpus:
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
         _, roster = real_corpus_result
-        assert roster["note"].notna().sum() == 28  # 17 legislature + 11 not-participating
+        assert roster["note"].notna().sum() == 32  # 18 legislature + 14 not-participating
         assert set(roster.loc[roster["note"].notna(), "pv_status"]) == {
             PV_STATUS_LEGISLATURE_CHOSEN,
             PV_STATUS_NOT_PARTICIPATING,
@@ -953,7 +964,7 @@ class TestRealCorpus:
     def test_the_curated_catalog_agrees_with_ucsb_on_every_classification(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
-        """The **classification** of all 2,130 ``(year, state)`` pairs, set-equal.
+        """The **classification** of all 2,167 ``(year, state)`` pairs, set-equal.
 
         **The dependency is deliberately inverted.** ``usvote/pv/absences.py`` classifies
         the pre-1976 absences from public-domain sources so the public snapshot needs no
@@ -968,13 +979,13 @@ class TestRealCorpus:
         it would be asserting a tautology. What is genuinely independent is the
         ``pv_status`` on each of those rows: UCSB's comes from parsing their markup,
         ours from a hand-curated catalog with its own citations. So the absence sets are
-        checked first and on their own, since those 28 rows are the entire claim, and the
+        checked first and on their own, since those 32 rows are the entire claim, and the
         full triple-equality follows as the statement that nothing else diverges either.
 
         ``note`` is **not** compared. UCSB's prose is theirs (``redistributable=false``);
         ours is null by construction.
 
-        This is the only check that exercises all 28 absences against real markup, and it
+        This is the only check that exercises all 32 absences against real markup, and it
         **skips in CI**. Running it locally with ``USVOTE_UCSB_HTML_DIR`` set is a merge
         precondition for anything touching the catalog.
         """
@@ -999,10 +1010,10 @@ class TestRealCorpus:
 
         mine, theirs = triples(ours), triples(ucsb_roster)
 
-        # The claim under test: the 28 absences, and which cause each carries.
+        # The claim under test: the 32 absences, and which cause each carries.
         my_absences = {t for t in mine if t[2] in PV_ABSENCE_STATUSES}
         their_absences = {t for t in theirs if t[2] in PV_ABSENCE_STATUSES}
-        assert len(my_absences) == 28
+        assert len(my_absences) == 32
         assert my_absences == their_absences, (
             f"ours-not-UCSB: {sorted(my_absences - their_absences)}\n"
             f"UCSB-not-ours: {sorted(their_absences - my_absences)}"
@@ -1014,7 +1025,7 @@ class TestRealCorpus:
             f"UCSB-not-ours: {sorted(theirs - mine)}"
         )
 
-    # --- reconcile (#38): the only run of reconcile over all 49 in-scope years ---
+    # --- reconcile (#38): the only run of reconcile over all 50 in-scope years ---
     def test_reconcile_passes_all_guards_over_the_whole_corpus(
         self, real_corpus_reconciled: pd.DataFrame
     ) -> None:

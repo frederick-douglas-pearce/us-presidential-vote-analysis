@@ -21,8 +21,13 @@ from tests._helpers import (
     record_inserts,
 )
 from usvote import scrape
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_COUNTED,
+    COUNT_STATUS_DISPUTED,
+    COUNT_STATUS_REASON_COLUMN,
+)
 from usvote.load import SCHEMA
-from usvote.parse import ParseError
 from usvote.pipeline import (
     EC_SPINE_FLOOR,
     LATEST_ELECTION_YEAR,
@@ -33,7 +38,7 @@ from usvote.pipeline import (
     run_ec_pipeline,
 )
 from usvote.scrape import Fetch, fetch_from_dir
-from usvote.transform import TransformError
+from usvote.transform import ELECTORAL_VOTE_SHORTFALLS, TransformError
 
 # --- election_years --------------------------------------------------------
 
@@ -67,9 +72,11 @@ def test_ec_ingest_years_applies_floor_and_reconstruction_exclusions() -> None:
     assert min(years) == EC_SPINE_FLOOR == 1824
     assert 1820 not in years  # post-12A but below the floor (deferred)
     assert 1800 not in years  # pre-12th-Amendment (out of scope, D010)
-    # ... 1868 and 1872 are real elections but excluded pending dedicated modeling ...
+    # ... 1872 is a real election but excluded pending dedicated modeling (#144), while
+    # 1868 — its former companion — is now ingested (#143) ...
     assert election_years(2024) >= UNSUPPORTED_EC_YEARS
     assert not (UNSUPPORTED_EC_YEARS & years)
+    assert 1868 in years
     # ... and the modern spine through the latest year is retained.
     assert {1824, 1864, 1876, 1892, 2024} <= years
 
@@ -178,10 +185,9 @@ def test_run_ec_pipeline_pre1892_spine_offline(
     ("year", "exc", "match"),
     [
         # 1872: Greeley's scattered votes parse as an "Others" column with no
-        # registered correction -> TransformError.
+        # registered correction -> TransformError. (1868 was the other entry here until
+        # #143 ingested it; 1872 lands in #144.)
         (1872, TransformError, "no registered correction"),
-        # 1868: Georgia's contested "(9)" is a non-numeric vote cell -> ParseError.
-        (1868, ParseError, "un-modelled vote notation"),
     ],
 )
 def test_run_ec_pipeline_rejects_gated_reconstruction_year(
@@ -191,9 +197,10 @@ def test_run_ec_pipeline_rejects_gated_reconstruction_year(
     exc: type[Exception],
     match: str,
 ) -> None:
-    # Both years are excluded from the default ingest (UNSUPPORTED_EC_YEARS); an
+    # The year is excluded from the default ingest (UNSUPPORTED_EC_YEARS); an
     # explicit years={year} must fail loudly with a typed, located error rather than
     # silently loading wrong data or crashing with a bare ValueError.
+    assert year in UNSUPPORTED_EC_YEARS
     record_inserts(monkeypatch)
     with pytest.raises(exc, match=match):
         run_ec_pipeline(
@@ -204,6 +211,63 @@ def test_run_ec_pipeline_rejects_gated_reconstruction_year(
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),
         )
+
+
+def test_run_ec_pipeline_1868_contested_count_offline(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1868 end-to-end (#143): the year the gate used to exclude now loads clean.
+
+    Exercises the whole slice at once — the dual-totals selection, the parenthesized
+    ``(9)``, the three dash-allotment states, and ``count_status`` reaching the fact —
+    against the real saved Archives page.
+    """
+    record_inserts(monkeypatch)
+    candidates_df, _state_df, votes_df = run_ec_pipeline(
+        make_dbc(recording_conn),
+        "unused.shp",
+        replace=True,
+        years={1868},
+        fetch=fetch_from_dir(FIXTURES_DIR),
+        load_geo=lambda _p: fake_state_geo(),
+    )
+    by_id = candidates_df.set_index("candidate_id")["name"].to_dict()
+    tot = votes_df[votes_df["is_total"]]
+    ev = {
+        by_id[int(r["candidate_id"])]: int(r["president_electoral_votes"])
+        for _, r in tot.iterrows()
+    }
+    # The *including-Georgia* totals: 294 appointed, Grant 214, Seymour 80. The 285/71
+    # reading is the one the source also prints and this pipeline must not adopt (D044).
+    assert ev == {"Ulysses S. Grant": 214, "Horatio Seymour": 80}
+    assert int(tot["total_electoral_votes"].iloc[0]) == 294
+
+    state_rows = votes_df[votes_df["state"].notna()]
+    # Mississippi/Texas/Virginia appointed no electors: real 0-EV rows, not missing ones.
+    unreadmitted = state_rows[
+        state_rows["state"].isin(["Mississippi", "Texas", "Virginia"])
+    ]
+    assert len(unreadmitted) == 6  # 3 states x 2 candidates — dense, per D026
+    assert set(unreadmitted["total_electoral_votes"]) == {0}
+    assert set(unreadmitted["president_electoral_votes"]) == {0}
+
+    # Georgia's nine are Seymour's, and they are flagged `disputed` with the Archives'
+    # own sentence — the row exists and carries its votes; only their counting is open.
+    georgia = state_rows[state_rows["state"] == "Georgia"]
+    seymour_id = next(cid for cid, name in by_id.items() if name == "Horatio Seymour")
+    seymour_ga = georgia[georgia["candidate_id"] == seymour_id].iloc[0]
+    assert int(seymour_ga["president_electoral_votes"]) == 9
+    assert seymour_ga[COUNT_STATUS_COLUMN] == COUNT_STATUS_DISPUTED
+    assert "could not agree whether to accept" in seymour_ga[COUNT_STATUS_REASON_COLUMN]
+
+    # Exactly one row in the year is flagged; everything else is plainly `counted`,
+    # including the national totals row that aggregates the disputed nine (D044).
+    flagged = votes_df[votes_df[COUNT_STATUS_COLUMN] != COUNT_STATUS_COUNTED]
+    assert len(flagged) == 1
+    assert set(tot[COUNT_STATUS_COLUMN]) == {COUNT_STATUS_COUNTED}
+    # 1868 must NOT acquire a shortfall entry: its votes were cast, then contested —
+    # the other mechanism entirely (D043 §6).
+    assert not [key for key in ELECTORAL_VOTE_SHORTFALLS if key[0] == 1868]
 
 
 def test_run_ec_pipeline_2024_footnoted_state_offline(

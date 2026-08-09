@@ -7,10 +7,10 @@ public-domain Archives roster snapshot), so these run in CI with no network, no 
 module ships must be provable without UCSB, and the structural half of that proof lives
 in :mod:`tests.unit.test_layering`.
 
-**What CI can and cannot prove here, stated plainly.** The 11 ``not_participating`` rows
+**What CI can and cannot prove here, stated plainly.** The 14 ``not_participating`` rows
 are verifiable *in both directions* against the committed fixture — they must be exactly
-the 1864 zero-EV set, and the fixture carries that set — so those 11 are genuinely
-proven. The 17 ``legislature_chosen`` rows are not: a legislature-appointed state cast
+the 1864/1868 zero-EV set, and the fixture carries that set — so those 14 are genuinely
+proven. The 18 ``legislature_chosen`` rows are not: a legislature-appointed state cast
 electoral votes like any other, so the spine cannot distinguish it from a state that held
 a popular vote. They are pinned here as an explicit expected set with non-empty
 citations, and independently checked against UCSB by
@@ -50,10 +50,11 @@ from usvote.pv.status import (
 
 SOURCE = "TEST"
 
-#: The 17 ``legislature_chosen`` rows, written out longhand rather than derived from the
+#: The 18 ``legislature_chosen`` rows, written out longhand rather than derived from the
 #: catalog — a test that recomputes the constant it is checking proves nothing.
 EXPECTED_LEGISLATURE_CHOSEN: frozenset[tuple[int, str]] = frozenset(
     {
+        (1868, "Florida"),
         (1824, "Delaware"),
         (1824, "Georgia"),
         (1824, "Louisiana"),
@@ -74,23 +75,28 @@ EXPECTED_LEGISLATURE_CHOSEN: frozenset[tuple[int, str]] = frozenset(
     }
 )
 
-#: The 11 ``not_participating`` rows — the 1864 Confederate states. Unlike the set above,
-#: this one is also checked *against the EC spine* below, which is real proof.
+#: The 14 ``not_participating`` rows — the 11 Confederate states of 1864, plus the three
+#: not yet readmitted in 1868 (admitted to scope by #143 with no new research: they were
+#: catalogued out of scope in #140). Unlike the set above, this one is also checked
+#: *against the EC spine* below, which is real proof.
 EXPECTED_NOT_PARTICIPATING: frozenset[tuple[int, str]] = frozenset(
-    (1864, state)
-    for state in (
-        "Alabama",
-        "Arkansas",
-        "Florida",
-        "Georgia",
-        "Louisiana",
-        "Mississippi",
-        "North Carolina",
-        "South Carolina",
-        "Tennessee",
-        "Texas",
-        "Virginia",
-    )
+    {
+        (1864, state)
+        for state in (
+            "Alabama",
+            "Arkansas",
+            "Florida",
+            "Georgia",
+            "Louisiana",
+            "Mississippi",
+            "North Carolina",
+            "South Carolina",
+            "Tennessee",
+            "Texas",
+            "Virginia",
+        )
+    }
+    | {(1868, state) for state in ("Mississippi", "Texas", "Virginia")}
 )
 
 
@@ -176,9 +182,12 @@ class TestBuildRosterAbsenceMap:
 class TestCatalogIntegrity:
     """The catalog as a data structure, before any derivation runs over it."""
 
-    def test_the_in_scope_catalog_is_exactly_28_rows_split_17_11(self) -> None:
+    def test_the_in_scope_catalog_is_exactly_32_rows_split_18_14(self) -> None:
         in_scope = {k: v for k, v in PV_ABSENCE_CATALOG.items() if k[0] in CURATED_YEARS}
-        assert len(in_scope) == 28
+        assert len(in_scope) == 32
+        # Since #143 admitted 1868, *every* catalog row is in scope — there is no longer a
+        # catalogued-but-unconsumed remainder.
+        assert in_scope.keys() == PV_ABSENCE_CATALOG.keys()
         by_status: dict[str, set[tuple[int, str]]] = {}
         for key, entry in in_scope.items():
             by_status.setdefault(entry.pv_status, set()).add(key)
@@ -192,12 +201,17 @@ class TestCatalogIntegrity:
             assert entry.pv_status in PV_ABSENCE_STATUSES, key
             assert entry.citation.strip(), f"{key} has no citation"
 
-    def test_curated_years_is_the_ec_ingest_span_and_excludes_1868_1872(self) -> None:
-        """The count pin. If the EC span moves, an unreviewed year becomes derivable."""
-        assert len(CURATED_YEARS) == CURATED_YEAR_COUNT == 49
+    def test_curated_years_is_the_ec_ingest_span_and_excludes_1872(self) -> None:
+        """The count pin. If the EC span moves, an unreviewed year becomes derivable.
+
+        1868 joined the span in #143 — and the pin is exactly what forced that to be a
+        deliberate act: lifting ``UNSUPPORTED_EC_YEARS`` raised at import until its four
+        already-cited rows were confirmed in scope.
+        """
+        assert len(CURATED_YEARS) == CURATED_YEAR_COUNT == 50
         assert min(CURATED_YEARS) == 1824
         assert max(CURATED_YEARS) == 2024
-        assert 1868 not in CURATED_YEARS
+        assert 1868 in CURATED_YEARS
         assert 1872 not in CURATED_YEARS
 
     def test_the_scope_pin_is_enforced_at_runtime_not_only_by_this_test(self) -> None:
@@ -218,11 +232,21 @@ class TestCatalogIntegrity:
             mp.setattr(absences, "CURATED_YEARS", CURATED_YEARS | {2028})
             absences._assert_curated_scope_pinned()
 
-    def test_the_1868_rows_are_catalogued_but_outside_curated_years(self) -> None:
-        """Retained so the research is not redone; gated so it is never consumed."""
+    def test_no_catalog_row_is_left_outside_curated_years(self) -> None:
+        """The catalogue-early payoff, asserted rather than assumed.
+
+        1868's four rows were curated in #140 while the year was still gated, precisely so
+        that admitting it (#143) needed no new research. Nothing is catalogued-but-unusable
+        now; if a future year is pre-curated the same way, this test is where that shows.
+        """
         uncurated = {k for k in PV_ABSENCE_CATALOG if k[0] not in CURATED_YEARS}
-        assert {year for year, _ in uncurated} == {1868}
-        assert len(uncurated) == 4
+        assert not uncurated
+        assert {k for k in PV_ABSENCE_CATALOG if k[0] == 1868} == {
+            (1868, "Florida"),
+            (1868, "Mississippi"),
+            (1868, "Texas"),
+            (1868, "Virginia"),
+        }
 
     def test_no_catalog_key_falls_in_mit_s_span(self) -> None:
         """MIT's 1976-2024 precondition, held here rather than as a runtime assert.
@@ -253,13 +277,17 @@ class TestRealShapes:
         assert len(keys_with(roster, PV_STATUS_POPULAR_VOTE)) == 18
         assert not keys_with(roster, PV_STATUS_NOT_PARTICIPATING)
 
-    def test_1864_not_participating_is_exactly_the_spine_s_zero_ev_set(self) -> None:
-        """The 11 rows CI can genuinely prove — both directions, against the spine.
+    def test_not_participating_is_exactly_the_spine_s_zero_ev_set(self) -> None:
+        """The 14 rows CI can genuinely prove — both directions, against the spine.
 
-        Not "the catalog says so": the fixture independently records which 1864 states
-        cast zero electoral votes, and the two sets must coincide exactly.
+        Not "the catalog says so": the fixture independently records which states cast
+        zero electoral votes, and the two sets must coincide exactly. Both absence years
+        are checked together (1864's eleven Confederate states, 1868's three not yet
+        readmitted), because the *cross-year* equality is what pins the claim — a
+        1864-only check would pass while 1868 quietly acquired or lost a row.
         """
-        frame = ec_participation_frame([1864])
+        years = [1864, 1868]
+        frame = ec_participation_frame(years)
         zero_ev = {
             (int(year), state)
             for year, state, ev in zip(
@@ -267,11 +295,21 @@ class TestRealShapes:
             )
             if state is not None and ev == 0
         }
-        roster = curated(1864)
-        assert len(roster) == 36
+        roster = curated(*years)
         assert keys_with(roster, PV_STATUS_NOT_PARTICIPATING) == zero_ev
         assert zero_ev == EXPECTED_NOT_PARTICIPATING
-        assert len(keys_with(roster, PV_STATUS_POPULAR_VOTE)) == 25
+
+        # ...and per year, so a shortfall in one cannot be masked by the other.
+        roster_1864 = curated(1864)
+        assert len(roster_1864) == 36
+        assert len(keys_with(roster_1864, PV_STATUS_NOT_PARTICIPATING)) == 11
+        assert len(keys_with(roster_1864, PV_STATUS_POPULAR_VOTE)) == 25
+        roster_1868 = curated(1868)
+        assert len(roster_1868) == 37
+        assert len(keys_with(roster_1868, PV_STATUS_NOT_PARTICIPATING)) == 3
+        # Florida is legislature_chosen, not absent — it cast its three electoral votes.
+        assert keys_with(roster_1868, PV_STATUS_LEGISLATURE_CHOSEN) == {(1868, "Florida")}
+        assert len(keys_with(roster_1868, PV_STATUS_POPULAR_VOTE)) == 33
 
     def test_south_carolina_is_not_participating_in_1864_not_legislature_chosen(
         self,
@@ -301,7 +339,7 @@ class TestRealShapes:
         assert len(roster) == 51
         assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
 
-    def test_the_whole_curated_span_yields_28_absences_and_nothing_else(self) -> None:
+    def test_the_whole_curated_span_yields_32_absences_and_nothing_else(self) -> None:
         roster = build_curated_roster(
             ec_participation_frame(CURATED_YEARS),
             source=SOURCE,
@@ -313,7 +351,7 @@ class TestRealShapes:
             if status in PV_ABSENCE_STATUSES
         }
         assert absent == EXPECTED_LEGISLATURE_CHOSEN | EXPECTED_NOT_PARTICIPATING
-        assert len(absent) == 28
+        assert len(absent) == 32
 
 
 # --- the residual, and the shape contract -----------------------------------
@@ -376,7 +414,7 @@ class TestResidualAndShape:
 class TestCuratedYearGate:
     """Silence about an unreviewed year must not read as "no absences"."""
 
-    @pytest.mark.parametrize("year", [1868, 1872, 1800, 2028])
+    @pytest.mark.parametrize("year", [1872, 1800, 2028])
     def test_an_uncurated_year_raises_rather_than_deriving(self, year: int) -> None:
         frame = pd.DataFrame(
             [{
@@ -391,21 +429,31 @@ class TestCuratedYearGate:
 
     def test_a_mixed_request_raises_on_the_uncurated_year(self) -> None:
         """Partial derivation would be worse than refusal — some years unreviewed."""
-        with pytest.raises(PVAbsenceCatalogError, match=r"\[1868\]"):
+        with pytest.raises(PVAbsenceCatalogError, match=r"\[1872\]"):
             build_curated_roster(
-                ec_participation_frame([1864]), source=SOURCE, years=[1864, 1868]
+                ec_participation_frame([1864]), source=SOURCE, years=[1864, 1872]
             )
 
-    def test_the_1868_catalog_rows_never_reach_a_roster(self) -> None:
-        """They are in the constant; they are unreachable through the derivation."""
-        assert (1868, "Florida") in PV_ABSENCE_CATALOG
+    def test_the_1868_catalog_rows_now_reach_the_roster(self) -> None:
+        """The other side of the gate: 1868 derives, 1872 still does not.
+
+        Was ``..._never_reach_a_roster`` while the year was gated. Inverting it (rather
+        than deleting it) keeps the gate's *behaviour* pinned from both directions — a
+        refactor that quietly stopped applying the catalog would pass a "1872 absent"
+        assertion alone.
+        """
         roster = build_curated_roster(
             ec_participation_frame(CURATED_YEARS),
             source=SOURCE,
             years=CURATED_YEARS,
         )
-        assert 1868 not in set(roster["year"])
+        assert 1868 in set(roster["year"])
         assert 1872 not in set(roster["year"])
+        by_state = statuses(roster)
+        assert by_state[(1868, "Florida")] == PV_STATUS_LEGISLATURE_CHOSEN
+        assert by_state[(1868, "Texas")] == PV_STATUS_NOT_PARTICIPATING
+        # ...and an ordinary 1868 state is still the residual, not swept up by the year.
+        assert by_state[(1868, "Ohio")] == PV_STATUS_POPULAR_VOTE
 
 
 # --- the spine cross-check --------------------------------------------------

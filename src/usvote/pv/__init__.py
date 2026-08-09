@@ -32,7 +32,7 @@ One module here is **not** a contract, and the difference is worth stating rathe
 letting the list above imply otherwise:
 
 - :mod:`usvote.pv.absences` — the in-repo pre-1976 popular-vote absence catalog (#140):
-  28 ``(year, state)`` pairs at which no popular vote was held, each with a
+  32 ``(year, state)`` pairs at which no popular vote was held, each with a
   public-domain citation, plus the derivation that layers them onto the EC spine's
   roster. It carries **data and a derivation**, where every module above carries a
   shape, a guard, or a seam. It belongs here anyway for the same reason the roster

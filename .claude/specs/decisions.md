@@ -2072,3 +2072,102 @@ picking a totals row.
   enumerated in #57 and unchanged by this entry.
 - Blog post 3 states this handling as shipped-by-decision; if #57 lands differently, the post is the
   thing that has to change.
+
+## D044: 1868's two totals rows are resolved by the source's own allotment sum, not a curated literal
+
+**Date:** 2026-08-09
+
+**Context:** #143 (the first of #57's two per-year slices) ingests 1868 and carries the shared
+`count_status` DDL. D043 settled the *modeling* — a three-value status on the fact — but left three
+implementation questions the code had to answer, and one of them is a place where a parser can
+silently take a side in a constitutional dispute.
+
+The 1868 Archives page (`tests/fixtures/www_archives_gov_electoral_college_1868.html`) ends with
+**two** totals rows — `Totals (excluding Georgia's votes) 285 / 214 / 71` and `Totals (including
+Georgia's votes) 294 / 214 / 80` — and marks neither authoritative. Everything downstream of the
+parser treats `state == "Totals"` as one row per year (`_add_electoral_rank` ranks off it,
+`assert_totals_equal_state_sum` compares against it, `assert_state_count_by_year` counts it), so
+both cannot survive. The parser's exact `{"Total", "Totals"}` match recognised *neither*, which
+would have loaded the year with no totals row at all.
+
+**Decision:**
+
+1. **The surviving totals row is the one whose `total_electoral_votes` equals the sum of that
+   page's own per-state allotments** — a rule *derived from the source*, not a curated per-year
+   literal, and not an editorial choice between two readings. Verified against the fixture's own
+   tokens: its 37 state rows sum to **294 / Grant 214 / Seymour 80**, matching the *including*
+   row exactly, while the *excluding* row disagrees with the very state rows printed above it and
+   would fail `assert_totals_equal_state_sum`. This re-derives D043 §1's 294 from the data rather
+   than inheriting it from D043's prose, which is what AC 4 of #143 demanded (D043 §6 had already
+   been found wrong once). The rule compares **allotments** on both sides, never the per-candidate
+   vote columns: 1832's totals row carries 288 *appointed* while only 286 were *cast*, and the
+   allotment comparison is what keeps `ELECTORAL_VOTE_SHORTFALLS` years unaffected. Zero or several
+   reconciling rows **raise** — the parser never guesses, because guessing wrong answers Congress's
+   question by accident. Totals-label matching becomes a **prefix** match to recognise qualified
+   labels; no US state name begins with "Total".
+2. **The enum lives in a new stdlib-only top-level module, `usvote/count_status.py`.** It has two
+   callers that must not depend on each other — `usvote/transform.py` *assigns* the values,
+   `usvote/load.py` builds the `CHECK` from them. Putting the tuple in `transform` would point the
+   DDL builder at the pandas transform module; putting it in `load` would drag psycopg2 into the
+   transform import chain. This is the shape `usvote/years.py` and `usvote/pv/status.py` already
+   have, so `count_status.py` joins the `years.py` family of pure EC-domain top-level modules
+   (D027's taxonomy) rather than being an ad-hoc placement.
+3. **The columns are `count_status` + `count_status_reason`**, not `pv_status`'s `note` spelling.
+   A deliberate, minor divergence from D043 §3's phrasing-by-analogy: `note` on a wide fact table
+   does not say what it is a note *about*. Unlike `pv_state_status.note` (verbatim UCSB prose,
+   `redistributable=false`), this column holds the **Archives' own sentence** — a US Government
+   work, so it carries no redistribution restriction. `count_status` is `NOT NULL` with **no
+   `DEFAULT`**: the transform supplies a value on every row, so the column is complete rather than
+   exceptions-only (D024 §3 applied to the fact) and a null can never stand in for "presumably
+   fine". A biconditional assert (`assert_count_status_reasons`) requires a reason on every flagged
+   row and forbids one on a `counted` row.
+4. **Aggregate (`is_total`) rows are never flagged.** 1868 Seymour's national 80 includes Georgia's
+   disputed 9, and one enum value cannot say "80, of which 9 disputed". D043 §4 fixes the grain at
+   `(year, state, candidate)`; the state rows carry the truth and the aggregate's disputed-ness is
+   derivable from them. Asserted by a test rather than left emergent, because propagating `disputed`
+   upward is a defensible-looking change that would quietly over-claim.
+5. **No migration story.** The `dwh` schema is only ever created fresh (`create_table` /
+   `--replace`), so adding two columns needs a rebuild, not an `ALTER`.
+6. **The `(N)` relaxation carries a reciprocal guard.** Reading a parenthesized cell as a
+   number is a *global* loosening — before this, every `(N)` raised `ParseError` — so the
+   parser now **reports** each parenthesized cell (`ParsedTable2.contested_cells`) and
+   `transform.assert_contested_cells_catalogued` requires every one to have a
+   `COUNT_STATUS_OVERRIDES` entry. Without it, a parenthesized cell in a year with no
+   catalog entry would load as an ordinary `counted` vote with every sum validator
+   passing, and 41 of the 50 in-scope years have no committed fixture, so a re-scrape or
+   an Archives edit is a live path. `_add_count_status`'s own guard runs catalog → data;
+   this is data → catalog, and it is modelled on `apply_other_candidates`, which raises
+   the same way for an unregistered "Other(s)" column. (Found by the `/code-review` gate,
+   not by the plan.)
+
+**Rationale:**
+- D043's own argument is that a structure must not answer a question its source left open. A parser
+  that picked a totals row by position — or by a literal someone typed once — would do exactly that,
+  in whichever direction it leaned. Deriving the choice from the allotment sum means the source
+  answers it, and means the rule degrades to a **loud error** rather than to a stale constant when a
+  future page does something new.
+- The allotment basis is not a new principle: it is D041's "whole number of Electors **appointed**",
+  already load-bearing for `ec_denominator`. 1868's nine Georgia electors were appointed beyond
+  dispute — only whether their votes *counted* was open — so 294 follows from the existing rule and
+  the 285-vs-294 question was never a denominator question at all (D043 §1).
+- Catalogue-early paid off. The four 1868 `PV_ABSENCE_CATALOG` rows were curated in #140 while the
+  year was still gated, with public-domain citations; admitting them here required **no new
+  research**, only lifting `UNSUPPORTED_EC_YEARS` and bumping `CURATED_YEAR_COUNT` 49 → 50. The
+  import-time scope pin is what forced that to be a deliberate act instead of an accident.
+- Nothing under `usvote/ucsb/` changed. Its scope derives from `ec_ingest_years()` (D024 §6), so
+  lifting the gate moved its consumed `UCSB_NONPARTICIPATING_STATES` from 11 to 14 and its roster's
+  `legislature_chosen` from 17 to 18 with no edit in that package — the self-healing property the
+  derivation was built for, now observed rather than promised.
+
+**Action required:**
+- **#144 (1872)** rebases on this. It ships the second and third `count_status` values in anger
+  (`not_counted` for Georgia's 3 Greeley votes and for Arkansas/Louisiana), the 366 denominator, and
+  the correction to D043 §6's worked arithmetic — which is wrong against the 1872 fixture: the
+  rejected Greeley votes are **not rows in the table at all** (Greeley's column reads `-`, the
+  president-side Others cell reads 8), so they must be *synthesized* before they can be flagged.
+  That correction is #144's to append, not this entry's.
+- **#139** should note a coupling the plan initially mis-stated: the API snapshot is unaffected by
+  1868 because `snapshot._covered_years` is the MIT window, **not** because the year is excluded —
+  1868 rows *do* enter `ec_pv_redistributable`. #139 is the story that widens the covered window, so
+  it is the one that must decide what `count_status` does on a public surface (D043 §7 defers the
+  surfacing until then, and that deferral now expires in #139).

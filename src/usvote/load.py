@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from usvote.count_status import build_count_status_check
 from usvote.db import DBC
 
 # The data-warehouse schema and its tables, listed in FK-dependency order: a table
@@ -95,6 +96,20 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
             ("president_electoral_votes", "smallint", "not null"),
             ("president_electoral_rank", "smallint", "not null"),
             ("took_office", "boolean", "not null"),
+            # Was this row's cast votes actually counted (D043 §3, D044)? NOT NULL with
+            # no DEFAULT: the value is always supplied by the transform, which sets
+            # 'counted' on every ordinary row, so the column is complete rather than
+            # exceptions-only and a null can never stand in for "presumably fine". The
+            # CHECK is built from usvote.count_status's value tuple so the enum has one
+            # definition — the pattern usvote.pv.status uses for pv_status (D024 §4).
+            (
+                "count_status", "varchar", "not null", build_count_status_check(),
+            ),
+            # The source's own sentence, on the flagged rows only (null on 'counted').
+            # Free text, not an enum: it quotes the Archives' Notes verbatim, and a
+            # US Government work carries no redistribution restriction — unlike the UCSB
+            # prose that pv_state_status.note holds (D022/D024 §6).
+            ("count_status_reason", "text"),
         ],
     ]
 

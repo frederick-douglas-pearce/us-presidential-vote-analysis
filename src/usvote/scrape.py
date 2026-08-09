@@ -235,7 +235,7 @@ def fetch_from_dir(source_dir: str | Path) -> Fetch:
 # URL-keyed file cache for a handful of fixture pages, this is a whole-span
 # corpus that a warehouse rebuild can run from with zero network requests --
 # the path that feeds the public API snapshot (D034), which previously cost a
-# full re-scrape of ~49 pages every time it was refreshed.
+# full re-scrape of ~50 pages every time it was refreshed.
 #
 # Layout deliberately MIRRORS the UCSB corpus (usvote/ucsb/scrape.py): one
 # ``<year>.html`` per election, the results index under EC_INDEX_FILENAME, and a

@@ -31,6 +31,7 @@ import pytest
 from bs4.element import Tag
 
 from tests._helpers import FIXTURES_DIR, STATE_NAMES, fake_state_geo
+from usvote import count_status as CS
 from usvote import transform as T
 from usvote.parse import ParsedYear, parse_election_years
 from usvote.scrape import fetch_from_dir, get_html_tables
@@ -886,3 +887,234 @@ def test_non_contingent_office_holder_is_ec_winner(
     totals = votes[(votes["year"] == 2020) & votes["is_total"]].set_index("candidate_id")
     assert bool(totals.loc[ids["Joseph R. Biden Jr."], "took_office"])
     assert not bool(totals.loc[ids["Donald J. Trump"], "took_office"])
+
+
+# --- count_status: the cast-then-not-counted mechanism (#143, D043/D044) ----
+
+
+_SYNTHETIC_1868: dict[str, Any] = {
+    "year": 1868,
+    "t1": [
+        {"president_candidate_name": "Ulysses S. Grant",
+         "president_candidate_party": "R"},
+        {"president_candidate_name": "Horatio Seymour",
+         "president_candidate_party": "D"},
+    ],
+    "t2": {
+        "candidate_state": [
+            {"president_candidate_name": "Ulysses S. Grant", "col_ind": 1,
+             "president_candidate_state": "Illinois"},
+            {"president_candidate_name": "Horatio Seymour", "col_ind": 2,
+             "president_candidate_state": "New York"},
+        ],
+        "votes_by_state": [
+            {"state": "Ohio", "total_electoral_votes": 21, 1: 21, 2: 0},
+            {"state": "Georgia", "total_electoral_votes": 9, 1: 0, 2: 9},
+            {"state": "Texas", "total_electoral_votes": 0, 1: 0, 2: 0},
+            {"state": "Totals", "total_electoral_votes": 30, 1: 21, 2: 9},
+        ],
+    },
+}
+
+
+def _transform_1868() -> tuple[pd.DataFrame, pd.DataFrame]:
+    candidates, _, votes = T.transform_parsed_years([_SYNTHETIC_1868], fake_state_geo())
+    return candidates, votes
+
+
+def test_count_status_defaults_to_counted_with_no_reason() -> None:
+    # Complete, not exceptions-only (D024 §3 applied to the fact): an ordinary row
+    # *states* that it was counted rather than leaving a null to be interpreted.
+    _candidates, votes = _transform_1868()
+    ordinary = votes[votes["state"] == "Ohio"]
+    assert set(ordinary[CS.COUNT_STATUS_COLUMN]) == {CS.COUNT_STATUS_COUNTED}
+    assert ordinary[CS.COUNT_STATUS_REASON_COLUMN].isna().all()
+
+
+def test_1868_georgia_seymour_is_disputed_with_the_archives_sentence() -> None:
+    candidates, votes = _transform_1868()
+    ids = candidates.set_index("name")["candidate_id"]
+    georgia = votes[votes["state"] == "Georgia"].set_index("candidate_id")
+
+    seymour = georgia.loc[ids["Horatio Seymour"]]
+    assert seymour[CS.COUNT_STATUS_COLUMN] == CS.COUNT_STATUS_DISPUTED
+    # 'disputed', never 'not_counted': Congress decided *nothing* in 1868 (D043 §3/§5).
+    assert seymour[CS.COUNT_STATUS_COLUMN] != CS.COUNT_STATUS_NOT_COUNTED
+    assert "could not agree whether to accept" in seymour[CS.COUNT_STATUS_REASON_COLUMN]
+    # The votes themselves are present and unreduced — only their counting is open.
+    assert int(seymour["president_electoral_votes"]) == 9
+
+    # Grant's Georgia row is an ordinary 0-EV loser row, not swept up by the state.
+    grant = georgia.loc[ids["Ulysses S. Grant"]]
+    assert grant[CS.COUNT_STATUS_COLUMN] == CS.COUNT_STATUS_COUNTED
+
+
+def test_the_totals_row_aggregating_a_disputed_state_stays_counted() -> None:
+    """D044: aggregates are not flagged — one enum value cannot say "80, of which 9".
+
+    Asserted rather than left emergent, because the alternative (propagating `disputed`
+    upward) is a defensible-looking change that would quietly over-claim: the year's
+    national total would read as wholly in question when only nine votes were.
+    """
+    _candidates, votes = _transform_1868()
+    totals = votes[votes["is_total"]]
+    assert not totals.empty
+    assert set(totals[CS.COUNT_STATUS_COLUMN]) == {CS.COUNT_STATUS_COUNTED}
+    assert totals[CS.COUNT_STATUS_REASON_COLUMN].isna().all()
+
+
+def test_1868_adds_no_electoral_vote_shortfall_entry() -> None:
+    """The two mechanisms stay disjoint (D043 §6), and disjointness is structural.
+
+    ``count_status`` is *cast, then not counted*; ``ELECTORAL_VOTE_SHORTFALLS`` is *never
+    cast*. 1868's rows sum exactly to their allotments, so a shortfall entry would not
+    merely be redundant — it would make ``assert_row_votes_sum_to_total`` fail.
+    """
+    assert not [key for key in T.ELECTORAL_VOTE_SHORTFALLS if key[0] == 1868]
+    _candidates, votes = _transform_1868()
+    state_rows = votes[votes["state"].notna()]
+    by_state = state_rows.groupby("state")["president_electoral_votes"].sum()
+    allotment = state_rows.groupby("state")["total_electoral_votes"].max()
+    assert (by_state == allotment).all()
+
+
+def test_a_count_status_override_matching_no_row_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero-match override is the dangerous case: the row would read as ordinary.
+
+    Unlike a mis-typed candidate *name* elsewhere in the transform — which the
+    reconciliation asserts catch because the join drops rows — a bad override key simply
+    does nothing, leaving a contested row silently marked ``counted``.
+    """
+    monkeypatch.setattr(
+        T,
+        "COUNT_STATUS_OVERRIDES",
+        {(1868, "Georgia", "Horace Seymour"): (CS.COUNT_STATUS_DISPUTED, "typo'd name")},
+    )
+    with pytest.raises(TransformError, match="matched 0 vote rows"):
+        T.transform_parsed_years([_SYNTHETIC_1868], fake_state_geo())
+
+
+def test_an_override_for_an_absent_year_is_skipped_not_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A subset run (years={2020}) must not be indicted by another year's override —
+    # the same year-scoping every other correction uses.
+    monkeypatch.setattr(
+        T,
+        "COUNT_STATUS_OVERRIDES",
+        {(1872, "Georgia", "Horace Greeley"): (CS.COUNT_STATUS_NOT_COUNTED, "rejected")},
+    )
+    _candidates, votes = _transform_1868()
+    assert set(votes[CS.COUNT_STATUS_COLUMN]) == {CS.COUNT_STATUS_COUNTED}
+
+
+def test_assert_count_status_reasons_requires_grounds_both_ways() -> None:
+    # A flagged row with no reason is an unverifiable assertion; a reason on a `counted`
+    # row is a claim its own status contradicts. Both must raise.
+    base = pd.DataFrame({
+        "year": [1868],
+        "state": ["Georgia"],
+        "candidate_id": [1],
+        CS.COUNT_STATUS_COLUMN: [CS.COUNT_STATUS_DISPUTED],
+        CS.COUNT_STATUS_REASON_COLUMN: [None],
+    })
+    with pytest.raises(TransformError, match="carry no count_status_reason"):
+        T.assert_count_status_reasons(base)
+
+    spurious = base.assign(
+        **{
+            CS.COUNT_STATUS_COLUMN: [CS.COUNT_STATUS_COUNTED],
+            CS.COUNT_STATUS_REASON_COLUMN: ["why?"],
+        }
+    )
+    with pytest.raises(TransformError, match="but a count_status_reason is set"):
+        T.assert_count_status_reasons(spurious)
+
+
+def test_totals_row_label_matches_the_parser_s_own_constant() -> None:
+    """The one-definition property without the dependency (#143 review).
+
+    `transform` deliberately does NOT import `usvote.parse` for this string — that would
+    put `transform -> parse -> bs4` in the graph for one literal, the same shape D044
+    created `usvote/count_status.py` to avoid. The two are kept from drifting by this
+    assertion instead: rename the parser's constant and this fails, where before the
+    votes fact would silently stop recognising its own totals rows.
+    """
+    from usvote.parse import TOTALS_ROW_STATE
+
+    assert T.TOTALS_ROW_LABEL == TOTALS_ROW_STATE
+
+
+def test_an_uncatalogued_contested_cell_raises() -> None:
+    """The reciprocal of the override guard, and the direction that actually bites.
+
+    `_add_count_status` catches catalog -> data (an override matching no row). This
+    catches data -> catalog: a source cell the Archives parenthesized that nobody has
+    classified. Without it the `(N)` relaxation is a global loosening — before #143 every
+    parenthesized cell raised, and afterwards an uncatalogued one loads as an ordinary
+    `counted` vote with every sum validator passing.
+    """
+    parsed = {
+        **_SYNTHETIC_1868,
+        "t2": {
+            **_SYNTHETIC_1868["t2"],
+            # Ohio's votes printed parenthesized, with no catalog entry for them.
+            "contested_cells": [{"state": "Ohio", "col_ind": 1}],
+        },
+    }
+    with pytest.raises(TransformError, match="no COUNT_STATUS_OVERRIDES entry"):
+        T.transform_parsed_years([parsed], fake_state_geo())
+
+
+def test_the_catalogued_1868_contested_cell_passes_the_reciprocal_guard() -> None:
+    # The positive case, so the guard above is not trivially satisfied by an empty list.
+    parsed = {
+        **_SYNTHETIC_1868,
+        "t2": {
+            **_SYNTHETIC_1868["t2"],
+            "contested_cells": [{"state": "Georgia", "col_ind": 2}],
+        },
+    }
+    _candidates, _states, votes = T.transform_parsed_years([parsed], fake_state_geo())
+    flagged = votes[votes[CS.COUNT_STATUS_COLUMN] == CS.COUNT_STATUS_DISPUTED]
+    assert len(flagged) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "reason", "match"),
+    [
+        ("not-counted", "typo'd status", "not in the enum"),
+        (CS.COUNT_STATUS_COUNTED, "a no-op", "already the default"),
+        (CS.COUNT_STATUS_DISPUTED, "   ", "carries no reason"),
+    ],
+)
+def test_a_malformed_override_raises_naming_its_own_problem(
+    monkeypatch: pytest.MonkeyPatch, status: str, reason: str, match: str
+) -> None:
+    """Each failure must name the *override*, not surface as a downstream symptom.
+
+    A typo'd status previously reached `assert_count_status_reasons`, which reported it
+    as "a reason set on a counted row" — an error pointing at the wrong thing. Mirrors
+    `PV_ABSENCE_CATALOG`'s integrity check, blank-citation rejection included.
+    """
+    monkeypatch.setattr(
+        T, "COUNT_STATUS_OVERRIDES", {(1868, "Georgia", "Horatio Seymour"): (status, reason)}
+    )
+    with pytest.raises(TransformError, match=match):
+        T._assert_overrides_well_formed()
+
+
+def test_an_empty_reason_does_not_satisfy_the_biconditional() -> None:
+    # `.notna()` is True for "", which would let a flagged row ship with grounds the
+    # reader cannot check — the exact thing PVAbsence's `citation.strip()` rejects.
+    frame = pd.DataFrame({
+        "year": [1868],
+        "state": ["Georgia"],
+        "candidate_id": [1],
+        CS.COUNT_STATUS_COLUMN: [CS.COUNT_STATUS_DISPUTED],
+        CS.COUNT_STATUS_REASON_COLUMN: ["   "],
+    })
+    with pytest.raises(TransformError, match="carry no count_status_reason"):
+        T.assert_count_status_reasons(frame)
