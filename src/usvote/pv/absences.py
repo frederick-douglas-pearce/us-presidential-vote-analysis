@@ -54,10 +54,15 @@ Greeley died after the popular vote and Congress refused 17 electoral votes — 
 of them touches whether a popular vote was **held**, which is the only question this
 catalog answers. Those anomalies live on ``dwh.votes.count_status`` instead (D043-D046).
 
-The review was not taken on trust: with Arkansas's and Louisiana's allotments restored
-(D045), 1872 has **no zero-EV state at all**, so :func:`assert_catalog_matches_spine`'s
-"no uncatalogued zero-EV state" check confirms the empty catalog against the EC spine
-rather than merely permitting it.
+**What corroborates that, and what does not** (code review, #144). It is tempting to say
+the EC spine confirms it. It does not: :func:`assert_catalog_matches_spine` only forces
+an entry for a state that appointed **no** electors, and with Arkansas's and Louisiana's
+allotments restored (D045) 1872 has no such state — so that check inspects nothing there
+and passes trivially. It is structurally blind to the other kind of absence in any
+case: a ``legislature_chosen`` state appointed electors and carries EV > 0, which is 18
+of this catalog's 32 entries. The real corroboration is the cross-source control test in
+``TestRealCorpus``, which agrees with UCSB on every year's classifications — and that
+one **skips in CI** (D022), so it is a merge precondition run locally, not a gate.
 """
 
 from __future__ import annotations

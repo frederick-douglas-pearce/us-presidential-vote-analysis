@@ -28,6 +28,7 @@ import pytest
 
 from usvote import hybrid
 from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.join import EC_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -1337,6 +1338,29 @@ class TestTieGuard:
 
 
 # --- shape / grain guards --------------------------------------------------
+
+
+def test_the_fixture_matches_the_live_view_shape() -> None:
+    """``ec_pv_frame`` must emit exactly ``EC_PV_COLUMNS`` — no more, no less.
+
+    The helper's docstring promises columns are "derived here so a fixture cannot
+    contradict the live view", and until #144 nothing enforced it. That gap is what let
+    a real bug through: the fixture emitted ``president_electoral_votes_counted`` while
+    the join view did not carry it, so every ``policy='restricted'`` test passed on data
+    the warehouse could not produce and ``build_hybrid_from_db(policy=...)`` raised
+    ``KeyError`` on the first real run.
+
+    A *superset* is the dangerous direction — a missing column fails loudly on the next
+    line, an extra one silently makes the fixture more capable than reality — so this
+    asserts set equality rather than containment.
+    """
+    frame = ec_pv_frame([
+        {
+            "year": 2020, "state": "Texas", "candidate": "A",
+            "total_electoral_votes": 38, "president_electoral_votes": 38,
+        }
+    ])
+    assert set(frame.columns) == set(EC_PV_COLUMNS)
 
 
 class TestShape:

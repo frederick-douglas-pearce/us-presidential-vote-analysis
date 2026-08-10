@@ -85,11 +85,12 @@ def ec_ingest_years(latest: int = LATEST_ELECTION_YEAR) -> set[int]:
 
     The full election calendar (:func:`election_years`) narrowed to the supported EC
     spine: from :data:`EC_SPINE_FLOOR` (1824, the D009 comparison floor) through
-    ``latest``, excluding :data:`UNSUPPORTED_EC_YEARS` (the Reconstruction years whose
-    contested/uncounted votes need dedicated modeling). See those constants for why the
-    pre-1824 and 1868/1872 years are out of the default. This is the default ``years``
-    filter for :func:`usvote.pipeline.run_ec_pipeline`; pass an explicit ``years`` to
-    override it.
+    ``latest``, minus :data:`UNSUPPORTED_EC_YEARS` — **which is now empty**, so this is
+    currently every election year from 1824 on. See :data:`EC_SPINE_FLOOR` for why the
+    pre-1824 years are out, and :data:`UNSUPPORTED_EC_YEARS` for the two Reconstruction
+    years that were gated until #143 and #144 ingested them. This is the default
+    ``years`` filter for :func:`usvote.pipeline.run_ec_pipeline`; pass an explicit
+    ``years`` to override it.
 
     Also the base of the **UCSB** ingest scope — :func:`usvote.ucsb.transform.
     ucsb_ingest_years` subtracts the no-popular-vote years from this set (D024 §6).

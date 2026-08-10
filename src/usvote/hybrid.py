@@ -187,6 +187,9 @@ REQUIRED_JOIN_COLUMNS: tuple[str, ...] = (
     "took_office",
     "candidate_votes",
     "state_total_votes",
+    # Per-row, and distinct from the national sum above: policy (c) re-sums the counted
+    # measure over a restricted state set, which the national total cannot give it.
+    COUNTED_VOTES_COLUMN,
 )
 
 #: What :func:`roll_up_national` derives itself; a ``carry`` entry may not shadow one.

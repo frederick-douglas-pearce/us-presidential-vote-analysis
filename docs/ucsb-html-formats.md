@@ -18,7 +18,8 @@ value *is* the finding (the `0.0`-percent decoy in §4).
 ## 1. Corpus inventory
 
 - **60 year pages**, `1789.html` … `2024.html`, every four years, no gaps. Includes 1868
-  and 1872, which the EC spine excludes via `UNSUPPORTED_EC_YEARS`.
+  and 1872, which the EC spine gated via `UNSUPPORTED_EC_YEARS` until #143 and #144
+  ingested them; that set is now empty, so both years are in scope here too.
 - `_index_elections.html` is present, plus `manifest.json` and the original snapshot
   script.
 - Every page decodes as UTF-8 and contains **literal U+00A0 bytes**. The entity
@@ -132,9 +133,10 @@ The prose always contains the exact substring **`electors chosen by state legisl
 **18 at the parser, 18 at the roster — since #143.** It was 18/17 while 1868 Florida sat
 outside the EC spine (`UNSUPPORTED_EC_YEARS` then gated 1868/1872; see D024 §6 as clarified
 2026-07-18). #143 ingested 1868, so the `pv_state_status` roster now carries all 18 that the
-parser finds — with no change under `usvote/ucsb/`, since the scope is derived. 1872 remains
-gated (#144). The two layers can still diverge, so any test asserting a count must state
-which one it measures.
+parser finds — with no change under `usvote/ucsb/`, since the scope is derived. #144 then
+ingested 1872 and emptied the gate; it adds **no** `legislature_chosen` states, so the
+count stays 18/18. The two layers can still diverge, so any test asserting a count must
+state which one it measures.
 
 #### Case 2 — state did not participate *(state-level, no markup at all)*
 

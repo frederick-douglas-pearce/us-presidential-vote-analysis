@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 
 from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.hybrid import REQUIRED_JOIN_COLUMNS
 from usvote.join import (
     EC_PV_COLUMNS,
     EC_PV_PREFERRED_VIEW,
@@ -71,6 +72,53 @@ def test_builder_national_ev_is_a_window_sum() -> None:
         "sum(v.president_electoral_votes) OVER (PARTITION BY v.year, v.candidate_id)"
         in sql
     )
+
+
+def test_builder_counted_columns_are_appended_never_inserted() -> None:
+    """The #144 regression: a mid-list column breaks CREATE OR REPLACE VIEW.
+
+    PostgreSQL only lets ``CREATE OR REPLACE VIEW`` **append** columns — renaming or
+    reordering an existing one raises *"cannot change name of view column"*. So a new
+    column inserted into the middle of :data:`EC_PV_COLUMNS` makes
+    ``warehouse.rebuild_views`` fail against every warehouse whose views already exist,
+    while passing every offline test, since the pandas oracle happily builds any order.
+
+    #144 shipped exactly that (``national_counted_electoral_votes`` between
+    ``national_electoral_votes`` and ``president_electoral_rank``) and it was caught in
+    review, not by the suite. This pins the ordering rule so the next added column has
+    to be appended too.
+    """
+    # The pre-#144 tail must still be the pre-#144 tail: nothing was inserted before it.
+    assert EC_PV_COLUMNS[:-2] == (
+        "year", "state", "candidate_id", "candidate",
+        "total_electoral_votes", "president_electoral_votes",
+        "national_electoral_votes", "president_electoral_rank", "took_office",
+        "source", "party", "candidate_votes", "state_total_votes",
+        "reliability", "redistributable",
+    )
+    assert EC_PV_COLUMNS[-2:] == (
+        COUNTED_VOTES_COLUMN,
+        "national_counted_electoral_votes",
+    )
+    # ... and the SELECT list agrees, so the view's column order matches the contract.
+    sql = build_ec_pv_join_sql(PV_PREFERRED_VIEW)
+    assert sql.index("s.redistributable") < sql.index(f"v.{COUNTED_VOTES_COLUMN},")
+    assert sql.index(f"v.{COUNTED_VOTES_COLUMN},") < sql.index(
+        "AS national_counted_electoral_votes"
+    )
+
+
+def test_builder_carries_the_per_row_counted_measure_not_only_the_sum() -> None:
+    """Coverage policy (c) re-sums the counted measure over a restricted state set.
+
+    A national window total cannot answer that, so the per-row column has to be in the
+    view. #144 carried only the window sum, which made
+    ``build_hybrid_frame(..., policy='restricted')`` raise ``KeyError`` on any real
+    frame while every unit test passed — the fixture was emitting a column the view
+    could not produce (see ``test_hybrid.test_the_fixture_matches_the_live_view_shape``).
+    """
+    assert COUNTED_VOTES_COLUMN in EC_PV_COLUMNS
+    assert set(REQUIRED_JOIN_COLUMNS) <= set(EC_PV_COLUMNS)
 
 
 def test_builder_carries_redistributable_from_pv_source() -> None:

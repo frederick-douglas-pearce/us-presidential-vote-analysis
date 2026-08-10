@@ -216,14 +216,18 @@ outside it rather than quietly returning an all-`popular_vote` roster.
   no-op for every unmarked candidate and 1944 FDR is the only one affected in current
   coverage. Discovered while authoring the #38 UCSB candidate map (the RHS must equal the
   clean EC name for the E6 join to key on it). Source: the 1944 Table 2 + Notes.
-- **Deferred Reconstruction year (1872).** Still **excluded** from the default ingest
-  (`UNSUPPORTED_EC_YEARS` in [`years.py`](../src/usvote/years.py), re-exported from
-  [`pipeline.py`](../src/usvote/pipeline.py)), not corrected here, because its table
-  encodes uncounted electoral votes that need dedicated modeling: Horace Greeley died
-  after the popular vote, scattering his electoral votes, and Georgia's three for him
-  were rejected by Congress — votes the table does not print at all, so they must be
-  synthesized before they can be flagged. Tracked as #144.
-  **1868 is no longer deferred.** #143 ingested it (D044): its dual
+- **No deferred Reconstruction years remain.** `UNSUPPORTED_EC_YEARS` in
+  [`years.py`](../src/usvote/years.py) (re-exported from
+  [`pipeline.py`](../src/usvote/pipeline.py)) is now **empty**, and both years are
+  corrected in the catalog above rather than deferred past it.
+  **1872 was ingested by #144** (D045/D046): Horace Greeley died after the popular vote
+  and his electors scattered across four recipients, Georgia's three votes for him were
+  rejected by the House, and Arkansas's and Louisiana's returns were refused — 17 votes
+  the Archives table does not print at all, synthesized from its own footnotes before
+  being flagged `count_status='not_counted'`. Arkansas and Louisiana also recover the
+  allotments the table prints as `-`, which is what makes the year's denominator the 366
+  Congress announced rather than the 352 the page totals.
+  **1868 was ingested by #143** (D044): its dual
   "excluding/including Georgia" totals rows are resolved by the source's own allotment
   sum, Georgia's nine carry `count_status='disputed'`, and MS/TX/VA load as genuine
   0-electoral-vote rows — see the three 1868 rows in the Electoral College catalog above.

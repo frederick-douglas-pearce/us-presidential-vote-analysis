@@ -117,6 +117,35 @@ CAST_VOTES_COLUMN = "president_electoral_votes"
 COUNTED_VOTES_COLUMN = "president_electoral_votes_counted"
 
 
+def assert_enum_partitions() -> None:
+    """Raise at **import** unless the enum is exactly ``counted`` + the uncounted set.
+
+    Two definitions of "did these votes enter the count" exist in this package and must
+    stay complements: :func:`usvote.transform._add_counted_votes` keys on ``== counted``
+    (so anything else zeroes the counted measure) while
+    :func:`usvote.transform.assert_count_status_reasons` keys on membership in
+    :data:`COUNT_STATUS_UNCOUNTED` (so anything else must carry no reason). They agree
+    only while those two sets partition :data:`COUNT_STATUS_VALUES`.
+
+    Adding a fourth value — a ``counted_in_part``, say — would break the agreement
+    silently: the row's counted votes would be zeroed while the reason guard treated it
+    as ordinary. So the partition is checked rather than assumed (code review, #144).
+    """
+    partitioned = {COUNT_STATUS_COUNTED} | set(COUNT_STATUS_UNCOUNTED)
+    if set(COUNT_STATUS_VALUES) != partitioned or COUNT_STATUS_COUNTED in (
+        COUNT_STATUS_UNCOUNTED
+    ):
+        raise ValueError(
+            f"count_status must partition into {COUNT_STATUS_COUNTED!r} and "
+            f"{sorted(COUNT_STATUS_UNCOUNTED)}, but the enum is "
+            f"{list(COUNT_STATUS_VALUES)}. Two callers derive opposite meanings from "
+            "this set and would silently disagree about a value in neither group."
+        )
+
+
+assert_enum_partitions()
+
+
 def build_count_status_check(column: str = COUNT_STATUS_COLUMN) -> str:
     """Return the ``CHECK`` restricting ``column`` to :data:`COUNT_STATUS_VALUES`.
 

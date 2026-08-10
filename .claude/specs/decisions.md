@@ -2223,9 +2223,12 @@ Re-verifying the rest of D043's prose, as that issue instructed, found the same 
    **retained, not deleted**: it is the single gate on both sources (D024 §6) and the documented seam
    for the deferred pre-12th-Amendment era (D010).
 4. **1872 is reviewed for popular-vote absences and has none**, which is a finding rather than a
-   silence. `CURATED_YEAR_COUNT` 50 → 51. With AR/LA's allotments restored the year has no zero-EV
-   state at all, so `assert_catalog_matches_spine` **confirms** the empty catalog against the spine
-   rather than merely permitting it.
+   silence. `CURATED_YEAR_COUNT` 50 → 51. **What corroborates that is the UCSB cross-source control
+   test, not the EC spine** (corrected at code review, before merge): `assert_catalog_matches_spine`
+   only forces an entry for a state that appointed *no* electors, and restoring AR/LA's allotments
+   leaves 1872 with no such state — so that check inspects nothing there and passes trivially. It is
+   blind to `legislature_chosen` absences in any case, since those states appointed electors (18 of
+   the catalog's 32 entries). The real check skips in CI (D022) and is a local merge precondition.
 
 **Sources (all public domain; the citation discipline `usvote/pv/absences.py` established):**
 - **CRS Report RL30769**, *Electoral Vote Counts in Congress: Survey of Certain Congressional
@@ -2358,9 +2361,16 @@ to 1824 — so the deferral has expired and #144 is where the call is recorded.
    that reports Grant at 300 electoral votes in 1872 with no way to see that 14 were refused is worse
    than one that omits the year: the number looks ordinary and contradicts every reference the reader
    can check.
-2. **The plumbing is #139's, not #144's.** `usvote/join.py` gains `national_counted_electoral_votes`
-   in `EC_PV_COLUMNS` here (the analysis surface needs it for D046), but `snapshot_schema.DATA_COLUMNS`
-   and the API models are untouched.
+2. **The plumbing is #139's, not #144's.** `usvote/join.py` gains **two** columns in `EC_PV_COLUMNS`
+   here — the per-row `president_electoral_votes_counted` and the national
+   `national_counted_electoral_votes` — because the analysis surface needs both for D046: coverage
+   policy (c) re-sums the measure over a *restricted* state set, which a national total cannot give
+   it. `snapshot_schema.DATA_COLUMNS` and the API models are untouched.
+   **Both are appended, never inserted**, and that is a hard rule rather than a style note:
+   PostgreSQL's `CREATE OR REPLACE VIEW` can only add trailing columns, so a mid-list insert makes
+   `rebuild_views` fail against every warehouse whose views already exist. #144 shipped exactly that
+   bug into review — it passed all 987 offline tests, because the pandas oracle builds any order —
+   and it is now pinned by a test.
 3. **Leaving them out of `DATA_COLUMNS` is safe, and was verified rather than assumed.**
    `DATA_COLUMNS` is an **independent explicit tuple** that `snapshot.py` projects with
    `[list(DATA_COLUMNS)]`; the only test coupling the two runs `DATA_COLUMNS → API model`, never

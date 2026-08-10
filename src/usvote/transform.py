@@ -1074,10 +1074,17 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     All three run before :func:`assert_row_votes_sum_to_total`, which is what makes the
     corrections checkable: 1872 Georgia only reconciles (11 = 6 + 2 + 3) once step 2 has
     restored Greeley's three votes.
+
+    Because every pass **overwrites** the source's own published totals cells, the
+    printed row is snapshotted first and reconciled against the result by
+    :func:`assert_corrections_reconcile_printed_totals` — without which the downstream
+    ``assert_totals_equal_state_sum`` would compare a derived number against itself for
+    exactly the years that were corrected (code review, #144).
     """
     matrix = pd.json_normalize(
         list(parsed_years), ["t2", "votes_by_state"], ["year"]
     )
+    printed_totals = _printed_totals_by_year(matrix)
     for year, candidates in OTHER_CANDIDATES.items():
         year_mask = matrix["year"] == year
         if not year_mask.any():
@@ -1090,13 +1097,160 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
         for ov in OTHER_VOTES[year]:
             row = year_mask & (matrix["state"] == ov["state"])
             matrix.loc[row, ov["col_ind"]] = ov["votes"]
-        totals_row = year_mask & (matrix["state"] == TOTALS_ROW_LABEL)
-        state_rows = year_mask & (matrix["state"] != TOTALS_ROW_LABEL)
-        matrix.loc[totals_row, other_cols] = (
-            matrix.loc[state_rows, other_cols].sum(axis=0).values
-        )
+        _rebuild_totals_row(matrix, int(year), other_cols)
     matrix = _apply_unprinted_votes(matrix, parsed_years)
-    return _apply_appointed_elector_corrections(matrix)
+    matrix = _apply_appointed_elector_corrections(matrix)
+    assert_corrections_reconcile_printed_totals(matrix, printed_totals, parsed_years)
+    return matrix
+
+
+def _parsed_year(
+    parsed_years: Sequence[Mapping[str, Any]], year: int
+) -> Mapping[str, Any]:
+    """The parsed record for ``year``; empty-shaped if that year is not in this run."""
+    for py in parsed_years:
+        if int(py["year"]) == year:
+            return py
+    return {"t2": {"candidate_state": []}}
+
+
+def _printed_totals_by_year(matrix: pd.DataFrame) -> dict[int, dict[str | int, int]]:
+    """Snapshot each year's totals row **as the source printed it**, before corrections.
+
+    Taken at the top of :func:`_votes_matrix` because all three correction passes
+    overwrite these cells. Keeping the originals is what lets
+    :func:`assert_corrections_reconcile_printed_totals` check the corrections against
+    the source rather than against themselves.
+    """
+    totals = matrix.loc[matrix["state"] == TOTALS_ROW_LABEL]
+    cols: list[str | int] = ["total_electoral_votes"]
+    cols += [c for c in matrix.columns if isinstance(c, int)]
+    return {
+        int(row["year"]): {
+            col: int(row[col]) for col in cols if pd.notna(row[col])
+        }
+        for _, row in totals.iterrows()
+    }
+
+
+def assert_corrections_reconcile_printed_totals(
+    matrix: pd.DataFrame,
+    printed_totals: Mapping[int, Mapping[str | int, int]],
+    parsed_years: Sequence[Mapping[str, Any]],
+) -> None:
+    """Raise unless a corrected totals row equals the printed one plus its corrections.
+
+    **The independent check the corrections would otherwise lose.** Every pass in
+    :func:`_votes_matrix` rebuilds the totals row from the state rows, so by the time
+    :func:`assert_totals_equal_state_sum` runs — "the strongest end-to-end check" — both
+    of its sides are derived from the same data for any corrected year, and it can no
+    longer see a disagreement between the page's grid and the page's own totals. That
+    was a real loss: before #144, 1872's printed ``352 / Grant 286 / Others 63`` were
+    checked against its state grid, and afterwards nothing was.
+
+    So each correction is reconciled against the number the source actually printed:
+
+    - **Others split** — the printed "Others" cell must equal the sum of the named
+      columns it was split into (1872: 63 = Brown 18 + Hendricks 42 + Jenkins 2 +
+      Davis 1). This checks the curated per-state split against the source's own
+      national figure, which no other assert does.
+    - **Unprinted votes** — a corrected column must equal its printed value plus exactly
+      the votes catalogued for it (1872: Grant 286 + 6 + 8 = 300; Greeley 0 + 3 = 3).
+    - **Appointed electors** — the corrected allotment must equal the printed one plus
+      the catalogued appointments (1872: 352 + 6 + 8 = 366).
+
+    A re-scrape or an Archives edit that moved a printed total would now fail here
+    instead of being silently absorbed.
+    """
+    corrected = matrix.loc[matrix["state"] == TOTALS_ROW_LABEL].set_index("year")
+    columns_by_year = {
+        int(py["year"]): _year_column_by_candidate(py) for py in parsed_years
+    }
+    offenders: list[str] = []
+
+    for year, printed in printed_totals.items():
+        if year not in corrected.index:
+            continue
+        row = corrected.loc[year]
+        by_candidate = columns_by_year.get(year, {})
+
+        # (a) the Others split reproduces the source's own aggregate cell(s). A year may
+        # print MORE than one placeholder column -- 2016 has two, at col_ind 2 and 4 --
+        # so both sides are summed rather than paired: every placeholder the parser saw
+        # against every named column the correction produced.
+        placeholders = [
+            int(cs["col_ind"])
+            for cs in _parsed_year(parsed_years, year)["t2"]["candidate_state"]
+            if cs.get("president_candidate_state") is None
+        ]
+        if placeholders and year in OTHER_CANDIDATES:
+            split_cols = [int(c["col_ind"]) for c in OTHER_CANDIDATES[year]]
+            got = int(sum(row[c] for c in split_cols))
+            want = sum(printed.get(c, 0) for c in placeholders)
+            if got != want:
+                offenders.append(
+                    f"{year}: the printed 'Other(s)' total(s) sum to {want}, but the "
+                    f"named split sums to {got}"
+                )
+
+        # (b) each unprinted-vote column == printed + catalogued
+        expected_added: dict[int, int] = {}
+        for (y, _state, candidate), votes in UNPRINTED_ELECTORAL_VOTES.items():
+            if y != year:
+                continue
+            col = by_candidate.get(candidate)
+            if col is not None:
+                expected_added[col] = expected_added.get(col, 0) + votes
+        for col, added in expected_added.items():
+            if col not in printed:
+                continue
+            got, want = int(row[col]), printed[col] + added
+            if got != want:
+                offenders.append(
+                    f"{year}: column {col} reads {got}, but the source printed "
+                    f"{printed[col]} and {added} vote(s) were catalogued as unprinted "
+                    f"(expected {want})"
+                )
+
+        # (c) the allotment == printed + catalogued appointments
+        appointed = sum(
+            n for (y, _state), n in APPOINTED_ELECTORS_NOT_IN_TABLE.items() if y == year
+        )
+        if appointed and "total_electoral_votes" in printed:
+            got = int(row["total_electoral_votes"])
+            want = printed["total_electoral_votes"] + appointed
+            if got != want:
+                offenders.append(
+                    f"{year}: allotment reads {got}, but the source printed "
+                    f"{printed['total_electoral_votes']} and {appointed} appointed "
+                    f"elector(s) were catalogued (expected {want})"
+                )
+
+    if offenders:
+        raise TransformError(
+            "corrections do not reconcile with the totals the source printed: "
+            + "; ".join(offenders)
+        )
+
+
+def _rebuild_totals_row(
+    matrix: pd.DataFrame, year: int, columns: Sequence[str | int]
+) -> None:
+    """Overwrite ``year``'s totals row for ``columns`` with the sum over its state rows.
+
+    The one place the derive-don't-enter discipline (D044 §2) is implemented, called by
+    all three correction passes in :func:`_votes_matrix`. It was copy-pasted three times
+    with small variations until code review pointed out that a fix to the mask semantics
+    would have to be made in three places or the copies would drift.
+
+    Mutates in place, like the assignments it replaces.
+    """
+    year_mask = matrix["year"] == year
+    totals_row = year_mask & (matrix["state"] == TOTALS_ROW_LABEL)
+    state_rows = year_mask & (matrix["state"] != TOTALS_ROW_LABEL)
+    matrix.loc[totals_row, list(columns)] = (
+        matrix.loc[state_rows, list(columns)].sum(axis=0).values
+    )
 
 
 def _year_column_by_candidate(py: Mapping[str, Any]) -> dict[str, int]:
@@ -1133,13 +1287,17 @@ def _apply_unprinted_votes(
     Years absent from ``matrix`` are skipped, so a subset run never indicts another
     year's corrections.
     """
-    by_year = {int(py["year"]): py for py in parsed_years}
+    # Built once per year, not once per catalog entry (code review): the map is a walk
+    # over that year's parsed columns plus its OTHER_CANDIDATES registry.
+    columns_by_year = {
+        int(py["year"]): _year_column_by_candidate(py) for py in parsed_years
+    }
     touched: dict[int, set[int]] = {}
     for (year, state, candidate), votes in UNPRINTED_ELECTORAL_VOTES.items():
-        py = by_year.get(year)
-        if py is None:
+        by_candidate = columns_by_year.get(year)
+        if by_candidate is None:
             continue  # this year not in the current (possibly subset) run
-        col_ind = _year_column_by_candidate(py).get(candidate)
+        col_ind = by_candidate.get(candidate)
         if col_ind is None:
             raise TransformError(
                 f"unprinted electoral votes ({year}, {state!r}, {candidate!r}) name a "
@@ -1158,12 +1316,7 @@ def _apply_unprinted_votes(
         touched.setdefault(year, set()).add(col_ind)
 
     for year, cols in touched.items():
-        year_mask = matrix["year"] == year
-        totals_row = year_mask & (matrix["state"] == TOTALS_ROW_LABEL)
-        state_rows = year_mask & (matrix["state"] != TOTALS_ROW_LABEL)
-        matrix.loc[totals_row, sorted(cols)] = (
-            matrix.loc[state_rows, sorted(cols)].sum(axis=0).values
-        )
+        _rebuild_totals_row(matrix, year, sorted(cols))
     return matrix
 
 
@@ -1192,12 +1345,7 @@ def _apply_appointed_elector_corrections(matrix: pd.DataFrame) -> pd.DataFrame:
         touched_years.add(year)
 
     for year in touched_years:
-        year_mask = matrix["year"] == year
-        totals_row = year_mask & (matrix["state"] == TOTALS_ROW_LABEL)
-        state_rows = year_mask & (matrix["state"] != TOTALS_ROW_LABEL)
-        matrix.loc[totals_row, "total_electoral_votes"] = int(
-            matrix.loc[state_rows, "total_electoral_votes"].sum()
-        )
+        _rebuild_totals_row(matrix, year, ["total_electoral_votes"])
     return matrix
 
 
@@ -1310,9 +1458,24 @@ def _add_counted_votes(votes: pd.DataFrame) -> pd.DataFrame:
     )
     totals = votes.loc[~state_rows]
     keys = pd.MultiIndex.from_arrays([totals["year"], totals["candidate_id"]])
-    votes.loc[~state_rows, COUNTED_VOTES_COLUMN] = (
-        state_sum.reindex(keys).to_numpy()
-    )
+    aggregated = state_sum.reindex(keys)
+    # A totals row whose (year, candidate) has no state rows leaves NaN here, and the
+    # cast below would surface it as pandas' IntCastingNaNError naming no year,
+    # candidate or state. Every sibling guard here fails with the offending keys instead
+    # (code review, #144); a ragged early-era table is the shape that would trip it.
+    if aggregated.isna().any():
+        orphaned = [
+            (int(y), int(c))
+            for (y, c), missing in zip(keys, aggregated.isna(), strict=True)
+            if missing
+        ]
+        raise TransformError(
+            f"national totals row(s) {orphaned} have no state rows to sum a counted "
+            "total from — (year, candidate_id) present as an aggregate but absent from "
+            "the state grain, which breaks the dense-fact invariant "
+            "(assert_rectangular_state_grain)."
+        )
+    votes.loc[~state_rows, COUNTED_VOTES_COLUMN] = aggregated.to_numpy()
     return votes.astype({COUNTED_VOTES_COLUMN: "int"})
 
 
@@ -1329,6 +1492,16 @@ def assert_counted_matches_count_status(votes: pd.DataFrame) -> None:
     carrying the state-row sum, so 1868's Seymour totals row is a legitimate
     ``counted``-flagged 71 against a cast 80. The aggregate identity is a different
     claim and gets its own check.
+
+    **This is a refactor guard, not a data check, and the difference is worth stating**
+    (code review, #144). Run against a single build it restates what
+    :func:`_add_counted_votes` just assigned, so no *input* can make it fire — what it
+    guards is the two-rule derivation drifting apart under a later edit to one rule. The
+    check with independent authority lives in ``tests/unit/test_pipeline.py``: 1868's
+    counted reconstruction (285 / Grant 214 / Seymour 71) is exactly the "excluding
+    Georgia" totals row the Archives prints and D044 had to reject, and 1872's counted
+    Grant (286) is exactly its printed totals cell. Neither figure appears anywhere in
+    this module, so reproducing them is corroboration rather than restatement.
     """
     state_rows = votes.loc[votes["state"].notna()]
     counted = state_rows[COUNT_STATUS_COLUMN].eq(COUNT_STATUS_COUNTED)
@@ -1346,11 +1519,13 @@ def assert_counted_matches_count_status(votes: pd.DataFrame) -> None:
 def assert_counted_totals_equal_state_sum(votes: pd.DataFrame) -> None:
     """Raise if a counted totals row != the counted sum over that candidate's states.
 
-    The counted-basis twin of :func:`assert_totals_equal_state_sum`, and the guard that
-    actually earns its keep: the cast totals are checked against the *source's own*
-    published row, but nothing publishes a counted total, so without this the two
-    numbers this issue exists to produce — 1868's 285 and 1872's 349 — would ship
-    unverified.
+    The counted-basis twin of :func:`assert_totals_equal_state_sum`. Like its sibling
+    above it is a **refactor guard rather than a data check** — it re-asserts the
+    aggregate rule :func:`_add_counted_votes` applies, so no input can make it fire, and
+    an earlier draft of this docstring overclaimed by saying 1868's 285 and 1872's 349
+    "would ship unverified" without it (code review, #144). They *are* verified, against
+    figures the Archives itself prints, in ``tests/unit/test_pipeline.py``. What this
+    catches is the totals rule and the state rule drifting apart in a later edit.
 
     Deliberately general (every ``(year, candidate_id)``), not scoped to the two
     Reconstruction years: with 1872 ingested the EC spine is complete, so this is a

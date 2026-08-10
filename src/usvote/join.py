@@ -88,10 +88,22 @@ JOIN_KEY: tuple[str, ...] = ("year", "state", "candidate")
 #: ``ec_determinative`` on, because who won an election is settled by the votes Congress
 #: counted.
 #:
+#: The per-row :data:`~usvote.count_status.COUNTED_VOTES_COLUMN` is carried too, not
+#: just the window sum: coverage policy (c) re-sums the measure over a *restricted*
+#: state set (:func:`usvote.hybrid._restricted_ec_numerator`), which a national total
+#: cannot give it.
+#:
 #: Adding a column here does **not** reach the API:
 #: ``usvote.snapshot_schema.DATA_COLUMNS`` is an independent explicit projection, so the
 #: snapshot carries exactly what it lists. Surfacing this pair publicly is #139's
 #: (D047).
+#:
+#: **New columns are APPENDED, never inserted** — the same rule
+#: :data:`usvote.transform.VOTES_COLUMN_ORDER` follows, except that here it is enforced
+#: by PostgreSQL rather than by convention: ``CREATE OR REPLACE VIEW`` can only *add*
+#: trailing columns, so a column inserted mid-list makes ``rebuild_views`` fail against
+#: any warehouse whose views already exist ("cannot change name of view column ...").
+#: #144 shipped exactly that bug into review, which is why this note exists.
 EC_PV_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
@@ -100,7 +112,6 @@ EC_PV_COLUMNS: tuple[str, ...] = (
     "total_electoral_votes",
     "president_electoral_votes",
     "national_electoral_votes",
-    "national_counted_electoral_votes",
     "president_electoral_rank",
     "took_office",
     "source",
@@ -109,6 +120,9 @@ EC_PV_COLUMNS: tuple[str, ...] = (
     "state_total_votes",
     "reliability",
     "redistributable",
+    # Appended, never inserted -- see the ordering note above.
+    COUNTED_VOTES_COLUMN,
+    "national_counted_electoral_votes",
 )
 
 
@@ -176,12 +190,13 @@ def build_ec_pv_join_sql(
         " v.total_electoral_votes, v.president_electoral_votes,"
         " sum(v.president_electoral_votes)"
         " OVER (PARTITION BY v.year, v.candidate_id) AS national_electoral_votes,"
-        f" sum(v.{COUNTED_VOTES_COLUMN})"
-        " OVER (PARTITION BY v.year, v.candidate_id)"
-        " AS national_counted_electoral_votes,"
         " v.president_electoral_rank, v.took_office,"
         " p.source, p.party, p.candidate_votes, p.state_total_votes, p.reliability,"
-        " s.redistributable"
+        " s.redistributable,"
+        f" v.{COUNTED_VOTES_COLUMN},"
+        f" sum(v.{COUNTED_VOTES_COLUMN})"
+        " OVER (PARTITION BY v.year, v.candidate_id)"
+        " AS national_counted_electoral_votes"
     )
     return (
         f"SELECT {cols}"
