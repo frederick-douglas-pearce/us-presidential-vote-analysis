@@ -1688,7 +1688,7 @@ def assert_rectangular_state_grain(votes: pd.DataFrame) -> None:
     fails loud here instead of silently dropping a loser row into a downstream gap.
     :func:`assert_state_count_by_year` only checks the rank-1 winner per state, and
     :func:`assert_totals_equal_state_sum` is blind to a dropped 0-row — this closes that
-    seam. Verified to hold across all 50 currently-loaded years.
+    seam. Verified to hold across all 51 currently-loaded years.
 
     Both a duplicate ``(state, candidate)`` row **and** full ``rows == states x
     getters`` coverage are checked: a pure count test alone has a blind spot — a
@@ -1732,7 +1732,7 @@ def assert_contested_cells_catalogued(
     parenthesized cell raised ``ParseError``, and afterwards one appearing in a year
     with no catalog entry would load as an ordinary ``counted`` vote with every sum
     validator passing — precisely the "the row reads as ordinary" failure, reached from
-    the other side. 41 of the 50 in-scope years have no committed fixture, so a
+    the other side. 42 of the 51 in-scope years have no committed fixture, so a
     re-scrape or an Archives edit is a live path, not a hypothetical one.
 
     Modelled on :func:`apply_other_candidates`, which raises the same way for an

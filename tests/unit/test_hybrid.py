@@ -1363,6 +1363,97 @@ def test_the_fixture_matches_the_live_view_shape() -> None:
     assert set(frame.columns) == set(EC_PV_COLUMNS)
 
 
+class TestCountedBasis:
+    """D046: ``ec_share_full`` and ``ec_determinative`` read **counted**, not cast.
+
+    AC-verify (#144) caught this whole layer untested: reverting ``ec_share_full`` to
+    ``national_electoral_votes`` — undoing half of D046 — left the entire suite green,
+    because every other fixture defaults counted to cast and none supplies a divergent
+    value. So the PR's headline behavioural claim was unpinned exactly where a reader
+    would look for it. These cases supply the divergence.
+    """
+
+    @staticmethod
+    def _1868() -> tuple[pd.DataFrame, pd.DataFrame]:
+        """1868 in miniature: Seymour's Georgia nine are cast but never counted.
+
+        Real shape, real numbers — Grant 214 of 294 with every vote counted, Seymour 80
+        cast / 71 counted — so the assertions below are the warehouse's actual figures
+        rather than invented ones.
+        """
+        rows = [
+            {"year": 1868, "state": "Georgia", "candidate": "Horatio Seymour",
+             "total_electoral_votes": 9, "president_electoral_votes": 9,
+             # cast, then never counted: the two chambers deadlocked (D044).
+             COUNTED_VOTES_COLUMN: 0},
+            {"year": 1868, "state": "Georgia", "candidate": "Ulysses S. Grant",
+             "total_electoral_votes": 9, "president_electoral_votes": 0,
+             COUNTED_VOTES_COLUMN: 0},
+            {"year": 1868, "state": "Ohio", "candidate": "Horatio Seymour",
+             "total_electoral_votes": 285, "president_electoral_votes": 71,
+             COUNTED_VOTES_COLUMN: 71},
+            {"year": 1868, "state": "Ohio", "candidate": "Ulysses S. Grant",
+             "total_electoral_votes": 285, "president_electoral_votes": 214,
+             COUNTED_VOTES_COLUMN: 214},
+        ]
+        frame = ec_pv_frame(rows, took_office={1868: "Ulysses S. Grant"})
+        return frame, all_popular_vote(frame)
+
+    def test_ec_share_full_divides_counted_by_the_appointed_allotment(self) -> None:
+        frame, roster = self._1868()
+        out = hybrid.build_hybrid_frame(frame, roster).set_index("candidate")
+        # 294 appointed (9 + 285), unchanged by the deadlock — D041's denominator is
+        # electors *appointed*, and Georgia's nine were appointed beyond dispute.
+        assert set(out["ec_denominator"]) == {294}
+        # Seymour: 71 counted / 294, NOT the 80 he cast. This is the assertion the whole
+        # counted basis rests on, and the one that was missing.
+        assert out.loc["Horatio Seymour", "ec_share_full"] == pytest.approx(71 / 294)
+        assert out.loc["Horatio Seymour", "national_electoral_votes"] == 80
+        assert out.loc["Horatio Seymour", "national_counted_electoral_votes"] == 71
+        # Grant's votes all counted, so his share is identical on either basis — which is
+        # why no winner or ec_determinative outcome moved when the basis changed.
+        assert out.loc["Ulysses S. Grant", "ec_share_full"] == pytest.approx(214 / 294)
+
+    def test_the_winner_and_determinative_flag_are_unmoved_by_the_basis(self) -> None:
+        frame, roster = self._1868()
+        summary = hybrid.build_hybrid_summary(
+            hybrid.build_hybrid_frame(frame, roster)
+        ).iloc[0]
+        assert summary["ec_winner"] == "Ulysses S. Grant"
+        assert bool(summary["ec_determinative"]) is True  # 214/294 = 0.728 > 0.5
+        # And the rank the spine carries agrees with the share derived here — the two
+        # must share a basis or assert_ec_winner_matches_rank fires (D046).
+        hybrid.assert_ec_winner_matches_rank(
+            hybrid.build_hybrid_frame(frame, roster),
+            hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(frame, roster)),
+        )
+
+    def test_policy_c_restricts_states_not_the_basis(self) -> None:
+        """(c) narrows *which states* count, never *which measure* (D046).
+
+        Pairing a cast numerator with (b)'s counted one would make the two policies
+        disagree in 1868/1872 for a reason unrelated to coverage. Here every state is
+        ``popular_vote``, so (c) restricts nothing and must reproduce (b) exactly.
+        """
+        frame, roster = self._1868()
+        b = hybrid.build_hybrid_frame(frame, roster).set_index("candidate")
+        c = hybrid.build_hybrid_frame(
+            frame, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
+        ).set_index("candidate")
+        assert c.loc["Horatio Seymour", "ec_share_hybrid"] == pytest.approx(71 / 294)
+        assert c["ec_share_hybrid"].tolist() == pytest.approx(
+            b["ec_share_hybrid"].tolist()
+        )
+
+    def test_shares_still_sum_to_at_most_one(self) -> None:
+        # counted <= cast <= appointed, so the counted basis can only shrink each share:
+        # this guard is strictly safer than it was, never at risk of exceeding 1.0.
+        frame, roster = self._1868()
+        out = hybrid.build_hybrid_frame(frame, roster)
+        hybrid.assert_ec_shares_le_one(out)
+        assert out["ec_share_full"].sum() == pytest.approx(285 / 294)
+
+
 class TestShape:
     def test_the_frame_is_one_row_per_year_candidate(self) -> None:
         df, roster = frame_1824()

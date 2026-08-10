@@ -38,7 +38,7 @@ Gore Jr.``). No rule covers that, so the map is curated and provenance-carrying,
 mirroring the EC correction catalog and ``docs/corrections.md``.
 
 **Keyed on ``(year, ucsb_name)``, not the bare string.** Unlike MIT's 1976-2024 window,
-UCSB spans 50 elections in which the same surname denotes different people across years
+UCSB spans 51 elections in which the same surname denotes different people across years
 (the two Roosevelts, the two Adamses, the two Bushes) and one person's UCSB spelling
 drifts across years (``HERBERT HOOVER`` in 1928, ``HERBERT C. HOOVER`` in 1932). The
 ``(year, name)`` key resolves both without ambiguity, and it also *is* the D007 scope

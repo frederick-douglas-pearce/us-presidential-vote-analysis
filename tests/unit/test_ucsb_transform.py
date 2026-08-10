@@ -875,7 +875,7 @@ def real_corpus_reconciled(
     reason="USVOTE_UCSB_HTML_DIR unset; the UCSB snapshot lives outside the repo",
 )
 class TestRealCorpus:
-    """The acceptance check the synthetics cannot deliver: all 50 in-scope years.
+    """The acceptance check the synthetics cannot deliver: all 51 in-scope years.
 
     Skipped whenever the snapshot is absent, so CI stays green and never touches UCSB
     (D014/D016/D022) — the same contract as ``test_ucsb_parse.TestRealCorpus``. The EC
@@ -1043,7 +1043,7 @@ class TestRealCorpus:
             f"UCSB-not-ours: {sorted(theirs - mine)}"
         )
 
-    # --- reconcile (#38): the only run of reconcile over all 50 in-scope years ---
+    # --- reconcile (#38): the only run of reconcile over all 51 in-scope years ---
     def test_reconcile_passes_all_guards_over_the_whole_corpus(
         self, real_corpus_reconciled: pd.DataFrame
     ) -> None:

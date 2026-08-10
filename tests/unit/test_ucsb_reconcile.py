@@ -113,7 +113,7 @@ class TestCandidateMap:
             assert len(values) == len(set(values)), f"duplicate canonical name in {year}"
 
     def test_recurring_surnames_map_to_distinct_people(self) -> None:
-        # The same-name-collision hazard across 50 years (docs/canonical-keys.md).
+        # The same-name-collision hazard across 51 years (docs/canonical-keys.md).
         assert (
             UCSB_CANDIDATE_RECONCILIATIONS[(1904, "THEODORE ROOSEVELT")]
             != UCSB_CANDIDATE_RECONCILIATIONS[(1932, "FRANKLIN D. ROOSEVELT")]

@@ -87,7 +87,7 @@ canonical **display** forms above, in its own source-namespaced reconcile stage:
   [`src/usvote/ucsb/reconcile.py`](../src/usvote/ucsb/reconcile.py). UCSB's **state** names
   were already reconciled in #36 (`UCSB_STATE_RECONCILIATIONS`); this story reconciles
   **candidate** names via `UCSB_CANDIDATE_RECONCILIATIONS` — a curated, provenance-carrying
-  map keyed by `(year, ucsb_native_name)` (113 entries; keyed by year because 50 elections
+  map keyed by `(year, ucsb_native_name)` (115 entries; keyed by year because 51 elections
   reuse surnames across people, e.g. the two Roosevelts). Like MIT's, UCSB's header spelling
   is not a mechanical transform of the canonical `name` (`STROM THURMOND` → `J. Strom
   Thurmond`, `ADLAI E. STEVENSON` → `Adlai Stevenson`, `JOHN C. FREMONT` → `John C. Frémont`).

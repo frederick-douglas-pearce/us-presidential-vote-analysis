@@ -105,7 +105,7 @@ inverting the dependency exactly as D016 already does for the PV facts.
 
 What that control corroborates, stated precisely: both rosters take their `(year, state)`
 **membership** from the same EC spine, because D024 §6 requires both to — so the shared
-2,167-row count is the *design*, not a finding. What is genuinely independent is the
+2,204-row count is the *design*, not a finding. What is genuinely independent is the
 `pv_status` on each row (UCSB's parsed from their markup, ours curated with its own
 citations), and above all the **32 absences**, which the test checks first and on their
 own because they are the entire claim.
@@ -200,7 +200,7 @@ outside it rather than quietly returning an all-`popular_vote` roster.
   (`UCSB_NON_GETTER_COLUMNS` — Van Buren '48, Hale '52, Debs '12, Anderson '80, Perot
   '92/'96, Nader '00, G. Johnson '16), and a reciprocal completeness guard against an
   injected EC-getter frame proves no major was silently lost.
-  `EC_GETTERS_WITHOUT_POPULAR_VOTE` (13 entries) exempts the getters that held no popular
+  `EC_GETTERS_WITHOUT_POPULAR_VOTE` (17 entries) exempts the getters that held no popular
   vote — faithless/unpledged electors (1960 Byrd, 2016's five, 2004 Edwards, …) and the
   1832/1836 South Carolina legislature-chosen awards. With #38 landed, MIT and UCSB rows
   now share the EC-getter candidate grain in `dwh.pv_votes` (totals/margins were never
