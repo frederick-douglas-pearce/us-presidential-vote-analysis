@@ -2171,3 +2171,225 @@ would have loaded the year with no totals row at all.
   1868 rows *do* enter `ec_pv_redistributable`. #139 is the story that widens the covered window, so
   it is the one that must decide what `count_status` does on a public surface (D043 §7 defers the
   surfacing until then, and that deferral now expires in #139).
+
+## D045: 1872's 17 rejected electoral votes are synthesized from prose; the denominator is 366, not the Archives' 352
+
+**Date:** 2026-08-10
+**Issue:** #144 (split from #57) · **Corrects:** D043 §6 · **Builds on:** D043, D044
+
+**Context:**
+
+D043 §6 asserted that `assert_row_votes_sum_to_total` was "**unchanged** and passes for 1872 Georgia
+— 6 + 2 + 3 = 11 = the allotment — because rejected votes remain *rows*, merely flagged."
+
+Verified against `tests/fixtures/www_archives_gov_electoral_college_1872.html` at plan time, **that
+is wrong**. Georgia's row reads `['Georgia 4', '11', '-', '-', '8', '-', '5', '6']`: Greeley's
+president column is `-` and the president-side Others cell is 8 (Brown 6 + Jenkins 2). The three
+rejected Greeley votes **are not in the table at all** — they exist only in Table 2's note 4. The
+president side therefore sums to 8 against an allotment of 11, and D043 §6's arithmetic holds only
+*after* a synthesis step D043 did not anticipate.
+
+Re-verifying the rest of D043's prose, as that issue instructed, found the same pattern twice more:
+
+- **The 366 denominator is right, and its basis was under-stated.** The Archives totals row prints
+  352, which is the sum of the *submitting* states' allotments. Arkansas (6) and Louisiana (8)
+  appointed their full complement and print `-` only because their returns were refused.
+- **D043 §3's "Arkansas and Louisiana get `not_counted`" is right for a reason D043 did not give.**
+  The Archives note says only that the two states "did not submit any electoral votes to be
+  counted", which reads as an allotment-only gap with no recipient — and modelling it that way would
+  have kept Grant's national row at the familiar 286. The primary record says otherwise: both
+  states' electors met and cast **for Grant**, and the *returns* were rejected.
+
+**Decision:**
+
+1. **Three new correction mechanisms in `usvote/transform.py`**, each provenance-carrying, applied
+   inside `_votes_matrix` before `assert_row_votes_sum_to_total` so the source's own arithmetic is
+   what checks them:
+   - `UNPRINTED_ELECTORAL_VOTES` — votes the source documents in prose but omits from its table.
+     Keyed `(year, state, canonical candidate name)`, the **`COUNT_STATUS_OVERRIDES` grain (D043
+     §4)**, deliberately *not* the parsed `col_ind`: the Others pass renumbers those columns, so a
+     positional key would drift while its twin count_status entry — addressing the same cell — stayed
+     correct, and the two would disagree with the row still reading as ordinary. The column index is
+     resolved from the name at application time, so a name matching no column raises.
+   - `APPOINTED_ELECTORS_NOT_IN_TABLE` — allotments the source prints as `-` for a state that did
+     appoint electors. It moves the **denominator**, not a candidate's votes, which is why it is a
+     separate constant.
+   - `OTHER_CANDIDATES_1872` / `OTHER_VOTES_1872` — no new mechanism, the existing aggregate-column
+     split, but the widest instance in the corpus: four recipients (Brown 18, Hendricks 42, Jenkins
+     2, Davis 1).
+2. **The totals row is recomputed from its state rows** for every column and for the allotment, so
+   366 is derived rather than entered — D044 §2's discipline, extended to the denominator.
+3. **`UNSUPPORTED_EC_YEARS` becomes empty.** The EC spine is complete, 1824–2024. The constant is
+   **retained, not deleted**: it is the single gate on both sources (D024 §6) and the documented seam
+   for the deferred pre-12th-Amendment era (D010).
+4. **1872 is reviewed for popular-vote absences and has none**, which is a finding rather than a
+   silence. `CURATED_YEAR_COUNT` 50 → 51. **What corroborates that is the UCSB cross-source control
+   test, not the EC spine** (corrected at code review, before merge): `assert_catalog_matches_spine`
+   only forces an entry for a state that appointed *no* electors, and restoring AR/LA's allotments
+   leaves 1872 with no such state — so that check inspects nothing there and passes trivially. It is
+   blind to `legislature_chosen` absences in any case, since those states appointed electors (18 of
+   the catalog's 32 entries). The real check skips in CI (D022) and is a local merge precondition.
+
+**Sources (all public domain; the citation discipline `usvote/pv/absences.py` established):**
+- **CRS Report RL30769**, *Electoral Vote Counts in Congress: Survey of Certain Congressional
+  Practices* (Maskell, Halstead, Welborn & Burkes, 2000-12-13) — a US Government work. Records the
+  announced **whole number of 366** electors with **349 counted**, and 17 rejected: Georgia 3
+  (Greeley, who had died), Arkansas 6 (the certified persons "were not the persons elected as
+  electors"; returns "not certified according to law"), Louisiana 8 (no lawful canvass).
+- **H. Misc. Doc. No. 13, 44th Cong., 2d Sess. (1877)**, *Counting Electoral Votes: Proceedings and
+  Debates of Congress Relating to Counting the Electoral Votes for President and Vice-President of
+  the United States*, printed by order of the House — for the AR/LA **recipient**, which the
+  Archives page does not name: "the votes of Arkansas, 6, and Louisiana, 8, cast for U. S. Grant".
+- **Apportionment Act of 1872**, 17 Stat. 28 — the independent structural check: 37 states × 2
+  senators + 292 representatives = 366; Arkansas 4 + 2 = 6; Louisiana 6 + 2 = 8.
+- The per-state Others split and Georgia's recipients come from the **Archives page's own** Table 2
+  notes 1 and 4–10; every figure reproduces the parsed Others column per state and each recipient's
+  national total. No external source is needed for that half.
+
+**Rationale:**
+- The issue instructed that D043's worked numbers be treated as claims to re-verify rather than
+  settled inputs, because one of them had already proved wrong. Doing so found a second loose clause
+  (§3's AR/LA reasoning) that a narrower reading would have missed — and reversed a design that was
+  about to record a defensible-but-false model of what happened in those two states.
+- Keeping `APPOINTED_ELECTORS_NOT_IN_TABLE` separate from `UNPRINTED_ELECTORAL_VOTES` despite their
+  numbers coinciding (6 and 8 in both) avoids baking a **coincidence** into the schema: the identity
+  holds only because every appointed elector in those states cast for one candidate and all were
+  rejected. It is also cross-checked for free — `assert_row_votes_sum_to_total` requires each row's
+  cast votes to equal its allotment, so an appointed 6 against an unprinted 5 raises.
+- `ELECTORAL_VOTE_SHORTFALLS` is **untouched**. Its meaning is votes *never cast*; 1872's were cast
+  and then refused. The two mechanisms stay disjoint exactly as `usvote/count_status.py` claims, and
+  1872 acquires no shortfall entry.
+- 1868 and 1872 must not be conflated even though both print `-` allotments. 1868's
+  Mississippi/Texas/Virginia had no readmitted government and appointed nobody — genuine zeros
+  (D043 §2). A test asserts the two behave differently.
+
+**Action required:**
+- Nothing outstanding for this entry. The `count_status` **public surfacing** decision is D046/D047.
+
+## D046: `dwh.votes` carries both a cast and a counted electoral-vote measure, and counted decides who won
+
+**Date:** 2026-08-10
+**Issue:** #144 · **Builds on:** D041, D043, D044, D045 · **Decided by:** Fred, at the #144 plan gate
+
+**Context:**
+
+Synthesizing 1872's 17 rejected votes (D045) forced a question #143 had left implicit. With the
+rejected votes present as rows, Grant's national `president_electoral_votes` reads **300**, not the
+familiar 286 — because the fact records what electors *cast*, and `assert_totals_equal_state_sum`
+requires the totals row to equal the sum of the state rows.
+
+Checking rather than assuming showed the warehouse had **no counted-only total anywhere**:
+`national_electoral_votes` is an unfiltered window `SUM` (`join.py`), and `count_status` is absent
+from `EC_PV_COLUMNS`, so the join views, `usvote/hybrid.py` and the API could not express "counted
+only" at all. #143 had therefore already shipped 1868 with Seymour at **80**, nine of which were
+never counted, and nothing downstream could say so.
+
+1872 makes three different totals all true at once, and one measure cannot carry them:
+
+| | appointed | cast | counted |
+|---|---|---|---|
+| **1872 national** | 366 | 366 | 349 |
+| Grant | — | 300 | 286 |
+| Greeley | — | 3 | 0 |
+| **1868 national** | 294 | 294 | 285 |
+| Seymour | — | 80 | **71** |
+
+**Decision:**
+
+1. **`dwh.votes` carries both measures.** `president_electoral_votes` is unchanged and means **cast**;
+   `president_electoral_votes_counted` is new and means **entered the final national count**. The
+   column name lives in the stdlib-only `usvote/count_status.py` for the same reason the enum does
+   (D044): `transform` derives it, `load` builds its DDL, `join` sums it, and none may depend on the
+   others.
+2. **The counted rule is strict:** `disputed` is excluded alongside `not_counted`, because Georgia's
+   nine votes in 1868 were never counted by anyone — the two chambers deadlocked. A pleasing
+   consequence: **both** of the Archives' printed 1868 totals rows are now reproducible, 294 as cast
+   and 285 as counted, where D044 could only select one.
+3. **The measure is derived by two rules, and that is deliberate.** State rows take the row rule
+   (cast when `counted`, else 0). `is_total` rows take the **sum over their year's state rows** — the
+   row rule is *wrong* for them, since aggregates are never flagged (D044) and would hand back the
+   cast value. This is exactly the fact D044 recorded that one enum value could not express.
+4. **Counted decides who won.** `president_electoral_rank` (and the `took_office` derived from it)
+   and `hybrid.ec_share_full` / `ec_determinative` all move to the counted basis. The denominator
+   stays the **appointed** allotment (D041), so `ec_share_full` is now literally the 12th Amendment's
+   test — votes *counted* over electors *appointed*. 1872 reads Grant at 286/366 = 0.781 against the
+   184-of-366 threshold Congress actually announced.
+5. **Three measures, one ladder: appointed ≥ cast ≥ counted**, with a documented gap at each step —
+   `ELECTORAL_VOTE_SHORTFALLS` opens the first (appointed, never cast) and `count_status` the second
+   (cast, never counted).
+
+**Rationale:**
+- The alternative — keep the fact at what Congress counted and correct only the denominator — would
+  have kept Grant at the familiar 286 but left the 17 cast votes and their recipients out of the
+  warehouse entirely, needing a new 17-vote row-sum exemption and leaving `not_counted` with **zero
+  instances** in the corpus. That is the mechanism D043 built, unexercised.
+- Storing rather than deriving-at-the-view is what the two-rule derivation buys: on a state row the
+  value is redundant, but on an `is_total` row it is the only place the counted total exists.
+- **Rank and `ec_share_full` had to switch together.** `assert_ec_winner_matches_rank` compares
+  `argmax(ec_share_full)` against `president_electoral_rank == 1`; had only one moved, 1872 alone
+  would have fired it. The co-switch is mandatory, not incidental.
+- **No outcome changes, and that is provable without running anything** (architect, #144): only 1868
+  and 1872 have `counted ≠ cast`, and in both the EC winner is Grant, **whose votes were entirely
+  counted** — so the winner's `ec_share_full` is identical on either basis and the argmax cannot
+  reorder. What *does* change is 1868 Seymour's `ec_share_full` (80/294 = 0.272 → 71/294 = 0.241).
+  His `hybrid_score` does **not** move: 1868 is pre-1976, so `pv_share` and the hybrid are NULL.
+- Because `counted ≤ cast ≤ appointed`, `assert_ec_shares_le_one` is **strictly safer** under the new
+  basis: a smaller numerator can only shrink a share, never manufacture a majority. D041's safety
+  property is strengthened rather than threatened.
+- Policy (c)'s `_restricted_ec_numerator` moved to the counted measure too. A coverage policy chooses
+  which *states* count toward a share, never which *basis*; leaving it on cast would have made (b)
+  and (c) disagree in 1872 for a reason unrelated to coverage. Numerically immaterial today — both
+  anomaly years have full popular-vote coverage — but the inconsistency would have been invisible.
+
+**Action required:**
+- **#139** owns the public surfacing (D047).
+
+## D047: `count_status` and the counted measure will be surfaced publicly; the API plumbing is #139's
+
+**Date:** 2026-08-10
+**Issue:** #144 · **Supersedes:** D043 §7 · **Builds on:** D028, D030, D046
+
+**Context:**
+
+D043 §7 deferred the question of whether `count_status` should reach a public surface "until a public
+surface actually covers these years". #139 is that surface — it widens the API's covered window back
+to 1824 — so the deferral has expired and #144 is where the call is recorded.
+
+**Decision:**
+
+1. **Yes, both `count_status` and `president_electoral_votes_counted` are surfaced publicly.** An API
+   that reports Grant at 300 electoral votes in 1872 with no way to see that 14 were refused is worse
+   than one that omits the year: the number looks ordinary and contradicts every reference the reader
+   can check.
+2. **The plumbing is #139's, not #144's.** `usvote/join.py` gains **two** columns in `EC_PV_COLUMNS`
+   here — the per-row `president_electoral_votes_counted` and the national
+   `national_counted_electoral_votes` — because the analysis surface needs both for D046: coverage
+   policy (c) re-sums the measure over a *restricted* state set, which a national total cannot give
+   it. `snapshot_schema.DATA_COLUMNS` and the API models are untouched.
+   **Both are appended, never inserted**, and that is a hard rule rather than a style note:
+   PostgreSQL's `CREATE OR REPLACE VIEW` can only add trailing columns, so a mid-list insert makes
+   `rebuild_views` fail against every warehouse whose views already exist. #144 shipped exactly that
+   bug into review — it passed all 987 offline tests, because the pandas oracle builds any order —
+   and it is now pinned by a test.
+3. **Leaving them out of `DATA_COLUMNS` is safe, and was verified rather than assumed.**
+   `DATA_COLUMNS` is an **independent explicit tuple** that `snapshot.py` projects with
+   `[list(DATA_COLUMNS)]`; the only test coupling the two runs `DATA_COLUMNS → API model`, never
+   `EC_PV_COLUMNS → DATA_COLUMNS`. So an added join-view column does not propagate to the snapshot,
+   the content hash, or the served payload.
+
+**Rationale:**
+- Splitting the decision from its plumbing keeps #144 to one coherent slice (ingest 1872 + model the
+  two measures) while giving #139 a settled answer to build against instead of a re-litigation.
+- The containment property is what makes the split honest. Had `DATA_COLUMNS` been derived from
+  `EC_PV_COLUMNS`, adding a column here would have silently changed the public payload and the
+  snapshot version — a D028/D030 surprise. It is not, and a test proves the direction.
+
+**Action required:**
+- **#139** threads both columns through `snapshot.py` → the API models, and decides their public
+  field names. One thing it should not re-derive: `national_counted_electoral_votes` is **never
+  NULL** (an int at state grain, unlike PV), so it needs none of the `_INTEGER_COLUMNS`/`_to_int64`
+  NULL handling the PV columns require.
+- **Blog Post 3** (`social/drafts/2026-08-05-it-takes-270-but-270-of-what.md`) describes this model in
+  the present tense and cites #57 as the record. Per D043's action item it is **the post that
+  changes** where it diverges from shipped behaviour — in particular it must not describe 1872's
+  electoral totals without saying which basis it means.

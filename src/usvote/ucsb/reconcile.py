@@ -38,7 +38,7 @@ Gore Jr.``). No rule covers that, so the map is curated and provenance-carrying,
 mirroring the EC correction catalog and ``docs/corrections.md``.
 
 **Keyed on ``(year, ucsb_name)``, not the bare string.** Unlike MIT's 1976-2024 window,
-UCSB spans 50 elections in which the same surname denotes different people across years
+UCSB spans 51 elections in which the same surname denotes different people across years
 (the two Roosevelts, the two Adamses, the two Bushes) and one person's UCSB spelling
 drifts across years (``HERBERT HOOVER`` in 1928, ``HERBERT C. HOOVER`` in 1932). The
 ``(year, name)`` key resolves both without ambiguity, and it also *is* the D007 scope
@@ -133,6 +133,22 @@ UCSB_CANDIDATE_RECONCILIATIONS: dict[tuple[int, str], str] = {
     # parser selects, D044), so both map rather than being dropped as non-getters.
     (1868, "ULYSSES S. GRANT"): "Ulysses S. Grant",
     (1868, "HORATIO SEYMOUR"): "Horatio Seymour",
+    # 1872 — admitted when #144 lifted the last year from UNSUPPORTED_EC_YEARS. Both
+    # columns are EV-getters, but only one of them obviously: Grant took 286 counted
+    # votes, while Greeley died before the electors met and his 3 Georgia votes were
+    # rejected by the House. He is a getter here because the EC spine records votes
+    # **cast** (``president_electoral_votes``), not votes counted — had the spine keyed
+    # getter-hood to the counted measure (#144's other half), Greeley would read 0, fall
+    # to UCSB_NON_GETTER_COLUMNS, and his 2.8M popular votes — 43.8% of the national
+    # total, the second largest share of the year — would be dropped from the PV fact
+    # entirely. The cast basis is what keeps him in.
+    #
+    # ``GREEFLEY`` is **UCSB's own typo**, not ours: their 1872 page prints the column
+    # header as "HORACE GREEFLEY" while spelling it correctly three times in the body
+    # prose. Reconciled here rather than corrected at the parse seam, because this map
+    # is exactly where a source's spelling meets the canonical one (D006).
+    (1872, "ULYSSES S. GRANT"): "Ulysses S. Grant",
+    (1872, "HORACE GREEFLEY"): "Horace Greeley",
     # 1876
     (1876, "RUTHERFORD B. HAYES"): "Rutherford B. Hayes",
     (1876, "SAMUEL J. TILDEN"): "Samuel J. Tilden",

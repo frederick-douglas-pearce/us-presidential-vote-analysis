@@ -1118,3 +1118,292 @@ def test_an_empty_reason_does_not_satisfy_the_biconditional() -> None:
     })
     with pytest.raises(TransformError, match="carry no count_status_reason"):
         T.assert_count_status_reasons(frame)
+
+
+# --- #144: the 1872 correction constants and the counted measure -------------
+#
+# Code review found these untested: transform.py claimed "a test asserts that identity
+# in both directions" for the two 1872 constants and none existed, and none of
+# _apply_unprinted_votes / _apply_appointed_elector_corrections / _add_counted_votes /
+# the two new asserts had a negative test. CLAUDE.md requires every correction constant
+# be paired with an apply_* function AND a test.
+
+
+class TestUnprintedVotesCatalog:
+    """The two 1872 constants describe the same three cells from opposite sides."""
+
+    def test_the_two_catalogs_name_exactly_the_same_1872_cells(self) -> None:
+        """The identity transform.py's comment claims, asserted in **both** directions.
+
+        ``UNPRINTED_ELECTORAL_VOTES`` and the year's ``not_counted``
+        ``COUNT_STATUS_OVERRIDES`` describe one fact from two sides: a vote the table
+        omits, and a vote Congress refused. Editing one alone would leave the other
+        describing a cell that no longer exists.
+
+        The import-time guard only checks unprinted -> override (a general rule: a vote
+        omitted from the table cannot have counted). The converse is 1872-specific — 1868's
+        disputed nine ARE printed — so it is pinned here rather than in the module.
+        """
+        unprinted = {k for k in T.UNPRINTED_ELECTORAL_VOTES if k[0] == 1872}
+        refused = {
+            k
+            for k, (status, _reason) in T.COUNT_STATUS_OVERRIDES.items()
+            if k[0] == 1872 and status == CS.COUNT_STATUS_NOT_COUNTED
+        }
+        assert unprinted == refused
+        assert unprinted == {
+            (1872, "Georgia", "Horace Greeley"),
+            (1872, "Arkansas", "Ulysses S. Grant"),
+            (1872, "Louisiana", "Ulysses S. Grant"),
+        }
+
+    def test_an_unprinted_vote_without_a_count_status_entry_raises_at_import(
+        self,
+    ) -> None:
+        # The dangerous direction: unflagged, synthesized votes would load as ordinary
+        # `counted` rows and inflate a national total with every sum validator passing.
+        original = T.UNPRINTED_ELECTORAL_VOTES
+        T.UNPRINTED_ELECTORAL_VOTES = {**original, (1872, "Ohio", "Ulysses S. Grant"): 1}
+        try:
+            with pytest.raises(TransformError, match="no COUNT_STATUS_OVERRIDES entry"):
+                T._assert_unprinted_votes_are_uncounted()
+        finally:
+            T.UNPRINTED_ELECTORAL_VOTES = original
+
+    def test_the_catalogued_totals_are_the_seventeen_congress_refused(self) -> None:
+        # 3 (Georgia/Greeley) + 6 (Arkansas) + 8 (Louisiana) = 17, and the appointed
+        # corrections are the AR/LA half of that. The coincidence is real but per-state.
+        assert sum(T.UNPRINTED_ELECTORAL_VOTES.values()) == 17
+        assert dict(T.APPOINTED_ELECTORS_NOT_IN_TABLE) == {
+            (1872, "Arkansas"): 6,
+            (1872, "Louisiana"): 8,
+        }
+
+
+class TestUnprintedVotesApplication:
+    """``_apply_unprinted_votes`` resolves a candidate NAME to a column, or raises."""
+
+    @staticmethod
+    def _matrix() -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+        parsed = [{
+            "year": 1872,
+            "t2": {
+                "candidate_state": [
+                    {"president_candidate_name": "Ulysses S. Grant", "col_ind": 1,
+                     "president_candidate_state": "Illinois"},
+                    {"president_candidate_name": "Horace Greeley", "col_ind": 2,
+                     "president_candidate_state": "New York"},
+                ]
+            },
+        }]
+        matrix = pd.DataFrame([
+            {"year": 1872, "state": "Georgia", "total_electoral_votes": 11, 1: 0, 2: 0},
+            {"year": 1872, "state": "Totals", "total_electoral_votes": 11, 1: 0, 2: 0},
+        ])
+        return matrix, parsed
+
+    def test_a_name_with_no_column_that_year_raises(self) -> None:
+        # A dropped synthesis is worse than a loud one: the row would still *look*
+        # complete, just short.
+        matrix, parsed = self._matrix()
+        original = T.UNPRINTED_ELECTORAL_VOTES
+        T.UNPRINTED_ELECTORAL_VOTES = {(1872, "Georgia", "Horace Greeeley"): 3}
+        try:
+            with pytest.raises(TransformError, match="no column in that year"):
+                T._apply_unprinted_votes(matrix, parsed)
+        finally:
+            T.UNPRINTED_ELECTORAL_VOTES = original
+
+    def test_a_state_matching_no_row_raises(self) -> None:
+        matrix, parsed = self._matrix()
+        original = T.UNPRINTED_ELECTORAL_VOTES
+        T.UNPRINTED_ELECTORAL_VOTES = {(1872, "Atlantis", "Horace Greeley"): 3}
+        try:
+            with pytest.raises(TransformError, match="matched 0 state rows"):
+                T._apply_unprinted_votes(matrix, parsed)
+        finally:
+            T.UNPRINTED_ELECTORAL_VOTES = original
+
+    def test_the_totals_row_is_rebuilt_from_the_state_rows(self) -> None:
+        matrix, parsed = self._matrix()
+        original = T.UNPRINTED_ELECTORAL_VOTES
+        T.UNPRINTED_ELECTORAL_VOTES = {(1872, "Georgia", "Horace Greeley"): 3}
+        try:
+            out = T._apply_unprinted_votes(matrix, parsed)
+        finally:
+            T.UNPRINTED_ELECTORAL_VOTES = original
+        assert int(out.loc[out["state"] == "Georgia", 2].iloc[0]) == 3
+        # Derived, never entered (D044 §2): the totals row follows its state rows.
+        assert int(out.loc[out["state"] == "Totals", 2].iloc[0]) == 3
+
+    def test_a_year_absent_from_the_run_is_skipped(self) -> None:
+        # A subset run must never indict another year's corrections.
+        matrix = pd.DataFrame([
+            {"year": 2020, "state": "Texas", "total_electoral_votes": 38, 1: 38},
+            {"year": 2020, "state": "Totals", "total_electoral_votes": 38, 1: 38},
+        ])
+        out = T._apply_unprinted_votes(matrix, [{"year": 2020, "t2": {
+            "candidate_state": [{"president_candidate_name": "A", "col_ind": 1,
+                                 "president_candidate_state": "Texas"}]}}])
+        assert int(out.loc[out["state"] == "Texas", 1].iloc[0]) == 38
+
+
+class TestAppointedElectorCorrections:
+    """1872's dashes become 6 and 8; 1868's stay genuine zeros (D043 §2)."""
+
+    def test_1872_ar_la_recover_their_allotments_and_1868_ms_tx_va_do_not(self) -> None:
+        matrix = pd.DataFrame([
+            {"year": 1872, "state": "Arkansas", "total_electoral_votes": 0},
+            {"year": 1872, "state": "Louisiana", "total_electoral_votes": 0},
+            {"year": 1872, "state": "Ohio", "total_electoral_votes": 22},
+            {"year": 1872, "state": "Totals", "total_electoral_votes": 22},
+            {"year": 1868, "state": "Mississippi", "total_electoral_votes": 0},
+            {"year": 1868, "state": "Texas", "total_electoral_votes": 0},
+            {"year": 1868, "state": "Virginia", "total_electoral_votes": 0},
+            {"year": 1868, "state": "Totals", "total_electoral_votes": 0},
+        ])
+        out = T._apply_appointed_elector_corrections(matrix).set_index(
+            ["year", "state"]
+        )["total_electoral_votes"]
+        assert (int(out[(1872, "Arkansas")]), int(out[(1872, "Louisiana")])) == (6, 8)
+        assert int(out[(1872, "Totals")]) == 36  # 6 + 8 + 22, rebuilt from state rows
+        # Not readmitted, appointed nobody — these are real zeros, not missing data.
+        for state in ("Mississippi", "Texas", "Virginia"):
+            assert int(out[(1868, state)]) == 0
+        assert int(out[(1868, "Totals")]) == 0
+
+    def test_a_state_matching_no_row_in_a_present_year_raises(self) -> None:
+        original = T.APPOINTED_ELECTORS_NOT_IN_TABLE
+        T.APPOINTED_ELECTORS_NOT_IN_TABLE = {(1872, "Atlantis"): 6}
+        try:
+            with pytest.raises(TransformError, match="matched 0 state rows"):
+                T._apply_appointed_elector_corrections(
+                    pd.DataFrame([
+                        {"year": 1872, "state": "Ohio", "total_electoral_votes": 22},
+                        {"year": 1872, "state": "Totals", "total_electoral_votes": 22},
+                    ])
+                )
+        finally:
+            T.APPOINTED_ELECTORS_NOT_IN_TABLE = original
+
+
+class TestCountedMeasure:
+    """The two-rule derivation (D046) and its two guards."""
+
+    @staticmethod
+    def _votes(status: str, cast: int, counted: int) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"year": 1872, "state": "Georgia", "candidate_id": 1,
+             CS.CAST_VOTES_COLUMN: cast, CS.COUNTED_VOTES_COLUMN: counted,
+             CS.COUNT_STATUS_COLUMN: status},
+            {"year": 1872, "state": None, "candidate_id": 1,
+             CS.CAST_VOTES_COLUMN: cast, CS.COUNTED_VOTES_COLUMN: counted,
+             CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+        ])
+
+    def test_state_rows_take_the_row_rule_and_totals_take_the_state_sum(self) -> None:
+        votes = pd.DataFrame([
+            {"year": 1868, "state": "Georgia", "candidate_id": 2,
+             CS.CAST_VOTES_COLUMN: 9, CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_DISPUTED},
+            {"year": 1868, "state": "Ohio", "candidate_id": 2,
+             CS.CAST_VOTES_COLUMN: 71, CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+            {"year": 1868, "state": None, "candidate_id": 2,
+             CS.CAST_VOTES_COLUMN: 80, CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+        ])
+        out = T._add_counted_votes(votes)
+        by_state = out.loc[out["state"].notna()].set_index("state")
+        # Strict: `disputed` is excluded alongside `not_counted`.
+        assert int(by_state.loc["Georgia", CS.COUNTED_VOTES_COLUMN]) == 0
+        assert int(by_state.loc["Ohio", CS.COUNTED_VOTES_COLUMN]) == 71
+        # The aggregate takes the state sum, NOT its own row rule — it is flagged
+        # `counted` (D044), so the row rule would have handed back the cast 80.
+        totals = out.loc[out["state"].isna()]
+        assert int(totals[CS.COUNTED_VOTES_COLUMN].iloc[0]) == 71
+        assert int(totals[CS.CAST_VOTES_COLUMN].iloc[0]) == 80
+
+    def test_a_totals_row_with_no_state_rows_raises_a_located_error(self) -> None:
+        # Not pandas' IntCastingNaNError, which names no year or candidate.
+        orphan = pd.DataFrame([
+            {"year": 1872, "state": "Ohio", "candidate_id": 1,
+             CS.CAST_VOTES_COLUMN: 22, CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+            {"year": 1872, "state": None, "candidate_id": 99,
+             CS.CAST_VOTES_COLUMN: 5, CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+        ])
+        with pytest.raises(TransformError, match=r"no state rows to sum"):
+            T._add_counted_votes(orphan)
+
+    def test_the_state_row_biconditional_fires_both_ways(self) -> None:
+        # A `counted` row must carry its cast votes ...
+        with pytest.raises(TransformError, match="disagrees with count_status"):
+            T.assert_counted_matches_count_status(
+                self._votes(CS.COUNT_STATUS_COUNTED, cast=11, counted=8)
+            )
+        # ... and any other row must carry 0.
+        with pytest.raises(TransformError, match="disagrees with count_status"):
+            T.assert_counted_matches_count_status(
+                self._votes(CS.COUNT_STATUS_NOT_COUNTED, cast=11, counted=11)
+            )
+
+    def test_the_biconditional_does_not_fire_on_a_legitimate_totals_row(self) -> None:
+        # 1868 Seymour: `counted`-flagged, 71 counted against 80 cast. Scoping the check
+        # to state rows is what stops it raising on correct data.
+        legit = pd.DataFrame([
+            {"year": 1868, "state": "Georgia", "candidate_id": 2,
+             CS.CAST_VOTES_COLUMN: 9, CS.COUNTED_VOTES_COLUMN: 0,
+             CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_DISPUTED},
+            {"year": 1868, "state": None, "candidate_id": 2,
+             CS.CAST_VOTES_COLUMN: 80, CS.COUNTED_VOTES_COLUMN: 71,
+             CS.COUNT_STATUS_COLUMN: CS.COUNT_STATUS_COUNTED},
+        ])
+        T.assert_counted_matches_count_status(legit)  # must not raise
+
+    def test_the_aggregate_check_fires_when_the_totals_row_drifts(self) -> None:
+        drifted = pd.DataFrame([
+            {"year": 1868, "state": "Ohio", "candidate_id": 2,
+             CS.COUNTED_VOTES_COLUMN: 71},
+            {"year": 1868, "state": None, "candidate_id": 2,
+             CS.COUNTED_VOTES_COLUMN: 80},
+        ])
+        with pytest.raises(TransformError, match="totals row !="):
+            T.assert_counted_totals_equal_state_sum(drifted)
+
+
+class TestPrintedTotalsReconciliation:
+    """The source-drift guard that replaced the check the corrections overwrote."""
+
+    @staticmethod
+    def _parsed_1872() -> list[ParsedYear]:
+        tables = get_html_tables(
+            "https://www.archives.gov/electoral-college/1872",
+            find_all=True,
+            fetch=fetch_from_dir(FIXTURES_DIR),
+        )
+        return parse_election_years({1872: tables}, STATE_NAMES)
+
+    def test_the_real_1872_page_reconciles(self) -> None:
+        T._votes_matrix(self._parsed_1872())  # must not raise
+
+    @pytest.mark.parametrize(
+        ("cell", "value", "match"),
+        [
+            (1, 287, "column 1 reads"),  # printed Grant total moves
+            ("total_electoral_votes", 353, "allotment reads"),  # printed 352 moves
+            (3, 64, "named split sums to"),  # printed Others cell moves
+        ],
+    )
+    def test_source_drift_in_a_printed_total_fails_loud(
+        self, cell: Any, value: int, match: str
+    ) -> None:
+        """An Archives edit or a bad re-scrape must not be silently absorbed.
+
+        Every correction pass overwrites the printed totals cells, so without this the
+        page's published numbers would no longer be checked against its own state grid
+        for exactly the year with the most synthesis.
+        """
+        parsed = self._parsed_1872()
+        totals = next(
+            v for v in parsed[0]["t2"]["votes_by_state"] if v["state"] == "Totals"
+        )
+        totals[cell] = value
+        with pytest.raises(TransformError, match=match):
+            T._votes_matrix(parsed)

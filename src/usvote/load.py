@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from usvote.count_status import build_count_status_check
+from usvote.count_status import build_count_status_check, build_counted_votes_check
 from usvote.db import DBC
 
 # The data-warehouse schema and its tables, listed in FK-dependency order: a table
@@ -110,6 +110,17 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
             # US Government work carries no redistribution restriction — unlike the UCSB
             # prose that pv_state_status.note holds (D022/D024 §6).
             ("count_status_reason", "text"),
+            # The counted-basis twin of president_electoral_votes (#144, D046): the
+            # votes that entered the final national count, i.e. the cast votes on a
+            # 'counted' row and 0 on any other — and, on an is_total row, the sum over
+            # that year's states, which is how an aggregate expresses "80 cast, 71
+            # counted" that one enum value could not (D044). Appointed >= cast >=
+            # counted is the ladder; the CHECK closes the second inequality at the write
+            # boundary, mirroring the count_status CHECK above.
+            (
+                "president_electoral_votes_counted", "smallint", "not null",
+                build_counted_votes_check(),
+            ),
         ],
     ]
 
