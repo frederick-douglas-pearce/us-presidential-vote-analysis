@@ -190,12 +190,13 @@ outside it rather than quietly returning an all-`popular_vote` roster.
   **candidate** names are reconciled onto the canonical EC `name` in
   [`src/usvote/ucsb/reconcile.py`](../src/usvote/ucsb/reconcile.py) via
   `UCSB_CANDIDATE_RECONCILIATIONS` — a curated map keyed by `(year, ucsb_native_name)`
-  (111 EC-getter columns). The spellings are non-mechanical, mirroring the EC/MIT
+  (115 EC-getter columns). The spellings are non-mechanical, mirroring the EC/MIT
   catalogs: `STROM THURMOND` → `J. Strom Thurmond`, `ADLAI E. STEVENSON` → `Adlai
   Stevenson`, `WENDELL WILLKIE` → `Wendell L. Willkie`, `AL GORE` → `Albert Gore Jr.`,
   and the accent restored in `JOHN C. FREMONT` → `John C. Frémont`. (The 1872 `HORACE
-  GREEFLEY` typo lives in a Reconstruction year gated out of the EC spine, so it is
-  catalogued but not ingested until #57 — see below.) The **D007 candidate scope** is
+  GREEFLEY` typo was catalogued while that year was gated out of the EC spine; #144
+  ingested 1872, so it is now reconciled like any other — the #38 reciprocal guard raised
+  on the column rather than letting 2.8M votes drop silently.) The **D007 candidate scope** is
   applied in the same stage: the 8 popular-vote-only minors UCSB prints are dropped
   (`UCSB_NON_GETTER_COLUMNS` — Van Buren '48, Hale '52, Debs '12, Anderson '80, Perot
   '92/'96, Nader '00, G. Johnson '16), and a reciprocal completeness guard against an
