@@ -46,12 +46,18 @@ the year, which admitted those four rows to :data:`CURATED_YEARS` with **no new
 research**: that is the payoff of recording an out-of-scope finding rather than
 deferring it.
 
-**1872 has no entries, and its absence from the catalog is not evidence it has none** —
-that is the reason :data:`CURATED_YEARS` is a scope marker rather than a derived set.
-Whoever lands #144 must review 1872 (Greeley died after the popular vote; Congress
-rejected Georgia's electoral votes) before adding it, not read this silence as a clean
-bill of health. Until then the year stays in ``UNSUPPORTED_EC_YEARS`` and
-:func:`build_curated_roster` refuses to derive for it.
+**1872 was reviewed in #144 and genuinely has no entries** — which is a finding, not a
+silence, and the distinction is exactly what :data:`CURATED_YEARS` exists to record.
+Every one of the 37 states that appointed electors in 1872 chose them by popular vote;
+Colorado was not yet a state. The year's anomalies are all *counting* anomalies —
+Greeley died after the popular vote and Congress refused 17 electoral votes — and none
+of them touches whether a popular vote was **held**, which is the only question this
+catalog answers. Those anomalies live on ``dwh.votes.count_status`` instead (D043-D046).
+
+The review was not taken on trust: with Arkansas's and Louisiana's allotments restored
+(D045), 1872 has **no zero-EV state at all**, so :func:`assert_catalog_matches_spine`'s
+"no uncatalogued zero-EV state" check confirms the empty catalog against the EC spine
+rather than merely permitting it.
 """
 
 from __future__ import annotations
@@ -73,8 +79,10 @@ from usvote.pv.status import (
 from usvote.years import ec_ingest_years
 
 #: The years a curator has reviewed for popular-vote absences. Derived from
-#: :func:`usvote.years.ec_ingest_years` rather than re-listing the span, so the
-#: 1868/1872 exclusion has one definition (``UNSUPPORTED_EC_YEARS``) and not two.
+#: :func:`usvote.years.ec_ingest_years` rather than re-listing the span, so the ingest
+#: scope has one definition (``UNSUPPORTED_EC_YEARS``) and not two. That set is now
+#: empty — #143 and #144 ingested the last two gated years — so this is currently the
+#: full 1824-2024 span, and the derivation is what kept it correct through both lifts.
 #:
 #: This is the catalog's **scope marker**, not a convenience: outside it, the catalog's
 #: silence carries no information, so :func:`build_curated_roster` refuses to derive.
@@ -85,7 +93,11 @@ CURATED_YEARS: frozenset[int] = frozenset(ec_ingest_years())
 #: would be *derivable* while nobody has reviewed it for absences. Bumping
 #: ``LATEST_ELECTION_YEAR`` is a routine each-cycle edit, so this is a live path, not a
 #: hypothetical one.
-CURATED_YEAR_COUNT = 50
+#:
+#: 49 -> 50 when #143 admitted 1868 (whose four rows were already catalogued), 50 -> 51
+#: when #144 admitted 1872 (reviewed, no absences). Both bumps were deliberate acts
+#: gated on a review, which is the whole point of pinning the count.
+CURATED_YEAR_COUNT = 51
 
 
 @dataclass(frozen=True)

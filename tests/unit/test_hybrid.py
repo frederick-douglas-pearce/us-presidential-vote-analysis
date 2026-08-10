@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 
 from usvote import hybrid
+from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -47,7 +48,12 @@ def ec_pv_frame(
 
     Each row needs ``year``, ``state``, ``candidate``, ``total_electoral_votes``,
     ``president_electoral_votes``; ``candidate_votes`` and ``state_total_votes`` are
-    optional (absent → NULL, the honest D005 gap). Derived here so a fixture cannot
+    optional (absent → NULL, the honest D005 gap). ``president_electoral_votes_counted``
+    is optional too and **defaults to the cast value** — the shape of every year but 1868
+    and 1872 (#144). Supplying it lets a fixture model cast-but-uncounted votes; both the
+    counted window SUM and the rank are then derived from it, exactly as the live view and
+    ``transform._add_electoral_rank`` do, so a fixture cannot assert a rank the spine
+    would not produce. Derived here so a fixture cannot
     contradict the live view: ``candidate_id`` (stable per name), ``national_electoral_votes``
     (the window SUM), and ``president_electoral_rank`` (dense rank on the national total,
     descending, so rank 1 is the EC leader).
@@ -70,11 +76,18 @@ def ec_pv_frame(
     df["candidate_id"] = df["candidate"].map(ids)
     df["party"] = df["candidate"].map(party or {}).fillna("Unknown")
 
-    df["national_electoral_votes"] = df.groupby(["year", "candidate_id"])[
-        "president_electoral_votes"
-    ].transform("sum")
+    if COUNTED_VOTES_COLUMN not in df.columns:
+        df[COUNTED_VOTES_COLUMN] = df["president_electoral_votes"]
+    df[COUNTED_VOTES_COLUMN] = df[COUNTED_VOTES_COLUMN].fillna(
+        df["president_electoral_votes"]
+    )
+    for source_col, out_col in (
+        ("president_electoral_votes", "national_electoral_votes"),
+        (COUNTED_VOTES_COLUMN, "national_counted_electoral_votes"),
+    ):
+        df[out_col] = df.groupby(["year", "candidate_id"])[source_col].transform("sum")
     df["president_electoral_rank"] = (
-        df.groupby("year")["national_electoral_votes"]
+        df.groupby("year")["national_counted_electoral_votes"]
         .rank(method="dense", ascending=False)
         .astype(int)
     )

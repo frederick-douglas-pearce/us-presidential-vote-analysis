@@ -164,15 +164,21 @@ class TestYearScope:
         years = ucsb_ingest_years()
         assert min(years) == 1824
         assert max(years) == 2024
-        assert len(years) == 50
+        # 51, not 50: #144 ingested 1872, emptying UNSUPPORTED_EC_YEARS. With no gated
+        # year left, UCSB's scope is now exactly the EC spine — the pre-1824
+        # no-popular-vote subtraction has nothing to remove above the floor.
+        assert len(years) == 51
 
-    def test_reconstruction_years_excluded_via_the_ec_spine(self) -> None:
-        # Not by a local literal — see the grep test below. 1868 was admitted by #143
-        # lifting it from UNSUPPORTED_EC_YEARS, with no edit under usvote/ucsb/: exactly
-        # the self-healing property the derivation was built for (D024 §6). 1872 is still
-        # gated, pending #144.
-        assert 1868 in ucsb_ingest_years()
-        assert 1872 not in ucsb_ingest_years()
+    def test_reconstruction_years_admitted_via_the_ec_spine(self) -> None:
+        """Both Reconstruction years now reach UCSB, and neither needed an edit here.
+
+        Not by a local literal — see the grep test below. 1868 was admitted by #143 and
+        1872 by #144, each simply lifting the year from ``UNSUPPORTED_EC_YEARS``, with no
+        change under ``usvote/ucsb/`` either time. That is exactly the self-healing
+        property the derivation was built for (D024 §6), and the second lift is what
+        confirms the first was not a one-off.
+        """
+        assert {1868, 1872} <= ucsb_ingest_years()
 
     def test_pre_1824_no_popular_vote_years_excluded(self) -> None:
         assert not ucsb_ingest_years() & {1789, 1792, 1820}
@@ -925,13 +931,23 @@ class TestRealCorpus:
     def test_reliability_flags_only_self_contradicting_cells(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
-        """Four cells corpus-wide, each a published percent contradicting its votes.
+        """Six cells corpus-wide, each a published percent contradicting its votes.
 
         1860 VT/VA/WI each repeat the *next* candidate's percent in the Douglas cell
         (4.16, 44.46, 0.58) while their votes sum exactly to the state total; 1968 UT
         publishes 31.1 where 156,665/422,568 is 37.1. Every other 1860 state agrees to
         0.00pp, which is what shows these are isolated source typos rather than a
         column misalignment. Catalogued in ``docs/corrections.md``.
+
+        **1872 Kentucky (both cells) joined the list when #144 admitted the year**, and
+        it is a source error of a different shape: UCSB publishes 45.5 / 54.5 against
+        88,970 / 100,208 of a 191,552 state total, which works out to 46.45 / 52.31. The
+        two published percents are inconsistent with **each other**, not merely with the
+        printed total — no denominator D satisfies both, since 88,970/100,208 = 0.888
+        while 45.5/54.5 = 0.835. So this is not the "percent computed over a two-party
+        subtotal" pattern; the figures are simply wrong at the source, and flagging both
+        cells is correct. The votes themselves are untouched — ``reliability`` marks the
+        cell, it never edits a number (D017).
         """
         pv, _ = real_corpus_result
         flagged = pv[pv["reliability"] == RELIABILITY_UNRELIABLE]
@@ -941,6 +957,8 @@ class TestRealCorpus:
             (1860, "Vermont"),
             (1860, "Virginia"),
             (1860, "Wisconsin"),
+            (1872, "Kentucky"),
+            (1872, "Kentucky"),  # both candidate cells in the state
             (1968, "Utah"),
         ]
 
@@ -964,7 +982,7 @@ class TestRealCorpus:
     def test_the_curated_catalog_agrees_with_ucsb_on_every_classification(
         self, real_corpus_result: tuple[pd.DataFrame, pd.DataFrame]
     ) -> None:
-        """The **classification** of all 2,167 ``(year, state)`` pairs, set-equal.
+        """The **classification** of all 2,204 ``(year, state)`` pairs, set-equal.
 
         **The dependency is deliberately inverted.** ``usvote/pv/absences.py`` classifies
         the pre-1976 absences from public-domain sources so the public snapshot needs no

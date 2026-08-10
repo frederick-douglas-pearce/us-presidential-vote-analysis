@@ -49,6 +49,7 @@ from collections.abc import Collection
 
 import pandas as pd
 
+from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.schema import PV_SCHEMA
@@ -74,12 +75,23 @@ JOIN_KEY: tuple[str, ...] = ("year", "state", "candidate")
 #: The joined view's column order. EC-spine columns first (identity + the state's EC
 #: context + this candidate's electoral votes there + national context), then the PV
 #: columns carried through from the resolved series (+ ``redistributable`` from the
-#: ``pv_source`` reference table). ``state_total_votes`` is carried so margins pin
-#: to each
-#: source's *provided* denominator, never a re-sum of candidate rows (D017).
+#: ``pv_source`` reference table). ``state_total_votes`` is carried so margins pin to
+#: each source's *provided* denominator, never a re-sum of candidate rows (D017).
 #: ``national_electoral_votes`` is the candidate's national EV total — a window SUM over
 #: their state rows (exact because the fact is dense and state-sum == national total,
 #: :func:`usvote.transform.assert_totals_equal_state_sum`), carried for flip magnitude.
+#: ``national_counted_electoral_votes`` is its counted-basis twin (#144, D046), the
+#: window SUM of :data:`~usvote.count_status.COUNTED_VOTES_COLUMN` — the votes that
+#: entered the final national count. The two differ only in 1868 and 1872 (Seymour
+#: 80/71, Grant 300/286, Greeley 3/0) but they differ in *meaning* everywhere, and it is
+#: the counted one that :mod:`usvote.hybrid` scores ``ec_share_full`` and
+#: ``ec_determinative`` on, because who won an election is settled by the votes Congress
+#: counted.
+#:
+#: Adding a column here does **not** reach the API:
+#: ``usvote.snapshot_schema.DATA_COLUMNS`` is an independent explicit projection, so the
+#: snapshot carries exactly what it lists. Surfacing this pair publicly is #139's
+#: (D047).
 EC_PV_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
@@ -88,6 +100,7 @@ EC_PV_COLUMNS: tuple[str, ...] = (
     "total_electoral_votes",
     "president_electoral_votes",
     "national_electoral_votes",
+    "national_counted_electoral_votes",
     "president_electoral_rank",
     "took_office",
     "source",
@@ -163,6 +176,9 @@ def build_ec_pv_join_sql(
         " v.total_electoral_votes, v.president_electoral_votes,"
         " sum(v.president_electoral_votes)"
         " OVER (PARTITION BY v.year, v.candidate_id) AS national_electoral_votes,"
+        f" sum(v.{COUNTED_VOTES_COLUMN})"
+        " OVER (PARTITION BY v.year, v.candidate_id)"
+        " AS national_counted_electoral_votes,"
         " v.president_electoral_rank, v.took_office,"
         " p.source, p.party, p.candidate_votes, p.state_total_votes, p.reliability,"
         " s.redistributable"
@@ -323,10 +339,15 @@ def join_ec_pv(
     ).rename(columns={"name": "candidate"})
     # National EV total = sum of the candidate's state EVs (dense fact ⇒ == published
     # national total); mirrors the SQL window SUM OVER (PARTITION BY year,
-    # candidate_id).
-    ec["national_electoral_votes"] = ec.groupby(["year", "candidate_id"])[
-        "president_electoral_votes"
-    ].transform("sum")
+    # candidate_id). The counted twin is the same window over the counted measure — no
+    # third derivation of "counted", because this view excludes the is_total rows (the
+    # only place the row rule does not hold), so summing the stored column and summing
+    # `cast where count_status='counted'` are the same thing here.
+    for source_col, out_col in (
+        ("president_electoral_votes", "national_electoral_votes"),
+        (COUNTED_VOTES_COLUMN, "national_counted_electoral_votes"),
+    ):
+        ec[out_col] = ec.groupby(["year", "candidate_id"])[source_col].transform("sum")
 
     joined = ec.merge(pv_df, on=list(JOIN_KEY), how="left")  # EC on the left
     if pv_source_df is not None:

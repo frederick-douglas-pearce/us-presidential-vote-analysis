@@ -85,6 +85,37 @@ COUNT_STATUS_UNCOUNTED: frozenset[str] = frozenset(
 COUNT_STATUS_COLUMN = "count_status"
 COUNT_STATUS_REASON_COLUMN = "count_status_reason"
 
+#: The **cast** electoral-vote measure: votes the electors actually cast, whatever
+#: Congress later did with them. The original ``dwh.votes`` measure, unchanged.
+CAST_VOTES_COLUMN = "president_electoral_votes"
+
+#: The **counted** electoral-vote measure (#144): the votes that entered the final
+#: national count. Named here rather than in :mod:`usvote.transform` for exactly the
+#: reason this module exists — it has the same two mutually-independent callers as the
+#: enum itself (``transform`` derives it, ``load`` builds its DDL and ``CHECK``), plus a
+#: third in :mod:`usvote.join`, which sums it into ``national_counted_electoral_votes``.
+#:
+#: **Its definition is this module's enum**, which is why it is not merely a second
+#: number: a row's counted value is its cast value when :data:`COUNT_STATUS_COUNTED`,
+#: and ``0`` otherwise. The rule is **strict** — ``disputed`` is excluded alongside
+#: ``not_counted``, because Georgia's nine votes in 1868 were never counted by anyone;
+#: the two chambers deadlocked. That strictness is what makes *both* of the Archives'
+#: printed 1868 totals rows reproducible: 294 as cast, 285 as counted, where D044 could
+#: only select one of them.
+#:
+#: **The row rule does not apply to aggregates.** A year's ``is_total`` row is always
+#: ``counted`` (D044 — one enum value cannot say "80, of which 9 disputed"), so the row
+#: rule would return its cast value. Its counted value is instead the sum over that
+#: year's state rows, which is precisely the fact the aggregate could not previously
+#: express. See :func:`usvote.transform.assert_counted_totals_equal_state_sum`.
+#:
+#: The three measures form a ladder — **appointed >= cast >= counted** — where
+#: ``total_electoral_votes`` is the appointed allotment (the D041 denominator),
+#: :data:`ELECTORAL_VOTE_SHORTFALLS <usvote.transform.ELECTORAL_VOTE_SHORTFALLS>` opens
+#: the first gap (appointed but never cast) and this column's status opens the second
+#: (cast but never counted).
+COUNTED_VOTES_COLUMN = "president_electoral_votes_counted"
+
 
 def build_count_status_check(column: str = COUNT_STATUS_COLUMN) -> str:
     """Return the ``CHECK`` restricting ``column`` to :data:`COUNT_STATUS_VALUES`.
@@ -96,3 +127,17 @@ def build_count_status_check(column: str = COUNT_STATUS_COLUMN) -> str:
     """
     values = ", ".join(f"'{value}'" for value in COUNT_STATUS_VALUES)
     return f"CHECK ({column} IN ({values}))"
+
+
+def build_counted_votes_check(
+    counted: str = COUNTED_VOTES_COLUMN, cast: str = CAST_VOTES_COLUMN
+) -> str:
+    """Return the ``CHECK`` enforcing ``counted <= cast`` at the write boundary.
+
+    Defense in depth for the one invariant the two measures must never violate: votes
+    can be cast and not counted, never counted without being cast. The transform already
+    asserts the exact biconditional on state rows and the aggregate identity on totals
+    rows; this makes the weaker-but-universal half **unrepresentable** in the database,
+    the same way :func:`build_count_status_check` does for the enum.
+    """
+    return f"CHECK ({counted} <= {cast})"

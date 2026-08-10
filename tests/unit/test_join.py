@@ -19,6 +19,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.join import (
     EC_PV_COLUMNS,
     EC_PV_PREFERRED_VIEW,
@@ -125,6 +126,10 @@ def _votes() -> pd.DataFrame:
         {
             "year": 2020, "state": s, "is_total": False, "candidate_id": c,
             "total_electoral_votes": tev, "president_electoral_votes": pev,
+            # 2020 has no uncounted votes, so counted == cast on every row. The two
+            # measures diverge only in 1868/1872 (#144); the divergent shapes are
+            # exercised in test_transform/test_pipeline, not here.
+            COUNTED_VOTES_COLUMN: pev,
             "president_electoral_rank": rank[c], "took_office": took[c],
         }
         for (s, c, tev, pev) in state_cells
@@ -134,6 +139,7 @@ def _votes() -> pd.DataFrame:
         rows.append({
             "year": 2020, "state": None, "is_total": True, "candidate_id": cid,
             "total_electoral_votes": 538, "president_electoral_votes": nev,
+            COUNTED_VOTES_COLUMN: nev,
             "president_electoral_rank": rank[cid], "took_office": took[cid],
         })
     return pd.DataFrame(rows)

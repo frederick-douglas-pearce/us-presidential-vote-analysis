@@ -76,6 +76,9 @@ def _row(
         "total_electoral_votes": total_ev,
         "president_electoral_votes": president_ev,
         "national_electoral_votes": national_ev,
+        # counted == cast for every in-window (1976+) year; the pair diverges only in
+        # 1868/1872, which the redistributable surface does not reach (#144).
+        "national_counted_electoral_votes": national_ev,
         "president_electoral_rank": rank,
         "took_office": took_office,
         "source": source,

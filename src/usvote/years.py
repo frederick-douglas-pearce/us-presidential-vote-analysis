@@ -41,25 +41,30 @@ EC_SPINE_FLOOR = 1824
 
 # Years the default ingest deliberately excludes because their Archives tables encode
 # contested/uncounted electoral votes that need dedicated modeling, not the standard
-# per-state candidate grain (#32; tracked for follow-up in #57):
-#   - 1872: Horace Greeley died after the popular vote; his electoral votes scattered
-#     across several candidates, and Georgia's 3 Greeley votes were rejected by
-#     Congress — which the Archives table does not print at all (they exist only in a
-#     footnote), so they must be synthesized before they can be flagged. Ingested
-#     by #144.
-# These are a default-scoping choice, not a hard block: an explicit ``years={1872}``
-# still attempts them and fails loudly rather than being silently dropped.
+# per-state candidate grain (#32, tracked in #57).
 #
-# **1868 was lifted from this set in #143.** It is now ingested with Georgia's contested
-# nine votes carried as ``count_status='disputed'`` on the fact (D043/D044) rather than
-# resolved by picking one of the page's two totals rows; Mississippi, Texas and Virginia
-# (not yet readmitted, no electors appointed) load as genuine 0-electoral-vote rows.
+# **This set is now EMPTY, and that is the point.** Both Reconstruction years have been
+# ingested and the EC spine is complete from 1824 to the latest election:
+#   - **1868, lifted in #143.** Georgia's contested nine votes are carried as
+#     ``count_status='disputed'`` on the fact (D043/D044) rather than resolved by
+#     picking one of the page's two totals rows; Mississippi, Texas and Virginia
+#     (not yet readmitted, no electors appointed) load as genuine 0-EV rows.
+#   - **1872, lifted in #144.** Greeley died after the popular vote and his electoral
+#     votes scattered across four recipients; the 17 votes Congress refused to count
+#     (Georgia's 3 for Greeley, Arkansas's 6 and Louisiana's 8 for Grant) appear nowhere
+#     in the Archives table and are synthesized from its own footnotes before being
+#     flagged ``count_status='not_counted'`` (D045). Arkansas and Louisiana also recover
+#     the allotments the table prints as "-", which is what makes the year's denominator
+#     the 366 Congress announced rather than the 352 the page totals (D045).
 #
-# This constant is the **single gate** on both sources: UCSB derives its own scope from
-# ``ec_ingest_years()`` (D024 §6), so removing a year here admits it to E4 as well — and
-# it likewise widens ``usvote.pv.absences.CURATED_YEARS``, whose import-time pin
-# (``CURATED_YEAR_COUNT``) is what forces an un-reviewed year to be noticed.
-UNSUPPORTED_EC_YEARS = frozenset({1872})
+# The constant is retained rather than deleted: it is the **single gate** on both
+# sources (UCSB derives its scope from ``ec_ingest_years()``, D024 §6) and the
+# documented seam for any future era — the pre-12th-Amendment epic (D010) is the next
+# candidate — so a year can be excluded again without reinventing the mechanism.
+# Emptying it likewise widened ``usvote.pv.absences.CURATED_YEARS`` to its full 51,
+# whose import-time pin (``CURATED_YEAR_COUNT``) is what forces an un-reviewed year to
+# be noticed.
+UNSUPPORTED_EC_YEARS: frozenset[int] = frozenset()
 
 
 def election_years(latest: int = LATEST_ELECTION_YEAR) -> set[int]:

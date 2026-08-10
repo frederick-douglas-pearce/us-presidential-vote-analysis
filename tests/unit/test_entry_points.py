@@ -360,7 +360,7 @@ def test_corpus_runner_reports_pages_and_exits_zero(
     assert top._run_corpus(argparse.Namespace()) == 0
     out = capsys.readouterr().out
     # Counted from files on disk, so a stale manifest key cannot inflate it.
-    assert "50 year page(s)" in out
+    assert "51 year page(s)" in out
 
 
 def test_corpus_runner_resolves_a_directory_that_does_not_exist_yet(
@@ -421,7 +421,7 @@ def test_corpus_banner_reports_the_corpus_age(
     # through to the deployed snapshot hash.
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, _valid_corpus(tmp_path))
     assert top.main([]) == 0
-    assert "50 year pages, fetched" in capsys.readouterr().out
+    assert "51 year pages, fetched" in capsys.readouterr().out
 
 
 # --- PipelineError must reach the operator as a message, not a traceback ----
@@ -506,20 +506,24 @@ def test_corpus_page_count_ignores_a_stale_out_of_scope_manifest_key(
 
     A stale out-of-scope key exists *because* the page was once fetched, so its file is
     on disk too — and-ing a file-existence check onto a manifest iteration therefore
-    does not stop it inflating the count. 1872 is the realistic case: it is in
-    UNSUPPORTED_EC_YEARS, so a corpus built before that gate would carry exactly this.
-    (It was 1868 until #143 ingested that year — the swap is the test staying honest
-    about which years are actually out of scope, not a weakening.)
+    does not stop it inflating the count.
+
+    The stale key is now **1820**, a pre-``EC_SPINE_FLOOR`` year. It was 1868 until #143
+    ingested that year and 1872 until #144 ingested this one, at which point
+    ``UNSUPPORTED_EC_YEARS`` became empty and there was no gated year left to stand in.
+    Each swap keeps the test honest about which years are genuinely out of scope rather
+    than weakening it — and 1820 is the realistic case now, since a corpus built under a
+    lower floor (the deferred pre-1824 era, D010) would carry exactly this.
     """
     corpus = _valid_corpus(tmp_path)
-    (tmp_path / "1872.html").write_bytes(b"<html></html>")
+    (tmp_path / "1820.html").write_bytes(b"<html></html>")
     manifest = top.scrape.read_manifest(corpus)
-    manifest["1872"] = {"http_status": 200, "file": "1872.html"}
+    manifest["1820"] = {"http_status": 200, "file": "1820.html"}
     top.scrape.write_manifest(corpus, manifest)
     monkeypatch.setenv(top.config.EC_HTML_DIR_VAR, corpus)
     monkeypatch.setattr(top.scrape, "snapshot_election_years", lambda d: None)
     assert top._run_corpus(argparse.Namespace()) == 0
-    assert "50 year page(s)" in capsys.readouterr().out
+    assert "51 year page(s)" in capsys.readouterr().out
 
 
 # --- AC-verify round 5: the `all` corpus branch, unguarded until now --------

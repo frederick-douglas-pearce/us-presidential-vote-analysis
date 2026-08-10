@@ -201,18 +201,22 @@ class TestCatalogIntegrity:
             assert entry.pv_status in PV_ABSENCE_STATUSES, key
             assert entry.citation.strip(), f"{key} has no citation"
 
-    def test_curated_years_is_the_ec_ingest_span_and_excludes_1872(self) -> None:
+    def test_curated_years_is_the_whole_ec_ingest_span(self) -> None:
         """The count pin. If the EC span moves, an unreviewed year becomes derivable.
 
-        1868 joined the span in #143 — and the pin is exactly what forced that to be a
-        deliberate act: lifting ``UNSUPPORTED_EC_YEARS`` raised at import until its four
-        already-cited rows were confirmed in scope.
+        1868 joined the span in #143 and 1872 in #144 — and the pin is exactly what
+        forced each to be a deliberate act: lifting ``UNSUPPORTED_EC_YEARS`` raised at
+        import until the new year had been reviewed (1868's four already-cited rows
+        confirmed in scope; 1872 reviewed and found to have none).
+
+        With the gate empty the span is now every election from 1824 on, so this pins a
+        contiguous 51 — a gap would mean a year slipped back out of review.
         """
-        assert len(CURATED_YEARS) == CURATED_YEAR_COUNT == 50
+        assert len(CURATED_YEARS) == CURATED_YEAR_COUNT == 51
         assert min(CURATED_YEARS) == 1824
         assert max(CURATED_YEARS) == 2024
-        assert 1868 in CURATED_YEARS
-        assert 1872 not in CURATED_YEARS
+        assert {1868, 1872} <= CURATED_YEARS
+        assert frozenset(range(1824, 2025, 4)) == CURATED_YEARS
 
     def test_the_scope_pin_is_enforced_at_runtime_not_only_by_this_test(self) -> None:
         """Bumping ``LATEST_ELECTION_YEAR`` is a routine each-cycle edit.
@@ -414,7 +418,7 @@ class TestResidualAndShape:
 class TestCuratedYearGate:
     """Silence about an unreviewed year must not read as "no absences"."""
 
-    @pytest.mark.parametrize("year", [1872, 1800, 2028])
+    @pytest.mark.parametrize("year", [1820, 1800, 2028])
     def test_an_uncurated_year_raises_rather_than_deriving(self, year: int) -> None:
         frame = pd.DataFrame(
             [{
@@ -429,26 +433,30 @@ class TestCuratedYearGate:
 
     def test_a_mixed_request_raises_on_the_uncurated_year(self) -> None:
         """Partial derivation would be worse than refusal — some years unreviewed."""
-        with pytest.raises(PVAbsenceCatalogError, match=r"\[1872\]"):
+        with pytest.raises(PVAbsenceCatalogError, match=r"\[1820\]"):
             build_curated_roster(
-                ec_participation_frame([1864]), source=SOURCE, years=[1864, 1872]
+                ec_participation_frame([1864]), source=SOURCE, years=[1864, 1820]
             )
 
     def test_the_1868_catalog_rows_now_reach_the_roster(self) -> None:
-        """The other side of the gate: 1868 derives, 1872 still does not.
+        """The other side of the gate: a curated year derives, an uncurated one does not.
 
-        Was ``..._never_reach_a_roster`` while the year was gated. Inverting it (rather
-        than deleting it) keeps the gate's *behaviour* pinned from both directions — a
-        refactor that quietly stopped applying the catalog would pass a "1872 absent"
-        assertion alone.
+        Was ``..._never_reach_a_roster`` while 1868 was gated. Inverting it (rather than
+        deleting it) keeps the gate's *behaviour* pinned from both directions — a
+        refactor that quietly stopped applying the catalog would pass an
+        "uncurated year absent" assertion alone.
+
+        The out-of-scope side is now **1820** rather than 1872: #144 ingested 1872,
+        emptying ``UNSUPPORTED_EC_YEARS``, so the nearest uncurated year is below the
+        1824 spine floor (the deferred pre-12th-Amendment era, D010).
         """
         roster = build_curated_roster(
             ec_participation_frame(CURATED_YEARS),
             source=SOURCE,
             years=CURATED_YEARS,
         )
-        assert 1868 in set(roster["year"])
-        assert 1872 not in set(roster["year"])
+        assert {1868, 1872} <= set(roster["year"])
+        assert 1820 not in set(roster["year"])
         by_state = statuses(roster)
         assert by_state[(1868, "Florida")] == PV_STATUS_LEGISLATURE_CHOSEN
         assert by_state[(1868, "Texas")] == PV_STATUS_NOT_PARTICIPATING
