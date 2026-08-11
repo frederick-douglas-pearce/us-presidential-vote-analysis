@@ -256,6 +256,18 @@ Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decision
 the workflow**. Now the raw `run.app` `/v1` returns **403** while `https://api.<domain>/v1`
 returns **200** through the cached, rate-limited edge — the post-deploy smoke asserts both.
 
+> **If the smoke step fails on `cloudflare /v1` (#148).** It runs immediately after the cache
+> purge and revision cutover, and this assertion false-failed on both of the first two
+> deploys while the deploy itself was fine — healing on its own within minutes each time. It
+> now uses a **per-run cache-buster** (`?deploy_smoke=$GITHUB_RUN_ID`) so a 403 cached at the
+> runner's edge colo during cutover cannot be replayed to every retry, plus a longer budget
+> (45 tries ≈ 3 min) for that check alone.
+>
+> **Before assuming a repeat is benign, check the one thing that matters:** that the raw
+> `run.app` `/v1` still returns **403**. `https://api.<domain>/v1` returning 200 is *also*
+> what you would see if the origin lock had fallen open, so "it works now" is not by itself
+> evidence the deploy is healthy — the pair is.
+
 ## 8. Refreshing the data (the snapshot-refresh story, AC4)
 
 Data changes rarely (a bug fix, or every ~4 years for a new election):
