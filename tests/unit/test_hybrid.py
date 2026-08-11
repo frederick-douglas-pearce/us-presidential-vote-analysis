@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
 from usvote import hybrid
 from usvote.count_status import (
     COUNT_STATUS_COLUMN,
@@ -41,12 +42,10 @@ from usvote.pv.status import (
     PV_STATUS_NOT_PARTICIPATING,
     PV_STATUS_POPULAR_VOTE,
 )
-from usvote.transform import COUNT_STATUS_OVERRIDES
 
-#: A real Archives sentence for the fixture's uncounted rows. Invented prose would be
-#: rejected by the snapshot's closed-vocabulary guard, and a fixture that could not
-#: survive the real build is a fixture that proves less than it appears to.
-_FIXTURE_REASON = COUNT_STATUS_OVERRIDES[(1872, "Georgia", "Horace Greeley")][1]
+#: The shared Archives sentence (see tests/fixtures/api_snapshot.py for why a fixture
+#: cannot invent one).
+_FIXTURE_REASON = FIXTURE_NOT_COUNTED_REASON
 
 # --- frame builders ---------------------------------------------------------
 

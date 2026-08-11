@@ -35,6 +35,7 @@ from usvote.api.models import (
 from usvote.api.origin_guard import install_origin_guard
 from usvote.api.repository import SnapshotRepository
 from usvote.api.routes import ResourceNotFound
+from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE
 
 #: ``Cache-Control`` for the liveness probe — never cached, unlike the ``/v1`` surface.
 _HEALTH_CACHE_CONTROL = "no-store"
@@ -55,22 +56,31 @@ _ERROR_CACHE_CONTROL = "no-store"
 #: matches ``meta.provenance`` rather than a literal that could drift.
 _MIT = provenance.source_display("MIT")
 _CC0 = provenance.license_display("CC0-1.0")
-_NARA = provenance.source_display("NARA")
-_US_PD = provenance.license_display("US-PD")
+# Imported, not re-typed: `snapshot_schema` is where the build gets these codes, so a
+# change there moves the fallback schema with it. Re-typing them would let the static
+# OpenAPI block advertise one code while every live response 500'd on the other.
+_NARA = provenance.source_display(EC_SOURCE)
+_US_PD = provenance.license_display(EC_LICENSE)
 
-#: The popular-vote window quoted in the **static fallback** description only. The
-#: served schema reads the real numbers off the snapshot
-#: (:func:`_install_live_openapi`); this pair exists so the offline fallback is honest
-#: rather than vague, and it is the only place in the serving layer naming a year.
+#: The popular-vote window quoted in the **static fallback** description only — the path
+#: taken when the schema is built before the lifespan opens the snapshot. The served
+#: schema reads the real numbers off the snapshot (:func:`_install_live_openapi`), so
+#: these literals never reach a running deployment. They will go stale when a new
+#: election is ingested; that is tolerable precisely because they are unreachable in
+#: production, and preferable to a fallback that says nothing about coverage at all.
 _FALLBACK_PV_WINDOW = (1976, 2024)
 
 API_TITLE = "US Presidential Vote API"
 
-API_VERSION = "0.2.0"
+#: Bumped 0.2.0 -> 0.3.0 by #139. The **served contract changed**, so leaving it would
+#: have told a pinned consumer nothing had: pre-1976 years went from 404 to 200,
+#: ``info.license`` flipped from CC0 to the EC public-domain statement, and ``EcPvRow``
+#: gained four required fields. ``SNAPSHOT_SCHEMA_VERSION`` moved for the same event —
+#: this is the half of it external consumers can actually see.
+API_VERSION = "0.3.0"
 
 API_SUMMARY = (
-    "Electoral College vs. popular vote for US presidential elections, over the "
-    "redistributable modern era."
+    "Electoral College vs. popular vote for every US presidential election from 1824."
 )
 
 #: Tokens filled per-schema by :func:`_render_description` — from the loaded snapshot

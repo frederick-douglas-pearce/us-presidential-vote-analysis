@@ -5,7 +5,7 @@ This project analyzes historical US Presidential Election data to better underst
 In the spirit of checks and balances &mdash; a pillar of our democratic republic &mdash; I propose a third option: what about using the average of the Electoral College Vote and Popular Vote? Exploring a more balanced approach for determining the US President is the focus of the final portion of this historical voting analysis.
 
 The project is broken down into several steps, with the first two focused on data collection and validation, while the third focuses on analyzing the historical data under different approaches to determining the election outcome:
-  1. [X] **Electoral College data** &mdash; scrapes electoral college vote data for each US Presidential Election from 1824 to the present (excluding the contested 1872 Reconstruction election; 1868 is ingested, with Georgia's contested nine electoral votes flagged rather than silently resolved) from the [National Archives website](https://www.archives.gov/electoral-college/results), and writes the data to a data warehouse schema in an `elections` Postgres database. Originally the `step1_electoral_college_data.ipynb` notebook; now also runnable as the installable `usvote` package (see [Configuration](#configuration)).
+  1. [X] **Electoral College data** &mdash; scrapes electoral college vote data for **every** US Presidential Election from 1824 to the present from the [National Archives website](https://www.archives.gov/electoral-college/results), and writes the data to a data warehouse schema in an `elections` Postgres database. The two contested Reconstruction elections were the last holdouts and are now in: 1868 carries Georgia's contested nine electoral votes flagged as `disputed` rather than silently resolved, and 1872 synthesizes the 17 cast-then-rejected votes the Archives table omits, so the fact can state both what electors **cast** and what Congress **counted**. Originally the `step1_electoral_college_data.ipynb` notebook; now also runnable as the installable `usvote` package (see [Configuration](#configuration)).
   2. [X] **Popular vote data** &mdash; ingests popular-vote results from two sources &mdash; the [MIT Election Lab](https://electionlab.mit.edu/) 1976&ndash;2024 dataset and the historical [UCSB American Presidency Project](https://www.presidency.ucsb.edu/) pages &mdash; reconciles them onto the same candidate and state keys as Step 1, adds them to a shared fact table in the data warehouse schema built in Step 1, and joins the result back onto the Electoral College spine (analysis of the discrepancies is Step 3).
   3. [ ] **Voting data analysis** &mdash; performs the voting analysis, develops visualizations, and creates objects within a data mart schema to support dashboard development.
 
@@ -82,7 +82,8 @@ $ docker build -t usvote-api .
 $ docker run --rm -p 8080:8080 usvote-api          # Cloud-Run-style: listens on $PORT (default 8080)
 
 $ curl -s localhost:8080/health | jq -c '{v: .snapshot_version[0:8], rows: .row_count, years: .coverage}'
-# → {"v":"bc6056f3","rows":1734,"years":{"year_min":1976,"year_max":2024}}
+# → {"v":"8abcff44","rows":5623,"years":{"year_min":1824,"year_max":2024,
+#                                        "pv_year_min":1976,"pv_year_max":2024}}
 ```
 
 The image is **slim by design** (~150 MB): the API serve path imports only FastAPI + stdlib, so the container installs the package with `--no-deps` plus a lock-pinned `serve` dependency-group — the heavy warehouse/analysis stack (pandas/GDAL/psycopg2/matplotlib) never enters the image ([D033](.claude/specs/decisions.md)). It is cloud-agnostic (listens on `$PORT`, no vendor SDKs, no baked-in secrets), so the Cloud Run deploy (E8-S7, #101) is a deploy step, not a rebuild. To refresh the data, rebuild the snapshot and the image (acceptable given the ~4-yearly refresh cadence). A CI job builds and boots the image against a synthetic placeholder snapshot to catch Dockerfile rot.
@@ -93,7 +94,7 @@ The API is deployed publicly to **Google Cloud Run** (scale-to-zero, single inst
 
 #### Local smoke test (full pipeline → live API)
 
-The end-to-end check we run repeatedly while building out E8: warehouse → snapshot → HTTP, then hit the live endpoints against real 1976&ndash;2024 data. Configure the environment first (see [Configuration](#configuration)) — the build steps read `PGPASSWORD` from your git-ignored `.env`, so load it into the shell once:
+The end-to-end check we run repeatedly while building out E8: warehouse → snapshot → HTTP, then hit the live endpoints against real 1824&ndash;2024 data. Configure the environment first (see [Configuration](#configuration)) — the build steps read `PGPASSWORD` from your git-ignored `.env`, so load it into the shell once:
 
 ```
 $ set -a; source .env; set +a               # load PG* + USVOTE_* (never commit .env)
@@ -113,14 +114,27 @@ Then, in a second shell, sanity-check the live surface (these need only the runn
 ```
 $ B=http://127.0.0.1:8000/v1
 $ curl -s "$B/elections" | jq -c '{count: .meta.count, first: .data[0], last: .data[-1]}'
-# → {"count":13,"first":{"year":1976,...},"last":{"year":2024,...}}
+# → {"count":51,"first":{"year":1824,"candidate_count":4,"has_popular_vote":false},
+#                "last":{"year":2024,"candidate_count":2,"has_popular_vote":true}}
 
 $ curl -s "$B/elections/2000/summary" \
     | jq -c '.data[] | {slug: .candidate_slug, ec: .national_electoral_votes, pv: .national_pv_votes, took_office}'
 # → Bush: 271 EC / 50,456,169 PV / took_office true
 #   Gore: 266 EC / 50,996,062 PV / took_office false   ← the thesis: lost the EC, won the popular vote
 
-$ curl -s -o /dev/null -w '%{http_code}\n' "$B/elections/1900"   # → 404 (pre-1976, outside the window)
+# Pre-1976 is served too (E8-S9): electoral facts back to 1824, popular votes null,
+# and every row says WHICH KIND of null it is.
+$ curl -s "$B/elections/1872/summary" \
+    | jq -c '.data[0] | {c: .candidate, cast: .national_electoral_votes,
+                         counted: .national_electoral_votes_counted,
+                         of: .national_electoral_denominator}'
+# → Grant: 300 cast / 286 counted / of 366   ← Congress refused 14; the API says so
+
+$ curl -s "$B/elections/1860?state=SC" | jq -c '.data[0] | {state, pv_status, popular_votes}'
+# → {"state":"South Carolina","pv_status":"legislature_chosen","popular_votes":null}
+#   ...vs New York the same year: pv_status "popular_vote", also null — different nulls.
+
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/elections/1900"   # → 404 (never an election)
 ```
 
 `GET /health` (unversioned) reports the loaded snapshot's version and coverage with no database at all. Stop the server with Ctrl-C.

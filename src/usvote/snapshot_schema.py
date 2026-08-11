@@ -92,20 +92,6 @@ DATA_COLUMNS: tuple[str, ...] = (
     "count_status_reason",
 )
 
-#: The ``DATA_COLUMNS`` entries that are **not** ``usvote.join.EC_PV_COLUMNS`` names —
-#: minted or merged during the build rather than carried through from the view. Named
-#: here so a test can assert the *safe* direction (every ``DATA_COLUMNS`` entry is
-#: either a join-view column or one of these), which catches a hand-typed name that
-#: would otherwise ``KeyError`` only against a real warehouse.
-#:
-#: **The reverse direction is forbidden** (D047 §3): do not assert that
-#: ``DATA_COLUMNS`` covers ``EC_PV_COLUMNS``. The two tuples are independent by design —
-#: that independence is precisely what let #144 add join-view columns without changing
-#: the public payload or the content hash.
-DERIVED_DATA_COLUMNS: frozenset[str] = frozenset(
-    {"state_usps", "candidate_slug", "pv_status"}
-)
-
 #: The precomputed national roll-up columns, one row per ``(year, candidate_slug)``.
 ROLLUP_COLUMNS: tuple[str, ...] = (
     "year",

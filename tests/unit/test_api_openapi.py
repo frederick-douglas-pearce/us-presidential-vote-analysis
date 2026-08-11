@@ -28,7 +28,7 @@ from usvote.snapshot import build_snapshot
 def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     info = client.get("/openapi.json").json()["info"]
     assert info["title"] == "US Presidential Vote API"
-    assert info["version"] == "0.2.0"
+    assert info["version"] == "0.3.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.

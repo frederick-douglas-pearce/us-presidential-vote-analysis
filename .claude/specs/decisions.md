@@ -2432,10 +2432,17 @@ error the series exists to describe, committed by the series' own evidence.
    API would report Grant at 300 in 1872 with no way to see that 14 votes were refused — a
    number contradicting every reference a reader can check. `count_status_reason` is the one
    free-text column that ships, and it ships **because it is Archives prose** (a U.S. Government
-   work, 17 U.S.C. § 105) where `pv_state_status.note` is UCSB's. That distinction was editorial
-   as first drafted — `dwh.votes` carries no provenance column — so the build now pins every
-   served reason to the **closed three-sentence vocabulary** in `COUNT_STATUS_OVERRIDES`, the
-   same shape of guard the closed `pv_status` enum already is.
+   work, 17 U.S.C. § 105) where `pv_state_status.note` is UCSB's. The build pins every served
+   reason to the sentences in `COUNT_STATUS_OVERRIDES` — but that is a **containment** check,
+   not a provenance one, and the distinction matters: it catches a reason arriving from anywhere
+   other than the curated map (a hand-edited warehouse, a migration, a future second writer),
+   while the map itself is exactly where a new correction is added. So unlike `pv_status` —
+   whose enum is closed in a module no correction workflow touches — the thing keeping
+   non-public-domain text off this column is **review of the catalog**, where each entry carries
+   its Archives URL in a comment. A first draft of this entry claimed the guard made the
+   provenance structural; it does not, and the honest close is to make the citation
+   machine-checkable in `usvote/transform.py` (a per-entry source field asserted to be an
+   `archives.gov` URL). Recorded as a known residual rather than asserted away.
 5. **`national_rollup` gains the appointed denominator.** A counted total is not checkable
    without one: 1872 is Grant **286 of 366**, and 1824 is the **261** the contingent election
    turns on. Delegated to `hybrid.ec_denominator_by_year`, because the obvious re-derivation

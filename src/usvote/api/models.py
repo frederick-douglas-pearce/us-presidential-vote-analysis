@@ -24,7 +24,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from usvote.api import provenance
-from usvote.snapshot_schema import SnapshotMeta
+from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE, SnapshotMeta
 
 #: Snapshot columns intentionally **not** on any public model. Empty today (every
 #: ``ec_pv`` / ``national_rollup`` column is exposed under a public name), but the drift
@@ -138,8 +138,10 @@ _YEAR_LIST_EXAMPLE: dict[str, Any] = {
 # example can't drift from _SOURCES / _LICENSES if a name or URL is ever edited.
 _EX_SRC = provenance.source_display("MIT")
 _EX_LIC = provenance.license_display("CC0-1.0")
-_EX_EC_SRC = provenance.source_display("NARA")
-_EX_EC_LIC = provenance.license_display("US-PD")
+# Imported rather than re-typed, so the shipped example cannot advertise a code the
+# build no longer emits (see the same note in app.py).
+_EX_EC_SRC = provenance.source_display(EC_SOURCE)
+_EX_EC_LIC = provenance.license_display(EC_LICENSE)
 
 _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "snapshot_version": (
@@ -192,8 +194,10 @@ class EcPvRow(BaseModel):
     ``president_*`` / ``candidate_votes`` / ``*_total_votes`` columns for a reader.
     PV fields are ``None`` wherever no redistributable popular vote exists (an honest
     gap, never a fabricated 0) — which, since the surface widened to 1824, is most of
-    the table. ``pv_status`` is the sibling that says *which kind* of nothing it is, so
-    a null popular vote is never bare; see ``docs/api-snapshot.md``.
+    the table. ``pv_status`` narrows *why* at the **state** level: whether a popular
+    vote was held there at all. It does not resolve the remaining per-**candidate**
+    case — an in-window getter the source does not cover, such as a faithless elector —
+    whose null is still an undifferentiated gap (D005). See ``docs/api-snapshot.md``.
 
     **Two electoral-vote measures, and they are not interchangeable.**
     ``electoral_votes`` is what the state's electors **cast**;
@@ -268,11 +272,14 @@ class EcPvRow(BaseModel):
     )
     pv_status: str = Field(
         description=(
-            "Why this state has or lacks a popular vote: 'popular_vote' (one was "
-            "held), 'legislature_chosen' (the legislature appointed the electors), or "
-            "'not_participating' (the state took no part). A 'popular_vote' state with "
-            "null popular_votes simply falls outside this surface's popular-vote "
-            "window — see meta.provenance.coverage."
+            "Whether a popular vote was held in this STATE that year: 'popular_vote' "
+            "(one was held), 'legislature_chosen' (the legislature appointed the "
+            "electors, so none was), or 'not_participating' (the state took no part). "
+            "It is a fact about the election, not about this surface's coverage: a "
+            "'popular_vote' row can still have null popular_votes, either because the "
+            "year is outside meta.provenance.coverage's popular-vote window or because "
+            "the source does not cover this particular candidate (an unpledged slate "
+            "or faithless elector)."
         ),
     )
     source: str | None = Field(
@@ -307,9 +314,11 @@ class NationalSummaryRow(BaseModel):
     rather than an omission.** A year can be *mixed* — in 1824 six states' legislatures
     appointed electors while eighteen held a popular vote — so no single status is true
     of a whole year, and inventing one would be exactly the flattening this project
-    objects to. A summary row's null popular vote is disambiguated at **year** level
-    instead: ``meta.provenance.coverage.pv_year_min`` and the ``has_popular_vote`` flag
-    on ``GET /v1/elections``. Per-state reasons live on the fact rows.
+    objects to. A summary row's null popular vote is narrowed at **year** level instead:
+    ``meta.provenance.coverage.pv_year_min`` and the ``has_popular_vote`` flag on
+    ``GET /v1/elections``. Per-state reasons live on the fact rows. Note that inside the
+    popular-vote window a *candidate* can still have a null national total — a getter
+    the source does not cover — which no status resolves; that is the honest D005 gap.
     """
 
     model_config = _config(_NATIONAL_SUMMARY_EXAMPLE)

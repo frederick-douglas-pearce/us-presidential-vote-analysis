@@ -96,9 +96,13 @@ rank against the cast column.
 
 `count_status_reason` is the one free-text column on the public surface, and it ships for a
 specific reason: Archives pages are works of the U.S. Government (17 U.S.C. § 105), unlike
-`pv_state_status.note`, which is verbatim UCSB prose and never leaves the warehouse. That
-provenance is enforced, not asserted — the build pins every served reason to the closed
-three-sentence vocabulary in `usvote.transform.COUNT_STATUS_OVERRIDES`.
+`pv_state_status.note`, which is verbatim UCSB prose and never leaves the warehouse. The
+build pins every served reason to the sentences in
+`usvote.transform.COUNT_STATUS_OVERRIDES` — which bounds *which* sentences can ship (a
+value from anywhere else fails the build) but does **not** by itself prove where they came
+from, since that map is also where a new correction is added. The provenance rests on review
+of the catalog, where each entry carries its Archives URL. See the note in
+`assert_count_status_reasons_are_catalogued`.
 
 ## The three tables
 

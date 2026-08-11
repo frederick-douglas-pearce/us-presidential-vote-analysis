@@ -345,7 +345,7 @@ sys.meta_path.insert(0, _BlockUCSB())
 
 import usvote.snapshot  # the public snapshot build, DB stack and all
 
-assert hasattr(usvote.snapshot, "read_pv_status_roster"), dir(usvote.snapshot)
+assert hasattr(usvote.snapshot, "derive_curated_pv_status_roster")
 assert "usvote.ucsb" not in sys.modules, sorted(sys.modules)
 print("OK")
 """

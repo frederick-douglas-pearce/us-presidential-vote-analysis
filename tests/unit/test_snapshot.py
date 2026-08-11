@@ -26,6 +26,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_COLUMNS
@@ -49,19 +50,17 @@ from usvote.snapshot import (
     add_candidate_slug,
     build_national_rollup,
     build_snapshot,
-    read_pv_status_roster,
+    derive_curated_pv_status_roster,
     read_redistributable,
 )
 from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE
-from usvote.transform import COUNT_STATUS_OVERRIDES
 from usvote.years import ec_ingest_years
 
 _TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 
-#: A real Archives sentence. The build pins every served ``count_status_reason`` to the
-#: curated vocabulary, so an invented one would (correctly) fail — see
-#: ``test_a_foreign_count_status_reason_fails_loud``, which relies on exactly that.
-_ARCHIVES_REASON = COUNT_STATUS_OVERRIDES[(1872, "Georgia", "Horace Greeley")][1]
+#: The one real Archives sentence the fixtures use, defined once in the shared fixture
+#: package (with the rationale for why it cannot be invented) and imported here.
+_ARCHIVES_REASON = FIXTURE_NOT_COUNTED_REASON
 
 #: The state->USPS enrichment read_redistributable adds from dwh.state; the synthetic
 #: frame carries it directly (it is the shape build_snapshot consumes).
@@ -395,11 +394,15 @@ def test_roster_extra_columns_cannot_ride_along() -> None:
 
 
 def test_duplicate_roster_key_fails_loud() -> None:
-    """A duplicated ``(year, state)`` would fan the fact out; ``validate='m:1'`` stops it."""
+    """A duplicated ``(year, state)`` would fan the fact out; ``validate='m:1'`` stops it.
+
+    Surfaced as a ``SnapshotError`` rather than a bare ``MergeError`` so the CLI reports
+    it as a build-invariant violation (exit 3) instead of a traceback.
+    """
     frame = _ec_pv_frame()
     status = _status_frame(frame)
     status = pd.concat([status, status.head(1)], ignore_index=True)
-    with pytest.raises(pd.errors.MergeError):
+    with pytest.raises(SnapshotError, match="not unique on \\(year, state\\)"):
         _build_raises(frame, status)
 
 
@@ -796,13 +799,13 @@ class _RosterStubDBC:
 
 
 def test_roster_derivation_classifies_from_the_catalog_not_the_warehouse() -> None:
-    """``read_pv_status_roster`` derives from the EC spine + the in-repo catalog.
+    """``derive_curated_pv_status_roster`` derives from the EC spine + the in-repo catalog.
 
     The licensing property in one test: no ``dwh.pv_state_status`` read happens (the
     stub serves only ``dwh.votes``), ``popular_vote`` is the residual, and the 32
     catalogued absences come back with their curated classifications.
     """
-    roster = read_pv_status_roster(_RosterStubDBC(_full_spine()))  # type: ignore[arg-type]
+    roster = derive_curated_pv_status_roster(_RosterStubDBC(_full_spine()))  # type: ignore[arg-type]
     assert list(roster.columns) == ["year", "state", "pv_status"]
     by_key = {
         (int(y), str(s)): str(v)
@@ -832,7 +835,7 @@ def test_roster_derivation_fails_loud_on_a_short_warehouse() -> None:
     short = _full_spine()
     short = short[short["year"] != 1872]
     with pytest.raises(SnapshotError, match="1872"):
-        read_pv_status_roster(_RosterStubDBC(short))  # type: ignore[arg-type]
+        derive_curated_pv_status_roster(_RosterStubDBC(short))  # type: ignore[arg-type]
 
 
 def test_read_missing_view_fails_loud() -> None:
@@ -851,18 +854,26 @@ def test_build_from_db_reads_then_builds(
 ) -> None:
     """The glue: read the (stubbed) live view, build the snapshot, close the connection.
 
-    ``read_pv_status_roster`` is stubbed out rather than exercised here, and that is not
-    a shortcut — it *cannot* run against a three-state synthetic spine. It derives the
+    ``derive_curated_pv_status_roster`` is stubbed out rather than exercised here: it
+    cannot run against this module's three-state synthetic spine, because it derives the
     roster through the real absence catalog, whose cross-check requires every catalogued
-    ``(year, state)`` to exist in the spine it is handed, so a fabricated spine makes
-    every genuine 1860s entry look like a typo. The derivation is tested against the
-    real warehouse in the integration suite; this test owns the read→build→close wiring.
+    ``(year, state)`` to exist in the spine it is handed — so a fabricated spine makes
+    every genuine 1860s entry look like a typo. This test owns the read→build→close
+    wiring; the derivation itself is covered by the ``_full_spine`` tests above.
+
+    **Known gap, stated rather than implied:** there is no integration test that builds a
+    snapshot from a live warehouse, so the interaction of this derivation with the
+    *actual* ``dwh.votes`` across all 51 years — plus slug uniqueness over the real 96
+    candidates and the ``state_usps`` join — is verified only by a manual local run
+    (#139 did one). It is not easily added to the current integration suite, whose
+    warehouses are year-scoped and which D048 §7 now deliberately forbids snapshotting.
+    Closing it means a full-span warehouse fixture, which is its own piece of work.
     """
     import usvote.snapshot as snapshot_mod
     from usvote.snapshot import build_snapshot_from_db
 
     monkeypatch.setattr(
-        snapshot_mod, "read_pv_status_roster", lambda dbc, schema=None: _status_frame()
+        snapshot_mod, "derive_curated_pv_status_roster", lambda dbc, schema=None: _status_frame()
     )
     stub = _StubDBC(exists=True)
     out = tmp_path / "snapshot.sqlite"

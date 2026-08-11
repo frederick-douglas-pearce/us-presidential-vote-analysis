@@ -17,11 +17,8 @@ import pydantic
 
 from usvote.api import models
 from usvote.join import EC_PV_COLUMNS
-from usvote.snapshot_schema import (
-    DATA_COLUMNS,
-    DERIVED_DATA_COLUMNS,
-    ROLLUP_COLUMNS,
-)
+from usvote.snapshot import DERIVED_DATA_COLUMNS
+from usvote.snapshot_schema import DATA_COLUMNS, ROLLUP_COLUMNS
 
 
 def _mapped_columns(model: type[pydantic.BaseModel]) -> set[str]:

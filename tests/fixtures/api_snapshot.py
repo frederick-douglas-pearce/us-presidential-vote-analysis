@@ -136,14 +136,14 @@ def api_snapshot_row(
 def api_snapshot_status_row(
     *, year: int, state: str, pv_status: str = PV_STATUS_POPULAR_VOTE
 ) -> dict[str, object]:
-    """One ``read_pv_status_roster``-shaped row (``year``, ``state``, ``pv_status``).
+    """One roster row (``year``, ``state``, ``pv_status``) shaped for ``build_snapshot``.
 
     The roster is **injected** rather than derived in the build (see
     :func:`usvote.snapshot.build_snapshot`): the real derivation cross-checks the
-    in-repo absence catalog against the EC spine, and a two-state synthetic spine would
+    in-repo absence catalog against the EC spine, and a four-state synthetic spine would
     make every genuine 1860s catalog entry look like a phantom key. So the fixture
-    supplies statuses directly, and the catalog's own correctness is tested against the
-    real spine elsewhere.
+    supplies statuses directly; the derivation itself is covered in ``test_snapshot``
+    against a fabricated full-span spine.
     """
     return {"year": year, "state": state, "pv_status": pv_status}
 
@@ -225,10 +225,12 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
             #   California  — same, and where Cand D's votes are CAST but NOT COUNTED
             #   Vermont     — legislature_chosen: no popular vote was ever held
             #   Nevada      — not_participating: took no part, hence 0 electoral votes
-            # Cand C cast 10 and counted 10; Cand D cast 8 but only 5 counted, so the
-            # counted basis is what makes C rank 1 — the D046 property the API must be
-            # able to show, on a row where cast alone would still say C wins but by a
-            # different margin.
+            # Cand C cast 10 and counted 10; Cand D cast 8 in California and Congress
+            # counted NONE of them, so D's national counted total is 0. The counted
+            # value follows D046's row rule — cast when `counted`, else 0 — rather than
+            # being chosen freely: a fixture that paired `not_counted` with a non-zero
+            # counted value would assert behaviour the transform cannot produce, and a
+            # regression that mis-derived the measure from the status would still pass.
             api_snapshot_row(
                 year=1860, state="Texas", candidate_id=3, candidate="Cand C",
                 president_ev=6, national_ev=10, rank=1, took_office=True,
@@ -240,7 +242,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 president_ev=0, national_ev=8, rank=2, took_office=False,
                 candidate_votes=None, state_total=None, total_ev=6,
                 source=None, party=None, reliability=None, redistributable=None,
-                national_counted_ev=5,
+                national_counted_ev=0,
             ),
             api_snapshot_row(
                 year=1860, state="California", candidate_id=3, candidate="Cand C",
@@ -253,7 +255,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 president_ev=8, national_ev=8, rank=2, took_office=False,
                 candidate_votes=None, state_total=None, total_ev=8,
                 source=None, party=None, reliability=None, redistributable=None,
-                counted_ev=5, national_counted_ev=5,
+                counted_ev=0, national_counted_ev=0,
                 count_status=COUNT_STATUS_NOT_COUNTED,
                 count_status_reason=FIXTURE_NOT_COUNTED_REASON,
             ),
@@ -268,7 +270,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 president_ev=0, national_ev=8, rank=2, took_office=False,
                 candidate_votes=None, state_total=None, total_ev=4,
                 source=None, party=None, reliability=None, redistributable=None,
-                national_counted_ev=5,
+                national_counted_ev=0,
             ),
             api_snapshot_row(
                 year=1860, state="Nevada", candidate_id=3, candidate="Cand C",
@@ -281,7 +283,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 president_ev=0, national_ev=8, rank=2, took_office=False,
                 candidate_votes=None, state_total=None, total_ev=0,
                 source=None, party=None, reliability=None, redistributable=None,
-                national_counted_ev=5,
+                national_counted_ev=0,
             ),
         ]
     )
