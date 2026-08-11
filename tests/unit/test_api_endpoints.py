@@ -28,16 +28,28 @@ from usvote.api.config import ApiSettings
 
 def test_list_elections_returns_years_with_counts(client: TestClient) -> None:
     body = client.get("/v1/elections").json()
-    assert [item["year"] for item in body["data"]] == [2016, 2020]
+    assert [item["year"] for item in body["data"]] == [1860, 2016, 2020]
     assert all(item["candidate_count"] == 2 for item in body["data"])
-    assert body["meta"]["count"] == 2
+    assert body["meta"]["count"] == 3
+    # has_popular_vote answers "which years can I compare PV for" from the index
+    # itself, without fetching each year and inspecting its nulls (#139).
+    assert {i["year"]: i["has_popular_vote"] for i in body["data"]} == {
+        1860: False,
+        2016: True,
+        2020: True,
+    }
     prov = body["meta"]["provenance"]
     assert prov["source"] == "MIT"
     assert prov["source_name"] == "MIT Election Lab"
     assert prov["license"] == "CC0-1.0"
     assert prov["license_url"]
     assert "UCSB" in prov["redistributable_note"]
-    assert prov["coverage"] == {"year_min": 2016, "year_max": 2020}
+    assert prov["coverage"] == {
+        "year_min": 1860,
+        "year_max": 2020,
+        "pv_year_min": 2016,
+        "pv_year_max": 2020,
+    }
     assert prov["snapshot_version"]
 
 
@@ -132,12 +144,12 @@ def test_summary_ignores_row_filters_on_the_year_endpoint(client: TestClient) ->
 def test_get_state_across_years(client: TestClient) -> None:
     body = client.get("/v1/states/CA").json()
     assert {r["state_usps"] for r in body["data"]} == {"CA"}
-    assert {r["year"] for r in body["data"]} == {2016, 2020}
-    assert body["meta"]["count"] == 4
+    assert {r["year"] for r in body["data"]} == {1860, 2016, 2020}
+    assert body["meta"]["count"] == 6
 
 
 def test_get_state_is_case_insensitive(client: TestClient) -> None:
-    assert client.get("/v1/states/ca").json()["meta"]["count"] == 4
+    assert client.get("/v1/states/ca").json()["meta"]["count"] == 6
 
 
 def test_get_state_year_window(client: TestClient) -> None:

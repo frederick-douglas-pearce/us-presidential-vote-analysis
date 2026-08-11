@@ -27,7 +27,13 @@ import pandas as pd
 import pytest
 
 from usvote import hybrid
-from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_COUNTED,
+    COUNT_STATUS_NOT_COUNTED,
+    COUNT_STATUS_REASON_COLUMN,
+    COUNTED_VOTES_COLUMN,
+)
 from usvote.join import EC_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
@@ -35,6 +41,12 @@ from usvote.pv.status import (
     PV_STATUS_NOT_PARTICIPATING,
     PV_STATUS_POPULAR_VOTE,
 )
+from usvote.transform import COUNT_STATUS_OVERRIDES
+
+#: A real Archives sentence for the fixture's uncounted rows. Invented prose would be
+#: rejected by the snapshot's closed-vocabulary guard, and a fixture that could not
+#: survive the real build is a fixture that proves less than it appears to.
+_FIXTURE_REASON = COUNT_STATUS_OVERRIDES[(1872, "Georgia", "Horace Greeley")][1]
 
 # --- frame builders ---------------------------------------------------------
 
@@ -107,6 +119,20 @@ def ec_pv_frame(
     df["source"] = "test"
     df["reliability"] = "high"
     df["redistributable"] = True
+    # #139 appended the count status to the view. `usvote.hybrid` reads neither column,
+    # but the fixture must still emit exactly EC_PV_COLUMNS — the set-equality assert
+    # below exists because a fixture *richer* than the view is what let #144's
+    # `policy='restricted'` KeyError through the whole offline suite. Derived from the
+    # counted measure rather than accepted as input, so a fixture cannot claim a row was
+    # counted while zeroing its counted votes.
+    counted_in_full = df[COUNTED_VOTES_COLUMN] == df["president_electoral_votes"]
+    df[COUNT_STATUS_COLUMN] = [
+        COUNT_STATUS_COUNTED if ok else COUNT_STATUS_NOT_COUNTED
+        for ok in counted_in_full
+    ]
+    df[COUNT_STATUS_REASON_COLUMN] = [
+        None if ok else _FIXTURE_REASON for ok in counted_in_full
+    ]
     return df.sort_values(["year", "state", "candidate"], kind="stable").reset_index(
         drop=True
     )

@@ -92,7 +92,7 @@ def list_elections(
     year_from: int | None = _YEAR_FROM,
     year_to: int | None = _YEAR_TO,
 ) -> models.Envelope[models.YearListItem]:
-    """Every covered (redistributable) year with its distinct-candidate count."""
+    """Every covered year with its candidate count and a popular-vote flag."""
     _validate_year_range(year_from, year_to)
     repo = _repo(request)
     cache_dependency(request, response)
@@ -117,7 +117,9 @@ def get_election(
 ) -> models.ElectionResponse:
     """The state fact rows for a year (``data``) plus its roll-up (``summary``).
 
-    An unknown or out-of-window year (e.g. pre-1976) is a 404, not an error. The
+    A year that was never an election in scope (1800, 1837) is a 404. A pre-1976
+    election is **not** — since #139 it returns 200 with its electoral-college facts and
+    null popular votes, each row carrying a ``pv_status`` that says why. The
     optional ``state`` / ``candidate`` filters narrow ``data`` (and ``meta.count``); a
     filter that matches nothing is a 200 with an empty ``data`` (a filter, not a missing
     resource). ``summary`` is the **national** roll-up for the whole year and is
@@ -228,8 +230,15 @@ def get_candidate(
 
 
 def _unknown_year_message(repo: SnapshotRepository, year: int) -> str:
+    """The 404 body for a year the snapshot does not contain.
+
+    Names the **served** window, and the popular-vote sub-window separately. Before
+    #139 they were the same span, so one number pair said everything; now conflating
+    them would tell a reader asking for 1860 that the data stops at 1976 when in fact
+    1860 is served — the coverage confusion the widening exists to remove.
+    """
     m = repo.meta()
     return (
-        f"No election data for year {year}; the snapshot's redistributable window is "
-        f"{m.year_min}–{m.year_max}."
+        f"No election data for year {year}; the snapshot covers "
+        f"{m.year_min}–{m.year_max} (popular vote {m.pv_year_min}–{m.pv_year_max})."
     )

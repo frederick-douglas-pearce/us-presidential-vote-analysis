@@ -16,7 +16,12 @@ from typing import Any
 import pydantic
 
 from usvote.api import models
-from usvote.snapshot_schema import DATA_COLUMNS, ROLLUP_COLUMNS
+from usvote.join import EC_PV_COLUMNS
+from usvote.snapshot_schema import (
+    DATA_COLUMNS,
+    DERIVED_DATA_COLUMNS,
+    ROLLUP_COLUMNS,
+)
 
 
 def _mapped_columns(model: type[pydantic.BaseModel]) -> set[str]:
@@ -38,6 +43,28 @@ def test_every_rollup_column_is_mapped_or_dropped() -> None:
     covered = _mapped_columns(models.NationalSummaryRow) | models._DROPPED_COLUMNS
     missing = set(ROLLUP_COLUMNS) - covered
     assert not missing, f"unmapped rollup columns (add a field or drop them): {missing}"
+
+
+def test_every_data_column_comes_from_the_join_view_or_is_explicitly_derived() -> None:
+    """``DATA_COLUMNS`` ⊆ ``EC_PV_COLUMNS`` ∪ the explicitly-derived set.
+
+    A **subset** assert, and the direction matters. The reverse — asserting
+    ``DATA_COLUMNS`` covers ``EC_PV_COLUMNS`` — is forbidden by D047 §3: the two tuples
+    are independent on purpose, which is exactly what let #144 add join-view columns
+    without touching the public payload or the content hash. Coupling them would undo
+    that.
+
+    What this catches is a typo in a hand-added name. Both the snapshot projection and
+    the synthetic test frame are hand-authored, so the *same* misspelling in both passes
+    the whole offline suite and fails only at ``data_df[list(DATA_COLUMNS)]`` against a
+    real warehouse — on the one machine that has one.
+    """
+    unexplained = set(DATA_COLUMNS) - set(EC_PV_COLUMNS) - DERIVED_DATA_COLUMNS
+    assert not unexplained, (
+        f"DATA_COLUMNS entries {sorted(unexplained)} are neither join-view columns nor "
+        "listed in DERIVED_DATA_COLUMNS — likely a typo, which would only surface "
+        "against a live warehouse."
+    )
 
 
 def test_candidate_id_is_never_a_model_field() -> None:

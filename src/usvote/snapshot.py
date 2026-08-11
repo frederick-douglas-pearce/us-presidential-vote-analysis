@@ -12,27 +12,44 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
 **The serving contract (what E8-S2/S3 consume).** A SQLite file with three tables:
 
 ``ec_pv`` — the joined fact, one row per ``(year, state, candidate_slug)`` over the
-    **redistributable window** (the years MIT covers, 1976–2024). Every EC state row in
-    those years is kept (winners *and* 0-EV losers — the dense-fact rows the thesis
-    needs, D026); PV columns are NULL for a getter MIT does not cover (a faithless
-    elector, an unpledged slate), an honest D005 gap. Indexed on ``year`` / ``state`` /
-    ``candidate_slug`` for the by-year/by-state/by-candidate endpoints (#97). The
-    internal surrogate ``candidate_id`` is **dropped** (D006 /
+    **full EC span, 1824–2024** (#139 / D048; it was the MIT-only 1976–2024 window until
+    then). Every EC state row is kept (winners *and* 0-EV losers — the dense-fact rows
+    the thesis needs, D026); PV columns are NULL wherever no redistributable popular
+    vote exists, which after the widening is most of the table. Indexed on ``year`` /
+    ``state`` / ``candidate_slug`` for the by-year/by-state/by-candidate endpoints
+    (#97). The internal surrogate ``candidate_id`` is **dropped** (D006 /
     ``docs/canonical-keys.md``) and replaced by ``candidate_slug`` — the durable public
     candidate id minted here. ``state_usps`` is carried alongside the full
     ``state`` name as a clean URL/path key for ``/v1/states/{...}`` (#97).
 
+    **A NULL popular vote is never bare.** Every row carries a ``pv_status`` saying
+    which kind of nothing it is: ``legislature_chosen`` (the state's legislature
+    appointed the electors — no popular vote was ever held), ``not_participating`` (the
+    state took no part in the election), or ``popular_vote`` (one was held; whether
+    *this* surface carries it is the separate question ``meta.pv_year_min`` answers).
+    Widening the window without this column would commit, on the public artifact, the
+    exact missing-vs-zero conflation this project exists to describe.
+
 ``national_rollup`` — one row per ``(year, candidate_slug)`` with the per-candidate
-    national EC total (the view's window sum) and national PV total (+ denominator), so
-    ``/v1/elections/{year}/summary`` (#97) **reads** the roll-up instead of computing it
-    in a route handler. Safe to precompute because the redistributable window is
-    **single-source (MIT)**, so the D017 cross-source-denominator caveat does not bite.
+    national EC total (the view's window sum), its **counted** twin (D046), the year's
+    **appointed** electoral denominator (D041), and the national PV total (+ its own
+    denominator), so ``/v1/elections/{year}/summary`` (#97) **reads** the roll-up
+    instead of computing it in a route handler. Safe to precompute because the
+    redistributable PV window is **single-source (MIT)**, so the D017 cross-source
+    -denominator caveat does not bite. The EC denominator is here because a counted
+    total alone is not checkable — 1872's Grant is 286 *of 366*, and re-deriving the 366
+    from the fact table is the multiply-by-candidate-count trap
+    :func:`usvote.hybrid.ec_denominator_by_year` exists to prevent.
 
 ``snapshot_meta`` — one row of provenance for the API ``meta`` block: the content-hash
-    ``snapshot_version``, the schema version, row/candidate counts, the coverage window
-    (``year_min`` / ``year_max``), ``source`` = MIT and its ``license`` (CC0-1.0, read
-    from the ``pv_source`` reference data, not hardcoded), and an **informational-only**
-    build timestamp.
+    ``snapshot_version``, the schema version, row/candidate counts, the served window
+    (``year_min`` / ``year_max``) **and the narrower redistributable-PV sub-window**
+    (``pv_year_min`` / ``pv_year_max``), the PV ``source`` = MIT with its ``license``
+    (CC0-1.0, read from the ``pv_source`` reference data, not hardcoded), the EC
+    ``ec_source`` / ``ec_license`` (the National Archives; a U.S. Government work), and
+    an **informational-only** build timestamp. Two provenances, because after #139 the
+    surface has two: most of the table is Archives EC data with no popular vote at all,
+    and a ``meta`` block naming only MIT would assert MIT covers 1824 (D048).
 
 **Version = content hash, not timestamp (D028).** ``snapshot_version`` is a SHA-256
 over the ``ec_pv`` rows in a deterministic ``ORDER BY (year, state, candidate_slug)``
@@ -71,27 +88,75 @@ import pandas as pd
 
 from usvote import config
 from usvote.config import ConfigError
+from usvote.count_status import COUNT_STATUS_REASON_COLUMN
 from usvote.db import DBC, DBConnectionError
-from usvote.hybrid import roll_up_national
+from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_REDISTRIBUTABLE_VIEW
 from usvote.load import SCHEMA
-from usvote.pv.source import SOURCE_MIT, build_pv_source_frame
+from usvote.pv.absences import build_curated_roster
+from usvote.pv.source import (
+    MIT_PV_YEAR_MIN,
+    SOURCE_MIT,
+    assert_mit_year_floor,
+    build_pv_source_frame,
+)
+from usvote.pv.status import (
+    PV_STATUS_POPULAR_VOTE,
+    assert_roster_shape,
+    assert_unique_roster_grain,
+)
 from usvote.slug import candidate_slug
 from usvote.snapshot_schema import (
     DATA_COLUMNS,
     DATA_TABLE,
+    EC_LICENSE,
+    EC_SOURCE,
     META_TABLE,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotMeta,
 )
+from usvote.spine import read_ec_participation
+from usvote.transform import COUNT_STATUS_OVERRIDES
+from usvote.years import ec_ingest_years
 
 #: The name of the EC state dimension the build reads ``state_usps`` from. Reading a
 #: second *relation* (not a second path to the join view) is fine — the AC's "reuse the
 #: view, no second hand-rolled SQL path" is about the view, and ``state_usps`` is a
 #: clean URL/path key for ``/v1/states/{...}`` (#97) the view itself does not carry.
 STATE_DIM = "state"
+
+#: The ``source`` value handed to :func:`usvote.pv.absences.build_curated_roster`, which
+#: requires the kwarg and deliberately defines no ``SOURCE_CURATED`` literal of its own
+#: ("naming a source value would pre-commit a decision that belongs to whoever loads
+#: it"). #139 does not *load* the roster — it derives one in memory and throws the
+#: column away — so the literal is private here rather than public there.
+#:
+#: :func:`read_pv_status_roster` **projects the column off** before the frame is
+#: returned; it never reaches ``build_snapshot``, the merge, or SQLite. That is
+#: structural, not conventional: :func:`assert_redistributable_only` reads a column
+#: literally named ``source``, so a second frame carrying one anywhere near the build is
+#: a live hazard, and "we drop it later" is a comment, not a guarantee.
+_CURATED_ROSTER_SOURCE = "CURATED"
+
+#: The columns :func:`read_pv_status_roster` returns — the roster narrowed to what the
+#: broadcast needs. Notably **not** ``note``: the curated roster's is null by
+#: construction, and the public surface must never carry roster free text (D022/D024).
+_ROSTER_MERGE_COLUMNS: tuple[str, ...] = ("year", "state", "pv_status")
+
+#: The closed vocabulary ``count_status_reason`` may draw from — the Archives' own
+#: sentences, curated in :data:`usvote.transform.COUNT_STATUS_OVERRIDES`.
+#:
+#: This is what makes "Archives prose ships, UCSB prose does not" a **property rather
+#: than a claim**. ``dwh.votes`` carries no provenance column, so without this the
+#: distinction would rest on a docstring and a future contributor pasting a UCSB
+#: sentence into the overrides map would break nothing that fails. Same argument, same
+#: shape, as the closed ``pv_status`` enum: a value drawn from a fixed finite set cannot
+#: smuggle in someone else's expression.
+_ALLOWED_COUNT_STATUS_REASONS: frozenset[str] = frozenset(
+    reason for _, reason in COUNT_STATUS_OVERRIDES.values()
+)
 
 #: Integer-valued columns that the EC-left join returns as float64 (LEFT-JOIN NULLs make
 #: NaN). Cast to nullable ``Int64`` before hashing/writing so ``150`` never becomes
@@ -104,6 +169,11 @@ _INTEGER_COLUMNS: tuple[str, ...] = (
     "president_electoral_rank",
     "candidate_votes",
     "state_total_votes",
+    # The counted measure (D046). Its national twin is never NULL at state grain
+    # (D047's action item says so explicitly), but it costs nothing to normalize both
+    # and the cast keeps the content hash independent of pandas' float formatting.
+    "president_electoral_votes_counted",
+    "national_counted_electoral_votes",
 )
 
 #: The deterministic order the content hash and the ``ec_pv`` rows are written in.
@@ -189,16 +259,191 @@ def add_candidate_slug(ec_pv_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _covered_years(ec_pv_df: pd.DataFrame) -> list[int]:
-    """The years with any redistributable PV — the snapshot's coverage window.
+def _snapshot_years(ec_pv_df: pd.DataFrame) -> list[int]:
+    """The **served** window: every election year in the frame (1824–2024).
 
     ``ec_pv_redistributable`` is EC-**left**, so it carries every EC state row from 1824
-    on with PV attached only where MIT covers it. The public surface is the
-    redistributable window (D005/D016): the years that actually have PV. Pre-1976 years
-    (all-NULL PV) are honestly absent — the point of the surface, not a bug.
+    on with PV attached only where MIT covers it. Until #139 the build filtered those
+    rows away and served only the years that had PV; the rows were already arriving, so
+    the widening is one deleted filter rather than a new pipeline.
+
+    Serving them is the point of #134/D048: 38 of the 51 in-scope elections had no
+    reachable public record here, and the posts that turn on 1824's 261-vote
+    denominator or 1872's rejected votes pointed readers at a surface that 404'd. Kept
+    honest by the sibling :func:`_pv_years` — the two windows now genuinely differ, and
+    ``meta`` says so rather than leaving a reader to infer it from NULLs.
+    """
+    return sorted(int(y) for y in ec_pv_df["year"].unique())
+
+
+def _pv_years(ec_pv_df: pd.DataFrame) -> list[int]:
+    """The **redistributable popular-vote** sub-window: the years that actually have PV.
+
+    Was ``_covered_years``, and was the whole served window before #139. It still gates
+    the "MIT was never loaded" build failure and still supplies ``meta.pv_year_min`` /
+    ``pv_year_max`` — it simply no longer decides which rows ship.
     """
     with_pv = ec_pv_df.loc[ec_pv_df["candidate_votes"].notna(), "year"]
     return sorted(int(y) for y in with_pv.unique())
+
+
+def add_pv_status(ec_pv_df: pd.DataFrame, pv_status_df: pd.DataFrame) -> pd.DataFrame:
+    """Broadcast the ``(year, state)`` ``pv_status`` onto every candidate row.
+
+    The column that keeps a NULL ``candidate_votes`` from being bare (D024/D048). It is
+    a column on the fact rather than a fourth snapshot table for four reasons, the last
+    of which is decisive: the contract is a **row-level sibling pairing**, so a column
+    realizes it literally; the repository needs no join; "no bare NULL" becomes a
+    ``NOT NULL`` column constraint instead of a cross-table invariant; and the column is
+    **covered by the content hash for free**, where a separate table would ship a stale
+    ETag on a roster correction that left the facts untouched.
+
+    Three merge properties, each guarding a failure the others cannot see:
+
+    1. ``validate="m:1"`` — a duplicated roster key would otherwise fan the fact out and
+       be caught three steps later by the ``PRIMARY KEY`` at INSERT, pointing at the
+       symptom rather than the cause.
+    2. The merge must add **exactly** ``{"pv_status"}``. This is the structural form of
+       "and no ``source`` / ``note`` column came along for the ride" — the one that
+       matters, since :func:`assert_redistributable_only` keys on a column named
+       ``source`` and roster free text must never reach the public surface.
+    3. Every ``(year, state)`` in the fact must find a status — the completeness
+       anti-join. It is the only guard here that :mod:`usvote.pv.status` cannot provide,
+       because only this module knows the fact frame.
+
+    Run **after** :func:`assert_redistributable_only`, which reads ``source``.
+    """
+    before = set(ec_pv_df.columns)
+    keys = ec_pv_df[["year", "state"]].drop_duplicates()
+    missing = keys.merge(pv_status_df, on=["year", "state"], how="left")
+    absent = missing.loc[missing["pv_status"].isna(), ["year", "state"]]
+    if not absent.empty:
+        raise SnapshotError(
+            f"{len(absent)} (year, state) key(s) in the fact have no pv_status: "
+            f"{absent.values.tolist()[:10]}. Every served row must say which kind of "
+            "'no popular vote' it is (D024/D048) — a bare NULL popular vote is the "
+            "missing-vs-zero conflation this column exists to prevent. The roster "
+            "derives from the EC spine, so this means the spine and the join view "
+            "disagree about which states took part."
+        )
+    out = ec_pv_df.merge(pv_status_df, on=["year", "state"], how="left", validate="m:1")
+    added = set(out.columns) - before
+    if added != {"pv_status"}:
+        raise SnapshotError(
+            f"the pv_status broadcast added {sorted(added)}, not exactly "
+            "{'pv_status'} — the roster frame carried extra columns into the public "
+            "fact. Roster provenance and free text must not reach the snapshot "
+            "(D022/D030); project the roster in read_pv_status_roster."
+        )
+    return out
+
+
+def assert_modern_years_are_popular_vote(data_df: pd.DataFrame) -> None:
+    """Assert every row from :data:`MIT_PV_YEAR_MIN` on is ``pv_status='popular_vote'``.
+
+    Free, and it makes structural the reason two rosters can coexist without being
+    reconciled by hand. :mod:`usvote.hybrid` reads ``dwh.pv_state_status`` (UCSB + MIT)
+    for ``pv_coverage``; the snapshot derives its own from the in-repo catalog. They
+    agree over the modern window **by construction** — the catalog's own integrity test
+    guarantees no :data:`~usvote.pv.absences.PV_ABSENCE_CATALOG` key falls at or after
+    :data:`MIT_PV_YEAR_MIN`, so over those years ``build_curated_roster`` and
+    ``build_popular_vote_roster`` are the same derivation with the same empty effective
+    absence map.
+
+    "By construction" is a fact about today's catalog, though, not a law. A future
+    absence entry in a modern year would silently make the public roster disagree with
+    the analysis one, so the property is checked here rather than trusted.
+    """
+    modern = data_df[data_df["year"] >= MIT_PV_YEAR_MIN]
+    bad = modern[modern["pv_status"] != PV_STATUS_POPULAR_VOTE]
+    if not bad.empty:
+        offenders = bad[["year", "state", "pv_status"]].drop_duplicates()
+        raise SnapshotError(
+            f"{len(bad)} row(s) at or after {MIT_PV_YEAR_MIN} carry a pv_status other "
+            f"than {PV_STATUS_POPULAR_VOTE!r}: {offenders.values.tolist()[:10]}"
+            ". The public roster (the in-repo catalog) and the analysis roster "
+            "(dwh.pv_state_status) agree over the MIT window only while the catalog "
+            "records no absence there — see usvote.pv.absences."
+        )
+
+
+def assert_count_status_reasons_are_catalogued(data_df: pd.DataFrame) -> None:
+    """Assert every ``count_status_reason`` comes from the curated Archives vocabulary.
+
+    The structural half of "the enum ships, the expression does not", applied to the one
+    free-text column the public surface *does* carry. ``count_status_reason`` is
+    admissible because it is the **Archives' own sentence** — a U.S. Government work,
+    17 U.S.C. § 105 — where ``pv_state_status.note`` is UCSB prose and is not (D022 /
+    D044 §3). But ``dwh.votes`` carries no provenance column, so left as prose that
+    distinction is editorial: nothing would fail if a UCSB sentence were pasted into
+    :data:`usvote.transform.COUNT_STATUS_OVERRIDES`.
+
+    Pinning the served values to the curated map converts it into the same guarantee the
+    ``pv_status`` enum already has — a value from a closed finite set cannot carry
+    someone else's expression.
+    """
+    reasons = data_df[COUNT_STATUS_REASON_COLUMN].dropna()
+    unknown = sorted(set(reasons) - _ALLOWED_COUNT_STATUS_REASONS)
+    if unknown:
+        raise SnapshotError(
+            f"{len(unknown)} count_status_reason value(s) are not in the curated "
+            f"Archives vocabulary: {[r[:80] for r in unknown]}. Only the sentences in "
+            "usvote.transform.COUNT_STATUS_OVERRIDES may reach the public surface — "
+            "they are U.S. Government works and carry no redistribution restriction "
+            "(D044 §3). Free text from any other source must not ship (D022/D030)."
+        )
+
+
+def assert_no_pv_below_mit_window(data_df: pd.DataFrame) -> None:
+    """Assert no **fact** row below :data:`MIT_PV_YEAR_MIN` carries popular-vote data.
+
+    The fact-level half of the pre-window guard;
+    :func:`assert_no_pv_aggregate_below_mit_window` is the derived-table half. This one
+    covers the table the API actually serves.
+    """
+    pre = data_df[data_df["year"] < MIT_PV_YEAR_MIN]
+    for col in ("candidate_votes", "state_total_votes"):
+        bad = pre[pre[col].notna()]
+        if not bad.empty:
+            raise SnapshotError(
+                f"{len(bad)} fact row(s) below {MIT_PV_YEAR_MIN} carry a non-null "
+                f"{col}: {bad[['year', 'state', 'candidate']].values.tolist()[:10]}. "
+                "The redistributable surface has no popular vote before MIT's window "
+                "(D030)."
+            )
+
+
+def assert_no_pv_aggregate_below_mit_window(rollup_df: pd.DataFrame) -> None:
+    """Assert the roll-up carries no PV aggregate below :data:`MIT_PV_YEAR_MIN`.
+
+    **The floor is a constant, never derived from the frame** — and that is the single
+    most important line in this function. The obvious spelling, "the lowest year that
+    has any PV", is *vacuous under exactly the failure a floor guard exists to catch*:
+    repoint the build at ``ec_pv_preferred`` and pre-1976 suddenly has UCSB PV, so the
+    observed floor slides to 1824 and the assert passes over everything it was meant to
+    stop. An external invariant cannot slide. See
+    :data:`usvote.pv.source.MIT_PV_YEAR_MIN`.
+
+    **What it uniquely catches is a fabricated zero, not laundered UCSB.** Worth
+    stating precisely, or this reads as redundant and gets deleted: against a repoint
+    to ``ec_pv_preferred``, :func:`assert_redistributable_only` already fires first,
+    because UCSB rows carry ``source='UCSB'``. The failure *nothing else sees* is a
+    regression in ``min_count=1`` inside :func:`usvote.hybrid.roll_up_national`, which
+    would turn an all-NULL pre-1976 year into a national popular vote of ``0`` — a
+    correctness bug, not a licensing one, and one that would publish "in 1860, 0 people
+    voted" with every other guard green.
+    """
+    pre = rollup_df[rollup_df["year"] < MIT_PV_YEAR_MIN]
+    for col in ("national_pv_votes", "national_pv_denominator"):
+        bad = pre[pre[col].notna()]
+        if not bad.empty:
+            raise SnapshotError(
+                f"{len(bad)} roll-up row(s) below {MIT_PV_YEAR_MIN} carry a non-null "
+                f"{col}: {bad[['year', 'candidate_slug', col]].values.tolist()[:10]}. "
+                "A year with no popular vote must aggregate to NULL, never 0 — a "
+                "fabricated zero is the missing-vs-zero error this surface exists to "
+                "avoid (D030/D048)."
+            )
 
 
 def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
@@ -240,10 +485,21 @@ def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
             "candidate": "candidate",
             "party": "party",
             "national_electoral_votes": "national_electoral_votes",
+            "national_counted_electoral_votes": "national_counted_electoral_votes",
             "president_electoral_rank": "president_electoral_rank",
             "took_office": "took_office",
         },
     )
+    # The appointed denominator (D041) — per *year*, not per candidate, so it merges
+    # rather than carries. Delegated for the same reason the roll-up itself is: a bare
+    # aggregate over the joined rows would multiply every state's allotment by the
+    # candidate count, and `ec_denominator_by_year` is the one place that subtlety is
+    # already solved. This is what makes the counted total checkable — "286" means
+    # nothing without "of 366".
+    denominator = ec_denominator_by_year(data_df).rename(
+        columns={"ec_denominator": "national_electoral_denominator"}
+    )
+    rollup = rollup.merge(denominator, on="year", how="left", validate="m:1")
     return rollup[list(ROLLUP_COLUMNS)]
 
 
@@ -294,42 +550,83 @@ def build_snapshot(
     ec_pv_df: pd.DataFrame,
     out_path: str,
     *,
+    pv_status_df: pd.DataFrame,
     build_timestamp: datetime | None = None,
 ) -> SnapshotMeta:
     """Build the SQLite snapshot from an ``ec_pv_redistributable``-shaped frame.
 
     ``ec_pv_df`` is the view frame (:data:`usvote.join.EC_PV_COLUMNS`) enriched with
-    ``state_usps`` — exactly what :func:`read_redistributable` produces. The pure core,
-    unit-tested offline from a synthetic frame (no DB). Steps: assert
-    redistributable-only
-    (D030); **restrict to the redistributable window first** (:func:`_covered_years`),
-    *then* mint the candidate slug + drop ``candidate_id`` (D006) — so a slug collision
-    between candidates that never ship (e.g. two pre-1976 names) can't fail a build over
-    data the snapshot won't even contain; precompute the national roll-up; content-hash
-    the fact rows (D028); and write the three tables to ``out_path`` atomically
-    (temp file + ``os.replace``) so a partial write never leaves a corrupt snapshot.
+    ``state_usps`` — exactly what :func:`read_redistributable` produces.
+    ``pv_status_df`` is the ``(year, state, pv_status)`` roster
+    :func:`read_pv_status_roster` derives. The pure core, unit-tested offline from
+    synthetic frames (no DB).
+
+    **Why the roster arrives as an argument rather than being derived here.** The
+    obvious simplification — call :func:`~usvote.pv.absences.build_curated_roster`
+    inside this function — cannot work, and the reason is worth stating so nobody
+    re-introduces it: that derivation runs
+    :func:`~usvote.pv.absences.assert_catalog_matches_spine` unconditionally, whose
+    phantom-key check fails the moment the spine it is handed is a *synthetic* one.
+    A fixture with a pre-1976 year but only two states would make ``(1860, "South
+    Carolina")`` a phantom key and kill the build. So the catalog-bound derivation lives
+    on the DB side, where it sees the real spine, and the builder takes a frame.
+
+    Steps: assert redistributable-only (D030); broadcast ``pv_status``
+    (:func:`add_pv_status`, *after* the redistributable guard, which reads a column
+    named ``source``); mint the candidate slug + drop ``candidate_id`` (D006)
+    **over the whole frame** — see the note below; precompute the national roll-up and
+    run both halves of the pre-window PV guard; content-hash the fact rows (D028); and
+    write the three tables to ``out_path`` atomically (temp file + ``os.replace``) so a
+    partial write never leaves a corrupt snapshot.
+
+    **Slugs are minted over every row, and the old ordering is gone.** This used to
+    filter to the served window *first* so that a collision between two candidates the
+    snapshot would never ship could not fail a build. That rationale evaporated with
+    #139: every candidate 1824–2024 now ships, so slug uniqueness must hold across all
+    of them, and a collision is a real, build-blocking defect — the same-name residual
+    ``docs/canonical-keys.md`` describes, to be resolved there rather than dodged here.
 
     ``build_timestamp`` is injectable for deterministic tests; it is informational
     metadata only, never part of the version.
     """
     assert_redistributable_only(ec_pv_df)
 
-    covered = _covered_years(ec_pv_df)
-    if not covered:
+    years = _snapshot_years(ec_pv_df)
+    if not years:
         raise SnapshotError(
-            "no redistributable PV rows in the source view — the snapshot would be "
-            "empty; build the warehouse (run_warehouse) with MIT loaded first."
+            "the source view is empty — the snapshot would have no rows at all; build "
+            "the warehouse (run_warehouse) first."
         )
-    # Filter to the served window BEFORE minting/validating slugs, so slug uniqueness is
-    # only enforced over candidates that actually ship (the architect-review fix).
-    in_window = add_candidate_slug(ec_pv_df[ec_pv_df["year"].isin(covered)].copy())
+    pv_years = _pv_years(ec_pv_df)
+    if not pv_years:
+        raise SnapshotError(
+            "no redistributable PV rows in the source view — the snapshot would carry "
+            "electoral-college data with no popular vote anywhere; build the warehouse "
+            "(run_warehouse) with MIT loaded first."
+        )
+    assert_mit_year_floor(pv_years, error_cls=SnapshotError, caller="build_snapshot")
 
-    data_df = _to_int64(in_window, _INTEGER_COLUMNS)[list(DATA_COLUMNS)]
+    with_status = add_pv_status(ec_pv_df, pv_status_df)
+    slugged = add_candidate_slug(with_status)
+
+    data_df = _to_int64(slugged, _INTEGER_COLUMNS)[list(DATA_COLUMNS)]
     data_df = data_df.sort_values(list(_ORDER_BY), kind="stable").reset_index(drop=True)
+    assert_modern_years_are_popular_vote(data_df)
+    assert_count_status_reasons_are_catalogued(data_df)
+    assert_no_pv_below_mit_window(data_df)
+
     rollup_df = _to_int64(
         build_national_rollup(data_df),
-        ("national_electoral_votes", "president_electoral_rank"),
+        (
+            "national_electoral_votes",
+            "national_counted_electoral_votes",
+            "national_electoral_denominator",
+            "president_electoral_rank",
+            "national_pv_votes",
+            "national_pv_denominator",
+        ),
     )
+    assert_no_pv_aggregate_below_mit_window(rollup_df)
 
     ts = build_timestamp if build_timestamp is not None else datetime.now(UTC)
     meta = SnapshotMeta(
@@ -337,10 +634,14 @@ def build_snapshot(
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         row_count=len(data_df),
         candidate_count=int(data_df["candidate_slug"].nunique()),
-        year_min=covered[0],
-        year_max=covered[-1],
+        year_min=years[0],
+        year_max=years[-1],
+        pv_year_min=pv_years[0],
+        pv_year_max=pv_years[-1],
         source=SOURCE_MIT,
         license=_mit_license(),
+        ec_source=EC_SOURCE,
+        ec_license=EC_LICENSE,
         build_timestamp=ts.isoformat(),
     )
     _write_sqlite(out_path, data_df, rollup_df, meta)
@@ -412,6 +713,14 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " candidate_votes INTEGER,"
         " state_total_votes INTEGER,"
         " reliability TEXT,"
+        # NOT NULL is the point, not decoration: "a NULL popular vote is never bare"
+        # (D048) is a per-row promise, so it is enforced per row by the store rather
+        # than by a build-time assert alone.
+        " pv_status TEXT NOT NULL,"
+        " president_electoral_votes_counted INTEGER,"
+        " national_counted_electoral_votes INTEGER,"
+        " count_status TEXT NOT NULL,"
+        " count_status_reason TEXT,"
         # Canonical grain (D026): one row per (year, state, candidate_slug). A PRIMARY
         # KEY makes a join-view / slug-mapping fan-out fail loud at INSERT (matching
         # national_rollup's own PK guard and the "validation is load-bearing" rule)
@@ -436,6 +745,8 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " took_office INTEGER,"
         " national_pv_votes INTEGER,"
         " national_pv_denominator INTEGER,"
+        " national_counted_electoral_votes INTEGER,"
+        " national_electoral_denominator INTEGER,"
         " PRIMARY KEY (year, candidate_slug))"
     )
     conn.execute(
@@ -446,8 +757,12 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " candidate_count INTEGER NOT NULL,"
         " year_min INTEGER NOT NULL,"
         " year_max INTEGER NOT NULL,"
+        " pv_year_min INTEGER NOT NULL,"
+        " pv_year_max INTEGER NOT NULL,"
         " source TEXT NOT NULL,"
         " license TEXT NOT NULL,"
+        " ec_source TEXT NOT NULL,"
+        " ec_license TEXT NOT NULL,"
         " build_timestamp TEXT NOT NULL)"
     )
 
@@ -495,6 +810,50 @@ def read_redistributable(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
     return ec_pv.merge(state_usps, on="state", how="left")
 
 
+def read_pv_status_roster(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
+    """Derive the ``(year, state, pv_status)`` roster from the EC spine + the catalog.
+
+    The public surface's answer to "why is this popular vote NULL?", and it is built
+    **without reading ``dwh.pv_state_status`` at all**. That is the whole point (D048,
+    implementing #134's option (C)): the warehouse roster's pre-1976 rows are
+    UCSB-derived, UCSB grants no redistribution rights (D022), and the artifact being
+    built here *is* the public surface. So membership comes from the EC spine (Archives,
+    public domain) and the classifications come from :mod:`usvote.pv.absences` — 32
+    in-repo entries, each carrying a public-domain citation — with ``popular_vote`` as
+    the residual. UCSB's roster is demoted to a cross-source **control** that validates
+    this one, never an input to it.
+
+    :func:`~usvote.pv.absences.build_curated_roster` cross-checks the catalog against
+    the spine in both directions before deriving, so a typo'd state name or a newly
+    zero-EV state cannot slip through as an ordinary ``popular_vote``.
+
+    **Scope is the full ingest span, and a short warehouse fails loud.** Passing
+    ``ec_ingest_years()`` means a warehouse missing an election raises here rather than
+    yielding a quietly narrower snapshot. That retires the scoped-subset promise
+    ``SnapshotMeta`` used to make, deliberately: a snapshot silently missing 1868 is the
+    same class of error — a gap rendered as a nonexistence — that the ``pv_status``
+    column exists to prevent one level down.
+
+    The ``source`` column is projected off before returning; see
+    :data:`_CURATED_ROSTER_SOURCE`.
+    """
+    participation = read_ec_participation(dbc, schema=schema)
+    roster = build_curated_roster(
+        participation,
+        source=_CURATED_ROSTER_SOURCE,
+        years=ec_ingest_years(),
+        error_cls=SnapshotError,
+    )
+    # Both already exist in the shared contract module and are already tested there;
+    # calling them is deliberate reuse, not belt-and-braces. `assert_roster_shape` is
+    # the closed-enum guard (a pv_status outside the three values cannot ship, which is
+    # the structural form of "the enum ships, the expression does not") and needs the
+    # full ROSTER_COLUMNS shape, so it runs before the projection below.
+    assert_roster_shape(roster, error_cls=SnapshotError)
+    assert_unique_roster_grain(roster, error_cls=SnapshotError)
+    return roster[list(_ROSTER_MERGE_COLUMNS)]
+
+
 def build_snapshot_from_db(
     dbc: DBC,
     out_path: str,
@@ -506,7 +865,13 @@ def build_snapshot_from_db(
     """Read the live view and build the snapshot — the glue behind the CLI."""
     try:
         ec_pv_df = read_redistributable(dbc, schema=schema)
-        return build_snapshot(ec_pv_df, out_path, build_timestamp=build_timestamp)
+        pv_status_df = read_pv_status_roster(dbc, schema=schema)
+        return build_snapshot(
+            ec_pv_df,
+            out_path,
+            pv_status_df=pv_status_df,
+            build_timestamp=build_timestamp,
+        )
     finally:
         if close:
             dbc.close_connection()
@@ -540,7 +905,8 @@ def _run_build(environ: Mapping[str, str], out_override: str | None) -> int:
     print(
         f"Wrote snapshot to {out_path} "
         f"(version {meta.snapshot_version[:12]}…, {meta.row_count} rows, "
-        f"{meta.candidate_count} candidates, {meta.year_min}–{meta.year_max})."
+        f"{meta.candidate_count} candidates, {meta.year_min}–{meta.year_max}; "
+        f"popular vote {meta.pv_year_min}–{meta.pv_year_max})."
     )
     return 0
 

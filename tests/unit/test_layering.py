@@ -326,6 +326,52 @@ def test_the_curated_roster_derives_with_ucsb_unimportable() -> None:
     assert result.stdout.strip().endswith("OK")
 
 
+#: The same blocker, applied to the module that builds the **public artifact** (#139).
+#: `build_curated_roster` proving itself UCSB-free is necessary but not sufficient: what
+#: matters for D030 is that the whole snapshot build — imports and all — never reaches
+#: UCSB, which is the claim D048 makes and the reason the pre-1976 `pv_status` may ship.
+_NO_UCSB_SNAPSHOT_PROGRAM = """
+import sys
+
+
+class _BlockUCSB:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "usvote.ucsb" or fullname.startswith("usvote.ucsb."):
+            raise ImportError(f"usvote.ucsb is unimportable in this process: {fullname}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockUCSB())
+
+import usvote.snapshot  # the public snapshot build, DB stack and all
+
+assert hasattr(usvote.snapshot, "read_pv_status_roster"), dir(usvote.snapshot)
+assert "usvote.ucsb" not in sys.modules, sorted(sys.modules)
+print("OK")
+"""
+
+
+def test_the_snapshot_build_imports_with_ucsb_unimportable() -> None:
+    """The public snapshot build reaches no UCSB code, proven rather than asserted.
+
+    D048's licensing claim rests on this: the pre-1976 ``pv_status`` values may ship
+    because they come from the in-repo catalog over the EC spine, not from UCSB's
+    roster. A stray import — added later for convenience, or arriving transitively —
+    would quietly make the claim false while every other test stayed green.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _NO_UCSB_SNAPSHOT_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode == 0, (
+        f"importing usvote.snapshot reached usvote.ucsb.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("OK")
+
+
 def test_the_ucsb_blocker_in_that_program_actually_blocks() -> None:
     """Non-vacuity: if the blocker were inert the proof above would prove nothing."""
     probe = _NO_UCSB_PROGRAM.replace(

@@ -2393,3 +2393,96 @@ to 1824 — so the deferral has expired and #144 is where the call is recorded.
   the present tense and cites #57 as the record. Per D043's action item it is **the post that
   changes** where it diverges from shipped behaviour — in particular it must not describe 1872's
   electoral totals without saying which basis it means.
+
+## D048: the public surface widens to 1824, and it carries a second provenance
+
+**Date:** 2026-08-10
+**Issue:** #139 (E8-S9) · **Implements:** #134 option 2 · **Builds on:** D024, D028, D030,
+D041, D046 · **Discharges:** D047's action item
+
+**Context:**
+
+The public API covered **13 of 51** in-scope elections. `ec_pv_redistributable` is EC-left and
+already carried every EC state row from 1824 on; `snapshot.build_snapshot` filtered the rows
+without popular votes away. So 38 elections — including every year the blog series' historical
+posts turn on — were unreachable on the artifact those posts point readers at, and 1824 or 1872
+returned a **404**: a coverage gap rendered as a nonexistence, which is the missing-vs-zero
+error the series exists to describe, committed by the series' own evidence.
+
+**Decision:**
+
+1. **The served window is the full EC span, 1824–2024**; the redistributable popular vote keeps
+   its own narrower window. `SnapshotMeta` carries **both** (`year_min`/`year_max` and
+   `pv_year_min`/`pv_year_max`), so coverage is *stated* rather than inferred from a field of
+   nulls. 1,734 rows / 25 candidates → **5,623 rows / 96 candidates**.
+2. **Every fact row carries a `pv_status`, `NOT NULL`.** Widening without it would have shipped
+   ~3,900 bare NULL popular votes, conflating "no popular vote was ever held here" with "no
+   source reaches this far back" — the exact error this project describes. 1860 South Carolina
+   (`legislature_chosen`) and 1860 New York (`popular_vote`) both show a null popular vote, and
+   the two nulls now mean different things.
+3. **The classifications are derived from the in-repo catalog, never from `dwh.pv_state_status`**
+   (#134 option (C), built in #140). Membership comes from the EC spine; the 32 catalogued
+   absences supply the two absence statuses; `popular_vote` is the residual. **The warehouse
+   roster is not read at all**, so no UCSB-provenanced value is on the public path and D030 stays
+   structural rather than becoming an authorized editorial crossing. UCSB's roster is the
+   cross-source *control* that validates ours — never an input to it — and the property is
+   **proved, not grepped**: `usvote.snapshot` imports cleanly in a subprocess where
+   `usvote.ucsb` is unimportable.
+4. **`count_status` and both counted measures are surfaced** (D047's plumbing). Without them the
+   API would report Grant at 300 in 1872 with no way to see that 14 votes were refused — a
+   number contradicting every reference a reader can check. `count_status_reason` is the one
+   free-text column that ships, and it ships **because it is Archives prose** (a U.S. Government
+   work, 17 U.S.C. § 105) where `pv_state_status.note` is UCSB's. That distinction was editorial
+   as first drafted — `dwh.votes` carries no provenance column — so the build now pins every
+   served reason to the **closed three-sentence vocabulary** in `COUNT_STATUS_OVERRIDES`, the
+   same shape of guard the closed `pv_status` enum already is.
+5. **`national_rollup` gains the appointed denominator.** A counted total is not checkable
+   without one: 1872 is Grant **286 of 366**, and 1824 is the **261** the contingent election
+   turns on. Delegated to `hybrid.ec_denominator_by_year`, because the obvious re-derivation
+   multiplies each state's allotment by the candidate count.
+6. **Provenance is heterogeneous.** `snapshot_meta` gains `ec_source` / `ec_license` (NARA /
+   US-PD) beside the PV pair, which keep their unprefixed names for compatibility. Recorded in
+   the *artifact*, not hardcoded in the serving layer, so the advertised source cannot drift from
+   the one that was built. `redistributable_note` names both sources with their windows, and
+   OpenAPI's single `info.license` slot now advertises the **EC** license — it covers every row,
+   where CC0 covers only the popular-vote window.
+7. **A scoped warehouse can no longer build a snapshot.** The roster derives over the full
+   `ec_ingest_years()` span and raises if the warehouse is short a year. This **retires the
+   scoped-subset promise** `SnapshotMeta`'s docstring made, deliberately and in the same change.
+8. **`SNAPSHOT_SCHEMA_VERSION` 1 → 2.** The content hash covers only `ec_pv` data rows, so a
+   shape or roll-up-derivation change is invisible to it; the version must move by hand.
+
+**Rationale:**
+- The widening is *one deleted filter* at the fact level. Almost all the work is the honesty
+  scaffolding around it — which is the right ratio for a public artifact whose selling point is
+  "check the claim yourself".
+- **Catalogue-early paid off twice.** #140 curated the absences while 1868 was still gated; #144
+  settled the surfacing question. This issue therefore needed no new historical research and no
+  re-litigation, only plumbing.
+- The rights argument is now *demonstrated* rather than asserted. Fred's own test — "could this
+  value have been obtained from a different source?" — is answered by 32 cited rows that are that
+  other source.
+- Two guards look redundant and are not. The pre-window PV guard's unique catch is a **fabricated
+  zero** (a `min_count=1` regression turning an all-null year into `0`), not laundered UCSB —
+  `assert_redistributable_only` already fires on that. And its floor is a **constant**: the
+  obvious "lowest year with any PV" spelling is vacuous under exactly the failure it exists to
+  catch, since repointing the build at `ec_pv_preferred` slides the observed floor down with the
+  bad rows.
+- No outcome changes for 1976–2024. 2000 still reads Bush 271 / rank 1 / took office against
+  Gore's larger popular vote — the thesis year is untouched.
+
+**Action required:**
+- **The deploy is sequenced, not done.** The widened snapshot must reach production by the D034/
+  D035 path (rebuild → GCS → hash-tagged image → Cloudflare purge), and the schema bump means the
+  **image and snapshot cut over together**. #139 stays open with that as its sole remaining item.
+- The **local Archives corpus does not exist on this machine**, so the D034 zero-network build
+  path is unavailable; run `python -m usvote corpus` before the deploy rebuild.
+- **#102 / E8-S8** inherits `MIT_PV_YEAR_MIN` and the pre-window guard for `pv_share` /
+  `hybrid_score`. It should also resolve `pv_coverage` to **the in-repo catalog**, which is now
+  the public roster of record — `usvote.hybrid` still reads the UCSB-inclusive
+  `dwh.pv_state_status`, and publishing a coverage figure derived from data D030 excludes would
+  undo point 3.
+- **#130 guardrail G5** ("reproducible from the public API") becomes keepable pre-1976; amend it.
+- The **2028 `LATEST_ELECTION_YEAR` bump will fail the snapshot build** until the new year is
+  reviewed and added to the absence catalog. That is the designed behaviour, recorded here so it
+  is recognized as the feature it is rather than treated as a regression.

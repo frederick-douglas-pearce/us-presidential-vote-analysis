@@ -20,7 +20,11 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.fixtures.api_snapshot import SNAPSHOT_TS, synthetic_ec_pv_frame
+from tests.fixtures.api_snapshot import (
+    SNAPSHOT_TS,
+    synthetic_ec_pv_frame,
+    synthetic_pv_status_frame,
+)
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
 from usvote.snapshot import build_snapshot
@@ -33,10 +37,25 @@ def synthetic_frame() -> pd.DataFrame:
 
 
 @pytest.fixture
-def snapshot_path(tmp_path: Path, synthetic_frame: pd.DataFrame) -> str:
+def synthetic_status_frame() -> pd.DataFrame:
+    """The ``(year, state, pv_status)`` roster the build requires (override to customize)."""
+    return synthetic_pv_status_frame()
+
+
+@pytest.fixture
+def snapshot_path(
+    tmp_path: Path,
+    synthetic_frame: pd.DataFrame,
+    synthetic_status_frame: pd.DataFrame,
+) -> str:
     """A real SQLite snapshot built from ``synthetic_frame`` — no live DB."""
     out = str(tmp_path / "snapshot.sqlite")
-    build_snapshot(synthetic_frame, out, build_timestamp=SNAPSHOT_TS)
+    build_snapshot(
+        synthetic_frame,
+        out,
+        pv_status_df=synthetic_status_frame,
+        build_timestamp=SNAPSHOT_TS,
+    )
     return out
 
 

@@ -55,6 +55,14 @@ _ERROR_CACHE_CONTROL = "no-store"
 #: matches ``meta.provenance`` rather than a literal that could drift.
 _MIT = provenance.source_display("MIT")
 _CC0 = provenance.license_display("CC0-1.0")
+_NARA = provenance.source_display("NARA")
+_US_PD = provenance.license_display("US-PD")
+
+#: The popular-vote window quoted in the **static fallback** description only. The
+#: served schema reads the real numbers off the snapshot
+#: (:func:`_install_live_openapi`); this pair exists so the offline fallback is honest
+#: rather than vague, and it is the only place in the serving layer naming a year.
+_FALLBACK_PV_WINDOW = (1976, 2024)
 
 API_TITLE = "US Presidential Vote API"
 
@@ -105,8 +113,15 @@ def _render_description(coverage_window: str, provenance_note: str) -> str:
 #: The static fallback description — valid standalone (a generic coverage phrase + the
 #: D016 note). The served schema overwrites it with live snapshot values.
 API_DESCRIPTION = _render_description(
-    "the redistributable modern era (1976 onward)",
-    provenance.redistributable_note(_MIT, _CC0),
+    "every US presidential election from 1824 onward",
+    provenance.redistributable_note(
+        _MIT,
+        _CC0,
+        ec_source=_NARA,
+        ec_license=_US_PD,
+        pv_year_min=_FALLBACK_PV_WINDOW[0],
+        pv_year_max=_FALLBACK_PV_WINDOW[1],
+    ),
 )
 
 #: Tag groups, ordered as they should read in Swagger UI / ReDoc.
@@ -143,9 +158,17 @@ API_CONTACT = {
     "url": "https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis",
 }
 
-#: The OpenAPI ``license`` block advertises the **data** license (CC0) — this API serves
+#: The OpenAPI ``license`` block advertises the **data** license — this API serves
 #: public-domain data and carries no separate API terms.
-API_LICENSE_INFO = {"name": _CC0.name, "url": _CC0.url}
+#:
+#: OpenAPI's ``info.license`` holds exactly one entry, and this surface has two data
+#: licenses (CC0 for the popular vote, U.S. Government public domain for the electoral
+#: college). The **electoral-college** license is the one advertised here, because it
+#: covers every row while CC0 covers only the popular-vote window; both are stated in
+#: full in the description's provenance note and in every response's
+#: ``meta.provenance``. Advertising CC0 as *the* license — as this did before #139 —
+#: would put the narrower claim on the broader dataset.
+API_LICENSE_INFO = {"name": _US_PD.name, "url": _US_PD.url}
 
 
 def _install_live_openapi(app: FastAPI) -> None:
@@ -175,12 +198,23 @@ def _install_live_openapi(app: FastAPI) -> None:
             meta = repo.meta()
             src = provenance.source_display(meta.source)
             lic = provenance.license_display(meta.license)
+            ec_src = provenance.source_display(meta.ec_source)
+            ec_lic = provenance.license_display(meta.ec_license)
             info = schema["info"]
             info["description"] = _render_description(
                 f"{meta.year_min}–{meta.year_max}",
-                provenance.redistributable_note(src, lic),
+                provenance.redistributable_note(
+                    src,
+                    lic,
+                    ec_source=ec_src,
+                    ec_license=ec_lic,
+                    pv_year_min=meta.pv_year_min,
+                    pv_year_max=meta.pv_year_max,
+                ),
             )
-            info["license"] = {"name": lic.name, "url": lic.url}
+            # The EC license, for the reason API_LICENSE_INFO gives: it is the one that
+            # covers every row.
+            info["license"] = {"name": ec_lic.name, "url": ec_lic.url}
         return schema
 
     app.openapi = openapi  # type: ignore[method-assign]
@@ -219,9 +253,16 @@ def _meta_block(repo: SnapshotRepository) -> dict[str, object]:
         "schema_version": meta.schema_version,
         "row_count": meta.row_count,
         "candidate_count": meta.candidate_count,
-        "coverage": {"year_min": meta.year_min, "year_max": meta.year_max},
+        "coverage": {
+            "year_min": meta.year_min,
+            "year_max": meta.year_max,
+            "pv_year_min": meta.pv_year_min,
+            "pv_year_max": meta.pv_year_max,
+        },
         "source": meta.source,
         "license": meta.license,
+        "ec_source": meta.ec_source,
+        "ec_license": meta.ec_license,
         "build_timestamp": meta.build_timestamp,
     }
 
