@@ -49,7 +49,11 @@ from collections.abc import Collection
 
 import pandas as pd
 
-from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_REASON_COLUMN,
+    COUNTED_VOTES_COLUMN,
+)
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.schema import PV_SCHEMA
@@ -93,10 +97,18 @@ JOIN_KEY: tuple[str, ...] = ("year", "state", "candidate")
 #: state set (:func:`usvote.hybrid._restricted_ec_numerator`), which a national total
 #: cannot give it.
 #:
-#: Adding a column here does **not** reach the API:
+#: :data:`~usvote.count_status.COUNT_STATUS_COLUMN` and its reason ride along from #139
+#: (D047/D048), which is the story that put them on the public surface. They are a
+#: *row-grain* fact (D043 §4) and this view excludes the ``is_total`` rows — the one
+#: place D044 says the status must not be read — so the value here is unambiguous. The
+#: reason is the **Archives' own sentence** (a US Government work, D044 §3), drawn from
+#: the closed vocabulary in :data:`usvote.transform.COUNT_STATUS_OVERRIDES`; that
+#: closure is what lets it ship where ``pv_state_status.note`` (UCSB prose) cannot.
+#:
+#: Adding a column here does **not** reach the API on its own:
 #: ``usvote.snapshot_schema.DATA_COLUMNS`` is an independent explicit projection, so the
-#: snapshot carries exactly what it lists. Surfacing this pair publicly is #139's
-#: (D047).
+#: snapshot carries exactly what it lists. The direction is one-way by design (D047 §3)
+#: — do not add a test asserting ``DATA_COLUMNS`` covers this tuple.
 #:
 #: **New columns are APPENDED, never inserted** — the same rule
 #: :data:`usvote.transform.VOTES_COLUMN_ORDER` follows, except that here it is enforced
@@ -123,6 +135,8 @@ EC_PV_COLUMNS: tuple[str, ...] = (
     # Appended, never inserted -- see the ordering note above.
     COUNTED_VOTES_COLUMN,
     "national_counted_electoral_votes",
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_REASON_COLUMN,
 )
 
 
@@ -196,7 +210,8 @@ def build_ec_pv_join_sql(
         f" v.{COUNTED_VOTES_COLUMN},"
         f" sum(v.{COUNTED_VOTES_COLUMN})"
         " OVER (PARTITION BY v.year, v.candidate_id)"
-        " AS national_counted_electoral_votes"
+        " AS national_counted_electoral_votes,"
+        f" v.{COUNT_STATUS_COLUMN}, v.{COUNT_STATUS_REASON_COLUMN}"
     )
     return (
         f"SELECT {cols}"

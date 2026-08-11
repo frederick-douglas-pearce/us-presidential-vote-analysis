@@ -22,7 +22,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.fixtures.api_snapshot import SNAPSHOT_TS, synthetic_ec_pv_frame
+from tests.fixtures.api_snapshot import (
+    SNAPSHOT_TS,
+    synthetic_ec_pv_frame,
+    synthetic_pv_status_frame,
+)
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
 from usvote.api.repository import SnapshotError, SnapshotRepository
@@ -50,9 +54,14 @@ def test_opens_snapshot_path_with_spaces(tmp_path: Path) -> None:
     spaced = tmp_path / "My Snapshots"
     spaced.mkdir()
     out = str(spaced / "snap.sqlite")
-    build_snapshot(synthetic_ec_pv_frame(), out, build_timestamp=SNAPSHOT_TS)
+    build_snapshot(
+        synthetic_ec_pv_frame(),
+        out,
+        pv_status_df=synthetic_pv_status_frame(),
+        build_timestamp=SNAPSHOT_TS,
+    )
     repo = SnapshotRepository.open(out)
-    assert repo.meta().year_min == 2016
+    assert repo.meta().year_min == 1860
 
 
 def test_schema_version_mismatch_fails_loud_at_open(
@@ -76,7 +85,12 @@ def test_health_reports_status_and_snapshot_meta(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert body["snapshot_loaded"] is True
     assert body["snapshot_version"]  # the content hash from the build
-    assert body["coverage"] == {"year_min": 2016, "year_max": 2020}
+    assert body["coverage"] == {
+        "year_min": 1860,
+        "year_max": 2020,
+        "pv_year_min": 2016,
+        "pv_year_max": 2020,
+    }
     assert body["source"] == "MIT"
 
 

@@ -19,7 +19,12 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_COUNTED,
+    COUNT_STATUS_REASON_COLUMN,
+    COUNTED_VOTES_COLUMN,
+)
 from usvote.hybrid import REQUIRED_JOIN_COLUMNS
 from usvote.join import (
     EC_PV_COLUMNS,
@@ -88,23 +93,32 @@ def test_builder_counted_columns_are_appended_never_inserted() -> None:
     review, not by the suite. This pins the ordering rule so the next added column has
     to be appended too.
     """
-    # The pre-#144 tail must still be the pre-#144 tail: nothing was inserted before it.
-    assert EC_PV_COLUMNS[:-2] == (
+    # The pre-#144 head must still be the pre-#144 head: nothing was inserted before it.
+    assert EC_PV_COLUMNS[:15] == (
         "year", "state", "candidate_id", "candidate",
         "total_electoral_votes", "president_electoral_votes",
         "national_electoral_votes", "president_electoral_rank", "took_office",
         "source", "party", "candidate_votes", "state_total_votes",
         "reliability", "redistributable",
     )
-    assert EC_PV_COLUMNS[-2:] == (
+    # ... and #144's pair still sits immediately after it, ahead of #139's own pair.
+    assert EC_PV_COLUMNS[15:] == (
         COUNTED_VOTES_COLUMN,
         "national_counted_electoral_votes",
+        COUNT_STATUS_COLUMN,
+        COUNT_STATUS_REASON_COLUMN,
     )
     # ... and the SELECT list agrees, so the view's column order matches the contract.
     sql = build_ec_pv_join_sql(PV_PREFERRED_VIEW)
     assert sql.index("s.redistributable") < sql.index(f"v.{COUNTED_VOTES_COLUMN},")
     assert sql.index(f"v.{COUNTED_VOTES_COLUMN},") < sql.index(
         "AS national_counted_electoral_votes"
+    )
+    assert sql.index("AS national_counted_electoral_votes") < sql.index(
+        f"v.{COUNT_STATUS_COLUMN},"
+    )
+    assert sql.index(f"v.{COUNT_STATUS_COLUMN},") < sql.index(
+        f"v.{COUNT_STATUS_REASON_COLUMN}"
     )
 
 
@@ -178,6 +192,8 @@ def _votes() -> pd.DataFrame:
             # measures diverge only in 1868/1872 (#144); the divergent shapes are
             # exercised in test_transform/test_pipeline, not here.
             COUNTED_VOTES_COLUMN: pev,
+            COUNT_STATUS_COLUMN: COUNT_STATUS_COUNTED,
+            COUNT_STATUS_REASON_COLUMN: None,
             "president_electoral_rank": rank[c], "took_office": took[c],
         }
         for (s, c, tev, pev) in state_cells
@@ -188,6 +204,8 @@ def _votes() -> pd.DataFrame:
             "year": 2020, "state": None, "is_total": True, "candidate_id": cid,
             "total_electoral_votes": 538, "president_electoral_votes": nev,
             COUNTED_VOTES_COLUMN: nev,
+            COUNT_STATUS_COLUMN: COUNT_STATUS_COUNTED,
+            COUNT_STATUS_REASON_COLUMN: None,
             "president_electoral_rank": rank[cid], "took_office": took[cid],
         })
     return pd.DataFrame(rows)

@@ -36,12 +36,19 @@ from usvote.snapshot_schema import (
     SnapshotMeta,
 )
 
-#: Server-side row cap (D031 / #97). No legitimate scoped query approaches it: the whole
-#: redistributable window is ~a few thousand ``ec_pv`` rows and the widest endpoint
-#: (one candidate across the window) is ≈13 years × 51 states ≈ 660 rows — so hitting it
-#: means a grain/fan-out regression, not a large-but-valid result. We therefore fetch
-#: ``LIMIT MAX_ROWS + 1`` and **fail loud** on overflow (:class:`SnapshotError`) rather
-#: than silently truncate: silent truncation is exactly the drop this codebase forbids.
+#: Server-side row cap (D031 / #97). We fetch ``LIMIT MAX_ROWS + 1`` and **fail loud**
+#: on overflow (:class:`SnapshotError`) rather than silently truncate: silent truncation
+#: is exactly the drop this codebase forbids.
+#:
+#: **The cap now sits below the table size, and that is correct.** Before #139 the whole
+#: snapshot was ~1,700 rows and this note said so; the widened 1824–2024 surface is
+#: ~5,600, so a hypothetical unscoped ``SELECT`` would trip the cap. None exists:
+#: :meth:`list_years` aggregates, and every fact read goes through :meth:`_data_rows`,
+#: which always carries a ``WHERE``. What the cap protects is therefore unchanged — a
+#: *scoped* query returning thousands of rows means a grain/fan-out regression, not a
+#: large-but-valid result. Measured headroom on the widened surface: the widest scoped
+#: reads are one year (~357 rows), one candidate (~200) and one state (~150), so roughly
+#: 14×.
 MAX_ROWS = 5000
 
 
@@ -176,17 +183,31 @@ class SnapshotRepository:
     def list_years(
         self, year_from: int | None = None, year_to: int | None = None
     ) -> list[dict[str, object]]:
-        """Covered years with a distinct-candidate count, from the roll-up table."""
+        """Covered years with a distinct-candidate count and a popular-vote flag.
+
+        ``has_popular_vote`` is ``COUNT(national_pv_votes) > 0`` — SQLite's ``COUNT`` of
+        a nullable column skips nulls, so a year whose candidates all have NULL national
+        popular votes counts 0. It comes back as 0/1 and pydantic coerces it to a bool.
+        The flag exists so "which years can I compare popular votes for" is answerable
+        from the index, without fetching a year and inspecting its nulls (#139).
+        """
         clauses, params = _year_range_clauses(year_from, year_to)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         return self._select(
-            f"SELECT year, COUNT(*) AS candidate_count FROM {ROLLUP_TABLE}"  # noqa: S608
-            f"{where} GROUP BY year ORDER BY year",
+            "SELECT year, COUNT(*) AS candidate_count,"  # noqa: S608
+            " COUNT(national_pv_votes) > 0 AS has_popular_vote"
+            f" FROM {ROLLUP_TABLE}{where} GROUP BY year ORDER BY year",
             tuple(params),
         )
 
     def year_exists(self, year: int) -> bool:
-        """Whether the snapshot contains this year (pre-1976 / unknown → 404)."""
+        """Whether the snapshot contains this year (an unknown year → 404).
+
+        Since #139 the snapshot spans 1824–2024, so a pre-1976 year now *exists* and
+        returns 200 with its EC facts and null popular votes. Only a year that was never
+        an election in scope (1800, 1837) is a 404 — a genuine nonexistence, not a
+        coverage gap rendered as one.
+        """
         return self._exists("year", year)
 
     def _data_rows(

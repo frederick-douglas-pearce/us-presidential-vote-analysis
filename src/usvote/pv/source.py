@@ -23,6 +23,8 @@ Consumed by :mod:`usvote.pv.views` (``precedence_rank`` drives ``pv_preferred``'
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import pandas as pd
 
 from usvote.pv.schema import PV_SCHEMA
@@ -33,6 +35,28 @@ from usvote.pv.schema import PV_SCHEMA
 #: pv``), so a source's ``"MIT"``/``"UCSB"`` tag and this table can never disagree.
 SOURCE_MIT = "MIT"
 SOURCE_UCSB = "UCSB"
+
+#: The first election MIT's file covers — the floor of the **redistributable** popular
+#: vote. Provenance is the filename itself: ``1976-2024-president.csv``.
+#:
+#: **It is a constant on purpose, and the reason is subtle** (#139 / D048). The public
+#: snapshot must guarantee no popular-vote aggregate appears below this year, and the
+#: obvious spelling of that guard — "the lowest year that has any PV" — is *vacuous
+#: under exactly the failure it exists to catch*: repoint the snapshot build at
+#: ``ec_pv_preferred`` and pre-1976 suddenly has (UCSB) PV, so the observed floor slides
+#: to 1824 and the assert passes over everything it was meant to stop. An external
+#: invariant cannot slide.
+#:
+#: Its home is here rather than in :mod:`usvote.snapshot` because #102/E8-S8 inherits
+#: the same guard for ``pv_share`` / ``hybrid_score``, and an inheritance that is a
+#: re-typed ``1976`` is not an inheritance. Deliberately **not** a ``year_min`` column
+#: on the ``pv_source`` table: that implies a per-source generality — the right upgrade
+#: if a second *redistributable* source ever predates 1976 — which nothing needs yet.
+#:
+#: Cross-checked one-directionally against the loaded data (see
+#: :func:`assert_mit_year_floor`): a MIT frame starting *earlier* than this means the
+#: constant is stale and must fail loud; starting *later* is an ordinary scoped build.
+MIT_PV_YEAR_MIN = 1976
 
 #: The warehouse schema and reference-table name. ``pv_source`` co-locates in the same
 #: schema as ``pv_votes`` and the EC spine (D021), and the resolution views join the two
@@ -89,6 +113,46 @@ class PVSourceError(RuntimeError):
     ``pv_preferred``'s tie-break non-deterministic) fails loudly rather than silently
     corrupting the resolved series.
     """
+
+
+def assert_mit_year_floor(
+    observed_years: Collection[int],
+    *,
+    error_cls: type[Exception] = PVSourceError,
+    caller: str = "assert_mit_year_floor",
+) -> None:
+    """Assert no observed redistributable-PV year falls below :data:`MIT_PV_YEAR_MIN`.
+
+    The cross-check that keeps the constant honest without letting it slide. It is
+    **one-directional by design**:
+
+    - ``min(observed) < MIT_PV_YEAR_MIN`` → **raise.** MIT has published earlier years,
+      so the constant is stale and every guard built on it is now silently too weak.
+      Forcing a deliberate constant update is the whole point.
+    - ``min(observed) > MIT_PV_YEAR_MIN`` → **pass.** That is an ordinary scoped build
+      (a partial load, a year-filtered run). The guard is merely stricter than it needs
+      to be there, which costs nothing.
+
+    An *equality* check would look tighter and be worse: it would fail every scoped
+    build, for a reason unrelated to the invariant.
+
+    An empty ``observed_years`` passes — "no redistributable PV at all" is a different
+    failure, and the callers that care about it say so themselves with a clearer message
+    (:func:`usvote.snapshot.build_snapshot`'s empty-PV guard) rather than having it
+    reported here as a year-floor problem.
+    """
+    years = [int(y) for y in observed_years]
+    if not years:
+        return
+    floor = min(years)
+    if floor < MIT_PV_YEAR_MIN:
+        raise error_cls(
+            f"{caller}: redistributable popular-vote data was found for {floor}, "
+            f"earlier than MIT_PV_YEAR_MIN={MIT_PV_YEAR_MIN}. Either {SOURCE_MIT} now "
+            "publishes earlier elections — in which case update the constant in "
+            "usvote/pv/source.py deliberately, and re-read every guard that keys on it "
+            "— or a non-redistributable source has leaked into a redistributable view."
+        )
 
 
 def build_pv_source_frame() -> pd.DataFrame:

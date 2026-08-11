@@ -24,7 +24,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from usvote.api import provenance
-from usvote.snapshot_schema import SnapshotMeta
+from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE, SnapshotMeta
 
 #: Snapshot columns intentionally **not** on any public model. Empty today (every
 #: ``ec_pv`` / ``national_rollup`` column is exposed under a public name), but the drift
@@ -33,22 +33,34 @@ from usvote.snapshot_schema import SnapshotMeta
 _DROPPED_COLUMNS: frozenset[str] = frozenset()
 
 
-def _config(example: dict[str, Any]) -> ConfigDict:
-    """Row config that also carries one OpenAPI example (in public field names).
+def _config(*examples: dict[str, Any]) -> ConfigDict:
+    """Row config that also carries the OpenAPI examples (in public field names).
 
     ``populate_by_name=True`` lets a snapshot row validate by ``validation_alias`` *and*
     lets an example authored in the **public** field name validate — so the examples
     Swagger renders are exactly what an external consumer sends/receives, and the
     ``test_api_models`` drift guard can ``model_validate`` each one (D004: validation is
     load-bearing).
+
+    Variadic since #139: ``EcPvRow`` now ships two, because the modern and pre-1976
+    shapes differ in every way that matters to a reader — one has popular votes, the
+    other has a ``pv_status`` explaining their absence and a count status explaining a
+    rejected electoral vote. One example could only show half the surface.
     """
-    return ConfigDict(populate_by_name=True, json_schema_extra={"examples": [example]})
+    return ConfigDict(
+        populate_by_name=True, json_schema_extra={"examples": list(examples)}
+    )
 
 
 # Realistic examples, authored once as module constants so the drift guard can import
 # and ``model_validate`` them. The 2000 Bush/Florida observation is the canonical
 # figure — the election the whole thesis is built around (lost the PV, took office).
-_COVERAGE_EXAMPLE: dict[str, Any] = {"year_min": 1976, "year_max": 2024}
+_COVERAGE_EXAMPLE: dict[str, Any] = {
+    "year_min": 1824,
+    "year_max": 2024,
+    "pv_year_min": 1976,
+    "pv_year_max": 2024,
+}
 
 _EC_PV_ROW_EXAMPLE: dict[str, Any] = {
     "year": 2000,
@@ -58,14 +70,48 @@ _EC_PV_ROW_EXAMPLE: dict[str, Any] = {
     "candidate_slug": "george-w-bush",
     "state_electoral_votes": 25,
     "electoral_votes": 25,
+    "electoral_votes_counted": 25,
     "national_electoral_votes": 271,
+    "national_electoral_votes_counted": 271,
     "electoral_rank": 1,
     "took_office": True,
+    "electoral_count_status": "counted",
+    "electoral_count_status_reason": None,
+    "pv_status": "popular_vote",
     "source": "MIT",
     "party": "REPUBLICAN",
     "popular_votes": 2912790,
     "state_popular_total": 5963110,
     "reliability": "exact",
+}
+
+# The pre-1976 shape, shown deliberately: 1872 Georgia is the row where every column
+# this issue added is doing work at once — votes cast but not counted, an Archives
+# sentence saying why, and a popular vote that exists but is not on this surface.
+_EC_PV_PRE_1976_EXAMPLE: dict[str, Any] = {
+    "year": 1872,
+    "state": "Georgia",
+    "state_usps": "GA",
+    "candidate": "Horace Greeley",
+    "candidate_slug": "horace-greeley",
+    "state_electoral_votes": 11,
+    "electoral_votes": 3,
+    "electoral_votes_counted": 0,
+    "national_electoral_votes": 3,
+    "national_electoral_votes_counted": 0,
+    "electoral_rank": 6,
+    "took_office": False,
+    "electoral_count_status": "not_counted",
+    "electoral_count_status_reason": (
+        "In Georgia, Greeley received 3 electoral votes for President, but these were "
+        "not counted by resolution of the House."
+    ),
+    "pv_status": "popular_vote",
+    "source": None,
+    "party": None,
+    "popular_votes": None,
+    "state_popular_total": None,
+    "reliability": None,
 }
 
 _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
@@ -74,18 +120,28 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
     "candidate_slug": "albert-gore-jr",
     "party": "DEMOCRAT",
     "national_electoral_votes": 266,
+    "national_electoral_votes_counted": 266,
+    "national_electoral_denominator": 538,
     "electoral_rank": 2,
     "took_office": False,
     "national_pv_votes": 50996062,
     "national_pv_denominator": 105593982,
 }
 
-_YEAR_LIST_EXAMPLE: dict[str, Any] = {"year": 2000, "candidate_count": 7}
+_YEAR_LIST_EXAMPLE: dict[str, Any] = {
+    "year": 2000,
+    "candidate_count": 7,
+    "has_popular_vote": True,
+}
 
 # Derive every display field from the provenance maps (not literals), so the shipped
 # example can't drift from _SOURCES / _LICENSES if a name or URL is ever edited.
 _EX_SRC = provenance.source_display("MIT")
 _EX_LIC = provenance.license_display("CC0-1.0")
+# Imported rather than re-typed, so the shipped example cannot advertise a code the
+# build no longer emits (see the same note in app.py).
+_EX_EC_SRC = provenance.source_display(EC_SOURCE)
+_EX_EC_LIC = provenance.license_display(EC_LICENSE)
 
 _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "snapshot_version": (
@@ -95,26 +151,37 @@ _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "source_name": _EX_SRC.name,
     "license": _EX_LIC.code,
     "license_url": _EX_LIC.url,
+    "ec_source": _EX_EC_SRC.code,
+    "ec_source_name": _EX_EC_SRC.name,
+    "ec_license": _EX_EC_LIC.code,
+    "ec_license_url": _EX_EC_LIC.url,
     "coverage": _COVERAGE_EXAMPLE,
-    "redistributable_note": provenance.redistributable_note(_EX_SRC, _EX_LIC),
+    "redistributable_note": provenance.redistributable_note(
+        _EX_SRC,
+        _EX_LIC,
+        ec_source=_EX_EC_SRC,
+        ec_license=_EX_EC_LIC,
+        pv_year_min=1976,
+        pv_year_max=2024,
+    ),
 }
 
 _META_EXAMPLE: dict[str, Any] = {"provenance": _PROVENANCE_EXAMPLE, "count": 2}
 
 _SNAPSHOT_META_RESPONSE_EXAMPLE: dict[str, Any] = {
     "provenance": _PROVENANCE_EXAMPLE,
-    "schema_version": 1,
-    "row_count": 1734,
-    "candidate_count": 25,
-    "build_timestamp": "2026-07-24T01:05:05.969957+00:00",
+    "schema_version": 2,
+    "row_count": 5623,
+    "candidate_count": 96,
+    "build_timestamp": "2026-08-10T01:05:05.969957+00:00",
 }
 
 _ERROR_EXAMPLE: dict[str, Any] = {
     "error": {
         "code": "year_not_found",
         "message": (
-            "No election data for year 1800; the snapshot's redistributable window is "
-            "1976–2024."
+            "No election data for year 1800; the snapshot covers 1824–2024 "
+            "(popular vote 1976–2024)."
         ),
     }
 }
@@ -125,11 +192,22 @@ class EcPvRow(BaseModel):
 
     The ``electoral_*`` / ``popular_*`` fields are renamed from the snapshot's internal
     ``president_*`` / ``candidate_votes`` / ``*_total_votes`` columns for a reader.
-    PV fields are ``None`` for an EC getter MIT does not cover (an honest gap, never a
-    fabricated 0) — see ``docs/api-snapshot.md``.
+    PV fields are ``None`` wherever no redistributable popular vote exists (an honest
+    gap, never a fabricated 0) — which, since the surface widened to 1824, is most of
+    the table. ``pv_status`` narrows *why* at the **state** level: whether a popular
+    vote was held there at all. It does not resolve the remaining per-**candidate**
+    case — an in-window getter the source does not cover, such as a faithless elector —
+    whose null is still an undifferentiated gap (D005). See ``docs/api-snapshot.md``.
+
+    **Two electoral-vote measures, and they are not interchangeable.**
+    ``electoral_votes`` is what the state's electors **cast**;
+    ``electoral_votes_counted`` is what entered Congress's final count. They differ in
+    exactly two elections (1868 and 1872) and ``electoral_count_status`` says why.
+    ``electoral_rank`` and ``took_office`` are on the **counted** basis, because who won
+    is settled by the votes Congress counted (D046).
     """
 
-    model_config = _config(_EC_PV_ROW_EXAMPLE)
+    model_config = _config(_EC_PV_ROW_EXAMPLE, _EC_PV_PRE_1976_EXAMPLE)
 
     year: int = Field(description="Election year.")
     state: str = Field(description="Full state name (the canonical grain key).")
@@ -144,17 +222,65 @@ class EcPvRow(BaseModel):
     )
     electoral_votes: int = Field(
         validation_alias="president_electoral_votes",
-        description="This candidate's electoral votes in this state (0 for a loser).",
+        description=(
+            "Electoral votes this candidate's electors CAST in this state (0 for a "
+            "loser). See electoral_votes_counted for what Congress counted."
+        ),
+    )
+    electoral_votes_counted: int = Field(
+        validation_alias="president_electoral_votes_counted",
+        description=(
+            "Of those cast, the electoral votes that entered Congress's final count. "
+            "Equal to electoral_votes except in 1868 and 1872."
+        ),
     )
     national_electoral_votes: int = Field(
-        description="This candidate's national EC total this year (window sum)."
+        description="This candidate's national CAST electoral-vote total this year."
+    )
+    national_electoral_votes_counted: int = Field(
+        validation_alias="national_counted_electoral_votes",
+        description=(
+            "This candidate's national COUNTED electoral-vote total this year — e.g. "
+            "Grant in 1872 cast 300 and counted 286."
+        ),
     )
     electoral_rank: int = Field(
         validation_alias="president_electoral_rank",
-        description="This candidate's national EC finishing rank (1 = most EVs).",
+        description=(
+            "This candidate's national EC finishing rank (1 = most EVs), on the "
+            "COUNTED basis — so it may not order the cast totals."
+        ),
     )
     took_office: bool = Field(
         description="Whether this candidate assumed the presidency this term."
+    )
+    electoral_count_status: str = Field(
+        validation_alias="count_status",
+        description=(
+            "Whether these cast electoral votes were counted by Congress: 'counted', "
+            "'not_counted' (Congress refused them), or 'disputed' (Congress never "
+            "resolved the question)."
+        ),
+    )
+    electoral_count_status_reason: str | None = Field(
+        default=None,
+        validation_alias="count_status_reason",
+        description=(
+            "The National Archives' own sentence explaining a non-'counted' status; "
+            "None when the votes were counted normally."
+        ),
+    )
+    pv_status: str = Field(
+        description=(
+            "Whether a popular vote was held in this STATE that year: 'popular_vote' "
+            "(one was held), 'legislature_chosen' (the legislature appointed the "
+            "electors, so none was), or 'not_participating' (the state took no part). "
+            "It is a fact about the election, not about this surface's coverage: a "
+            "'popular_vote' row can still have null popular_votes, either because the "
+            "year is outside meta.provenance.coverage's popular-vote window or because "
+            "the source does not cover this particular candidate (an unpledged slate "
+            "or faithless elector)."
+        ),
     )
     source: str | None = Field(
         default=None, description="PV data source (None where no PV is available)."
@@ -180,8 +306,19 @@ class EcPvRow(BaseModel):
 class NationalSummaryRow(BaseModel):
     """One per-candidate national roll-up row for a year (from ``national_rollup``).
 
-    The flip-relevant national totals only — national EC, national PV, and the PV
-    denominator. No hybrid / flip / margin (those are E8-S8).
+    The flip-relevant national totals only — national EC (cast and counted, with the
+    appointed denominator), national PV, and the PV denominator. No hybrid / flip /
+    margin (those are E8-S8).
+
+    **There is deliberately no ``pv_status`` here, and its absence is a design choice
+    rather than an omission.** A year can be *mixed* — in 1824 six states' legislatures
+    appointed electors while eighteen held a popular vote — so no single status is true
+    of a whole year, and inventing one would be exactly the flattening this project
+    objects to. A summary row's null popular vote is narrowed at **year** level instead:
+    ``meta.provenance.coverage.pv_year_min`` and the ``has_popular_vote`` flag on
+    ``GET /v1/elections``. Per-state reasons live on the fact rows. Note that inside the
+    popular-vote window a *candidate* can still have a null national total — a getter
+    the source does not cover — which no status resolves; that is the honest D005 gap.
     """
 
     model_config = _config(_NATIONAL_SUMMARY_EXAMPLE)
@@ -193,11 +330,28 @@ class NationalSummaryRow(BaseModel):
         default=None, description="Party of record (None where no PV is available)."
     )
     national_electoral_votes: int = Field(
-        description="This candidate's national electoral-vote total this year."
+        description="This candidate's national CAST electoral-vote total this year."
+    )
+    national_electoral_votes_counted: int = Field(
+        validation_alias="national_counted_electoral_votes",
+        description=(
+            "This candidate's national COUNTED electoral-vote total — the votes that "
+            "entered Congress's final count."
+        ),
+    )
+    national_electoral_denominator: int = Field(
+        description=(
+            "The year's whole number of electors APPOINTED (each state counted once) "
+            "— the 12th Amendment's denominator. A majority of it wins outright: 1872 "
+            "is 366, so Grant's 286 counted votes cleared the 184 needed."
+        )
     )
     electoral_rank: int = Field(
         validation_alias="president_electoral_rank",
-        description="National EC finishing rank (1 = most EVs).",
+        description=(
+            "National EC finishing rank (1 = most EVs), on the COUNTED basis — so it "
+            "may not order the cast totals."
+        ),
     )
     took_office: bool = Field(
         description="Whether this candidate assumed the presidency this term."
@@ -217,38 +371,73 @@ class YearListItem(BaseModel):
 
     model_config = _config(_YEAR_LIST_EXAMPLE)
 
-    year: int = Field(description="A redistributable election year in the data.")
+    year: int = Field(description="An election year in the data.")
     candidate_count: int = Field(
         description="Distinct candidates with national roll-up rows this year."
+    )
+    has_popular_vote: bool = Field(
+        description=(
+            "Whether this year carries popular-vote figures on this surface. False for "
+            "every election before the popular-vote window — the electoral-college "
+            "data is still complete. Answers 'which years can I compare PV for' "
+            "without a second call."
+        )
     )
 
 
 class Coverage(BaseModel):
-    """The inclusive year window the snapshot contains (descriptive, not a promise)."""
+    """The year windows the snapshot contains (descriptive, not a promise).
+
+    **Two windows, because they genuinely differ.** ``year_min``/``year_max`` is
+    everything the snapshot serves; ``pv_year_min``/``pv_year_max`` is the narrower
+    span that also carries popular votes. Stating both here is what stops a reader
+    inferring coverage from a field of nulls — the mistake this whole surface is built
+    to make impossible.
+    """
 
     year_min: int = Field(description="Earliest election year in the snapshot.")
     year_max: int = Field(description="Latest election year in the snapshot.")
+    pv_year_min: int = Field(
+        description="Earliest election year with popular-vote data."
+    )
+    pv_year_max: int = Field(description="Latest election year with popular-vote data.")
 
 
 class Provenance(BaseModel):
     """Where every response's data came from — identical across the whole snapshot.
 
-    The raw ``source`` / ``license`` codes and ``coverage`` / ``snapshot_version`` are
-    read **straight from the snapshot metadata** (E8-S1) so they can't drift from what
-    was actually built; the human ``source_name`` / ``license_url`` /
-    ``redistributable_note`` are the presentation of those codes
-    (:mod:`usvote.api.provenance`). The note makes the D030 redistributable boundary
-    explicit: MIT (CC0) only, UCSB excluded.
+    The raw codes and ``coverage`` / ``snapshot_version`` are read **straight from the
+    snapshot metadata** (E8-S1) so they can't drift from what was actually built; the
+    human ``*_name`` / ``*_url`` / ``redistributable_note`` are the presentation of
+    those codes (:mod:`usvote.api.provenance`). The note makes the D030 redistributable
+    boundary explicit: MIT (CC0) and the Archives (public domain) only, UCSB excluded.
+
+    **Two provenances, because the surface has two** (#139 / D048). ``source`` /
+    ``license`` describe the **popular-vote** data and keep their original unprefixed
+    names for backward compatibility; ``ec_source`` / ``ec_license`` describe the
+    **electoral-college** data. Before the window widened the distinction was invisible
+    — every served row had MIT popular vote attached. It is not invisible now: most of
+    the table is pre-1976, where the only data is the Archives'.
     """
 
     model_config = _config(_PROVENANCE_EXAMPLE)
 
     snapshot_version: str = Field(description="Content-hash snapshot version (ETag).")
-    source: str = Field(description="PV data source code, e.g. 'MIT'.")
+    source: str = Field(description="Popular-vote data source code, e.g. 'MIT'.")
     source_name: str = Field(description="Spelled-out source, e.g. 'MIT Election Lab'.")
-    license: str = Field(description="PV data license code, e.g. 'CC0-1.0'.")
+    license: str = Field(description="Popular-vote data license code, e.g. 'CC0-1.0'.")
     license_url: str = Field(description="Canonical URL for the license.")
-    coverage: Coverage = Field(description="The year window the snapshot contains.")
+    ec_source: str = Field(
+        description="Electoral-college data source code, e.g. 'NARA'."
+    )
+    ec_source_name: str = Field(
+        description="Spelled-out EC source, e.g. 'U.S. National Archives …'."
+    )
+    ec_license: str = Field(
+        description="Electoral-college data license code, e.g. 'US-PD'."
+    )
+    ec_license_url: str = Field(description="Canonical URL for the EC license.")
+    coverage: Coverage = Field(description="The year windows the snapshot contains.")
     redistributable_note: str = Field(
         description="Plain-language statement of the redistributable data boundary."
     )
@@ -263,14 +452,32 @@ class Provenance(BaseModel):
         """
         src = provenance.source_display(meta.source)
         lic = provenance.license_display(meta.license)
+        ec_src = provenance.source_display(meta.ec_source)
+        ec_lic = provenance.license_display(meta.ec_license)
         return cls(
             snapshot_version=meta.snapshot_version,
             source=src.code,
             source_name=src.name,
             license=lic.code,
             license_url=lic.url,
-            coverage=Coverage(year_min=meta.year_min, year_max=meta.year_max),
-            redistributable_note=provenance.redistributable_note(src, lic),
+            ec_source=ec_src.code,
+            ec_source_name=ec_src.name,
+            ec_license=ec_lic.code,
+            ec_license_url=ec_lic.url,
+            coverage=Coverage(
+                year_min=meta.year_min,
+                year_max=meta.year_max,
+                pv_year_min=meta.pv_year_min,
+                pv_year_max=meta.pv_year_max,
+            ),
+            redistributable_note=provenance.redistributable_note(
+                src,
+                lic,
+                ec_source=ec_src,
+                ec_license=ec_lic,
+                pv_year_min=meta.pv_year_min,
+                pv_year_max=meta.pv_year_max,
+            ),
         )
 
 
