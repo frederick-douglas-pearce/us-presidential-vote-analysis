@@ -604,15 +604,19 @@ def test_rollup_delegates_to_the_shared_primitive() -> None:
 def test_rollup_keeps_an_all_null_pv_year_denominator_null_not_zero() -> None:
     """The **second** ``min_count=1``, on the per-year denominator sum.
 
-    Called directly rather than through :func:`build_snapshot`, which filters to the
-    covered window (so 1972 never reaches the roll-up there) — that filtering is exactly
-    why losing this ``min_count`` would go unnoticed on the snapshot path while silently
-    producing a divide-by-zero ``pv_share`` for every pre-1976 year of E7's
-    ``hybrid_preferred``, which shares this derivation.
+    A pre-popular-vote year must aggregate to NULL, never ``0``. Losing this
+    ``min_count`` would publish "in 1972, 0 people voted" and hand E7's
+    ``hybrid_preferred`` — which shares this derivation — a divide-by-zero ``pv_share``
+    for every pre-1976 year.
+
+    (This test used to explain itself by saying it had to call the roll-up *directly*
+    because ``build_snapshot`` filtered pre-window years away. It no longer does — #139
+    serves them — so the year now reaches the roll-up on the real path too, and
+    :func:`usvote.snapshot.assert_no_pv_aggregate_below_mit_window` guards it there.)
     """
     rollup = build_national_rollup(add_candidate_slug(_ec_pv_frame()))
     pre_window = rollup.loc[rollup["year"] == 1972]
-    assert not pre_window.empty  # the year is present when not window-filtered
+    assert not pre_window.empty
     assert pre_window["national_pv_denominator"].isna().all()
     assert (pre_window["national_pv_denominator"] == 0).sum() == 0
 
