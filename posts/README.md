@@ -71,18 +71,95 @@ Two carry over from `social/README.md` and apply to anything published here:
 - **Every historical claim is checkable and gets checked before publishing.** The
   ledger records the provenance link so the check is cheap.
 
-## Not yet ported
+## Publishing
 
-The publish path from `claude-code-sessions` is **not** wired up here yet — tracked in
-[#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132),
-which captures the port's design constraints and the required one-time PAT setup:
+Ported from `claude-code-sessions` in
+[#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132).
+Three pieces, with a deliberate split: **the Action owns auth and the push; the script
+owns the transform, OG resolution, and the content-compare.**
 
-- `tooling/publish-to-pages.py` — resolves each post's `og_card_source`, copies the
-  rendered card into the Pages repo, and fails closed if it can't.
-- `.github/workflows/pages-sync.yml` — runs the publisher on push to `main`.
-- `tooling/check-og-cards.py` — a PR guard that runs the publisher's *own* validator
-  on PRs, so a post merged without its card fails on the PR rather than turning
-  `main` red afterward. (That is not hypothetical; it happened in the source repo.)
+| Piece | What it does | When it runs |
+|---|---|---|
+| [`tooling/publish-to-pages.py`](../tooling/publish-to-pages.py) | Transforms frontmatter to Pages conventions, resolves + copies each post's OG card | Called by the Action; runnable locally |
+| [`.github/workflows/pages-sync.yml`](../.github/workflows/pages-sync.yml) | Cross-repo auth + the reconcile-retry push to the Pages repo | Push to `main` touching `posts/**` or `social/images/**`; also `workflow_dispatch` |
+| [`tooling/check-og-cards.py`](../tooling/check-og-cards.py) | PR guard — runs the publisher's *own* validator, so a card-less post fails on the PR | [`og-card-guard.yml`](../.github/workflows/og-card-guard.yml), on PRs and `main` pushes |
 
-Until those land, publishing is manual. Port them before the first post ships, or
-accept that the card/URL wiring is checked by eye.
+**Shipping a post is a merge.** Move the finished draft from `social/drafts/` into
+`posts/`, open a PR — the guard checks the card resolves — and merge. The sync runs on
+`main` and pushes the post plus its card to the Pages repo.
+
+Four properties are load-bearing; a change that keeps the code but loses one of these
+produces something that looks the same and fails differently:
+
+1. **OG resolution is fail-closed, never a glob.** A missing `og_card_source`, an
+   absolute or repo-escaping path, a missing source file, a missing `og_image`, or two
+   posts colliding on one target all abort with **zero writes**. A wrong image shipped
+   under a green Action is the failure mode the design exists to prevent.
+2. **Idempotency is content-compare, not push-diff.** Outputs are written only when
+   their bytes differ, so a re-run makes no spurious changes and no empty commit.
+3. **Atomicity is validate-all-then-write.** The full plan is built and validated before
+   a single byte is written, so one bad post can't half-publish a batch.
+4. **The guard reuses the publisher's `build_plan`** rather than re-deriving the rules,
+   so it cannot drift. A future fail-closed condition is inherited for free.
+
+### Previewing a publish locally
+
+`--dry-run` resolves and compares but writes nothing. Point it at a real checkout of the
+Pages repo:
+
+```
+uv run python tooling/publish-to-pages.py posts/YYYY-MM-DD-<slug>.md \
+    --posts-dir  /path/to/frederick-douglas-pearce.github.io/_posts \
+    --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img \
+    --dry-run
+```
+
+The same preview is available in CI: **Actions → Pages sync → Run workflow → tick
+`dry_run`**. That does a real Pages checkout with the real token and writes the planned
+diff to the job summary, without committing.
+
+To check the cards without a Pages repo at all (what CI does on every PR):
+
+```
+uv run python tooling/check-og-cards.py
+```
+
+### One-time owner setup
+
+The sync cannot run until this exists. Until then its **preflight step fails loud** — so
+the workflow can be merged ahead of the setup, it is simply inert, not silently broken.
+
+1. **Create a fine-grained PAT.** GitHub → Settings → Developer settings → Personal
+   access tokens → Fine-grained tokens → *Generate new token*.
+   - **Repository access:** *Only select repositories* → **the Pages repo only**
+     (`frederick-douglas-pearce.github.io`). It must not be able to write to this repo.
+   - **Permissions → Repository permissions:** **Contents: Read and write**. Nothing else.
+     (Metadata: Read-only is added automatically and is required.)
+   - Name it for the source repo — `claude-code-sessions` needs its own separate token,
+     and you want to tell them apart when revoking.
+2. **Create the environment.** This repo → Settings → Environments → *New environment*,
+   named exactly **`pages-sync`** (the workflow's `environment:` key matches this string
+   literally).
+3. **Add the secret** inside that environment: name **`PAGES_SYNC_TOKEN`**, value the
+   token, **with no trailing newline**. It must be an *environment* secret, not a
+   repository secret — scoping it there means only a job that opts into `pages-sync` can
+   reach it.
+4. **Verify** with the `dry_run` dispatch above before trusting the first real publish.
+
+The default `GITHUB_TOKEN` cannot write to another repo, which is the whole reason for
+the PAT. The workflow declares `permissions: contents: read` and needs nothing more from
+this repo, and the token is never echoed — it lives only in `pages/.git/config` inside
+the runner.
+
+### Two things to know about the shared Pages site
+
+That site also receives posts from `claude-code-sessions`, and the Pages repo has its own
+daily ESG-feed cron. Two consequences:
+
+- **Slugs share a namespace.** The card target is derived as
+  `assets/img/<basename of og_image>`, and the collision check sees only *this* repo's
+  posts — so two posts from different source repos with the same `og_image` basename
+  would overwrite each other silently. Keep the slug distinct across the two series.
+- **Pushes race.** The Action reconciles rather than force-pushing: on rejection it
+  fetches, resets to the moved tip, **re-transforms against it**, and retries (bounded,
+  then fails loud). Nothing another writer put there is clobbered.

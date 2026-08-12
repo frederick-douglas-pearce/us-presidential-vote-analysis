@@ -2493,3 +2493,47 @@ error the series exists to describe, committed by the series' own evidence.
 - The **2028 `LATEST_ELECTION_YEAR` bump will fail the snapshot build** until the new year is
   reviewed and added to the absence catalog. That is the designed behaviour, recorded here so it
   is recognized as the feature it is rather than treated as a regression.
+
+---
+
+## D049: `tooling/` joins mypy's scope when the publish path lands there
+
+**Date:** 2026-08-12
+**Issue:** #132 (E11) · **Builds on:** #152's `tooling/` test coverage
+
+**Context:**
+
+`[tool.mypy] files` was `["src", "tests"]`, chosen when `tooling/` held nothing — the scripts
+there are not package modules, nothing imports them by name, and `usvote` is what ships. #132
+puts `tooling/publish-to-pages.py` in that directory: the code that decides which bytes reach a
+public website, whose whole design is a set of fail-closed conditions. #152 had already put
+`tooling/render-og-card.py` under test for the same reason (it decides what every published share
+card looks like).
+
+The pre-#132 state was the worst of both: `tests/unit/test_og_card_render.py` imports the renderer
+**by path**, so mypy checked the call sites in the test and never the definitions in the script.
+The issue asked for a deliberate decision either way rather than an inherited default.
+
+**Decision:**
+
+`files = ["src", "tests", "tooling"]`. The cost was measured, not estimated: the two new scripts
+were clean, and widening surfaced exactly two findings, both in the pre-existing renderer —
+`Image.LANCZOS` (an untyped int the Pillow stubs don't expose; swapped for the identical-valued
+`Image.Resampling.LANCZOS`) and `sys.exit(render(...))`, where `render` returns `None`, so the
+call forwarded nothing and only read as if it did. Both fixed here; all three cards re-render
+byte-identical afterwards.
+
+**Rationale:**
+
+- **Scope should follow consequence, not packaging.** "Not importable, therefore unchecked" was a
+  reasonable default when `tooling/` was empty and is the wrong one now that the directory decides
+  what reaches a public site and a public timeline. Nothing about `usvote` being the shipped
+  artifact makes a bad `og_card_source` resolution cheaper.
+- **The measurement is the argument.** Two findings across three scripts is a small enough bill
+  that deferring would have been a choice to keep a known gap.
+- **The ongoing cost is one rule:** a new `tooling/` script must carry annotations
+  (`disallow_untyped_defs` reaches it now). That is the same bar `src/` and `tests/` already meet.
+- **What this does *not* do:** ruff already covered `tooling/` (`extend-exclude` lists only
+  notebooks), and pytest's `testpaths = ["tests"]` is unchanged — the ported tests live in
+  `tests/unit/`, not beside the scripts as they do upstream, so they are collected by the existing
+  configuration rather than a second one.

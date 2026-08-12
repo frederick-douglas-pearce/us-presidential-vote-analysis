@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -257,7 +256,10 @@ def render(brief_path: Path) -> None:
     flat = Image.new("RGB", img.size, BG)
     flat.paste(img, mask=img.split()[3])
     flat.save(png2x)
-    flat.resize((WIDTH, HEIGHT), Image.LANCZOS).save(png1x)
+    # `Image.Resampling.LANCZOS`, not the bare `Image.LANCZOS` alias: the latter
+    # is an untyped int the Pillow stubs don't expose, and #132 brought tooling/
+    # into mypy's scope. Same value (1), same resample, no behaviour change.
+    flat.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS).save(png1x)
 
     for p in (svg_path, png2x, png1x):
         print(f"wrote {p.relative_to(Path.cwd()) if Path.cwd() in p.parents else p}")
@@ -266,4 +268,7 @@ def render(brief_path: Path) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("brief", type=Path, help="path to og-card.toml")
-    sys.exit(render(ap.parse_args().brief))
+    # `render` returns None and signals failure by raising (SystemExit from the
+    # guards, CalledProcessError from Inkscape), so there is no code to forward —
+    # falling off the end exits 0. `sys.exit(render(...))` read as if there were.
+    render(ap.parse_args().brief)
