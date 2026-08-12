@@ -52,6 +52,15 @@
 #     design (D048). It rests on the standard historical account, same as the post's
 #     own "Five times in 47 presidencies" sentence.
 #
+# The subhead says "popular vote COUNT", matching the post's own wording rather than
+# the shorter phrasing this card first shipped with. The extra word is load-bearing:
+# 1824 had no single popular vote to lead — six of its twenty-four states appointed
+# electors by legislature and held none — so "led the popular vote" states as a fact
+# about the country something that is only a fact about a recorded tally. The post
+# can afford the distinction in surrounding prose ("1824 is the odd one", "eighteen
+# of its twenty-four states chose electors at the ballot box"); a share card is read
+# alone, so it has to carry its own precision.
+#
 # Two things the right-hand panel is saying precisely, both load-bearing:
 #   - The denominator is the electors **appointed**, not the votes cast. That is
 #     the Twelfth Amendment's own standard (D041), and it is why 2000 reads
@@ -75,7 +84,7 @@
 
 [card]
 title = ["222 Votes Away, and a Record", "Few Can Get End to End"]
-subhead = "Five times the person who took office had not led the popular vote."
+subhead = "Five times the person who took office had not led the popular vote count."
 series_mark = "Counted, Not Assumed · 1 of 10"
 
 # Rows are index-aligned across panels: row N is the same election in both. The
