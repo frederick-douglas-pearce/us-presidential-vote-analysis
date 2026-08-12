@@ -276,3 +276,48 @@ def test_missing_og_image(box: Sandbox, ptp: ModuleType) -> None:
 def test_og_target_name_from_url(ptp: ModuleType) -> None:
     url = "https://frederick-douglas-pearce.github.io/assets/img/222-votes-away-og.png"
     assert ptp.og_target_name(url) == "222-votes-away-og.png"
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_quoted_frontmatter_values_are_unquoted(
+    box: Sandbox, ptp: ModuleType, quote: str
+) -> None:
+    """A quoted `og_image` must not put the quote character into the filename.
+
+    This repo's frontmatter convention quotes `title` and `description`, so
+    quoting `og_image` is a natural habit. Unstripped, the card lands at
+    `x-og.png"` while the post points at `x-og.png` — a broken share image under
+    a green Action and a green card guard, which is exactly what the fail-closed
+    design is for.
+    """
+    src = box.add_post("quoted", "social/images/quoted/og-card.png")
+    src.write_text(
+        src.read_text().replace(
+            "og_image: https://example.github.io/assets/img/quoted-og.png",
+            f"og_image: {quote}https://example.github.io/assets/img/quoted-og.png{quote}",
+        )
+    )
+    box.publish([src])
+    assert (box.pages_assets / "quoted-og.png").is_file()
+    assert not list(box.pages_assets.glob("*[\"']*")), "no quote may reach a filename"
+
+
+def test_trailing_inline_comment_fails_closed(box: Sandbox) -> None:
+    """`urlparse` reads a trailing `# …` as a fragment, leaving a padded name."""
+    src = box.add_post("commented", "social/images/commented/og-card.png")
+    src.write_text(src.read_text().replace("-og.png\n", "-og.png  # the card\n", 1))
+    with pytest.raises(box.ptp.PublishError, match="is not a plain filename"):
+        box.publish([src])
+    assert not any(box.pages_assets.iterdir())
+
+
+def test_non_ascii_body_round_trips(box: Sandbox) -> None:
+    """Posts are full of em dashes; the write side is unconditionally UTF-8."""
+    src = box.add_post("unicode", "social/images/unicode/og-card.png")
+    src.write_text(
+        src.read_text() + "\nAn em dash — and a curly quote’s tail.\n",
+        encoding="utf-8",
+    )
+    box.publish([src])
+    published = (box.pages_posts / src.name).read_text(encoding="utf-8")
+    assert "em dash — and a curly quote’s tail." in published

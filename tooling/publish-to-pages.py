@@ -114,11 +114,24 @@ def _top_level_key(line: str) -> str | None:
     return line.partition(":")[0].strip()
 
 
+def _unquote(value: str) -> str:
+    """Drop one matching pair of surrounding quotes, YAML-style.
+
+    Added on the port: the source repo reads the raw partition. This repo's own
+    frontmatter convention quotes `title` and `description`, so quoting
+    `og_image` too is a natural habit — and an unstripped quote survives all the
+    way into a filename (see `og_target_name`).
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def read_field(fm_block: str, key: str) -> str | None:
     """Value of a top-level frontmatter key, or None if absent."""
     for line in fm_block.splitlines():
         if _top_level_key(line) == key:
-            return line.partition(":")[2].strip()
+            return _unquote(line.partition(":")[2].strip())
     return None
 
 
@@ -164,6 +177,11 @@ def resolve_og_source(og_card_source: str | None) -> Path:
     return resolved
 
 
+#: A derived Pages filename must look like one. Anything else means the
+#: `og_image` value carried something this line-level reader did not expect.
+_SAFE_BASENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 def og_target_name(og_image: str | None) -> str:
     """Pages target basename, from the post's og_image URL. Fail closed."""
     if not og_image:
@@ -172,6 +190,17 @@ def og_target_name(og_image: str | None) -> str:
     if not name:
         raise PublishError(
             f"could not derive an OG target basename from og_image {og_image!r}"
+        )
+    # Added on the port. Without it, a stray character in the frontmatter value
+    # rides through into the filename and the card is written one byte away from
+    # where `og_image` points — a broken share image on a green Action, which is
+    # the precise failure this module's fail-closed design exists to prevent. A
+    # trailing inline comment does it (urlparse reads `# …` as a fragment,
+    # leaving trailing spaces), as does a quote style `_unquote` cannot pair up.
+    if not _SAFE_BASENAME.match(name):
+        raise PublishError(
+            f"derived OG target basename {name!r} is not a plain filename "
+            f"(from og_image {og_image!r}) — check the frontmatter value"
         )
     return name
 
@@ -204,7 +233,11 @@ def build_plan(
         if not src.is_file():
             raise PublishError(f"source not found: {src}")
         try:
-            fm_block, body = split_frontmatter(src.read_text())
+            # Explicit encoding, matching the rest of the codebase: the output
+            # side is unconditionally UTF-8 (`transform_bytes` calls `.encode()`),
+            # and posts are full of em dashes. Left to the runner's locale this
+            # either raises mid-publish or round-trips mojibake to a public site.
+            fm_block, body = split_frontmatter(src.read_text(encoding="utf-8"))
             _add(
                 plan,
                 posts_dir / src.name,

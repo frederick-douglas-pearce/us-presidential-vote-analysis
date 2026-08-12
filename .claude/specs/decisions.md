@@ -2537,3 +2537,10 @@ byte-identical afterwards.
   notebooks), and pytest's `testpaths = ["tests"]` is unchanged — the ported tests live in
   `tests/unit/`, not beside the scripts as they do upstream, so they are collected by the existing
   configuration rather than a second one.
+
+**Noted, deliberately not done here:** `scripts/` stays outside the scope, and by this entry's own
+"scope should follow consequence" reasoning it has a claim —
+`scripts/make_placeholder_snapshot.py` is load-bearing for CI's `docker-build` job. It is left out
+because the widening was scoped to the directory #132 touches and its cost was measured there;
+extending to a second directory on the same PR would be an unmeasured guess. Worth revisiting on
+the next change that lands in `scripts/`.

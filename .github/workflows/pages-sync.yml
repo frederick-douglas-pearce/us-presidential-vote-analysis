@@ -59,12 +59,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: pages-sync
     steps:
-      - name: Preflight — require the Pages PAT
+      # A workflow_dispatch offers a branch picker, and posts/README.md teaches
+      # operators to use exactly that path for the dry-run preview. Dispatching
+      # from a feature branch WITHOUT ticking dry_run would check out that
+      # branch's posts/ and push it to the live site — an unreviewed draft
+      # published under a green run. Only main publishes; any ref may preview.
+      # (This guard is an addition to the ported workflow, not a port of one.)
+      - name: Guard — only main may publish
         env:
-          PAGES_SYNC_TOKEN: ${{ secrets.PAGES_SYNC_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
-          if [ -z "${PAGES_SYNC_TOKEN}" ]; then
-            echo "::error::PAGES_SYNC_TOKEN is not set in the 'pages-sync' environment — cannot publish. See posts/README.md for the one-time setup."
+          if [ "${GITHUB_REF}" != "refs/heads/main" ] && [ "${DRY_RUN}" != "true" ]; then
+            echo "::error::Refusing to publish from ${GITHUB_REF} — only main publishes. Re-run with dry_run ticked to preview this branch."
             exit 1
           fi
 
@@ -73,7 +79,41 @@ jobs:
         with:
           path: source
 
+      # Runs BEFORE the PAT preflight on purpose: the token is only needed to
+      # push, so "no posts yet" must not require one. The push trigger's
+      # `posts/**` filter matches posts/README.md, and posts/ holds only that
+      # README until post 1 ships — so without this ordering, merging the port
+      # itself would turn `main` red on a repo with no PAT and nothing to
+      # publish. It would also contradict the PR guard, which calls the
+      # identical state clean. The publisher never deletes, so an empty match
+      # can only ever mean "nothing to do".
+      - name: Detect publishable posts
+        id: detect
+        working-directory: source
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          posts=(posts/[0-9][0-9][0-9][0-9]-*.md)
+          if [ ${#posts[@]} -eq 0 ]; then
+            echo "::notice::No date-prefixed posts under posts/ yet — nothing to publish."
+            echo "found=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Found ${#posts[@]} publishable post(s)."
+            echo "found=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Preflight — require the Pages PAT
+        if: ${{ steps.detect.outputs.found == 'true' }}
+        env:
+          PAGES_SYNC_TOKEN: ${{ secrets.PAGES_SYNC_TOKEN }}
+        run: |
+          if [ -z "${PAGES_SYNC_TOKEN}" ]; then
+            echo "::error::PAGES_SYNC_TOKEN is not set in the 'pages-sync' environment — cannot publish. See posts/README.md for the one-time setup."
+            exit 1
+          fi
+
       - name: Checkout Pages repo
+        if: ${{ steps.detect.outputs.found == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: ${{ env.PAGES_REPO }}
@@ -87,11 +127,13 @@ jobs:
           # workspace as an artifact — that is the only place the token lives.
 
       - name: Set up Python
+        if: ${{ steps.detect.outputs.found == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Publish to Pages
+        if: ${{ steps.detect.outputs.found == 'true' }}
         env:
           # Explicit: only a dispatch with the box ticked is a dry run. On a push
           # event `inputs.dry_run` is null, so this evaluates to false (publish).
@@ -104,10 +146,13 @@ jobs:
           PAGES="${GITHUB_WORKSPACE}/pages"
 
           # Only date-prefixed posts — posts/README.md (and any future non-post)
-          # has no frontmatter and must never reach the transform.
+          # has no frontmatter and must never reach the transform. The `detect`
+          # step above already gated on this being non-empty; re-globbing here
+          # keeps transform_and_stage self-contained, and the check stays as an
+          # assertion that the two globs agree.
           posts=("${SOURCE}"/posts/[0-9][0-9][0-9][0-9]-*.md)
           if [ ${#posts[@]} -eq 0 ]; then
-            echo "::error::No date-prefixed posts found under posts/ — nothing to publish."
+            echo "::error::No date-prefixed posts found under posts/, but the detect step said there were — these two globs must agree."
             exit 1
           fi
           echo "Publishing ${#posts[@]} post(s)."

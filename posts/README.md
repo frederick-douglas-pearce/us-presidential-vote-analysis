@@ -118,6 +118,10 @@ The same preview is available in CI: **Actions → Pages sync → Run workflow �
 `dry_run`**. That does a real Pages checkout with the real token and writes the planned
 diff to the job summary, without committing.
 
+That dispatch offers a branch picker, and **only `main` publishes**: a dispatch from any
+other ref must have `dry_run` ticked or the run refuses, so an unreviewed draft on a
+feature branch cannot reach the live site through the preview path.
+
 To check the cards without a Pages repo at all (what CI does on every PR):
 
 ```
@@ -126,8 +130,12 @@ uv run python tooling/check-og-cards.py
 
 ### One-time owner setup
 
-The sync cannot run until this exists. Until then its **preflight step fails loud** — so
-the workflow can be merged ahead of the setup, it is simply inert, not silently broken.
+The sync cannot publish until this exists, and the ordering is deliberate: the workflow
+checks for publishable posts **before** it requires the token. So while `posts/` holds
+only this README the sync is genuinely inert — it exits green with "nothing to publish"
+and never asks for a secret. The moment a dated post lands without the setup done, the
+**preflight fails loud** rather than silently skipping. Both states are honest; neither
+is a red `main` for a repo that has nothing to publish yet.
 
 1. **Create a fine-grained PAT.** GitHub → Settings → Developer settings → Personal
    access tokens → Fine-grained tokens → *Generate new token*.
