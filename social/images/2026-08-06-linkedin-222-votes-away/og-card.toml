@@ -33,12 +33,24 @@
 # same image. A third consecutive one would make the device the series' signature
 # rather than its argument. Every row here is filled.
 #
-# Data provenance: all ten figures come from the LIVE public API, endpoint
-# /v1/elections/<year>/summary, filtered to the row with took_office = true —
-# `national_electoral_votes` and `national_electoral_denominator`. Verified
-# 2026-08-12 against snapshot 8abcff447157. Anyone can re-run them; that is the
-# point of the post. The National Archives is the upstream source of all of it
-# (NARA, public domain).
+# Data provenance. The card carries thirteen numbers, not ten, and they do not all
+# come from the same place — so each is accounted for rather than covered by an
+# average:
+#   - The TEN panel figures come from the LIVE public API, endpoint
+#     /v1/elections/<year>/summary, filtered to the row with took_office = true —
+#     `national_electoral_votes` and `national_electoral_denominator`. Verified
+#     2026-08-12 against snapshot 8abcff447157. Anyone can re-run them; that is the
+#     point of the post. Upstream is the National Archives (NARA, public domain).
+#   - "51" (sublabel) is the count of in-scope elections — `len(ec_ingest_years())`,
+#     and `meta.count` on GET /v1/elections. Checkable on the public surface.
+#   - "222" (title) is the NPVIC tally. It is the post's own headline figure, sourced
+#     there to nationalpopularvote.com, and is NOT an election-record number.
+#   - "5" (sublabel) is the one figure on this card that the public surface CANNOT
+#     confirm, and it is named here rather than left to look like the others: it
+#     counts elections whose popular-vote leader differs from who took office, and
+#     three of the five turn on pre-1976 popular votes the API serves as null by
+#     design (D048). It rests on the standard historical account, same as the post's
+#     own "Five times in 47 presidencies" sentence.
 #
 # Two things the right-hand panel is saying precisely, both load-bearing:
 #   - The denominator is the electors **appointed**, not the votes cast. That is
