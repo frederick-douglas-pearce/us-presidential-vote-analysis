@@ -45,9 +45,14 @@
 #     the Twelfth Amendment's own standard (D041), and it is why 2000 reads
 #     "271 of 538" and not "271 of 537" — one DC elector abstained, so 537 were
 #     cast, and the threshold did not move.
-#   - The numerator is votes **counted** (D046). For these five years cast and
-#     counted agree, so no figure here depends on the distinction — but the column
-#     is the counted measure, and a year like 1872 would differ.
+#   - The numerator is `national_electoral_votes`, which is the votes **cast**
+#     measure, NOT `national_electoral_votes_counted` (D046). For all five of these
+#     years cast and counted agree — checked at the same time, both columns pulled —
+#     so no printed figure depends on the distinction. Naming the column exactly
+#     matters anyway: post 3 is *about* cast vs. counted, and a future re-checker
+#     following this line must land on the field these numbers actually came from.
+#     A year like 1872 would differ — Grant is 300 cast, 286 counted — and a card
+#     drawing on such a year must state which measure it means.
 #
 # One trap avoided, recorded so it is not reintroduced: 1824's "84" does NOT mean
 # what the other four rows' numbers mean. Adams took office with 84 while Jackson
@@ -64,16 +69,23 @@ series_mark = "Counted, Not Assumed · 1 of 10"
 # Rows are index-aligned across panels: row N is the same election in both. The
 # year repeats in each panel on purpose, so either panel can be read alone at
 # thumbnail size — the same choice post 3 makes with its state labels.
+#
+# The gutters below are U+00A0, not spaces, and that is not decoration. SVG <text>
+# inherits xml:space="default" and collapses consecutive spaces, so "1824   John"
+# would have shipped as "1824 John" — invisible here because every year is four
+# digits wide, and silently broken the first time a brief uses labels of differing
+# width. The renderer now rejects run-of-spaces padding outright rather than leaving
+# it to be remembered.
 [[panel]]
 label = "Took office"
 sublabel = "5 of 51 elections"
 mono = true
 rows = [
-  "1824   John Quincy Adams",
-  "1876   Rutherford B. Hayes",
-  "1888   Benjamin Harrison",
-  "2000   George W. Bush",
-  "2016   Donald J. Trump",
+  "1824   John Quincy Adams",
+  "1876   Rutherford B. Hayes",
+  "1888   Benjamin Harrison",
+  "2000   George W. Bush",
+  "2016   Donald J. Trump",
 ]
 
 [[panel]]

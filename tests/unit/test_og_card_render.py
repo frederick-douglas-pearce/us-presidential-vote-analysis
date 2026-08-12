@@ -103,6 +103,54 @@ def test_panel_fits_its_rows(renderer: ModuleType) -> None:
         assert last_baseline < top + height, f"{n_rows} rows: last row clipped"
 
 
+@pytest.mark.parametrize("slug", SHIPPED_SLUGS)
+def test_committed_pngs_exist_at_the_published_dimensions(slug: str) -> None:
+    """`og_card_source` points at the PNG, so the PNG is what actually ships.
+
+    Known limit, stated rather than implied: this does **not** prove the PNG was
+    rendered from the committed SVG. Closing that would mean running Inkscape in
+    CI (whose output is not version-stable) or pinning a hash of the SVG into the
+    PNG's metadata. A stale PNG beside a fresh SVG would still pass — re-render
+    deliberately after any chassis change; the byte-identity test above tells you
+    when one happened.
+    """
+    from PIL import Image
+
+    for name, expected in (
+        ("og-card.png", (1200, 630)),
+        ("og-card@2x.png", (2400, 1260)),
+    ):
+        path = _IMAGES / slug / name
+        assert path.is_file(), f"{slug}/{name} missing — the published card"
+        with Image.open(path) as img:
+            assert img.size == expected, f"{slug}/{name} is {img.size}, want {expected}"
+            # RGBA would composite on white in LinkedIn's preview and muddy the
+            # dark card — the renderer flattens for exactly this reason.
+            assert img.mode == "RGB", f"{slug}/{name} is {img.mode}, want RGB"
+
+
+def test_collapsing_space_run_is_rejected(renderer: ModuleType) -> None:
+    """SVG collapses consecutive spaces, so run-padding a column silently fails.
+
+    Regression guard: post 1's brief originally padded with three literal spaces and
+    rendered with one. It survived only because every leading token was a 4-digit
+    year; labels of differing width would have broken the column invisibly.
+    """
+    panel = {
+        "label": "L",
+        "sublabel": "s",
+        "rows": ["1824   John Quincy Adams"],
+    }
+    with pytest.raises(SystemExit, match="collapses"):
+        renderer._panel(0, 100, panel)
+
+
+def test_nbsp_gutter_is_accepted(renderer: ModuleType) -> None:
+    """The sanctioned alternative must actually pass, or the guard is a dead end."""
+    panel = {"label": "L", "sublabel": "s", "rows": ["1824   Adams"]}
+    assert "1824   Adams" in renderer._panel(0, 100, panel)
+
+
 def test_over_max_rows_is_rejected(renderer: ModuleType) -> None:
     """Silent truncation would drop record rows off a published card."""
     panel = {
