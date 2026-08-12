@@ -144,7 +144,9 @@ is a red `main` for a repo that has nothing to publish yet.
    - **Permissions → Repository permissions:** **Contents: Read and write**. Nothing else.
      (Metadata: Read-only is added automatically and is required.)
    - Name it for the source repo — `claude-code-sessions` needs its own separate token,
-     and you want to tell them apart when revoking.
+     and you want to tell them apart when revoking. GitHub caps the name length, so a
+     shortened form is fine; the token's name is a display label and nothing reads it.
+     (Ours is `pages-sync-from-us-presidential-vote`.)
 2. **Create the environment.** This repo → Settings → Environments → *New environment*,
    named exactly **`pages-sync`** (the workflow's `environment:` key matches this string
    literally).

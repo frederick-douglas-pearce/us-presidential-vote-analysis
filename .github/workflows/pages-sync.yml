@@ -8,10 +8,12 @@ name: Pages sync
 #
 # Owner setup (one-time): create a fine-grained PAT with `contents: write` on
 # the Pages repo ONLY, then add it as the secret PAGES_SYNC_TOKEN inside a GitHub
-# Environment named `pages-sync` (Settings -> Environments). The token is never
-# echoed; it is consumed only by the Pages checkout below. Until that exists the
-# preflight step below fails loud, so merging this workflow ahead of the setup is
-# safe — the path is inert, not silently broken. Full runbook: posts/README.md.
+# Environment named `pages-sync` (Settings -> Environments). Those two names are
+# matched literally by this file; the PAT's own name is a display label nothing
+# reads. The token is never echoed; it is consumed only by the Pages checkout
+# below. Without it, a run with nothing to publish still exits green (the
+# `detect` step gates the preflight), while a run with a real post to publish
+# fails loud. Full runbook: posts/README.md.
 
 on:
   push:
