@@ -1,12 +1,12 @@
 ---
 layout: post
 title: "Presidential Elections Are Messy. The Data Has to Carry the Story."
-date: 2026-08-03 00:00:00-0800
+date: 2026-08-18 00:00:00-0800
 description: "The hard part isn't the numbers — it's recording why a number isn't there."
 categories: ["american-history"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/presidential-elections-are-messy-og.png
-og_card_source: social/images/2026-08-03-linkedin-presidential-elections-are-messy/og-card.png
+og_card_source: social/images/2026-08-18-linkedin-presidential-elections-are-messy/og-card.png
 featured: false
 ---
 
