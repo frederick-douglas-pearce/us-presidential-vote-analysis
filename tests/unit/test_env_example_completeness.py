@@ -7,7 +7,7 @@ up on a fresh machine, and it was the only config surface with **nothing checkin
 variable names, the README table is maintained by hand, and the example file is
 maintained by hand — three places, one of which nothing verified. ``USVOTE_EC_HTML_DIR``
 shipped in #89 documented in the first two and absent from the third, so a fresh setup
-silently re-scraped ~49 pages of archives.gov on every warehouse rebuild: the exact cost
+silently re-scraped ~50 pages of archives.gov on every warehouse rebuild: the exact cost
 that issue existed to remove.
 
 Two design notes:

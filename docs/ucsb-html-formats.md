@@ -18,7 +18,8 @@ value *is* the finding (the `0.0`-percent decoy in §4).
 ## 1. Corpus inventory
 
 - **60 year pages**, `1789.html` … `2024.html`, every four years, no gaps. Includes 1868
-  and 1872, which the EC spine excludes via `UNSUPPORTED_EC_YEARS`.
+  and 1872, which the EC spine gated via `UNSUPPORTED_EC_YEARS` until #143 and #144
+  ingested them; that set is now empty, so both years are in scope here too.
 - `_index_elections.html` is present, plus `manifest.json` and the original snapshot
   script.
 - Every page decodes as UTF-8 and contains **literal U+00A0 bytes**. The entity
@@ -129,11 +130,13 @@ The prose always contains the exact substring **`electors chosen by state legisl
 | 1868 | Florida |
 | 1876 | Colorado |
 
-**18 at the parser, 17 at the roster — not a regression.** 1868 Florida is the only one of
-the 18 outside the EC spine (`UNSUPPORTED_EC_YEARS` gates 1868/1872; see D024 §6 as clarified
-2026-07-18). The parser finds all 18 — `TestRealCorpus` runs the full 60-page snapshot — but
-the `pv_state_status` roster contains 17 until #57 ingests the Reconstruction years. Any test
-asserting a count must state which layer it measures.
+**18 at the parser, 18 at the roster — since #143.** It was 18/17 while 1868 Florida sat
+outside the EC spine (`UNSUPPORTED_EC_YEARS` then gated 1868/1872; see D024 §6 as clarified
+2026-07-18). #143 ingested 1868, so the `pv_state_status` roster now carries all 18 that the
+parser finds — with no change under `usvote/ucsb/`, since the scope is derived. #144 then
+ingested 1872 and emptied the gate; it adds **no** `legislature_chosen` states, so the
+count stays 18/18. The two layers can still diverge, so any test asserting a count must
+state which one it measures.
 
 #### Case 2 — state did not participate *(state-level, no markup at all)*
 
@@ -240,7 +243,10 @@ the *Votes* cell carries absence meaning. Three paired-percent variants exist: `
    `Washington*` (1976), `West Virginia*` (1988), `Dist. of Col.*` (2000), `Minnesota*`
    (2004). DC label drifts `Dist. of Col.` → `District of Columbia` at 2020.
 8. **Totals-row label drift** — `Totals` everywhere except singular `Total` in 1864 and
-   1944. The EC parser's `TOTALS_LABELS = {"Total", "Totals"}` already covers both.
+   1944. UCSB's own `TOTALS_LABELS = {"TOTAL", "TOTALS"}` covers both. (The **EC** parser
+   keeps a same-named exact-match set for its column-0 `<td>` path, and since #143 matches
+   qualified `<th>` labels — 1868's "Totals (including Georgia's votes)" — by the
+   `TOTALS_LABEL_PREFIX` prefix instead; the two parsers' constants are unrelated.)
 9. **The second-column header label is wildly unstable** — `TOTAL VOTE`, `TOTAL VOTES`,
    `T. VOTES`, `Votes` (1976). **Never match on it.** Column 0's header is `STATES`
    (plural) in 1940.

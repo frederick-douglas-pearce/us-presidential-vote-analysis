@@ -31,13 +31,39 @@ def test_unknown_license_fails_loud() -> None:
         provenance.license_display("CC-BY-4.0")
 
 
+def _note() -> str:
+    return provenance.redistributable_note(
+        provenance.source_display("MIT"),
+        provenance.license_display("CC0-1.0"),
+        ec_source=provenance.source_display("NARA"),
+        ec_license=provenance.license_display("US-PD"),
+        pv_year_min=1976,
+        pv_year_max=2024,
+    )
+
+
 def test_redistributable_note_names_source_license_and_excludes_ucsb() -> None:
-    src = provenance.source_display("MIT")
-    lic = provenance.license_display("CC0-1.0")
-    note = provenance.redistributable_note(src, lic)
-    assert src.name in note
-    assert lic.name in note
+    note = _note()
+    assert provenance.source_display("MIT").name in note
+    assert provenance.license_display("CC0-1.0").name in note
     assert "UCSB" in note
+
+
+def test_redistributable_note_names_the_ec_source_and_its_pv_window() -> None:
+    """The note must describe **both** provenances, not just the popular vote (#139).
+
+    Before the surface widened, every served row carried MIT popular vote, so naming
+    MIT alone was complete. It is not now: most of the table is pre-1976 Archives
+    electoral-college data with no popular vote at all, and a note still saying
+    "sourced from MIT Election Lab" beside a rendered coverage window of 1824–2024
+    would tell a reader that MIT covers 1824.
+    """
+    note = _note()
+    assert provenance.source_display("NARA").name in note
+    assert provenance.license_display("US-PD").name in note
+    # The popular-vote window is stated numerically, so "which years can I compare PV
+    # for" is answerable from the prose rather than inferred from a field of nulls.
+    assert "1976–2024" in note
 
 
 def test_redistributable_codes_are_mapped() -> None:

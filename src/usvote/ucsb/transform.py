@@ -100,10 +100,10 @@ RELIABILITY_UNRELIABLE = "unreliable"
 #: from the UCSB page, and only a prose footnote elsewhere attests to it. Absence with
 #: no markup cannot be parsed, so it is enumerated here, with its cause.
 #:
-#: All 14 entries are retained, but **only in-scope years produce roster rows**: 1868 is
-#: gated out of the EC spine by ``UNSUPPORTED_EC_YEARS``, so its three are catalogued
-#: but not yet ingested, pending #57 (D024 §6, clarified 2026-07-18). The consumed count
-#: is 11 today and becomes 14 with no change here when #57 lands.
+#: All 14 entries are consumed. It was 11 until #143 ingested 1868 and admitted its
+#: three — which happened, as designed, with **no change in this module**: the scope is
+#: derived from ``ec_ingest_years()`` (D024 §6), so lifting ``UNSUPPORTED_EC_YEARS`` was
+#: the whole edit.
 #:
 #: The note text is **ours**, not UCSB's — unlike the verbatim legislature prose the
 #: parser captures, it carries no redistributability restriction (D024/D022).
@@ -128,8 +128,9 @@ UCSB_NONPARTICIPATING_STATES: dict[tuple[int, str], str] = {
     (1864, "Tennessee"): _SECEDED,
     (1864, "Texas"): _SECEDED,
     (1864, "Virginia"): _SECEDED,
-    # Out of scope until #57 lifts 1868 from UNSUPPORTED_EC_YEARS. Retained, not
-    # deleted: the fact is catalogued, and deferring the *ingest* is not hiding it.
+    # In scope since #143 lifted 1868 from UNSUPPORTED_EC_YEARS. Catalogued here well
+    # before that, out of scope: deferring the *ingest* was never hiding the fact, and
+    # keeping the rows is what made the year's admission a no-op in this module.
     (1868, "Mississippi"): _UNREADMITTED,
     (1868, "Texas"): _UNREADMITTED,
     (1868, "Virginia"): _UNREADMITTED,
@@ -242,13 +243,19 @@ def ucsb_ingest_years(latest: int = LATEST_ELECTION_YEAR) -> set[int]:
     (:func:`usvote.years.ec_ingest_years`) minus the years UCSB publishes no popular
     vote for (:data:`usvote.ucsb.parse.NO_POPULAR_VOTE_YEARS`, 1789-1820).
 
-    UCSB *does* publish popular vote for 1868 and 1872, but the EC spine gates them
+    UCSB publishes popular vote for **1872** too, but the EC spine still gates it
     (``UNSUPPORTED_EC_YEARS``), and ``pv_coverage`` (D024 §8) is electoral-vote-weighted
-    and so uncomputable for a year with no EC spine — ingesting them would create
-    exactly the partial-coverage years D009 mandates a caveat for, with no means to
-    quantify one. Because the exclusion is *derived*, #57 lifting the gate admits both
-    years here with **no change in this package**; the literals ``1868``/``1872``
-    deliberately appear nowhere under ``usvote/ucsb/`` (a test enforces this).
+    and so uncomputable for a year with no EC spine — ingesting it would create exactly
+    the partial-coverage year D009 mandates a caveat for, with no means to quantify one.
+
+    Because the exclusion is *derived*, this is what actually happened when #143
+    ingested **1868**: the year appeared here with **no change in this package**,
+    moving the consumed :data:`UCSB_NONPARTICIPATING_STATES` from 11 to 14 and the
+    roster's ``legislature_chosen`` count from 17 to 18. #144 will do the same for 1872.
+    The
+    literals ``1868``/``1872`` deliberately appear in no *year-scope decision* under
+    ``usvote/ucsb/`` (a test enforces this over executable code); they appear only as
+    data keys and in prose.
     """
     return ec_ingest_years(latest) - NO_POPULAR_VOTE_YEARS
 

@@ -51,11 +51,17 @@ it: ``ec_determinative`` simply does not read that column.
 
 **The majority basis is the appointed allotment** (D041), exactly the 12th Amendment's
 "majority of the whole number of Electors **appointed**", while the numerators are votes
-actually **cast**. Real shortfalls exist (the 2000 DC abstention, faithless electors),
-so Σ ``president_electoral_votes`` can be *less* than ``ec_denominator`` and candidate
-shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
+actually **counted** (#144, D046). Those are three different quantities and they form a
+ladder — **appointed ≥ cast ≥ counted** — with a documented gap at each step:
+``ELECTORAL_VOTE_SHORTFALLS`` opens the first (appointed, never cast: the 2000 DC
+abstention, 1832 Maryland) and ``count_status`` opens the second (cast, never counted:
+1868's disputed nine, 1872's rejected seventeen).
+
+So Σ ``national_counted_electoral_votes`` can be *less* than ``ec_denominator`` and
+candidate shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
 (:func:`assert_ec_shares_le_one`). 2000 is Bush **271 of 538 appointed**, not 269 of
-537 cast.
+537 cast; 1872 is Grant **286 of 366 appointed** against the 184 Congress announced,
+not 286 of the 352 its own table totals.
 """
 
 from __future__ import annotations
@@ -65,6 +71,7 @@ from typing import Literal
 
 import pandas as pd
 
+from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.join import EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW
 from usvote.load import SCHEMA
 from usvote.pv.status import (
@@ -139,6 +146,7 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
     "candidate",
     "party",
     "national_electoral_votes",
+    "national_counted_electoral_votes",
     "ec_denominator",
     "ec_share_full",
     "national_pv_votes",
@@ -174,10 +182,14 @@ REQUIRED_JOIN_COLUMNS: tuple[str, ...] = (
     "total_electoral_votes",
     "president_electoral_votes",
     "national_electoral_votes",
+    "national_counted_electoral_votes",
     "president_electoral_rank",
     "took_office",
     "candidate_votes",
     "state_total_votes",
+    # Per-row, and distinct from the national sum above: policy (c) re-sums the counted
+    # measure over a restricted state set, which the national total cannot give it.
+    COUNTED_VOTES_COLUMN,
 )
 
 #: What :func:`roll_up_national` derives itself; a ``carry`` entry may not shadow one.
@@ -391,7 +403,7 @@ def pv_coverage_by_year(
 def _restricted_ec_numerator(
     ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame, key: Sequence[str]
 ) -> pd.DataFrame:
-    """Per-``key`` Σ ``president_electoral_votes``, ``popular_vote`` states only.
+    """Per-``key`` Σ counted electoral votes, ``popular_vote`` states only.
 
     Policy (c)'s EC numerator, and it must be **recomputed from the state rows** — the
     carried ``national_electoral_votes`` is a window SUM over *every* state, so pairing
@@ -401,9 +413,15 @@ def _restricted_ec_numerator(
     makes harmless (``ec_determinative`` never reads this column) and that this function
     must not commit anyway.
 
-    No dedup, unlike :func:`ec_denominator_by_year`: ``president_electoral_votes`` is
-    genuinely per ``(state, candidate)``, not a per-state allotment broadcast across
-    candidate rows, so a straight sum over the restricted state set is correct.
+    No dedup, unlike :func:`ec_denominator_by_year`: the measure is genuinely per
+    ``(state, candidate)``, not a per-state allotment broadcast across candidate rows,
+    so a straight sum over the restricted state set is correct.
+
+    Sums the **counted** measure, matching ``ec_share_full`` (#144, D046). A policy
+    chooses which *states* count toward the share, never which *basis* — pairing a cast
+    numerator with a counted one would make (c) and (b) disagree in 1872 for a reason
+    that has nothing to do with coverage. (Immaterial numerically today: both anomaly
+    years have full popular-vote coverage, so (c) restricts nothing there.)
     """
     resolved = _resolve_roster(roster_df)
     pv_states = resolved.loc[
@@ -411,9 +429,9 @@ def _restricted_ec_numerator(
     ]
     restricted = ec_pv_df.merge(pv_states, on=["year", "state"], how="inner")
     return (
-        restricted.groupby(list(key), as_index=False)["president_electoral_votes"]
+        restricted.groupby(list(key), as_index=False)[COUNTED_VOTES_COLUMN]
         .sum()
-        .rename(columns={"president_electoral_votes": "restricted_electoral_votes"})
+        .rename(columns={COUNTED_VOTES_COLUMN: "restricted_electoral_votes"})
     )
 
 
@@ -463,8 +481,11 @@ def apply_coverage_policy(
     **unreachable** — a non-NULL numerator over a zero denominator would require
     ``popular_vote`` states whose allotments sum to zero, which the join view cannot
     produce — and a guard no mutation can kill is dead code, so it is gone (AC-verify,
-    #122). On today's MIT-only redistributable surface the first path is *every* year:
-    the roster carries no MIT rows at all (#127), so (c) returns NULL throughout there.
+    #122). On the MIT-only redistributable surface that first path is now exactly the
+    **pre-1976** years: since #127 the roster carries MIT's own rows for 1976-2024, so
+    (c) is a no-op there (every state is ``popular_vote``, so restricting changes
+    nothing) and returns NULL only for the years MIT does not reach. Before the
+    backfill the roster held no MIT rows at all and (c) returned NULL throughout.
 
     ``ec_share_full`` and ``ec_determinative`` are deliberately **outside this
     function's reach** (D037/A) — policy-invariant, computed in
@@ -547,13 +568,18 @@ def build_hybrid_frame(
             "candidate": "candidate",
             "party": "party",
             "national_electoral_votes": "national_electoral_votes",
+            "national_counted_electoral_votes": "national_counted_electoral_votes",
             "president_electoral_rank": "president_electoral_rank",
             "took_office": "took_office",
         },
     )
     national = national.merge(ec_denominator_by_year(ec_pv_df), on="year", how="left")
+    # Counted, not cast (#144, D046): who won is settled by the votes Congress counted,
+    # so the share that feeds ec_determinative divides the counted total by the
+    # appointed allotment — exactly the 12th Amendment's test. Identical to the cast
+    # basis in every year but 1868 and 1872.
     national["ec_share_full"] = (
-        national["national_electoral_votes"] / national["ec_denominator"]
+        national["national_counted_electoral_votes"] / national["ec_denominator"]
     )
     frame = apply_coverage_policy(
         national, ec_pv_df, roster_df, policy=policy, key=HYBRID_CANDIDATE_GRAIN
@@ -631,12 +657,14 @@ def assert_ec_shares_le_one(
 ) -> None:
     """Assert per-year Σ ``ec_share_full`` ≤ 1.0 — **never** that it equals 1.0 (D041).
 
-    The denominator is the **appointed** allotment; the numerators are votes **cast**.
-    Real shortfalls (the 2000 DC abstention, faithless electors) make the sum strictly
-    less than
-    1.0 in such a year — 2000 is 537 of 538 — so an ``== 1.0`` assertion would fail on
-    correct data. Exceeding 1.0, though, means a denominator bug: dividing by *cast*
-    rather than *appointed*, or a denominator that lost a state.
+    The denominator is the **appointed** allotment; the numerators are votes **counted**
+    (#144). Both gaps in the appointed ≥ cast ≥ counted ladder make the sum strictly
+    less than 1.0 — 2000 is 537 of 538 cast, 1872 is 349 of 366 counted — so an
+    ``== 1.0`` assertion would fail on correct data. Exceeding 1.0, though, means a
+    denominator bug: dividing by *cast* or *counted* rather than *appointed*, or a
+    denominator that lost a state. Widening the numerator's basis can only shrink each
+    share, so this guard is strictly safer under the counted basis than it was under
+    cast.
     """
     totals = hybrid_frame.groupby("year")["ec_share_full"].sum()
     over = totals.loc[totals > 1.0 + tolerance]
@@ -690,9 +718,14 @@ def assert_ec_winner_matches_rank(
     """Assert the EC winner is the candidate the spine already ranks first.
 
     ``argmax(ec_share_full)`` and ``president_electoral_rank == 1`` are two independent
-    paths to one fact — both monotonic in ``national_electoral_votes``, one derived here
-    and one carried from ``dwh.votes``. They must agree; a disagreement means the frame
-    assembly misaligned candidates, which no per-column check would catch.
+    paths to one fact — both monotonic in ``national_counted_electoral_votes``, one
+    derived here and one carried from ``dwh.votes``. They must agree; a disagreement
+    means the frame assembly misaligned candidates, which no per-column check would
+    catch.
+
+    The two share a **basis**, and that is load-bearing rather than incidental: the rank
+    switched to the counted measure in #144 for the same reason this share did, and had
+    only one of them moved, 1872 alone would have been enough to fire this guard.
 
     Not a claim about who took office: 1824's rank-1 was Jackson while the House
     installed Adams (``took_office``), and both are correct.
@@ -790,11 +823,13 @@ def build_hybrid_from_db(
     made to claim full coverage for years it holds no popular vote for (code review,
     #126). A view with no PV at all yields an empty source set, hence NULL coverage.
 
-    **On ``ec_pv_redistributable`` that scope currently matches nothing** (#127): MIT
-    writes no ``pv_state_status`` rows — only UCSB calls ``load_pv_status`` — so the
-    public surface reports NULL ``pv_coverage`` for every year, 1976-2024 included,
-    where the true EV-weighted coverage is ``1.0``. #127 backfills those rows; until it
-    lands, NULL is the honest reading of an absent roster, not a bug in this scoping.
+    **On ``ec_pv_redistributable`` that scope now matches MIT's own rows** (#127,
+    landed): ``run_mit_pipeline`` calls ``load_pv_status``, so 1976-2024 reports the
+    true EV-weighted ``1.0`` and pre-1976 stays NULL — no PV *and* no MIT roster row
+    reaches those years, which is the honest reading of an absent roster rather than a
+    fabricated ``0.0``. Before the backfill this scope matched **nothing**, so the
+    public surface reported NULL for *every* year including the fully-covered modern
+    ones; that was the bug #127 fixed, not a flaw in this scoping.
 
     ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
     anything else** — #124 materializes the views from this default and ``warehouse.py``

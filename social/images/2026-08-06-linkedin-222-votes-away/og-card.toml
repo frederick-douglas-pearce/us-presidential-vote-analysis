@@ -1,0 +1,122 @@
+# OG share-card brief — Post 1, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card shows a real fragment of the actual
+# record. Post 1's spine is the sentence "Five times in 47 presidencies, the person
+# who took office had not led the national popular vote count." This card is that
+# sentence's evidence — the five cases, with what each winner actually got and what
+# they needed to get it from.
+#
+# THE SPECIMEN IS DELIBERATELY ELECTORAL-ONLY, and that is the whole design.
+# The obvious card for this post is the five cases with both halves side by side:
+# who took office against who led the popular vote. It was rejected for a reason
+# that is the post's own subject. The popular-vote half is NULL on the public API
+# before 1976 by design (D048), and UCSB — the only source that reaches those years
+# — is barred from anything committed (D022). So three of that card's five
+# right-hand cells would have had no legitimate provenance, and worse, the card
+# would have asserted in public exactly the half the post spends a paragraph saying
+# you cannot check there. Posts 2 and 3 solved the same problem by construction
+# (post 2's right panel is the *complement* of the EC zero-EV set, not a UCSB
+# transcription); this card solves it by staying inside the record it can hand you.
+#
+# The claim itself is not dropped — it moves to the subhead, as prose. A sentence
+# is allowed to state a historical fact the author cannot serve; a specimen cell,
+# in this series, is not.
+#
+# Blank slots were also avoided on purpose. Post 2's card (1864 participation
+# holes) and post 3's (1872 counted vs. allotted) are both built on index-aligned
+# blanks, and post 3's brief already flags the cost of two cards reading as the
+# same image. A third consecutive one would make the device the series' signature
+# rather than its argument. Every row here is filled.
+#
+# Data provenance. The card carries thirteen numbers, not ten, and they do not all
+# come from the same place — so each is accounted for rather than covered by an
+# average:
+#   - The TEN panel figures come from the LIVE public API, endpoint
+#     /v1/elections/<year>/summary, filtered to the row with took_office = true —
+#     `national_electoral_votes` and `national_electoral_denominator`. Verified
+#     2026-08-12 against snapshot 8abcff447157. Anyone can re-run them; that is the
+#     point of the post. Upstream is the National Archives (NARA, public domain).
+#   - "51" (sublabel) is the count of in-scope elections — `len(ec_ingest_years())`,
+#     and `meta.count` on GET /v1/elections. Checkable on the public surface.
+#   - "222" (title) is the NPVIC tally. It is the post's own headline figure, sourced
+#     there to nationalpopularvote.com, and is NOT an election-record number.
+#   - "5" (sublabel) is the one figure on this card that the public surface CANNOT
+#     confirm, and it is named here rather than left to look like the others: it
+#     counts elections whose popular-vote leader differs from who took office, and
+#     three of the five turn on pre-1976 popular votes the API serves as null by
+#     design (D048). It rests on the standard historical account, same as the post's
+#     own "Five times in 47 presidencies" sentence.
+#
+# The subhead says "popular vote COUNT", matching the post's own wording rather than
+# the shorter phrasing this card first shipped with. The extra word is load-bearing:
+# 1824 had no single popular vote to lead — six of its twenty-four states appointed
+# electors by legislature and held none — so "led the popular vote" states as a fact
+# about the country something that is only a fact about a recorded tally. The post
+# can afford the distinction in surrounding prose ("1824 is the odd one", "eighteen
+# of its twenty-four states chose electors at the ballot box"); a share card is read
+# alone, so it has to carry its own precision.
+#
+# Two things the right-hand panel is saying precisely, both load-bearing:
+#   - The denominator is the electors **appointed**, not the votes cast. That is
+#     the Twelfth Amendment's own standard (D041), and it is why 2000 reads
+#     "271 of 538" and not "271 of 537" — one DC elector abstained, so 537 were
+#     cast, and the threshold did not move.
+#   - The numerator is `national_electoral_votes`, which is the votes **cast**
+#     measure, NOT `national_electoral_votes_counted` (D046). For all five of these
+#     years cast and counted agree — checked at the same time, both columns pulled —
+#     so no printed figure depends on the distinction. Naming the column exactly
+#     matters anyway: post 3 is *about* cast vs. counted, and a future re-checker
+#     following this line must land on the field these numbers actually came from.
+#     A year like 1872 would differ — Grant is 300 cast, 286 counted — and a card
+#     drawing on such a year must state which measure it means.
+#
+# One trap avoided, recorded so it is not reintroduced: 1824's "84" does NOT mean
+# what the other four rows' numbers mean. Adams took office with 84 while Jackson
+# *led* with 99; no one reached a majority of 261 and the House chose under the
+# Twelfth Amendment. The left panel is headed "Took office" rather than "Won" for
+# exactly this reason, and the sublabel says "5 of 51 elections" rather than
+# anything implying these five are victories of the same kind.
+
+[card]
+title = ["222 Votes Away, and a Record", "Few Can Get End to End"]
+subhead = "Five times the person who took office had not led the popular vote count."
+series_mark = "Counted, Not Assumed · 1 of 10"
+
+# Rows are index-aligned across panels: row N is the same election in both. The
+# year repeats in each panel on purpose, so either panel can be read alone at
+# thumbnail size — the same choice post 3 makes with its state labels.
+#
+# The gutters below are U+00A0, not spaces, and that is not decoration. SVG <text>
+# inherits xml:space="default" and collapses consecutive spaces, so "1824   John"
+# would have shipped as "1824 John" — invisible here because every year is four
+# digits wide, and silently broken the first time a brief uses labels of differing
+# width. The renderer now rejects run-of-spaces padding outright rather than leaving
+# it to be remembered.
+[[panel]]
+label = "Took office"
+sublabel = "5 of 51 elections"
+mono = true
+rows = [
+  "1824   John Quincy Adams",
+  "1876   Rutherford B. Hayes",
+  "1888   Benjamin Harrison",
+  "2000   George W. Bush",
+  "2016   Donald J. Trump",
+]
+
+[[panel]]
+label = "Electoral vote"
+sublabel = "of electors appointed"
+mono = true
+rows = [
+  ["1824", "84 of 261"],
+  ["1876", "185 of 369"],
+  ["1888", "233 of 401"],
+  ["2000", "271 of 538"],
+  ["2016", "304 of 538"],
+]

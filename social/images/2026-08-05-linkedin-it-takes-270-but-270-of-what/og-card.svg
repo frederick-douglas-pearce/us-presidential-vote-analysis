@@ -1,0 +1,96 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
+<rect x="0" y="0" width="1200" height="630" fill="#0f0f14"/>
+<text x="600" y="50" text-anchor="middle" fill="#ffffff" font-size="42" font-weight="300">It Takes 270,</text>
+<text x="600" y="94" text-anchor="middle" fill="#ffffff" font-size="42" font-weight="300">But 270 of What?</text>
+<text x="600" y="128" text-anchor="middle" fill="#c0c0c8" font-size="23" font-weight="400">1872: 366 electors appointed, 352 in the record's own total, 349 counted.</text>
+<g>
+<rect x="40.0" y="148" width="552.0" height="436" rx="14" fill="#16161d"/>
+<rect x="40.0" y="148" width="552.0" height="40" rx="14" fill="#1d1d26"/>
+<rect x="40.0" y="174" width="552.0" height="14" fill="#1d1d26"/>
+<text x="66.0" y="175" fill="#ffffff" font-size="20" font-weight="500">Electoral Vote of Each State</text>
+<text x="566.0" y="175" text-anchor="end" fill="#8a8a99" font-size="17" font-weight="300">352 allotted</text>
+<text x="66.0" y="212" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Alabama</text>
+<text x="566.0" y="212" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">10</text>
+<text x="66.0" y="230" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Arkansas</text>
+<text x="566.0" y="230" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">–</text>
+<text x="66.0" y="248" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">California</text>
+<text x="566.0" y="248" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">6</text>
+<text x="66.0" y="266" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Connecticut</text>
+<text x="566.0" y="266" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">6</text>
+<text x="66.0" y="284" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Delaware</text>
+<text x="566.0" y="284" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">3</text>
+<text x="66.0" y="302" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Florida</text>
+<text x="566.0" y="302" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">4</text>
+<text x="66.0" y="320" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Georgia</text>
+<text x="566.0" y="320" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">11</text>
+<text x="66.0" y="338" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Illinois</text>
+<text x="566.0" y="338" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">21</text>
+<text x="66.0" y="356" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Indiana</text>
+<text x="566.0" y="356" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">15</text>
+<text x="66.0" y="374" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Iowa</text>
+<text x="566.0" y="374" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">11</text>
+<text x="66.0" y="392" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Kansas</text>
+<text x="566.0" y="392" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">5</text>
+<text x="66.0" y="410" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Kentucky</text>
+<text x="566.0" y="410" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">12</text>
+<text x="66.0" y="428" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Louisiana</text>
+<text x="566.0" y="428" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">–</text>
+<text x="66.0" y="446" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Maine</text>
+<text x="566.0" y="446" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">7</text>
+<text x="66.0" y="464" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Maryland</text>
+<text x="566.0" y="464" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">8</text>
+<text x="66.0" y="482" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Massachusetts</text>
+<text x="566.0" y="482" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">13</text>
+<text x="66.0" y="500" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Michigan</text>
+<text x="566.0" y="500" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">11</text>
+<text x="66.0" y="518" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Minnesota</text>
+<text x="566.0" y="518" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">5</text>
+<text x="66.0" y="536" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Mississippi</text>
+<text x="566.0" y="536" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">8</text>
+<text x="66.0" y="554" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">…</text>
+</g>
+<g>
+<rect x="608.0" y="148" width="552.0" height="436" rx="14" fill="#16161d"/>
+<rect x="608.0" y="148" width="552.0" height="40" rx="14" fill="#1d1d26"/>
+<rect x="608.0" y="174" width="552.0" height="14" fill="#1d1d26"/>
+<text x="634.0" y="175" fill="#ffffff" font-size="20" font-weight="500">Counted for President</text>
+<text x="1134.0" y="175" text-anchor="end" fill="#8a8a99" font-size="17" font-weight="300">349 counted · 2 states absent</text>
+<text x="634.0" y="212" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Alabama</text>
+<text x="1134.0" y="212" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">10</text>
+<text x="634.0" y="248" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">California</text>
+<text x="1134.0" y="248" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">6</text>
+<text x="634.0" y="266" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Connecticut</text>
+<text x="1134.0" y="266" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">6</text>
+<text x="634.0" y="284" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Delaware</text>
+<text x="1134.0" y="284" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">3</text>
+<text x="634.0" y="302" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Florida</text>
+<text x="1134.0" y="302" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">4</text>
+<text x="634.0" y="320" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Georgia</text>
+<text x="1134.0" y="320" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">8</text>
+<text x="634.0" y="338" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Illinois</text>
+<text x="1134.0" y="338" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">21</text>
+<text x="634.0" y="356" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Indiana</text>
+<text x="1134.0" y="356" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">15</text>
+<text x="634.0" y="374" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Iowa</text>
+<text x="1134.0" y="374" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">11</text>
+<text x="634.0" y="392" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Kansas</text>
+<text x="1134.0" y="392" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">5</text>
+<text x="634.0" y="410" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Kentucky</text>
+<text x="1134.0" y="410" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">12</text>
+<text x="634.0" y="446" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Maine</text>
+<text x="1134.0" y="446" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">7</text>
+<text x="634.0" y="464" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Maryland</text>
+<text x="1134.0" y="464" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">8</text>
+<text x="634.0" y="482" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Massachusetts</text>
+<text x="1134.0" y="482" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">13</text>
+<text x="634.0" y="500" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Michigan</text>
+<text x="1134.0" y="500" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">11</text>
+<text x="634.0" y="518" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Minnesota</text>
+<text x="1134.0" y="518" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">5</text>
+<text x="634.0" y="536" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">Mississippi</text>
+<text x="1134.0" y="536" text-anchor="end" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">8</text>
+<text x="634.0" y="554" font-family="'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace" fill="#ffffff" font-size="16" font-weight="300">…</text>
+</g>
+<text x="38" y="608" fill="#8a8a99" font-size="20" font-weight="300">Frederick Pearce · Data. AI. Human.</text>
+<text x="1162" y="608" text-anchor="end" fill="#5a5a68" font-size="18" font-weight="300">Counted, Not Assumed · 3 of 10</text>
+</svg>
