@@ -52,3 +52,7 @@ coverage/
 # Only the rendered OG cards and their committable build inputs are versioned.
 /social/*
 !/social/images/
+
+# Node toolchain for the Prettier gate on posts/ (package.json + the lockfile
+# are tracked; the installed tree is not).
+node_modules/

@@ -22,10 +22,18 @@ What it does, per post:
 
 1. **Transform frontmatter.** Strip the upstream-only field (`og_card_source`);
    copy the body and every other field byte-for-byte. The strip is line-level,
-   not a YAML round-trip, so the source formatting survives unchanged. (This
-   repo has no Prettier gate, unlike the source repo — the line-level approach
-   is kept anyway, because a round-trip would reflow the frontmatter for no
-   benefit.)
+   not a YAML round-trip, so the source formatting survives unchanged (a
+   round-trip would reflow the frontmatter for no benefit).
+
+   Because the body is copied verbatim, THIS SCRIPT NEVER FORMATS ANYTHING —
+   what a post says here is what lands on the site, and the site runs
+   `prettier . --check` on every push to its main. Keeping the posts in the
+   site's dialect is therefore a pre-merge gate's job, not this script's:
+   `.github/workflows/prettier.yml`, pinned to the site's exact formatter
+   versions. Do not "helpfully" add a format pass here — it would break the
+   byte-for-byte contract and make the published post differ from the source of
+   record. (The gate was missing when this was ported in #132, and post 1 duly
+   turned the site red on 2026-08-12; see posts/README.md.)
 2. **Resolve + copy the OG card**: the post's `og_card_source` field
    (repo-root-relative) is the source; the target is `<assets-dir>/<basename of
    the post's og_image URL>`.
