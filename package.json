@@ -1,0 +1,14 @@
+{
+  "name": "us-presidential-vote-analysis",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tooling deps for the Prettier gate on posts/, mirroring the Pages site's formatter.",
+  "scripts": {
+    "format:check": "prettier . --check",
+    "format:write": "prettier . --write"
+  },
+  "devDependencies": {
+    "@shopify/prettier-plugin-liquid": "1.11.0",
+    "prettier": "3.9.5"
+  }
+}

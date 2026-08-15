@@ -1,0 +1,45 @@
+name: Prettier (posts)
+
+# Pre-merge gate so posts/ is Prettier-clean BEFORE it reaches main and gets
+# synced to the Pages site by pages-sync.yml. The site runs its own
+# `prettier . --check` on every push to its main, so a dirty post turns the
+# SITE red — and keeps it red, because the site's daily ESG cron re-runs the
+# same check every morning on the same file.
+#
+# This has now happened twice on the same publishing path: it bit a post in
+# claude-code-sessions on 2026-06-08 (which is why that repo has this gate),
+# and it bit post 1 here on 2026-08-12, because issue #132 ported the publisher
+# (pages-sync.yml, tooling/publish-to-pages.py) without porting the gate that
+# makes it safe. The concrete trap both times: Prettier normalizes markdown
+# emphasis to _underscores_, and *asterisks* are not a configurable style.
+#
+# Scoped to posts/ via .prettierignore — the rest of the repo is authored to
+# other conventions. See posts/README.md.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Install from the lockfile, and pin the formatter to the EXACT versions
+      # the Pages site pins (prettier 3.9.5, @shopify/prettier-plugin-liquid
+      # 1.11.0). Caret ranges would let this gate drift a minor version ahead of
+      # or behind the site, which is the one way it can pass here and still fail
+      # there — the failure mode it exists to prevent.
+      - run: npm ci
+
+      - run: npm run format:check

@@ -75,18 +75,52 @@ Two carry over from `social/README.md` and apply to anything published here:
 
 Ported from `claude-code-sessions` in
 [#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132).
-Three pieces, with a deliberate split: **the Action owns auth and the push; the script
-owns the transform, OG resolution, and the content-compare.**
+Four pieces, with a deliberate split: **the Action owns auth and the push; the script
+owns the transform, OG resolution, and the content-compare; two PR guards keep a post
+from reaching `main` in a state the site will reject.**
 
-| Piece | What it does | When it runs |
-|---|---|---|
-| [`tooling/publish-to-pages.py`](../tooling/publish-to-pages.py) | Transforms frontmatter to Pages conventions, resolves + copies each post's OG card | Called by the Action; runnable locally |
-| [`.github/workflows/pages-sync.yml`](../.github/workflows/pages-sync.yml) | Cross-repo auth + the reconcile-retry push to the Pages repo | Push to `main` touching `posts/**` or `social/images/**`; also `workflow_dispatch` |
-| [`tooling/check-og-cards.py`](../tooling/check-og-cards.py) | PR guard — runs the publisher's *own* validator, so a card-less post fails on the PR | [`og-card-guard.yml`](../.github/workflows/og-card-guard.yml), on PRs and `main` pushes |
+| Piece                                                                     | What it does                                                                         | When it runs                                                                            |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [`tooling/publish-to-pages.py`](../tooling/publish-to-pages.py)           | Transforms frontmatter to Pages conventions, resolves + copies each post's OG card   | Called by the Action; runnable locally                                                  |
+| [`.github/workflows/pages-sync.yml`](../.github/workflows/pages-sync.yml) | Cross-repo auth + the reconcile-retry push to the Pages repo                         | Push to `main` touching `posts/**` or `social/images/**`; also `workflow_dispatch`      |
+| [`tooling/check-og-cards.py`](../tooling/check-og-cards.py)               | PR guard — runs the publisher's _own_ validator, so a card-less post fails on the PR | [`og-card-guard.yml`](../.github/workflows/og-card-guard.yml), on PRs and `main` pushes |
+| [`.github/workflows/prettier.yml`](../.github/workflows/prettier.yml)     | PR guard — `posts/` must be Prettier-clean in the site's own dialect                 | On PRs and `main` pushes                                                                |
 
 **Shipping a post is a merge.** Move the finished draft from `social/drafts/` into
-`posts/`, open a PR — the guard checks the card resolves — and merge. The sync runs on
-`main` and pushes the post plus its card to the Pages repo.
+`posts/`, open a PR — the guards check the card resolves and the markdown is
+Prettier-clean — and merge. The sync runs on `main` and pushes the post plus its card
+to the Pages repo.
+
+### Prettier, and why a post can turn the site red
+
+The publisher copies each post's body through **byte-for-byte**, and the Pages site runs
+`prettier . --check` on every push to its `main`. So a post that is valid markdown but
+not _Prettier's_ markdown fails on the site rather than here — and keeps failing, because
+the site's daily ESG cron re-runs the same check every morning on the same file.
+
+That is not hypothetical. It bit a post in `claude-code-sessions` on 2026-06-08, which is
+why that repo has this gate; #132 ported the publisher here without it, and post 1 did the
+same thing to the site on 2026-08-12.
+
+Run it before opening the PR — the gate does this in CI, but locally it is one command:
+
+```
+npm ci            # first time only
+npm run format:check
+npm run format:write   # fix
+```
+
+The trap that has now caused both incidents: **Prettier normalizes emphasis to
+`_underscores_`**, and `*asterisks*` are not a configurable alternative. Tables get their
+pipes padded, too.
+
+Two scoping notes. The gate covers **`posts/` only** — `.prettierignore` ignores
+everything and then unignores `posts/`, because the rest of the repo (`docs/`, `social/`,
+`.claude/` specs, CLAUDE.md) is authored to other conventions. And the formatter is
+pinned to the **exact** versions the Pages site pins, `prettier` 3.9.5 with
+`@shopify/prettier-plugin-liquid` 1.11.0, installed via `npm ci` from the lockfile. Caret
+ranges would let this gate drift a version away from the site's, which is the one way it
+can pass here and still fail there.
 
 Four properties are load-bearing; a change that keeps the code but loses one of these
 produces something that looks the same and fails differently:
@@ -138,8 +172,8 @@ and never asks for a secret. The moment a dated post lands without the setup don
 is a red `main` for a repo that has nothing to publish yet.
 
 1. **Create a fine-grained PAT.** GitHub → Settings → Developer settings → Personal
-   access tokens → Fine-grained tokens → *Generate new token*.
-   - **Repository access:** *Only select repositories* → **the Pages repo only**
+   access tokens → Fine-grained tokens → _Generate new token_.
+   - **Repository access:** _Only select repositories_ → **the Pages repo only**
      (`frederick-douglas-pearce.github.io`). It must not be able to write to this repo.
    - **Permissions → Repository permissions:** **Contents: Read and write**. Nothing else.
      (Metadata: Read-only is added automatically and is required.)
@@ -147,11 +181,11 @@ is a red `main` for a repo that has nothing to publish yet.
      and you want to tell them apart when revoking. GitHub caps the name length, so a
      shortened form is fine; the token's name is a display label and nothing reads it.
      (Ours is `pages-sync-from-us-presidential-vote`.)
-2. **Create the environment.** This repo → Settings → Environments → *New environment*,
+2. **Create the environment.** This repo → Settings → Environments → _New environment_,
    named exactly **`pages-sync`** (the workflow's `environment:` key matches this string
    literally).
 3. **Add the secret** inside that environment: name **`PAGES_SYNC_TOKEN`**, value the
-   token, **with no trailing newline**. It must be an *environment* secret, not a
+   token, **with no trailing newline**. It must be an _environment_ secret, not a
    repository secret — scoping it there means only a job that opts into `pages-sync` can
    reach it.
 4. **Verify** with the `dry_run` dispatch above before trusting the first real publish.
@@ -167,7 +201,7 @@ That site also receives posts from `claude-code-sessions`, and the Pages repo ha
 daily ESG-feed cron. Two consequences:
 
 - **Slugs share a namespace.** The card target is derived as
-  `assets/img/<basename of og_image>`, and the collision check sees only *this* repo's
+  `assets/img/<basename of og_image>`, and the collision check sees only _this_ repo's
   posts — so two posts from different source repos with the same `og_image` basename
   would overwrite each other silently. Keep the slug distinct across the two series.
 - **Pushes race.** The Action reconciles rather than force-pushing: on rejection it
