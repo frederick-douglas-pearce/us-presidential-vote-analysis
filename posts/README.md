@@ -25,13 +25,21 @@ layout: post
 title: "Post title"
 date: YYYY-MM-DD 00:00:00-0800
 description: "One-sentence summary used for previews and SEO"
-categories: ["american-history"]
+categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/<slug>-og.png
 og_card_source: social/images/<YYYY-MM-DD>-linkedin-<slug>/og-card.png
 featured: false
 ---
 ```
+
+`categories` names the **series**, not the subject. Every post here is
+`["us-presidential-vote"]` and stays that way: the Pages site drives its blog filter
+chips off categories (`display_categories`), and this repo shares that site's `_posts/`
+namespace with [`claude-code-sessions`](https://github.com/frederick-douglas-pearce/claude-code-sessions),
+so the category is what lets a reader see one series without the other. Subject stays on
+the **tags** axis — `american-history`, `electoral-college`, `data-quality` — which is
+where it already was.
 
 `og_image` is the published URL on the Pages site; `og_card_source` is the
 repo-root-relative path to the rendered card that gets copied there at publish time.
