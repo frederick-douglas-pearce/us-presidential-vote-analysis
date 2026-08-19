@@ -3,7 +3,7 @@ layout: post
 title: "Presidential Elections Are Messy. The Data Has to Carry the Story."
 date: 2026-08-18 00:00:00-0800
 description: "The hard part isn't the numbers — it's recording why a number isn't there."
-categories: ["american-history"]
+categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/presidential-elections-are-messy-og.png
 og_card_source: social/images/2026-08-18-linkedin-presidential-elections-are-messy/og-card.png
@@ -12,9 +12,9 @@ featured: false
 
 In 1864, eleven states took no part in the [presidential election](https://www.archives.gov/electoral-college/1864). Not "had bad turnout." Took no part. The country was in the midst of the Civil War, and those states had seceded.
 
-The National Archives, the official record for electoral votes, lists all thirty-six states of that year, and a note beside the table explains it in plain language: *"The Confederate States did not participate in the election of 1864 because they seceded from the Union."* Nothing is hidden. But inside the table, those eleven states carry a dash in every electoral-vote column. A dash is also what that same table prints for a candidate who won no electoral votes in a state where the election was held normally. One mark, two entirely different facts: *this candidate lost here*, and *there was no election here*.
+The National Archives, the official record for electoral votes, lists all thirty-six states of that year, and a note beside the table explains it in plain language: _"The Confederate States did not participate in the election of 1864 because they seceded from the Union."_ Nothing is hidden. But inside the table, those eleven states carry a dash in every electoral-vote column. A dash is also what that same table prints for a candidate who won no electoral votes in a state where the election was held normally. One mark, two entirely different facts: _this candidate lost here_, and _there was no election here_.
 
-The American Presidency Project at the University of California, Santa Barbara (UCSB), the most complete popular-vote compilation reaching back this far, does the opposite. Its [1864 page](https://www.presidency.ucsb.edu/statistics/elections/1864) lists twenty-five states, and the other eleven are simply not on it — no row, no dash, no asterisk. The only trace is one sentence of prose: *"Eleven Confederate states did not participate in the election because of the Civil War."*
+The American Presidency Project at the University of California, Santa Barbara (UCSB), the most complete popular-vote compilation reaching back this far, does the opposite. Its [1864 page](https://www.presidency.ucsb.edu/statistics/elections/1864) lists twenty-five states, and the other eleven are simply not on it — no row, no dash, no asterisk. The only trace is one sentence of prose: _"Eleven Confederate states did not participate in the election because of the Civil War."_
 
 Neither of those is a mistake. Both are sensible editorial choices for a document a person reads, and in both the sentence that resolves the ambiguity is sitting right there next to the table. But for a program reading either page, the prose may as well not exist. In one record the dash becomes a number, the number is zero, and zero is a claim about what happened. In the other, eleven states quietly cease to exist for a year, and nothing in the shape of the data says otherwise.
 
@@ -26,7 +26,7 @@ This series documents a project that assembles roughly two centuries of presiden
 
 The first is to faithfully reconstruct the calculus that selected each president, including the years it went sideways. The familiar story is that one candidate wins a majority of the appointed electoral votes. Several elections didn't work that way.
 
-The second is harder: to ask *what-if* questions against historically accurate vote counts. What would a different rule have produced in 1876? In 2000? That's the interesting question, and the one with a trapdoor under it, because a what-if is only as honest as the numbers it runs on. The fastest way to get a confidently wrong answer about a nineteenth-century election is to feed it a zero that was never a real zero.
+The second is harder: to ask _what-if_ questions against historically accurate vote counts. What would a different rule have produced in 1876? In 2000? That's the interesting question, and the one with a trapdoor under it, because a what-if is only as honest as the numbers it runs on. The fastest way to get a confidently wrong answer about a nineteenth-century election is to feed it a zero that was never a real zero.
 
 So the recurring problem here isn't recording numbers. Most numbers are easy. It's recording **why a number isn't there**, and doing it in a way that survives being merged with a second record and aggregated by someone else.
 
@@ -40,7 +40,7 @@ Collapse the voting record into a single count column and at least five differen
 
 **The state's legislature chose the electors, so no popular vote was ever held.** The Constitution has no objection: states appoint electors "in such manner as the legislature may direct," and it promises no one a ballot. South Carolina did it this way in every election through 1860, which reads like a founding-era habit the country simply outgrew. Not quite. The last legislature to pick presidential electors with no popular vote at all was **Colorado's, in 1876**, a state admitted too close to the election to organize one.
 
-**The state took no part in the election.** This is 1864's eleven, and it's distinct from the case above: South Carolina's electors in 1860 *existed*, and were legislature-chosen. Virginia's in 1864 did not exist at all.
+**The state took no part in the election.** This is 1864's eleven, and it's distinct from the case above: South Carolina's electors in 1860 _existed_, and were legislature-chosen. Virginia's in 1864 did not exist at all.
 
 **The election happened, but a source doesn't have the number.** A gap in what a source collected is a fact about the source, not about the election. Treating those gaps as zeros quietly merges two different histories: a place where nothing happened, and a place where something happened that this particular record doesn't carry.
 
@@ -70,9 +70,9 @@ That isn't bookkeeping fussiness. The threshold for winning is defined on the ap
 
 All of that care buys something specific. It's what lets us merge two independent records of the same elections without silently breaking the comparison.
 
-Merging is exactly where a missing row and a zero row stop being distinguishable, because a merge only asks whether a match exists. It never asks what a non-match *means*. A row can be missing because the candidate lost, or because the source never covered that state. To a merge, both look the same: no match.
+Merging is exactly where a missing row and a zero row stop being distinguishable, because a merge only asks whether a match exists. It never asks what a non-match _means_. A row can be missing because the candidate lost, or because the source never covered that state. To a merge, both look the same: no match.
 
-Which is why it matters that the electoral-vote record is complete rather than selective. The Archives prints a dash for every candidate in every state, and that dash parses into an explicit zero. A losing candidate still gets a row, carrying that zero, in every state they lost. Nobody is ever simply absent because they didn't win. That single property is what makes a question like *"who lost the Electoral College but won the popular vote"* answerable at all. The losers are still there to be counted, with their real electoral totals, when the two records are merged.
+Which is why it matters that the electoral-vote record is complete rather than selective. The Archives prints a dash for every candidate in every state, and that dash parses into an explicit zero. A losing candidate still gets a row, carrying that zero, in every state they lost. Nobody is ever simply absent because they didn't win. That single property is what makes a question like _"who lost the Electoral College but won the popular vote"_ answerable at all. The losers are still there to be counted, with their real electoral totals, when the two records are merged.
 
 Had the record gone the other way, a merge over a selective record would have dropped precisely the rows the comparison exists to find. The totals would still have added up cleanly, because the missing rows were never there to be missed. A failure like that raises no error.
 
@@ -88,15 +88,15 @@ Apply that to [1824](https://www.archives.gov/electoral-college/1824). Six state
 
 That is not what happened. Jackson had 99 of 261 electoral votes: **37.9 percent, a majority of nothing**. Under the Twelfth Amendment, the election went to the House of Representatives, which chose John Quincy Adams instead.
 
-Treating *"this state held no popular vote"* as *"this state doesn't count"* is the missing-as-zero mistake wearing a different hat, and here it manufactures a constitutional majority that never existed. The fix is simple: every state that appointed electors belongs in the electoral-vote denominator, whether or not it held a popular vote.
+Treating _"this state held no popular vote"_ as _"this state doesn't count"_ is the missing-as-zero mistake wearing a different hat, and here it manufactures a constitutional majority that never existed. The fix is simple: every state that appointed electors belongs in the electoral-vote denominator, whether or not it held a popular vote.
 
-The historical facts aren't at risk here. Adams became president in 1825, and no arithmetic changes it. A bad denominator silently corrupts *our own computed number* about 1824: 52 percent, no error, every appearance of a normal result. Anything built on top of it inherits the error. The 37.9 percent holds up only because those six states are recorded as *having held no popular vote*, a different thing entirely from having no data.
+The historical facts aren't at risk here. Adams became president in 1825, and no arithmetic changes it. A bad denominator silently corrupts _our own computed number_ about 1824: 52 percent, no error, every appearance of a normal result. Anything built on top of it inherits the error. The 37.9 percent holds up only because those six states are recorded as _having held no popular vote_, a different thing entirely from having no data.
 
 ## Back to the eleven
 
 It's easy to read all of this and still miss the eleven states from 1864, because nothing in either table tells you to go looking. The dashes parse cleanly. The twenty-five states that are there line up. Every total balances.
 
-Eleven rows in this record now say *took no part*, each carrying its reason, and they say it only because someone read a sentence of prose beside a table and went to find out what it was doing there. Neither table asked for that, and neither could: a table has no way to tell you which of five things its blank-looking cell means.
+Eleven rows in this record now say _took no part_, each carrying its reason, and they say it only because someone read a sentence of prose beside a table and went to find out what it was doing there. Neither table asked for that, and neither could: a table has no way to tell you which of five things its blank-looking cell means.
 
 None of this is unique to electoral history. Anyone building on a record they didn't compile runs into the same thing. Whoever did compile it made decisions about what to leave out, and those decisions are almost always explained somewhere that isn't the data: a codebook, a footnote, a sentence beside a table. The numbers arrive without them.
 
