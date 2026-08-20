@@ -7,9 +7,9 @@ In the spirit of checks and balances &mdash; a pillar of our democratic republic
 The project is broken down into several steps, with the first two focused on data collection and validation, while the third focuses on analyzing the historical data under different approaches to determining the election outcome:
   1. [X] **Electoral College data** &mdash; scrapes electoral college vote data for **every** US Presidential Election from 1824 to the present from the [National Archives website](https://www.archives.gov/electoral-college/results), and writes the data to a data warehouse schema in an `elections` Postgres database. The two contested Reconstruction elections were the last holdouts and are now in: 1868 carries Georgia's contested nine electoral votes flagged as `disputed` rather than silently resolved, and 1872 synthesizes the 17 cast-then-rejected votes the Archives table omits, so the fact can state both what electors **cast** and what Congress **counted**. Originally the `step1_electoral_college_data.ipynb` notebook; now also runnable as the installable `usvote` package (see [Configuration](#configuration)).
   2. [X] **Popular vote data** &mdash; ingests popular-vote results from two sources &mdash; the [MIT Election Lab](https://electionlab.mit.edu/) 1976&ndash;2024 dataset and the historical [UCSB American Presidency Project](https://www.presidency.ucsb.edu/) pages &mdash; reconciles them onto the same candidate and state keys as Step 1, adds them to a shared fact table in the data warehouse schema built in Step 1, and joins the result back onto the Electoral College spine (analysis of the discrepancies is Step 3).
-  3. [ ] **Voting data analysis** &mdash; performs the voting analysis, develops visualizations, and creates objects within a data mart schema to support dashboard development.
+  3. [~] **Voting data analysis** &mdash; the three-method computation core is **built**: `usvote/hybrid.py` rolls the resolved join view up to per-`(year, candidate)` national outcomes and derives all three scores &mdash; the Electoral College share, the popular-vote share, and the **hybrid** average of the two (D037) &mdash; alongside a per-election summary carrying the three winners, whether the EC produced a constitutional majority at all (`ec_determinative`), and how much of the country's electoral weight the popular vote actually covers that year. Flip detection and the three-method margins (#123), materializing the results as views (#124), the visualizations, and the data mart schema for dashboards are the remainder.
 
-> **Now an installable package.** What began as Step 1's notebook has grown into an installable `usvote` Python package under `src/` (decision D003). It now spans the Electoral College spine (`usvote/`), both popular-vote sources (`usvote/mit/`, `usvote/ucsb/`) over a shared set of PV contracts (`usvote/pv/`), the EC&harr;PV join seam (`usvote/join.py`), and a `usvote/warehouse.py` composition root that builds the whole warehouse in one command. The Step&nbsp;1 notebook is retained while the "keep the notebook vs. fully migrate off it" decision (D003) stays open. See [CLAUDE.md](CLAUDE.md) for the module-to-notebook-section map and the `uv`/pytest tooling, and the [`docs/`](docs/) folder &mdash; [ROADMAP](docs/ROADMAP.md), [canonical-keys](docs/canonical-keys.md), [corrections](docs/corrections.md) &mdash; for the design decisions and data catalogs.
+> **Now an installable package.** What began as Step 1's notebook has grown into an installable `usvote` Python package under `src/` (decision D003). It now spans the Electoral College spine (`usvote/`), both popular-vote sources (`usvote/mit/`, `usvote/ucsb/`) over a shared set of PV contracts (`usvote/pv/`), the EC&harr;PV join seam (`usvote/join.py`), the three-method computation core that answers the project's own question (`usvote/hybrid.py`), and a `usvote/warehouse.py` composition root that builds the whole warehouse in one command. The Step&nbsp;1 notebook is retained while the "keep the notebook vs. fully migrate off it" decision (D003) stays open. See [CLAUDE.md](CLAUDE.md) for the module-to-notebook-section map and the `uv`/pytest tooling, and the [`docs/`](docs/) folder &mdash; [ROADMAP](docs/ROADMAP.md), [canonical-keys](docs/canonical-keys.md), [corrections](docs/corrections.md) &mdash; for the design decisions and data catalogs.
 
 The data model for the data warehouse loosely follows a star schema design &mdash; appropriate for historical data of moderate size &mdash; with dimension tables that organize data for the Presidential Candidates and for the US States, and a fact table (`dwh.votes`) that contains the Electoral College Votes by State data for each Presidential Election.
 
@@ -202,6 +202,42 @@ $ python -m usvote --replace  # destructive: drop and recreate the dwh schema fi
 
 You are prompted for `PGPASSWORD` at runtime unless it is already set in the
 environment.
+
+
+## The blog series and its publishing pipeline
+
+The findings are written up as a public blog series, **"Counted, Not Assumed"** &mdash; two
+centuries of presidential elections read from what the record actually says instead of the
+shorthand everyone repeats. It is live at
+**<https://frederick-douglas-pearce.github.io/blog/>**. Published post sources are
+version-controlled in [`posts/`](posts/) and sync to a Jekyll GitHub Pages site;
+pre-publication drafts and outreach notes stay in `social/`, which is deliberately
+git-ignored so a half-finished post about a claim that turns out to be wrong never
+enters this repo's history.
+
+Publishing is automated end to end, with the work split so that no single piece can ship a
+post the site would reject:
+
+| Piece | What it does |
+|---|---|
+| [`tooling/publish-to-pages.py`](tooling/publish-to-pages.py) | Transforms frontmatter to the Pages site's conventions, resolves and copies each post's Open Graph share card |
+| [`.github/workflows/pages-sync.yml`](.github/workflows/pages-sync.yml) | Cross-repo auth and a reconcile-retry push to the Pages repo on every merge to `main` |
+| [`tooling/check-og-cards.py`](tooling/check-og-cards.py) | PR guard &mdash; runs the publisher's *own* validator, so a card-less post fails on the pull request rather than in production |
+| [`.github/workflows/prettier.yml`](.github/workflows/prettier.yml) | PR guard &mdash; `posts/` must be Prettier-clean in the site's exact dialect and pinned versions |
+| [`tooling/render-og-card.py`](tooling/render-og-card.py) | Renders each post's 1200&times;630 share card from a committable TOML brief, so a card can be re-generated without re-prompting |
+
+Four properties are load-bearing. **Card resolution is fail-closed, never a glob** &mdash; a
+missing, absolute, or repo-escaping path, a missing image, or two posts colliding on one
+target all abort with zero writes, because a wrong image shipped under a green build is the
+failure this design exists to prevent. **Idempotency is content-compare, not push-diff**, so
+a re-run makes no spurious changes and no empty commits. **Atomicity is
+validate-all-then-write**, so one bad post cannot half-publish a batch. And **the PR guard
+reuses the publisher's own plan builder** rather than re-deriving its rules, so the two
+cannot drift and a future fail-closed condition is inherited for free.
+
+Two editorial guardrails apply to everything published: nothing critical of a data source
+is ever published (findings about the National Archives, MIT Election Lab, or UCSB go to
+them privately), and every historical claim is checkable and gets checked before it ships.
 
 
 ## License
