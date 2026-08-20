@@ -8,7 +8,9 @@ Analyzes historical US Presidential Election data (**1824–present, complete** 
 
 - `step1_electoral_college_data.ipynb` — **implemented.** Scrapes Electoral College vote data from the [National Archives](https://www.archives.gov/electoral-college/results) and loads it into the `dwh` (data warehouse) schema.
 - `step2_popular_vote_data.ipynb` — planned. Popular vote data from UC Santa Barbara, added to the same warehouse tables.
-- `step3_voting_data_analysis.ipynb` — planned. Analysis, visualizations, and a data mart schema for dashboards.
+- `step3_voting_data_analysis.ipynb` — planned. Analysis, visualizations, and a data mart schema for dashboards. The three-method computation core that this step's analysis rests on is **already built** outside the notebook, in `usvote/hybrid.py` (see below).
+
+Alongside the pipeline the repo carries a **publishing workstream** — the "Counted, Not Assumed" blog series in [`posts/`](posts/), its drafts in the git-ignored `social/`, and the scripts and CI gates that ship them. It shares no code with the pipeline; see [Publishing](#publishing-posts-social-tooling--a-second-non-pipeline-workstream).
 
 ## Environment & Running
 
@@ -157,6 +159,17 @@ Loose star schema: two dimension tables + one fact table. Column definitions and
 ### `db_tools.py` — `DBC` class
 
 Thin psycopg2 wrapper (schema/table create/drop, `insert_df_into_table` via `execute_values`, `select_query_to_df`). Constructor exits the process on connection failure. This is the only importable module; the notebooks depend on it.
+
+### Publishing (`posts/`, `social/`, `tooling/`) — a second, non-pipeline workstream
+
+The repo has a **writing** side that shares nothing with the data pipeline except its subject, and it has its own conventions and CI gates. Findings are published as the **"Counted, Not Assumed"** blog series, live at <https://frederick-douglas-pearce.github.io/blog/>.
+
+- **[`posts/`](posts/) is tracked and holds published posts only**; its [README](posts/README.md) is the authoritative spec for frontmatter, share cards, the Prettier gate, and the publish path. Read it before touching anything under `posts/`.
+- **`social/` is git-ignored working state** — drafts, the candidate ledger, the series outline. Deliberate: a half-finished post about a claim that turns out to be wrong should not be in a public repo's history. Two exceptions are tracked: `social/images/` (rendered OG cards plus their committable TOML briefs) and the published post itself, which moves to `posts/`.
+- **`tooling/`** holds the three publishing scripts: `publish-to-pages.py` (frontmatter transform + OG resolution + content-compare, syncing to a separate Jekyll Pages repo), `check-og-cards.py` (the PR guard, which reuses the publisher's own `build_plan` rather than re-deriving its rules), and `render-og-card.py` (1200×630 cards from a TOML brief).
+- **Three of the five CI workflows are publishing gates**, not pipeline CI: `pages-sync.yml` (cross-repo push on merge to `main`), `og-card-guard.yml`, and `prettier.yml`. The Prettier gate covers **`posts/` only** and pins the *exact* versions the Pages site pins — caret ranges would let it drift a version away from the site's, which is the one way it can pass here and fail there.
+- **Two editorial guardrails are absolute.** Nothing critical of a data source is ever published (findings about the National Archives, MIT Election Lab, or UCSB go to them privately via the ledger's `outreach` lane) — and every historical claim is checked before publishing. Both are enforced by review, not by CI.
+- **The `marketer` agent drafts public-facing copy; the parent agent handles anything landing in the repo itself** (README, commit messages, PR bodies). Keep that split — it is in the agent's own definition. Agent output is saved verbatim as `social/drafts/<date>-<slug>.raw.md` alongside the edited version, because the raw-vs-shipped diff is what calibrates the agent.
 
 ## Working conventions
 
