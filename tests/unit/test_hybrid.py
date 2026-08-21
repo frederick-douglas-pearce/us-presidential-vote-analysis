@@ -1496,21 +1496,45 @@ class TestMargins:
     def test_the_ec_margin_reads_the_policy_invariant_share(self) -> None:
         """``ec_margin`` comes from ``ec_share_full``, never the policy-selected share.
 
-        Under coverage policy (c) the restricted EC share can re-rank candidates, which
-        would leave a reported EC margin describing a different ordering than the
-        ``ec_winner`` and ``ec_determinative`` computed from ``ec_share_full``. Pinned by
-        computing the margin the frame's own ``ec_share_full`` column implies and
-        requiring the summary to agree.
+        **Built under policy (c), because under (b) this test could not fail.**
+        ``mismatched`` sets ``ec_share_hybrid == ec_share_full`` by construction, so a
+        builder reading the wrong column produces identical output on every natural
+        fixture — the same trap
+        :meth:`TestEcDeterminativeBoundary.test_determinative_reads_the_full_share_never_the_hybrid_share`
+        documents one class up, and the reason it injects a divergence rather than
+        trusting the default.
+
+        Here the divergence comes from the **real seam** rather than an overwrite:
+        ``restricted`` narrows both halves of the EC share to 1824's popular-vote states.
+        That genuinely re-ranks the field — Clay overtakes Crawford — though **at ranks
+        three and four, so the top-2 pair is unchanged**; what moves is the *gap*, 5.75
+        points against 18.95. The gap is therefore what discriminates, and asserting the
+        top-2 *identity* would prove nothing here.
         """
         df, roster = frame_1824()
-        frame = hybrid.build_hybrid_frame(df, roster)
-        row = hybrid.build_hybrid_summary(frame).iloc[0]
-        top2 = frame["ec_share_full"].sort_values(ascending=False).head(2)
-        assert row["ec_margin"] == pytest.approx(
-            (top2.iloc[0] - top2.iloc[1]) * 100
+        full = hybrid.build_hybrid_frame(df, roster)
+        restricted = hybrid.build_hybrid_frame(
+            df, roster, policy=hybrid.COVERAGE_POLICY_RESTRICTED
         )
-        # 1824: Jackson 99, Adams 84, over the real 261-vote appointed allotment.
+        # The hazard is real on this fixture, not hypothetical: the policy-selected share
+        # is a different column with a different ordering below the top two.
+        assert not restricted["ec_share_hybrid"].equals(restricted["ec_share_full"])
+        by_hybrid = restricted.sort_values("ec_share_hybrid", ascending=False)
+        by_full = restricted.sort_values("ec_share_full", ascending=False)
+        assert list(by_hybrid["candidate"]) != list(by_full["candidate"])
+
+        row = hybrid.build_hybrid_summary(restricted).iloc[0]
+        # 1824: Jackson 99, Adams 84, over the real 261-vote appointed allotment —
+        # unchanged by the policy, which is the property under test.
         assert row["ec_margin"] == pytest.approx((99 - 84) / 261 * 100)
+        wrong = (
+            by_hybrid["ec_share_hybrid"].iloc[0] - by_hybrid["ec_share_hybrid"].iloc[1]
+        ) * 100
+        assert row["ec_margin"] != pytest.approx(wrong)
+        # The policy-invariant answer is identical to the one policy (b) reports.
+        assert row["ec_margin"] == pytest.approx(
+            hybrid.build_hybrid_summary(full).iloc[0]["ec_margin"]
+        )
 
     def test_1824_computes_both_flips_and_all_three_margins(self) -> None:
         """AC-5: the contingent election is computed **and** flagged, never withheld.
