@@ -1223,6 +1223,12 @@ class TestKnownFlips:
         # The hybrid does NOT flip 2016 — Trump's EC margin outweighs the PV gap.
         assert row["hybrid_winner"] == "Trump"
         assert row["ec_determinative"]
+        # #123: the same two facts, as the per-election flags the thesis reads.
+        assert row["pv_flip"]
+        assert not row["hybrid_flip"]
+        # A flip that is False must be *populated* False, never NULL — "the method
+        # agreed" and "the method had nothing to say" are different answers.
+        assert pd.notna(row["hybrid_flip"])
 
     def test_a_hybrid_flip_is_representable(self) -> None:
         """Guard against a computation that can only ever agree with the EC.
@@ -1250,6 +1256,55 @@ class TestKnownFlips:
         assert row["ec_winner"] == "A"
         assert row["pv_winner"] == "B"
         assert row["hybrid_winner"] == "B"
+        assert row["pv_flip"]
+        assert row["hybrid_flip"]
+
+    def test_2000_pv_flips_the_electoral_outcome(self) -> None:
+        """A real 2000 six-state subset: Bush takes the EC, Gore the popular vote.
+
+        Real allotments and real two-way per-state popular votes, taken from this
+        project's own MIT-sourced surface (``/v1/elections/2000``) rather than
+        transcribed from memory. Bush 90 electoral votes to Gore's 87 over a 177-vote
+        appointed subtotal; Gore 18,400,507 popular votes to Bush's 17,279,431.
+
+        **``hybrid_flip`` is deliberately NOT asserted here, and the omission is the
+        point.** ``state_total_votes`` is the two-way total (the fixture omits third
+        parties), which inflates both shares — and 2000 is the year where that changes
+        the hybrid's answer rather than just its precision. On this two-way subset the
+        hybrid goes to Gore; on the **real national** figures it does not, because Nader's
+        votes sit in the denominator and dilute Gore's popular-vote share
+        (Bush (271/538 + 50456169/105593982) / 2 = 0.4908 against Gore's 0.4887). Pinning
+        a hybrid flip here would teach the opposite of the real result. The live-warehouse
+        hybrid pin belongs to #124; what *is* real and asserted here is the ordering.
+        """
+        real_2000 = {
+            #             EV  winner  Bush pv    Gore pv
+            "Texas": (32, "Bush", 3799639, 2433746),
+            "Florida": (25, "Bush", 2912790, 2912253),
+            "Ohio": (21, "Bush", 2350363, 2183628),
+            "Indiana": (12, "Bush", 1245836, 901980),
+            "California": (54, "Gore", 4567429, 5861203),
+            "New York": (33, "Gore", 2403374, 4107697),
+        }
+        rows: list[dict[str, object]] = []
+        for state, (ev, winner, bush_pv, gore_pv) in real_2000.items():
+            total = float(bush_pv + gore_pv)
+            for candidate, pv in (("Bush", bush_pv), ("Gore", gore_pv)):
+                rows.append({
+                    "year": 2000, "state": state, "candidate": candidate,
+                    "total_electoral_votes": ev,
+                    "president_electoral_votes": ev if candidate == winner else 0,
+                    "candidate_votes": float(pv), "state_total_votes": total,
+                })
+        df = ec_pv_frame(rows)
+        row = hybrid.build_hybrid_summary(
+            hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        ).iloc[0]
+        assert row["ec_winner"] == "Bush"
+        assert row["pv_winner"] == "Gore"
+        assert row["pv_flip"]
+        # 90 vs 87 of 177 appointed — the closest EC margin in the fixture set.
+        assert row["ec_margin"] == pytest.approx((90 - 87) / 177 * 100)
 
 
 # --- NULL handling ---------------------------------------------------------
@@ -1308,6 +1363,186 @@ class TestNullHandling:
         # ...but C's electoral votes still count toward the appointed denominator's cast
         # total and keep A off a majority basis of its own.
         assert c["ec_share_full"] == pytest.approx(1 / 25)
+
+    def test_a_null_method_winner_yields_a_null_flip_and_never_true(self) -> None:
+        """#123 AC-1, and the specific way it is easy to get catastrophically wrong.
+
+        The obvious spelling of a flip is ``pv_winner != ec_winner``. It is wrong here,
+        and not in the direction the criterion warns about. ``_winner`` returns a Python
+        ``None`` for an all-NULL year — not ``pd.NA`` — so ``!=`` does not propagate to
+        NULL the way it would over a pandas column: ``None != "A"`` is plain ``True``.
+        A bare ``!=`` would therefore report **a flip** on every pre-1976 year of a
+        warehouse built without UCSB, inventing the project's headline result out of a
+        coverage gap. The criterion forbids ``False`` here; ``True`` is worse.
+
+        So this asserts all three states explicitly: NULL, and not ``True``, and not
+        ``False``.
+        """
+        df = ec_pv_frame([
+            {"year": 1900, "state": "Ohio", "candidate": c,
+             "total_electoral_votes": 23,
+             "president_electoral_votes": 23 if c == "A" else 0}
+            for c in ("A", "B")
+        ])
+        frame = hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        row = hybrid.build_hybrid_summary(frame).iloc[0]
+
+        assert pd.isna(row["pv_winner"])
+        for column in ("pv_flip", "hybrid_flip"):
+            assert pd.isna(row[column]), f"{column} must be NULL on a no-PV year"
+            assert row[column] is not True
+            assert row[column] is not False
+        # The EC half is unaffected — a coverage gap in one method does not blank another.
+        assert row["ec_winner"] == "A"
+        assert pd.notna(row["ec_margin"])
+
+
+# --- #123: the three percentage-point margins -------------------------------
+
+
+class TestMargins:
+    def test_the_margin_is_percentage_points_not_a_fraction(self) -> None:
+        """D037 fixes the unit. A 60/40 split is a **20**-point margin, not 0.2."""
+        df = ec_pv_frame([
+            {"year": 1900, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 10, "president_electoral_votes": 6,
+             "candidate_votes": 600.0, "state_total_votes": 1000.0},
+            {"year": 1900, "state": "Ohio", "candidate": "B",
+             "total_electoral_votes": 10, "president_electoral_votes": 4,
+             "candidate_votes": 400.0, "state_total_votes": 1000.0},
+        ])
+        row = hybrid.build_hybrid_summary(
+            hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        ).iloc[0]
+        assert row["ec_margin"] == pytest.approx(20.0)
+        assert row["pv_margin"] == pytest.approx(20.0)
+        assert row["hybrid_margin"] == pytest.approx(20.0)
+
+    def test_each_method_takes_its_top_two_from_its_own_non_null_set(self) -> None:
+        """The shape real data actually has, and the reason each margin gets its own series.
+
+        A corpus pass over this project's public API found that **4 of the 13
+        redistributable years (1976, 1988, 2004, 2016) carry a candidate with electoral
+        votes and no popular vote at all** — faithless electors and "Other" rows; in 2016
+        five of the seven rows are such candidates. So a year's EC top-2 and PV top-2 are
+        genuinely drawn from different candidate sets, and a single filtered frame shared
+        across the three margins would silently compute at least one of them over the
+        wrong population.
+
+        Here C holds the *second-largest* electoral vote count while carrying no popular
+        vote. The EC margin must be A-over-C; the PV margin must skip C entirely and be
+        A-over-B.
+        """
+        df = ec_pv_frame([
+            {"year": 1976, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 100, "president_electoral_votes": 60,
+             "candidate_votes": 600.0, "state_total_votes": 1000.0},
+            {"year": 1976, "state": "Ohio", "candidate": "B",
+             "total_electoral_votes": 100, "president_electoral_votes": 10,
+             "candidate_votes": 400.0, "state_total_votes": 1000.0},
+            # Second on electoral votes, absent from the popular vote entirely.
+            {"year": 1976, "state": "Ohio", "candidate": "C",
+             "total_electoral_votes": 100, "president_electoral_votes": 30,
+             "candidate_votes": np.nan, "state_total_votes": 1000.0},
+        ])
+        row = hybrid.build_hybrid_summary(
+            hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        ).iloc[0]
+        # EC: A 60 vs C 30 — C is the runner-up, so the gap is 30 points, not A-over-B's 50.
+        assert row["ec_margin"] == pytest.approx(30.0)
+        # PV: C is not in the running at all, so the gap is A 60% vs B 40%.
+        assert row["pv_margin"] == pytest.approx(20.0)
+
+    def test_an_all_null_method_yields_a_null_margin_and_never_a_zero(self) -> None:
+        """AC-3's "gracefully": absent, not zero. A 0.0 margin would read as a dead heat."""
+        df = ec_pv_frame([
+            {"year": 1900, "state": "Ohio", "candidate": c,
+             "total_electoral_votes": 23,
+             "president_electoral_votes": 23 if c == "A" else 0}
+            for c in ("A", "B")
+        ])
+        row = hybrid.build_hybrid_summary(
+            hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        ).iloc[0]
+        assert pd.isna(row["pv_margin"])
+        assert pd.isna(row["hybrid_margin"])
+        assert row["pv_margin"] != 0
+
+    def test_a_lone_scored_candidate_yields_a_null_margin_not_its_own_share(self) -> None:
+        """A "top-2 gap" is undefined with one entry.
+
+        The tempting fallback is ``top1 - 0``, which would publish a **share** under a
+        column named margin — a wrong number rather than an absent one. Here B holds
+        electoral votes but no popular vote, leaving exactly one popular-vote-scored
+        candidate, whose share is ~100%: a ``top1 - 0`` implementation would report a
+        100-point popular-vote margin for an election nobody contested on that measure.
+        """
+        df = ec_pv_frame([
+            {"year": 1976, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 10, "president_electoral_votes": 6,
+             "candidate_votes": 1000.0, "state_total_votes": 1000.0},
+            {"year": 1976, "state": "Ohio", "candidate": "B",
+             "total_electoral_votes": 10, "president_electoral_votes": 4,
+             "candidate_votes": np.nan, "state_total_votes": 1000.0},
+        ])
+        frame = hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        assert frame["pv_share"].notna().sum() == 1
+        row = hybrid.build_hybrid_summary(frame).iloc[0]
+        assert pd.isna(row["pv_margin"])
+        assert row["pv_margin"] != 100.0
+        # The EC measure has two scored candidates, so it still reports.
+        assert row["ec_margin"] == pytest.approx(20.0)
+
+    def test_the_ec_margin_reads_the_policy_invariant_share(self) -> None:
+        """``ec_margin`` comes from ``ec_share_full``, never the policy-selected share.
+
+        Under coverage policy (c) the restricted EC share can re-rank candidates, which
+        would leave a reported EC margin describing a different ordering than the
+        ``ec_winner`` and ``ec_determinative`` computed from ``ec_share_full``. Pinned by
+        computing the margin the frame's own ``ec_share_full`` column implies and
+        requiring the summary to agree.
+        """
+        df, roster = frame_1824()
+        frame = hybrid.build_hybrid_frame(df, roster)
+        row = hybrid.build_hybrid_summary(frame).iloc[0]
+        top2 = frame["ec_share_full"].sort_values(ascending=False).head(2)
+        assert row["ec_margin"] == pytest.approx(
+            (top2.iloc[0] - top2.iloc[1]) * 100
+        )
+        # 1824: Jackson 99, Adams 84, over the real 261-vote appointed allotment.
+        assert row["ec_margin"] == pytest.approx((99 - 84) / 261 * 100)
+
+    def test_1824_computes_both_flips_and_all_three_margins(self) -> None:
+        """AC-5: the contingent election is computed **and** flagged, never withheld.
+
+        Jackson leads all three methods, so both flips are a populated ``False`` — which
+        is a different statement from the NULL a no-coverage year produces, and the
+        distinction is the whole reason flips are nullable. The two orthogonal facts stay
+        true beside them: no EC majority, and partial popular-vote coverage.
+        """
+        df, roster = frame_1824()
+        row = hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(df, roster)).iloc[0]
+        assert row["ec_winner"] == "Jackson"
+        assert row["pv_winner"] == "Jackson"
+        assert row["hybrid_winner"] == "Jackson"
+        for column in ("pv_flip", "hybrid_flip"):
+            assert pd.notna(row[column])
+            assert not row[column]
+        # Populated, not withheld — and the two orthogonal flags still hold.
+        assert not row["ec_determinative"]
+        assert row["pv_coverage"] == pytest.approx(190 / 261)
+        for column in ("ec_margin", "pv_margin", "hybrid_margin"):
+            assert pd.notna(row[column])
+            assert row[column] > 0
+        # Real 1824 national popular vote: Jackson 151,271 to Adams' 113,122 of 352,780.
+        assert row["pv_margin"] == pytest.approx((151271 - 113122) / 352780 * 100)
+
+    def test_a_margin_is_never_negative(self) -> None:
+        """Top-2 ordering, not a signed gap against a fixed candidate."""
+        df, roster = frame_1824()
+        summary = hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(df, roster))
+        for column in ("ec_margin", "pv_margin", "hybrid_margin"):
+            assert (summary[column].dropna() >= 0).all()
 
 
 # --- the tie guard (kept separable for #124) --------------------------------
