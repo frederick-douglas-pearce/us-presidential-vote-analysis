@@ -15,8 +15,9 @@ serve-time boundary forbids (both enforced by tests).
 
 **Two grains, two builders.** :func:`build_hybrid_frame` is per ``(year, candidate)`` —
 the scores; :func:`build_hybrid_summary` is per ``(year)`` — the winners, the D041
-``ec_determinative`` flag, and the coverage flag. Flip detection and the three-method
-margins are **#123**, not here; view materialization is **#124**.
+``ec_determinative`` flag, the coverage flag, and — as of **#123** — the two flips
+(``pv_flip`` / ``hybrid_flip``, each method's winner against the EC baseline) and the
+three percentage-point margins. View materialization is **#124**.
 
 **This module ships no SQL, deliberately** (architect ruling, Fred 2026-07-28).
 ``join.py`` pairs a SQL builder with a pandas oracle because the same epic
@@ -159,7 +160,20 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
     "took_office",
 )
 
-#: The per-election summary's column contract, in order.
+#: The per-election summary's column contract, in order: identity, the three winners and
+#: the two E7-S2 flags, then #123's flips and margins.
+#:
+#: **Append, never insert**, and the order is pinned by a hand-written literal in
+#: ``TestShape.test_the_summary_column_order_is_pinned_to_a_literal`` — the twin of the
+#: ``EC_PV_COLUMNS[:15]`` pin in ``tests/unit/test_join.py``. It has to be a literal:
+#: this frame is built with ``columns=list(HYBRID_SUMMARY_COLUMNS)`` below, so any
+#: assert comparing the frame against the constant is circular and passes under a
+#: reorder or a mid-list insert alike. #124 materializes this tuple as the
+#: ``hybrid_summary`` view, after which the D047 constraint on
+#: :data:`usvote.join.EC_PV_COLUMNS` applies here too — ``CREATE OR REPLACE VIEW`` can
+#: only add trailing columns, so a mid-list insert breaks a rebuild against an existing
+#: warehouse. That SQL constraint does not bite until #124; the contract-drift hazard on
+#: the constant bites on every edit from now on, which is what the literal covers.
 HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "year",
     "ec_denominator",
@@ -168,6 +182,11 @@ HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "hybrid_winner",
     "ec_determinative",
     "pv_coverage",
+    "pv_flip",
+    "hybrid_flip",
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
 )
 
 #: The columns this module reads off the resolved join view. A strict subset of
@@ -607,6 +626,53 @@ def _winner(scores: pd.Series, names: pd.Series) -> str | None:
     return str(names.loc[ranked.idxmax()])
 
 
+def _flip(method_winner: str | None, ec_winner: str | None) -> object:
+    """``True`` when a method names a different winner than the EC baseline; else NULL.
+
+    **Guarded explicitly rather than written as ``method_winner != ec_winner``**, and
+    the difference is not stylistic. :func:`_winner` returns a Python ``None`` for an
+    all-NULL year, not ``pd.NA``, so ``!=`` does **not** propagate to NULL the way it
+    would over a pandas column — ``None != "Trump"`` is plain ``True``. A bare ``!=``
+    would therefore report a *flip* for every year carrying no popular vote at all:
+    worse than the ``false`` #123 forbids, because it invents a headline result out of
+    a coverage gap.
+
+    A NULL ``ec_winner`` is likewise NULL, not ``True`` — a flip is defined against the
+    EC baseline, and with no baseline there is nothing to differ from. That branch is
+    **defensive and unreachable on real data**: the EC fact is dense (``parse.py`` reads
+    the Archives' ``-`` as ``0``, so a loser is an explicit 0-EV row) and the appointed
+    denominator is positive, so every in-scope year resolves an EC winner.
+    """
+    if method_winner is None or ec_winner is None:
+        return pd.NA
+    return method_winner != ec_winner
+
+
+def _margin(scores: pd.Series) -> float | None:
+    """The top-2 gap in ``scores``, in percentage points; ``None`` under fewer than two.
+
+    Percentage points only (D037) — the scores are already ratios, so the gap is scaled
+    by 100 exactly once. 2000's electoral margin reads ``0.93``, never ``0.0093``.
+
+    **Computed over that method's own non-NULL entries**, which is why each margin takes
+    its own series rather than sharing one filtered frame: the three methods' top-2 sets
+    genuinely differ within a single year. 2016 is the live case — five of its seven
+    rows are faithless-elector and "Other" candidates carrying electoral votes but no
+    popular vote, so the EC gap is taken over seven candidates and the popular-vote gap
+    over two.
+
+    **Fewer than two scored candidates yields ``None``**, covering both the all-NULL
+    year (a warehouse built without UCSB has no pre-1976 popular vote) and the
+    lone-candidate year. A "top-2 gap" is undefined with one entry, and falling back
+    to ``top1 - 0`` would report a *share* under a column named margin — a wrong number
+    rather than an absent one.
+    """
+    ranked = scores.dropna().sort_values(ascending=False)
+    if len(ranked) < 2:
+        return None
+    return float((ranked.iloc[0] - ranked.iloc[1]) * 100.0)
+
+
 def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
     """Per-election winners, the D041 ``ec_determinative`` flag, and the coverage flag.
 
@@ -624,12 +690,35 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
     ``ec_determinative`` and ``pv_coverage`` are **orthogonal** — 1824 is both "EC not
     determinative" and "partial PV coverage", two separate true facts.
 
-    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). Flips and
-    margins are #123.
+    **The flips** (#123) answer the thesis question (D001) per election: did this method
+    name a different winner than the Electoral College? The EC baseline is the rank-1
+    electoral-vote leader — ``argmax(ec_share_full)``, which
+    :func:`assert_ec_winner_matches_rank` cross-checks against the spine's
+    ``president_electoral_rank == 1`` — and deliberately **not** ``took_office``, which
+    diverges in a contingent election (1824's rank-1 was Jackson; the House installed
+    Adams). A flip whose method has no winner is NULL, never ``false`` — see
+    :func:`_flip` for why that needs an explicit guard.
+
+    **The three margins** are each method's top-2 gap in percentage points, over that
+    method's own non-NULL scores (:func:`_margin`). ``ec_margin`` reads
+    ``ec_share_full``, not the policy-selected ``ec_share_hybrid``, so it stays
+    coherent with the
+    ``ec_winner`` and ``ec_determinative`` computed from the same column: under coverage
+    policy (c) the hybrid share can re-rank candidates, which would leave a reported EC
+    margin describing a different ordering than the reported EC winner. On the shipped
+    default (b) the two columns are numerically identical, so this only bites under (c).
+    ``hybrid_margin`` reads ``hybrid_score`` and therefore tracks the D037 formula
+    automatically; the asymmetry between the two is deliberate, because they measure
+    different things.
+
+    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). View
+    materialization is #124.
     """
     rows: list[dict[str, object]] = []
     for year, group in hybrid_frame.groupby("year", sort=True):
         ec_winner = _winner(group["ec_share_full"], group["candidate"])
+        pv_winner = _winner(group["pv_share"], group["candidate"])
+        hybrid_winner = _winner(group["hybrid_score"], group["candidate"])
         determinative: object = pd.NA
         if ec_winner is not None:
             leader = group.loc[group["candidate"] == ec_winner, "ec_share_full"].iloc[0]
@@ -638,11 +727,20 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
             "year": year,
             "ec_denominator": group["ec_denominator"].iloc[0],
             "ec_winner": ec_winner,
-            "pv_winner": _winner(group["pv_share"], group["candidate"]),
-            "hybrid_winner": _winner(group["hybrid_score"], group["candidate"]),
+            "pv_winner": pv_winner,
+            "hybrid_winner": hybrid_winner,
             "ec_determinative": determinative,
             "pv_coverage": group["pv_coverage"].iloc[0],
+            "pv_flip": _flip(pv_winner, ec_winner),
+            "hybrid_flip": _flip(hybrid_winner, ec_winner),
+            "ec_margin": _margin(group["ec_share_full"]),
+            "pv_margin": _margin(group["pv_share"]),
+            "hybrid_margin": _margin(group["hybrid_score"]),
         })
+    # ``columns=`` follows the constant rather than validating against it (unlike
+    # ``build_hybrid_frame``'s ``frame[list(...)]``, which raises on a declared-but-
+    # unproduced column). The order is backstopped by the literal-tuple assert named
+    # on HYBRID_SUMMARY_COLUMNS above, which no builder spelling could provide.
     return pd.DataFrame(rows, columns=list(HYBRID_SUMMARY_COLUMNS))
 
 
