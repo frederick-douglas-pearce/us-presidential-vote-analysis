@@ -1574,6 +1574,70 @@ class TestMargins:
         for column in ("ec_margin", "pv_margin", "hybrid_margin"):
             assert (summary[column].dropna() >= 0).all()
 
+    def test_the_null_filter_is_what_returns_none_not_a_propagated_nan(self) -> None:
+        """Calls :func:`hybrid._margin` directly, because the frame cannot tell them apart.
+
+        Dropping the ``dropna()`` survives every frame-level assertion in this file, and
+        the mutation pass confirmed it. The reason is that ``sort_values(ascending=False)``
+        puts NaNs **last**, so the top-2 slice is identical either way; the only thing that
+        changes is the *unscored* case, where the filter returns ``None`` and its absence
+        returns a propagated ``nan``. Both land in a DataFrame column as NaN, so
+        ``pd.isna`` — which every other margin test uses — cannot distinguish them.
+
+        That is the guard-that-guards-nothing shape: the assertions pin the **outcome**
+        while leaving the **mechanism** free. Asserting ``is None`` on the helper itself
+        is the smallest thing that observes which implementation ran, and it is worth
+        observing: ``_margin`` is annotated ``float | None``, ``None`` is what
+        :func:`build_hybrid_summary`'s contract promises, and #124 has to translate
+        "fewer than two scored candidates" into a SQL NULL rather than a NaN.
+        """
+        two_scored = pd.Series([0.6, 0.4], dtype="float64")
+        assert hybrid._margin(two_scored) == pytest.approx(20.0)
+
+        for name, values in (
+            ("one scored, one null", [1.0, np.nan]),
+            ("none scored", [np.nan, np.nan]),
+            ("single row", [0.5]),
+            ("empty", []),
+        ):
+            result = hybrid._margin(pd.Series(values, dtype="float64"))
+            assert result is None, f"{name}: expected None, got {result!r}"
+
+        # NaNs must not displace a real runner-up either — the property that makes the
+        # filter invisible above, asserted rather than assumed.
+        assert hybrid._margin(
+            pd.Series([0.6, np.nan, 0.3], dtype="float64")
+        ) == pytest.approx(30.0)
+
+    def test_hybrid_margin_is_derived_from_the_hybrid_score_not_a_component(self) -> None:
+        """Pins ``hybrid_margin`` to a value no component share produces.
+
+        The mutation pass found this one: pointing ``hybrid_margin`` at ``pv_share``
+        survived the whole suite, because every other test asserting it either uses a
+        fixture where all three margins are coincidentally equal (60/40 gives 20.0 three
+        times) or asserts only ``notna`` / ``> 0``. Nothing pinned it to a
+        *distinguishing* number — the same defect the ``ec_margin`` guard was written for,
+        on the third column.
+
+        1824 distinguishes them: the EC gap is 5.75 points, the popular-vote gap 10.81,
+        and the hybrid's 8.28. The assertion is the D037 identity rather than a
+        re-implementation — under policy (b) the hybrid score is the mean of the two
+        shares, so where the same two candidates lead all three measures (they do here:
+        Jackson then Adams), **the hybrid margin is the mean of the other two margins.**
+        That is a property of the formula, not of the code, so it fails for any
+        implementation reading a single component.
+        """
+        df, roster = frame_1824()
+        row = hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(df, roster)).iloc[0]
+        assert row["hybrid_margin"] == pytest.approx(
+            (row["ec_margin"] + row["pv_margin"]) / 2
+        )
+        # ...and the three are genuinely distinct here, so that identity has content.
+        assert row["ec_margin"] == pytest.approx((99 - 84) / 261 * 100)
+        assert row["pv_margin"] == pytest.approx((151271 - 113122) / 352780 * 100)
+        assert row["hybrid_margin"] != pytest.approx(row["pv_margin"])
+        assert row["hybrid_margin"] != pytest.approx(row["ec_margin"])
+
 
 # --- the tie guard (kept separable for #124) --------------------------------
 
