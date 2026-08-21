@@ -1423,8 +1423,14 @@ class TestMargins:
 
         A corpus pass over this project's public API found that **4 of the 13
         redistributable years (1976, 1988, 2004, 2016) carry a candidate with electoral
-        votes and no popular vote at all** — faithless electors and "Other" rows; in 2016
-        five of the seven rows are such candidates. So a year's EC top-2 and PV top-2 are
+        votes and no popular vote at all** — every one of them a faithless elector's
+        recipient, per :data:`usvote.getters.EC_GETTERS_WITHOUT_POPULAR_VOTE`. In 2016
+        that is five of the seven rows (Powell 3, Sanders, Ron Paul, Kasich, Faith
+        Spotted Eagle), which the Archives Table 2 collapses into unnamed "Other"
+        columns — a printing convention for those same faithless votes, not a separate
+        kind of candidate (``docs/corrections.md``; the 2016 page's own Notes read "There
+        were faithless votes cast for president and vice president in Hawaii, Texas, and
+        Washington"). So a year's EC top-2 and PV top-2 are
         genuinely drawn from different candidate sets, and a single filtered frame shared
         across the three margins would silently compute at least one of them over the
         wrong population.
@@ -1501,8 +1507,8 @@ class TestMargins:
         builder reading the wrong column produces identical output on every natural
         fixture — the same trap
         :meth:`TestEcDeterminativeBoundary.test_determinative_reads_the_full_share_never_the_hybrid_share`
-        documents one class up, and the reason it injects a divergence rather than
-        trusting the default.
+        documents, and the reason it injects a divergence rather than trusting the
+        default.
 
         Here the divergence comes from the **real seam** rather than an overwrite:
         ``restricted`` narrows both halves of the EC share to 1824's popular-vote states.
@@ -1760,6 +1766,51 @@ class TestShape:
         df, roster = frame_1824()
         summary = hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(df, roster))
         assert list(summary.columns) == list(hybrid.HYBRID_SUMMARY_COLUMNS)
+
+    def test_the_summary_column_order_is_pinned_to_a_literal(self) -> None:
+        """The only assert here that can catch a **reorder** of the constant.
+
+        The test above cannot, and neither could any variation on it:
+        ``build_hybrid_summary`` emits ``pd.DataFrame(rows, columns=list(
+        HYBRID_SUMMARY_COLUMNS))``, so the frame follows whatever order the constant
+        declares and comparing the two is circular. Switching the builder to
+        ``frame[list(...)]`` — the spelling ``build_hybrid_frame`` uses — would not help
+        either: it also follows the constant. Only a **hand-written literal** is
+        independent of it.
+
+        Demonstrated, not assumed: with the constant monkeypatched, reordering the
+        leading seven passes the assert above, and so does inserting a bogus column
+        mid-list (it simply arrives all-NaN).
+
+        This is the twin of
+        :func:`tests.unit.test_join.test_the_column_order_is_append_only`'s
+        ``EC_PV_COLUMNS[:15] == (...)`` pin, and it exists for the same reason (D047):
+        #124 materializes this tuple as the ``hybrid_summary`` view, and
+        ``CREATE OR REPLACE VIEW`` can only **add trailing columns** — so a mid-list
+        insert would break ``rebuild_views`` against every warehouse whose views already
+        exist, while passing the whole offline suite. #144 shipped exactly that mistake
+        on ``EC_PV_COLUMNS`` and review, not the suite, caught it.
+
+        A new column is therefore **appended** to the second tuple below.
+        """
+        # The E7-S2 head must still be the head: nothing was inserted before it.
+        assert hybrid.HYBRID_SUMMARY_COLUMNS[:7] == (
+            "year",
+            "ec_denominator",
+            "ec_winner",
+            "pv_winner",
+            "hybrid_winner",
+            "ec_determinative",
+            "pv_coverage",
+        )
+        # ... and #123's flips and margins sit after it, in this order.
+        assert hybrid.HYBRID_SUMMARY_COLUMNS[7:] == (
+            "pv_flip",
+            "hybrid_flip",
+            "ec_margin",
+            "pv_margin",
+            "hybrid_margin",
+        )
 
     def test_every_input_column_the_frame_needs_is_in_the_join_view_contract(
         self,

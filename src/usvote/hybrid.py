@@ -163,13 +163,17 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
 #: The per-election summary's column contract, in order: identity, the three winners and
 #: the two E7-S2 flags, then #123's flips and margins.
 #:
-#: **Append, never insert.** The leading seven are pinned in order by ``TestShape``, and
-#: #124 materializes this tuple as the ``hybrid_summary`` view — after which the D047
-#: constraint on :data:`usvote.join.EC_PV_COLUMNS` applies here too (``CREATE OR
-#: REPLACE VIEW`` can only add trailing columns, so a mid-list insert breaks a rebuild
-#: against an existing warehouse). That constraint does not bite yet — no such view
-#: exists — so the binding reason today is ``TestShape``; establishing the habit before
-#: the view exists is the cheap moment to do it.
+#: **Append, never insert**, and the order is pinned by a hand-written literal in
+#: ``TestShape.test_the_summary_column_order_is_pinned_to_a_literal`` — the twin of the
+#: ``EC_PV_COLUMNS[:15]`` pin in ``tests/unit/test_join.py``. It has to be a literal:
+#: this frame is built with ``columns=list(HYBRID_SUMMARY_COLUMNS)`` below, so any
+#: assert comparing the frame against the constant is circular and passes under a
+#: reorder or a mid-list insert alike. #124 materializes this tuple as the
+#: ``hybrid_summary`` view, after which the D047 constraint on
+#: :data:`usvote.join.EC_PV_COLUMNS` applies here too — ``CREATE OR REPLACE VIEW`` can
+#: only add trailing columns, so a mid-list insert breaks a rebuild against an existing
+#: warehouse. That SQL constraint does not bite until #124; the contract-drift hazard on
+#: the constant bites on every edit from now on, which is what the literal covers.
 HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "year",
     "ec_denominator",
@@ -645,7 +649,7 @@ def _flip(method_winner: str | None, ec_winner: str | None) -> object:
 
 
 def _margin(scores: pd.Series) -> float | None:
-    """The top-2 gap in ``scores``, in **percentage points**; ``None`` under two.
+    """The top-2 gap in ``scores``, in percentage points; ``None`` under fewer than two.
 
     Percentage points only (D037) — the scores are already ratios, so the gap is scaled
     by 100 exactly once. 2000's electoral margin reads ``0.93``, never ``0.0093``.
@@ -733,6 +737,10 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
             "pv_margin": _margin(group["pv_share"]),
             "hybrid_margin": _margin(group["hybrid_score"]),
         })
+    # ``columns=`` follows the constant rather than validating against it (unlike
+    # ``build_hybrid_frame``'s ``frame[list(...)]``, which raises on a declared-but-
+    # unproduced column). The order is backstopped by the literal-tuple assert named
+    # on HYBRID_SUMMARY_COLUMNS above, which no builder spelling could provide.
     return pd.DataFrame(rows, columns=list(HYBRID_SUMMARY_COLUMNS))
 
 
