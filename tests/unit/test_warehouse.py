@@ -208,14 +208,12 @@ def test_rebuild_views_sequences_union_then_join_then_hybrid(
     assert calls == ["union", "join", "hybrid"]
 
 
-def test_a_replace_build_still_rebuilds_the_hybrid_views(
-    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
-) -> None:
-    """``replace=True`` drops the schema (and every view with it), so the rebuild must
-    still be the final step — otherwise E7's analysis surface and #102's read seam
-    (D039) would be missing after a full rebuild.
-    """
-    run_warehouse(dbc, "states.shp", "mit.csv", replace=True)
-
-    assert [name for name, _ in recorder] == ["ec", "mit", "views"]
-    assert recorder[0][1]["replace"] is True, "EC is the destructive step"
+# NOTE: there is deliberately no "a --replace build still rebuilds the hybrid views"
+# test here. The ``recorder`` fixture monkeypatches ``rebuild_views`` wholesale, so such
+# a test structurally *cannot* observe ``create_hybrid_views`` — it would be a near-exact
+# duplicate of ``test_replace_maps_destructive_to_ec_additive_to_pv`` wearing a name that
+# claims more than it checks. The property is covered by composition:
+# ``test_replace_maps_destructive_to_ec_additive_to_pv`` pins that a ``replace`` build
+# still records ``views``, and ``test_rebuild_views_sequences_union_then_join_then_hybrid``
+# pins that ``rebuild_views`` calls ``create_hybrid_views``. The live end-to-end check is
+# ``tests/integration/test_hybrid_views.py``. (Architect ruling, #124 code review.)

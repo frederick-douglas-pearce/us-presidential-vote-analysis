@@ -17,16 +17,28 @@ serve-time boundary forbids (both enforced by tests).
 the scores; :func:`build_hybrid_summary` is per ``(year)`` — the winners, the D041
 ``ec_determinative`` flag, the coverage flag, and — as of **#123** — the two flips
 (``pv_flip`` / ``hybrid_flip``, each method's winner against the EC baseline) and the
-three percentage-point margins. View materialization is **#124**.
+three percentage-point margins. **#124** materialized both as warehouse views.
 
-**This module ships no SQL, deliberately** (architect ruling, Fred 2026-07-28).
-``join.py`` pairs a SQL builder with a pandas oracle because the same epic
-materializes the view; #121 performs no DB write, so a builder here would be dead code —
-and a view cannot ``raise``, so #124 must express the winners as a window rank plus a
-separate precondition query anyway. Two consequences are honoured throughout: every
-step stays relationally expressible (group-by aggregate, join, rank), and **the tie
-check is a separate ``assert_*``, never embedded in a winner column** — so #124's
-translation is mechanical.
+**The module ships SQL as of #124, and the pandas builders became its tested oracle**
+(D050) — the dual-expression pattern of ``join.py`` and ``pv/views.py``:
+:func:`build_hybrid_candidate_sql` and :func:`build_hybrid_summary_sql` drive the four
+live views, while :func:`build_hybrid_frame` / :func:`build_hybrid_summary` are re-run
+against frames read back from them by a differential integration test.
+
+It shipped **no** SQL until then, deliberately (architect ruling, Fred 2026-07-28): #121
+performed no DB write, so a builder would have been dead code. That deferral is why the
+translation was mechanical when it came, and the two constraints it imposed are still
+live and still load-bearing — every step stays relationally expressible (group-by
+aggregate, join, rank), and **the tie check is a separate ``assert_*``, never embedded
+in a winner column**, because a view cannot ``raise``. The winners are a window rank and
+:func:`assert_no_winner_tie` is a view-creation precondition
+(:func:`create_hybrid_views`).
+
+**What the guards do and do not cover.** Those preconditions run over the *pandas* side,
+so a drift between the two expressions passes every one of them; only the differential
+test (``tests/integration/test_hybrid_views.py::
+test_the_live_views_match_the_pandas_oracle``) covers that, which is why it is
+deliberately not corpus-gated.
 
 **The EC share is split in two, and that split is a safety property** (D037/A). Both
 denominators below look parallel and are not:
@@ -137,9 +149,10 @@ CoveragePolicy = Literal["mismatched", "restricted"]
 #: all EC-casting states and the PV share over the popular-vote states, and *flag* the
 #: mismatch with ``pv_coverage < 1.0``. ``restricted`` (c) narrows **both halves of the
 #: EC share** to the popular-vote states so both denominators span one sub-electorate.
-#: (c) is reachable only by an explicit argument; nothing in ``warehouse.py`` or #124
-#: passes one, which is what makes the public surface's treatment fixed rather than
-#: configurable (the property #102 relies on).
+#: (c) is reachable only by an explicit argument; neither ``warehouse.py`` nor the SQL
+#: builders pass one — the views materialize (b) alone (D050 §2) — which is what makes
+#: the public surface's treatment fixed rather than configurable (the property #102
+#: relies on).
 COVERAGE_POLICY_MISMATCHED: CoveragePolicy = "mismatched"
 COVERAGE_POLICY_RESTRICTED: CoveragePolicy = "restricted"
 COVERAGE_POLICIES: tuple[CoveragePolicy, ...] = (
@@ -186,12 +199,14 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
 #: ``EC_PV_COLUMNS[:15]`` pin in ``tests/unit/test_join.py``. It has to be a literal:
 #: this frame is built with ``columns=list(HYBRID_SUMMARY_COLUMNS)`` below, so any
 #: assert comparing the frame against the constant is circular and passes under a
-#: reorder or a mid-list insert alike. #124 materializes this tuple as the
-#: ``hybrid_summary`` view, after which the D047 constraint on
+#: reorder or a mid-list insert alike. #124 materialized this tuple as the
+#: ``hybrid_summary_preferred`` / ``hybrid_summary_redistributable`` views, so the D047
+#: constraint on
 #: :data:`usvote.join.EC_PV_COLUMNS` applies here too — ``CREATE OR REPLACE VIEW`` can
 #: only add trailing columns, so a mid-list insert breaks a rebuild against an existing
-#: warehouse. That SQL constraint does not bite until #124; the contract-drift hazard on
-#: the constant bites on every edit from now on, which is what the literal covers.
+#: warehouse — and with a summary view reading a candidate view, a breaking change now
+#: needs an explicit ``DROP ... CASCADE`` migration rather than a ``CREATE OR REPLACE``
+#: (D050). The literal pin is what catches the drift before the DDL does.
 HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "year",
     "ec_denominator",
@@ -260,8 +275,8 @@ CARRIED_CANDIDATE_COLUMNS: tuple[str, ...] = (
 )
 
 #: The columns this module reads off the resolved join view. A strict subset of
-#: :data:`usvote.join.EC_PV_COLUMNS` (pinned by a test), which is the shape that
-#: actually exists — there is no live hybrid view to pin against until #124.
+#: :data:`usvote.join.EC_PV_COLUMNS` (pinned by a test) — the shape this module *reads*,
+#: as distinct from :data:`HYBRID_CANDIDATE_COLUMNS`, the shape it produces.
 REQUIRED_JOIN_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
@@ -552,7 +567,7 @@ def apply_coverage_policy(
       it is already restricted. (c) therefore moves the EC half alone.
 
     Both branches keep every step relationally expressible (group-by aggregate, join),
-    so #124's translation to SQL stays mechanical.
+    which is what kept #124's translation to SQL mechanical.
 
     ``key`` is the grain ``national`` is on, and exists for the same reason
     :func:`roll_up_national` takes one: (c)'s numerator must be grouped by *whatever*
@@ -726,8 +741,8 @@ def _winner(scores: pd.Series, names: pd.Series) -> str | None:
     """The name maximizing ``scores`` over **non-NULL** entries; ``None`` if all NULL.
 
     Deliberately does **not** raise on a tie — :func:`assert_no_winner_tie` owns that,
-    kept separate so #124 can translate this to a SQL window rank (a view cannot
-    ``raise``) and make the tie check a precondition query.
+    kept separate so #124 could translate this to a SQL window rank (a view cannot
+    ``raise``) and make the tie check a view-creation precondition.
     """
     ranked = scores.dropna()
     if ranked.empty:
@@ -820,8 +835,8 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
     automatically; the asymmetry between the two is deliberate, because they measure
     different things.
 
-    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). View
-    materialization is #124.
+    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). The SQL twin is
+    :func:`build_hybrid_summary_sql`.
     """
     rows: list[dict[str, object]] = []
     for year, group in hybrid_frame.groupby("year", sort=True):
@@ -900,9 +915,10 @@ def assert_no_winner_tie(
     such year.
 
     Kept **separate from the winner derivation** on purpose (architect ruling, Fred
-    2026-07-28): #124 materializes these as SQL views, where a tie surfaces as two
-    rank-1 rows and this becomes a precondition query. A ``raise`` baked into a winner
-    column could not survive that translation.
+    2026-07-28), and #124 is where that paid off: the winners are now a SQL window rank,
+    where a tie would surface as two rank-1 rows and be broken arbitrarily, so this runs
+    as a :func:`create_hybrid_views` precondition instead. A ``raise`` baked into a
+    winner column could not have survived that translation.
     """
     for year, group in hybrid_frame.groupby("year", sort=True):
         scored = group[score_column].dropna()
@@ -1022,9 +1038,10 @@ def build_hybrid_from_db(
     """Read the join view + roster; return ``(candidate frame, election summary)``.
 
     Local Postgres is required here, at **build time only** — the served API never opens
-    this connection (D028). #124 is what materializes the result as
-    ``hybrid_preferred``/``hybrid_redistributable`` plus their ``hybrid_summary``
-    companions and wires the rebuild into ``usvote.warehouse``.
+    this connection (D028). #124 materialized the result as
+    ``hybrid_preferred``/``hybrid_redistributable`` plus their ``hybrid_summary_*``
+    companions (:func:`create_hybrid_views`) and wired the rebuild into
+    ``usvote.warehouse``.
 
     **The roster read is scoped to the surface** — the sources actually present in
     ``view`` — so the MIT-only redistributable surface is not handed UCSB's roster and
@@ -1040,16 +1057,17 @@ def build_hybrid_from_db(
     ones; that was the bug #127 fixed, not a flaw in this scoping.
 
     ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
-    anything else** — #124 materializes the views from this default and ``warehouse.py``
-    never names a policy, which is why the public surface's treatment is fixed rather
-    than configurable (a test pins that no other module even mentions the constants).
+    anything else** — the views are built from this default and ``warehouse.py`` never
+    names a policy, which is why the public surface's treatment is fixed rather than
+    configurable (a test pins that no other module even mentions the constants).
 
     **The guards run here, not only in tests** (code review, #126). They exist to catch
     a denominator bug or a real dead heat, and on live warehouse data build time is the
     only place either can arise — the same reason
     :func:`usvote.join.create_ec_pv_views` runs
     :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
-    its upstream. #124 inherits them as its view-creation preconditions.
+    its upstream. :func:`create_hybrid_views` runs this function for exactly that
+    reason, inheriting all four as its view-creation preconditions.
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
     surface_sources = set(ec_pv_df["source"].dropna().unique())
@@ -1434,13 +1452,22 @@ def create_hybrid_views(
     per-candidate view is created first and the summary second, because the summary
     reads it.
 
-    **The preconditions are the existing guards, run over the live join view** — this is
-    what :func:`build_hybrid_from_db` promised #124 would inherit. Calling it here gives
-    ``assert_ec_shares_le_one``, ``assert_no_winner_tie`` on all three scores,
-    ``assert_ec_winner_matches_rank`` and (inside ``_resolve_roster``) the cross-source
-    status-disagreement check, over exactly the data the view will express. The tie
-    check matters most: a view cannot ``raise``, and a genuine dead heat would
-    otherwise make the window-rank winner an arbitrary pick.
+    **Seven preconditions run before anything is created**, over exactly the data the
+    views will express. Three are checked here directly, on the input join frame:
+
+    - :func:`assert_redistributable_only_source` — redistributable surface only (D030);
+    - :func:`assert_carried_columns_constant` — the columns the SQL carries with
+      ``min``/``max``/``bool_or`` really are constant per candidate-year;
+    - :func:`usvote.join.assert_no_fan_out` — at the **input** grain, the one grain
+      where a raw-union leak is expressible (see :func:`assert_no_fan_out` for why the
+      two output-grain checks cannot see it).
+
+    Four more come from calling :func:`build_hybrid_from_db`, which is what that
+    function promised #124 would inherit: ``assert_ec_shares_le_one``,
+    ``assert_no_winner_tie`` on all three scores, ``assert_ec_winner_matches_rank``, and
+    (inside ``_resolve_roster``) the cross-source status-disagreement check. The tie
+    check matters most: a view cannot ``raise``, and a genuine dead heat would otherwise
+    make the window-rank winner an arbitrary pick.
 
     **Know what these guards do and do not cover.** They validate the *pandas*
     derivation, not the emitted SQL, so a SQL/oracle drift passes every one of them.

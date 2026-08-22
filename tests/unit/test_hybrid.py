@@ -2359,6 +2359,32 @@ class TestCoverageNullEncoding:
         assert "CASE WHEN NOT EXISTS" in sql
         assert "coalesce(sum(a.state_electoral_votes)" in sql
 
+    def test_both_schemas_are_threaded_into_the_emitted_sql(self) -> None:
+        """The join view and the roster each take their schema from their own argument.
+
+        `create_hybrid_views` carries `schema` **and** `roster_schema` as independent
+        defaults, mirroring `usvote.join.create_ec_pv_views`'s `schema`/`pv_schema` pair
+        rather than inventing a `None`-fallback idiom this codebase does not use. That
+        independence is only safe if both are actually threaded — an argument that is
+        accepted and then ignored is worse than one that does not exist, because the
+        caller has been told it works. Nothing tested the threading until code review
+        asked (#124).
+        """
+        sql = hybrid.build_hybrid_candidate_sql(
+            EC_PV_PREFERRED_VIEW, schema="wh", roster_schema="ref"
+        )
+        assert f"wh.{EC_PV_PREFERRED_VIEW}" in sql
+        assert "ref.pv_state_status" in sql
+        assert "dwh." not in sql, "a default leaked past an explicit argument"
+
+    def test_the_summary_builder_needs_only_the_one_schema(self) -> None:
+        """It reads the candidate view, which has already resolved the roster."""
+        sql = hybrid.build_hybrid_summary_sql(
+            hybrid.HYBRID_PREFERRED_VIEW, schema="wh"
+        )
+        assert f"wh.{hybrid.HYBRID_PREFERRED_VIEW}" in sql
+        assert "pv_state_status" not in sql
+
     def test_the_roster_reach_test_matches_the_oracle_s_own(self) -> None:
         """``EXISTS`` over the roster, not ``count()`` over the joined rows.
 

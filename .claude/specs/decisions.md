@@ -2582,10 +2582,22 @@ separable from the tie check because a view cannot `raise`.
    only thing that covers it, and it is deliberately **not** gated on any corpus so it runs on any
    integration box.
 5. **`pv_coverage`'s two nulls keep two spellings in SQL.**
-   `CASE WHEN count(pv_status) = 0 THEN NULL ELSE coalesce(sum(...) FILTER (...), 0) END`. A bare
-   `FILTER` sum returns NULL both for a year the roster does not reach (coverage *unknown*) and
-   for a year it reaches with no popular-vote state (a real `0`), and collapsing those is exactly
-   what D024's no-`unknown` design exists to prevent.
+   `CASE WHEN NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.year = a.year) THEN NULL ELSE
+   coalesce(sum(...) FILTER (...), 0) END`. A bare `FILTER` sum returns NULL both for a year the
+   roster does not reach (coverage *unknown*) and for a year it reaches with no popular-vote
+   state (a real `0`), and collapsing those is exactly what D024's no-`unknown` design exists to
+   prevent.
+
+   **Correction (code review, same PR): the reach test is `EXISTS` over the roster, not `count()`
+   over the joined rows.** This entry first wrote it as
+   `CASE WHEN count(pv_status) = 0 THEN NULL …`, which asks a subtly different question — whether
+   the roster carries the year *for a state the EC spine has that year* — where the pandas oracle
+   asks whether the roster carries the year at all (`roster_years = set(resolved["year"])`). The
+   two agree only while D024 §6 keeps both derived from one spine; where they part, one side
+   reports a known `0.0` and the other an unknown NULL, which is the very distinction this column
+   exists to preserve. `tests/unit/test_hybrid.py::TestCoverageNullEncoding
+   ::test_the_roster_reach_test_matches_the_oracle_s_own` now pins the `EXISTS` form and asserts
+   the `count(...)` form is absent.
 6. **`party` is resolved by `min`, not required constant — a finding from the live corpus.** The
    first version of the carried-column guard required every rolled-up column to be constant within
    `(year, candidate_id)` and **failed the real two-source build**: MIT writes `REPUBLICAN` /
