@@ -235,7 +235,7 @@ HYBRID_REDISTRIBUTABLE_VIEW = "hybrid_redistributable"
 #: The per-election companions. D039 names the seam ``hybrid_redistributable`` "+ its
 #: per-election ``hybrid_summary``" without pinning the summary's spelling, and #124's
 #: acceptance criteria require **one per surface** — a single ``hybrid_summary`` cannot
-#: be both — so the surface is carried in the name (D049).
+#: be both — so the surface is carried in the name (D050).
 HYBRID_SUMMARY_PREFERRED_VIEW = "hybrid_summary_preferred"
 HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW = "hybrid_summary_redistributable"
 
@@ -1175,7 +1175,7 @@ def build_hybrid_candidate_sql(
     integration test re-runs against it.
 
     **Coverage policy (b) only, and that is a property rather than a limitation**
-    (D038/D049). (c) stays reachable only from Python, which is what makes the public
+    (D038/D050). (c) stays reachable only from Python, which is what makes the public
     surface's denominator treatment *fixed* rather than configurable — the property
     #102 relies on. See :func:`apply_coverage_policy`.
 
@@ -1483,7 +1483,7 @@ def create_hybrid_views(
     because the asymmetry is easy to forget when adding a guard later.
 
     ``replace`` defaults to ``True`` (``CREATE OR REPLACE VIEW`` — idempotent and
-    non-destructive). Note the consequence of the new view-on-view dependency (D049): a
+    non-destructive). Note the consequence of the new view-on-view dependency (D050): a
     *breaking* column change to a per-candidate view now needs an explicit
     ``DROP ... CASCADE`` migration, since its summary depends on it.
     """

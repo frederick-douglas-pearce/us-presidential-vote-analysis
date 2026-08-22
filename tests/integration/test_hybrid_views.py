@@ -463,6 +463,13 @@ def test_hybrid_views_over_a_real_full_warehouse(
         # would pass the set-equality above unnoticed.
         others = summary.drop(index=list(PARTIAL_COVERAGE_YEARS))
         assert len(others) == 39
+        # notna() FIRST: a NULL coverage is not `< 1.0`, so the set-equality above would
+        # not catch it, and `(... == 1.0).all()` skips NA by default -- a year whose
+        # coverage came back NULL would pass both legs silently.
+        assert others["pv_coverage"].notna().all(), (
+            "a year has NULL coverage; on the preferred surface every year is covered "
+            f"by the roster: {others.index[others['pv_coverage'].isna()].tolist()}"
+        )
         assert (others["pv_coverage"].astype("Float64") == 1.0).all()
 
         # 1864 reads 1.0, NOT below it: its eleven not_participating states carry 0
@@ -473,12 +480,21 @@ def test_hybrid_views_over_a_real_full_warehouse(
 
         # --- C2: 1824 under BOTH coverage policies ---------------------------
         # The views materialize (b) only; (c) is reachable from Python alone, which is
-        # what keeps the public surface's treatment fixed (D038/D049). So the (c) leg
+        # what keeps the public surface's treatment fixed (D038/D050). So the (c) leg
         # is asserted through the builder over the same live warehouse.
         ec_pv = hybrid.read_ec_pv_join(dbc, view=EC_PV_PREFERRED_VIEW)
         roster = hybrid.read_pv_status_roster(
             dbc, sources=set(ec_pv["source"].dropna().unique())
         )
+        # The margin each policy must produce, from docs/pv-coverage.md's worked 1824
+        # example: (c) restricts Jackson's EC share to the popular-vote states, which
+        # nearly doubles the gap without moving the winner. Pinning the VALUES is the
+        # point of this leg -- `is not None` would pass on a broken NULL margin, because
+        # build_hybrid_summary materializes a null float as NaN and `NaN is not None`.
+        expected_margin = {
+            hybrid.COVERAGE_POLICY_MISMATCHED: 8.09,
+            hybrid.COVERAGE_POLICY_RESTRICTED: 14.69,
+        }
         for policy in hybrid.COVERAGE_POLICIES:
             frame = hybrid.build_hybrid_frame(ec_pv, roster, policy=policy)
             row = hybrid.build_hybrid_summary(frame).set_index("year").loc[1824]
@@ -489,7 +505,12 @@ def test_hybrid_views_over_a_real_full_warehouse(
             # The House installed Adams; the EC leader was Jackson. Both are correct,
             # and ec_determinative is what says the EC did not settle it.
             assert bool(row["ec_determinative"]) is False
-            assert row["hybrid_margin"] is not None
+            # The winner is invariant; the flips are the other half of that claim.
+            assert bool(row["pv_flip"]) is False, f"1824 pv_flip under {policy}"
+            assert bool(row["hybrid_flip"]) is False, f"1824 hybrid_flip under {policy}"
+            assert float(row["hybrid_margin"]) == pytest.approx(
+                expected_margin[policy], abs=0.01
+            ), f"1824 hybrid_margin under policy {policy}"
 
         # --- the public surface carries no UCSB-derived number ---------------
         leak = dbc.select_query_to_df(
