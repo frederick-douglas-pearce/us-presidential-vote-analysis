@@ -2575,7 +2575,7 @@ separable from the tie check because a view cannot `raise`.
    is unit-tested for shape; `build_hybrid_frame` / `build_hybrid_summary` are re-run against
    frames read back from the live views by an integration test.
 4. **The view-creation preconditions are the existing guards, and their limit is stated rather
-   than papered over.** `create_hybrid_views` calls `build_hybrid_from_db` per surface first, so
+   than papered over.** (Plus one guard at the *input* grain — see the fan-out note below.) `create_hybrid_views` calls `build_hybrid_from_db` per surface first, so
    the shares-≤-1, tie, rank-agreement and roster-disagreement checks all run over the live join
    view — as `build_hybrid_from_db` promised #124 would inherit. But those validate the **pandas**
    side, so a SQL/oracle drift passes every one of them. The differential integration test is the
@@ -2594,10 +2594,31 @@ separable from the tie check because a view cannot `raise`.
    MIT's D019 filter drops in one state keeps its UCSB spelling there. One party, two spellings.
    `roll_up_national`'s pandas `first` would pick by row order — not merely different from the
    SQL but non-deterministic — so `party` leaves the constancy guard and is resolved with `min`,
-   which pandas and SQL spell identically and which is stable under row order. Deliberately not
-   "the plurality party", which would make a candidate's displayed label depend on vote counts.
-   `roll_up_national` itself is **untouched**, so the snapshot's `national_rollup` (D029/D037/F)
-   and its content hash are unaffected.
+   which is stable under row order. Deliberately not "the plurality party", which would make a
+   candidate's displayed label depend on vote counts. `roll_up_national` itself is **untouched**,
+   so the snapshot's `national_rollup` (D029/D037/F) and its content hash are unaffected.
+
+   **Correction (code review, same PR): `min` is only the same pick on both sides under a
+   byte-ordered collation.** This entry first claimed the two were "spelled identically in pandas
+   and in SQL". That is false. Python's `min` compares codepoints; Postgres `min(text)` compares
+   under the database collation, and on the usual `en_US.UTF-8` it returns `Republican` where
+   Python returns `REPUBLICAN` — a disagreement on precisely the mixed-spelling case the
+   resolution exists for, and one no offline test could see. The SQL therefore emits
+   `min(party COLLATE "C")`. `min(candidate)` needs no cast: `assert_carried_columns_constant`
+   proves it constant within the group, and `min` over one distinct value is
+   collation-independent. The differential test was seeding a single party spelling everywhere,
+   which is why it passed; it now seeds MIT's `REPUBLICAN` against UCSB's `Republican` on one
+   candidate-year, and fails without the cast.
+
+7. **The output-grain fan-out guards are a contract check, not a live tripwire, and say so.**
+   Both frames `assert_no_fan_out` inspects are group-by outputs, so duplicate keys are
+   impossible by construction; the guard is there against a future builder that stops
+   aggregating. It notably does **not** catch the failure it is naturally read as catching — a
+   raw `dwh.pv_votes` union leaking into the join view still collapses to one row per key here
+   and surfaces as a *doubled* `national_pv_votes` (the denominator is protected by the
+   per-`(year, state)` `max`). That is caught at the grain where it is expressible:
+   `create_hybrid_views` runs `usvote.join.assert_no_fan_out` on the input join frame. An
+   earlier docstring claimed the coverage this one disclaims (code review).
 
 **Consequences:**
 

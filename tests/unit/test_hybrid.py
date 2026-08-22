@@ -2315,6 +2315,23 @@ class TestSqlColumnContract:
         got = projected_aliases("WITH x AS (SELECT 1) SELECT a.one, b AS two FROM x")
         assert got == ["one", "two"]
 
+    def test_party_is_minned_under_a_byte_ordered_collation(self) -> None:
+        """``min(text)`` is collation-dependent; Python's ``min`` is not.
+
+        Under the usual ``en_US.UTF-8`` Postgres returns ``'Republican'`` from
+        ``min('REPUBLICAN','Republican')`` while :func:`usvote.hybrid._resolved_party`
+        returns ``'REPUBLICAN'`` — a silent disagreement on exactly the mixed-spelling
+        case ``party`` is resolved for, and one no offline comparison can see. The
+        ``COLLATE "C"`` is what makes the two the same pick.
+
+        ``min(candidate)`` deliberately carries no such cast:
+        :func:`usvote.hybrid.assert_carried_columns_constant` proves it constant within
+        the group, and ``min`` over a single distinct value is collation-independent.
+        """
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
+        assert 'min(party COLLATE "C") AS party' in sql
+        assert "min(party) AS party" not in sql
+
     def test_every_ratio_casts_before_dividing(self) -> None:
         """Postgres integer-divides ints — an uncast share reads 0 for everyone.
 
@@ -2339,8 +2356,23 @@ class TestCoverageNullEncoding:
     def test_the_sql_distinguishes_the_two_with_an_explicit_case(self) -> None:
         """A bare ``FILTER`` sum would return NULL for both, collapsing the D024 design."""
         sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
-        assert "CASE WHEN count(r.pv_status) = 0 THEN NULL ELSE" in sql
+        assert "CASE WHEN NOT EXISTS" in sql
         assert "coalesce(sum(a.state_electoral_votes)" in sql
+
+    def test_the_roster_reach_test_matches_the_oracle_s_own(self) -> None:
+        """``EXISTS`` over the roster, not ``count()`` over the joined rows.
+
+        The oracle asks whether the **roster** carries the year at all
+        (``roster_years = set(resolved["year"])``). Counting matched rows instead asks
+        whether the roster carries the year *for a state the EC spine has that year* —
+        the same question only while D024 §6 keeps both derived from one spine. Where
+        they part, one side reports a known ``0.0`` and the other an unknown NULL, which
+        is exactly the distinction this column exists to preserve. Found at code
+        review (#124).
+        """
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
+        assert "(SELECT 1 FROM roster r2 WHERE r2.year = a.year)" in sql
+        assert "count(r.pv_status) = 0" not in sql
 
     def test_a_roster_absent_year_is_null_and_an_all_absence_year_is_zero(self) -> None:
         """The oracle the SQL above mirrors — the two paths, side by side."""
@@ -2373,6 +2405,41 @@ class TestFanOutGuards:
         summary = pd.DataFrame([{"year": 2000}, {"year": 2000}])
         with pytest.raises(hybrid.HybridError, match="fanned out"):
             hybrid.assert_no_fan_out(summary, hybrid.HYBRID_SUMMARY_GRAIN)
+
+    def test_the_output_grain_guards_cannot_see_a_raw_union_leak(self) -> None:
+        """The gap the docstring now discloses, demonstrated rather than asserted.
+
+        A 1976-2024 overlap key present twice doubles ``national_pv_votes`` and hence
+        ``pv_share``, yet still collapses to one row per output grain — so neither
+        output-grain guard fires. What catches it is
+        :func:`usvote.join.assert_no_fan_out` on the **input** frame, which
+        :func:`usvote.hybrid.create_hybrid_views` runs as a precondition.
+        """
+        from usvote.join import JoinError
+        from usvote.join import assert_no_fan_out as assert_join_no_fan_out
+
+        clean = ec_pv_frame([
+            {"year": 2000, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 20, "president_electoral_votes": 20,
+             "candidate_votes": 100.0, "state_total_votes": 150.0},
+        ])
+        leaked = pd.concat([clean, clean], ignore_index=True)  # the union, un-resolved
+        roster = all_popular_vote(clean)
+
+        doubled = hybrid.build_hybrid_frame(leaked, roster)
+        honest = hybrid.build_hybrid_frame(clean, roster)
+        assert doubled["national_pv_votes"].iloc[0] == 2 * honest[
+            "national_pv_votes"
+        ].iloc[0], "the leak must actually double the numerator, or this proves nothing"
+
+        # ... and yet both output-grain guards are silent on it.
+        hybrid.assert_no_fan_out(doubled, hybrid.HYBRID_CANDIDATE_GRAIN)
+        hybrid.assert_no_fan_out(
+            hybrid.build_hybrid_summary(doubled), hybrid.HYBRID_SUMMARY_GRAIN
+        )
+        # The input-grain guard is the one that sees it.
+        with pytest.raises(JoinError, match="fanned out"):
+            assert_join_no_fan_out(leaked)
 
     def test_the_real_builders_pass_both_grains(self) -> None:
         df, roster = frame_1824()

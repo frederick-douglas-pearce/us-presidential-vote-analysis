@@ -83,14 +83,20 @@ PARTIAL_COVERAGE_YEARS: dict[int, tuple[int, int]] = {
 
 
 def _pv_row(
-    source: str, year: int, state: str, candidate: str, votes: int, total: int
+    source: str,
+    year: int,
+    state: str,
+    candidate: str,
+    votes: int,
+    total: int,
+    party: str = "DEMOCRAT",
 ) -> dict[str, Any]:
     return {
         "source": source,
         "year": year,
         "state": state,
         "candidate": candidate,
-        "party": "DEMOCRAT",
+        "party": party,
         "candidate_votes": votes,
         "state_total_votes": total,
         "reliability": "exact",
@@ -204,10 +210,19 @@ def test_the_live_views_match_the_pandas_oracle(
         chosen16 = states16[0]
         voting16 = states16[1:4]
 
+        # MIT's uppercase party_simplified vs UCSB's title case, on ONE candidate-year --
+        # the D050 §6 mixed-spelling case. Seeding a single spelling everywhere (as this
+        # test first did) leaves ``party`` resolving trivially, and the whole collation
+        # question invisible: Postgres min(text) follows the database collation and
+        # returns 'Republican' where Python's codepoint min returns 'REPUBLICAN', so
+        # without ``COLLATE "C"`` the view and the oracle disagree here and nowhere else.
         rows = [
-            _pv_row(SOURCE_MIT, 2016, s, c, votes, 1_000_000)
+            _pv_row(SOURCE_MIT, 2016, s, c, votes, 1_000_000, party=party)
             for s in voting16
-            for c, votes in ((winner16, 600_000), (loser16, 400_000))
+            for c, votes, party in (
+                (winner16, 600_000, "REPUBLICAN"),
+                (loser16, 400_000, "DEMOCRAT"),
+            )
         ]
         # 2020: the runner-up alone carries a popular vote -> exactly one scored
         # candidate, so both PV-side margins must come back NULL.
@@ -225,7 +240,15 @@ def test_the_live_views_match_the_pandas_oracle(
         ucsb_state = states16[4]
         assert ucsb_state not in voting16 and ucsb_state != chosen16
         rows.append(
-            _pv_row(SOURCE_UCSB, 2016, ucsb_state, winner16, 610_000, 1_010_000)
+            _pv_row(
+                SOURCE_UCSB,
+                2016,
+                ucsb_state,
+                winner16,
+                610_000,
+                1_010_000,
+                party="Republican",  # UCSB's spelling of MIT's REPUBLICAN
+            )
         )
         load_pv_records(
             dbc, pd.DataFrame(rows)[list(SHARED_PV_COLUMNS)], replace=False
@@ -320,6 +343,20 @@ def test_the_live_views_match_the_pandas_oracle(
         )["v"].iloc[0]
         assert pref > pub, (
             "the UCSB row must reach the preferred surface and never the public one"
+        )
+
+        # The mixed-spelling resolution, live: both sides of the seam must make the SAME
+        # arbitrary pick. Python's codepoint min gives REPUBLICAN; an uncollated SQL
+        # min(text) gives 'Republican' under en_US.UTF-8, which is the bug ``COLLATE "C"``
+        # closes. The frame comparison above already covers this -- asserted separately
+        # because a reader should not have to infer it from a whole-frame equality.
+        party = dbc.select_query_to_df(
+            f"SELECT party FROM {SCHEMA}.{hybrid.HYBRID_PREFERRED_VIEW} "
+            f"WHERE year = 2016 AND candidate = '{winner16}'"
+        )["party"].iloc[0]
+        assert party == "REPUBLICAN", (
+            "the view and the pandas oracle must resolve one party's two spellings to "
+            f"the same value; got {party!r}"
         )
 
         # Idempotent: a second create over an existing warehouse is a no-op, which is

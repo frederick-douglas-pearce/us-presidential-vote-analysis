@@ -74,7 +74,11 @@ import pandas as pd
 
 from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.db import DBC
-from usvote.join import EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW
+from usvote.join import (
+    EC_PV_PREFERRED_VIEW,
+    EC_PV_REDISTRIBUTABLE_VIEW,
+)
+from usvote.join import assert_no_fan_out as assert_join_no_fan_out
 from usvote.load import SCHEMA
 from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import (
@@ -110,9 +114,9 @@ __all__ = [
     "build_hybrid_candidate_sql",
     "build_hybrid_frame",
     "build_hybrid_from_db",
+    "build_hybrid_summary",
     "build_hybrid_summary_sql",
     "create_hybrid_views",
-    "build_hybrid_summary",
     "ec_denominator_by_year",
     "pv_coverage_by_year",
     "read_ec_pv_join",
@@ -626,10 +630,17 @@ def _resolved_party(ec_pv_df: pd.DataFrame) -> pd.DataFrame:
 
     So the two values are one party under two spellings, and any pick is arbitrary. What
     matters is that the pick is **the same on both sides of the seam**: ``min`` is
-    stable, needs no ordering a view cannot express, and is spelled identically in
-    pandas and in SQL. It skips nulls and returns null for an all-null group in both, so
-    a getter with no popular vote anywhere keeps a NULL party rather than a fabricated
-    one.
+    stable, needs no ordering a view cannot express, and skips nulls (returning null
+    for an all-null group) in pandas and SQL alike, so a getter with no popular vote
+    anywhere keeps a NULL party rather than a fabricated one.
+
+    **The two are only the same pick under a byte-ordered collation, and the SQL says so
+    explicitly.** Python's ``min`` compares codepoints; Postgres ``min(text)`` compares
+    under the database collation, and on the usual ``en_US.UTF-8`` it returns
+    ``'Republican'`` where this function returns ``'REPUBLICAN'`` — a silent
+    disagreement on precisely the mixed-spelling case this resolution exists for. So
+    :func:`build_hybrid_candidate_sql` emits ``min(party COLLATE "C")``. Found at code
+    review, after both this docstring and D050 had asserted the two were identical.
 
     Deliberately *not* "the party of the plurality of votes", which reads better and is
     a different quantity: it would make a candidate's displayed party depend on vote
@@ -1005,6 +1016,7 @@ def build_hybrid_from_db(
     *,
     view: str = EC_PV_PREFERRED_VIEW,
     schema: str = SCHEMA,
+    roster_schema: str = ROSTER_SCHEMA,
     policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read the join view + roster; return ``(candidate frame, election summary)``.
@@ -1041,7 +1053,9 @@ def build_hybrid_from_db(
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
     surface_sources = set(ec_pv_df["source"].dropna().unique())
-    roster_df = read_pv_status_roster(dbc, sources=surface_sources)
+    roster_df = read_pv_status_roster(
+        dbc, sources=surface_sources, schema=roster_schema
+    )
     frame = build_hybrid_frame(ec_pv_df, roster_df, policy=policy)
     summary = build_hybrid_summary(frame)
 
@@ -1085,7 +1099,8 @@ def _candidate_sql_cte(ec_pv_view: str, schema: str, roster_ref: str) -> str:
         # and for a year it reaches with no popular-vote state (a real 0). Collapsing
         # those is exactly what D024's no-`unknown` design exists to prevent.
         "), coverage AS ("
-        " SELECT a.year, CASE WHEN count(r.pv_status) = 0 THEN NULL ELSE"
+        " SELECT a.year, CASE WHEN NOT EXISTS"
+        " (SELECT 1 FROM roster r2 WHERE r2.year = a.year) THEN NULL ELSE"
         " coalesce(sum(a.state_electoral_votes)"
         f" FILTER (WHERE r.pv_status = '{PV_STATUS_POPULAR_VOTE}'), 0)"
         " END AS covered_electoral_votes"
@@ -1105,7 +1120,14 @@ def _candidate_sql_cte(ec_pv_view: str, schema: str, roster_ref: str) -> str:
         # rather than becoming a fabricated 0.
         "), national AS ("
         " SELECT year, candidate_id, min(candidate) AS candidate,"
-        " min(party) AS party,"
+        # COLLATE "C" is load-bearing, not decoration: Postgres min(text) is
+        # collation-dependent, and under the usual en_US.UTF-8 it returns 'Republican'
+        # where Python's codepoint min in _resolved_party returns 'REPUBLICAN' -- a
+        # silent disagreement on exactly the mixed-spelling case party is resolved for.
+        # min(candidate) needs no such cast: assert_carried_columns_constant proves it
+        # constant within the group, and min over one distinct value is
+        # collation-independent.
+        ' min(party COLLATE "C") AS party,'
         " max(national_electoral_votes) AS national_electoral_votes,"
         " max(national_counted_electoral_votes)"
         " AS national_counted_electoral_votes,"
@@ -1363,11 +1385,20 @@ def assert_no_fan_out(
     """Assert one row per ``key`` — the :func:`usvote.join.assert_no_fan_out` analogue.
 
     Called at both grains: :data:`HYBRID_CANDIDATE_GRAIN` for the per-candidate view and
-    :data:`HYBRID_SUMMARY_GRAIN` for the summary. Both are group-by aggregates, so a
-    fan-out cannot arise from the aggregation itself — it would come from a regression
-    that let the raw ``dwh.pv_votes`` union (two rows per 1976-2024 overlap key) reach
-    the join view underneath, which is the same failure this project guards at every
-    other grain.
+    :data:`HYBRID_SUMMARY_GRAIN` for the summary.
+
+    **Be precise about what this can and cannot catch, because the obvious reading is
+    wrong.** Both frames it inspects are group-by outputs, so duplicate keys are
+    impossible *by construction* today — it is a contract check against a future builder
+    that stops aggregating, not a live tripwire. In particular it does **not** catch the
+    failure it is naturally assumed to: a raw ``dwh.pv_votes`` union leaking into the
+    join view (two rows per 1976-2024 overlap key) still collapses to one row per key
+    here, and surfaces instead as a **doubled** ``national_pv_votes`` — the denominator
+    is protected by the per-``(year, state)`` ``max``, so ``pv_share`` doubles while
+    this guard sees nothing. That failure is caught upstream, at the grain where it is
+    expressible, by :func:`usvote.join.assert_no_fan_out` on the input join frame, which
+    :func:`create_hybrid_views` runs as a precondition. An earlier version of this
+    docstring claimed the coverage this one disclaims (code review, #124).
     """
     dupes = df.loc[df.duplicated(list(key), keep=False)]
     if not dupes.empty:
@@ -1392,6 +1423,7 @@ def create_hybrid_views(
     dbc: DBC,
     *,
     schema: str = SCHEMA,
+    roster_schema: str = ROSTER_SCHEMA,
     replace: bool = True,
     close: bool = False,
 ) -> None:
@@ -1434,13 +1466,21 @@ def create_hybrid_views(
         if join_view == EC_PV_REDISTRIBUTABLE_VIEW:
             assert_redistributable_only_source(ec_pv_df)
         assert_carried_columns_constant(ec_pv_df)
-        frame, summary = build_hybrid_from_db(dbc, view=join_view, schema=schema)
+        # At the INPUT grain, where a raw-union leak is actually expressible: two rows
+        # per 1976-2024 overlap key would double national_pv_votes while collapsing
+        # invisibly at the output grains below (see assert_no_fan_out).
+        assert_join_no_fan_out(ec_pv_df)
+        frame, summary = build_hybrid_from_db(
+            dbc, view=join_view, schema=schema, roster_schema=roster_schema
+        )
         assert_no_fan_out(frame, HYBRID_CANDIDATE_GRAIN)
         assert_no_fan_out(summary, HYBRID_SUMMARY_GRAIN)
         dbc.create_view(
             schema,
             candidate_view,
-            build_hybrid_candidate_sql(join_view, schema=schema),
+            build_hybrid_candidate_sql(
+                join_view, schema=schema, roster_schema=roster_schema
+            ),
             replace=replace,
         )
         dbc.create_view(
