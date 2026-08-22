@@ -35,7 +35,11 @@ from usvote.count_status import (
     COUNT_STATUS_REASON_COLUMN,
     COUNTED_VOTES_COLUMN,
 )
-from usvote.join import EC_PV_COLUMNS
+from usvote.join import (
+    EC_PV_COLUMNS,
+    EC_PV_PREFERRED_VIEW,
+    EC_PV_REDISTRIBUTABLE_VIEW,
+)
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -2112,3 +2116,378 @@ def test_the_entry_point_rejects_an_unresolved_view() -> None:
     df, roster = _mixed_surface()
     with pytest.raises(hybrid.HybridError, match="resolved"):
         hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="pv_votes")
+
+
+# --- #124: the materialized views -------------------------------------------
+
+
+def _split_top_level(text: str) -> list[str]:
+    """Split ``text`` on commas at paren depth 0 — the projection's column list."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(text[start:i])
+            start = i + 1
+    out.append(text[start:])
+    return [p.strip() for p in out if p.strip()]
+
+
+def projected_aliases(sql: str) -> list[str]:
+    """The output column names of ``sql``'s final projection, in order.
+
+    Both builders put the outermost ``SELECT`` **last** (every CTE precedes it), so the
+    final ``SELECT`` is the last one in the string. Written as a parser rather than as a
+    literal-substring assert because the point is to compare the *emitted contract*
+    against the column tuple — a substring check would pass on a SELECT that projected
+    the right names in the wrong order, which is the exact failure D047 makes fatal.
+    """
+    body = sql[sql.rindex(" SELECT ") + len(" SELECT ") :]
+    body = body[: body.rindex(" FROM ")] if " FROM " in body else body
+    aliases = []
+    for part in _split_top_level(body):
+        if " AS " in part:
+            aliases.append(part.rsplit(" AS ", 1)[1].strip())
+        else:
+            aliases.append(part.rsplit(".", 1)[-1].strip())
+    return aliases
+
+
+class TestViewConstants:
+    """The four view names and the surface table that pairs them (#124 AC-7)."""
+
+    def test_the_four_view_names(self) -> None:
+        assert hybrid.HYBRID_PREFERRED_VIEW == "hybrid_preferred"
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW == "hybrid_redistributable"
+        assert hybrid.HYBRID_SUMMARY_PREFERRED_VIEW == "hybrid_summary_preferred"
+        assert (
+            hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW
+            == "hybrid_summary_redistributable"
+        )
+
+    def test_each_surface_pairs_a_join_view_with_its_own_two_hybrid_views(self) -> None:
+        """One entry per surface, and no name reused across surfaces."""
+        assert len(hybrid.HYBRID_SURFACES) == 2
+        joins = [s[0] for s in hybrid.HYBRID_SURFACES]
+        assert joins == [EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW]
+        names = [n for surface in hybrid.HYBRID_SURFACES for n in surface[1:]]
+        assert len(set(names)) == 4, f"a view name is shared across surfaces: {names}"
+
+    def test_every_view_name_is_exported(self) -> None:
+        for name in (
+            "HYBRID_PREFERRED_VIEW",
+            "HYBRID_REDISTRIBUTABLE_VIEW",
+            "HYBRID_SUMMARY_PREFERRED_VIEW",
+            "HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW",
+            "HYBRID_SURFACES",
+        ):
+            assert name in hybrid.__all__, f"{name} must be public — #102 reads it"
+
+
+class TestRedistributableLeakGuardIsStructural:
+    """AC-4 **primary**: the public hybrid view can only ever read the public join view.
+
+    This is the guard that cannot pass vacuously. A data assertion over a frame is only
+    as good as the frame — if no non-redistributable row happens to be present it says
+    nothing — whereas the *definition* naming ``ec_pv_redistributable`` and never
+    ``ec_pv_preferred`` is true or false regardless of what data exists. Style borrowed
+    from ``tests/unit/test_api_import_graph.py``.
+    """
+
+    def test_the_redistributable_view_never_reads_the_preferred_join_view(self) -> None:
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_REDISTRIBUTABLE_VIEW)
+        assert EC_PV_REDISTRIBUTABLE_VIEW in sql
+        assert EC_PV_PREFERRED_VIEW not in sql, (
+            "the public hybrid surface must never name the preferred join view — "
+            "that is the structural half of D030"
+        )
+
+    def test_the_preferred_view_is_the_mirror(self) -> None:
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
+        assert EC_PV_PREFERRED_VIEW in sql
+        assert EC_PV_REDISTRIBUTABLE_VIEW not in sql
+
+    def test_each_summary_reads_only_its_own_candidate_view(self) -> None:
+        pub = hybrid.build_hybrid_summary_sql(hybrid.HYBRID_REDISTRIBUTABLE_VIEW)
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW in pub
+        assert hybrid.HYBRID_PREFERRED_VIEW not in pub
+        priv = hybrid.build_hybrid_summary_sql(hybrid.HYBRID_PREFERRED_VIEW)
+        assert hybrid.HYBRID_PREFERRED_VIEW in priv
+        # `hybrid_preferred` is a substring of nothing else, but the reverse is not
+        # true: guard the direction that could actually alias.
+        assert hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW not in priv
+
+    def test_the_creator_pairs_each_surface_correctly(self) -> None:
+        """The pairing in :data:`HYBRID_SURFACES`, which is what the creator loops."""
+        for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
+            assert join_view in hybrid.build_hybrid_candidate_sql(join_view)
+            assert candidate_view in hybrid.build_hybrid_summary_sql(candidate_view)
+            assert summary_view.endswith(candidate_view.removeprefix("hybrid_"))
+
+
+class TestRedistributableDataAssert:
+    """AC-4 **defense in depth** — and here we test only that the guard *fires*.
+
+    Its clean-path discharge is deliberately **not** in this file: a clean assertion
+    over a frame authored in this very module proves nothing, which is the vacuity the
+    structural test above exists to cover instead. It runs for real as a
+    :func:`usvote.hybrid.create_hybrid_views` precondition and in the gated real-corpus
+    integration test.
+    """
+
+    def _frame(self, source: str | None, redistributable: object) -> pd.DataFrame:
+        df = ec_pv_frame([
+            {"year": 2000, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 20, "president_electoral_votes": 20,
+             "candidate_votes": 100.0, "state_total_votes": 150.0},
+        ])
+        df["source"] = source
+        df["redistributable"] = redistributable
+        return df
+
+    def test_an_explicit_false_is_a_violation(self) -> None:
+        with pytest.raises(hybrid.HybridError, match="redistributable=false"):
+            hybrid.assert_redistributable_only_source(
+                self._frame(SOURCE_MIT, False)
+            )
+
+    def test_a_non_mit_source_is_a_violation(self) -> None:
+        with pytest.raises(hybrid.HybridError, match="non-MIT source"):
+            hybrid.assert_redistributable_only_source(
+                self._frame(SOURCE_UCSB, True)
+            )
+
+    def test_a_null_source_is_an_honest_gap_not_a_violation(self) -> None:
+        """A getter MIT does not cover has NULL PV — a D005 gap, never a leak."""
+        hybrid.assert_redistributable_only_source(self._frame(None, None))
+
+
+class TestSqlColumnContract:
+    """The emitted projections are the column tuples, in order (D047)."""
+
+    def test_the_candidate_projection_is_the_candidate_column_tuple(self) -> None:
+        for join_view, _, _ in hybrid.HYBRID_SURFACES:
+            sql = hybrid.build_hybrid_candidate_sql(join_view)
+            assert projected_aliases(sql) == list(hybrid.HYBRID_CANDIDATE_COLUMNS)
+
+    def test_the_summary_projection_is_the_summary_column_tuple(self) -> None:
+        for _, candidate_view, _ in hybrid.HYBRID_SURFACES:
+            sql = hybrid.build_hybrid_summary_sql(candidate_view)
+            assert projected_aliases(sql) == list(hybrid.HYBRID_SUMMARY_COLUMNS)
+
+    def test_the_candidate_column_order_is_pinned_to_a_literal(self) -> None:
+        """The twin of ``test_the_summary_column_order_is_pinned_to_a_literal``.
+
+        The two asserts above compare the SQL against the constant, which catches a
+        column the SQL forgot — but **not a reorder of the constant itself**, because
+        the SQL is written to follow it. Only a hand-written literal is independent.
+        CLAUDE.md recorded this gap as a deferred follow-up after #123; it stops being
+        deferrable here, because #124 turns the tuple into a ``CREATE OR REPLACE VIEW``
+        column contract where a mid-list insert breaks a rebuild against every existing
+        warehouse while passing the whole offline suite.
+
+        A new column is **appended** to the literal below, never inserted.
+        """
+        assert hybrid.HYBRID_CANDIDATE_COLUMNS == (
+            "year",
+            "candidate_id",
+            "candidate",
+            "party",
+            "national_electoral_votes",
+            "national_counted_electoral_votes",
+            "ec_denominator",
+            "ec_share_full",
+            "national_pv_votes",
+            "national_pv_denominator",
+            "pv_share",
+            "ec_share_hybrid",
+            "pv_coverage",
+            "hybrid_score",
+            "president_electoral_rank",
+            "took_office",
+        )
+
+    def test_the_alias_parser_would_notice_a_reorder(self) -> None:
+        """Non-vacuity: the parser must not return a set-like or sorted answer."""
+        got = projected_aliases("WITH x AS (SELECT 1) SELECT a.one, b AS two FROM x")
+        assert got == ["one", "two"]
+
+    def test_every_ratio_casts_before_dividing(self) -> None:
+        """Postgres integer-divides ints — an uncast share reads 0 for everyone.
+
+        Shape-checked here and checked **numerically** in the integration test, because
+        a string assert cannot survive a rewording of the expression it pins.
+        """
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
+        for numerator, denominator in (
+            ("n.national_counted_electoral_votes", "d.ec_denominator"),
+            ("n.national_pv_votes", "p.national_pv_denominator"),
+            ("c.covered_electoral_votes", "d.ec_denominator"),
+        ):
+            assert f"{numerator} / {denominator}" not in sql, (
+                f"{numerator} is divided without a cast — Postgres would truncate"
+            )
+            assert f"{numerator}::double precision / {denominator}" in sql
+
+
+class TestCoverageNullEncoding:
+    """The roster-absent NULL vs. roster-present-zero distinction, in both expressions."""
+
+    def test_the_sql_distinguishes_the_two_with_an_explicit_case(self) -> None:
+        """A bare ``FILTER`` sum would return NULL for both, collapsing the D024 design."""
+        sql = hybrid.build_hybrid_candidate_sql(EC_PV_PREFERRED_VIEW)
+        assert "CASE WHEN count(r.pv_status) = 0 THEN NULL ELSE" in sql
+        assert "coalesce(sum(a.state_electoral_votes)" in sql
+
+    def test_a_roster_absent_year_is_null_and_an_all_absence_year_is_zero(self) -> None:
+        """The oracle the SQL above mirrors — the two paths, side by side."""
+        df = ec_pv_frame([
+            {"year": 1820, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 8, "president_electoral_votes": 8},
+            {"year": 1824, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 8, "president_electoral_votes": 8},
+        ])
+        # 1824 is in the roster and entirely legislature-chosen; 1820 is absent from it.
+        roster = roster_frame({1824: {"Ohio": PV_STATUS_LEGISLATURE_CHOSEN}})
+        out = hybrid.pv_coverage_by_year(df, roster).set_index("year")
+        assert pd.isna(out.loc[1820, "pv_coverage"]), "absent from roster ⇒ unknown"
+        assert out.loc[1824, "covered_electoral_votes"] == 0
+        assert out.loc[1824, "pv_coverage"] == 0.0, "known, and known to be none"
+
+
+class TestFanOutGuards:
+    """AC-5 — one row per grain, at both grains."""
+
+    def test_the_candidate_grain_guard_fires_on_a_duplicate(self) -> None:
+        frame = pd.DataFrame([
+            {"year": 2000, "candidate_id": 1},
+            {"year": 2000, "candidate_id": 1},
+        ])
+        with pytest.raises(hybrid.HybridError, match="fanned out"):
+            hybrid.assert_no_fan_out(frame, hybrid.HYBRID_CANDIDATE_GRAIN)
+
+    def test_the_summary_grain_guard_fires_on_a_duplicate(self) -> None:
+        summary = pd.DataFrame([{"year": 2000}, {"year": 2000}])
+        with pytest.raises(hybrid.HybridError, match="fanned out"):
+            hybrid.assert_no_fan_out(summary, hybrid.HYBRID_SUMMARY_GRAIN)
+
+    def test_the_real_builders_pass_both_grains(self) -> None:
+        df, roster = frame_1824()
+        frame = hybrid.build_hybrid_frame(df, roster)
+        summary = hybrid.build_hybrid_summary(frame)
+        hybrid.assert_no_fan_out(frame, hybrid.HYBRID_CANDIDATE_GRAIN)
+        hybrid.assert_no_fan_out(summary, hybrid.HYBRID_SUMMARY_GRAIN)
+
+
+class TestCarriedColumnsConstant:
+    """The guard that keeps ``min``/``max`` in SQL honest against pandas ``first``."""
+
+    @staticmethod
+    def _two_state_frame() -> pd.DataFrame:
+        return ec_pv_frame([
+            {"year": 2016, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 20, "president_electoral_votes": 20,
+             "candidate_votes": 10.0, "state_total_votes": 20.0},
+            {"year": 2016, "state": "Iowa", "candidate": "A",
+             "total_electoral_votes": 8, "president_electoral_votes": 8,
+             "candidate_votes": 5.0, "state_total_votes": 10.0},
+        ])
+
+    def test_a_varying_structural_column_raises(self) -> None:
+        """A national window sum that differs per state row is an assembly bug."""
+        df = self._two_state_frame()
+        df.loc[df["state"] == "Ohio", "national_electoral_votes"] = 99
+        with pytest.raises(hybrid.HybridError, match="vary within"):
+            hybrid.assert_carried_columns_constant(df)
+
+    def test_the_error_names_the_conflicting_values_not_just_the_key(self) -> None:
+        """A key alone sends the reader hunting; the two values usually name the cause."""
+        df = self._two_state_frame()
+        df.loc[df["state"] == "Ohio", "national_electoral_votes"] = 99
+        with pytest.raises(hybrid.HybridError, match="99"):
+            hybrid.assert_carried_columns_constant(df)
+
+    def test_a_varying_party_does_NOT_raise_because_it_legitimately_varies(self) -> None:
+        """The real two-source finding: MIT and UCSB spell one party two ways.
+
+        ``pv_preferred`` resolves the 1976-2024 overlap **per key**, not per year (D017),
+        so a getter MIT's D019 filter drops in one state keeps its UCSB row — and its
+        UCSB spelling — there. Requiring constancy would fail every real two-source
+        build over capitalization, which is exactly what it did when this guard first
+        ran against the live corpus.
+        """
+        df = self._two_state_frame()
+        df.loc[df["state"] == "Ohio", "party"] = "REPUBLICAN"
+        df.loc[df["state"] == "Iowa", "party"] = "Republican"
+        hybrid.assert_carried_columns_constant(df)  # must not raise
+
+    def test_party_is_resolved_deterministically_regardless_of_row_order(self) -> None:
+        """The property that replaces constancy: same answer from either row order.
+
+        ``roll_up_national``'s ``first`` would return whichever spelling sorted first in
+        an unordered ``SELECT``, so the oracle would disagree with the view *and* with
+        itself. ``min`` is what both sides of the seam can spell identically.
+        """
+        df = self._two_state_frame()
+        df.loc[df["state"] == "Ohio", "party"] = "REPUBLICAN"
+        df.loc[df["state"] == "Iowa", "party"] = "Republican"
+        roster = all_popular_vote(df)
+
+        forward = hybrid.build_hybrid_frame(df, roster)["party"].iloc[0]
+        reversed_ = hybrid.build_hybrid_frame(
+            df.iloc[::-1].reset_index(drop=True), roster
+        )["party"].iloc[0]
+        assert forward == reversed_ == "REPUBLICAN"
+
+    def test_a_getter_with_no_party_anywhere_stays_null(self) -> None:
+        """``min`` over an all-null group is NULL in pandas and in SQL alike."""
+        df = self._two_state_frame()
+        df["party"] = None
+        frame = hybrid.build_hybrid_frame(df, all_popular_vote(df))
+        assert frame["party"].isna().all(), "a fabricated party is worse than none"
+
+    def test_a_well_formed_frame_passes(self) -> None:
+        df, _ = frame_1824()
+        hybrid.assert_carried_columns_constant(df)
+
+    def test_a_null_party_on_a_no_pv_getter_is_not_a_variation(self) -> None:
+        """``nunique`` skips NA, so an honest D005 gap must not trip the guard."""
+        df = ec_pv_frame([
+            {"year": 2000, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 20, "president_electoral_votes": 20,
+             "candidate_votes": 10.0, "state_total_votes": 20.0},
+            {"year": 2000, "state": "Iowa", "candidate": "A",
+             "total_electoral_votes": 8, "president_electoral_votes": 8},
+        ])
+        df.loc[df["state"] == "Ohio", "party"] = "DEMOCRAT"
+        df.loc[df["state"] == "Iowa", "party"] = None
+        hybrid.assert_carried_columns_constant(df)
+
+
+def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:
+    """AC-7: ``snapshot.py`` (#102) must read the names by constant, never re-type them.
+
+    Prose is exempt, for the reason ``tests/unit/test_layering.py`` gives: a docstring
+    explaining what ``hybrid_redistributable`` is should not be punished. Only code —
+    including string literals, which is where a hand-rolled SQL path would hide.
+    """
+    from tests.unit.test_layering import PKG_ROOT, code_only
+
+    names = (
+        hybrid.HYBRID_PREFERRED_VIEW,
+        hybrid.HYBRID_REDISTRIBUTABLE_VIEW,
+        hybrid.HYBRID_SUMMARY_PREFERRED_VIEW,
+        hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW,
+    )
+    offenders = {
+        py.relative_to(PKG_ROOT).as_posix(): [n for n in names if n in code_only(
+            py.read_text()
+        )]
+        for py in sorted(PKG_ROOT.rglob("*.py"))
+        if py.name != "hybrid.py"
+    }
+    offenders = {k: v for k, v in offenders.items() if v}
+    assert not offenders, f"these hard-code a hybrid view name: {offenders}"

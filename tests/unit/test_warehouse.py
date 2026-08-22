@@ -177,3 +177,45 @@ def test_no_pv_source_imports_the_warehouse_composition_root() -> None:
         if pattern.search(py.read_text())
     ]
     assert not offenders, f"these must not import usvote.warehouse: {offenders}"
+
+
+# --- #124: the hybrid views join the rebuild chain --------------------------
+
+
+def test_rebuild_views_sequences_union_then_join_then_hybrid(
+    dbc: DBC, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The order is a dependency chain, so **order** is what this asserts, not presence.
+
+    ``create_ec_pv_views`` reads the resolved PV views and ``create_hybrid_views`` reads
+    the join views, so a rebuild that ran them in any other order would fail against a
+    fresh schema — and would fail *silently* against a warehouse whose views already
+    exist from a previous build, which is the case a presence-only assert would miss.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(
+        warehouse, "build_pv_union", lambda _dbc: calls.append("union")
+    )
+    monkeypatch.setattr(
+        warehouse, "create_ec_pv_views", lambda _dbc: calls.append("join")
+    )
+    monkeypatch.setattr(
+        warehouse, "create_hybrid_views", lambda _dbc: calls.append("hybrid")
+    )
+
+    warehouse.rebuild_views(dbc)
+
+    assert calls == ["union", "join", "hybrid"]
+
+
+def test_a_replace_build_still_rebuilds_the_hybrid_views(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """``replace=True`` drops the schema (and every view with it), so the rebuild must
+    still be the final step — otherwise E7's analysis surface and #102's read seam
+    (D039) would be missing after a full rebuild.
+    """
+    run_warehouse(dbc, "states.shp", "mit.csv", replace=True)
+
+    assert [name for name, _ in recorder] == ["ec", "mit", "views"]
+    assert recorder[0][1]["replace"] is True, "EC is the destructive step"

@@ -341,6 +341,13 @@ The table above is prose, and prose drifts. Three code guarantees are what it ac
 - **`TestRealCorpus`** in `tests/unit/test_ucsb_transform.py` checks the classification of all
   2,204 state-year pairs across 51 years against an independent source, set-equal. It is skipped
   in CI by design and is run locally.
+- **`test_hybrid_views_over_a_real_full_warehouse`** in `tests/integration/test_hybrid_views.py`
+  (#124) pins **this page's table** against the materialized `hybrid_summary_preferred` view over
+  a real EC + MIT + UCSB warehouse: the twelve years set-equal, each `pv_coverage` value to
+  1e-6, each `ec_denominator`, every other year exactly `1.0` — so a year *leaving* the set is
+  caught as well as one joining — and 1864 explicitly `1.0`. Like `TestRealCorpus` it is gated on
+  the local corpora and skipped in CI, so running it is a merge precondition rather than
+  something CI can vouch for.
 
 The twelve-year set in this page was produced from a full local warehouse and cross-checked
 against the in-repo catalog over the same Electoral College spine: 2,204 state-year pairs, **zero
@@ -356,7 +363,9 @@ spine. Only the classification is an independent check.
 - [**D024**](../.claude/specs/decisions.md) — the `pv_state_status` roster (§1 the enumeration,
   §4 the three-value enum, §8 the EV weighting)
 - [`src/usvote/hybrid.py`](../src/usvote/hybrid.py) — `pv_coverage_by_year`,
-  `apply_coverage_policy`, `ec_denominator_by_year`
+  `apply_coverage_policy`, `ec_denominator_by_year`, and (#124) the SQL builders that
+  materialize them as the `hybrid_*` views
+- [**D050**](../.claude/specs/decisions.md) — how the hybrid views materialize this column
 - [`src/usvote/pv/absences.py`](../src/usvote/pv/absences.py) — the absence catalog and its
   citations
 - [`ucsb-html-formats.md`](ucsb-html-formats.md) — the source-corpus survey the roster design came

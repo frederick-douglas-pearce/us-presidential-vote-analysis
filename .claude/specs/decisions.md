@@ -2544,3 +2544,74 @@ byte-identical afterwards.
 because the widening was scoped to the directory #132 touches and its cost was measured there;
 extending to a second directory on the same PR would be an unmeasured guess. Worth revisiting on
 the next change that lands in `scripts/`.
+
+---
+
+## D050: the hybrid views materialize policy (b) only, with the pandas builders kept as the tested oracle
+
+**Date:** 2026-08-22
+
+**Context:** #124 (E7-S5) had to expose `usvote/hybrid.py`'s computation as warehouse views —
+the read seam D039 settled for #102. The module had shipped **no SQL by design** (D037 note,
+architect ruling 2026-07-28) precisely so that this story could translate it, and it was written
+to make that translation mechanical: every step relationally expressible, the winner kept
+separable from the tie check because a view cannot `raise`.
+
+**Decision:**
+
+1. **Four views, two per surface.** `hybrid_preferred` / `hybrid_redistributable` at the
+   per-`(year, candidate)` grain and `hybrid_summary_preferred` /
+   `hybrid_summary_redistributable` at the per-`(year)` grain, all from one parameterized builder
+   pair, created by `usvote.hybrid.create_hybrid_views` and rebuilt by `warehouse.rebuild_views`
+   as a third step after `create_ec_pv_views`. D039 named the seam
+   "`hybrid_redistributable` (+ its per-election `hybrid_summary`)" without pinning the summary's
+   spelling; #124's AC requires **one per surface**, and a single `hybrid_summary` cannot be both,
+   so the surface is carried in the name.
+2. **The SQL implements coverage policy (b) only.** (c) stays reachable from Python alone. This is
+   a property, not a limitation: it is what makes the public surface's denominator treatment
+   *fixed* rather than configurable, which is what #102 relies on (D038/D042).
+3. **The pandas builders become the tested oracle, not a second implementation.** The house
+   dual-expression pattern of `join.py` and `pv/views.py`: the SQL string drives the live view and
+   is unit-tested for shape; `build_hybrid_frame` / `build_hybrid_summary` are re-run against
+   frames read back from the live views by an integration test.
+4. **The view-creation preconditions are the existing guards, and their limit is stated rather
+   than papered over.** `create_hybrid_views` calls `build_hybrid_from_db` per surface first, so
+   the shares-≤-1, tie, rank-agreement and roster-disagreement checks all run over the live join
+   view — as `build_hybrid_from_db` promised #124 would inherit. But those validate the **pandas**
+   side, so a SQL/oracle drift passes every one of them. The differential integration test is the
+   only thing that covers it, and it is deliberately **not** gated on any corpus so it runs on any
+   integration box.
+5. **`pv_coverage`'s two nulls keep two spellings in SQL.**
+   `CASE WHEN count(pv_status) = 0 THEN NULL ELSE coalesce(sum(...) FILTER (...), 0) END`. A bare
+   `FILTER` sum returns NULL both for a year the roster does not reach (coverage *unknown*) and
+   for a year it reaches with no popular-vote state (a real `0`), and collapsing those is exactly
+   what D024's no-`unknown` design exists to prevent.
+6. **`party` is resolved by `min`, not required constant — a finding from the live corpus.** The
+   first version of the carried-column guard required every rolled-up column to be constant within
+   `(year, candidate_id)` and **failed the real two-source build**: MIT writes `REPUBLICAN` /
+   `DEMOCRAT` (its `party_simplified`) while UCSB writes `Republican` / `Democratic`, and
+   `pv_preferred` resolves the 1976–2024 overlap **per key, not per year** (D017), so a getter
+   MIT's D019 filter drops in one state keeps its UCSB spelling there. One party, two spellings.
+   `roll_up_national`'s pandas `first` would pick by row order — not merely different from the
+   SQL but non-deterministic — so `party` leaves the constancy guard and is resolved with `min`,
+   which pandas and SQL spell identically and which is stable under row order. Deliberately not
+   "the plurality party", which would make a candidate's displayed label depend on vote counts.
+   `roll_up_national` itself is **untouched**, so the snapshot's `national_rollup` (D029/D037/F)
+   and its content hash are unaffected.
+
+**Consequences:**
+
+- **A breaking column change to a per-candidate view now needs a `DROP ... CASCADE` migration.**
+  `hybrid_summary_*` depends on `hybrid_*`, so the D047 append-only rule that governs
+  `EC_PV_COLUMNS` now binds `HYBRID_CANDIDATE_COLUMNS` and `HYBRID_SUMMARY_COLUMNS` too — with a
+  second view on top, `CREATE OR REPLACE VIEW` has less room than it does for `ec_pv`. Both
+  tuples now carry hand-written literal order pins (`HYBRID_CANDIDATE_COLUMNS` gained one here;
+  the gap was recorded as a follow-up after #123).
+- **AC-6's real-data assertions only ever run on a machine with all three corpora.** The gated
+  test pins the 2000/2016 flips against real national figures, the twelve partial-coverage years
+  from `docs/pv-coverage.md`, and 1824 under both policies — and skips in CI. Running it is a
+  merge precondition, on the same footing as `TestRealCorpus` (D022).
+- **2000's hybrid does not follow its popular vote, and that is now pinned.** On real national
+  denominators Nader's votes dilute Gore's PV share (Bush 0.4908 to Gore 0.4887), so
+  `hybrid_flip` is `false` in 2000 even though `pv_flip` is `true` — the opposite of what #123's
+  two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
