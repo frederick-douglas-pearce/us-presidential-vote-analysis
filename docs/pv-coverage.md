@@ -259,7 +259,7 @@ Note which of these a public consumer actually reaches for a pre-1976 year: the 
 
 ## Provenance, and how to reproduce these numbers
 
-Every figure printed on this page is public-domain:
+Every figure in the tables above is public-domain, and rests on two inputs:
 
 - the **electoral-vote allotments** are National Archives data (`dwh.votes`, loaded from
   <https://www.archives.gov/electoral-college/results>);
@@ -278,17 +278,23 @@ Every figure printed on this page is public-domain:
 statement *about* the popular vote, and the pre-1976 popular vote in this project's warehouse comes
 from a source that grants no redistribution rights (D016/D022). No popular-vote count, no
 per-candidate popular-vote share, and no national popular-vote total from before 1976 appears
-anywhere on this page, and **none of those is recoverable from what does** — the same boundary the
-public API draws by serving popular votes only from 1976 onward.
+anywhere on this page, and **no count, no individual share, and no total is recoverable from what
+does** — the same boundary the public API draws by serving popular votes only from 1976 onward.
+
+**Three printed figures are the exception, and they are PV-derived**: the two 1824 hybrid margins
+(8.09 and 14.69 points) and the ~10.4-point gap below. Everything else on the page — every table
+cell, every share, every ratio — comes from the two public-domain inputs above.
 
 Stated precisely, because an absolute claim here would be the wrong kind of claim to make. One
-derived quantity *is* recoverable: the two margins plus the printed EC shares give the **gap between
-the two leaders' popular-vote shares** in 1824 (about 10.4 points), since a margin is the mean of an
-EC gap and a PV gap. That is a difference between two candidates, not either one's share — the two
+derived quantity *is* recoverable from those three: the two margins plus the printed EC shares give
+the **gap between the two leaders' popular-vote shares** in 1824, about 10.4 points, since a margin
+is the mean of an EC gap and a PV gap. That is a difference between two candidates, not either
+one's share — the two
 margins yield one equation in two unknowns, so no individual share falls out, and Crawford's and
 Clay's never enter a top-two margin at all. It is here because the acceptance criteria ask for the
 margins by name and the movement of the margin *is* the finding, which is the same exception
-[`ucsb-html-formats.md`](ucsb-html-formats.md) draws for quoting a vote number. `pv_coverage` itself is unaffected: it is a ratio of *electoral votes*, and the
+[`ucsb-html-formats.md`](ucsb-html-formats.md) draws for quoting a vote number. `pv_coverage`
+itself is unaffected: it is a ratio of *electoral votes*, and the
 only thing it takes from the popular-vote side is the yes/no of whether a state held one, which is
 the independently-cited classification above.
 
