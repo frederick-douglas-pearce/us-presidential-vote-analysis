@@ -177,3 +177,43 @@ def test_no_pv_source_imports_the_warehouse_composition_root() -> None:
         if pattern.search(py.read_text())
     ]
     assert not offenders, f"these must not import usvote.warehouse: {offenders}"
+
+
+# --- #124: the hybrid views join the rebuild chain --------------------------
+
+
+def test_rebuild_views_sequences_union_then_join_then_hybrid(
+    dbc: DBC, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The order is a dependency chain, so **order** is what this asserts, not presence.
+
+    ``create_ec_pv_views`` reads the resolved PV views and ``create_hybrid_views`` reads
+    the join views, so a rebuild that ran them in any other order would fail against a
+    fresh schema — and would fail *silently* against a warehouse whose views already
+    exist from a previous build, which is the case a presence-only assert would miss.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(
+        warehouse, "build_pv_union", lambda _dbc: calls.append("union")
+    )
+    monkeypatch.setattr(
+        warehouse, "create_ec_pv_views", lambda _dbc: calls.append("join")
+    )
+    monkeypatch.setattr(
+        warehouse, "create_hybrid_views", lambda _dbc: calls.append("hybrid")
+    )
+
+    warehouse.rebuild_views(dbc)
+
+    assert calls == ["union", "join", "hybrid"]
+
+
+# NOTE: there is deliberately no "a --replace build still rebuilds the hybrid views"
+# test here. The ``recorder`` fixture monkeypatches ``rebuild_views`` wholesale, so such
+# a test structurally *cannot* observe ``create_hybrid_views`` — it would be a near-exact
+# duplicate of ``test_replace_maps_destructive_to_ec_additive_to_pv`` wearing a name that
+# claims more than it checks. The property is covered by composition:
+# ``test_replace_maps_destructive_to_ec_additive_to_pv`` pins that a ``replace`` build
+# still records ``views``, and ``test_rebuild_views_sequences_union_then_join_then_hybrid``
+# pins that ``rebuild_views`` calls ``create_hybrid_views``. The live end-to-end check is
+# ``tests/integration/test_hybrid_views.py``. (Architect ruling, #124 code review.)
