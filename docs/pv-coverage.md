@@ -1,0 +1,256 @@
+# `pv_coverage` — what it measures, and why twelve elections read below 1.0
+
+The hybrid method averages a candidate's **Electoral College share** with their **national
+popular-vote share** ([decision **D037**](../.claude/specs/decisions.md)). That average is only
+strictly apples-to-apples where every state that cast electoral votes also held a popular vote —
+and for twelve elections between 1824 and 1876, one or more states did not. Their electors were
+appointed by the state legislature, so there was no popular vote to count, anywhere in that state.
+
+`pv_coverage` is the column that carries that mismatch. This page says what it measures, why the
+project **flags** the mismatch rather than papering over it, and enumerates every affected year
+with its verified numbers.
+
+> **Scope.** This documents the **settled** denominator policy — rule **(b)** of
+> [**D038**](../.claude/specs/decisions.md) — and the evidence table behind it. It is not a
+> re-litigation of that decision, and it is **not** the cross-source question of whether MIT and
+> UCSB agree in their 1976–2024 overlap, which is separate work. The authoritative,
+> machine-readable derivation is
+> [`pv_coverage_by_year`](../src/usvote/hybrid.py) in `src/usvote/hybrid.py`; this page is the
+> human-browsable description of what it produces.
+
+## What the number measures
+
+For each election year:
+
+```
+pv_coverage = Σ total_electoral_votes over the year's popular_vote states
+              ────────────────────────────────────────────────────────────
+              Σ total_electoral_votes over every state (the appointed allotment)
+```
+
+A year in which every state held a popular vote reads exactly `1.0`. A year in which some state
+appointed its electors directly reads below `1.0`, by that state's share of the electoral votes.
+
+**It is weighted by electoral votes, not by state count** ([D024
+§8](../.claude/specs/decisions.md)) — electoral votes are the analytically relevant weight, and
+they are already loaded. The two weightings are genuinely different numbers, not rounding variants
+of each other: 1824 is **0.728** EV-weighted against **0.750** by state count, and 1864 is
+**1.000** against **0.694**. A state-count check would pass while measuring the wrong quantity, so
+both are reported in the tables below and the EV-weighted one is the column the hybrid carries.
+
+**The roster drives this, and a null popular vote never may.** Coverage is derived from
+`dwh.pv_state_status` — a complete roster of every state in every election with its `pv_status` —
+never inferred from a missing `candidate_votes` cell. Inferring it from a null would conflate a
+state where **no popular vote was ever held** with a state some **source simply does not cover**,
+which is exactly the distinction D024's deliberately `unknown`-free enum exists to preserve. The
+two cases have an identical shape in the data, and only the roster tells them apart.
+
+## Policy (b): what the hybrid actually does with a partial year
+
+Under the settled rule, for a partial-coverage year:
+
+- the **EC share is measured over all EC-casting states** — the full appointed allotment;
+- the **PV share is measured over only the states that held a popular vote**;
+- and `pv_coverage < 1.0` is carried alongside as the flag that the two were measured over
+  different electorates.
+
+The denominators are deliberately **not** reconciled. The alternative that would reconcile them —
+rule (c), restricting both halves to the popular-vote states — is implemented behind the
+`apply_coverage_policy` seam but **is not shipped** ([D042](../.claude/specs/decisions.md)).
+
+### Why a flag rather than a fix
+
+The rejected alternative is the argument. Rule **(a)** was to withhold the hybrid entirely for any
+year containing a legislature-chosen state. D038 rejected it because it would suppress precisely
+the elections the method exists to speak to: the House-contingent, no-electoral-majority years —
+1824 above all. A method that goes quiet exactly where it is most interesting is not a cautious
+method, it is an evasive one.
+
+So `pv_coverage < 1.0` is **an honest caveat on a real number, not a defect and not a data
+quality problem.** Nothing is missing, mis-parsed, or estimated. In 1824 the six legislature-chosen
+states really did appoint 71 electors without holding an election, and the national popular vote of
+that year really is a complete measurement of a smaller electorate — not an incomplete measurement
+of the full one. Consumers should display the number and the coverage together, never the number
+alone and never neither.
+
+## The affected years
+
+**Every year containing a `legislature_chosen` state**, with both weightings. Twelve elections,
+1824–1876; from 1880 onward every year reads exactly `1.0`.
+
+| year | legislature-chosen states (EV) | PV states / all | covered EV / appointed EV | `pv_coverage` (EV) | by state count |
+|---|---|---|---|---|---|
+| 1824 | Delaware (3), Georgia (9), Louisiana (5), New York (36), South Carolina (11), Vermont (7) | 18 / 24 | 190 / 261 | **0.7280** | 0.7500 |
+| 1828 | Delaware (3), South Carolina (11) | 22 / 24 | 247 / 261 | **0.9464** | 0.9167 |
+| 1832 | South Carolina (11) | 23 / 24 | 277 / 288 | **0.9618** | 0.9583 |
+| 1836 | South Carolina (11) | 25 / 26 | 283 / 294 | **0.9626** | 0.9615 |
+| 1840 | South Carolina (11) | 25 / 26 | 283 / 294 | **0.9626** | 0.9615 |
+| 1844 | South Carolina (9) | 25 / 26 | 266 / 275 | **0.9673** | 0.9615 |
+| 1848 | South Carolina (9) | 29 / 30 | 281 / 290 | **0.9690** | 0.9667 |
+| 1852 | South Carolina (8) | 30 / 31 | 288 / 296 | **0.9730** | 0.9677 |
+| 1856 | South Carolina (8) | 30 / 31 | 288 / 296 | **0.9730** | 0.9677 |
+| 1860 | South Carolina (8) | 32 / 33 | 295 / 303 | **0.9736** | 0.9697 |
+| 1868 | Florida (3) | 33 / 37 | 291 / 294 | **0.9898** | 0.8919 |
+| 1876 | Colorado (3) | 37 / 38 | 366 / 369 | **0.9919** | 0.9737 |
+
+Three things this table settles, which prose estimates could not:
+
+- **South Carolina is the whole story for eight consecutive elections.** From 1832 through 1860 it
+  is the only state in the country appointing electors without a popular vote — the last holdout
+  of a practice that had been the norm in 1824.
+- **The set is exactly twelve, and it ends at 1876.** This **verifies** the enumeration D024 §1
+  already gave (the same twelve years, derived independently), and it agrees with
+  [`ucsb-html-formats.md`](ucsb-html-formats.md), whose survey of the source corpus records
+  Colorado 1876 as the last legislature-chosen state and no PV-absent state anywhere from 1880 on.
+- **Only 1824 is badly covered.** Nine of the twelve years sit above 0.96, and the remaining
+  mismatch is small enough to be a footnote. 1824 at 0.728 is the year that actually needs the
+  caveat — and it is also the year with no electoral-vote majority at all, which is why it is the
+  hybrid's motivating case rather than an awkward edge.
+
+### Companion: years with `not_participating` states
+
+Two elections carry a different kind of absence — states that took no part in the election at all,
+rather than states that appointed electors without a popular vote. **These do not behave the way
+you would expect, and the surprise is worth stating plainly.**
+
+| year | non-participating states | `pv_coverage` (EV) | by state count | what actually drives the number |
+|---|---|---|---|---|
+| 1864 | Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi, North Carolina, South Carolina, Tennessee, Texas, Virginia (11) | **1.0000** (233 / 233) | 0.6944 (25 / 36) | nothing — see below |
+| 1868 | Mississippi, Texas, Virginia (3) | **0.9898** (291 / 294) | 0.8919 (33 / 37) | **Florida alone**, which is legislature-chosen, not non-participating |
+
+**A non-participating state has zero electoral votes**, so it contributes nothing to *either* side
+of the ratio — it is a 0/0 non-contributor. The property is enforced in code, not assumed: check 2
+of [`assert_catalog_matches_spine`](../src/usvote/pv/absences.py) rejects any catalogued
+`not_participating` state that carries a non-zero allotment, and any `legislature_chosen` state
+that carries zero.
+
+The consequence is that **1864 reads full EV coverage despite eleven absent states**, and that is
+the correct answer rather than a bug: every electoral vote cast in 1864 was cast by a state that
+held a popular vote. 1864 is where the two weightings diverge maximally — 1.000 against 0.694 —
+and a consumer who sees eleven missing states and *expects* low coverage is the reader this
+section is for. The honest message is reassuring, not cautionary.
+
+1868 appears in **both** tables, and only its Florida row moves the number. The two statuses are
+kept distinct throughout (D024 §4) precisely so that "appointed electors without a popular vote"
+and "took no part" never collapse into one undifferentiated bucket.
+
+## Worked example: 1824, where the policy is most visible
+
+1824 is the year with the lowest coverage, no electoral-vote majority, and a president chosen by
+the House. It is the natural test of whether the denominator policy changes any conclusion.
+
+| candidate | EC votes | `ec_share_full` | PV share | (b) `hybrid_score` | (c) `hybrid_score` |
+|---|---|---|---|---|---|
+| Andrew Jackson | 99 | 0.3793 | 0.4135 | **0.3964** | **0.4278** |
+| John Quincy Adams | 84 | 0.3218 | 0.3092 | 0.3155 | 0.2809 |
+| William H. Crawford | 41 | 0.1571 | 0.1117 | 0.1344 | 0.1216 |
+| Henry Clay | 37 | 0.1418 | 0.1299 | 0.1358 | 0.1518 |
+
+**The winner is invariant; only the margin moves.** Jackson leads on both measures and wins the
+hybrid under **both** (b) and (c). What the policy changes is the top-two gap:
+
+- under shipped policy **(b)**, `hybrid_margin` = **8.09 percentage points**;
+- under unshipped policy **(c)**, it would be **14.69 points** — because (c) restricts Jackson's EC
+  share to the popular-vote states, where he took 84 of 190 electoral votes (0.442) against Adams's
+  0.253.
+
+That is the sentence a display surface should carry: for the worst-covered election in the record,
+the coverage policy moves the **margin**, not the **outcome**.
+
+Two further properties of 1824 are worth naming, because they are easy to misread:
+
+- **`ec_share_full` is policy-invariant, and no coverage policy can move it.** Jackson stays at
+  99/261 = 0.3793 under both rules. This is a deliberate safety property (D037/A): the EC share is
+  split in two, and only the policy-invariant half feeds `ec_determinative`. Were it otherwise,
+  restricting 1824's EC share to the popular-vote states would put Jackson at 99/190 = 0.52 — over
+  the line, manufacturing a constitutional majority that never existed. The real answer is 0.379,
+  no majority, and the House decided the election.
+- **`ec_determinative` is `false` here, and that is a populated result, not a null.** Coverage and
+  determinativeness are orthogonal: 1824 is both "no EC majority" and "partial PV coverage", and
+  neither caused the other.
+
+## A null `pv_coverage` is a third thing again
+
+Distinguish three readings, because they mean different things and a display surface must not
+merge them:
+
+| value | meaning |
+|---|---|
+| `1.0` | every state that cast an electoral vote also held a popular vote |
+| `< 1.0` | at least one state appointed electors without a popular vote — the caveat this page explains |
+| `NULL` | **unknown** — the roster does not reach that year at all |
+
+`NULL` is emphatically not `0.0`. A year the roster says nothing about is a year nobody has
+established anything about; reporting it as zero coverage would assert a fact that was never
+checked. A real `0.0` — a year the roster reaches in which no state held a popular vote — is a
+different, known result, and the derivation keeps the two apart on purpose.
+
+## Provenance, and how to reproduce these numbers
+
+Both inputs are public-domain:
+
+- the **electoral-vote allotments** are National Archives data (`dwh.votes`, loaded from
+  <https://www.archives.gov/electoral-college/results>);
+- the **classification** of which states held no popular vote comes from
+  [`PV_ABSENCE_CATALOG`](../src/usvote/pv/absences.py), an in-repo catalog whose every entry
+  carries a public-domain citation — *McPherson v. Blacker*, 146 U.S. 1 (1892) for the 1824–1860
+  legislative appointments, the Colorado Constitution of 1876 for Colorado, the H.R. 126 joint
+  resolution for 1864.
+
+The decision record makes the same distinction directly: D024's licensing note holds that the
+roster's free-text `note` column is non-redistributable source prose, while "the `pv_status` enum
+is a bare historical fact and carries no such restriction."
+
+**From the public API** (no database required — one request per year):
+
+```bash
+curl -s https://api.us-presidential-election-center.org/v1/elections/1824 \
+  | python3 -c 'import json,sys
+rows = json.load(sys.stdin)["data"]
+st = {r["state"]: (r["pv_status"], r["state_electoral_votes"]) for r in rows}
+den = sum(ev for _, ev in st.values())
+cov = sum(ev for s, ev in st.values() if s == "popular_vote")
+print(f"{cov}/{den} = {cov/den:.4f}")'
+# → 190/261 = 0.7280
+```
+
+**From a local warehouse**, calling the shipped derivation rather than re-deriving it:
+
+```python
+from usvote.hybrid import pv_coverage_by_year
+
+pv_coverage_by_year(ec_pv_df, roster_df)   # → year, ec_denominator,
+                                           #   covered_electoral_votes, pv_coverage
+```
+
+### What keeps these numbers honest
+
+The table above is prose, and prose drifts. Three code guarantees are what it actually rests on:
+
+- **[`assert_catalog_matches_spine`](../src/usvote/pv/absences.py)** cross-checks the catalog
+  against the Electoral College spine in both directions — every catalogued state must exist in
+  the spine with the electoral-vote count its status implies, and, the direction with teeth, no
+  zero-electoral-vote state in the spine may be left classified `popular_vote` by the residual.
+- **`CURATED_YEAR_COUNT`** in the same module pins the catalog's scope to a counted set of years,
+  so the catalog's *silence* about an unreviewed year can never be read as "no absences there".
+- **`TestRealCorpus`** in `tests/unit/test_ucsb_transform.py` checks the classification of all
+  2,204 state-year pairs across 51 years against an independent source, set-equal. It is skipped
+  in CI by design and is run locally.
+
+The twelve-year set in this page was produced from a full local warehouse and cross-checked
+against the in-repo catalog: 2,204 state-year pairs, zero membership differences, zero
+classification disagreements.
+
+## See also
+
+- [**D037**](../.claude/specs/decisions.md) — the hybrid method and the split EC share
+- [**D038**](../.claude/specs/decisions.md) — the settled denominator policy (b)
+- [**D042**](../.claude/specs/decisions.md) — why (c) is implemented but not shipped
+- [**D024**](../.claude/specs/decisions.md) — the `pv_state_status` roster (§1 the enumeration,
+  §4 the three-value enum, §8 the EV weighting)
+- [`src/usvote/hybrid.py`](../src/usvote/hybrid.py) — `pv_coverage_by_year`,
+  `apply_coverage_policy`, `ec_denominator_by_year`
+- [`src/usvote/pv/absences.py`](../src/usvote/pv/absences.py) — the absence catalog and its
+  citations
+- [`ucsb-html-formats.md`](ucsb-html-formats.md) — the source-corpus survey the roster design came
+  from
