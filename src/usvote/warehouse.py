@@ -3,8 +3,8 @@
 :func:`run_warehouse` sequences the four source/join steps into one runnable build:
 the EC spine (:func:`usvote.pipeline.run_ec_pipeline`), the MIT PV source
 (:func:`usvote.mit.pipeline.run_mit_pipeline`), optionally the UCSB PV source
-(:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`), then the resolved-PV + EC<->PV join
-views (:func:`rebuild_views`). It is the programmatic entry point behind
+(:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`), then the resolved-PV, EC<->PV join
+and hybrid views (:func:`rebuild_views`). It is the programmatic entry point behind
 ``python -m usvote all`` (#84b).
 
 **This is a composition root, not part of the EC spine.** It lives at the top level
@@ -32,10 +32,11 @@ no build holds a transaction open across HTTP.
 ``run_ec_pipeline(replace=True)``, which drops and recreates the ``dwh`` schema — and
 because the PV tables and all views live in ``dwh``, that ``DROP SCHEMA ... CASCADE``
 takes them with it. So the PV loads run with ``replace=False`` (append onto the *fresh*
-schema, the only sane mapping and exactly the integration-test order), and the join
-views are **always rebuilt** as the final step — without that rebuild a
-``replace=True`` build would leave a warehouse with the fact tables but no
-``ec_pv_preferred`` / ``ec_pv_redistributable`` for E7/E8 to read.
+schema, the only sane mapping and exactly the integration-test order), and the views are
+**always rebuilt** as the final step — without that rebuild a ``replace=True`` build
+would leave a warehouse with the fact tables but no ``ec_pv_preferred`` /
+``ec_pv_redistributable`` for E7/E8 to read, and since #124 no ``hybrid_*`` views
+either.
 
 **UCSB is gated explicitly, never by environment magic.** ``ucsb_html_dir=None`` (the
 default) **skips** UCSB — this function does not consult ``USVOTE_UCSB_HTML_DIR``
@@ -60,6 +61,7 @@ from pathlib import Path
 import pandas as pd
 
 from usvote.db import DBC
+from usvote.hybrid import create_hybrid_views
 from usvote.join import create_ec_pv_views
 from usvote.mit.pipeline import run_mit_pipeline
 from usvote.pipeline import run_ec_pipeline
@@ -83,8 +85,9 @@ class WarehouseResult:
     frame lengths; both PV sources now report a fact **and** a roster count, since #127
     gave MIT its D024 ``pv_state_status`` rows too. The two UCSB counts are ``None``
     exactly when UCSB was skipped.
-    ``views_built`` records that the resolved-PV + join views were (re)created —
-    always ``True`` on a successful build, surfaced so a caller need not re-probe.
+    ``views_built`` records that the resolved-PV, join and hybrid views were
+    (re)created — always ``True`` on a successful build, surfaced so a caller need not
+    re-probe.
 
     Kept intentionally minimal: E7/E8 read the persistent views, so "is UCSB present?"
     is a query against ``dwh.pv_source`` / the ``pv_ucsb`` view at analysis time, not an
@@ -108,14 +111,27 @@ class WarehouseResult:
 
 
 def rebuild_views(dbc: DBC) -> None:
-    """(Re)build the resolved-PV views and the EC<->PV join views over current facts.
+    """(Re)build the resolved-PV, EC<->PV join and hybrid views over current facts.
 
-    :func:`usvote.pv.load.build_pv_union` seeds ``dwh.pv_source`` and creates the three
-    resolved series (``pv_preferred`` / ``pv_redistributable`` / ``pv_ucsb``); then
-    :func:`usvote.join.create_ec_pv_views` runs its reciprocal anti-join precondition
-    and creates ``ec_pv_preferred`` / ``ec_pv_redistributable``. Both are idempotent
-    (``CREATE OR REPLACE VIEW``) and open no transaction of their own, so this is safe
-    to call after any PV load and never nests over a pipeline's transaction (#84a).
+    **The one place the view ordering is expressed** — ``pv union -> join -> hybrid`` —
+    and the ordering is a dependency chain, not a preference:
+
+    1. :func:`usvote.pv.load.build_pv_union` seeds ``dwh.pv_source`` and creates the
+       three resolved series (``pv_preferred`` / ``pv_redistributable`` / ``pv_ucsb``).
+    2. :func:`usvote.join.create_ec_pv_views` runs its reciprocal anti-join precondition
+       and creates ``ec_pv_preferred`` / ``ec_pv_redistributable`` over them.
+    3. :func:`usvote.hybrid.create_hybrid_views` (#124) runs the hybrid preconditions
+       and creates ``hybrid_preferred`` / ``hybrid_redistributable`` plus their
+       ``hybrid_summary_*`` companions over *those*.
+
+    All three are idempotent (``CREATE OR REPLACE VIEW``) and open no transaction of
+    their own, so this is safe to call after any PV load and never nests over a
+    pipeline's transaction (#84a).
+
+    Because :func:`run_warehouse` always calls this last, a ``replace=True`` build —
+    whose ``DROP SCHEMA dwh CASCADE`` takes every view with it — rebuilds the hybrid
+    views too, with no extra wiring. That is what leaves E7's analysis surface and
+    #102's read seam (D039) populated after a full rebuild.
 
     Factored out of :func:`run_warehouse` so a future ``views`` subcommand — rebuild
     the views without re-scraping the sources — is a thin wrapper over this, not a
@@ -123,6 +139,7 @@ def rebuild_views(dbc: DBC) -> None:
     """
     build_pv_union(dbc)
     create_ec_pv_views(dbc)
+    create_hybrid_views(dbc)
 
 
 def run_warehouse(
@@ -153,7 +170,8 @@ def run_warehouse(
     3. :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` — the UCSB PV source, only when
        ``ucsb_html_dir`` is not ``None`` (else UCSB is skipped, explicitly — no env
        magic). Also ``replace=False``.
-    4. :func:`rebuild_views` — the resolved-PV + EC<->PV join views, always rebuilt.
+    4. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
+       rebuilt.
 
     ``years`` scopes every source to the same subset of elections (e.g. ``{2016, 2020}``
     to match the fixtures); ``None`` loads each source's full range. ``environ`` is
