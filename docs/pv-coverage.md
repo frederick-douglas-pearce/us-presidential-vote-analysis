@@ -70,7 +70,8 @@ Under the settled rule, for a partial-coverage year:
   different electorates.
 
 The denominators are deliberately **not** reconciled. The alternative that would reconcile them —
-rule (c), restricting both halves to the popular-vote states — is implemented behind the
+rule (c), restricting the EC share and the PV share alike to the popular-vote states — is
+implemented behind the
 `apply_coverage_policy` seam but **is not shipped**: that is D038's ruling, and
 [D042 §2](../.claude/specs/decisions.md) is what enforces it. (b) is the only configured rule, and
 `test_nothing_configures_a_policy_other_than_b` in `tests/unit/test_hybrid.py` fails CI on any
@@ -136,10 +137,13 @@ Two elections carry a different kind of absence — states that took no part in 
 rather than states that appointed electors without a popular vote. **These do not behave the way
 you would expect, and the surprise is worth stating plainly.**
 
+Every state named below carries **0** electoral votes, which is the whole point of the section —
+so no allotments are shown in this table, unlike the one above.
+
 | year | non-participating states | `pv_coverage` (EV) | by state count | what actually drives the number |
 |---|---|---|---|---|
-| 1864 | Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi, North Carolina, South Carolina, Tennessee, Texas, Virginia (11) | **1.0000** (233 / 233) | 0.6944 (25 / 36) | nothing — see below |
-| 1868 | Mississippi, Texas, Virginia (3) | **0.9898** (291 / 294) | 0.8919 (33 / 37) | **Florida alone**, which is legislature-chosen, not non-participating |
+| 1864 | Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi, North Carolina, South Carolina, Tennessee, Texas, Virginia — eleven states | **1.0000** (233 / 233) | 0.6944 (25 / 36) | nothing — see below |
+| 1868 | Mississippi, Texas, Virginia — three states | **0.9898** (291 / 294) | 0.8919 (33 / 37) | **Florida alone**, which is legislature-chosen, not non-participating |
 
 **A non-participating state has zero electoral votes**, so it contributes nothing to *either* side
 of the ratio — it is a 0/0 non-contributor. The property is enforced in code, not assumed: check 2
@@ -162,25 +166,35 @@ and "took no part" never collapse into one undifferentiated bucket.
 1824 is the year with the lowest coverage, no electoral-vote majority, and a president chosen by
 the House. It is the natural test of whether the denominator policy changes any conclusion.
 
-| candidate | EC votes | `ec_share_full` | PV share | (c) restricted EC share | (b) `hybrid_score` | (c) `hybrid_score` |
-|---|---|---|---|---|---|---|
-| Andrew Jackson | 99 | 0.3793 | 0.4135 | 84 / 190 = 0.4421 | **0.3964** | **0.4278** |
-| John Quincy Adams | 84 | 0.3218 | 0.3092 | 48 / 190 = 0.2526 | 0.3155 | 0.2809 |
-| William H. Crawford | 41 | 0.1571 | 0.1117 | 25 / 190 = 0.1316 | 0.1344 | 0.1216 |
-| Henry Clay | 37 | 0.1418 | 0.1299 | 33 / 190 = 0.1737 | 0.1358 | 0.1518 |
+| candidate | EC votes | `ec_share_full` (b) | (c) restricted EC share |
+|---|---|---|---|
+| Andrew Jackson | 99 | 0.3793 | 84 / 190 = 0.4421 |
+| John Quincy Adams | 84 | 0.3218 | 48 / 190 = 0.2526 |
+| William H. Crawford | 41 | 0.1571 | 25 / 190 = 0.1316 |
+| Henry Clay | 37 | 0.1418 | 33 / 190 = 0.1737 |
 
-The EC column sums to 261 and the restricted column to 190, so both shares sum to exactly 1.0. The
-four PV shares sum to 0.964, not 1.0 — 1824's national total is 365,833 votes, and the remainder
-went to candidates outside the top four or was not attributed. That asymmetry is real, not a
-rounding artifact.
+The EC column sums to 261 and the restricted column to 190, so both share columns sum to exactly
+1.0. Note what (c) does to the *ordering* of the also-rans: Clay overtakes Crawford, because
+Crawford's support was concentrated in legislature-chosen states (Georgia's nine and Delaware's
+two) that (c) removes from the denominator and from his numerator alike.
 
-**The winner is invariant; only the margin moves.** Jackson leads on both measures and wins the
-hybrid under **both** (b) and (c). What the policy changes is the top-two gap:
+> **Why the popular-vote columns are not printed here.** This project's pre-1976 popular vote comes
+> from a source that grants no redistribution rights (D016/D022), so per-candidate popular-vote
+> shares and national vote totals for 1824 are **deliberately absent from this page** — as they are
+> from the public API, which serves popular votes only from 1976. The hybrid *scores* are omitted
+> for the same reason and not merely for tidiness: a score is the mean of the EC and PV shares, so
+> printing it beside the EC share would reconstruct the PV share exactly. What is stated below are
+> the two **derived margins**, which the acceptance criteria ask for by name and which do not
+> reconstruct any candidate's share.
+
+**The winner is invariant; only the margin moves.** Jackson leads on both measures — he has the
+most electoral votes and the largest popular vote — and wins the hybrid under **both** (b) and (c).
+What the policy changes is the top-two gap:
 
 - under shipped policy **(b)**, `hybrid_margin` = **8.09 percentage points**;
 - under unshipped policy **(c)**, it would be **14.69 points** — because (c) restricts Jackson's EC
-  share to the popular-vote states, where he took 84 of 190 electoral votes (0.442) against Adams's
-  0.253.
+  share to the popular-vote states, where he took 84 of 190 electoral votes (0.4421) against
+  Adams's 0.2526, a wider lead than the 0.3793-to-0.3218 he holds over the full 261.
 
 That is the sentence a display surface should carry: for the worst-covered election in the record,
 the coverage policy moves the **margin**, not the **outcome**.
@@ -224,16 +238,24 @@ NULL as `0%`.
 
 ### Suggested display copy
 
-Ship these verbatim if they fit, so the wording does not drift between surfaces:
+Templates rather than fixed strings, so one year's numbers cannot be shipped for another. Keep the
+wording, substitute the values:
 
-- `< 1.0` — *"Popular-vote coverage: 73% of electoral votes. Six states appointed electors without
-  holding a popular vote in 1824, so the popular-vote share is measured over the remaining states."*
+- `< 1.0` — *"Popular-vote coverage: {coverage:.0%} of electoral votes. {n} state(s) appointed
+  electors without holding a popular vote in {year}, so the popular-vote share is measured over the
+  remaining states."*
+  Instantiated for 1824: *"Popular-vote coverage: 73% of electoral votes. 6 states appointed
+  electors without holding a popular vote in 1824, …"* — and for 1832: *"…: 96% of electoral votes.
+  1 state appointed electors …"*
 - `1.0` — *"Popular-vote coverage: complete."*
 - `NULL` — *"Popular-vote coverage is not established for this election on this data surface."*
 
+Note which of these a public consumer actually reaches for a pre-1976 year: the **`NULL`** one. The
+`< 1.0` template is for a surface carrying the full-history roster.
+
 ## Provenance, and how to reproduce these numbers
 
-Both inputs are public-domain:
+Every figure printed on this page is public-domain:
 
 - the **electoral-vote allotments** are National Archives data (`dwh.votes`, loaded from
   <https://www.archives.gov/electoral-college/results>);
@@ -247,6 +269,15 @@ Both inputs are public-domain:
   Each `legislature_chosen` row additionally cites U.S. Const. art. II, § 1, cl. 2, the clause that
   permits legislative appointment — the clause permits it, the source attests that the state
   actually used it.
+
+**The third input, named because this page depends on it and does not print it.** Coverage is a
+statement *about* the popular vote, and the pre-1976 popular vote in this project's warehouse comes
+from a source that grants no redistribution rights (D016/D022). No popular-vote count or
+per-candidate popular-vote share from before 1976 appears anywhere on this page, and none is
+recoverable from what does — the same boundary the public API draws by serving popular votes only
+from 1976 onward. `pv_coverage` itself is unaffected: it is a ratio of *electoral votes*, and the
+only thing it takes from the popular-vote side is the yes/no of whether a state held one, which is
+the independently-cited classification above.
 
 The decision record makes the same distinction directly: D024's licensing note holds that the
 roster's free-text `note` column is non-redistributable source prose, while "the `pv_status` enum
