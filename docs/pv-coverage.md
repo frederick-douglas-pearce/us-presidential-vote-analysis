@@ -174,9 +174,12 @@ the House. It is the natural test of whether the denominator policy changes any 
 | Henry Clay | 37 | 0.1418 | 33 / 190 = 0.1737 |
 
 The EC column sums to 261 and the restricted column to 190, so both share columns sum to exactly
-1.0. Note what (c) does to the *ordering* of the also-rans: Clay overtakes Crawford, because
-Crawford's support was concentrated in legislature-chosen states (Georgia's nine and Delaware's
-two) that (c) removes from the denominator and from his numerator alike.
+1.0. Note what (c) does to the *ordering* of the also-rans: Clay overtakes Crawford, reversing a
+4-vote Crawford lead into an 8-vote Clay one. The mechanism is **differential exposure, not
+concentration** — Crawford's support was not mostly in legislature-chosen states, since 25 of his
+41 electoral votes came from popular-vote Virginia (24) and Maryland (1). What matters is the
+*proportion* each candidate loses when those states come out: Crawford drops 16 of 41 (Georgia's
+nine, New York's five, Delaware's two — 39%), Clay only 4 of 37 (New York's four — 11%).
 
 > **Why the popular-vote columns are not printed here.** This project's pre-1976 popular vote comes
 > from a source that grants no redistribution rights (D016/D022), so per-candidate popular-vote
@@ -184,8 +187,9 @@ two) that (c) removes from the denominator and from his numerator alike.
 > from the public API, which serves popular votes only from 1976. The hybrid *scores* are omitted
 > for the same reason and not merely for tidiness: a score is the mean of the EC and PV shares, so
 > printing it beside the EC share would reconstruct the PV share exactly. What is stated below are
-> the two **derived margins**, which the acceptance criteria ask for by name and which do not
-> reconstruct any candidate's share.
+> the two **derived margins**, which the acceptance criteria ask for by name and which reconstruct
+> no candidate's share — see [the provenance note](#provenance-and-how-to-reproduce-these-numbers)
+> for exactly what they do and do not expose.
 
 **The winner is invariant; only the margin moves.** Jackson leads on both measures — he has the
 most electoral votes and the largest popular vote — and wins the hybrid under **both** (b) and (c).
@@ -272,10 +276,19 @@ Every figure printed on this page is public-domain:
 
 **The third input, named because this page depends on it and does not print it.** Coverage is a
 statement *about* the popular vote, and the pre-1976 popular vote in this project's warehouse comes
-from a source that grants no redistribution rights (D016/D022). No popular-vote count or
-per-candidate popular-vote share from before 1976 appears anywhere on this page, and none is
-recoverable from what does — the same boundary the public API draws by serving popular votes only
-from 1976 onward. `pv_coverage` itself is unaffected: it is a ratio of *electoral votes*, and the
+from a source that grants no redistribution rights (D016/D022). No popular-vote count, no
+per-candidate popular-vote share, and no national popular-vote total from before 1976 appears
+anywhere on this page, and **none of those is recoverable from what does** — the same boundary the
+public API draws by serving popular votes only from 1976 onward.
+
+Stated precisely, because an absolute claim here would be the wrong kind of claim to make. One
+derived quantity *is* recoverable: the two margins plus the printed EC shares give the **gap between
+the two leaders' popular-vote shares** in 1824 (about 10.4 points), since a margin is the mean of an
+EC gap and a PV gap. That is a difference between two candidates, not either one's share — the two
+margins yield one equation in two unknowns, so no individual share falls out, and Crawford's and
+Clay's never enter a top-two margin at all. It is here because the acceptance criteria ask for the
+margins by name and the movement of the margin *is* the finding, which is the same exception
+[`ucsb-html-formats.md`](ucsb-html-formats.md) draws for quoting a vote number. `pv_coverage` itself is unaffected: it is a ratio of *electoral votes*, and the
 only thing it takes from the popular-vote side is the yes/no of whether a state held one, which is
 the independently-cited classification above.
 
