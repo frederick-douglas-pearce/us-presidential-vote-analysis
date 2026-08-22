@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -45,6 +46,7 @@ from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
     PV_STATUS_POPULAR_VOTE,
+    ROSTER_TABLE,
 )
 
 #: The shared Archives sentence (see tests/fixtures/api_snapshot.py for why a fixture
@@ -2558,6 +2560,94 @@ class TestCarriedColumnsConstant:
         df.loc[df["state"] == "Ohio", "party"] = "DEMOCRAT"
         df.loc[df["state"] == "Iowa", "party"] = None
         hybrid.assert_carried_columns_constant(df)
+
+
+class _ProbeStub:
+    """A minimal ``DBC`` stand-in that answers ``to_regclass`` probes and records writes.
+
+    Deliberately not the shared ``RecordingConnection``: what is under test is the
+    *order* of probes against creations, so the stub has to be able to report a specific
+    relation absent while still counting every ``create_view`` that got as far as being
+    issued.
+    """
+
+    def __init__(self, absent: str) -> None:
+        self.absent = absent
+        self.created: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        if not query.startswith("SELECT to_regclass("):
+            # Not just unsupported -- this IS the assertion. Any data read means a probe
+            # for a *later* input had not run yet, which is the ordering bug itself.
+            # Without this the stub would fail on such a query anyway, but with an
+            # IndexError that says nothing about what went wrong.
+            raise AssertionError(
+                f"a data read was issued before every input had been probed: {query!r}"
+            )
+        relation = query.split("'")[1]  # to_regclass('schema.name')
+        found = None if relation.endswith(f".{self.absent}") else relation
+        return pd.DataFrame({"relation": [found]})
+
+    def create_view(
+        self, schema: str, view_name: str, select_sql: str, replace: bool = False
+    ) -> None:
+        self.created.append(view_name)
+
+
+class TestEveryInputIsProbedBeforeAnythingIsCreated:
+    """A missing input must leave the warehouse untouched, not half-built.
+
+    ``create_hybrid_views`` opens no transaction and ``DBC`` commits per statement, so
+    probing inside the per-surface loop would let a failure on the *second* surface
+    leave the first surface's pair created and committed — a warehouse advertising two
+    of four hybrid views. ``usvote.join.create_ec_pv_views`` probes both its inputs up
+    front for the same reason. Raised at code review (#124).
+    """
+
+    def _run(self, absent: str) -> tuple[_ProbeStub, pytest.ExceptionInfo[Exception]]:
+        stub = _ProbeStub(absent)
+        with pytest.raises(hybrid.HybridError) as excinfo:
+            hybrid.create_hybrid_views(cast("Any", stub))
+        return stub, excinfo
+
+    def test_a_missing_second_surface_creates_nothing_at_all(self) -> None:
+        """The regression that motivated the fix: surface 1 must not be committed."""
+        stub, excinfo = self._run(EC_PV_REDISTRIBUTABLE_VIEW)
+        assert EC_PV_REDISTRIBUTABLE_VIEW in str(excinfo.value)
+        assert stub.created == [], (
+            "the first surface's views were created before the second was probed — "
+            f"a half-built warehouse: {stub.created}"
+        )
+
+    def test_a_missing_roster_is_a_clear_error_not_an_undefined_table(self) -> None:
+        """The roster is a required input, so its absence is probed, not stumbled into."""
+        stub, excinfo = self._run(ROSTER_TABLE)
+        assert ROSTER_TABLE in str(excinfo.value)
+        assert "pv_coverage" in str(excinfo.value), "say why it is needed"
+        assert stub.created == []
+
+    def test_the_probe_stub_would_let_a_creation_through(self) -> None:
+        """Non-vacuity: with nothing absent the stub records creations, so the two
+        ``created == []`` asserts above are load-bearing rather than trivially true."""
+        stub = _ProbeStub("nothing-is-absent")
+        assert stub.select_query_to_df("SELECT to_regclass('dwh.x')")[
+            "relation"
+        ].iloc[0] == "dwh.x"
+        stub.create_view("dwh", "v", "SELECT 1")
+        assert stub.created == ["v"]
+
+    def test_the_stub_names_the_ordering_bug_rather_than_erroring_obscurely(
+        self,
+    ) -> None:
+        """How this suite would report a regression to probing inside the loop.
+
+        Under that ordering the first surface is probed, then read — and the read is
+        what this stub refuses. Pinning the message keeps the failure self-explaining
+        instead of an ``IndexError`` from a query the stub could not parse.
+        """
+        stub = _ProbeStub(EC_PV_REDISTRIBUTABLE_VIEW)
+        with pytest.raises(AssertionError, match="before every input had been probed"):
+            stub.select_query_to_df(f"SELECT * FROM dwh.{EC_PV_PREFERRED_VIEW}")
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:

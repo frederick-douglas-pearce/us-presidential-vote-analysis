@@ -1447,10 +1447,17 @@ def create_hybrid_views(
 ) -> None:
     """Create all four hybrid views, after the per-surface preconditions pass.
 
-    Mirrors :func:`usvote.join.create_ec_pv_views`: probe the inputs, run the guards as
-    **preconditions**, then create. Per surface in :data:`HYBRID_SURFACES` the
-    per-candidate view is created first and the summary second, because the summary
-    reads it.
+    Mirrors :func:`usvote.join.create_ec_pv_views`: probe **every** input, then per
+    surface run the guards as **preconditions** and create. The per-candidate view is
+    created first and its summary second, because the summary reads it.
+
+    **All probing happens before any creation, and that ordering is the point.** This
+    function opens no transaction and ``DBC`` commits per statement, so a probe inside
+    the loop would let a failure on the second surface leave the first surface's pair
+    created and committed — a warehouse advertising two of four hybrid views. The guards
+    themselves stay per-surface (they need that surface's data), so this narrows the
+    window rather than closing it; what it removes is the *foreseeable* half-build,
+    where an input is simply absent.
 
     **Seven preconditions run before anything is created**, over exactly the data the
     views will express. Three are checked here directly, on the input join frame:
@@ -1480,13 +1487,29 @@ def create_hybrid_views(
     *breaking* column change to a per-candidate view now needs an explicit
     ``DROP ... CASCADE`` migration, since its summary depends on it.
     """
-    for join_view, candidate_view, summary_view in HYBRID_SURFACES:
+    # EVERY input is probed before ANY view is created. DBC commits per statement and
+    # this function opens no transaction, so probing inside the loop below would let a
+    # failure on the second surface leave the first surface's pair created and
+    # committed -- a warehouse advertising two of four hybrid views. The sibling
+    # usvote.join.create_ec_pv_views probes both of its inputs up front for exactly this
+    # reason. The roster is probed too: it is a required input (read_pv_status_roster),
+    # and without this its absence surfaces mid-loop as a raw psycopg2 UndefinedTable,
+    # which also aborts the connection -- the opacity the probe exists to prevent.
+    for join_view, _, _ in HYBRID_SURFACES:
         if not _relation_exists(dbc, schema, join_view):
             raise HybridError(
                 f"{schema}.{join_view} does not exist — run "
                 "usvote.join.create_ec_pv_views (or usvote.warehouse.rebuild_views) "
                 "before create_hybrid_views."
             )
+    if not _relation_exists(dbc, roster_schema, ROSTER_TABLE):
+        raise HybridError(
+            f"{roster_schema}.{ROSTER_TABLE} does not exist — load a popular-vote "
+            "source (which writes the D024 roster) before create_hybrid_views; "
+            "pv_coverage cannot be derived without it."
+        )
+
+    for join_view, candidate_view, summary_view in HYBRID_SURFACES:
         # Licensing and carried-column guards first, so a leak or a SQL/oracle
         # divergence fails before the (more expensive) derivation runs.
         ec_pv_df = read_ec_pv_join(dbc, view=join_view, schema=schema)
