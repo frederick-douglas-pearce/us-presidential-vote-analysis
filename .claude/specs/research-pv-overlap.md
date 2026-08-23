@@ -18,8 +18,8 @@ single-source views, differenced directly. No re-extract.
 **The benign-seam assumption is CONFIRMED, on a pre-stated bar, with one named caveat.**
 
 1. **The sources agree on the outcome in every overlap year.** The national popular-vote **winner is
-   identical under both sources in all 13 of 13 years**. `pv_flip` — a headline E7 output (D037) — is
-   therefore source-invariant across the entire overlap.
+   identical under both sources in all 13 of 13 years**. `pv_flip` — a headline E7 output, added in #123 and materialized
+   by D050 — is therefore source-invariant across the entire overlap.
 2. **They agree on the margin to well inside what could matter.** The largest cross-source
    disagreement in the national margin is **0.034 percentage points**, against a smallest actual
    margin of **0.511 pp** (2000). The worst-case source effect is **~15× smaller** than the closest
@@ -81,14 +81,26 @@ issue #70** rather than applied silently.
   public by construction*. It is also the deliverable's entire point: D017 §3 calls this agreement
   the "empirical justification". Without this carve-out a literal reading of the rule would forbid
   the agreement rate itself, and no such document could exist.
+
+  **Stated plainly rather than left implicit:** §3's two `100.00%` rows (1988 and 2012) go further
+  than the aggregate — they identify **204 specific cells** as equal to their public MIT values.
+  That is the largest individual-record identification in this document. It is accepted under this
+  same carve-out, and the reason is the one above: those 204 integers are already public under CC0,
+  so what transfers is UCSB's *agreement*, not its content.
 - **A band needs an absolute floor.** Votes are integers, so a `<0.1%` band on a ~5,000-vote cell
   implies ±5 votes — a near-pin, not a bound. Where a band's implied interval (`MIT × band ceiling`)
   falls under 500 votes the cell is reported with **no band at all**, only as a divergence. **20 of
   the 87 divergent cells are reported that way**, and §3's table carries them in an explicit
   `withheld` column rather than silently folding them into a band. Absolute magnitude and relative
-  band are never published for the same cell.
-- **A normalized margin is not reconstructive.** A national margin is one ratio in three unknowns
-  (two candidate totals and a denominator); no integer is recoverable from it. This is the same
+  band are never published for the same cell. The rule governs *UCSB-derived* magnitudes: MIT's own
+  integers are CC0 and appear where one is needed to explain a threshold, as in the script's
+  commentary on the floor.
+- **A normalized margin does not reconstruct an individual record.** A national margin is one ratio
+  in three unknowns (two candidate totals and a denominator), so no *state or candidate* value falls
+  out of it. It is **not** an absolute claim that no integer is recoverable: where §5.3 reports a
+  year exact, two unknowns are supplied and the year's national **denominator** does solve — a
+  51-state aggregate, which is acceptable under the rule above, but worth stating precisely rather
+  than overclaiming. This is the same
   property D017 relies on when it says ratios cancel the source — which is precisely why the
   decisive test in **§5.1–§5.2** can be published in full while §3's cell-level detail cannot. It
   does **not** extend to §5.3, whose roll-up figures are counts rather than ratios — see the note
@@ -118,7 +130,8 @@ become publishable.
 ## 3. Cell-grain agreement (AC-2a)
 
 Joined **FULL OUTER** on the canonical `(year, state, candidate)`, so an unmatched row on either
-side would surface as a finding rather than vanish ([[inner-join-silent-drop]]):
+side would surface as a finding rather than vanish — the inner-join silent-drop hazard, where an
+unmatched row disappears without any sum-based validator noticing:
 
 | Measure | Value |
 |---|---|
@@ -135,10 +148,10 @@ direction.
 **Relative-delta percentiles.** The basis matters and is stated, because the two differ by orders of
 magnitude and an unlabeled percentile would be uninterpretable:
 
-| Basis | p50 | p90 | p95 |
-|---|---|---|---|
-| Divergent cells only (n=87) | 0.016% | 0.699% | 1.347% |
-| All cells (n=1326) | 0.000% | 0.000% | 0.002% |
+| Basis | p50 | p90 |
+|---|---|---|
+| Divergent cells only (n=87) | 0.016% | 0.699% |
+| All cells (n=1326) | 0.000% | 0.000% |
 
 **The tail, as counts rather than as an extreme value** (per §2's second tightening):
 
@@ -166,7 +179,9 @@ applies within each.
 | 2024 | 2 | 0 | 0 | 0 | 2 | 98.04% |
 
 Totals: **44** in `<0.1%`, **16** in `0.1–1%`, **7** in `>1%`, **20** with the band withheld under
-the §2 floor — 87 divergent cells in all.
+the §2 floor — 87 divergent cells in all. *(This table is an assembly: the band columns come from the
+script's query 3, the exact-match column from query 3b, and 1988/2012 appear as explicit zero rows
+because query 3 groups only over divergent cells and so emits nothing for them.)*
 
 ### 3.1 The D005 reliability list (AC-3)
 
@@ -215,7 +230,7 @@ than per-candidate transcription noise.
 | State-years compared | 663 |
 | Provided totals identical | **454 (68.48%)** |
 | p95 relative difference | 0.778% |
-| max relative difference | 3.359% |
+| state-years at or above 1% / 2% / 3% | 28 / 11 / 2 |
 
 **The relationship runs in one direction only** — the tempting reading, that a cell difference and
 a denominator difference are the same event seen twice, is contradicted by the data. The 2×2 over
@@ -239,8 +254,8 @@ That asymmetry is itself informative, and §4.1 uses it.
 D017's benign-seam caveat names other/write-in handling as a failure mode. **No partition of the
 divergent cells by candidate type is possible**, because the minor-candidate rows are not in the
 population: across the whole overlap there are **exactly 2 candidates in every one of the 663
-state-years** — 18 distinct candidates, 2 distinct parties, and the rank query returns no rank-3
-row at all.
+state-years** — 18 distinct candidates, 2 distinct parties. The script's query 4b checks this
+directly (min and max candidates per state-year are both 2).
 
 Two different mechanisms produce that, and they are worth naming separately because they are not
 equally robust:
@@ -250,9 +265,10 @@ equally robust:
   `reconcile.py`'s curated `UCSB_CANDIDATE_RECONCILIATIONS` map does the rewriting and scoping and
   `_assert_getter_completeness` checks the result — a literal D007 scope.
 - **MIT** is scoped by the **D019 party proxy**, `EC_GETTER_PARTIES = {"DEMOCRAT", "REPUBLICAN"}`
-  (`src/usvote/mit/transform.py:74`), applied by `_filter_ec_getters`. Under a *literal* EC-getter
-  scope 2016's faithless-elector recipients would be in scope; the party proxy alone is what
-  excludes them on the MIT side.
+  (`src/usvote/mit/transform.py:74`), applied by `_filter_ec_getters`. The MIT file carries no rows
+  at all for 2016's faithless-elector recipients, so nothing is in fact excluded there — but the
+  filter tests **party only**, with no write-in predicate, so a named write-in coded `DEMOCRAT`
+  would enter under the proxy where a name match would reject it.
 
 A future MIT release coding a named write-in line as `DEMOCRAT` would change the population under
 the proxy and not under the name match — so the "exactly 2" property is a current fact, not a
@@ -275,13 +291,13 @@ candidates — which is why `pv/validate.py::assert_totals_not_exceeded` asserts
 | UCSB mean residual | 4.922% |
 | **Mean absolute *paired* difference** (per state-year) | **0.104 pp** |
 | p95 of the paired difference | 0.755 pp |
-| max paired difference | 3.002 pp |
+| state-years at or above 1 / 2 / 3 pp | 25 / 4 / 1 |
 
 **The paired figure is the honest one and it is not the difference of the two means.** Comparing
 `4.974 − 4.922 = 0.05` would let opposite-signed per-state differences cancel; computed per
 state-year and then averaged, the two sources' "everybody else" coverage differs by **0.104 pp on
-average**, with a tail reaching 3 pp. That is small — and it is twice the number an unpaired
-comparison would have suggested.
+average**, with only 4 state-years past 2 pp. That is small — and it is twice the number an
+unpaired comparison would have suggested.
 
 ---
 
@@ -379,7 +395,8 @@ a normalized margin is not.
 > delta narrowed four of those seven `(year, state, candidate)` cells to between 4 and 261 votes,
 > against a band mechanism engineered to leave an interval 9–18% wide. That is the individual-record
 > disclosure this document exists to avoid, arrived at by combining two figures each of which looked
-> harmless alone — the same indirect shape as the #125 finding.
+> harmless alone — the same indirect shape as the #125 finding, whose fix is recorded in the
+> provenance section of [`docs/pv-coverage.md`](../../docs/pv-coverage.md).
 >
 > Threshold counts bound the tail without locating it. The AC-2b finding is unaffected: "only 4 of
 > 26 rows agree exactly, and differences accumulate rather than cancel" is what the criterion asks
@@ -416,18 +433,19 @@ D017 §3 exists to detect.
   within the measured range a passing gate leaves no margin close enough to flip. It is **not** a
   guarantee on unseen data: a future election decided by 0.2 pp would pass this gate and could still
   be source-sensitive.
-- **The roll-up grain is deliberately not gated.** Its relative agreement (max 0.100%) is tighter
-  than the cell grain, so #1 and #2 dominate it; adding a fourth threshold would fire only where one
-  of those already had.
+- **The roll-up grain is deliberately not gated.** Every roll-up row lands under 0.15% (§5.3), which
+  is tighter than the cell grain, so #1 and #2 dominate it; adding a fourth threshold would fire only
+  where one of those already had.
 
 ---
 
 ## 7. What this does and does not license
 
 **Licensed.** Reading `pv_preferred` across the 1976 seam for **normalized per-election metrics** —
-flip booleans and margin percentages, which is what `hybrid_preferred` and
-`hybrid_summary_preferred` publish — computed on the same provided-total denominator this study
-used (§5.2), so the comparison is like-for-like. Within the overlap the source choice changes no
+flip booleans and margin percentages, which is what `hybrid_summary_preferred` publishes
+(`hybrid_preferred`, the per-candidate view, carries the shares and scores but no flip or margin
+column) — computed on the same provided-total denominator this study used (§5.2), so the comparison
+is like-for-like. Within the overlap the source choice changes no
 winner and moves no margin by as much as 0.034 pp.
 
 **Not licensed, and the caveat is unchanged by this finding:**
@@ -450,10 +468,11 @@ winner and moves no margin by as much as 0.034 pp.
 **The query script is committed beside this document** as
 [`research-pv-overlap.sql`](research-pv-overlap.sql). It contains no UCSB values — only the queries
 that derive aggregates from them — so it ships with the finding rather than living where a reader
-cannot reach it. It emits the tables of §3, §4, §5.1, §5.2 and §5.3 (not in document order — §5.3's
-query precedes §5.1's). Three published figures are derived from it rather than printed by it: the
-percentile table's *all-cells* row, and §6's "Observed today" column, which is assembled from
-several of its queries.
+cannot reach it. It emits the tables of §3, §4, §5.1, §5.2 and §5.3, though **not in document order** (§5.3's query
+precedes §5.1's, and §4 reads its four queries out of sequence). A few published figures are
+**assembled from more than one query rather than printed by any single one**: the percentile table's
+*all-cells* row (query 2 with its divergence filter dropped), §3's band table (queries 3 and 3b plus
+the two implied zero rows), and §6's whole "Observed today" column.
 
 ```bash
 docker run -d --name usvote-70 -e POSTGRES_PASSWORD=itest -e POSTGRES_DB=elections \

@@ -32,9 +32,10 @@ WHERE coalesce(m.year,u.year) BETWEEN 1976 AND 2024;
 -- KNOWN LIMITATION of the absolute floor below, for #167 to resolve rather than inherit:
 -- `band_hi` is the band's UPPER edge, and the top band is open-ended, so its `band_hi`
 -- of 1.0 makes the floor predicate `mit*band_hi < 500` degenerate to `mit < 500` there.
--- Inert on this corpus -- the smallest published >1% cell has MIT 77,798, giving an
--- implied interval ~778 votes, and nothing published sits under the floor -- but a
--- future small-magnitude >1% cell would be published with too narrow an interval.
+-- Inert on this corpus: with band_hi = 1.0 the predicate is `mit < 500`, and no
+-- published cell has a MIT value that small, so nothing is mis-withheld today. But a
+-- future small-magnitude >1% cell would be published with too narrow an interval,
+-- because the predicate is not testing what the comment above says it tests.
 -- Deliberately NOT redesigned here: changing the predicate changes the published
 -- counts, which the review round that found it had no budget left to re-certify.
 -- NULL HANDLING: `pair` is a FULL OUTER join, so a one-sided row would carry NULL
@@ -63,7 +64,9 @@ SELECT count(*) AS pairs, count(*) FILTER (WHERE mit IS NULL) AS mit_missing,
 SELECT count(*) AS n,
   round(percentile_cont(0.50) WITHIN GROUP (ORDER BY relpct)::numeric,4) AS p50,
   round(percentile_cont(0.90) WITHIN GROUP (ORDER BY relpct)::numeric,4) AS p90,
-  round(percentile_cont(0.95) WITHIN GROUP (ORDER BY relpct)::numeric,4) AS p95,
+  -- No p95 here: with 7 of 87 cells above 1%, any percentile above ~92% interpolates
+  -- INSIDE the published key list and pins a named cell (round-3 review). p50/p90 land
+  -- in the unnamed mass and are safe.
   count(*) FILTER (WHERE relpct>1) AS over_1pct, count(*) FILTER (WHERE relpct>2) AS over_2pct,
   count(*) FILTER (WHERE relpct>5) AS over_5pct, count(*) FILTER (WHERE relpct>10) AS over_10pct
 FROM d WHERE mit<>ucsb;
@@ -85,7 +88,20 @@ FROM d GROUP BY year ORDER BY year;
 
 \echo ''
 \echo '### 4. The >1% cells -- keys + band only (the D005 reliability list, AC-3)'
-SELECT year, state, candidate, party FROM d WHERE relpct >= 1.0 ORDER BY year, state;
+-- `> 1` matches the tail counts in query 2 and the '>1%' band edge in the `d` view,
+-- which are all strict. No cell sits exactly at 1.0, so this is inert today; they are
+-- aligned so the published list and the published count cannot drift apart.
+SELECT year, state, candidate, party FROM d WHERE relpct > 1.0 ORDER BY year, state;
+
+\echo ''
+\echo '### 4b. Candidates per state-year -- the D007/D019 scoping property (AC-4)'
+-- Section 4.1 cites this: min and max are both 2, so no minor/other/write-in row
+-- exists in the comparison population and divergence cannot be partitioned by
+-- candidate type.
+SELECT min(n) AS min_candidates, max(n) AS max_candidates, count(*) AS state_years,
+       (SELECT count(DISTINCT candidate) FROM d) AS distinct_candidates,
+       (SELECT count(DISTINCT party) FROM d) AS distinct_parties
+FROM (SELECT year, state, count(*) AS n FROM d GROUP BY year, state) s;
 
 \echo ''
 \echo '### 5. Is divergence paired within a state-year? (AC-4, structure)'
@@ -104,7 +120,13 @@ WITH s AS (SELECT DISTINCT year, state, mit_tot, ucsb_tot FROM d)
 SELECT count(*) AS state_years, count(*) FILTER (WHERE mit_tot=ucsb_tot) AS equal_totals,
   round(100.0*count(*) FILTER (WHERE mit_tot=ucsb_tot)/count(*),2) AS equal_pct,
   round(percentile_cont(0.95) WITHIN GROUP (ORDER BY abs(mit_tot-ucsb_tot)::numeric/greatest(ucsb_tot,1)*100)::numeric,4) AS p95_relpct,
-  round(max(abs(mit_tot-ucsb_tot)::numeric/greatest(ucsb_tot,1)*100)::numeric,4) AS max_relpct FROM s;
+  -- Threshold counts, NOT a maximum: a max is a point statistic over a small
+  -- population and inverts. Two published maxima here jointly identified one
+  -- state-year and recovered its UCSB provided total to ~16 votes (round-3 review).
+  count(*) FILTER (WHERE abs(mit_tot-ucsb_tot)::numeric/greatest(ucsb_tot,1)*100 >= 1) AS ge_1pct,
+  count(*) FILTER (WHERE abs(mit_tot-ucsb_tot)::numeric/greatest(ucsb_tot,1)*100 >= 2) AS ge_2pct,
+  count(*) FILTER (WHERE abs(mit_tot-ucsb_tot)::numeric/greatest(ucsb_tot,1)*100 >= 3) AS ge_3pct
+  FROM s;
 
 \echo ''
 \echo '### 8. Other/write-in -- PAIRED provided-vs-resum residual difference (AC-4)'
@@ -117,7 +139,10 @@ SELECT round(avg(mr)::numeric,3) AS mit_mean_residual_pct,
        round(avg(ur)::numeric,3) AS ucsb_mean_residual_pct,
        round(avg(abs(mr-ur))::numeric,4) AS mean_abs_paired_diff_pp,
        round(percentile_cont(0.95) WITHIN GROUP (ORDER BY abs(mr-ur))::numeric,4) AS p95_paired_diff_pp,
-       round(max(abs(mr-ur))::numeric,4) AS max_paired_diff_pp FROM p;
+       -- Threshold counts rather than a maximum, for the reason in query 7.
+       count(*) FILTER (WHERE abs(mr-ur) >= 1) AS ge_1pp,
+       count(*) FILTER (WHERE abs(mr-ur) >= 2) AS ge_2pp,
+       count(*) FILTER (WHERE abs(mr-ur) >= 3) AS ge_3pp FROM p;
 
 \echo ''
 \echo '### 9. National roll-up per election, per candidate (AC-2b)'
