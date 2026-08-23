@@ -29,6 +29,14 @@ FROM dwh.pv_redistributable m
 FULL OUTER JOIN dwh.pv_ucsb u ON m.year=u.year AND m.state=u.state AND m.candidate=u.candidate
 WHERE coalesce(m.year,u.year) BETWEEN 1976 AND 2024;
 
+-- KNOWN LIMITATION of the absolute floor below, for #167 to resolve rather than inherit:
+-- `band_hi` is the band's UPPER edge, and the top band is open-ended, so its `band_hi`
+-- of 1.0 makes the floor predicate `mit*band_hi < 500` degenerate to `mit < 500` there.
+-- Inert on this corpus -- the smallest published >1% cell has MIT 77,798, giving an
+-- implied interval ~778 votes, and nothing published sits under the floor -- but a
+-- future small-magnitude >1% cell would be published with too narrow an interval.
+-- Deliberately NOT redesigned here: changing the predicate changes the published
+-- counts, which the review round that found it had no budget left to re-certify.
 CREATE TEMP VIEW d AS
 SELECT *, abs(mit-ucsb)::numeric/greatest(ucsb,1)*100 AS relpct,
   CASE WHEN abs(mit-ucsb)::numeric/greatest(ucsb,1)*100 < 0.1 THEN 0.001
@@ -107,13 +115,25 @@ SELECT round(avg(mr)::numeric,3) AS mit_mean_residual_pct,
 
 \echo ''
 \echo '### 9. National roll-up per election, per candidate (AC-2b)'
+-- Counts by band ONLY -- deliberately no per-year maximum. A per-year max relative
+-- deviation at 4dp is a reconstruction vector: MIT nationals are CC0 and exactly
+-- reproducible from this script, so UCSB_national = MIT_national / (1 +/- worst/100)
+-- inverts it to within tens of votes, and national per-candidate UCSB totals are on
+-- the finding's own withhold list. Caught in review; do not re-add the column.
 WITH n AS (SELECT year, candidate, sum(mit) AS mn, sum(ucsb) AS un FROM d GROUP BY year, candidate),
 b AS (SELECT year, abs(mn-un)::numeric/greatest(un,1)*100 AS rel FROM n)
 SELECT year, count(*) AS candidates, count(*) FILTER (WHERE rel=0) AS exact,
   count(*) FILTER (WHERE rel>0 AND rel<0.05) AS lt_0_05pct,
-  count(*) FILTER (WHERE rel>=0.05) AS ge_0_05pct,
-  round(max(rel)::numeric,4) AS worst_relpct
+  count(*) FILTER (WHERE rel>=0.05) AS ge_0_05pct
 FROM b GROUP BY year ORDER BY year;
+
+\echo ''
+\echo '### 9b. Roll-up tail as threshold counts, over all 26 rows'
+WITH n AS (SELECT year, candidate, sum(mit) AS mn, sum(ucsb) AS un FROM d GROUP BY year, candidate),
+b AS (SELECT abs(mn-un)::numeric/greatest(un,1)*100 AS rel FROM n)
+SELECT count(*) AS rows, count(*) FILTER (WHERE rel=0) AS exact,
+  count(*) FILTER (WHERE rel>=0.05) AS ge_0_05, count(*) FILTER (WHERE rel>=0.10) AS ge_0_10,
+  count(*) FILTER (WHERE rel>=0.15) AS ge_0_15 FROM b;
 
 \echo ''
 \echo '### 10. DECISIVE -- national PV winner agreement (AC-5b)'

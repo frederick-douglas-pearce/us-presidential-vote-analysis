@@ -45,7 +45,8 @@ residual assumption, and it should be stated wherever a cross-1976 trend is publ
 
 **This section is load-bearing, not boilerplate.** MIT is CC0 and already public; UCSB is
 `redistributable=false` (D016) and this repository is public, where committing UCSB content **is**
-redistribution and is effectively irreversible (D022, D030). The bite is algebraic:
+redistribution and is effectively irreversible (**D022**; D030 sets the related
+redistributable-only rule for the API surface). The bite is algebraic:
 
 > **`UCSB = MIT − delta`.** An exact per-cell delta printed beside the public MIT value is a
 > *lossless re-encoding of the UCSB integer*. A "delta" does not launder the source.
@@ -229,12 +230,14 @@ row at all.
 Two different mechanisms produce that, and they are worth naming separately because they are not
 equally robust:
 
-- **UCSB** is scoped by name-matching against the EC getters (`ucsb/reconcile.py` reads
-  `read_ec_getters`) — a literal D007 scope.
+- **UCSB** is scoped against the EC getters: `usvote/ucsb/pipeline.py` calls
+  `read_ec_getters` (defined in `usvote/spine.py`) and injects the frame across a DI seam, where
+  `reconcile.py`'s curated `UCSB_CANDIDATE_RECONCILIATIONS` map does the rewriting and scoping and
+  `_assert_getter_completeness` checks the result — a literal D007 scope.
 - **MIT** is scoped by the **D019 party proxy**, `EC_GETTER_PARTIES = {"DEMOCRAT", "REPUBLICAN"}`
-  (`src/usvote/mit/transform.py:74`). Under a *literal* EC-getter scope 2016's faithless-elector
-  recipients would be in scope; they are excluded because `EC_GETTERS_WITHOUT_POPULAR_VOTE` records
-  that they hold no popular vote.
+  (`src/usvote/mit/transform.py:74`), applied by `_filter_ec_getters`. Under a *literal* EC-getter
+  scope 2016's faithless-elector recipients would be in scope; the party proxy alone is what
+  excludes them on the MIT side.
 
 A future MIT release coding a named write-in line as `DEMOCRAT` would change the population under
 the proxy and not under the name match — so the "exactly 2" property is a current fact, not a
@@ -318,32 +321,46 @@ the window ✓. **All three clauses met → CONFIRMED.**
 
 ### 5.3 National roll-up per election (AC-2b)
 
-Per-candidate national totals from each source, differenced. Reported as counts by band, per the §2
-rule; MIT's own nationals are CC0 and the divergence is stated relatively.
+Per-candidate national totals from each source, differenced. Reported as **counts by band**, with
+no per-year extreme value — see the note below, which is the reason this table looks coarser than
+§3's.
 
-| Year | candidates | exact | >0 but <0.05% | ≥0.05% | worst |
-|---|---|---|---|---|---|
-| 1976 | 2 | 0 | 2 | 0 | 0.012% |
-| 1980 | 2 | 0 | 2 | 0 | 0.012% |
-| 1984 | 2 | 0 | 2 | 0 | 0.024% |
-| 1988 | 2 | **2** | 0 | 0 | 0.000% |
-| 1992 | 2 | 0 | 1 | 1 | 0.100% |
-| 1996 | 2 | 0 | 2 | 0 | 0.001% |
-| 2000 | 2 | 0 | 2 | 0 | 0.007% |
-| 2004 | 2 | 0 | 2 | 0 | 0.020% |
-| 2008 | 2 | 0 | 1 | 1 | 0.060% |
-| 2012 | 2 | **2** | 0 | 0 | 0.000% |
-| 2016 | 2 | 0 | 1 | 1 | 0.099% |
-| 2020 | 2 | 0 | 2 | 0 | 0.001% |
-| 2024 | 2 | 0 | 2 | 0 | 0.002% |
+| Year | candidates | exact | >0 but <0.05% | ≥0.05% |
+|---|---|---|---|---|
+| 1976 | 2 | 0 | 2 | 0 |
+| 1980 | 2 | 0 | 2 | 0 |
+| 1984 | 2 | 0 | 2 | 0 |
+| 1988 | 2 | **2** | 0 | 0 |
+| 1992 | 2 | 0 | 1 | 1 |
+| 1996 | 2 | 0 | 2 | 0 |
+| 2000 | 2 | 0 | 2 | 0 |
+| 2004 | 2 | 0 | 2 | 0 |
+| 2008 | 2 | 0 | 1 | 1 |
+| 2012 | 2 | **2** | 0 | 0 |
+| 2016 | 2 | 0 | 1 | 1 |
+| 2020 | 2 | 0 | 2 | 0 |
+| 2024 | 2 | 0 | 2 | 0 |
+
+Across all 26 rows: **4 exact**, **3 at or above 0.05%**, **1 at or above 0.10%**, and **none at or
+above 0.15%**.
 
 Only **4 of 26** rows agree exactly — and they are 1988 and 2012, the two years with no divergent
 cell at all, which is the expected internal cross-check. Elsewhere small per-cell differences
-**accumulate rather than cancel** when summed, but the relative disagreement stays tiny (p95
-**0.089%**, max **0.100%**, concentrated in 1992/2008/2016). This is exactly the asymmetry D017
-predicts: a raw national *count* series is the fragile reading, a normalized margin is not.
+**accumulate rather than cancel** when summed, but the disagreement stays under 0.15% everywhere.
+This is exactly the asymmetry D017 predicts: a raw national *count* series is the fragile reading,
+a normalized margin is not.
 
----
+> **Why this table publishes no per-year maximum.** An earlier version of this section carried a
+> per-year `worst` relative deviation to four decimal places, and that was a **reconstruction
+> vector**, caught in review. MIT's nationals are CC0 *and exactly reproducible from the recipe in
+> §8*, so `UCSB_national = MIT_national / (1 ± worst/100)` inverts a 4-dp relative figure to within
+> a few tens of votes on a 60-million-vote total — and the sign ambiguity is one bit, not a
+> defence. Chained onto §3.1's named keys it also narrowed several individual cells far below the
+> band width those keys were meant to carry. National per-candidate UCSB totals are **item 5 on
+> §2's own withhold list**, so this was the §2 rule stated and then not applied one section later.
+> Threshold counts bound the tail without locating it, which is the same treatment §2's second
+> tightening applies at the cell grain. The AC-2b finding is unaffected: "only 4 of 26 rows agree
+> exactly, and differences accumulate rather than cancel" is what the criterion asks for.
 
 ## 6. Recommended tolerance for the D017 layer-3 gate (AC-5a)
 
@@ -410,7 +427,10 @@ winner and moves no margin by as much as 0.034 pp.
 **The query script is committed beside this document** as
 [`research-pv-overlap.sql`](research-pv-overlap.sql). It contains no UCSB values — only the queries
 that derive aggregates from them — so it ships with the finding rather than living where a reader
-cannot reach it. **Every table in §3, §4, §5 and §6 is emitted by it**, in that order.
+cannot reach it. It emits the tables of §3, §4, §5.1, §5.2 and §5.3 (not in document order — §5.3's
+query precedes §5.1's). Three published figures are derived from it rather than printed by it: the
+percentile table's *all-cells* row, and §6's "Observed today" column, which is assembled from
+several of its queries.
 
 ```bash
 docker run -d --name usvote-70 -e POSTGRES_PASSWORD=itest -e POSTGRES_DB=elections \
