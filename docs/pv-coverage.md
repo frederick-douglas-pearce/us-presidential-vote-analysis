@@ -355,6 +355,30 @@ classification disagreements**. Note what that does and does not show — the sh
 the design, not a finding, since D024 §6 has both rosters take their state-years from the same
 spine. Only the classification is an independent check.
 
+## A second caveat, on the other side of 1976: the source seam
+
+`pv_coverage` describes how much of a year's electoral college is *covered* by a popular vote. A
+different question applies to the years that are fully covered: **which source the coverage came
+from.** `pv_preferred` reads MIT from 1976 on and UCSB before it (D017), so any comparison drawn
+*across* 1976 — a margin trend above all — spans a source switch.
+
+That switch has now been measured rather than assumed. See
+[`research-pv-overlap.md`](../.claude/specs/research-pv-overlap.md) (E7-S1, #70), which differences
+the two sources across the 1976–2024 window where both cover the same elections. The short version:
+
+- The national popular-vote **winner is identical under both sources in all 13 overlap years**, so
+  `pv_flip` is source-invariant there.
+- The largest cross-source difference in the national **margin** is **0.05 pp**, against a smallest
+  actual margin of 0.53 pp (2000) — roughly 10× smaller than the closest real election in the window.
+- So the **normalized** metrics this doc's neighbours publish — flips and margin percentages — are
+  safe to read across the seam. A raw national vote **count** series is not: counts disagree far
+  more readily than ratios do.
+
+**The residual assumption, which that finding explicitly could not discharge:** agreement measured
+*inside* the overlap licenses reading UCSB *before* it only if UCSB is methodologically stationary
+across its own span, and MIT does not reach back far enough to test that. State it wherever a
+cross-1976 trend is published.
+
 ## See also
 
 - [**D037**](../.claude/specs/decisions.md) — the hybrid method and the split EC share
@@ -368,5 +392,7 @@ spine. Only the classification is an independent check.
 - [**D050**](../.claude/specs/decisions.md) — how the hybrid views materialize this column
 - [`src/usvote/pv/absences.py`](../src/usvote/pv/absences.py) — the absence catalog and its
   citations
+- [`research-pv-overlap.md`](../.claude/specs/research-pv-overlap.md) — E7-S1 (#70): the measured
+  MIT-vs-UCSB agreement across the 1976 source seam, and the recommended D017 layer-3 tolerance
 - [`ucsb-html-formats.md`](ucsb-html-formats.md) — the source-corpus survey the roster design came
   from
