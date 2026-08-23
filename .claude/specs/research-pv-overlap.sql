@@ -37,6 +37,12 @@ WHERE coalesce(m.year,u.year) BETWEEN 1976 AND 2024;
 -- future small-magnitude >1% cell would be published with too narrow an interval.
 -- Deliberately NOT redesigned here: changing the predicate changes the published
 -- counts, which the review round that found it had no budget left to re-certify.
+-- NULL HANDLING: `pair` is a FULL OUTER join, so a one-sided row would carry NULL
+-- `mit` or `ucsb`; `relpct` is then NULL, the band CASE falls through to '>1%', and
+-- every `WHERE mit<>ucsb` filter below silently drops it (NULL is not true). Inert on
+-- this corpus -- query 1 reports mit_missing = ucsb_missing = 0 -- and query 1 is the
+-- guard that would catch it, since it counts the NULLs directly rather than filtering.
+-- Worth knowing now that this script is a committed, re-runnable artifact.
 CREATE TEMP VIEW d AS
 SELECT *, abs(mit-ucsb)::numeric/greatest(ucsb,1)*100 AS relpct,
   CASE WHEN abs(mit-ucsb)::numeric/greatest(ucsb,1)*100 < 0.1 THEN 0.001

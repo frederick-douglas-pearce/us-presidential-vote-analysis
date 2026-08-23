@@ -51,6 +51,15 @@ redistributable-only rule for the API surface). The bite is algebraic:
 > **`UCSB = MIT − delta`.** An exact per-cell delta printed beside the public MIT value is a
 > *lossless re-encoding of the UCSB integer*. A "delta" does not launder the source.
 
+**What the rule is actually protecting, stated precisely.** UCSB's data is **publicly viewable** —
+anyone can read it on the American Presidency Project site. It is not secret; it is *not
+redistributable*. So the harm this rule guards against is **republication**, and the unit that
+matters is the **individual `(year, state, candidate)` popular-vote record**. Aggregate and
+distributional statistics over hundreds of such records are not republication of anybody's data and
+are published here freely. The test applied throughout is therefore: *does this figure let a reader
+reconstruct an individual record they would otherwise have to get from UCSB?* — not "is this figure
+derived from UCSB at all", which would forbid the finding itself.
+
 So this document publishes **population statistics, keys, and bucketed magnitude bands**, and
 withholds anything from which a single UCSB value could be recovered. Issue #70's AC-3 ("cells …
 listed with provenance") is met in substance — a reader learns exactly *which* cells are
@@ -81,7 +90,9 @@ issue #70** rather than applied silently.
 - **A normalized margin is not reconstructive.** A national margin is one ratio in three unknowns
   (two candidate totals and a denominator); no integer is recoverable from it. This is the same
   property D017 relies on when it says ratios cancel the source — which is precisely why the
-  decisive test in §5 can be published in full while §3's cell-level detail cannot.
+  decisive test in **§5.1–§5.2** can be published in full while §3's cell-level detail cannot. It
+  does **not** extend to §5.3, whose roll-up figures are counts rather than ratios — see the note
+  there.
 
 **Two tightenings beyond the above, applied for the same reason.** §3.1 names seven cells, and in
 three years exactly one of them is the year's only `>1%` cell — so a statistic that identifies *the
@@ -97,8 +108,9 @@ against that definition.
 
 **Reproducibility is preserved.** Every withheld number is regenerable by anyone holding the UCSB
 snapshot: the query script ships beside this document as
-[`research-pv-overlap.sql`](research-pv-overlap.sql) and §8 gives the full build recipe. If UCSB ever grants redistribution — a
-one-row `pv_source` edit under D017 — this entire constraint dissolves and the withheld figures
+[`research-pv-overlap.sql`](research-pv-overlap.sql) and §8 gives the full build recipe. If UCSB
+ever grants redistribution — a one-row `pv_source` edit under D017 — this constraint dissolves and
+the withheld figures
 become publishable.
 
 ---
@@ -162,13 +174,16 @@ Seven cells exceed 1%. Listed by key and band only:
 
 | Year | State | Candidate | Party | Band |
 |---|---|---|---|---|
-| 1976 | Vermont | Gerald R. Ford | Republican | `>1%` |
-| 1976 | Vermont | Jimmy Carter | Democrat | `>1%` |
-| 1984 | Washington | Walter F. Mondale | Democrat | `>1%` |
-| 1992 | South Carolina | William J. Clinton | Democrat | `>1%` |
-| 2004 | Mississippi | George W. Bush | Republican | `>1%` |
-| 2016 | New York | Donald J. Trump | Republican | `>1%` |
-| 2016 | New York | Hillary Clinton | Democrat | `>1%` |
+| 1976 | Vermont | Gerald R. Ford | `REPUBLICAN` | `>1%` |
+| 1976 | Vermont | Jimmy Carter | `DEMOCRAT` | `>1%` |
+| 1984 | Washington | Walter F. Mondale | `DEMOCRAT` | `>1%` |
+| 1992 | South Carolina | William J. Clinton | `DEMOCRAT` | `>1%` |
+| 2004 | Mississippi | George W. Bush | `REPUBLICAN` | `>1%` |
+| 2016 | New York | Donald J. Trump | `REPUBLICAN` | `>1%` |
+| 2016 | New York | Hillary Clinton | `DEMOCRAT` | `>1%` |
+
+*Party is printed as the source stores it (MIT's uppercase spelling), not normalized — D050 records
+that MIT and UCSB spell one party two ways.*
 
 **All five state-years in this list also have differing provided state totals** — see §4.
 
@@ -247,7 +262,9 @@ structural guarantee.
 where the two major-candidate cells are *identical* while the **provided state totals differ** are
 precisely a measurement of the sources disagreeing about everybody else — that is the only thing
 left that can move the total when the retained candidates match. That population is 24% of all
-state-years, and it is what the other/write-in failure mode looks like in this warehouse.
+state-years. Strictly it is "everything not in the two retained cells" — which also absorbs MIT's
+ballot-disposition rows (`UNDERVOTES` / `OVERVOTES` / `VOID`), so it is slightly broader than
+other/write-in candidates as such; the formal definition below is the exact one.
 
 Quantified as the **residual** between each source's provided total and the sum of its own retained
 candidates — which is why `pv/validate.py::assert_totals_not_exceeded` asserts `<=` and not `==`:
@@ -350,17 +367,23 @@ cell at all, which is the expected internal cross-check. Elsewhere small per-cel
 This is exactly the asymmetry D017 predicts: a raw national *count* series is the fragile reading,
 a normalized margin is not.
 
-> **Why this table publishes no per-year maximum.** An earlier version of this section carried a
-> per-year `worst` relative deviation to four decimal places, and that was a **reconstruction
-> vector**, caught in review. MIT's nationals are CC0 *and exactly reproducible from the recipe in
-> §8*, so `UCSB_national = MIT_national / (1 ± worst/100)` inverts a 4-dp relative figure to within
-> a few tens of votes on a 60-million-vote total — and the sign ambiguity is one bit, not a
-> defence. Chained onto §3.1's named keys it also narrowed several individual cells far below the
-> band width those keys were meant to carry. National per-candidate UCSB totals are **item 5 on
-> §2's own withhold list**, so this was the §2 rule stated and then not applied one section later.
-> Threshold counts bound the tail without locating it, which is the same treatment §2's second
-> tightening applies at the cell grain. The AC-2b finding is unaffected: "only 4 of 26 rows agree
-> exactly, and differences accumulate rather than cancel" is what the criterion asks for.
+> **Why this table publishes no per-year maximum.** An earlier version carried a per-year `worst`
+> relative deviation to four decimal places, and it was a **reconstruction vector**, caught in
+> review. MIT's nationals are CC0 *and exactly reproducible from the recipe in §8*, so
+> `UCSB_national = MIT_national / (1 ± worst/100)` inverts a 4-dp relative figure to within a few
+> tens of votes; the sign ambiguity is one bit against seven significant figures, not a defence.
+>
+> **The national totals are not what made it disqualifying** — by the rule above, an aggregate over
+> 51 states is not republication of anybody's record. What made it disqualifying is that it
+> **chained down to individual records**: combined with §3.1's named keys, the recovered national
+> delta narrowed four of those seven `(year, state, candidate)` cells to between 4 and 261 votes,
+> against a band mechanism engineered to leave an interval 9–18% wide. That is the individual-record
+> disclosure this document exists to avoid, arrived at by combining two figures each of which looked
+> harmless alone — the same indirect shape as the #125 finding.
+>
+> Threshold counts bound the tail without locating it. The AC-2b finding is unaffected: "only 4 of
+> 26 rows agree exactly, and differences accumulate rather than cancel" is what the criterion asks
+> for.
 
 ## 6. Recommended tolerance for the D017 layer-3 gate (AC-5a)
 
