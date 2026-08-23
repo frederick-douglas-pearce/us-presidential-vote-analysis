@@ -368,8 +368,10 @@ the two sources across the 1976–2024 window where both cover the same election
 
 - The national popular-vote **winner is identical under both sources in all 13 overlap years**, so
   `pv_flip` is source-invariant there.
-- The largest cross-source difference in the national **margin** is **0.05 pp**, against a smallest
-  actual margin of 0.53 pp (2000) — roughly 10× smaller than the closest real election in the window.
+- The largest cross-source difference in the national **margin** is **0.034 pp**, against a smallest
+  actual margin of 0.511 pp (2000) — about 15× smaller than the closest real election in the window.
+  Both are computed on each source's **provided** state-total denominator, the same one
+  `roll_up_national` uses, so they are directly comparable with the shipped `pv_margin`.
 - So the **normalized** metrics this doc's neighbours publish — flips and margin percentages — are
   safe to read across the seam. A raw national vote **count** series is not: counts disagree far
   more readily than ratios do.
