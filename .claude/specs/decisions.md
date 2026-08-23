@@ -2740,11 +2740,19 @@ national margin is computed on **each source's own provided state-total column**
   reader's first sanity check, failed. Recomputing on the provided denominator moved the maximum
   cross-source delta 0.0498 → **0.0337 pp** and the safety ratio 10.7× → **15.2×**: the verdict
   came back **stronger**, not weaker. Threshold 3's number is only meaningful on that denominator.
+  **Each ratio is taken within its own basis, and both halves move** — the re-sum basis also reads
+  2000's margin as 0.5322 pp, so 0.5322 ÷ 0.0498 = 10.7, while the provided basis gives
+  0.5113 ÷ 0.0337 = 15.2. Dividing the *published* 0.5113 by the *re-sum* 0.0498 mixes the two and
+  reproduces neither.
   *(Those three figures — 6.96 pp, 0.0498, 10.7× — are published here for the first time rather
   than reused from the finding, so the §2 test below was applied to each rather than assumed:
-  6.96 pp is a **MIT-only** quantity, reproducible from the CC0 CSV by the recipe in research §8;
-  the other two are single cross-source ratios in two unknowns, the class §2 blesses and of which
-  §5.2 already publishes thirteen.)*
+  6.96 pp is a **MIT-only** quantity — Clinton minus Bush over a re-sum of MIT's own candidate
+  rows — computed directly from the CC0 CSV, which also reproduces the 0.5322 pp figure above.
+  It is **not**
+  reproducible from research §8's recipe, which builds the full warehouse and states that UCSB is
+  required, nor from the shipped `research-pv-overlap.sql`, which emits only the provided-denominator
+  margin. The other two are cross-source **ratios**, the class §2 blesses and of which §5.2 already
+  publishes thirteen.)*
 - **The published figures here are aggregates, and that is a licensing constraint, not a style
   choice.** UCSB is `redistributable=false` (D016) and this repository is public, so committing a
   UCSB `(year, state, candidate)` value **is** redistribution. **D022 is the byte-grain rule** (no
@@ -2777,5 +2785,6 @@ green numbers reads as more reassurance than it is:
   *where the code lives*, not about what #167 delivers: thresholds 1 and 2 as the layer-3 gate over
   the PV union, threshold 3 (#167's own AC-5) as the E7 trustworthiness check on
   `hybrid_summary_preferred.pv_margin`, valid only on the provided-total denominator above.
-- **Revisit threshold 1's per-year floor first** if any of these needs loosening; it carries the
-  least headroom by design.
+- **Revisit threshold 1's per-year floor first** if any of these needs loosening. **In cells** —
+  the unit the comparison holds in — it carries the least slack by design: ~4 against the overall
+  floor's ~46. In *points* it does not, and that is the reading to avoid.
