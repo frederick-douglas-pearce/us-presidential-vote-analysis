@@ -2693,7 +2693,10 @@ freshly-derived number is a human-authorized act, not a side effect of measuring
 | 3 | Margin difference | national, in **pp** | **≤ 0.25 pp** | max **0.0337 pp** | the grain E7's published outputs actually depend on |
 
 **Thresholds 1 and 2 are the D017 layer-3 gate proper** and run at the cell grain over the PV
-union. **Threshold 3 is an E7 trustworthiness check** and belongs with the hybrid computation, not
+union. **Their relative delta has a basis, and the measure is asymmetric, so it is part of the
+decision and not an implementation detail:** `relpct = |MIT − UCSB| ÷ UCSB × 100` — **UCSB is the
+denominator** (research §2). #167 implements against that definition; read as `÷ MIT` or `÷ mean`
+the 1% and 15% lines are different lines. **Threshold 3 is an E7 trustworthiness check** and belongs with the hybrid computation, not
 with the union — it is stated here because it is the threshold on the quantity D017's benign-seam
 caveat actually blesses.
 
@@ -2701,6 +2704,7 @@ caveat actually blesses.
 national margin is computed on **each source's own provided state-total column**
 (`Σ_states max(state_total_votes)`, what `usvote/hybrid.py::roll_up_national` computes as
 `national_pv_denominator`), **never a re-sum of candidate rows**.
+
 **Rationale:**
 - **Why not a single number.** With 93.44% of cells *exactly* equal, the failure that matters is
   not one blown cell but many cells drifting slightly — a methodology step, which is precisely what
@@ -2710,10 +2714,15 @@ national margin is computed on **each source's own provided state-total column**
 - **Why 2 fails at 15% and not 10%.** No divergent cell exceeds 10% today and one exceeds 5%, so a
   10% line sits close enough to live data to redden on an ordinary canvass revision. 15% still
   catches an order-of-magnitude error, which is what a hard fail should be for. (The exact observed
-  maximum is deliberately not recorded — it is a reconstruction vector under D022; see below.)
+  maximum is deliberately not recorded — it is a **reconstruction vector**; see the licensing
+  bullet below for what that means and where the test lives.)
 - **Why 1's per-year floor is the tight one, on purpose.** 80% sits **4.3 points** under 1976's
-  observed 84.31% — the least headroom in the table. A single state-year canvass revision in a bad
-  year could approach it. That is deliberate: the per-year floor is the instrument for exactly the
+  observed 84.31%. In *points* that is not the table's smallest gap — the overall floor's is 3.44
+  — but points are the wrong unit for comparing floors over populations two orders of magnitude
+  apart. In **cells** the per-year floor allows ~20 divergent cells of a year's 102 against 16
+  observed in 1976, about **4 cells of slack**; the overall floor allows ~133 of 1326 against 87
+  observed, about **46**. A single state-year canvass revision in a bad year could approach the
+  first and could not come near the second. That is deliberate: the per-year floor is the instrument for exactly the
   *localized* regression that would move one year, so slack defeats it. **Expect this to be the
   first threshold to need review.**
 - **Why 3 is in percentage points.** That is the unit the claim is made in. 0.25 pp sits ~2× below
@@ -2731,13 +2740,26 @@ national margin is computed on **each source's own provided state-total column**
   reader's first sanity check, failed. Recomputing on the provided denominator moved the maximum
   cross-source delta 0.0498 → **0.0337 pp** and the safety ratio 10.7× → **15.2×**: the verdict
   came back **stronger**, not weaker. Threshold 3's number is only meaningful on that denominator.
+  *(Those three figures — 6.96 pp, 0.0498, 10.7× — are published here for the first time rather
+  than reused from the finding, so the §2 test below was applied to each rather than assumed:
+  6.96 pp is a **MIT-only** quantity, reproducible from the CC0 CSV by the recipe in research §8;
+  the other two are single cross-source ratios in two unknowns, the class §2 blesses and of which
+  §5.2 already publishes thirteen.)*
 - **The published figures here are aggregates, and that is a licensing constraint, not a style
   choice.** UCSB is `redistributable=false` (D016) and this repository is public, so committing a
-  UCSB `(year, state, candidate)` value **is** redistribution (D022). None appears here. Note in
-  particular that the tail of threshold 2 is carried as **counts above thresholds** rather than as
-  a maximum: #70's own review caught that a max relative deviation inverts to the underlying
-  integer via `UCSB = MIT / (1 ± rel)` once the cell is attributed, MIT being CC0 and exactly
-  reproducible. Any future restatement of these thresholds inherits that constraint.
+  UCSB `(year, state, candidate)` value **is** redistribution. **D022 is the byte-grain rule** (no
+  UCSB HTML is ever committed); the **individual-record** grain and the operative test are authored
+  in [research §2](research-pv-overlap.md), and that test is *"does this figure let a reader
+  reconstruct an individual record they would otherwise have to get from UCSB?"* — **not** "is this
+  figure a UCSB integer?". The distinction is the whole rule, because **the leaks #70's review
+  caught printed no UCSB integer either**: a per-year max *relative* deviation inverts via
+  `UCSB = MIT / (1 ± rel)` once the cell is attributed, MIT being CC0 and exactly reproducible,
+  which is why threshold 2's tail is carried here as **counts above thresholds** rather than as a
+  maximum. Research §5.3's blockquote works one such chain end to end. **Any figure derived from
+  this study inherits that test**, not merely a restatement of these thresholds — and the caught
+  vector was a chain across two figures in different sections, so it is chains that need checking,
+  not lines.
+
 **What this does not settle** — unchanged by a confirming result, and restated because a table of
 green numbers reads as more reassurance than it is:
 - **Stationarity.** Agreement measured *inside* 1976–2024 licenses reading UCSB *before* 1976 only
@@ -2748,11 +2770,12 @@ green numbers reads as more reassurance than it is:
 - **Raw national PV *counts* across the seam.** Only 4 of 26 roll-up rows agree exactly; small
   per-cell differences accumulate rather than cancel when summed. D017 already said so; the
   measurement confirms it rather than relaxing it.
+
 **Action required:**
-- **#167 implements thresholds 1 and 2** as the D017 layer-3 gate. It is the issue this entry
-  exists to anchor: before this, #167 would have had to cite a research spike for its numbers.
-- **Threshold 3 lands with the hybrid computation**, not with the PV union — it is the check on
-  `hybrid_summary_preferred.pv_margin`, and it is only valid on the provided-total denominator
-  above.
+- **#167 implements all three thresholds** — it is the issue this entry exists to anchor, and
+  before this it would have had to cite a research spike for its numbers. The split above is about
+  *where the code lives*, not about what #167 delivers: thresholds 1 and 2 as the layer-3 gate over
+  the PV union, threshold 3 (#167's own AC-5) as the E7 trustworthiness check on
+  `hybrid_summary_preferred.pv_margin`, valid only on the provided-total denominator above.
 - **Revisit threshold 1's per-year floor first** if any of these needs loosening; it carries the
   least headroom by design.
