@@ -38,6 +38,7 @@ from tests._helpers import (
     MIT_FUSION_SAMPLE_CSV,
     fake_state_geo,
     narrow_mit_spine_to_sample,
+    non_null_flag,
 )
 from usvote.db import DBC
 from usvote.getters import EC_GETTERS_WITHOUT_POPULAR_VOTE
@@ -176,7 +177,14 @@ def test_join_resolves_a_synthetic_participant_set(
         )
         assert ucsb_pref["ev"].iloc[0] == 0
         assert ucsb_pref["source"].iloc[0] == SOURCE_UCSB
-        assert not bool(ucsb_pref["redistributable"].iloc[0])
+        # ``redistributable`` is a LEFT-joined pv_source column and so genuinely
+        # nullable (usvote/join.py sets pd.NA with no source frame). From the live
+        # view a NULL spells as None, and ``not bool(None)`` is True -- so the old
+        # shape passed on a broken NULL exactly as on a real false (#165).
+        assert non_null_flag(
+            ucsb_pref["redistributable"].iloc[0],
+            label="2020 California UCSB redistributable",
+        ) is False
 
         # The public surface: NO UCSB row, and NO redistributable = false row ever.
         leak = dbc.select_query_to_df(

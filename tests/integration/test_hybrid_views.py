@@ -299,7 +299,10 @@ def test_the_live_views_match_the_pandas_oracle(
 
         # 2016: partial coverage -- strictly between 0 and 1, not NULL and not 1.0.
         assert 0.0 < summary.loc[2016, "pv_coverage"] < 1.0
-        assert summary.loc[2016, "pv_margin"] is not None
+        # ``pd.notna``, not ``is not None``: a NULL float arrives from the live view as
+        # NaN, and ``NaN is not None`` is True -- the same vacuity #165 fixed one block
+        # below, and the trap this file already spells out at the 1824 margin legs.
+        assert pd.notna(summary.loc[2016, "pv_margin"])
         assert float(summary.loc[2016, "pv_margin"]) > 0.0
 
         # 2020: one scored candidate -> NULL margins, but a real (flipped) PV winner.

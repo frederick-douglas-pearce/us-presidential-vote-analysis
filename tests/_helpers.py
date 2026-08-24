@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -278,7 +279,7 @@ def fake_state_geo() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def non_null_flag(value: object, *, label: str = "") -> bool:
+def non_null_flag(value: object, *, label: str) -> bool:
     """A boolean cell normalized to a Python ``bool``, rejecting every NULL shape loudly.
 
     Exists because neither ``is`` nor ``bool(...)`` is correct on its own for a nullable
@@ -288,25 +289,41 @@ def non_null_flag(value: object, *, label: str = "") -> bool:
       Python ``bool``/``None``) when it carries a NULL, and as ``bool`` (cells are
       ``numpy.bool_``) when it does not. So ``cell is False`` passes on the first and fails
       on the second **against a correct value**, while ``bool(cell)`` maps ``None`` to
-      ``False`` — silently turning a ``NULL`` "no winner" into a passing non-flip assert.
-      That laundering is what #165 was filed for.
+      ``False`` — silently turning a ``NULL`` into a passing false. That laundering is what
+      #165 was filed for.
     - **From the pandas builders.** :func:`usvote.hybrid.build_hybrid_summary` nulls as
       ``pd.NA``, where ``bool(pd.NA)`` raises ``TypeError`` — loud, but an exception rather
-      than a diagnosis.
+      than a diagnosis. A null *float* materializes as ``np.nan`` instead, which is the
+      fourth spelling and the one that defeats ``is not None``.
 
-    Rejecting the null first and returning the Python singleton lets a call site keep the
-    readable ``is True`` / ``is False`` spelling and have it mean what it says, on either
-    path and under either dtype::
+    Rejecting all four and returning the Python singleton lets a call site keep the readable
+    ``is True`` / ``is False`` spelling and have it mean what it says, on either path and
+    under either dtype::
 
         assert non_null_flag(summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip") is False
 
-    ``label`` is what the failure message names; pass the ``(year, column)`` it came from,
-    since the value alone cannot say where it was read.
+    ``label`` is required and names the cell in every failure message: the value alone
+    cannot say where it was read, and a helper whose whole job is a good diagnosis should
+    not be callable without one.
+
+    **The message deliberately does not name a producing function.** This guards flips
+    (:func:`usvote.hybrid._flip`) *and* ``ec_determinative``, whose NULL comes from
+    ``build_hybrid_summary``'s own ``pd.NA`` branch and, in SQL, from a filtered
+    ``bool_or`` — so a hardcoded pointer would send half its callers to the wrong place.
+    ``label`` carries the specifics instead.
     """
+    assert pd.api.types.is_scalar(value), (
+        f"{label} is not a scalar cell: {value!r} ({type(value).__name__}). Pass a single "
+        f"cell — a Series or array would make the null check below ambiguous, and a "
+        f"one-element sequence would slip past it entirely."
+    )
     assert not pd.isna(value), (
-        f"{label or 'flag'} came back NULL — that is the 'no winner' encoding "
-        f"(usvote.hybrid._flip), which means the derivation broke. It is never a "
-        f"legitimate false."
+        f"{label} came back NULL — a NULL boolean here is the 'no value derived' "
+        f"encoding, which means the derivation broke. It is never a legitimate false."
+    )
+    assert isinstance(value, bool | np.bool_), (
+        f"{label} is not a boolean cell: {value!r} ({type(value).__name__}). "
+        f"bool() would coerce it silently, which is the class of bug this guards."
     )
     return bool(value)
 
