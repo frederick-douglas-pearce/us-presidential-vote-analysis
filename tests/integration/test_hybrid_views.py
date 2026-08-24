@@ -321,7 +321,13 @@ def test_the_live_views_match_the_pandas_oracle(
         assert pd.isna(summary.loc[2024, "pv_margin"])
         assert pd.isna(summary.loc[2024, "pv_coverage"])
         # The EC half is unaffected by the PV gap -- this is the D037/A split.
-        assert summary.loc[2024, "ec_winner"] is not None
+        # ``pd.notna``, not ``is not None``, for the same reason as the pv_margin leg
+        # above and for text as well as floats: on pandas 3.x a string column read back
+        # from the live view is ``str`` dtype with ``na_value=nan``, so a NULL ec_winner
+        # arrives as NaN and ``NaN is not None`` is True. ec_winner IS nullable here --
+        # hybrid.py builds it as a FILTERed ``max(candidate)`` -- so this leg is
+        # load-bearing and must be able to fail.
+        assert pd.notna(summary.loc[2024, "ec_winner"])
         assert summary.loc[2024, "ec_margin"] > 0.0
 
         # --- the numeric-cast check a string test cannot make -----------------

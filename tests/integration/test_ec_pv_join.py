@@ -177,10 +177,11 @@ def test_join_resolves_a_synthetic_participant_set(
         )
         assert ucsb_pref["ev"].iloc[0] == 0
         assert ucsb_pref["source"].iloc[0] == SOURCE_UCSB
-        # ``redistributable`` is a LEFT-joined pv_source column and so genuinely
-        # nullable (usvote/join.py sets pd.NA with no source frame). From the live
-        # view a NULL spells as None, and ``not bool(None)`` is True -- so the old
-        # shape passed on a broken NULL exactly as on a real false (#165).
+        # ``redistributable`` is genuinely nullable on this view: join.py's
+        # ``LEFT JOIN dwh.pv_source`` leaves it NULL for any EC row with no PV match
+        # (the pandas oracle spells the same gap ``pd.NA``). From the live view a NULL
+        # arrives as None, and ``not bool(None)`` is True -- so the old shape passed on
+        # a broken NULL exactly as on a real false (#165).
         assert non_null_flag(
             ucsb_pref["redistributable"].iloc[0],
             label="2020 California UCSB redistributable",

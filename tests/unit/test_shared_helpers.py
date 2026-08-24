@@ -5,10 +5,11 @@ reason (#165). The helper's **happy path does** run in CI — it is called from
 ``test_the_live_views_match_the_pandas_oracle``, which is deliberately not corpus-gated,
 and CI runs ``pytest -m integration`` against a Postgres service container. What never runs
 in CI is its **rejection branch on the legs that motivated it**: the 2000 ``hybrid_flip``
-leg sits in ``test_hybrid_views_over_a_real_full_warehouse``, gated on all four corpus
-env vars (D022 — no UCSB bytes are committed), which CI does not set. So without these
-cases the *fix's* non-vacuity would rest entirely on one maintainer's local run. This is
-the part a reviewer can reproduce with nothing but the repo.
+leg sits in ``test_hybrid_views_over_a_real_full_warehouse``, gated on all four of its env
+vars — the three local corpora plus the TIGER shapefile (D022 — no UCSB bytes are
+committed) — none of which CI sets. So without these cases the *fix's* non-vacuity would
+rest entirely on one maintainer's local run. This is the part a reviewer can reproduce
+with nothing but the repo.
 
 The rule under test is that a nullable boolean read back through pandas arrives in one of
 four spellings — Python ``bool``/``None`` from an object column, ``numpy.bool_`` from a
@@ -44,13 +45,19 @@ def test_every_null_spelling_is_rejected(value: object) -> None:
         non_null_flag(value, label="2000 hybrid_flip")
 
 
-def test_the_failure_message_names_where_the_value_came_from() -> None:
-    """The label is in the message — a bare value cannot say which cell it was."""
-    with pytest.raises(AssertionError, match="1824 pv_flip under mismatched"):
-        non_null_flag(None, label="1824 pv_flip under mismatched")
+#: One value per rejection branch of :func:`~tests._helpers.non_null_flag`, so the two
+#: properties below are pinned on **every** message rather than only the NULL one. Without
+#: this, re-adding a ``_flip`` pointer to -- or dropping ``label`` from -- either of the
+#: other two messages would fail nothing.
+REJECTED_BY_EVERY_BRANCH = [
+    pytest.param(None, id="null-branch"),
+    pytest.param(pd.Series([True, None]), id="non-scalar-branch"),
+    pytest.param("False", id="non-boolean-branch"),
+]
 
 
-def test_the_message_names_no_producing_function() -> None:
+@pytest.mark.parametrize("value", REJECTED_BY_EVERY_BRANCH)
+def test_no_message_names_a_producing_function(value: object) -> None:
     """It guards ``ec_determinative`` too, whose NULL never comes from ``_flip``.
 
     A hardcoded ``usvote.hybrid._flip`` pointer would send a maintainer chasing a red
@@ -59,8 +66,15 @@ def test_the_message_names_no_producing_function() -> None:
     filtered ``bool_or``). ``label`` carries the specifics instead.
     """
     with pytest.raises(AssertionError) as excinfo:
-        non_null_flag(None, label="1824 ec_determinative under mismatched")
+        non_null_flag(value, label="1824 ec_determinative under mismatched")
     assert "_flip" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("value", REJECTED_BY_EVERY_BRANCH)
+def test_every_message_interpolates_the_label(value: object) -> None:
+    """The label is the whole diagnostic value, so no branch may omit it."""
+    with pytest.raises(AssertionError, match="2000 hybrid_flip"):
+        non_null_flag(value, label="2000 hybrid_flip")
 
 
 @pytest.mark.parametrize(
@@ -146,5 +160,5 @@ def test_label_is_required() -> None:
     The message is the reason the helper exists; a call that cannot say which cell failed
     produces a diagnosis strictly worse than the one it was written to give.
     """
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="label"):
         non_null_flag(True)  # type: ignore[call-arg]
