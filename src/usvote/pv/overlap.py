@@ -1,0 +1,396 @@
+"""The D017 layer-3 overlap-validation gate — MIT vs. UCSB agreement (#167, D051).
+
+D017 §3 made the 1976-2024 MIT/UCSB overlap a **validation gate** — "disagreements
+beyond a tolerance are flagged with provenance, not silently resolved" — but named no
+tolerance and shipped no check, deferring both to a research task. That task (#70,
+:file:`.claude/specs/research-pv-overlap.md`) measured the overlap; **D051** adopted its
+§6 thresholds. This module is the code those two documents were waiting for.
+
+**Two of the three thresholds live here; the third does not.** D051 splits them by
+grain, and the split is about *where the code lives*:
+
+- **Gates 1 and 2** — the exact-match-rate floor and the per-cell relative ceiling — run
+  at the ``(year, state, candidate)`` cell grain over the PV union, so they belong here.
+- **Gate 3** — the national margin-difference ceiling — is the E7 trustworthiness check
+  and lives in :mod:`usvote.hybrid`, beside the computation it protects. That placement
+  is **forced, not preferred**: it is derived with
+  :func:`usvote.hybrid.roll_up_national`, and a home here would need a ``pv -> hybrid``
+  import, which ``tests/unit/test_layering.py`` forbids.
+
+**Why this module sits under** ``usvote/pv/`` **at all.** It compares two sources, so it
+cannot live in either source's subpackage (D015 forbids source-to-source). It is the
+same shelf as :mod:`usvote.pv.validate` — invariants over data *values*, not the D018
+column contract — and it names no ``dwh.votes``, so the greppable EC-knowledge invariant
+holds.
+
+**What the gate reads, and what it must never read.** The two shipped D017 single-source
+views, ``dwh.pv_redistributable`` (MIT today) and ``dwh.pv_ucsb`` — **never** the raw
+``dwh.pv_votes`` union, which carries both sources' rows per overlap key and would fan
+the comparison out 2x. :func:`read_overlap_frames` is the one place that read is
+expressed.
+
+**No magnitude ever leaves this module.** Gate 2's flag list is a list of *keys*
+(:class:`OverlapKey`), and that is a licensing constraint rather than a style choice.
+UCSB is ``redistributable=false`` (D016) and this repository is public, so the operative
+test (research §2) is *"does this figure let a reader reconstruct an individual record
+they would otherwise have to get from UCSB?"* — **not** "is this a UCSB integer?".
+MIT is CC0 and exactly reproducible, so an attributed *relative* delta inverts via
+``UCSB = MIT / (1 +/- rel)``. :class:`OverlapKey` therefore has no field that could
+carry a delta or an absolute magnitude: the leak is impossible by type rather than by
+discipline.
+
+*(This is also where* :file:`.claude/specs/research-pv-overlap.sql`'s *"KNOWN
+LIMITATION" is resolved rather than inherited. That script's 500-vote absolute floor
+existed to decide which divergent cells were safe to publish* with a magnitude. *This
+gate publishes no magnitude at all, so the predicate has no analogue here and none is
+carried over.)*
+
+**Dual expression, as everywhere else in this package.** :func:`compute_overlap_report`
+is a pure-pandas oracle over two frames; :func:`assert_db_overlap_within_tolerance` is
+the live-DB form that reads the views and hands them to it — the
+:func:`usvote.join.assert_pv_matches_ec` / :func:`usvote.join.assert_db_pv_matches_ec`
+precedent.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from usvote.pv.schema import PV_SCHEMA
+from usvote.pv.source import MIT_PV_YEAR_MIN
+from usvote.pv.views import (
+    PV_REDISTRIBUTABLE_VIEW,
+    PV_UCSB_VIEW,
+    RESOLVED_KEY,
+)
+
+__all__ = [
+    "CELL_RELPCT_FAIL",
+    "CELL_RELPCT_FLAG",
+    "EXACT_MATCH_FLOOR_OVERALL",
+    "EXACT_MATCH_FLOOR_PER_YEAR",
+    "SKIP_NO_OVERLAP_CELLS",
+    "SKIP_UCSB_ABSENT",
+    "OverlapKey",
+    "OverlapReport",
+    "PVOverlapError",
+    "assert_db_overlap_within_tolerance",
+    "assert_overlap_within_tolerance",
+    "compute_overlap_report",
+    "read_overlap_frames",
+]
+
+
+# --- the D051 thresholds ----------------------------------------------------
+#
+# Every value below is adopted verbatim from D051, which adopted
+# `.claude/specs/research-pv-overlap.md` §6. The observed figure beside each is what §6
+# records as of 2026-08-22, and is what `tests/unit/test_pv_overlap.py` pins by
+# hand-written literal so a silent retune is visible in a diff (AC-7).
+
+#: Gate 1, overall: minimum share of overlap cells whose two sources agree **exactly**,
+#: as a percentage. D051 / research §6 threshold 1; observed **93.44%**. This is the
+#: instrument for the failure that matters most — *many* cells drifting slightly, a
+#: methodology step — which no per-cell ceiling loose enough to tolerate a real canvass
+#: revision could ever catch.
+EXACT_MATCH_FLOOR_OVERALL = 90.0
+
+#: Gate 1, per year: the same floor applied to **each single year**. D051 / research §6
+#: threshold 1; worst observed **84.31%** (1976). D051 flags this as the tightest
+#: threshold in the table on purpose — in *cells* it allows about 4 of slack against
+#: 1976's observed count — because it is the instrument for a *localized* regression
+#: that would move one year, and slack defeats it. **Expect this to be the first
+#: threshold to need review.**
+EXACT_MATCH_FLOOR_PER_YEAR = 80.0
+
+#: Gate 2, flag: per-cell relative delta above which a cell joins the D005 reliability
+#: list. D051 / research §6 threshold 2; **7 of 87 divergent cells** flag today.
+#: Flagging is **not** a failure — the list is reported, never raised on.
+CELL_RELPCT_FLAG = 1.0
+
+#: Gate 2, fail: per-cell relative delta above which the gate **raises**. D051 /
+#: research §6 threshold 2. Deliberately 15% rather than 10%: no divergent cell exceeds
+#: 10% today and one exceeds 5%, so a 10% line sits close enough to live data to redden
+#: on an ordinary canvass revision. 15% still catches an order-of-magnitude error, which
+#: is what a hard fail should be for.
+CELL_RELPCT_FAIL = 15.0
+
+#: Skip reason: no UCSB rows at all, so there is no overlap to validate. A public clone
+#: builds EC + MIT only (``warehouse.py`` gates UCSB explicitly), and this gate must not
+#: redden that build (AC-3).
+SKIP_UCSB_ABSENT = "pv_ucsb is empty — UCSB is not loaded, so there is no overlap"
+
+#: Skip reason: **at least one** source has no rows in the overlap window, so there is
+#: no pairing to measure. Kept distinct from :data:`SKIP_UCSB_ABSENT` on purpose — that
+#: one is the live seam's specific finding ("UCSB is not loaded"), this one is what the
+#: oracle can see from two frames alone, and an exact-match *rate* over an empty
+#: population is 0/0, not 100%: reporting it as a pass would be the silent vacuous-green
+#: this gate exists to prevent.
+SKIP_NO_OVERLAP_CELLS = (
+    f"no {MIT_PV_YEAR_MIN}+ overlap cells — at least one source has no rows "
+    "in the window"
+)
+
+
+class PVOverlapError(RuntimeError):
+    """A D017 layer-3 overlap tolerance (D051 gate 1 or gate 2) was breached.
+
+    Sibling of :class:`usvote.pv.views.PVViewError` and
+    :class:`usvote.pv.validate.PVValidationError`: a typed failure for one shared PV
+    invariant. Raised only by :func:`assert_overlap_within_tolerance` — never by the
+    report computation, which measures without judging.
+    """
+
+
+@dataclass(frozen=True)
+class OverlapKey:
+    """One ``(year, state, candidate)`` overlap cell, with its party for display.
+
+    **The identity is the first three fields** — :data:`usvote.pv.views.RESOLVED_KEY`,
+    the canonical PV key. ``party`` is a *carried display attribute*, not part of the
+    key, and joining on it would be a bug rather than a refinement: MIT spells parties
+    ``REPUBLICAN``/``DEMOCRAT`` where UCSB spells them ``Republican``/``Democratic``
+    across the entire overlap (the live-corpus finding recorded in #124, which is why
+    ``usvote.hybrid`` resolves ``party`` by ``min`` rather than requiring it constant).
+    A four-column join would make **every** cell one-sided and collapse the exact-match
+    rate to zero. The value carried is MIT's spelling, falling back to UCSB's where MIT
+    has no row for the key. Research §3 does the same: it joins on the three-column key
+    and merely prints party.
+
+    **This type deliberately has no numeric field**, and that is the D030/D022 licensing
+    constraint made structural — see the module docstring. Adding a delta or a magnitude
+    here would republish a UCSB record; ``test_pv_overlap.py`` asserts the field set to
+    stop that happening by accident.
+    """
+
+    year: int
+    state: str
+    candidate: str
+    party: str | None
+
+
+@dataclass(frozen=True)
+class OverlapReport:
+    """What the cell-grain gates measured — the structured result, magnitude-free.
+
+    A ``skipped`` report carries no measurements and asserts nothing: every count is
+    zero and every list empty, so a caller that ignores ``skipped`` reads a *skip* as an
+    empty measurement rather than as a clean one. Check ``skipped`` before reading any
+    other field.
+    """
+
+    skipped: bool = False
+    skip_reason: str | None = None
+    cells: int = 0
+    exact: int = 0
+    exact_pct: float = 0.0
+    exact_pct_by_year: dict[int, float] = field(default_factory=dict)
+    one_sided: tuple[OverlapKey, ...] = ()
+    flagged: tuple[OverlapKey, ...] = ()
+    failed: tuple[OverlapKey, ...] = ()
+
+
+def _keys(rows: pd.DataFrame) -> tuple[OverlapKey, ...]:
+    """Build the ordered :class:`OverlapKey` tuple for ``rows`` of the merged frame."""
+    ordered = rows.sort_values(list(RESOLVED_KEY), kind="stable")
+    return tuple(
+        OverlapKey(
+            year=int(row.year),
+            state=str(row.state),
+            candidate=str(row.candidate),
+            party=None if pd.isna(row.party) else str(row.party),
+        )
+        for row in ordered.itertuples(index=False)
+    )
+
+
+def compute_overlap_report(
+    mit_df: pd.DataFrame, ucsb_df: pd.DataFrame
+) -> OverlapReport:
+    """Measure MIT-vs-UCSB cell agreement over the overlap window — the pure oracle.
+
+    ``mit_df``/``ucsb_df`` are :data:`usvote.pv.schema.SHARED_PV_COLUMNS`-shaped frames,
+    normally read from ``pv_redistributable``/``pv_ucsb`` by
+    :func:`read_overlap_frames`. Both are filtered to ``year >= MIT_PV_YEAR_MIN`` here
+    as well as at the read, so the oracle is correct when called directly from a test.
+
+    **The population is the FULL OUTER key set**, mirroring research query 1, which
+    counts one-sided rows directly rather than filtering them away. A key present in
+    only one source counts as **not exact** and is listed in
+    :attr:`OverlapReport.one_sided`; its relative delta is undefined, so it enters
+    neither gate-2 list. An inner join would instead *raise* the exact-match rate by
+    dropping exactly the rows a regression would create — the inner-join-silent-drop
+    hazard, one level up from where this package already guards it.
+
+    **A source with NO rows in the window skips rather than scoring 0%**, and the
+    carve-out is deliberately narrow: it fires only when one side is *entirely* empty,
+    which is what a UCSB-less warehouse looks like from here (AC-3). A source that lost
+    only *some* rows still scores them as one-sided and still trips gate 1 — including
+    the case where it lost a whole year, which the per-year floor catches. Without this,
+    AC-3's "skipped, not failed" would hold only for callers routed through
+    :func:`read_overlap_frames`, and any direct call would hard-fail on an absent UCSB.
+
+    **The relative delta is** ``|MIT - UCSB| / max(UCSB, 1) * 100`` — **UCSB is the
+    denominator** (D051, research §2). The measure is asymmetric, so this is part of the
+    decision and not an implementation detail: read as ``/ MIT`` or ``/ mean``, the 1%
+    and 15% lines are different lines. ``max(..., 1)`` mirrors the reference script's
+    ``greatest(ucsb, 1)`` and keeps a hypothetical zero-vote cell finite.
+
+    Both gate-2 comparisons are **strict** ``>``, matching research query 4's
+    ``relpct > 1.0`` and query 2's tail counts, so a published list and a published
+    count can never disagree about a cell sitting exactly on a line.
+    """
+    key = list(RESOLVED_KEY)
+    mit = mit_df.loc[mit_df["year"] >= MIT_PV_YEAR_MIN]
+    ucsb = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
+    if mit.empty or ucsb.empty:
+        return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+    merged = mit[[*key, "party", "candidate_votes"]].merge(
+        ucsb[[*key, "party", "candidate_votes"]],
+        on=key,
+        how="outer",
+        suffixes=("_mit", "_ucsb"),
+    )
+    if merged.empty:
+        return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+
+    # MIT's party spelling, falling back to UCSB's on a MIT-less key -- display only.
+    merged["party"] = merged["party_mit"].fillna(merged["party_ucsb"])
+    both = (
+        merged["candidate_votes_mit"].notna()
+        & merged["candidate_votes_ucsb"].notna()
+    )
+    merged["exact"] = both & (
+        merged["candidate_votes_mit"] == merged["candidate_votes_ucsb"]
+    )
+
+    paired = merged.loc[both].copy()
+    paired["relpct"] = (
+        (paired["candidate_votes_mit"] - paired["candidate_votes_ucsb"]).abs()
+        / paired["candidate_votes_ucsb"].clip(lower=1)
+        * 100
+    )
+
+    by_year = merged.groupby("year")["exact"].mean().mul(100)
+    return OverlapReport(
+        cells=len(merged),
+        exact=int(merged["exact"].sum()),
+        exact_pct=float(merged["exact"].mean() * 100),
+        exact_pct_by_year={int(y): float(p) for y, p in by_year.items()},
+        one_sided=_keys(merged.loc[~both]),
+        flagged=_keys(paired.loc[paired["relpct"] > CELL_RELPCT_FLAG]),
+        failed=_keys(paired.loc[paired["relpct"] > CELL_RELPCT_FAIL]),
+    )
+
+
+def assert_overlap_within_tolerance(
+    report: OverlapReport, *, error_cls: type[Exception] = PVOverlapError
+) -> None:
+    """Raise when gate 1 or gate 2 is breached; a flagged cell is **not** a breach.
+
+    Gate 1 fails when the overall exact-match rate is below
+    :data:`EXACT_MATCH_FLOOR_OVERALL` **or** any single year is below
+    :data:`EXACT_MATCH_FLOOR_PER_YEAR` — the two floors are separate instruments
+    (D051), and a localized regression can pass the first while failing the second.
+    Gate 2 fails when any cell's relative delta exceeds :data:`CELL_RELPCT_FAIL`.
+
+    :attr:`OverlapReport.flagged` is the D005 reliability list, reported and never
+    raised on; a ``skipped`` report asserts nothing at all (AC-3).
+
+    The failure message names **keys only**, never deltas — the module docstring's
+    licensing constraint applies to what this raises as much as to what it returns.
+    """
+    if report.skipped:
+        return
+
+    breaches: list[str] = []
+    if report.exact_pct < EXACT_MATCH_FLOOR_OVERALL:
+        breaches.append(
+            f"gate 1 (overall): {report.exact_pct:.2f}% of {report.cells} overlap "
+            f"cells agree exactly, below the {EXACT_MATCH_FLOOR_OVERALL}% floor"
+        )
+    low_years = [
+        f"{year} at {pct:.2f}%"
+        for year, pct in sorted(report.exact_pct_by_year.items())
+        if pct < EXACT_MATCH_FLOOR_PER_YEAR
+    ]
+    if low_years:
+        breaches.append(
+            f"gate 1 (per year): {', '.join(low_years)} — below the "
+            f"{EXACT_MATCH_FLOOR_PER_YEAR}% floor"
+        )
+    if report.failed:
+        breaches.append(
+            f"gate 2: {len(report.failed)} cell(s) diverge by more than "
+            f"{CELL_RELPCT_FAIL}% of the UCSB value: "
+            f"{[(k.year, k.state, k.candidate) for k in report.failed]}"
+        )
+    if breaches:
+        raise error_cls(
+            "MIT/UCSB popular-vote overlap breached the D017 layer-3 tolerance "
+            "(D051; see .claude/specs/research-pv-overlap.md §6): "
+            + "; ".join(breaches)
+        )
+
+
+def read_overlap_frames(
+    dbc: object, *, schema: str = PV_SCHEMA
+) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Read the two D017 single-source views for the window, or ``None`` to skip.
+
+    **The one place the overlap read is expressed.** All three of the things it does are
+    AC-pinned behaviour (#167), so :mod:`usvote.hybrid`'s gate 3 calls this rather than
+    keeping a second copy that could drift from it:
+
+    1. it reads ``pv_redistributable`` and ``pv_ucsb`` — **never** the raw
+       ``pv_votes`` union, which would fan the overlap 2x (AC-2);
+    2. it restricts both to ``year >= MIT_PV_YEAR_MIN``, the overlap window's floor,
+       derived rather than re-spelled as ``1976``;
+    3. it decides the **AC-3 skip**.
+
+    **The skip probe is** ``pv_ucsb`` **emptiness, asked of the UNFILTERED view** — "is
+    UCSB loaded at all?", a question about the source rather than about the window.
+    A ``dwh.pv_source`` lookup cannot answer it: :data:`usvote.pv.source.PV_SOURCE_ROWS`
+    seeds **both** source rows unconditionally, so that table says which sources are
+    *known*, never which are *loaded*.
+
+    **A limitation this probe has and does not guard:** it cannot distinguish "UCSB was
+    never loaded" from "UCSB was loaded and produced zero rows". Failing loud on a
+    zero-row parse is the UCSB pipeline's responsibility; this gate would simply skip.
+    Stated rather than guarded — no check here covers it.
+
+    ``dbc`` is typed :class:`object` because this module must not import
+    :mod:`usvote.db`: the shared PV layer stays free of the EC pipeline's DB stack, as
+    :mod:`usvote.pv.views` does. Only ``select_query_to_df`` is used.
+    """
+    select = dbc.select_query_to_df  # type: ignore[attr-defined]
+    if select(f"SELECT 1 FROM {schema}.{PV_UCSB_VIEW} LIMIT 1").empty:
+        return None
+    window = f"WHERE year >= {MIT_PV_YEAR_MIN}"
+    mit_df = select(f"SELECT * FROM {schema}.{PV_REDISTRIBUTABLE_VIEW} {window}")
+    ucsb_df = select(f"SELECT * FROM {schema}.{PV_UCSB_VIEW} {window}")
+    return mit_df, ucsb_df
+
+
+def assert_db_overlap_within_tolerance(
+    dbc: object, *, schema: str = PV_SCHEMA
+) -> OverlapReport:
+    """Live-DB form of gates 1 and 2 — read, measure, assert, return the report.
+
+    The dual-expression pattern this package already uses
+    (:func:`usvote.join.assert_db_pv_matches_ec` over
+    :func:`usvote.join.assert_pv_matches_ec`): the measurement and the judgement are
+    pure and unit-tested, and this adds only the read.
+
+    Returns the :class:`OverlapReport` so a caller can surface
+    :attr:`~OverlapReport.flagged` — the D005 reliability list — which is reported,
+    never raised on. Returns a ``skipped`` report when UCSB is absent, raising nothing.
+    """
+    frames = read_overlap_frames(dbc, schema=schema)
+    if frames is None:
+        return OverlapReport(skipped=True, skip_reason=SKIP_UCSB_ABSENT)
+    report = compute_overlap_report(*frames)
+    assert_overlap_within_tolerance(report)
+    return report

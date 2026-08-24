@@ -92,6 +92,7 @@ from usvote.join import (
 )
 from usvote.join import assert_no_fan_out as assert_join_no_fan_out
 from usvote.load import SCHEMA
+from usvote.pv.overlap import read_overlap_frames
 from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import (
     PV_STATUS_POPULAR_VOTE,
@@ -113,14 +114,17 @@ __all__ = [
     "HYBRID_SUMMARY_PREFERRED_VIEW",
     "HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW",
     "HYBRID_SURFACES",
+    "MARGIN_DIFF_MAX_PP",
     "REQUIRED_JOIN_COLUMNS",
     "CoveragePolicy",
     "HybridError",
     "apply_coverage_policy",
     "assert_carried_columns_constant",
+    "assert_db_margin_agreement",
     "assert_ec_shares_le_one",
     "assert_ec_winner_matches_rank",
     "assert_no_fan_out",
+    "assert_margin_agreement",
     "assert_no_winner_tie",
     "assert_redistributable_only_source",
     "build_hybrid_candidate_sql",
@@ -128,6 +132,7 @@ __all__ = [
     "build_hybrid_from_db",
     "build_hybrid_summary",
     "build_hybrid_summary_sql",
+    "national_pv_margin_by_year",
     "create_hybrid_views",
     "ec_denominator_by_year",
     "pv_coverage_by_year",
@@ -386,6 +391,114 @@ def roll_up_national(
         .rename(columns={"state_total_votes": "national_pv_denominator"})
     )
     return per_candidate.merge(denominator, on="year", how="left")
+
+
+# --- D051 gate 3: the cross-source margin-agreement check (#167) -------------
+#
+# D017 layer 3's third threshold. Gates 1 and 2 run at the cell grain over the PV union
+# and live in `usvote.pv.overlap`; this one is the **E7 trustworthiness check** and
+# lives here, beside the computation it protects (D051). That placement is forced rather
+# than preferred: the derivation below calls `roll_up_national`, and a home under
+# `usvote/pv/` would need a `pv -> hybrid` import, which `test_layering.py` forbids.
+
+#: Gate 3: the largest tolerated difference, in **percentage points**, between the
+#: national popular-vote margin computed from MIT and the same margin computed from
+#: UCSB, in any overlap year. D051 / `.claude/specs/research-pv-overlap.md` §6
+#: threshold 3; observed maximum **0.0337 pp**.
+#:
+#: **Percentage points, not a ratio** — that is the unit the claim is made in. 0.25 pp
+#: sits about 2x below the smallest actual margin in the measured window (0.5113 pp), so
+#: within that range a passing gate leaves no margin close enough to flip. It is **not a
+#: guarantee on unseen data**: a future election decided by 0.2 pp would pass this gate
+#: and could still be source-sensitive.
+MARGIN_DIFF_MAX_PP = 0.25
+
+
+def national_pv_margin_by_year(pv_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-year national popular-vote margin, in percentage points, for one source.
+
+    Takes a :data:`usvote.pv.schema.SHARED_PV_COLUMNS`-shaped single-source frame (a
+    read of ``pv_redistributable`` or ``pv_ucsb``) and returns ``year``/``pv_margin``.
+
+    **The denominator is the source's own PROVIDED state totals**, never a re-sum of
+    candidate rows, and that is a D017 rule rather than a preference — which is why this
+    calls :func:`roll_up_national` instead of summing here. D007 scopes candidates to
+    the EC-getters, so a re-sum differs *systematically* between two sources that cover
+    minor candidates differently. #70 hit it in practice: an early draft re-summed and
+    read 1992's margin as 6.96 pp against the universally published ~5.6 pp, failing a
+    reader's first sanity check. On the provided denominator the maximum cross-source
+    delta moved 0.0498 -> 0.0337 pp — the verdict came back *stronger* (D051).
+
+    The top-2 gap itself is :func:`_margin`, shared with the summary frame's three
+    margins, so "percentage points, over that method's own non-NULL scores, ``None``
+    under fewer than two candidates" has one definition rather than two.
+    """
+    rolled = roll_up_national(pv_df, key=("year", "candidate"), carry={})
+    rolled["share"] = rolled["national_pv_votes"] / rolled["national_pv_denominator"]
+    margins = [
+        {"year": int(year), "pv_margin": _margin(group["share"])}
+        for year, group in rolled.groupby("year", sort=True)
+    ]
+    return pd.DataFrame(margins, columns=["year", "pv_margin"])
+
+
+def assert_margin_agreement(
+    mit_df: pd.DataFrame,
+    ucsb_df: pd.DataFrame,
+    *,
+    error_cls: type[Exception] = HybridError,
+) -> pd.DataFrame:
+    """Raise when any overlap year's two national margins differ by > the D051 ceiling.
+
+    Returns the per-year comparison frame (``year``, ``mit_margin``, ``ucsb_margin``,
+    ``diff_pp``) so a caller can report it; raises :class:`HybridError` on a breach.
+
+    **Years either source cannot score are skipped, not failed.**
+    :func:`national_pv_margin_by_year` returns ``None`` for a year with fewer than two
+    scored candidates, and a missing margin is a coverage gap — comparing it against
+    anything would invent a difference out of an absence (the same reasoning that makes
+    :func:`_flip` NULL rather than ``True`` on an all-NULL year).
+    """
+    merged = national_pv_margin_by_year(mit_df).merge(
+        national_pv_margin_by_year(ucsb_df),
+        on="year",
+        how="inner",
+        suffixes=("_mit", "_ucsb"),
+    )
+    comparable = merged.loc[
+        merged["pv_margin_mit"].notna() & merged["pv_margin_ucsb"].notna()
+    ].copy()
+    comparable["diff_pp"] = (
+        comparable["pv_margin_mit"] - comparable["pv_margin_ucsb"]
+    ).abs()
+    breaches = comparable.loc[comparable["diff_pp"] > MARGIN_DIFF_MAX_PP]
+    if not breaches.empty:
+        offenders = [
+            f"{int(row.year)}: {row.diff_pp:.4f} pp"
+            for row in breaches.itertuples(index=False)
+        ]
+        raise error_cls(
+            "the national popular-vote margin is source-sensitive beyond the D051 "
+            f"gate-3 ceiling of {MARGIN_DIFF_MAX_PP} pp "
+            "(see .claude/specs/research-pv-overlap.md §6): " + "; ".join(offenders)
+        )
+    return comparable.rename(
+        columns={"pv_margin_mit": "mit_margin", "pv_margin_ucsb": "ucsb_margin"}
+    ).reset_index(drop=True)
+
+
+def assert_db_margin_agreement(dbc: DBC) -> pd.DataFrame | None:
+    """Live-DB form of gate 3; ``None`` when UCSB is absent (AC-3), raising nothing.
+
+    Reads through :func:`usvote.pv.overlap.read_overlap_frames`, which is the single
+    expression of the two-view read, the overlap-window filter and the UCSB skip probe —
+    all three AC-pinned — so this gate and the cell-grain gates beside it cannot drift
+    apart on any of them.
+    """
+    frames = read_overlap_frames(dbc)
+    if frames is None:
+        return None
+    return assert_margin_agreement(*frames)
 
 
 # --- the appointed electoral allotment --------------------------------------

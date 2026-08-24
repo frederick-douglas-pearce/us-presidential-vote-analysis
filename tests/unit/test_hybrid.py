@@ -41,6 +41,7 @@ from usvote.join import (
     EC_PV_PREFERRED_VIEW,
     EC_PV_REDISTRIBUTABLE_VIEW,
 )
+from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -2866,3 +2867,186 @@ def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:
     }
     offenders = {k: v for k, v in offenders.items() if v}
     assert not offenders, f"these hard-code a hybrid view name: {offenders}"
+
+
+# --- D051 gate 3: cross-source margin agreement (#167) ------------------------
+
+
+def _pv_source_row(
+    source: str,
+    year: int,
+    state: str,
+    candidate: str,
+    votes: int,
+    total: int,
+) -> dict[str, object]:
+    """One ``SHARED_PV_COLUMNS``-shaped row for a single-source PV frame."""
+    return {
+        "source": source,
+        "year": year,
+        "state": state,
+        "candidate": candidate,
+        "party": "DEMOCRAT" if candidate.startswith("D") else "REPUBLICAN",
+        "candidate_votes": votes,
+        "state_total_votes": total,
+        "reliability": "exact",
+    }
+
+
+def _two_way_year(
+    source: str, year: int, dem: int, rep: int, *, total: int
+) -> list[dict[str, object]]:
+    """A one-state year with two candidates and an explicit provided state total."""
+    return [
+        _pv_source_row(source, year, "Ohio", "Dem", dem, total),
+        _pv_source_row(source, year, "Ohio", "Rep", rep, total),
+    ]
+
+
+class _MarginStubDBC:
+    """Serves ``pv_redistributable`` / ``pv_ucsb`` reads for the gate-3 live form."""
+
+    def __init__(self, mit: pd.DataFrame, ucsb: pd.DataFrame) -> None:
+        self.mit = mit
+        self.ucsb = ucsb
+        self.queries: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        if "pv_ucsb" in query:
+            return self.ucsb.copy()
+        return self.mit.copy()
+
+
+class TestNationalPvMarginByYear:
+    """AC-5 — percentage points, on each source's own **provided** denominator."""
+
+    def test_the_margin_is_in_percentage_points(self) -> None:
+        """A 10-point gap reads ``10.0``, never ``0.1`` — D037's unit, shared with
+        the summary frame's three margins because both go through ``_margin``."""
+        frame = pd.DataFrame(
+            _two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000)
+        )
+        margins = hybrid.national_pv_margin_by_year(frame)
+        margin = margins.loc[margins["year"] == 1976, "pv_margin"].iloc[0]
+        assert margin == pytest.approx(10.0)
+
+    def test_the_denominator_is_the_provided_total_and_not_a_resum(self) -> None:
+        """The discriminating test for AC-5, and the one D017 forbids getting wrong.
+
+        The provided ``state_total_votes`` is 10,000 while the two candidate rows sum to
+        only 8,000 — a 2,000-vote minor-candidate residue, which is exactly the shape
+        D007's EC-getter scoping creates and exactly what differs between two sources.
+        On the provided denominator the margin is (5000-3000)/10000 = **20.00 pp**; on a
+        re-sum it would be (5000-3000)/8000 = 25.00 pp. #70 hit this for real: a re-sum
+        read 1992 as 6.96 pp against the published ~5.6 pp.
+        """
+        frame = pd.DataFrame(
+            _two_way_year(SOURCE_MIT, 1976, 5_000, 3_000, total=10_000)
+        )
+        margin = hybrid.national_pv_margin_by_year(frame)["pv_margin"].iloc[0]
+        assert margin == pytest.approx(20.0)
+        assert margin != pytest.approx(25.0)
+
+    def test_the_denominator_counts_each_state_once_across_candidates(self) -> None:
+        """``state_total_votes`` is broadcast onto every candidate row in a state, so a
+        bare sum would multiply the denominator by the candidate count."""
+        rows = _two_way_year(SOURCE_MIT, 1976, 6_000, 4_000, total=10_000)
+        rows += _two_way_year(SOURCE_MIT, 1976, 1_000, 1_000, total=10_000)
+        rows[2]["state"] = rows[3]["state"] = "Iowa"
+        margin = hybrid.national_pv_margin_by_year(pd.DataFrame(rows))["pv_margin"]
+        # (7000 - 5000) / 20000 = 10.00 pp; a candidate-broadcast denominator of 40000
+        # would halve it.
+        assert margin.iloc[0] == pytest.approx(10.0)
+
+    def test_a_year_with_one_candidate_yields_no_margin(self) -> None:
+        """A top-2 gap is undefined with one entry; ``top1 - 0`` would report a share."""
+        frame = pd.DataFrame(
+            [_pv_source_row(SOURCE_MIT, 1976, "Ohio", "Dem", 6_000, 10_000)]
+        )
+        assert hybrid.national_pv_margin_by_year(frame)["pv_margin"].iloc[0] is None
+
+
+class TestMarginAgreement:
+    """D051 threshold 3 — the E7 trustworthiness check."""
+
+    def test_two_sources_inside_the_ceiling_pass(self) -> None:
+        mit = pd.DataFrame(_two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000))
+        ucsb = pd.DataFrame(
+            _two_way_year(SOURCE_UCSB, 1976, 5_510, 4_500, total=10_000)
+        )
+        compared = hybrid.assert_margin_agreement(mit, ucsb)
+        # 10.00 pp vs 10.10 pp -- a 0.10 pp difference, inside the 0.25 pp ceiling.
+        assert compared["diff_pp"].iloc[0] == pytest.approx(0.10)
+
+    def test_a_difference_above_the_ceiling_raises(self) -> None:
+        mit = pd.DataFrame(_two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000))
+        ucsb = pd.DataFrame(
+            _two_way_year(SOURCE_UCSB, 1976, 5_600, 4_400, total=10_000)
+        )
+        # 10.00 pp vs 12.00 pp.
+        with pytest.raises(hybrid.HybridError, match="gate-3 ceiling"):
+            hybrid.assert_margin_agreement(mit, ucsb)
+
+    def test_a_difference_exactly_on_the_ceiling_passes(self) -> None:
+        """0.25 pp is a ceiling, not an exclusive bound — the gate raises *above* it.
+
+        Scaled to a million-vote state because votes are integers: 10.00 pp against
+        10.25 pp cannot be expressed exactly on a 10,000-vote total.
+        """
+        mit = pd.DataFrame(
+            _two_way_year(SOURCE_MIT, 1976, 550_000, 450_000, total=1_000_000)
+        )
+        ucsb = pd.DataFrame(
+            _two_way_year(SOURCE_UCSB, 1976, 551_250, 448_750, total=1_000_000)
+        )
+        compared = hybrid.assert_margin_agreement(mit, ucsb)
+        assert compared["diff_pp"].iloc[0] == pytest.approx(hybrid.MARGIN_DIFF_MAX_PP)
+
+    def test_a_year_only_one_source_can_score_is_skipped_not_failed(self) -> None:
+        """A missing margin is a coverage gap; comparing it would invent a difference.
+
+        The same reasoning that makes ``_flip`` NULL rather than ``True`` on an all-NULL
+        year — and it matters here because a warehouse legitimately carries years one
+        source scores and the other does not.
+        """
+        mit = pd.DataFrame(
+            _two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000)
+            + [_pv_source_row(SOURCE_MIT, 1980, "Ohio", "Dem", 9_000, 10_000)]
+        )
+        ucsb = pd.DataFrame(
+            _two_way_year(SOURCE_UCSB, 1976, 5_500, 4_500, total=10_000)
+            + _two_way_year(SOURCE_UCSB, 1980, 9_000, 1_000, total=10_000)
+        )
+        compared = hybrid.assert_margin_agreement(mit, ucsb)
+        assert list(compared["year"]) == [1976]
+
+    def test_the_live_form_skips_when_ucsb_is_absent(self) -> None:
+        """AC-3: gate 3 takes the same skip as the cell-grain gates, via the same seam."""
+        mit = pd.DataFrame(_two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000))
+        empty = pd.DataFrame(columns=list(SHARED_PV_COLUMNS))
+        dbc = _MarginStubDBC(mit, empty)
+        assert hybrid.assert_db_margin_agreement(cast(Any, dbc)) is None
+
+    def test_the_live_form_reads_the_two_single_source_views(self) -> None:
+        """AC-2: never the raw union, which would fan the overlap 2x."""
+        mit = pd.DataFrame(_two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000))
+        ucsb = pd.DataFrame(
+            _two_way_year(SOURCE_UCSB, 1976, 5_500, 4_500, total=10_000)
+        )
+        dbc = _MarginStubDBC(mit, ucsb)
+        hybrid.assert_db_margin_agreement(cast(Any, dbc))
+        joined = " ".join(dbc.queries)
+        assert "pv_redistributable" in joined and "pv_ucsb" in joined
+        assert "pv_votes" not in joined
+
+    def test_the_live_form_shares_the_read_seam_with_the_cell_grain_gates(self) -> None:
+        """One expression of the read + window + skip, so the two gates cannot drift.
+
+        Pinned by identity rather than by behaviour: ``hybrid`` must call
+        ``usvote.pv.overlap.read_overlap_frames`` itself, not keep a second copy that
+        happens to agree today.
+        """
+        from usvote.pv import overlap
+
+        assert hybrid.read_overlap_frames is overlap.read_overlap_frames

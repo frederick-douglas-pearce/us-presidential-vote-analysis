@@ -19,6 +19,7 @@ import pytest
 import usvote.warehouse as warehouse
 from tests._helpers import RecordingConnection, make_dbc
 from usvote.db import DBC
+from usvote.pv.overlap import OverlapKey, OverlapReport
 from usvote.warehouse import (
     SOURCE_EC,
     SOURCE_MIT,
@@ -32,6 +33,11 @@ from usvote.warehouse import (
 def dbc() -> DBC:
     """A real ``DBC`` over a recording fake — inert here (the pipelines are patched)."""
     return make_dbc(RecordingConnection())
+
+
+#: A clean gate verdict for the stubs below — the #167 gates read the live views, which
+#: a stub ``DBC`` cannot serve, so every ``run_warehouse`` test substitutes this.
+_CLEAN_REPORT = OverlapReport(cells=2, exact=2, exact_pct=100.0)
 
 
 @pytest.fixture
@@ -74,6 +80,13 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     monkeypatch.setattr(warehouse, "run_mit_pipeline", mit)
     monkeypatch.setattr(warehouse, "run_ucsb_pipeline", ucsb)
     monkeypatch.setattr(warehouse, "rebuild_views", views)
+    # The two #167 gates read the live views, so they are stubbed clean here rather
+    # than recorded -- every test above drives the default ``validate_overlap=True``
+    # against a stub DBC. The tests that care about them re-patch to record.
+    monkeypatch.setattr(
+        warehouse, "assert_db_overlap_within_tolerance", lambda _dbc: _CLEAN_REPORT
+    )
+    monkeypatch.setattr(warehouse, "assert_db_margin_agreement", lambda _dbc: None)
     return calls
 
 
@@ -93,6 +106,9 @@ def test_full_build_sequences_ec_mit_ucsb_views(
         ucsb_roster_rows=4,
         sources_loaded=frozenset({SOURCE_EC, SOURCE_MIT, SOURCE_UCSB}),
         views_built=True,
+        # The #167 gates ran and flagged nothing. ``()`` and ``None`` are distinct on
+        # the receipt: "ran, found none" versus "did not run".
+        overlap_flagged=(),
     )
 
 
@@ -152,11 +168,18 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", lambda *a, **k: ([], []))
     monkeypatch.setattr(warehouse, "rebuild_views", views)
+    # The #167 gates read the live views, which a RecordingConnection cannot serve.
+    def overlap(_dbc: object) -> OverlapReport:
+        order.append("overlap")
+        return _CLEAN_REPORT
+
+    monkeypatch.setattr(warehouse, "assert_db_overlap_within_tolerance", overlap)
+    monkeypatch.setattr(warehouse, "assert_db_margin_agreement", lambda _dbc: None)
 
     conn = RecordingConnection()
     run_warehouse(make_dbc(conn), "states.shp", "mit.csv", close=True)
 
-    assert order == ["views"]
+    assert order == ["views", "overlap"]
     assert conn.closed  # the connection was closed after the views were built
 
 
@@ -206,6 +229,116 @@ def test_rebuild_views_sequences_union_then_join_then_hybrid(
     warehouse.rebuild_views(dbc)
 
     assert calls == ["union", "join", "hybrid"]
+
+
+def _also_record_the_gates(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """Re-patch the two #167 gates so they append to the ``recorder`` call log."""
+    def cells(_dbc: object) -> OverlapReport:
+        calls.append(("overlap-cells", {}))
+        return _CLEAN_REPORT
+
+    monkeypatch.setattr(warehouse, "assert_db_overlap_within_tolerance", cells)
+    monkeypatch.setattr(
+        warehouse,
+        "assert_db_margin_agreement",
+        lambda _dbc: calls.append(("margin", {})),
+    )
+
+
+def test_run_warehouse_validates_the_overlap_after_the_views_are_built(
+    dbc: DBC,
+    recorder: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#167 / D051: the two raising gates run **last**, and that is load-bearing.
+
+    They are the only step in the build that can raise. Anywhere earlier, a breach would
+    leave a warehouse holding facts but no join/hybrid views — and its only documented
+    recovery, ``replace=True``, rebuilds and re-hits the same breach, so a threshold
+    D051 expects to retune could brick the build. Last means a breach reports loudly
+    over a *complete* warehouse.
+
+    Asserting the whole ordered list rather than membership is the point: a gate moved
+    one step earlier still runs, still passes a presence check, and re-opens exactly the
+    failure mode above.
+    """
+    _also_record_the_gates(monkeypatch, recorder)
+
+    run_warehouse(dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/")
+
+    assert [name for name, _ in recorder] == [
+        "ec",
+        "mit",
+        "ucsb",
+        "views",
+        "overlap-cells",
+        "margin",
+    ]
+
+
+def test_validate_overlap_false_skips_both_gates(
+    dbc: DBC,
+    recorder: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag is explicit and caller-supplied, in the ``ucsb_html_dir`` spirit.
+
+    A build whose sources are deliberately partial — a state-scoped MIT extract against
+    a full UCSB corpus, which two integration tests use — has too few paired cells for
+    an agreement *rate* to mean anything, so such a caller opts out rather than the gate
+    guessing from the data whether it was handed a sample.
+    """
+    _also_record_the_gates(monkeypatch, recorder)
+
+    result = run_warehouse(
+        dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", validate_overlap=False
+    )
+
+    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "views"]
+    assert result.overlap_flagged is None
+
+
+def test_the_flag_list_reaches_the_build_receipt(
+    dbc: DBC,
+    recorder: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-4: gate 2's D005 list is *produced*, so it must be reachable, not discarded.
+
+    ``None`` and ``()`` are kept distinct on the receipt — "the gate did not run" versus
+    "it ran and flagged nothing" — the same three-state discipline the ledger's own
+    slots use.
+    """
+    flagged = (OverlapKey(year=1976, state="Ohio", candidate="Carter", party="D"),)
+    monkeypatch.setattr(
+        warehouse,
+        "assert_db_overlap_within_tolerance",
+        lambda _dbc: OverlapReport(cells=1, exact=0, flagged=flagged),
+    )
+
+    result = run_warehouse(dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/")
+
+    assert result.overlap_flagged == flagged
+
+
+def test_a_skipped_gate_leaves_the_flag_list_none_not_empty(
+    dbc: DBC,
+    recorder: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A UCSB-less build skips (AC-3); ``None`` says so, where ``()`` would claim a
+    clean measurement that never happened."""
+    monkeypatch.setattr(
+        warehouse,
+        "assert_db_overlap_within_tolerance",
+        lambda _dbc: OverlapReport(skipped=True, skip_reason="no UCSB"),
+    )
+
+    result = run_warehouse(dbc, "states.shp", "mit.csv")
+
+    assert result.overlap_flagged is None
 
 
 # NOTE: there is deliberately no "a --replace build still rebuilds the hybrid views"
