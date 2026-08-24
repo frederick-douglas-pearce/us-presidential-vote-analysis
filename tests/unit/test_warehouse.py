@@ -10,7 +10,6 @@ invariant: nothing under ``usvote/{mit,ucsb,pv}/`` imports ``usvote.warehouse``.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ import pytest
 
 import usvote.warehouse as warehouse
 from tests._helpers import RecordingConnection, make_dbc
+from tests.unit.test_layering import imports
 from usvote.db import DBC
 from usvote.pv.overlap import OverlapKey, OverlapReport
 from usvote.warehouse import (
@@ -81,7 +81,8 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     monkeypatch.setattr(warehouse, "run_ucsb_pipeline", ucsb)
     monkeypatch.setattr(warehouse, "rebuild_views", views)
     # The two #167 gates read the live views, so they are stubbed clean here rather
-    # than recorded -- every test above drives the default ``validate_overlap=True``
+    # than recorded -- every test using this fixture drives the default
+    # ``validate_overlap=True``
     # against a stub DBC. The tests that care about them re-patch to record.
     monkeypatch.setattr(
         warehouse, "assert_db_overlap_within_tolerance", lambda _dbc: _CLEAN_REPORT
@@ -106,9 +107,9 @@ def test_full_build_sequences_ec_mit_ucsb_views(
         ucsb_roster_rows=4,
         sources_loaded=frozenset({SOURCE_EC, SOURCE_MIT, SOURCE_UCSB}),
         views_built=True,
-        # The #167 gates ran and flagged nothing. ``()`` and ``None`` are distinct on
-        # the receipt: "ran, found none" versus "did not run".
-        overlap_flagged=(),
+        # The #167 gates ran and found nothing. A populated report and ``None`` are
+        # distinct on the receipt: "ran" versus "did not run".
+        overlap=_CLEAN_REPORT,
     )
 
 
@@ -190,14 +191,21 @@ def test_no_pv_source_imports_the_warehouse_composition_root() -> None:
     but the exemption only stays honest if the dependency never runs the other way. Mirror
     the greppable ``dwh.votes`` invariant with an enforced test: no module under
     ``usvote/{mit,ucsb,pv}/`` may import ``usvote.warehouse``.
+
+    **Parsed, not grepped** — via ``test_layering.imports``, whose own docstring makes
+    the argument: a regex over ``import usvote.warehouse|from usvote.warehouse`` misses
+    ``from usvote import warehouse``, which is the prevailing spelling in this repo
+    *including inside the subpackages being guarded*, and it false-positives on a
+    docstring quoting an import line. This test used such a regex until #167 added
+    ``usvote/pv/overlap.py`` to the scanned set; a guard blind to the common spelling
+    reads as enforcement while providing none.
     """
     pkg_root = Path(warehouse.__file__).parent
-    pattern = re.compile(r"(^|\W)(import\s+usvote\.warehouse|from\s+usvote\.warehouse)")
     offenders = [
         py.relative_to(pkg_root).as_posix()
         for sub in ("mit", "ucsb", "pv")
         for py in (pkg_root / sub).rglob("*.py")
-        if pattern.search(py.read_text())
+        if imports(py.read_text(), "usvote.warehouse")
     ]
     assert not offenders, f"these must not import usvote.warehouse: {offenders}"
 
@@ -297,7 +305,7 @@ def test_validate_overlap_false_skips_both_gates(
     )
 
     assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "views"]
-    assert result.overlap_flagged is None
+    assert result.overlap is None
 
 
 def test_the_flag_list_reaches_the_build_receipt(
@@ -311,7 +319,7 @@ def test_the_flag_list_reaches_the_build_receipt(
     "it ran and flagged nothing" — the same three-state discipline the ledger's own
     slots use.
     """
-    flagged = (OverlapKey(year=1976, state="Ohio", candidate="Carter", party="D"),)
+    flagged = (OverlapKey(year=1976, state="State0", candidate="Nominee", party="D"),)
     monkeypatch.setattr(
         warehouse,
         "assert_db_overlap_within_tolerance",
@@ -320,16 +328,23 @@ def test_the_flag_list_reaches_the_build_receipt(
 
     result = run_warehouse(dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/")
 
-    assert result.overlap_flagged == flagged
+    assert result.overlap is not None
+    assert result.overlap.flagged == flagged
 
 
-def test_a_skipped_gate_leaves_the_flag_list_none_not_empty(
+def test_a_skipped_gate_is_distinguishable_from_a_clean_one(
     dbc: DBC,
     recorder: list[tuple[str, dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A UCSB-less build skips (AC-3); ``None`` says so, where ``()`` would claim a
-    clean measurement that never happened."""
+    """A UCSB-less build skips (AC-3), and the receipt says *skipped*, not clean.
+
+    Three states stay distinguishable on the receipt — ``None`` (the gates did not
+    run), a ``skipped`` report (they ran and had nothing to measure), and a populated
+    report with empty lists (they ran and found nothing). Collapsing the middle one
+    into either neighbour is how a build that never checked reads as a build that
+    checked and was clean.
+    """
     monkeypatch.setattr(
         warehouse,
         "assert_db_overlap_within_tolerance",
@@ -338,7 +353,9 @@ def test_a_skipped_gate_leaves_the_flag_list_none_not_empty(
 
     result = run_warehouse(dbc, "states.shp", "mit.csv")
 
-    assert result.overlap_flagged is None
+    assert result.overlap is not None
+    assert result.overlap.skipped
+    assert result.overlap.flagged == ()
 
 
 # NOTE: there is deliberately no "a --replace build still rebuilds the hybrid views"

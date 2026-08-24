@@ -498,22 +498,34 @@ def test_hybrid_views_over_a_real_full_warehouse(
         # --- #167 / D051: the D017 layer-3 gates over the real overlap --------
         # AC-3's own acceptance evidence, which cannot run in CI (D022) — this is the
         # only place the gates meet real MIT-vs-UCSB data. Every figure asserted here is
-        # already published in decisions.md (D051) / research-pv-overlap.md §6, so the
+        # already published in decisions.md (D051) / research-pv-overlap.md §3 and
+        # §6, so the
         # test commits no new UCSB-derived quantity.
+        # ``run_warehouse`` already ran both gates (``validate_overlap`` defaults on),
+        # so assert the receipt carries what they measured -- that is the shipped path.
+        # The direct call below then re-reads the LIVE views for the detailed
+        # assertions, which is a stronger check than trusting the receipt alone.
+        assert result.overlap is not None and not result.overlap.skipped
+        assert len(result.overlap.flagged) == 7
         report = assert_db_overlap_within_tolerance(dbc)
         assert not report.skipped, (
             "UCSB is loaded in this build, so the gate must measure rather than skip — "
             "a skip here would make every assertion below vacuous"
         )
-        assert report.cells == 1326, "the overlap population drifted from research §5"
+        assert report.cells == 1326, "the overlap population drifted from research §3"
         assert report.exact_pct == pytest.approx(93.44, abs=0.01)
         assert report.one_sided == (), (
-            "research §5.1 measured zero one-sided cells; a non-empty list means one "
+            "research §3 measured zero one-sided cells; a non-empty list means one "
             "source stopped covering a key the other still carries"
         )
         assert len(report.flagged) == 7, "D051 threshold 2 flags 7 of 87 divergent cells"
-        worst_year = min(report.exact_pct_by_year.values())
-        assert worst_year == pytest.approx(84.31, abs=0.01), "1976, research §6"
+        worst_year, worst_pct = min(
+            report.exact_pct_by_year.items(), key=lambda kv: kv[1]
+        )
+        # Assert WHICH year as well as the value: if 1976 improved and another year
+        # degraded to the same rate, a value-only assert passes under a message that
+        # has silently become false.
+        assert (worst_year, round(worst_pct, 2)) == (1976, 84.31), "research §6"
 
         # Gate 3, and the fork-(d) reconciliation: the margin this gate scores for the
         # redistributable source must BE the margin the site publishes. Without it the

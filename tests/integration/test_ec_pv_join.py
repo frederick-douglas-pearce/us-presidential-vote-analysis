@@ -339,10 +339,10 @@ def test_join_over_a_real_two_source_load(
             # sources are deliberately asymmetric: the fusion sample is a two-state MIT
             # extract, so MIT contributes 2 of the ~204 cells UCSB covers for these two
             # years. An agreement rate over that population says nothing about either
-            # source -- and both of the paired cells (2016 New York) are genuinely
-            # divergent in the real data, the two sources treating New York's
-            # fusion-party lines differently. The gates are exercised on a complete
-            # build by ``test_hybrid_views.py::test_hybrid_views_over_a_real_full_warehouse``.
+            # source. (Both paired cells also happen to be genuinely divergent in the
+            # real data -- why is not established here and is not asserted.) The gates
+            # are exercised on a complete build by
+            # ``test_hybrid_views.py::test_hybrid_views_over_a_real_full_warehouse``.
             validate_overlap=False,
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),

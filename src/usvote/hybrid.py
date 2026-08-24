@@ -93,7 +93,7 @@ from usvote.join import (
 from usvote.join import assert_no_fan_out as assert_join_no_fan_out
 from usvote.load import SCHEMA
 from usvote.pv.overlap import read_overlap_frames
-from usvote.pv.source import SOURCE_MIT
+from usvote.pv.source import MIT_PV_YEAR_MIN, SOURCE_MIT
 from usvote.pv.status import (
     PV_STATUS_POPULAR_VOTE,
     ROSTER_SCHEMA,
@@ -123,8 +123,8 @@ __all__ = [
     "assert_db_margin_agreement",
     "assert_ec_shares_le_one",
     "assert_ec_winner_matches_rank",
-    "assert_no_fan_out",
     "assert_margin_agreement",
+    "assert_no_fan_out",
     "assert_no_winner_tie",
     "assert_redistributable_only_source",
     "build_hybrid_candidate_sql",
@@ -132,9 +132,9 @@ __all__ = [
     "build_hybrid_from_db",
     "build_hybrid_summary",
     "build_hybrid_summary_sql",
-    "national_pv_margin_by_year",
     "create_hybrid_views",
     "ec_denominator_by_year",
+    "national_pv_margin_by_year",
     "pv_coverage_by_year",
     "read_ec_pv_join",
     "read_pv_status_roster",
@@ -453,12 +453,18 @@ def assert_margin_agreement(
     Returns the per-year comparison frame (``year``, ``mit_margin``, ``ucsb_margin``,
     ``diff_pp``) so a caller can report it; raises :class:`HybridError` on a breach.
 
+    Both frames are re-filtered to the overlap window here as well as at the read, so
+    the oracle is correct when called directly from a test — the same self-defense
+    :func:`usvote.pv.overlap.compute_overlap_report` applies, and for the same reason.
+
     **Years either source cannot score are skipped, not failed.**
     :func:`national_pv_margin_by_year` returns ``None`` for a year with fewer than two
     scored candidates, and a missing margin is a coverage gap — comparing it against
     anything would invent a difference out of an absence (the same reasoning that makes
     :func:`_flip` NULL rather than ``True`` on an all-NULL year).
     """
+    mit_df = mit_df.loc[mit_df["year"] >= MIT_PV_YEAR_MIN]
+    ucsb_df = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
     merged = national_pv_margin_by_year(mit_df).merge(
         national_pv_margin_by_year(ucsb_df),
         on="year",
@@ -487,15 +493,19 @@ def assert_margin_agreement(
     ).reset_index(drop=True)
 
 
-def assert_db_margin_agreement(dbc: DBC) -> pd.DataFrame | None:
+def assert_db_margin_agreement(
+    dbc: DBC, *, schema: str = ROSTER_SCHEMA
+) -> pd.DataFrame | None:
     """Live-DB form of gate 3; ``None`` when UCSB is absent (AC-3), raising nothing.
 
     Reads through :func:`usvote.pv.overlap.read_overlap_frames`, which is the single
     expression of the two-view read, the overlap-window filter and the UCSB skip probe —
     all three AC-pinned — so this gate and the cell-grain gates beside it cannot drift
-    apart on any of them.
+    apart on any of them. ``schema`` is forwarded for the same reason its cell-grain
+    twin :func:`usvote.pv.overlap.assert_db_overlap_within_tolerance` takes one: a
+    non-default-schema caller must not silently validate a different warehouse.
     """
-    frames = read_overlap_frames(dbc)
+    frames = read_overlap_frames(dbc, schema=schema)
     if frames is None:
         return None
     return assert_margin_agreement(*frames)

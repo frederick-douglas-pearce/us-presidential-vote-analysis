@@ -4,22 +4,26 @@ Covers :mod:`usvote.pv.overlap` — gates 1 and 2 at the cell grain — plus the
 threshold pin, which reaches across to :mod:`usvote.hybrid` for gate 3's constant so a
 half-table retune cannot hide.
 
-**One fixture here exists for a defect no other test in this file could see.**
-``test_a_party_spelling_difference_does_not_make_a_cell_one_sided`` spells MIT's
-``REPUBLICAN`` against UCSB's ``Republican`` on the same key. Every other fixture agrees
-on party — as any hand-written pair naturally would — so a regression that put ``party``
-back into the join key would pass all of them while collapsing the real-corpus
-exact-match rate to zero. That is the shape this project keeps naming: a test that
-passes for the wrong reason.
+**Two fixtures here exist for a defect the rest of the file could not see.**
+``test_a_party_spelling_difference_does_not_make_a_cell_one_sided`` and
+``test_the_carried_party_is_mits_spelling`` both spell MIT's ``REPUBLICAN`` against
+UCSB's ``Republican`` on one key. Every *other* fixture agrees on party — as any
+hand-written pair naturally would — so a regression that put ``party`` back into the
+join key would pass all of those while collapsing the real-corpus exact-match rate to
+zero. That is the shape this project keeps naming: a test that passes for the wrong
+reason.
 """
 
 from __future__ import annotations
 
 import dataclasses
+from typing import cast
 
 import pandas as pd
 import pytest
 
+from tests._helpers import QueryDispatchDBC
+from usvote.db import DBC
 from usvote.hybrid import MARGIN_DIFF_MAX_PP
 from usvote.pv.overlap import (
     CELL_RELPCT_FAIL,
@@ -85,24 +89,9 @@ def _agreeing(year: int, n: int, *, start: int = 0) -> list[list[dict[str, objec
     return [mit, ucsb]
 
 
-class _StubDBC:
-    """A minimal ``DBC`` stand-in answering by the relation named in the query.
-
-    Deliberately not a mock: the point is to prove the read seam issues the reads it
-    claims — the two D017 single-source views and never the raw union — so it has to
-    serve real frames and record what it was asked for.
-    """
-
-    def __init__(self, mit: pd.DataFrame, ucsb: pd.DataFrame) -> None:
-        self.mit = mit
-        self.ucsb = ucsb
-        self.queries: list[str] = []
-
-    def select_query_to_df(self, query: str) -> pd.DataFrame:
-        self.queries.append(query)
-        if "pv_ucsb" in query:
-            return self.ucsb.copy()
-        return self.mit.copy()
+def _stub(mit: pd.DataFrame, ucsb: pd.DataFrame) -> QueryDispatchDBC:
+    """The shared read-only ``DBC`` double, routed by relation name."""
+    return QueryDispatchDBC({"pv_ucsb": ucsb}, mit)
 
 
 class TestThresholds:
@@ -235,6 +224,69 @@ class TestPopulation:
         assert report.skip_reason == SKIP_NO_OVERLAP_CELLS
         assert report.skip_reason != SKIP_UCSB_ABSENT
 
+    def test_a_year_only_one_source_covers_is_excluded_not_scored_zero(self) -> None:
+        """The asymmetric-refresh case, which must not break a build.
+
+        MIT is a CSV drop and the UCSB corpus is a manual snapshot, so one reaching a
+        new election first is the *ordinary* case, not a regression. Scored, that year
+        reads 0% and gate 1 raises at the end of an otherwise complete build; the window
+        has a floor and deliberately no ceiling, so nothing else would stop it. Gate 3
+        already skips such a year (it inner-joins on year), so this also makes the two
+        gates agree about what a coverage gap is.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 10)
+        extra_mit, _ = _agreeing(2028, 4, start=100)
+        mit_rows += extra_mit  # MIT reached 2028; the UCSB snapshot has not
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.uncovered_years == (2028,)
+        assert 2028 not in report.exact_pct_by_year
+        assert report.cells == 10, "2028's cells must not enter the population"
+        assert report.exact_pct == 100.0
+        assert report.one_sided == ()
+        assert_overlap_within_tolerance(report)  # must not raise
+
+    def test_the_exclusion_is_per_year_and_does_not_swallow_a_partial_year(
+        self,
+    ) -> None:
+        """The carve-out is whole-year only — this is what keeps it from disabling gate 1.
+
+        A year one source reaches *partially* is a regression, not a coverage gap, so it
+        stays in the population and its missing cells count as one-sided. Without this
+        the previous test's exclusion could quietly widen into "any year with missing
+        rows is skipped", which would switch the gate off on exactly the failure it
+        exists to catch.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 46)
+        extra_mit, extra_ucsb = _agreeing(1980, 4, start=100)
+        mit_rows += extra_mit
+        ucsb_rows += extra_ucsb[:1]  # UCSB reached 1980, but lost 3 of its 4 cells
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.uncovered_years == (), "1980 IS covered by both sources"
+        assert report.exact_pct_by_year[1980] == 25.0
+        assert len(report.one_sided) == 3
+        with pytest.raises(PVOverlapError, match="gate 1 .per year.*1980"):
+            assert_overlap_within_tolerance(report)
+
+    def test_the_breach_message_names_the_one_sided_count(self) -> None:
+        """``one_sided`` must surface on a real build, and a breach is where it can.
+
+        It is not on either floor's own arithmetic, so without this a breach caused by a
+        source dropping rows reads identically to one caused by cells disagreeing — and
+        a reader starts in the wrong place.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 20)
+        del ucsb_rows[:5]
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+        with pytest.raises(PVOverlapError) as excinfo:
+            assert_overlap_within_tolerance(report)
+
+        assert "5 of them are carried by only one source" in str(excinfo.value)
+
     def test_a_source_that_lost_only_some_rows_still_trips_the_gate(self) -> None:
         """The empty-side skip is narrow **on purpose** — this is what keeps it honest.
 
@@ -356,24 +408,25 @@ class TestGateTwoPerCellCeiling:
             assert_overlap_within_tolerance(report)
 
     def test_the_relative_delta_is_taken_against_the_ucsb_value(self) -> None:
-        """AC-6: the basis is ``|MIT - UCSB| / UCSB``, and the measure is asymmetric.
+        """AC-6: the basis is ``|MIT - UCSB| / UCSB``, and it must be able to FAIL.
 
-        Engineered so the two readings straddle the flag line: MIT 1030 against UCSB
-        1000 is **3.00%** on the UCSB basis and **2.91%** on the MIT basis. Both flag,
-        so a straddle at 1% cannot discriminate — this pins the *value* instead, which
-        is what makes the basis observable rather than merely documented.
+        **The fixture straddles the flag line, and that is the whole test.** MIT 10,050
+        against UCSB 9,950 is ``100/9950 = 1.005%`` on the UCSB basis — flagged — and
+        ``100/10050 = 0.995%`` on the MIT basis — not flagged. So swapping the
+        denominator in ``compute_overlap_report`` turns this red.
+
+        An earlier version of this test used a pair that flagged under *both* bases and
+        then asserted arithmetic over literals, which pinned nothing: it would have
+        passed with the denominator swapped. Any ``99d < UCSB < 100d`` pair straddles
+        the line; keep one here rather than relying on the fail-line tests, whose
+        straddle is incidental and evaporates if ``CELL_RELPCT_FAIL`` is ever retuned.
         """
-        report = self._one_cell(1_030, 1_000)
-        assert [k.state for k in report.flagged] == ["ZZ"]
-        # 30/1000 = 3.00% (UCSB basis) -- fails a 2.95% line; 30/1030 = 2.913% passes it.
-        strict = compute_overlap_report(
-            _frame([_row(SOURCE_MIT, 1976, "ZZ", "Nominee", 1_030)]),
-            _frame([_row(SOURCE_UCSB, 1976, "ZZ", "Nominee", 1_000)]),
+        report = self._one_cell(10_050, 9_950)
+        assert [k.state for k in report.flagged] == ["ZZ"], (
+            "MIT 10050 vs UCSB 9950 is 1.005% of the UCSB value and must flag; "
+            "0.995% of the MIT value would not, so an empty list means the basis "
+            "was taken against MIT"
         )
-        assert strict.flagged  # sanity: the single cell diverges at all
-        mit_basis = abs(1_030 - 1_000) / 1_030 * 100
-        ucsb_basis = abs(1_030 - 1_000) / 1_000 * 100
-        assert mit_basis < 2.95 < ucsb_basis  # the two bases really do differ here
 
     def test_a_zero_ucsb_value_does_not_divide_by_zero(self) -> None:
         """``max(UCSB, 1)`` mirrors the reference script's ``greatest(ucsb, 1)``."""
@@ -390,22 +443,22 @@ class TestTheReadSeam:
             [_row(SOURCE_MIT, 1976, "Ohio", "Carter", 100)],
             [_row(SOURCE_UCSB, 1976, "Ohio", "Carter", 100)],
         )
-        dbc = _StubDBC(mit, ucsb)
-        assert read_overlap_frames(dbc) is not None
+        dbc = _stub(mit, ucsb)
+        assert read_overlap_frames(cast(DBC, dbc)) is not None
         joined = " ".join(dbc.queries)
         assert "pv_redistributable" in joined
         assert "pv_ucsb" in joined
         assert "pv_votes" not in joined
 
     def test_it_filters_both_reads_to_the_overlap_window(self) -> None:
-        dbc = _StubDBC(*_pair([], [_row(SOURCE_UCSB, 1976, "Ohio", "C", 1)]))
-        read_overlap_frames(dbc)
+        dbc = _stub(*_pair([], [_row(SOURCE_UCSB, 1976, "Ohio", "C", 1)]))
+        read_overlap_frames(cast(DBC, dbc))
         assert sum("year >= 1976" in q for q in dbc.queries) == 2
 
     def test_an_empty_pv_ucsb_skips_rather_than_reading_further(self) -> None:
         """AC-3: a public EC + MIT clone must not be reddened by this gate."""
-        dbc = _StubDBC(*_pair([_row(SOURCE_MIT, 1976, "Ohio", "Carter", 1)], []))
-        assert read_overlap_frames(dbc) is None
+        dbc = _stub(*_pair([_row(SOURCE_MIT, 1976, "Ohio", "Carter", 1)], []))
+        assert read_overlap_frames(cast(DBC, dbc)) is None
         # It stopped at the probe -- no window reads were issued.
         assert len(dbc.queries) == 1
 
@@ -415,13 +468,13 @@ class TestTheReadSeam:
         Probing the *filtered* view would skip whenever UCSB happened to carry no
         1976+ rows, which is a different fact and takes a different skip reason.
         """
-        dbc = _StubDBC(*_pair([], [_row(SOURCE_UCSB, 1900, "Ohio", "Bryan", 1)]))
-        read_overlap_frames(dbc)
+        dbc = _stub(*_pair([], [_row(SOURCE_UCSB, 1900, "Ohio", "Bryan", 1)]))
+        read_overlap_frames(cast(DBC, dbc))
         assert "year >=" not in dbc.queries[0]
 
     def test_the_live_form_returns_a_skipped_report_when_ucsb_is_absent(self) -> None:
-        dbc = _StubDBC(*_pair([_row(SOURCE_MIT, 1976, "Ohio", "Carter", 1)], []))
-        report = assert_db_overlap_within_tolerance(dbc)
+        dbc = _stub(*_pair([_row(SOURCE_MIT, 1976, "Ohio", "Carter", 1)], []))
+        report = assert_db_overlap_within_tolerance(cast(DBC, dbc))
         assert report.skipped
         assert report.skip_reason == SKIP_UCSB_ABSENT
 
@@ -429,17 +482,17 @@ class TestTheReadSeam:
         mit_rows, ucsb_rows = _agreeing(1976, 1)
         mit_rows.append(_row(SOURCE_MIT, 1976, "ZZ", "Nominee", 100))
         ucsb_rows.append(_row(SOURCE_UCSB, 1976, "ZZ", "Nominee", 101))
-        dbc = _StubDBC(_frame(mit_rows), _frame(ucsb_rows))
+        dbc = _stub(_frame(mit_rows), _frame(ucsb_rows))
         with pytest.raises(PVOverlapError):
-            assert_db_overlap_within_tolerance(dbc)
+            assert_db_overlap_within_tolerance(cast(DBC, dbc))
 
     def test_the_live_form_returns_the_flag_list_on_a_passing_population(self) -> None:
         """Gate 2's D005 list is *returned*, not raised on — AC-4's "feeding" half."""
         mit_rows, ucsb_rows = _agreeing(1976, 19)
         mit_rows.append(_row(SOURCE_MIT, 1976, "ZZ", "Nominee", 10_200))
         ucsb_rows.append(_row(SOURCE_UCSB, 1976, "ZZ", "Nominee", 10_000))
-        dbc = _StubDBC(_frame(mit_rows), _frame(ucsb_rows))
-        report = assert_db_overlap_within_tolerance(dbc)
+        dbc = _stub(_frame(mit_rows), _frame(ucsb_rows))
+        report = assert_db_overlap_within_tolerance(cast(DBC, dbc))
         assert not report.skipped
         assert [k.state for k in report.flagged] == ["ZZ"]
 

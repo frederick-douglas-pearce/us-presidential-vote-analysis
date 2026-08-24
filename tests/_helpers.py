@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -237,6 +237,47 @@ def make_dbc(conn: RecordingConnection) -> DBC:
     ``DBC`` over the recording connection to assert on the SQL it builds.
     """
     return DBC({"dbname": "test"}, connect=lambda **_: conn)
+
+
+class QueryDispatchDBC:
+    """A read-only ``DBC`` stand-in that answers by matching a relation in the query.
+
+    Deliberately not a mock: the callers under test are expected to *issue the reads
+    they claim*, so this serves real frames and records every query for the caller to
+    assert on (``pv_votes`` never appearing is a real assertion in the #167 tests).
+
+    ``routes`` maps a substring of the SQL — normally a relation name — to the frame to
+    return; the first match in insertion order wins, and ``default`` answers anything
+    unmatched. Use :func:`query_dispatch_dbc` to get one typed as a ``DBC``.
+    """
+
+    def __init__(
+        self, routes: dict[str, pd.DataFrame], default: pd.DataFrame
+    ) -> None:
+        self.routes = routes
+        self.default = default
+        self.queries: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        for needle, frame in self.routes.items():
+            if needle in query:
+                return frame.copy()
+        return self.default.copy()
+
+
+def query_dispatch_dbc(
+    routes: dict[str, pd.DataFrame], default: pd.DataFrame
+) -> DBC:
+    """A :class:`QueryDispatchDBC` typed as a ``DBC``, for a caller that takes one.
+
+    The ``cast`` lives here rather than at each call site: the stub implements only
+    ``select_query_to_df``, which is all a read-only seam uses, and spreading
+    ``cast(Any, stub)`` across test modules is what this replaces. Keep a reference to
+    the stub itself when you need ``.queries`` — construct :class:`QueryDispatchDBC`
+    directly and cast at the call, or read it back off the returned object.
+    """
+    return cast(DBC, QueryDispatchDBC(routes, default))
 
 
 def record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:

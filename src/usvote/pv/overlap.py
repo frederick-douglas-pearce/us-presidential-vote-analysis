@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from usvote.db import DBC
 from usvote.pv.schema import PV_SCHEMA
 from usvote.pv.source import MIT_PV_YEAR_MIN
 from usvote.pv.views import (
@@ -168,7 +169,13 @@ class OverlapKey:
     year: int
     state: str
     candidate: str
-    party: str | None
+    #: ``compare=False`` so it is excluded from ``__eq__``/``__hash__`` — the docstring
+    #: above says the identity is the first three fields, and a generated equality over
+    #: all four would contradict it on exactly the case this class exists to handle:
+    #: two spellings of one party would compare unequal and hash apart, so any consumer
+    #: deduping or diffing flagged lists across surfaces would get party-sensitive
+    #: behaviour the type promises it does not have.
+    party: str | None = field(compare=False, default=None)
 
 
 @dataclass(frozen=True)
@@ -190,6 +197,9 @@ class OverlapReport:
     one_sided: tuple[OverlapKey, ...] = ()
     flagged: tuple[OverlapKey, ...] = ()
     failed: tuple[OverlapKey, ...] = ()
+    #: Years reached by only one source, excluded from every count above. A coverage
+    #: gap, not a disagreement — see :func:`compute_overlap_report`.
+    uncovered_years: tuple[int, ...] = ()
 
 
 def _keys(rows: pd.DataFrame) -> tuple[OverlapKey, ...]:
@@ -224,13 +234,34 @@ def compute_overlap_report(
     dropping exactly the rows a regression would create — the inner-join-silent-drop
     hazard, one level up from where this package already guards it.
 
-    **A source with NO rows in the window skips rather than scoring 0%**, and the
-    carve-out is deliberately narrow: it fires only when one side is *entirely* empty,
-    which is what a UCSB-less warehouse looks like from here (AC-3). A source that lost
-    only *some* rows still scores them as one-sided and still trips gate 1 — including
-    the case where it lost a whole year, which the per-year floor catches. Without this,
-    AC-3's "skipped, not failed" would hold only for callers routed through
-    :func:`read_overlap_frames`, and any direct call would hard-fail on an absent UCSB.
+    **A year only ONE source covers is excluded, not scored 0%** — listed in
+    :attr:`OverlapReport.uncovered_years`. The window has a floor
+    (:data:`~usvote.pv.source.MIT_PV_YEAR_MIN`) and deliberately no ceiling, so without
+    this the ordinary case of asymmetric refresh would break the build: MIT is a CSV
+    drop and the UCSB corpus is a manual snapshot, so when 2028 lands in one before the
+    other, every cell of that year is one-sided, its rate reads 0%, and gate 1 raises at
+    the end of an otherwise complete build. The reference script avoided this with a
+    hardcoded ``BETWEEN 1976 AND 2024``; deriving the covered years does the same job
+    without a ceiling that goes stale. Gate 3 already treats such a year the same way
+    (:func:`usvote.hybrid.assert_margin_agreement` inner-joins on year), so the two
+    gates now agree about what a coverage gap is.
+
+    **The same carve-out applies at the window level, and it stays narrow at both.** A
+    source with no rows *at all* in the window skips outright — that is what a UCSB-less
+    warehouse looks like from here (AC-3), and without it AC-3's "skipped, not failed"
+    would hold only for callers routed through :func:`read_overlap_frames`. What is
+    excluded is always a *whole* year or a whole window that one source does not reach.
+    A source that lost only *some* of a year's rows still scores them as one-sided and
+    still trips gate 1 — the case the per-year floor exists for, and the reason this is
+    an exclusion of empty years rather than of one-sided rows.
+
+    **What the exclusion costs, stated rather than hidden:** a source that stops
+    covering a year entirely now reports as a coverage gap instead of a breach. That
+    regression has an owner — each source's own D024 roster/fact guard,
+    :func:`usvote.pv.status.assert_roster_covers_facts`, which fails loud when a state
+    the roster marks ``popular_vote`` has no vote rows — and it is a better instrument
+    for it than an agreement rate, because it knows which states were *supposed* to have
+    rows.
 
     **The relative delta is** ``|MIT - UCSB| / max(UCSB, 1) * 100`` — **UCSB is the
     denominator** (D051, research §2). The measure is asymmetric, so this is part of the
@@ -247,15 +278,23 @@ def compute_overlap_report(
     ucsb = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
     if mit.empty or ucsb.empty:
         return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+    # Years only one source reaches are a coverage gap, not a disagreement -- see the
+    # docstring. Excluded before the merge so they cannot enter any count or list.
+    covered = set(mit["year"].unique()) & set(ucsb["year"].unique())
+    uncovered = tuple(
+        sorted((set(mit["year"].unique()) | set(ucsb["year"].unique())) - covered)
+    )
+    mit = mit.loc[mit["year"].isin(covered)]
+    ucsb = ucsb.loc[ucsb["year"].isin(covered)]
+    if not covered:
+        return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+
     merged = mit[[*key, "party", "candidate_votes"]].merge(
         ucsb[[*key, "party", "candidate_votes"]],
         on=key,
         how="outer",
         suffixes=("_mit", "_ucsb"),
     )
-    if merged.empty:
-        return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
-
     # MIT's party spelling, falling back to UCSB's on a MIT-less key -- display only.
     merged["party"] = merged["party_mit"].fillna(merged["party_ucsb"])
     both = (
@@ -275,6 +314,7 @@ def compute_overlap_report(
 
     by_year = merged.groupby("year")["exact"].mean().mul(100)
     return OverlapReport(
+        uncovered_years=uncovered,
         cells=len(merged),
         exact=int(merged["exact"].sum()),
         exact_pct=float(merged["exact"].mean() * 100),
@@ -307,9 +347,19 @@ def assert_overlap_within_tolerance(
 
     breaches: list[str] = []
     if report.exact_pct < EXACT_MATCH_FLOOR_OVERALL:
+        # Name the one-sided count alongside the rate. A breach has two very different
+        # causes -- cells that disagree, and cells one source stopped carrying -- and
+        # the rate alone cannot tell them apart, so a reader would start in the wrong
+        # place. This is the only path on which ``one_sided`` surfaces during a build.
+        one_sided_note = (
+            f"; {len(report.one_sided)} of them are carried by only one source"
+            if report.one_sided
+            else ""
+        )
         breaches.append(
             f"gate 1 (overall): {report.exact_pct:.2f}% of {report.cells} overlap "
             f"cells agree exactly, below the {EXACT_MATCH_FLOOR_OVERALL}% floor"
+            f"{one_sided_note}"
         )
     low_years = [
         f"{year} at {pct:.2f}%"
@@ -336,7 +386,7 @@ def assert_overlap_within_tolerance(
 
 
 def read_overlap_frames(
-    dbc: object, *, schema: str = PV_SCHEMA
+    dbc: DBC, *, schema: str = PV_SCHEMA
 ) -> tuple[pd.DataFrame, pd.DataFrame] | None:
     """Read the two D017 single-source views for the window, or ``None`` to skip.
 
@@ -361,11 +411,13 @@ def read_overlap_frames(
     zero-row parse is the UCSB pipeline's responsibility; this gate would simply skip.
     Stated rather than guarded — no check here covers it.
 
-    ``dbc`` is typed :class:`object` because this module must not import
-    :mod:`usvote.db`: the shared PV layer stays free of the EC pipeline's DB stack, as
-    :mod:`usvote.pv.views` does. Only ``select_query_to_df`` is used.
+    Takes a :class:`~usvote.db.DBC` like every other live seam under ``usvote/pv/``
+    (:mod:`usvote.pv.load` types all five of its write seams that way). ``usvote.db`` is
+    the generic psycopg2 wrapper, not EC-domain knowledge, so importing it crosses none
+    of the D015 boundaries — the enforced ones are ``dwh.votes`` and no back-import of
+    ``usvote.warehouse``/``usvote.hybrid``, and this module trips neither.
     """
-    select = dbc.select_query_to_df  # type: ignore[attr-defined]
+    select = dbc.select_query_to_df
     if select(f"SELECT 1 FROM {schema}.{PV_UCSB_VIEW} LIMIT 1").empty:
         return None
     window = f"WHERE year >= {MIT_PV_YEAR_MIN}"
@@ -375,7 +427,7 @@ def read_overlap_frames(
 
 
 def assert_db_overlap_within_tolerance(
-    dbc: object, *, schema: str = PV_SCHEMA
+    dbc: DBC, *, schema: str = PV_SCHEMA
 ) -> OverlapReport:
     """Live-DB form of gates 1 and 2 — read, measure, assert, return the report.
 

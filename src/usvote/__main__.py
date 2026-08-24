@@ -47,8 +47,10 @@ from typing import Any
 
 from usvote import config, scrape
 from usvote.db import DBC, DBConnectionError
+from usvote.hybrid import HybridError
 from usvote.mit.config import mit_csv_path_from_env
 from usvote.pipeline import PipelineError, run_ec_pipeline
+from usvote.pv.overlap import OverlapReport, PVOverlapError
 from usvote.ucsb.config import ucsb_html_dir_from_env
 from usvote.warehouse import SOURCE_UCSB, run_warehouse
 from usvote.years import ec_ingest_years
@@ -276,12 +278,29 @@ def _run_all(args: argparse.Namespace) -> int:
             mit_csv_path,
             ucsb_html_dir=ucsb_html_dir,
             replace=args.replace,
+            validate_overlap=not getattr(args, "no_validate_overlap", False),
             fetch=ec_fetch,
             environ=environ,
             close=True,
         )
     except PipelineError as e:
         return _report_incomplete_scrape(e, dbc)
+    except (PVOverlapError, HybridError) as e:
+        # The D017 layer-3 gates (#167) are the last step, so a breach here means the
+        # warehouse itself built completely -- say so, because the operator's next move
+        # depends on it and a bare traceback after a multi-minute build does not.
+        # PVOverlapError/HybridError are RuntimeError siblings of PipelineError, not
+        # subclasses, so they need their own arm rather than falling into the one above.
+        print(f"Overlap validation failed: {e}", file=sys.stderr)
+        print(
+            "The warehouse and all views were built before this check ran, so the data "
+            "is in place; only the cross-source agreement gate failed. Re-run with "
+            "--no-validate-overlap to accept the build, or investigate the keys named "
+            "above. Do NOT re-run with --replace expecting a different result: it "
+            "rebuilds the same facts and re-hits the same breach.",
+            file=sys.stderr,
+        )
+        return 1
     sources = ", ".join(sorted(result.sources_loaded))
     ucsb_note = (
         f", UCSB {result.ucsb_pv_rows} PV / {result.ucsb_roster_rows} roster rows"
@@ -294,7 +313,39 @@ def _run_all(args: argparse.Namespace) -> int:
         f"MIT {result.mit_rows} PV / {result.mit_roster_rows} roster rows"
         f"{ucsb_note}; join views rebuilt."
     )
+    print(_overlap_note(result.overlap))
     return 0
+
+
+def _overlap_note(overlap: OverlapReport | None) -> str:
+    """One line describing what the D017 layer-3 gates did — never nothing.
+
+    Gate 2's flag list is AC-4's D005 reliability output, and a list computed on every
+    real build and never shown is not "produced" in any sense an operator can use. The
+    three states the receipt distinguishes each get their own sentence, so "the gate was
+    switched off" can never read as "the gate was clean".
+
+    Keys only, never magnitudes — the same D030/D022 constraint that shapes
+    :class:`~usvote.pv.overlap.OverlapKey` governs anything printed from it.
+    """
+    if overlap is None:
+        return "Overlap validation: SKIPPED by --no-validate-overlap (nothing checked)."
+    if overlap.skipped:
+        return f"Overlap validation: not applicable — {overlap.skip_reason}."
+    parts = [
+        f"{overlap.exact_pct:.2f}% of {overlap.cells} overlap cells agree exactly"
+    ]
+    if overlap.flagged:
+        keys = ", ".join(
+            f"{k.year} {k.state} {k.candidate}" for k in overlap.flagged
+        )
+        parts.append(f"{len(overlap.flagged)} flagged for the D005 list ({keys})")
+    if overlap.one_sided:
+        parts.append(f"{len(overlap.one_sided)} carried by only one source")
+    if overlap.uncovered_years:
+        years = ", ".join(str(y) for y in overlap.uncovered_years)
+        parts.append(f"year(s) {years} covered by only one source and excluded")
+    return "Overlap validation: passed — " + "; ".join(parts) + "."
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -354,6 +405,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-ucsb",
         action="store_true",
         help="Skip UCSB unconditionally (build only the EC + MIT core).",
+    )
+    all_p.add_argument(
+        "--no-validate-overlap",
+        action="store_true",
+        help="Skip the D017 layer-3 MIT/UCSB overlap gates (#167). They run by default "
+        "and are the build's only movable-threshold check, so an escape hatch exists "
+        "for a deliberately partial build or a threshold pending review (D051).",
     )
     all_p.add_argument(
         "--no-corpus",
