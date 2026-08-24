@@ -2209,9 +2209,11 @@ class TestViewConstants:
         """
         for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
             assert join_view.startswith("ec_pv_"), (
-                f"{join_view} does not follow the ec_pv_ naming convention, so the "
-                "suffix relation below would compare a name against itself and pass "
-                "vacuously"
+                f"{join_view} does not follow the ec_pv_ naming convention — rejected "
+                "by name here rather than through the suffix relation below, which "
+                "would silently reinterpret itself: removeprefix returns the string "
+                "unchanged, so the relation would become candidate_view == "
+                f"'hybrid_{join_view}' and fail for a reason naming nothing useful"
             )
             suffix = join_view.removeprefix("ec_pv_")
             assert candidate_view == f"hybrid_{suffix}", (
@@ -2267,6 +2269,7 @@ class TestRedistributableLeakGuardIsStructural:
         # `hybrid_preferred` is a substring of nothing else, but the reverse is not
         # true: guard the direction that could actually alias.
         assert hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW not in priv
+
 
 class TestRedistributableDataAssert:
     """AC-4 **defense in depth** — and here we test only that the guard *fires*.
@@ -2612,11 +2615,6 @@ class _ProbeStub:
     def __init__(self, absent: str) -> None:
         self.absent = absent
         self.created: list[str] = []
-        #: ``(view name, the SQL issued under it)`` — what
-        #: :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName` reads (#166).
-        #: Kept beside ``created`` rather than folded into it so the ordering asserts
-        #: above keep comparing against a plain list of names.
-        self.issued: list[tuple[str, str]] = []
 
     def select_query_to_df(self, query: str) -> pd.DataFrame:
         if not query.startswith("SELECT to_regclass("):
@@ -2635,7 +2633,6 @@ class _ProbeStub:
         self, schema: str, view_name: str, select_sql: str, replace: bool = False
     ) -> None:
         self.created.append(view_name)
-        self.issued.append((view_name, select_sql))
 
 
 class TestEveryInputIsProbedBeforeAnythingIsCreated:
@@ -2694,59 +2691,101 @@ class TestEveryInputIsProbedBeforeAnythingIsCreated:
             stub.select_query_to_df(f"SELECT * FROM dwh.{EC_PV_PREFERRED_VIEW}")
 
 
+def _redistributable_only_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A one-year MIT-only warehouse that survives **every** creator precondition.
+
+    Shaped so nothing raises on the way to ``create_view``: MIT-sourced and
+    ``redistributable`` (so the licensing guard passes on the public surface), one state
+    (so the carried columns are constant), unique keys (so both fan-out guards hold), and
+    a clear winner on all three scores (so no tie assert fires and the EC winner matches
+    the spine's rank 1). Deliberately **not** ``_mixed_surface``, which carries a
+    UCSB-only year and would fail ``assert_redistributable_only_source``.
+    """
+    df = ec_pv_frame([
+        {"year": 2000, "state": "Ohio", "candidate": "A",
+         "total_electoral_votes": 20, "president_electoral_votes": 20,
+         "candidate_votes": 600.0, "state_total_votes": 1000.0},
+        {"year": 2000, "state": "Ohio", "candidate": "B",
+         "total_electoral_votes": 20, "president_electoral_votes": 0,
+         "candidate_votes": 400.0, "state_total_votes": 1000.0},
+    ])
+    df["source"] = SOURCE_MIT
+    df["redistributable"] = True
+    roster = all_popular_vote(df)
+    roster["source"] = SOURCE_MIT
+    return df, roster
+
+
+class _CreatingStub(_StubDBC):
+    """:class:`_StubDBC` plus ``to_regclass`` probes and a record of what was created.
+
+    Extends rather than re-implements: ``_StubDBC`` already answers both of the reads
+    :func:`usvote.hybrid.build_hybrid_from_db` issues by matching the relation in the
+    query, which is exactly what lets the **real** derivation run here. What it lacks is
+    the probe answer :func:`usvote.hybrid.create_hybrid_views` needs before it will
+    create anything, and somewhere to record the creations.
+
+    Deliberately **not** :class:`_ProbeStub`, whose ``select_query_to_df`` *refuses* data
+    reads — that refusal is itself an ordering assertion for
+    :class:`TestEveryInputIsProbedBeforeAnythingIsCreated` and must not be softened.
+    """
+
+    def __init__(self, ec_pv: pd.DataFrame, roster: pd.DataFrame) -> None:
+        super().__init__(ec_pv, roster)
+        #: ``(view name, the SQL issued under it)``, in creation order.
+        self.issued: list[tuple[str, str]] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        if query.startswith("SELECT to_regclass("):
+            return pd.DataFrame({"relation": [query.split("'")[1]]})
+        return super().select_query_to_df(query)
+
+    def create_view(
+        self, schema: str, view_name: str, select_sql: str, replace: bool = False
+    ) -> None:
+        self.issued.append((view_name, select_sql))
+
+
 class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
     """Link 2 of 3: the name a view is created under, and the SQL it is created with (#166).
 
     :meth:`TestViewConstants.test_each_output_name_matches_its_own_input_join_view` pins
-    the surface *table*, and :class:`TestRedistributableLeakGuardIsStructural` pins what a
-    builder emits for a given input. Neither sees the two lines in
+    the surface *table*, and :class:`TestRedistributableLeakGuardIsStructural` pins which
+    join view a builder's SQL reads for a given input. Neither sees the lines in
     :func:`usvote.hybrid.create_hybrid_views` that join them — so a hardcoded view name, a
     ``build_hybrid_candidate_sql(candidate_view)`` slip, the two ``create_view`` name
     arguments transposed, or a botched tuple unpack would leave the table perfectly
-    consistent, keep the offline suite green, and be caught only by
-    ``tests/integration/test_hybrid_views.py::test_the_live_views_match_the_pandas_oracle``
-    — which needs a live Postgres and therefore does not run in CI.
+    consistent and keep the offline suite green.
 
-    **This runs the real loop, not a re-implementation of it.** Both SQL builders are pure
-    ``str -> str`` functions of a view name, so the SQL captured below is the SQL that
-    would reach Postgres; only the two data reads are stubbed, and the frame handed back
-    is real enough that ``assert_redistributable_only_source``,
-    ``assert_carried_columns_constant`` and the fan-out guards all run for real on it.
+    **The whole creator runs; nothing is stubbed out of it.** The stub is a *connection*,
+    not a substitute for the function under test: it answers the probes and serves both
+    reads real frames, so every one of the seven view-creation preconditions executes,
+    the real :func:`usvote.hybrid.build_hybrid_from_db` derives both grains, and the SQL
+    captured below is the SQL that would reach Postgres — both builders being pure
+    ``str -> str`` functions of a view name.
+
+    **What it still does not prove:** that the emitted SQL, executed by Postgres, returns
+    what the pandas oracle does. Only
+    ``tests/integration/test_hybrid_views.py::test_the_live_views_match_the_pandas_oracle``
+    does that — it runs the emitted SQL for real, and it *does* run in CI, in the
+    ``integration`` job's ``postgres:16`` service container. This class buys unit-tier
+    feedback with no database, not coverage that tier lacked.
     """
 
-    def _issued(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
-        """Run the real creator against a recording stub; return ``{view: its SQL}``."""
-        joined = ec_pv_frame([
-            {"year": 2000, "state": "Ohio", "candidate": "A",
-             "total_electoral_votes": 20, "president_electoral_votes": 20,
-             "candidate_votes": 100.0, "state_total_votes": 150.0},
-        ])
-        joined["source"] = SOURCE_MIT
-        joined["redistributable"] = True
-        monkeypatch.setattr(
-            hybrid, "read_ec_pv_join", lambda *a, **k: joined.copy()
-        )
-        monkeypatch.setattr(
-            hybrid,
-            "build_hybrid_from_db",
-            lambda *a, **k: (
-                pd.DataFrame(columns=list(hybrid.HYBRID_CANDIDATE_COLUMNS)),
-                pd.DataFrame(columns=list(hybrid.HYBRID_SUMMARY_COLUMNS)),
-            ),
-        )
-        stub = _ProbeStub("nothing-is-absent")
+    def _issued(self) -> dict[str, str]:
+        """Run the real creator against a recording connection; return ``{view: SQL}``."""
+        stub = _CreatingStub(*_redistributable_only_surface())
         hybrid.create_hybrid_views(cast("Any", stub))
         issued = dict(stub.issued)
-        assert len(issued) == len(stub.issued) == 4, (
-            f"expected four distinct creations, got {stub.created}"
+        expected = 2 * len(hybrid.HYBRID_SURFACES)
+        assert len(issued) == len(stub.issued) == expected, (
+            f"expected {expected} distinct creations, got {stub.issued}"
         )
         return issued
 
-    def test_each_candidate_view_is_created_with_its_own_join_views_sql(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_each_candidate_view_is_created_with_its_own_join_views_sql(self) -> None:
         """The public surface's SQL must never name the preferred join view."""
-        issued = self._issued(monkeypatch)
+        issued = self._issued()
         pub = issued[hybrid.HYBRID_REDISTRIBUTABLE_VIEW]
         assert EC_PV_REDISTRIBUTABLE_VIEW in pub
         assert EC_PV_PREFERRED_VIEW not in pub, (
@@ -2757,31 +2796,35 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
         assert EC_PV_PREFERRED_VIEW in priv
         assert EC_PV_REDISTRIBUTABLE_VIEW not in priv
 
-    def test_each_summary_view_is_created_with_its_own_candidate_views_sql(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        issued = self._issued(monkeypatch)
+    def test_each_summary_view_is_created_with_its_own_candidate_views_sql(self) -> None:
+        """Does **not** fire on #166's swap, which moves a row's summary with its
+        candidate view and so leaves that pairing consistent. It guards the neighbouring
+        mutation — a transposed or hardcoded summary source.
+
+        The ``not in`` legs are only as strong as the names allow, and today they are
+        strong: no hybrid view name contains another (checked across all six names). That
+        is a property of the **infix** ``summary_`` placement — rename the summaries to
+        ``hybrid_redistributable_summary`` and ``HYBRID_REDISTRIBUTABLE_VIEW in pub``
+        starts passing on a summary built over itself. Pinned below so the rename cannot
+        weaken this test silently.
+        """
+        names = (
+            hybrid.HYBRID_PREFERRED_VIEW,
+            hybrid.HYBRID_REDISTRIBUTABLE_VIEW,
+            hybrid.HYBRID_SUMMARY_PREFERRED_VIEW,
+            hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW,
+        )
+        assert not [
+            (a, b) for a in names for b in names if a != b and a in b
+        ], "a hybrid view name contains another — the `not in` asserts below soften"
+
+        issued = self._issued()
         pub = issued[hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW]
         assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW in pub
         assert hybrid.HYBRID_PREFERRED_VIEW not in pub
         priv = issued[hybrid.HYBRID_SUMMARY_PREFERRED_VIEW]
         assert hybrid.HYBRID_PREFERRED_VIEW in priv
         assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW not in priv
-
-    def test_the_capture_would_show_a_swap(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Non-vacuity, in the house style of
-        ``test_the_probe_stub_would_let_a_creation_through``: the two asserts above are
-        only load-bearing if the recorded SQL actually varies by surface. Pin that the
-        four captured statements are four *distinct* strings, so a creator that built one
-        SQL and issued it under every name could not read as clean here.
-        """
-        issued = self._issued(monkeypatch)
-        assert len(set(issued.values())) == 4, (
-            "two views were created with identical SQL — the capture cannot "
-            "distinguish surfaces"
-        )
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:
