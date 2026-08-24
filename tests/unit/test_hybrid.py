@@ -2266,8 +2266,11 @@ class TestRedistributableLeakGuardIsStructural:
         assert hybrid.HYBRID_PREFERRED_VIEW not in pub
         priv = hybrid.build_hybrid_summary_sql(hybrid.HYBRID_PREFERRED_VIEW)
         assert hybrid.HYBRID_PREFERRED_VIEW in priv
-        # `hybrid_preferred` is a substring of nothing else, but the reverse is not
-        # true: guard the direction that could actually alias.
+        # No hybrid view name contains another, so neither direction can alias today —
+        # pinned by TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName's containment
+        # assert, which is what keeps this leg meaningful under a rename (#166). An
+        # earlier comment here asserted the reverse containment was possible; the
+        # summary names are strictly longer, so it never was.
         assert hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW not in priv
 
 
@@ -2698,8 +2701,15 @@ def _redistributable_only_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
     ``redistributable`` (so the licensing guard passes on the public surface), one state
     (so the carried columns are constant), unique keys (so both fan-out guards hold), and
     a clear winner on all three scores (so no tie assert fires and the EC winner matches
-    the spine's rank 1). Deliberately **not** ``_mixed_surface``, which carries a
-    UCSB-only year and would fail ``assert_redistributable_only_source``.
+    the spine's rank 1).
+
+    Its own fixture rather than ``_mixed_surface`` because a single-source, single-year
+    frame keeps *this* test's subject legible — the names a view is created under, not
+    coverage behaviour. ``_mixed_surface`` would in fact survive the creator too: its
+    1900 rows carry a **NULL** source, which
+    :func:`usvote.hybrid.assert_redistributable_only_source` explicitly tolerates as an
+    honest D005 gap. (An earlier version of this docstring claimed the opposite —
+    that it would fail that guard. Measured: it does not. Code review, #166.)
     """
     df = ec_pv_frame([
         {"year": 2000, "state": "Ohio", "candidate": "A",
@@ -2737,6 +2747,10 @@ class _CreatingStub(_StubDBC):
 
     def select_query_to_df(self, query: str) -> pd.DataFrame:
         if query.startswith("SELECT to_regclass("):
+            # Log it before returning: ``_StubDBC.queries`` exists to prove which
+            # statements were issued, and an override that answers a probe without
+            # recording it would quietly make that log a partial account.
+            self.queries.append(query)
             return pd.DataFrame({"relation": [query.split("'")[1]]})
         return super().select_query_to_df(query)
 
@@ -2779,7 +2793,8 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
         issued = dict(stub.issued)
         expected = 2 * len(hybrid.HYBRID_SURFACES)
         assert len(issued) == len(stub.issued) == expected, (
-            f"expected {expected} distinct creations, got {stub.issued}"
+            f"expected {expected} distinct creations, got "
+            f"{[name for name, _ in stub.issued]}"
         )
         return issued
 
@@ -2802,7 +2817,7 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
         mutation — a transposed or hardcoded summary source.
 
         The ``not in`` legs are only as strong as the names allow, and today they are
-        strong: no hybrid view name contains another (checked across all six names). That
+        strong: no hybrid view name contains another (the four pinned below). That
         is a property of the **infix** ``summary_`` placement — rename the summaries to
         ``hybrid_redistributable_summary`` and ``HYBRID_REDISTRIBUTABLE_VIEW in pub``
         starts passing on a summary built over itself. Pinned below so the rename cannot
