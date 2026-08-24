@@ -2178,6 +2178,52 @@ class TestViewConstants:
         names = [n for surface in hybrid.HYBRID_SURFACES for n in surface[1:]]
         assert len(set(names)) == 4, f"a view name is shared across surfaces: {names}"
 
+    def test_each_output_name_matches_its_own_input_join_view(self) -> None:
+        """Link 3 of 3: every output name carries its **input's** surface suffix (#166).
+
+        The gap: swap the two output-name *pairs* between rows — each row keeping its own
+        input join view, emitting the other row's two output names — and the whole offline
+        suite stayed green (measured before this test existed: 1149 passed). Under that
+        swap ``hybrid_redistributable``, the read seam D039 settled for #102 and the
+        surface D030 requires be redistributable-only *at source*, is built over
+        ``ec_pv_preferred`` — over UCSB-provenanced rows — while carrying the name the
+        public path trusts.
+
+        **One leg of a tripod, not a standalone proof of D030's structural half.** It pins
+        this table's internal consistency and nothing else. It cannot see a *consistent*
+        double-rename (``ec_pv_public`` + ``hybrid_public`` satisfies the relation) — that
+        is :meth:`TestViewConstants.test_the_four_view_names`, which pins the literals. It
+        says nothing about the SQL a builder emits — that is
+        :class:`TestRedistributableLeakGuardIsStructural`. And it says nothing about the
+        creator's loop body — that is
+        :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName`.
+
+        Derived per row rather than enumerated per surface, deliberately: the constant's
+        own comment anticipates "a third surface would be one row here", and a
+        correctly-formed third row must pass with no edit here.
+
+        Replaces ``test_the_creator_pairs_each_surface_correctly``, removed in #166: two
+        of its three asserts were tautologies (the same value on both sides) and the third
+        related a row's two *outputs* to each other, which the swap preserves because it
+        moves them as a pair.
+        """
+        for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
+            assert join_view.startswith("ec_pv_"), (
+                f"{join_view} does not follow the ec_pv_ naming convention, so the "
+                "suffix relation below would compare a name against itself and pass "
+                "vacuously"
+            )
+            suffix = join_view.removeprefix("ec_pv_")
+            assert candidate_view == f"hybrid_{suffix}", (
+                f"{candidate_view} is built over {join_view} but does not carry its "
+                f"surface — expected hybrid_{suffix}"
+            )
+            assert summary_view == f"hybrid_summary_{suffix}", (
+                f"{summary_view} is built over {candidate_view}, itself built over "
+                f"{join_view}, but does not carry that surface — expected "
+                f"hybrid_summary_{suffix}"
+            )
+
     def test_every_view_name_is_exported(self) -> None:
         for name in (
             "HYBRID_PREFERRED_VIEW",
@@ -2221,14 +2267,6 @@ class TestRedistributableLeakGuardIsStructural:
         # `hybrid_preferred` is a substring of nothing else, but the reverse is not
         # true: guard the direction that could actually alias.
         assert hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW not in priv
-
-    def test_the_creator_pairs_each_surface_correctly(self) -> None:
-        """The pairing in :data:`HYBRID_SURFACES`, which is what the creator loops."""
-        for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
-            assert join_view in hybrid.build_hybrid_candidate_sql(join_view)
-            assert candidate_view in hybrid.build_hybrid_summary_sql(candidate_view)
-            assert summary_view.endswith(candidate_view.removeprefix("hybrid_"))
-
 
 class TestRedistributableDataAssert:
     """AC-4 **defense in depth** — and here we test only that the guard *fires*.
@@ -2574,6 +2612,11 @@ class _ProbeStub:
     def __init__(self, absent: str) -> None:
         self.absent = absent
         self.created: list[str] = []
+        #: ``(view name, the SQL issued under it)`` — what
+        #: :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName` reads (#166).
+        #: Kept beside ``created`` rather than folded into it so the ordering asserts
+        #: above keep comparing against a plain list of names.
+        self.issued: list[tuple[str, str]] = []
 
     def select_query_to_df(self, query: str) -> pd.DataFrame:
         if not query.startswith("SELECT to_regclass("):
@@ -2592,6 +2635,7 @@ class _ProbeStub:
         self, schema: str, view_name: str, select_sql: str, replace: bool = False
     ) -> None:
         self.created.append(view_name)
+        self.issued.append((view_name, select_sql))
 
 
 class TestEveryInputIsProbedBeforeAnythingIsCreated:
@@ -2648,6 +2692,96 @@ class TestEveryInputIsProbedBeforeAnythingIsCreated:
         stub = _ProbeStub(EC_PV_REDISTRIBUTABLE_VIEW)
         with pytest.raises(AssertionError, match="before every input had been probed"):
             stub.select_query_to_df(f"SELECT * FROM dwh.{EC_PV_PREFERRED_VIEW}")
+
+
+class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
+    """Link 2 of 3: the name a view is created under, and the SQL it is created with (#166).
+
+    :meth:`TestViewConstants.test_each_output_name_matches_its_own_input_join_view` pins
+    the surface *table*, and :class:`TestRedistributableLeakGuardIsStructural` pins what a
+    builder emits for a given input. Neither sees the two lines in
+    :func:`usvote.hybrid.create_hybrid_views` that join them — so a hardcoded view name, a
+    ``build_hybrid_candidate_sql(candidate_view)`` slip, the two ``create_view`` name
+    arguments transposed, or a botched tuple unpack would leave the table perfectly
+    consistent, keep the offline suite green, and be caught only by
+    ``tests/integration/test_hybrid_views.py::test_the_live_views_match_the_pandas_oracle``
+    — which needs a live Postgres and therefore does not run in CI.
+
+    **This runs the real loop, not a re-implementation of it.** Both SQL builders are pure
+    ``str -> str`` functions of a view name, so the SQL captured below is the SQL that
+    would reach Postgres; only the two data reads are stubbed, and the frame handed back
+    is real enough that ``assert_redistributable_only_source``,
+    ``assert_carried_columns_constant`` and the fan-out guards all run for real on it.
+    """
+
+    def _issued(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+        """Run the real creator against a recording stub; return ``{view: its SQL}``."""
+        joined = ec_pv_frame([
+            {"year": 2000, "state": "Ohio", "candidate": "A",
+             "total_electoral_votes": 20, "president_electoral_votes": 20,
+             "candidate_votes": 100.0, "state_total_votes": 150.0},
+        ])
+        joined["source"] = SOURCE_MIT
+        joined["redistributable"] = True
+        monkeypatch.setattr(
+            hybrid, "read_ec_pv_join", lambda *a, **k: joined.copy()
+        )
+        monkeypatch.setattr(
+            hybrid,
+            "build_hybrid_from_db",
+            lambda *a, **k: (
+                pd.DataFrame(columns=list(hybrid.HYBRID_CANDIDATE_COLUMNS)),
+                pd.DataFrame(columns=list(hybrid.HYBRID_SUMMARY_COLUMNS)),
+            ),
+        )
+        stub = _ProbeStub("nothing-is-absent")
+        hybrid.create_hybrid_views(cast("Any", stub))
+        issued = dict(stub.issued)
+        assert len(issued) == len(stub.issued) == 4, (
+            f"expected four distinct creations, got {stub.created}"
+        )
+        return issued
+
+    def test_each_candidate_view_is_created_with_its_own_join_views_sql(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The public surface's SQL must never name the preferred join view."""
+        issued = self._issued(monkeypatch)
+        pub = issued[hybrid.HYBRID_REDISTRIBUTABLE_VIEW]
+        assert EC_PV_REDISTRIBUTABLE_VIEW in pub
+        assert EC_PV_PREFERRED_VIEW not in pub, (
+            f"{hybrid.HYBRID_REDISTRIBUTABLE_VIEW} was created over the preferred join "
+            "view — the name the public path trusts, built over UCSB-provenanced rows"
+        )
+        priv = issued[hybrid.HYBRID_PREFERRED_VIEW]
+        assert EC_PV_PREFERRED_VIEW in priv
+        assert EC_PV_REDISTRIBUTABLE_VIEW not in priv
+
+    def test_each_summary_view_is_created_with_its_own_candidate_views_sql(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        issued = self._issued(monkeypatch)
+        pub = issued[hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW]
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW in pub
+        assert hybrid.HYBRID_PREFERRED_VIEW not in pub
+        priv = issued[hybrid.HYBRID_SUMMARY_PREFERRED_VIEW]
+        assert hybrid.HYBRID_PREFERRED_VIEW in priv
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW not in priv
+
+    def test_the_capture_would_show_a_swap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity, in the house style of
+        ``test_the_probe_stub_would_let_a_creation_through``: the two asserts above are
+        only load-bearing if the recorded SQL actually varies by surface. Pin that the
+        four captured statements are four *distinct* strings, so a creator that built one
+        SQL and issued it under every name could not read as clean here.
+        """
+        issued = self._issued(monkeypatch)
+        assert len(set(issued.values())) == 4, (
+            "two views were created with identical SQL — the capture cannot "
+            "distinguish surfaces"
+        )
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:
