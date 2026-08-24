@@ -39,7 +39,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from tests._helpers import FIXTURES_DIR, fake_state_geo
+from tests._helpers import FIXTURES_DIR, fake_state_geo, non_null_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.join import (
@@ -306,7 +306,7 @@ def test_the_live_views_match_the_pandas_oracle(
         assert summary.loc[2020, "pv_winner"] == loser20
         assert pd.isna(summary.loc[2020, "pv_margin"]), "top1 - 0 is not a margin"
         assert pd.isna(summary.loc[2020, "hybrid_margin"])
-        assert bool(summary.loc[2020, "pv_flip"]) is True
+        assert non_null_flag(summary.loc[2020, "pv_flip"], label="2020 pv_flip") is True
         assert summary.loc[2020, "pv_coverage"] == 1.0
 
         # 2024: no PV at all -> NULL winners/flips/margins, and coverage UNKNOWN (the
@@ -434,13 +434,19 @@ def test_hybrid_views_over_a_real_full_warehouse(
         )
 
         # --- C1: the 2000 and 2016 flips, on REAL national figures ------------
-        assert bool(summary.loc[2016, "pv_flip"]) is True
+        assert non_null_flag(
+            summary.loc[2016, "pv_flip"], label="2016 pv_flip"
+        ) is True
         assert summary.loc[2016, "ec_winner"] != summary.loc[2016, "pv_winner"]
-        assert bool(summary.loc[2000, "pv_flip"]) is True
+        assert non_null_flag(
+            summary.loc[2000, "pv_flip"], label="2000 pv_flip"
+        ) is True
         assert summary.loc[2000, "pv_winner"] != summary.loc[2000, "ec_winner"]
         # The trap #123 documented and deliberately did not assert: on the real
         # national denominators the hybrid does NOT follow the popular vote in 2000.
-        assert bool(summary.loc[2000, "hybrid_flip"]) is False, (
+        assert non_null_flag(
+            summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip"
+        ) is False, (
             "Nader's votes dilute Gore's PV share on the real national denominator — "
             "the two-way unit fixture points the other way, which is why this test "
             "exists"
@@ -504,10 +510,16 @@ def test_hybrid_views_over_a_real_full_warehouse(
             assert row["ec_winner"] == "Andrew Jackson"
             # The House installed Adams; the EC leader was Jackson. Both are correct,
             # and ec_determinative is what says the EC did not settle it.
-            assert bool(row["ec_determinative"]) is False
+            assert non_null_flag(
+                row["ec_determinative"], label=f"1824 ec_determinative under {policy}"
+            ) is False
             # The winner is invariant; the flips are the other half of that claim.
-            assert bool(row["pv_flip"]) is False, f"1824 pv_flip under {policy}"
-            assert bool(row["hybrid_flip"]) is False, f"1824 hybrid_flip under {policy}"
+            assert non_null_flag(
+                row["pv_flip"], label=f"1824 pv_flip under {policy}"
+            ) is False
+            assert non_null_flag(
+                row["hybrid_flip"], label=f"1824 hybrid_flip under {policy}"
+            ) is False
             assert float(row["hybrid_margin"]) == pytest.approx(
                 expected_margin[policy], abs=0.01
             ), f"1824 hybrid_margin under policy {policy}"

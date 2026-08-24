@@ -278,6 +278,39 @@ def fake_state_geo() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def non_null_flag(value: object, *, label: str = "") -> bool:
+    """A boolean cell normalized to a Python ``bool``, rejecting every NULL shape loudly.
+
+    Exists because neither ``is`` nor ``bool(...)`` is correct on its own for a nullable
+    boolean, and which one is wrong depends on data the assert cannot see (#165):
+
+    - **From a live view.** ``pd.read_sql`` types a boolean column as ``object`` (cells are
+      Python ``bool``/``None``) when it carries a NULL, and as ``bool`` (cells are
+      ``numpy.bool_``) when it does not. So ``cell is False`` passes on the first and fails
+      on the second **against a correct value**, while ``bool(cell)`` maps ``None`` to
+      ``False`` — silently turning a ``NULL`` "no winner" into a passing non-flip assert.
+      That laundering is what #165 was filed for.
+    - **From the pandas builders.** :func:`usvote.hybrid.build_hybrid_summary` nulls as
+      ``pd.NA``, where ``bool(pd.NA)`` raises ``TypeError`` — loud, but an exception rather
+      than a diagnosis.
+
+    Rejecting the null first and returning the Python singleton lets a call site keep the
+    readable ``is True`` / ``is False`` spelling and have it mean what it says, on either
+    path and under either dtype::
+
+        assert non_null_flag(summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip") is False
+
+    ``label`` is what the failure message names; pass the ``(year, column)`` it came from,
+    since the value alone cannot say where it was read.
+    """
+    assert not pd.isna(value), (
+        f"{label or 'flag'} came back NULL — that is the 'no winner' encoding "
+        f"(usvote.hybrid._flip), which means the derivation broke. It is never a "
+        f"legitimate false."
+    )
+    return bool(value)
+
+
 def narrow_mit_spine_to_sample(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scope MIT's D024 roster read to the states its fusion sample actually covers.
 
