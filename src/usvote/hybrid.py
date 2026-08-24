@@ -241,8 +241,22 @@ HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW = "hybrid_summary_redistributable"
 
 #: ``(join view, per-candidate view, per-election view)`` — one entry per surface, so
 #: :func:`create_hybrid_views` loops rather than repeating itself and a third surface
-#: would be one row here. The pairing is what a test asserts to prove the
-#: redistributable hybrid view never reads the preferred join view.
+#: would be one row here.
+#:
+#: **Each row's two outputs must carry its own input's surface suffix**, pinned offline
+#: by ``TestViewConstants.test_each_output_name_matches_its_own_input_join_view``
+#: (#166). Without it, swapping the two output-name *pairs* between rows — each row
+#: keeping its input, emitting the other's names — builds ``hybrid_redistributable``
+#: over ``ec_pv_preferred``, i.e. over UCSB-provenanced rows, while it keeps the name
+#: the public path trusts; the entire offline suite passed under exactly that swap
+#: before #166.
+#:
+#: **That test pins this table and nothing else.** Two further links complete the chain,
+#: each pinned by its own test in ``tests/unit/test_hybrid.py``: that
+#: :func:`create_hybrid_views` issues each row's SQL under that row's name, by
+#: ``TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName``; and that a builder's SQL
+#: reads the join view it was given and never the sibling surface's, by
+#: ``TestRedistributableLeakGuardIsStructural``.
 HYBRID_SURFACES: tuple[tuple[str, str, str], ...] = (
     (EC_PV_PREFERRED_VIEW, HYBRID_PREFERRED_VIEW, HYBRID_SUMMARY_PREFERRED_VIEW),
     (

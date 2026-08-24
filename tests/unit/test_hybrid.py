@@ -2178,6 +2178,54 @@ class TestViewConstants:
         names = [n for surface in hybrid.HYBRID_SURFACES for n in surface[1:]]
         assert len(set(names)) == 4, f"a view name is shared across surfaces: {names}"
 
+    def test_each_output_name_matches_its_own_input_join_view(self) -> None:
+        """Link 3 of 3: every output name carries its **input's** surface suffix (#166).
+
+        The gap: swap the two output-name *pairs* between rows — each row keeping its own
+        input join view, emitting the other row's two output names — and the whole offline
+        suite stayed green (measured before this test existed: 1149 passed). Under that
+        swap ``hybrid_redistributable``, the read seam D039 settled for #102 and the
+        surface D030 requires be redistributable-only *at source*, is built over
+        ``ec_pv_preferred`` — over UCSB-provenanced rows — while carrying the name the
+        public path trusts.
+
+        **One leg of a tripod, not a standalone proof of D030's structural half.** It pins
+        this table's internal consistency and nothing else. It cannot see a *consistent*
+        double-rename (``ec_pv_public`` + ``hybrid_public`` satisfies the relation) — that
+        is :meth:`TestViewConstants.test_the_four_view_names`, which pins the literals. It
+        says nothing about the SQL a builder emits — that is
+        :class:`TestRedistributableLeakGuardIsStructural`. And it says nothing about the
+        creator's loop body — that is
+        :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName`.
+
+        Derived per row rather than enumerated per surface, deliberately: the constant's
+        own comment anticipates "a third surface would be one row here", and a
+        correctly-formed third row must pass with no edit here.
+
+        Replaces ``test_the_creator_pairs_each_surface_correctly``, removed in #166: two
+        of its three asserts were tautologies (the same value on both sides) and the third
+        related a row's two *outputs* to each other, which the swap preserves because it
+        moves them as a pair.
+        """
+        for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
+            assert join_view.startswith("ec_pv_"), (
+                f"{join_view} does not follow the ec_pv_ naming convention — rejected "
+                "by name here rather than through the suffix relation below, which "
+                "would silently reinterpret itself: removeprefix returns the string "
+                "unchanged, so the relation would become candidate_view == "
+                f"'hybrid_{join_view}' and fail for a reason naming nothing useful"
+            )
+            suffix = join_view.removeprefix("ec_pv_")
+            assert candidate_view == f"hybrid_{suffix}", (
+                f"{candidate_view} is built over {join_view} but does not carry its "
+                f"surface — expected hybrid_{suffix}"
+            )
+            assert summary_view == f"hybrid_summary_{suffix}", (
+                f"{summary_view} is built over {candidate_view}, itself built over "
+                f"{join_view}, but does not carry that surface — expected "
+                f"hybrid_summary_{suffix}"
+            )
+
     def test_every_view_name_is_exported(self) -> None:
         for name in (
             "HYBRID_PREFERRED_VIEW",
@@ -2218,16 +2266,12 @@ class TestRedistributableLeakGuardIsStructural:
         assert hybrid.HYBRID_PREFERRED_VIEW not in pub
         priv = hybrid.build_hybrid_summary_sql(hybrid.HYBRID_PREFERRED_VIEW)
         assert hybrid.HYBRID_PREFERRED_VIEW in priv
-        # `hybrid_preferred` is a substring of nothing else, but the reverse is not
-        # true: guard the direction that could actually alias.
+        # No hybrid view name contains another, so neither direction can alias today —
+        # pinned by TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName's containment
+        # assert, which is what keeps this leg meaningful under a rename (#166). An
+        # earlier comment here asserted the reverse containment was possible; the
+        # summary names are strictly longer, so it never was.
         assert hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW not in priv
-
-    def test_the_creator_pairs_each_surface_correctly(self) -> None:
-        """The pairing in :data:`HYBRID_SURFACES`, which is what the creator loops."""
-        for join_view, candidate_view, summary_view in hybrid.HYBRID_SURFACES:
-            assert join_view in hybrid.build_hybrid_candidate_sql(join_view)
-            assert candidate_view in hybrid.build_hybrid_summary_sql(candidate_view)
-            assert summary_view.endswith(candidate_view.removeprefix("hybrid_"))
 
 
 class TestRedistributableDataAssert:
@@ -2648,6 +2692,154 @@ class TestEveryInputIsProbedBeforeAnythingIsCreated:
         stub = _ProbeStub(EC_PV_REDISTRIBUTABLE_VIEW)
         with pytest.raises(AssertionError, match="before every input had been probed"):
             stub.select_query_to_df(f"SELECT * FROM dwh.{EC_PV_PREFERRED_VIEW}")
+
+
+def _redistributable_only_surface() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A one-year MIT-only warehouse that survives **every** creator precondition.
+
+    Shaped so nothing raises on the way to ``create_view``: MIT-sourced and
+    ``redistributable`` (so the licensing guard passes on the public surface), one state
+    (so the carried columns are constant), unique keys (so both fan-out guards hold), and
+    a clear winner on all three scores (so no tie assert fires and the EC winner matches
+    the spine's rank 1).
+
+    Its own fixture rather than ``_mixed_surface`` because a single-source, single-year
+    frame keeps *this* test's subject legible — the names a view is created under, not
+    coverage behaviour. ``_mixed_surface`` would in fact survive the creator too: its
+    1900 rows carry a **NULL** source, which
+    :func:`usvote.hybrid.assert_redistributable_only_source` explicitly tolerates as an
+    honest D005 gap. (An earlier version of this docstring claimed the opposite —
+    that it would fail that guard. Measured: it does not. Code review, #166.)
+    """
+    df = ec_pv_frame([
+        {"year": 2000, "state": "Ohio", "candidate": "A",
+         "total_electoral_votes": 20, "president_electoral_votes": 20,
+         "candidate_votes": 600.0, "state_total_votes": 1000.0},
+        {"year": 2000, "state": "Ohio", "candidate": "B",
+         "total_electoral_votes": 20, "president_electoral_votes": 0,
+         "candidate_votes": 400.0, "state_total_votes": 1000.0},
+    ])
+    df["source"] = SOURCE_MIT
+    df["redistributable"] = True
+    roster = all_popular_vote(df)
+    roster["source"] = SOURCE_MIT
+    return df, roster
+
+
+class _CreatingStub(_StubDBC):
+    """:class:`_StubDBC` plus ``to_regclass`` probes and a record of what was created.
+
+    Extends rather than re-implements: ``_StubDBC`` already answers both of the reads
+    :func:`usvote.hybrid.build_hybrid_from_db` issues by matching the relation in the
+    query, which is exactly what lets the **real** derivation run here. What it lacks is
+    the probe answer :func:`usvote.hybrid.create_hybrid_views` needs before it will
+    create anything, and somewhere to record the creations.
+
+    Deliberately **not** :class:`_ProbeStub`, whose ``select_query_to_df`` *refuses* data
+    reads — that refusal is itself an ordering assertion for
+    :class:`TestEveryInputIsProbedBeforeAnythingIsCreated` and must not be softened.
+    """
+
+    def __init__(self, ec_pv: pd.DataFrame, roster: pd.DataFrame) -> None:
+        super().__init__(ec_pv, roster)
+        #: ``(view name, the SQL issued under it)``, in creation order.
+        self.issued: list[tuple[str, str]] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        if query.startswith("SELECT to_regclass("):
+            # Log it before returning: ``_StubDBC.queries`` exists to prove which
+            # statements were issued, and an override that answers a probe without
+            # recording it would quietly make that log a partial account.
+            self.queries.append(query)
+            return pd.DataFrame({"relation": [query.split("'")[1]]})
+        return super().select_query_to_df(query)
+
+    def create_view(
+        self, schema: str, view_name: str, select_sql: str, replace: bool = False
+    ) -> None:
+        self.issued.append((view_name, select_sql))
+
+
+class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
+    """Link 2 of 3: the name a view is created under, and the SQL it is created with (#166).
+
+    :meth:`TestViewConstants.test_each_output_name_matches_its_own_input_join_view` pins
+    the surface *table*, and :class:`TestRedistributableLeakGuardIsStructural` pins which
+    join view a builder's SQL reads for a given input. Neither sees the lines in
+    :func:`usvote.hybrid.create_hybrid_views` that join them — so a hardcoded view name, a
+    ``build_hybrid_candidate_sql(candidate_view)`` slip, the two ``create_view`` name
+    arguments transposed, or a botched tuple unpack would leave the table perfectly
+    consistent and keep the offline suite green.
+
+    **The whole creator runs; nothing is stubbed out of it.** The stub is a *connection*,
+    not a substitute for the function under test: it answers the probes and serves both
+    reads real frames, so every one of the seven view-creation preconditions executes,
+    the real :func:`usvote.hybrid.build_hybrid_from_db` derives both grains, and the SQL
+    captured below is the SQL that would reach Postgres — both builders being pure
+    ``str -> str`` functions of a view name.
+
+    **What it still does not prove:** that the emitted SQL, executed by Postgres, returns
+    what the pandas oracle does. Only
+    ``tests/integration/test_hybrid_views.py::test_the_live_views_match_the_pandas_oracle``
+    does that — it runs the emitted SQL for real, and it *does* run in CI, in the
+    ``integration`` job's ``postgres:16`` service container. This class buys unit-tier
+    feedback with no database, not coverage that tier lacked.
+    """
+
+    def _issued(self) -> dict[str, str]:
+        """Run the real creator against a recording connection; return ``{view: SQL}``."""
+        stub = _CreatingStub(*_redistributable_only_surface())
+        hybrid.create_hybrid_views(cast("Any", stub))
+        issued = dict(stub.issued)
+        expected = 2 * len(hybrid.HYBRID_SURFACES)
+        assert len(issued) == len(stub.issued) == expected, (
+            f"expected {expected} distinct creations, got "
+            f"{[name for name, _ in stub.issued]}"
+        )
+        return issued
+
+    def test_each_candidate_view_is_created_with_its_own_join_views_sql(self) -> None:
+        """The public surface's SQL must never name the preferred join view."""
+        issued = self._issued()
+        pub = issued[hybrid.HYBRID_REDISTRIBUTABLE_VIEW]
+        assert EC_PV_REDISTRIBUTABLE_VIEW in pub
+        assert EC_PV_PREFERRED_VIEW not in pub, (
+            f"{hybrid.HYBRID_REDISTRIBUTABLE_VIEW} was created over the preferred join "
+            "view — the name the public path trusts, built over UCSB-provenanced rows"
+        )
+        priv = issued[hybrid.HYBRID_PREFERRED_VIEW]
+        assert EC_PV_PREFERRED_VIEW in priv
+        assert EC_PV_REDISTRIBUTABLE_VIEW not in priv
+
+    def test_each_summary_view_is_created_with_its_own_candidate_views_sql(self) -> None:
+        """Does **not** fire on #166's swap, which moves a row's summary with its
+        candidate view and so leaves that pairing consistent. It guards the neighbouring
+        mutation — a transposed or hardcoded summary source.
+
+        The ``not in`` legs are only as strong as the names allow, and today they are
+        strong: no hybrid view name contains another (the four pinned below). That
+        is a property of the **infix** ``summary_`` placement — rename the summaries to
+        ``hybrid_redistributable_summary`` and ``HYBRID_REDISTRIBUTABLE_VIEW in pub``
+        starts passing on a summary built over itself. Pinned below so the rename cannot
+        weaken this test silently.
+        """
+        names = (
+            hybrid.HYBRID_PREFERRED_VIEW,
+            hybrid.HYBRID_REDISTRIBUTABLE_VIEW,
+            hybrid.HYBRID_SUMMARY_PREFERRED_VIEW,
+            hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW,
+        )
+        assert not [
+            (a, b) for a in names for b in names if a != b and a in b
+        ], "a hybrid view name contains another — the `not in` asserts below soften"
+
+        issued = self._issued()
+        pub = issued[hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW]
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW in pub
+        assert hybrid.HYBRID_PREFERRED_VIEW not in pub
+        priv = issued[hybrid.HYBRID_SUMMARY_PREFERRED_VIEW]
+        assert hybrid.HYBRID_PREFERRED_VIEW in priv
+        assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW not in priv
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:
