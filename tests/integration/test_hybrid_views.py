@@ -39,7 +39,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from tests._helpers import FIXTURES_DIR, fake_state_geo
+from tests._helpers import FIXTURES_DIR, fake_state_geo, non_null_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.join import (
@@ -299,14 +299,17 @@ def test_the_live_views_match_the_pandas_oracle(
 
         # 2016: partial coverage -- strictly between 0 and 1, not NULL and not 1.0.
         assert 0.0 < summary.loc[2016, "pv_coverage"] < 1.0
-        assert summary.loc[2016, "pv_margin"] is not None
+        # ``pd.notna``, not ``is not None``: a NULL float arrives from the live view as
+        # NaN, and ``NaN is not None`` is True -- the same vacuity #165 fixed one block
+        # below, and the trap this file already spells out at the 1824 margin legs.
+        assert pd.notna(summary.loc[2016, "pv_margin"])
         assert float(summary.loc[2016, "pv_margin"]) > 0.0
 
         # 2020: one scored candidate -> NULL margins, but a real (flipped) PV winner.
         assert summary.loc[2020, "pv_winner"] == loser20
         assert pd.isna(summary.loc[2020, "pv_margin"]), "top1 - 0 is not a margin"
         assert pd.isna(summary.loc[2020, "hybrid_margin"])
-        assert bool(summary.loc[2020, "pv_flip"]) is True
+        assert non_null_flag(summary.loc[2020, "pv_flip"], label="2020 pv_flip") is True
         assert summary.loc[2020, "pv_coverage"] == 1.0
 
         # 2024: no PV at all -> NULL winners/flips/margins, and coverage UNKNOWN (the
@@ -318,7 +321,13 @@ def test_the_live_views_match_the_pandas_oracle(
         assert pd.isna(summary.loc[2024, "pv_margin"])
         assert pd.isna(summary.loc[2024, "pv_coverage"])
         # The EC half is unaffected by the PV gap -- this is the D037/A split.
-        assert summary.loc[2024, "ec_winner"] is not None
+        # ``pd.notna``, not ``is not None``, for the same reason as the pv_margin leg
+        # above and for text as well as floats: on pandas 3.x a string column read back
+        # from the live view is ``str`` dtype with ``na_value=nan``, so a NULL ec_winner
+        # arrives as NaN and ``NaN is not None`` is True. ec_winner IS nullable here --
+        # hybrid.py builds it as a FILTERed ``max(candidate)`` -- so this leg is
+        # load-bearing and must be able to fail.
+        assert pd.notna(summary.loc[2024, "ec_winner"])
         assert summary.loc[2024, "ec_margin"] > 0.0
 
         # --- the numeric-cast check a string test cannot make -----------------
@@ -434,13 +443,19 @@ def test_hybrid_views_over_a_real_full_warehouse(
         )
 
         # --- C1: the 2000 and 2016 flips, on REAL national figures ------------
-        assert bool(summary.loc[2016, "pv_flip"]) is True
+        assert non_null_flag(
+            summary.loc[2016, "pv_flip"], label="2016 pv_flip"
+        ) is True
         assert summary.loc[2016, "ec_winner"] != summary.loc[2016, "pv_winner"]
-        assert bool(summary.loc[2000, "pv_flip"]) is True
+        assert non_null_flag(
+            summary.loc[2000, "pv_flip"], label="2000 pv_flip"
+        ) is True
         assert summary.loc[2000, "pv_winner"] != summary.loc[2000, "ec_winner"]
         # The trap #123 documented and deliberately did not assert: on the real
         # national denominators the hybrid does NOT follow the popular vote in 2000.
-        assert bool(summary.loc[2000, "hybrid_flip"]) is False, (
+        assert non_null_flag(
+            summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip"
+        ) is False, (
             "Nader's votes dilute Gore's PV share on the real national denominator — "
             "the two-way unit fixture points the other way, which is why this test "
             "exists"
@@ -504,10 +519,16 @@ def test_hybrid_views_over_a_real_full_warehouse(
             assert row["ec_winner"] == "Andrew Jackson"
             # The House installed Adams; the EC leader was Jackson. Both are correct,
             # and ec_determinative is what says the EC did not settle it.
-            assert bool(row["ec_determinative"]) is False
+            assert non_null_flag(
+                row["ec_determinative"], label=f"1824 ec_determinative under {policy}"
+            ) is False
             # The winner is invariant; the flips are the other half of that claim.
-            assert bool(row["pv_flip"]) is False, f"1824 pv_flip under {policy}"
-            assert bool(row["hybrid_flip"]) is False, f"1824 hybrid_flip under {policy}"
+            assert non_null_flag(
+                row["pv_flip"], label=f"1824 pv_flip under {policy}"
+            ) is False
+            assert non_null_flag(
+                row["hybrid_flip"], label=f"1824 hybrid_flip under {policy}"
+            ) is False
             assert float(row["hybrid_margin"]) == pytest.approx(
                 expected_margin[policy], abs=0.01
             ), f"1824 hybrid_margin under policy {policy}"
