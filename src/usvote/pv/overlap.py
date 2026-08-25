@@ -73,6 +73,7 @@ __all__ = [
     "CELL_RELPCT_FLAG",
     "EXACT_MATCH_FLOOR_OVERALL",
     "EXACT_MATCH_FLOOR_PER_YEAR",
+    "SKIP_ALL_YEARS_AT_FRONTIER",
     "SKIP_NO_OVERLAP_CELLS",
     "SKIP_UCSB_ABSENT",
     "OverlapKey",
@@ -133,6 +134,16 @@ SKIP_UCSB_ABSENT = "pv_ucsb is empty — UCSB is not loaded, so there is no over
 SKIP_NO_OVERLAP_CELLS = (
     f"no {MIT_PV_YEAR_MIN}+ overlap cells — at least one source has no rows "
     "in the window"
+)
+
+#: Skip reason: both sources have rows in the window, but every year either of them
+#: carries sits at or beyond the spine frontier, so all of them are excluded as refresh
+#: and nothing is left to compare. Kept distinct from :data:`SKIP_NO_OVERLAP_CELLS`
+#: because that one asserts a source is *empty*, which is false here — and a reason that
+#: misreports which of the two states was reached sends an operator to the wrong place.
+SKIP_ALL_YEARS_AT_FRONTIER = (
+    "no comparable years — every year either source carries sits at or beyond the "
+    "spine frontier"
 )
 
 
@@ -271,14 +282,17 @@ def compute_overlap_report(
     the spine, UCSB's ingest scope and the snapshot window moves this frontier too, so a
     stale constant fails all of them together rather than leaving one boundary behind.
 
-    **What it still cannot see, stated rather than hidden:** MIT dropping an election
-    *below* the frontier while also carrying a year *beyond* it — the excluded set then
-    launders the real drop. Reaching it takes a malformed MIT CSV, a newer-than-spine
-    MIT year, and a stale ``LATEST_ELECTION_YEAR`` at once. The honest home for that is
-    a MIT year-contiguity guard beside the source's own invariants, not a second clause
-    here: "MIT's loaded years have an interior hole" is a single-source question, and
-    answering it here would drag the circular data ceiling back into the module that
-    just dropped it.
+    **What it still cannot see, stated rather than hidden:** a source dropping the
+    **frontier year itself**. MIT losing 2024 is excluded by the same clause that lets a
+    mid-refresh 2024 through — that is the exemption, not a hole in it — so the year
+    vanishes from ``ec_pv_redistributable`` and the public API behind it while gate 1
+    reads 100%. It takes one malformed CSV, nothing more. **Only the frontier is exposed
+    this way**: ``uncovered`` is a per-year set, so a drop anywhere *below* the frontier
+    stays scored and trips gate 1 no matter what else the source carries. The honest
+    owner of the frontier case is a MIT year-contiguity guard beside the source's own
+    invariants (**#177**), not a second clause here: "MIT's loaded years have a hole" is
+    a single-source question, and answering it here would drag the circular data ceiling
+    back into the module that just dropped it.
 
     **Do not look for a second owner of the below-frontier case — MIT has none.** MIT's
     D024 roster/fact guard cannot see a wholly-missing MIT year, because
@@ -335,7 +349,7 @@ def compute_overlap_report(
         # year sets, so at least one frame survives its filter.
         return OverlapReport(
             skipped=True,
-            skip_reason=SKIP_NO_OVERLAP_CELLS,
+            skip_reason=SKIP_ALL_YEARS_AT_FRONTIER,
             uncovered_years=uncovered,
         )
     mit = mit.loc[mit["year"].isin(scored)]

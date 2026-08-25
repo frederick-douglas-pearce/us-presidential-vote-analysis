@@ -331,7 +331,11 @@ def _overlap_note(overlap: OverlapReport | None) -> str:
     if overlap is None:
         return "Overlap validation: SKIPPED by --no-validate-overlap (nothing checked)."
     if overlap.skipped:
-        return f"Overlap validation: not applicable — {overlap.skip_reason}."
+        # Name the excluded years even here. One skip path populates them, and an
+        # operator told only "nothing to compare" cannot tell which years went missing.
+        years = ", ".join(str(y) for y in overlap.uncovered_years)
+        excluded = f" (excluded: {years})" if overlap.uncovered_years else ""
+        return f"Overlap validation: not applicable — {overlap.skip_reason}{excluded}."
     parts = [
         f"{overlap.exact_pct:.2f}% of {overlap.cells} overlap cells agree exactly"
     ]

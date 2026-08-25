@@ -25,11 +25,13 @@ import pytest
 from tests._helpers import QueryDispatchDBC
 from usvote.db import DBC
 from usvote.hybrid import MARGIN_DIFF_MAX_PP
+from usvote.pv import overlap
 from usvote.pv.overlap import (
     CELL_RELPCT_FAIL,
     CELL_RELPCT_FLAG,
     EXACT_MATCH_FLOOR_OVERALL,
     EXACT_MATCH_FLOOR_PER_YEAR,
+    SKIP_ALL_YEARS_AT_FRONTIER,
     SKIP_NO_OVERLAP_CELLS,
     SKIP_UCSB_ABSENT,
     OverlapKey,
@@ -304,6 +306,13 @@ class TestPopulation:
         one-sided, and gate 1 fails at 0%. Under the old data-derived ceiling the newer
         of the two was excluded purely because it was newer — the circularity this rule
         replaced.
+
+        The rule is about the *frontier*, not about disjointness, so it splits this
+        failure mode rather than covering all of it: a disjoint pair whose years all sit
+        at or beyond the frontier is excluded down to nothing and **skips** instead —
+        pinned by ``test_everything_at_or_beyond_the_frontier_skips_rather_than_reading_
+        green``. Below the frontier, which is where every real election is, a total loss
+        of overlap fails.
         """
         mit_rows, _ = _agreeing(1976, 6)
         _, ucsb_rows = _agreeing(1980, 6, start=50)
@@ -384,42 +393,57 @@ class TestPopulation:
         with pytest.raises(PVOverlapError, match="gate 1 .per year.*1984"):
             assert_overlap_within_tolerance(report)
 
-    def test_the_frontier_defaults_to_the_ec_spine(self) -> None:
-        """The default is the spine's newest year, not a constant restated here.
+    def test_the_frontier_follows_the_ec_spine_and_not_a_restated_constant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The frontier must *move* with the spine, which needs the spine to move.
 
-        Derived from ``ec_ingest_years()`` rather than ``LATEST_ELECTION_YEAR`` so that
-        a year gated back into ``UNSUPPORTED_EC_YEARS`` moves the frontier down with it.
+        ``max(ec_ingest_years())`` and ``LATEST_ELECTION_YEAR`` are both 2024 today, so
+        a test that only checks today's value passes under either expression and pins
+        nothing. Gating 2024 back out of the spine — the case the choice exists for —
+        must pull the frontier down to 2020, which only the derived form does.
         """
-        spine_max = max(ec_ingest_years())
+        gated = {y for y in ec_ingest_years() if y != 2024}
+        monkeypatch.setattr(overlap, "ec_ingest_years", lambda: gated)
+
         mit_rows, ucsb_rows = _agreeing(1976, 10)
-        _, at_frontier = _agreeing(spine_max, 5, start=100)
-        ucsb_rows += at_frontier
+        _, at_2020 = _agreeing(2020, 5, start=100)
+        _, at_2024 = _agreeing(2024, 5, start=200)
+        ucsb_rows += at_2020 + at_2024
 
-        assert compute_overlap_report(
-            _frame(mit_rows), _frame(ucsb_rows)
-        ).uncovered_years == (spine_max,)
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
-    def test_a_below_frontier_drop_is_laundered_by_a_beyond_frontier_year(self) -> None:
+        assert report.uncovered_years == (2020, 2024), "the frontier fell to 2020"
+
+    def test_a_dropped_frontier_year_is_the_stated_blind_spot(self) -> None:
         """Pinning the limit the docstring states, so it stays a decision not a bug.
 
-        Here MIT has really *lost* 2024 while carrying a beyond-spine 2028 — and the
-        gate stays green, because a lost frontier year is indistinguishable from a
-        frontier year not yet published, which is the exemption that lets every ordinary
-        mid-refresh build through. Only the frontier is exposed this way: a dropped
-        1984 would still be kept and still fail. Reaching it needs a malformed CSV and a
-        stale spine constant at once, and its honest owner is a MIT year-contiguity
-        guard (#177), not a second clause here.
+        MIT really *losing* 2024 is excluded by the same clause that lets a mid-refresh
+        2024 through — that is the exemption itself, not a hole in it — so the gate
+        stays green and the year is gone from the public API. One malformed CSV reaches
+        it; its owner is the MIT year-contiguity guard filed as #177.
+
+        The companion assertion is what keeps the limit *narrow*: the same source also
+        dropping 1984 does raise, because ``uncovered`` is a per-year set and nothing
+        below the frontier is ever excluded. A drop below the frontier cannot be
+        laundered by anything the source does above it.
         """
         mit_rows, ucsb_rows = _agreeing(1976, 20)
-        extra_mit, _ = _agreeing(2028, 5, start=100)
         _, dropped = _agreeing(2024, 5, start=200)
-        mit_rows += extra_mit
         ucsb_rows += dropped  # MIT lost 2024, the frontier year
 
         report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
-        assert report.uncovered_years == (2024, 2028)
+        assert report.uncovered_years == (2024,)
         assert_overlap_within_tolerance(report)  # the stated limit: does not raise
+
+        _, also_below = _agreeing(1984, 5, start=300)
+        below = compute_overlap_report(
+            _frame(mit_rows), _frame(ucsb_rows + also_below)
+        )
+        assert below.uncovered_years == (2024,), "1984 is not excluded"
+        with pytest.raises(PVOverlapError, match="gate 1 .per year.*1984"):
+            assert_overlap_within_tolerance(below)
 
     def test_everything_at_or_beyond_the_frontier_skips_rather_than_reading_green(
         self,
@@ -437,7 +461,11 @@ class TestPopulation:
 
         report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
-        assert report.skipped and report.skip_reason == SKIP_NO_OVERLAP_CELLS
+        assert report.skipped and report.skip_reason == SKIP_ALL_YEARS_AT_FRONTIER
+        assert report.skip_reason != SKIP_NO_OVERLAP_CELLS, (
+            "both sources DO have rows in the window — reporting one as empty would "
+            "send an operator to the wrong place"
+        )
         assert report.uncovered_years == (2024, 2028)
         assert report.cells == 0 and report.exact_pct == 0.0
         assert_overlap_within_tolerance(report)  # a skip asserts nothing
