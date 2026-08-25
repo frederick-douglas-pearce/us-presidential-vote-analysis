@@ -298,7 +298,8 @@ def test_validate_overlap_false_skips_both_gates(
 
     A build whose sources are deliberately partial — a state-scoped MIT extract against
     a full UCSB corpus, which ``test_ec_pv_join.py::test_join_over_a_real_two_source_load``
-    does, and it is the only such caller in the tree — has too few paired cells for an
+    does, and it is the only caller that opts out for that *reason* rather than to
+    exercise the flag itself, as this test does below — has too few paired cells for an
     agreement *rate* to mean anything, so such a caller opts out rather than the gate
     guessing from the data whether it was handed a sample.
     """

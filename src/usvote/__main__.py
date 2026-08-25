@@ -345,8 +345,9 @@ def _overlap_note(overlap: OverlapReport | None) -> str:
     if overlap.uncovered_years:
         years = ", ".join(str(y) for y in overlap.uncovered_years)
         parts.append(
-            f"year(s) {years} excluded — reached by only one source, above the "
-            "years both cover, so read as an unfinished refresh rather than a loss"
+            f"year(s) {years} excluded — reached by only one source, at or beyond "
+            "the newest election the EC spine knows about, so read as an "
+            "unfinished refresh rather than a loss"
         )
     return "Overlap validation: passed — " + "; ".join(parts) + "."
 

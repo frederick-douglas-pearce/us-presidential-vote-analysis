@@ -42,6 +42,7 @@ from usvote.pv.overlap import (
 )
 from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
+from usvote.years import ec_ingest_years
 
 
 def _row(
@@ -224,19 +225,17 @@ class TestPopulation:
         assert report.skip_reason == SKIP_NO_OVERLAP_CELLS
         assert report.skip_reason != SKIP_UCSB_ABSENT
 
-    def test_a_one_sided_year_above_the_shared_ceiling_is_excluded(self) -> None:
+    def test_a_one_sided_year_beyond_the_spine_frontier_is_excluded(self) -> None:
         """The asymmetric-refresh case, which must not break a build.
 
         MIT is a CSV drop and the UCSB corpus is a manual snapshot, so one reaching a
         new election first is the *ordinary* case, not a regression. Scored, that year
-        reads 0% and gate 1 raises at the end of an otherwise complete build; the window
-        has a floor and deliberately no ceiling, so nothing else would stop it.
+        reads 0% and gate 1 raises at the end of an otherwise complete build.
 
-        The exclusion stops at the shared ceiling — see the three tests below, which
-        pin what happens at or under it. Gate 3 is *not* the reason it is safe to stop
-        there: it inner-joins on year, so it skips every one-sided year, above the
-        ceiling or below, which leaves gates 1-2 as the only instrument pointed at an
-        interior hole.
+        The exclusion stops at the spine frontier — the tests below pin what happens
+        under it. Gate 3 is *not* the reason it is safe to stop there: it inner-joins on
+        year, so it skips every one-sided year, beyond the frontier or below, which
+        leaves gates 1-2 as the only instrument pointed at a MIT coverage hole.
         """
         mit_rows, ucsb_rows = _agreeing(1976, 10)
         extra_mit, _ = _agreeing(2028, 4, start=100)
@@ -251,7 +250,7 @@ class TestPopulation:
         assert report.one_sided == ()
         assert_overlap_within_tolerance(report)  # must not raise
 
-    def test_a_one_sided_year_below_the_shared_ceiling_trips_the_gate(self) -> None:
+    def test_a_one_sided_year_below_the_spine_frontier_trips_the_gate(self) -> None:
         """An *interior* hole is a regression, and nothing else in the tree catches it.
 
         A source silently dropping a year it used to carry has no other owner: each
@@ -269,27 +268,31 @@ class TestPopulation:
 
         report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
-        assert report.uncovered_years == (), "2020 is below the 2024 ceiling"
+        assert report.uncovered_years == (), "2020 is below the spine frontier"
         assert report.exact_pct_by_year[2020] == 0.0
         assert len(report.one_sided) == 10
         with pytest.raises(PVOverlapError, match="gate 1 .per year.*2020"):
             assert_overlap_within_tolerance(report)
 
-    def test_a_dropped_lower_edge_year_trips_the_gate(self) -> None:
-        """The floor is fixed, so a *lower*-edge gap reads differently from an upper one.
+    def test_a_dropped_bottom_of_window_year_trips_the_gate(self) -> None:
+        """Only the *frontier* is excludable; the bottom of the window never is.
 
-        A UCSB re-snapshot that starts at 1980 leaves 1976 MIT-only. That is not
-        asymmetric refresh — "UCSB has not loaded 1976 yet" is not a thing that happens
-        — so it stays in the population and fails, where the same shape at the top of
-        the window is excluded. The two edges are deliberately not symmetric.
+        MIT dropping 1976 leaves the year UCSB-only. Nothing about the bottom of the
+        window is ambiguous the way the frontier is — 1976 is an election both sources
+        have had a full cycle to publish — so it stays in the population and fails.
+
+        Deliberately a **MIT**-side scenario. The mirror image, a UCSB re-snapshot that
+        starts at 1980, cannot reach this gate at all: ``ucsb/pipeline.py`` derives its
+        scope from the spine rather than from loaded rows, and ``_scope_years`` raises
+        ``UCSBMissingYearError`` before the warehouse is built.
         """
         mit_rows, ucsb_rows = _agreeing(1980, 20, start=50)
-        extra_mit, _ = _agreeing(1976, 20)
-        mit_rows += extra_mit  # UCSB was re-snapshotted from 1980 and lost 1976
+        _, extra_ucsb = _agreeing(1976, 20)
+        ucsb_rows += extra_ucsb  # MIT's CSV lost 1976 entirely
 
         report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
-        assert report.uncovered_years == (), "1976 is below the 1980 ceiling"
+        assert report.uncovered_years == (), "1976 is far below the spine frontier"
         assert report.exact_pct_by_year[1976] == 0.0
         with pytest.raises(PVOverlapError, match="gate 1 .per year.*1976"):
             assert_overlap_within_tolerance(report)
@@ -297,10 +300,10 @@ class TestPopulation:
     def test_two_sources_sharing_no_year_fail_rather_than_skip(self) -> None:
         """Total loss of overlap is the loudest regression there is — never a skip.
 
-        The ceiling year always belongs to at least one source and is by construction
-        not above itself, so it always survives into the scored population. That is what
-        makes the "no covered years" case unreachable rather than a branch to handle: a
-        fully disjoint pair fails gate 1 at 0%, and no count divides by zero.
+        Neither year is at the frontier, so nothing is excluded, every cell is
+        one-sided, and gate 1 fails at 0%. Under the old data-derived ceiling the newer
+        of the two was excluded purely because it was newer — the circularity this rule
+        replaced.
         """
         mit_rows, _ = _agreeing(1976, 6)
         _, ucsb_rows = _agreeing(1980, 6, start=50)
@@ -308,20 +311,17 @@ class TestPopulation:
         report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
 
         assert not report.skipped, "a total coverage loss must fail, not skip"
-        assert report.uncovered_years == (1980,), "only 1980 is above the 1976 ceiling"
-        assert report.cells == 6 and report.exact_pct == 0.0
+        assert report.uncovered_years == (), "both years are below the spine frontier"
+        assert report.cells == 12 and report.exact_pct == 0.0
         with pytest.raises(PVOverlapError, match="gate 1 .overall."):
             assert_overlap_within_tolerance(report)
 
-    def test_the_shorter_source_losing_its_newest_year_is_the_stated_blind_spot(
-        self,
-    ) -> None:
-        """Pinning the limit the docstring states, so it stays a decision not a bug.
+    def test_a_source_one_cycle_behind_at_the_frontier_is_excluded(self) -> None:
+        """The ordinary mid-refresh state, and why the bound is ``>=`` not ``>``.
 
-        MIT dropping its own newest year is indistinguishable from MIT not having
-        reached it yet — the ceiling moves down with it — so this one *is* excluded. The
-        ambiguity is real and the honest answer is to say so; this test exists so that
-        nobody later reads the pass as evidence the gate covers the case.
+        The frontier election is *precisely* the year most likely to be legitimately
+        one-sided: one source has published it and the other has not been refreshed yet.
+        An exclusive bound would fail every ordinary one-cycle-behind build.
         """
         mit_rows, ucsb_rows = _agreeing(2020, 10)
         _, extra_ucsb = _agreeing(2024, 10, start=50)
@@ -331,6 +331,116 @@ class TestPopulation:
 
         assert report.uncovered_years == (2024,)
         assert_overlap_within_tolerance(report)  # must not raise
+
+    def test_a_truncated_suffix_fails_instead_of_reading_a_hundred_percent(self) -> None:
+        """The regression this whole rule exists for — a silent green over a real loss.
+
+        The data-derived ceiling this replaced was **circular**: it let the data define
+        the boundary meant to detect the data being wrong. A MIT CSV truncated at 1996
+        dragged the ceiling down with it, so 2000-2024 were "above the ceiling" and
+        excluded, the surviving 1976-1996 agreed exactly, and gate 1 reported **100%**
+        while seven elections vanished from ``ec_pv_redistributable`` — and from the
+        snapshot and the public API behind it.
+
+        The spine does not move when MIT is truncated, so those years now stay in the
+        population and the build fails loudly.
+        """
+        years = list(range(1976, 2025, 4))
+        mit_rows: list[dict[str, object]] = []
+        ucsb_rows: list[dict[str, object]] = []
+        for year in years:
+            mit_year, ucsb_year = _agreeing(year, 10, start=year)
+            if year <= 1996:  # the truncated CSV covers only 1976-1996
+                mit_rows += mit_year
+            ucsb_rows += ucsb_year
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.uncovered_years == (2024,), "only the frontier is excludable"
+        assert report.exact_pct < 100.0, "the loss must not read as perfect agreement"
+        with pytest.raises(PVOverlapError, match="gate 1"):
+            assert_overlap_within_tolerance(report)
+
+    def test_the_frontier_bound_is_inclusive(self) -> None:
+        """``>=``, not ``>`` — pinned at the boundary in both directions at once.
+
+        The one test here that injects ``spine_max``, because it is *about* an arbitrary
+        frontier: with it at 1988, a one-sided 1988 is excluded and a one-sided 1984 is
+        not. The rest run on the real default, so a reversion of the default cannot hide
+        behind an injected value. A ``>`` bound would keep 1988 and fail every ordinary mid-refresh build; a
+        frontier one cycle further out would swallow 1984 and hide a real drop.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 20)
+        _, at_frontier = _agreeing(1988, 5, start=100)
+        _, below_frontier = _agreeing(1984, 5, start=200)
+        ucsb_rows += at_frontier + below_frontier
+
+        report = compute_overlap_report(
+            _frame(mit_rows), _frame(ucsb_rows), spine_max=1988
+        )
+
+        assert report.uncovered_years == (1988,)
+        assert report.exact_pct_by_year[1984] == 0.0, "1984 stays in the population"
+        with pytest.raises(PVOverlapError, match="gate 1 .per year.*1984"):
+            assert_overlap_within_tolerance(report)
+
+    def test_the_frontier_defaults_to_the_ec_spine(self) -> None:
+        """The default is the spine's newest year, not a constant restated here.
+
+        Derived from ``ec_ingest_years()`` rather than ``LATEST_ELECTION_YEAR`` so that
+        a year gated back into ``UNSUPPORTED_EC_YEARS`` moves the frontier down with it.
+        """
+        spine_max = max(ec_ingest_years())
+        mit_rows, ucsb_rows = _agreeing(1976, 10)
+        _, at_frontier = _agreeing(spine_max, 5, start=100)
+        ucsb_rows += at_frontier
+
+        assert compute_overlap_report(
+            _frame(mit_rows), _frame(ucsb_rows)
+        ).uncovered_years == (spine_max,)
+
+    def test_a_below_frontier_drop_is_laundered_by_a_beyond_frontier_year(self) -> None:
+        """Pinning the limit the docstring states, so it stays a decision not a bug.
+
+        Here MIT has really *lost* 2024 while carrying a beyond-spine 2028 — and the
+        gate stays green, because a lost frontier year is indistinguishable from a
+        frontier year not yet published, which is the exemption that lets every ordinary
+        mid-refresh build through. Only the frontier is exposed this way: a dropped
+        1984 would still be kept and still fail. Reaching it needs a malformed CSV and a
+        stale spine constant at once, and its honest owner is a MIT year-contiguity
+        guard (#177), not a second clause here.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 20)
+        extra_mit, _ = _agreeing(2028, 5, start=100)
+        _, dropped = _agreeing(2024, 5, start=200)
+        mit_rows += extra_mit
+        ucsb_rows += dropped  # MIT lost 2024, the frontier year
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.uncovered_years == (2024, 2028)
+        assert_overlap_within_tolerance(report)  # the stated limit: does not raise
+
+    def test_everything_at_or_beyond_the_frontier_skips_rather_than_reading_green(
+        self,
+    ) -> None:
+        """An empty scored population is a *skip*, never a vacuous pass.
+
+        Reachable now in a way it was not under the data-derived ceiling, which always
+        kept its own ceiling year: here MIT holds only the frontier election and UCSB
+        only a beyond-spine one, so both are excluded and nothing is left to compare.
+        Left unguarded the rate would be ``NaN``, and ``NaN < 90.0`` is ``False`` — a
+        green gate over zero cells.
+        """
+        mit_rows, _ = _agreeing(2024, 6)
+        _, ucsb_rows = _agreeing(2028, 6, start=50)
+
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.skipped and report.skip_reason == SKIP_NO_OVERLAP_CELLS
+        assert report.uncovered_years == (2024, 2028)
+        assert report.cells == 0 and report.exact_pct == 0.0
+        assert_overlap_within_tolerance(report)  # a skip asserts nothing
 
     def test_the_exclusion_is_per_year_and_does_not_swallow_a_partial_year(
         self,

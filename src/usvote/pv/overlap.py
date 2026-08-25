@@ -66,6 +66,7 @@ from usvote.pv.views import (
     PV_UCSB_VIEW,
     RESOLVED_KEY,
 )
+from usvote.years import ec_ingest_years
 
 __all__ = [
     "CELL_RELPCT_FAIL",
@@ -197,10 +198,11 @@ class OverlapReport:
     one_sided: tuple[OverlapKey, ...] = ()
     flagged: tuple[OverlapKey, ...] = ()
     failed: tuple[OverlapKey, ...] = ()
-    #: Years reached by only one source **above the shared ceiling**, excluded from
-    #: every count above as ordinary asymmetric refresh. A one-sided year at or below
-    #: the ceiling is a regression and does *not* appear here — it stays in the
-    #: population and trips gate 1. See :func:`compute_overlap_report`.
+    #: Years reached by only one source **at or beyond the spine frontier**
+    #: (``max(ec_ingest_years())``), excluded from every count above as ordinary
+    #: asymmetric refresh. A one-sided year *below* the frontier is a regression and
+    #: does **not** appear here — it stays in the population and trips gate 1. See
+    #: :func:`compute_overlap_report`.
     uncovered_years: tuple[int, ...] = ()
 
 
@@ -219,7 +221,7 @@ def _keys(rows: pd.DataFrame) -> tuple[OverlapKey, ...]:
 
 
 def compute_overlap_report(
-    mit_df: pd.DataFrame, ucsb_df: pd.DataFrame
+    mit_df: pd.DataFrame, ucsb_df: pd.DataFrame, *, spine_max: int | None = None
 ) -> OverlapReport:
     """Measure MIT-vs-UCSB cell agreement over the overlap window — the pure oracle.
 
@@ -236,40 +238,58 @@ def compute_overlap_report(
     dropping exactly the rows a regression would create — the inner-join-silent-drop
     hazard, one level up from where this package already guards it.
 
-    **A year only one source covers is excluded ONLY above the shared ceiling**, where
-    the ceiling is ``min(max MIT year, max UCSB year)`` and an excluded year is listed
-    in :attr:`OverlapReport.uncovered_years`. The window has a fixed floor
-    (:data:`~usvote.pv.source.MIT_PV_YEAR_MIN`) and deliberately no ceiling, and that
-    asymmetry is what settles which one-sided years are legitimate:
+    **A year only one source covers is excluded ONLY at or beyond the spine frontier**
+    — ``max(usvote.years.ec_ingest_years())``, the newest election the EC spine knows
+    about — and an excluded year is listed in :attr:`OverlapReport.uncovered_years`.
 
-    - **Above** the ceiling: ordinary asymmetric refresh. MIT is a CSV drop and the UCSB
-      corpus is a manual snapshot, so one source reaching a new election first is
-      expected — when 2028 lands in one before the other, "not loaded yet" and "lost"
-      are indistinguishable, and for a *future* election "not yet" is the honest
-      reading. Scored, that year reads 0% and gate 1 raises at the end of an otherwise
-      complete build, so it is excluded instead.
-    - **At or below** the ceiling: a regression. It stays in the population, its cells
-      count as one-sided, its year rate reads 0%, and gate 1's per-year floor trips.
-      Post-1976 both sources are comprehensive, so there is no benign reading of MIT
-      dropping 2020, or of a UCSB re-snapshot that starts at 1980 and leaves 1976
-      MIT-only — "UCSB has not loaded 1976 yet" is not a thing that happens.
+    - **At or beyond the frontier**: ordinary asymmetric refresh. MIT is a CSV drop and
+      the UCSB corpus is a manual snapshot, so one source reaching the newest election
+      first is expected; "not loaded yet" and "lost" are indistinguishable there, and
+      for the frontier election "not yet" is the honest reading. The bound is inclusive
+      because the frontier year is *precisely* the one legitimately one-sided mid-cycle.
+    - **Below the frontier**: a regression. It stays in the population, its cells count
+      as one-sided, its year rate reads 0%, and gate 1's per-year floor trips. Every
+      year below the frontier is an election both sources have had a full cycle to
+      publish, so there is no benign reading of one of them dropping it.
 
-    The ceiling is derived from the data rather than maintained, so it cannot go stale
-    the way the reference script's hardcoded ``BETWEEN 1976 AND 2024`` would. **What it
-    still cannot see, stated rather than hidden:** the *shorter* source losing its own
-    newest year — MIT dropping 2024 while UCSB keeps it — which is genuinely
-    indistinguishable from MIT not having reached 2024 yet. That is the residue of the
-    same ambiguity, not an oversight.
+    **The frontier is the EC spine's, not the data's, and that is the whole point.** An
+    earlier form of this rule took the ceiling from the frames themselves
+    (``min(max MIT year, max UCSB year)``) and was **circular** — it let the data define
+    the boundary that is supposed to detect the data being wrong. A truncated MIT drop
+    covering only 1976-1996 pulled the ceiling down to 1996 with it, excluded seven
+    elections, and reported **100% agreement** on what was left while 2000-2024 vanished
+    from ``ec_pv_redistributable`` and, downstream, the public API. The spine is the
+    external authority for "what counts as a real, known election" — the same reason
+    :data:`~usvote.pv.source.MIT_PV_YEAR_MIN` is a constant rather than an observed
+    ``min()``, applied to the top edge.
 
-    **Do not look for a second owner of the interior case; there is not one.** Each
-    source's D024 roster/fact guard
-    (:func:`usvote.pv.status.assert_roster_covers_facts`) cannot see a wholly-missing
-    MIT year, because :mod:`usvote.mit.pipeline` derives its in-scope years from the
-    rows MIT actually loaded — a year that vanished entirely is never compared against
-    anything. Gate 3 inner-joins on year and so skips every one-sided year, above the
-    ceiling or below it. That leaves gates 1-2 as the only instrument pointed at an
-    interior coverage hole, which is precisely why the exclusion has to stop at the
-    ceiling rather than swallow every one-sided year.
+    Deriving it from ``ec_ingest_years()`` rather than from
+    :data:`~usvote.years.LATEST_ELECTION_YEAR` directly is deliberate: if a year at the
+    top end were ever gated back into ``UNSUPPORTED_EC_YEARS``, the frontier must fall
+    back to the newest *supported* year, which is what "a year the spine knows about"
+    means. This adds **no new thing to maintain** — the cycle bump already required by
+    the spine, UCSB's ingest scope and the snapshot window moves this frontier too, so a
+    stale constant fails all of them together rather than leaving one boundary behind.
+
+    **What it still cannot see, stated rather than hidden:** MIT dropping an election
+    *below* the frontier while also carrying a year *beyond* it — the excluded set then
+    launders the real drop. Reaching it takes a malformed MIT CSV, a newer-than-spine
+    MIT year, and a stale ``LATEST_ELECTION_YEAR`` at once. The honest home for that is
+    a MIT year-contiguity guard beside the source's own invariants, not a second clause
+    here: "MIT's loaded years have an interior hole" is a single-source question, and
+    answering it here would drag the circular data ceiling back into the module that
+    just dropped it.
+
+    **Do not look for a second owner of the below-frontier case — MIT has none.** MIT's
+    D024 roster/fact guard cannot see a wholly-missing MIT year, because
+    :mod:`usvote.mit.pipeline` derives its in-scope years from the rows MIT actually
+    loaded, so a year that vanished entirely is never compared against anything. **UCSB
+    is different, and the difference is why this is a MIT-shaped problem**: it derives
+    its scope from the spine (``ucsb_ingest_years()``) and
+    :func:`usvote.ucsb.transform._scope_years` *raises* on any in-scope year with no
+    parsed page, long before the warehouse is built. Gate 3 inner-joins on year and
+    skips every one-sided year either way. So gates 1-2 are the only instrument pointed
+    at a MIT coverage hole.
 
     **The window-level carve-out is separate, and stays narrow.** A source with no rows
     *at all* in the window skips outright — that is what a UCSB-less warehouse looks
@@ -294,18 +314,30 @@ def compute_overlap_report(
     ucsb = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
     if mit.empty or ucsb.empty:
         return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+    # Plain ints, so ``uncovered_years`` carries ints rather than numpy scalars.
     mit_years = {int(y) for y in mit["year"].unique()}
     ucsb_years = {int(y) for y in ucsb["year"].unique()}
-    # A one-sided year is a refresh gap only ABOVE the shared ceiling; at or below it,
-    # it is a regression and stays in the population -- see the docstring.
-    ceiling = min(max(mit_years), max(ucsb_years))
+    # A one-sided year is refresh only AT OR BEYOND the spine frontier; below it, it is
+    # a regression and stays in the population -- see the docstring.
+    frontier = max(ec_ingest_years()) if spine_max is None else spine_max
     one_sided_years = mit_years ^ ucsb_years
-    uncovered = tuple(sorted(y for y in one_sided_years if y > ceiling))
+    uncovered = tuple(sorted(y for y in one_sided_years if y >= frontier))
     scored = (mit_years | ucsb_years) - set(uncovered)
-    # ``scored`` is never empty, so nothing below divides by zero: the ceiling year
-    # belongs to at least one source and is by construction not above the ceiling, so
-    # it always survives -- including when the two sources share no year at all, which
-    # is a total-coverage regression and must fail rather than skip.
+    if not scored:
+        # Every year either source carries sits at or beyond the frontier, so there is
+        # genuinely nothing to compare -- a real skip, not a laundered failure. Unlike
+        # the data-derived ceiling this replaces, the frontier does not move with the
+        # data, so this state is reachable (two sources whose only years are the
+        # frontier election and a beyond-spine year) rather than dead code -- and it is
+        # what keeps an empty population from reading as a pass, since the rate would
+        # otherwise be ``NaN`` and ``NaN < floor`` is ``False``. Below this line
+        # ``merged`` cannot be empty: ``scored`` is non-empty and drawn from the two
+        # year sets, so at least one frame survives its filter.
+        return OverlapReport(
+            skipped=True,
+            skip_reason=SKIP_NO_OVERLAP_CELLS,
+            uncovered_years=uncovered,
+        )
     mit = mit.loc[mit["year"].isin(scored)]
     ucsb = ucsb.loc[ucsb["year"].isin(scored)]
 
