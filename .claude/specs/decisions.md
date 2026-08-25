@@ -483,6 +483,25 @@ tagged union vs. resolved preferred series); they are named apart to prevent tha
   benign-seam assumption and calibrates the overlap tolerance (layer 3). It depends on E4
   (UCSB parsed to the overlap years) and E5 (MIT read) landing.
 
+**Answered by:** #70 / PR #168 (2026-08-23) —
+[`research-pv-overlap.md`](research-pv-overlap.md). **Both forward-pointers above are now
+historical**: §3's research task is complete, and the *Action required* bullet that filed it is
+discharged. Its verdict on the **benign-seam assumption is CONFIRMED**, against a bar stated before
+the numbers were read — across the 13 overlap years the two sources pick the **same national
+popular-vote winner 13 times out of 13**; the largest cross-source difference in the national margin
+is **0.0337 pp**, against a smallest actual margin of **0.5113 pp** (2000), so the source effect is
+**~15× smaller** than the closest real election in the window; **93.44%** of the 1326 overlap cells
+are **exactly** equal; and **no row is missing on either side** (a FULL OUTER join, so a drop would
+have surfaced). The tolerance §3 left uncalibrated is settled in **D051**.
+
+**What a confirming result does *not* discharge** (research §7): the **stationarity** assumption
+underneath it. The study measures MIT-vs-UCSB agreement *inside* 1976–2024 and uses it to license
+reading UCSB *before* 1976 — an inference no in-overlap measurement can establish, since MIT does
+not reach back to test it against. State it wherever a cross-1976 trend is published.
+
+*This trailer annotates D017 in the manner of D008's `Refined by` note; the body above is unedited
+and accurate as of its own date.*
+
 ---
 
 ## D018: Shared PV record shape — the one schema both MIT and UCSB conform to
@@ -1023,6 +1042,74 @@ sibling table rather than amending the shared PV fact.
      `total_electoral_votes > 0`** — that drops exactly the states this design exists to represent.
      For **#57**: whatever spine it builds for 1868 must render that year's three non-participating
      states as zero-EV rows, or check (a) will fire.
+   - *Clarified 2026-08-07 during #140 (no part of this decision reverses; §6's wording is now
+     out of date in two ways).* §6 says the roster is "the EC spine plus a named constant",
+     singular and UCSB-scoped. Both halves of that have moved:
+     **(i) There are now two absence constants, not one.** `usvote/pv/absences.py` holds
+     `PV_ABSENCE_CATALOG` — the same 28 in-scope `(year, state)` pairs, classified from
+     **public-domain** sources with a citation per row — alongside UCSB's existing
+     `UCSB_NONPARTICIPATING_STATES`, which stays because UCSB's own transform still needs it.
+     The reason for a second constant is licensing, not disagreement: the pre-1976 classifications
+     had exactly one machine origin (parsing UCSB markup), UCSB grants no reuse rights (D022), and
+     the snapshot is redistributable-only *at the source* (D030) — so #139's public `pv_status`
+     back to 1824 cannot be built on UCSB-derived rows. The `pv_status` enum being "a bare
+     historical fact" (see the Licensing consequence below) is what makes an independent
+     compilation possible at all; what is *not* redistributable is UCSB's expression of it,
+     including their selection.
+     **(ii) UCSB's role changes from source to control.** `TestRealCorpus` now asserts the two
+     rosters agree exactly on `(year, state, pv_status)` over all 49 in-scope years, with the
+     dependency **inverted**, the same posture D016 takes for the PV facts. State precisely what
+     that corroborates: the two rosters take their `(year, state)` **membership** from the same EC
+     spine because §6 requires both to, so the shared 2,130-row count is the *design* and asserting
+     it would assert a tautology. What is independent is the `pv_status` on each row — UCSB's
+     parsed from their markup, ours curated with its own citations — so the test checks the 28
+     absences first and on their own, that being the entire claim, with full triple-equality
+     following as "nothing else diverges either". Anything downstream that cites "2,130 rows" as
+     agreement must carry the same qualifier. That
+     inversion is only meaningful if the two cannot touch, so `tests/unit/test_layering.py`
+     enforces both directions: the catalog imports and reads nothing UCSB (proved in a subprocess
+     with `usvote.ucsb` made unimportable, not grepped), and **nothing under `usvote/ucsb/` may
+     import the catalog** — a back-import would let UCSB inherit the classifications it is meant to
+     corroborate, and the control test would pass by construction.
+     Three consequences worth recording, because each was a live design choice:
+     **(a) The derivation is single-sourced, in the direction that keeps the contract clean.**
+     `usvote/pv/status.py` gained `build_roster(..., absences=...)` with `popular_vote` as the
+     **residual**; `build_popular_vote_roster` is the empty-map call and `build_curated_roster` is
+     the catalog-bound one. The dependency runs `absences -> status`, so `status.py` keeps
+     importing nothing from `usvote` and stays underneath every source *and* the catalog.
+     **(b) Scope is explicit — `CURATED_YEARS`, with a count pin.** An exceptions catalog's
+     *silence* about an un-reviewed year is indistinguishable from a reviewed "no absences here":
+     §3's own failure mode, one level up. `build_curated_roster` therefore **raises** outside
+     `frozenset(ec_ingest_years())` rather than returning an all-`popular_vote` roster. 1868's four
+     rows are catalogued but never consumed, mirroring how `UCSB_NONPARTICIPATING_STATES` retains
+     its 1868 trio. (Note for #57: 1868 Florida has **no** in-repo constant behind it today — it is
+     parser-derived from UCSB markup — so it needed its own independent citation here.)
+     **(c) `note` stays null on curated rows, and that is structural rather than tidy.** The moment
+     the catalog's own prose could reach `note`, "no `note` reaches the public snapshot" stops being
+     a property of the column's provenance and becomes a reviewed invariant. An absence's cause
+     lives in its citation, in code.
+     Scope: #140 ships the derivation and its proof only. **No DB write, no new `source` value in
+     `dwh.pv_state_status`, no warehouse change** — wiring it into the snapshot build is #139's,
+     and the recommendation there is to call the derivation **in-process** at build time rather than
+     load a `CURATED` source (a vote-less source never appears in the join view's PV rows, so
+     loading it would not have bought a live cross-check anyway).
+     **On provenance, stated precisely, because the honest version is narrower than the tempting
+     one:** the firewall is over *machine* provenance. The curator did cross-check against UCSB's
+     count while scoping the work. Every row is independently attested and independently cited, and
+     the exact coincidence with UCSB's set is **corroboration** — nothing here should be read, or
+     restated downstream, as "we never looked."
+     **CI proves 11 of the 28, and the docs say so.** The `not_participating` rows are verifiable
+     both directions against the committed public-domain EC roster fixture (they must be exactly
+     1864's zero-EV set). The 17 `legislature_chosen` rows are not — a legislature-appointed state
+     cast electoral votes like any other, so the spine cannot distinguish it from a popular-vote
+     state — and `TestRealCorpus` **skips in CI** (D022). They are pinned as an explicit expected
+     set with non-empty citations, and running that class locally with `USVOTE_UCSB_HTML_DIR` set is
+     a **merge precondition** for anything touching the catalog. A UCSB-derived roster fixture must
+     **never** be committed to close that gap: committing UCSB's *selection* of absence pairs is
+     precisely the compilation question #140 exists to answer.
+     One check was attempted and **failed**: the public-domain Archives year pages would have been a
+     committable, CI-runnable witness for the 17, but neither the 1824 nor the 1876 page's Notes
+     attests how electors were appointed (fetched 2026-08-07). Recorded so it is not re-attempted.
 7. **The silent-drop guard is a two-way tested assert**, and is the roster's primary purpose:
    every `popular_vote` roster state has **≥1** `pv_votes` row; every absence-status state has
    **exactly 0**; and every `pv_votes` (year, state) is **in** the roster. The third check is what
@@ -2004,3 +2091,700 @@ picking a totals row.
   enumerated in #57 and unchanged by this entry.
 - Blog post 3 states this handling as shipped-by-decision; if #57 lands differently, the post is the
   thing that has to change.
+
+## D044: 1868's two totals rows are resolved by the source's own allotment sum, not a curated literal
+
+**Date:** 2026-08-09
+
+**Context:** #143 (the first of #57's two per-year slices) ingests 1868 and carries the shared
+`count_status` DDL. D043 settled the *modeling* — a three-value status on the fact — but left three
+implementation questions the code had to answer, and one of them is a place where a parser can
+silently take a side in a constitutional dispute.
+
+The 1868 Archives page (`tests/fixtures/www_archives_gov_electoral_college_1868.html`) ends with
+**two** totals rows — `Totals (excluding Georgia's votes) 285 / 214 / 71` and `Totals (including
+Georgia's votes) 294 / 214 / 80` — and marks neither authoritative. Everything downstream of the
+parser treats `state == "Totals"` as one row per year (`_add_electoral_rank` ranks off it,
+`assert_totals_equal_state_sum` compares against it, `assert_state_count_by_year` counts it), so
+both cannot survive. The parser's exact `{"Total", "Totals"}` match recognised *neither*, which
+would have loaded the year with no totals row at all.
+
+**Decision:**
+
+1. **The surviving totals row is the one whose `total_electoral_votes` equals the sum of that
+   page's own per-state allotments** — a rule *derived from the source*, not a curated per-year
+   literal, and not an editorial choice between two readings. Verified against the fixture's own
+   tokens: its 37 state rows sum to **294 / Grant 214 / Seymour 80**, matching the *including*
+   row exactly, while the *excluding* row disagrees with the very state rows printed above it and
+   would fail `assert_totals_equal_state_sum`. This re-derives D043 §1's 294 from the data rather
+   than inheriting it from D043's prose, which is what AC 4 of #143 demanded (D043 §6 had already
+   been found wrong once). The rule compares **allotments** on both sides, never the per-candidate
+   vote columns: 1832's totals row carries 288 *appointed* while only 286 were *cast*, and the
+   allotment comparison is what keeps `ELECTORAL_VOTE_SHORTFALLS` years unaffected. Zero or several
+   reconciling rows **raise** — the parser never guesses, because guessing wrong answers Congress's
+   question by accident. Totals-label matching becomes a **prefix** match to recognise qualified
+   labels; no US state name begins with "Total".
+2. **The enum lives in a new stdlib-only top-level module, `usvote/count_status.py`.** It has two
+   callers that must not depend on each other — `usvote/transform.py` *assigns* the values,
+   `usvote/load.py` builds the `CHECK` from them. Putting the tuple in `transform` would point the
+   DDL builder at the pandas transform module; putting it in `load` would drag psycopg2 into the
+   transform import chain. This is the shape `usvote/years.py` and `usvote/pv/status.py` already
+   have, so `count_status.py` joins the `years.py` family of pure EC-domain top-level modules
+   (D027's taxonomy) rather than being an ad-hoc placement.
+3. **The columns are `count_status` + `count_status_reason`**, not `pv_status`'s `note` spelling.
+   A deliberate, minor divergence from D043 §3's phrasing-by-analogy: `note` on a wide fact table
+   does not say what it is a note *about*. Unlike `pv_state_status.note` (verbatim UCSB prose,
+   `redistributable=false`), this column holds the **Archives' own sentence** — a US Government
+   work, so it carries no redistribution restriction. `count_status` is `NOT NULL` with **no
+   `DEFAULT`**: the transform supplies a value on every row, so the column is complete rather than
+   exceptions-only (D024 §3 applied to the fact) and a null can never stand in for "presumably
+   fine". A biconditional assert (`assert_count_status_reasons`) requires a reason on every flagged
+   row and forbids one on a `counted` row.
+4. **Aggregate (`is_total`) rows are never flagged.** 1868 Seymour's national 80 includes Georgia's
+   disputed 9, and one enum value cannot say "80, of which 9 disputed". D043 §4 fixes the grain at
+   `(year, state, candidate)`; the state rows carry the truth and the aggregate's disputed-ness is
+   derivable from them. Asserted by a test rather than left emergent, because propagating `disputed`
+   upward is a defensible-looking change that would quietly over-claim.
+5. **No migration story.** The `dwh` schema is only ever created fresh (`create_table` /
+   `--replace`), so adding two columns needs a rebuild, not an `ALTER`.
+6. **The `(N)` relaxation carries a reciprocal guard.** Reading a parenthesized cell as a
+   number is a *global* loosening — before this, every `(N)` raised `ParseError` — so the
+   parser now **reports** each parenthesized cell (`ParsedTable2.contested_cells`) and
+   `transform.assert_contested_cells_catalogued` requires every one to have a
+   `COUNT_STATUS_OVERRIDES` entry. Without it, a parenthesized cell in a year with no
+   catalog entry would load as an ordinary `counted` vote with every sum validator
+   passing, and 41 of the 50 in-scope years have no committed fixture, so a re-scrape or
+   an Archives edit is a live path. `_add_count_status`'s own guard runs catalog → data;
+   this is data → catalog, and it is modelled on `apply_other_candidates`, which raises
+   the same way for an unregistered "Other(s)" column. (Found by the `/code-review` gate,
+   not by the plan.)
+
+**Rationale:**
+- D043's own argument is that a structure must not answer a question its source left open. A parser
+  that picked a totals row by position — or by a literal someone typed once — would do exactly that,
+  in whichever direction it leaned. Deriving the choice from the allotment sum means the source
+  answers it, and means the rule degrades to a **loud error** rather than to a stale constant when a
+  future page does something new.
+- The allotment basis is not a new principle: it is D041's "whole number of Electors **appointed**",
+  already load-bearing for `ec_denominator`. 1868's nine Georgia electors were appointed beyond
+  dispute — only whether their votes *counted* was open — so 294 follows from the existing rule and
+  the 285-vs-294 question was never a denominator question at all (D043 §1).
+- Catalogue-early paid off. The four 1868 `PV_ABSENCE_CATALOG` rows were curated in #140 while the
+  year was still gated, with public-domain citations; admitting them here required **no new
+  research**, only lifting `UNSUPPORTED_EC_YEARS` and bumping `CURATED_YEAR_COUNT` 49 → 50. The
+  import-time scope pin is what forced that to be a deliberate act instead of an accident.
+- Nothing under `usvote/ucsb/` changed. Its scope derives from `ec_ingest_years()` (D024 §6), so
+  lifting the gate moved its consumed `UCSB_NONPARTICIPATING_STATES` from 11 to 14 and its roster's
+  `legislature_chosen` from 17 to 18 with no edit in that package — the self-healing property the
+  derivation was built for, now observed rather than promised.
+
+**Action required:**
+- **#144 (1872)** rebases on this. It ships the second and third `count_status` values in anger
+  (`not_counted` for Georgia's 3 Greeley votes and for Arkansas/Louisiana), the 366 denominator, and
+  the correction to D043 §6's worked arithmetic — which is wrong against the 1872 fixture: the
+  rejected Greeley votes are **not rows in the table at all** (Greeley's column reads `-`, the
+  president-side Others cell reads 8), so they must be *synthesized* before they can be flagged.
+  That correction is #144's to append, not this entry's.
+- **#139** should note a coupling the plan initially mis-stated: the API snapshot is unaffected by
+  1868 because `snapshot._covered_years` is the MIT window, **not** because the year is excluded —
+  1868 rows *do* enter `ec_pv_redistributable`. #139 is the story that widens the covered window, so
+  it is the one that must decide what `count_status` does on a public surface (D043 §7 defers the
+  surfacing until then, and that deferral now expires in #139).
+
+## D045: 1872's 17 rejected electoral votes are synthesized from prose; the denominator is 366, not the Archives' 352
+
+**Date:** 2026-08-10
+**Issue:** #144 (split from #57) · **Corrects:** D043 §6 · **Builds on:** D043, D044
+
+**Context:**
+
+D043 §6 asserted that `assert_row_votes_sum_to_total` was "**unchanged** and passes for 1872 Georgia
+— 6 + 2 + 3 = 11 = the allotment — because rejected votes remain *rows*, merely flagged."
+
+Verified against `tests/fixtures/www_archives_gov_electoral_college_1872.html` at plan time, **that
+is wrong**. Georgia's row reads `['Georgia 4', '11', '-', '-', '8', '-', '5', '6']`: Greeley's
+president column is `-` and the president-side Others cell is 8 (Brown 6 + Jenkins 2). The three
+rejected Greeley votes **are not in the table at all** — they exist only in Table 2's note 4. The
+president side therefore sums to 8 against an allotment of 11, and D043 §6's arithmetic holds only
+*after* a synthesis step D043 did not anticipate.
+
+Re-verifying the rest of D043's prose, as that issue instructed, found the same pattern twice more:
+
+- **The 366 denominator is right, and its basis was under-stated.** The Archives totals row prints
+  352, which is the sum of the *submitting* states' allotments. Arkansas (6) and Louisiana (8)
+  appointed their full complement and print `-` only because their returns were refused.
+- **D043 §3's "Arkansas and Louisiana get `not_counted`" is right for a reason D043 did not give.**
+  The Archives note says only that the two states "did not submit any electoral votes to be
+  counted", which reads as an allotment-only gap with no recipient — and modelling it that way would
+  have kept Grant's national row at the familiar 286. The primary record says otherwise: both
+  states' electors met and cast **for Grant**, and the *returns* were rejected.
+
+**Decision:**
+
+1. **Three new correction mechanisms in `usvote/transform.py`**, each provenance-carrying, applied
+   inside `_votes_matrix` before `assert_row_votes_sum_to_total` so the source's own arithmetic is
+   what checks them:
+   - `UNPRINTED_ELECTORAL_VOTES` — votes the source documents in prose but omits from its table.
+     Keyed `(year, state, canonical candidate name)`, the **`COUNT_STATUS_OVERRIDES` grain (D043
+     §4)**, deliberately *not* the parsed `col_ind`: the Others pass renumbers those columns, so a
+     positional key would drift while its twin count_status entry — addressing the same cell — stayed
+     correct, and the two would disagree with the row still reading as ordinary. The column index is
+     resolved from the name at application time, so a name matching no column raises.
+   - `APPOINTED_ELECTORS_NOT_IN_TABLE` — allotments the source prints as `-` for a state that did
+     appoint electors. It moves the **denominator**, not a candidate's votes, which is why it is a
+     separate constant.
+   - `OTHER_CANDIDATES_1872` / `OTHER_VOTES_1872` — no new mechanism, the existing aggregate-column
+     split, but the widest instance in the corpus: four recipients (Brown 18, Hendricks 42, Jenkins
+     2, Davis 1).
+2. **The totals row is recomputed from its state rows** for every column and for the allotment, so
+   366 is derived rather than entered — D044 §2's discipline, extended to the denominator.
+3. **`UNSUPPORTED_EC_YEARS` becomes empty.** The EC spine is complete, 1824–2024. The constant is
+   **retained, not deleted**: it is the single gate on both sources (D024 §6) and the documented seam
+   for the deferred pre-12th-Amendment era (D010).
+4. **1872 is reviewed for popular-vote absences and has none**, which is a finding rather than a
+   silence. `CURATED_YEAR_COUNT` 50 → 51. **What corroborates that is the UCSB cross-source control
+   test, not the EC spine** (corrected at code review, before merge): `assert_catalog_matches_spine`
+   only forces an entry for a state that appointed *no* electors, and restoring AR/LA's allotments
+   leaves 1872 with no such state — so that check inspects nothing there and passes trivially. It is
+   blind to `legislature_chosen` absences in any case, since those states appointed electors (18 of
+   the catalog's 32 entries). The real check skips in CI (D022) and is a local merge precondition.
+
+**Sources (all public domain; the citation discipline `usvote/pv/absences.py` established):**
+- **CRS Report RL30769**, *Electoral Vote Counts in Congress: Survey of Certain Congressional
+  Practices* (Maskell, Halstead, Welborn & Burkes, 2000-12-13) — a US Government work. Records the
+  announced **whole number of 366** electors with **349 counted**, and 17 rejected: Georgia 3
+  (Greeley, who had died), Arkansas 6 (the certified persons "were not the persons elected as
+  electors"; returns "not certified according to law"), Louisiana 8 (no lawful canvass).
+- **H. Misc. Doc. No. 13, 44th Cong., 2d Sess. (1877)**, *Counting Electoral Votes: Proceedings and
+  Debates of Congress Relating to Counting the Electoral Votes for President and Vice-President of
+  the United States*, printed by order of the House — for the AR/LA **recipient**, which the
+  Archives page does not name: "the votes of Arkansas, 6, and Louisiana, 8, cast for U. S. Grant".
+- **Apportionment Act of 1872**, 17 Stat. 28 — the independent structural check: 37 states × 2
+  senators + 292 representatives = 366; Arkansas 4 + 2 = 6; Louisiana 6 + 2 = 8.
+- The per-state Others split and Georgia's recipients come from the **Archives page's own** Table 2
+  notes 1 and 4–10; every figure reproduces the parsed Others column per state and each recipient's
+  national total. No external source is needed for that half.
+
+**Rationale:**
+- The issue instructed that D043's worked numbers be treated as claims to re-verify rather than
+  settled inputs, because one of them had already proved wrong. Doing so found a second loose clause
+  (§3's AR/LA reasoning) that a narrower reading would have missed — and reversed a design that was
+  about to record a defensible-but-false model of what happened in those two states.
+- Keeping `APPOINTED_ELECTORS_NOT_IN_TABLE` separate from `UNPRINTED_ELECTORAL_VOTES` despite their
+  numbers coinciding (6 and 8 in both) avoids baking a **coincidence** into the schema: the identity
+  holds only because every appointed elector in those states cast for one candidate and all were
+  rejected. It is also cross-checked for free — `assert_row_votes_sum_to_total` requires each row's
+  cast votes to equal its allotment, so an appointed 6 against an unprinted 5 raises.
+- `ELECTORAL_VOTE_SHORTFALLS` is **untouched**. Its meaning is votes *never cast*; 1872's were cast
+  and then refused. The two mechanisms stay disjoint exactly as `usvote/count_status.py` claims, and
+  1872 acquires no shortfall entry.
+- 1868 and 1872 must not be conflated even though both print `-` allotments. 1868's
+  Mississippi/Texas/Virginia had no readmitted government and appointed nobody — genuine zeros
+  (D043 §2). A test asserts the two behave differently.
+
+**Action required:**
+- Nothing outstanding for this entry. The `count_status` **public surfacing** decision is D046/D047.
+
+## D046: `dwh.votes` carries both a cast and a counted electoral-vote measure, and counted decides who won
+
+**Date:** 2026-08-10
+**Issue:** #144 · **Builds on:** D041, D043, D044, D045 · **Decided by:** Fred, at the #144 plan gate
+
+**Context:**
+
+Synthesizing 1872's 17 rejected votes (D045) forced a question #143 had left implicit. With the
+rejected votes present as rows, Grant's national `president_electoral_votes` reads **300**, not the
+familiar 286 — because the fact records what electors *cast*, and `assert_totals_equal_state_sum`
+requires the totals row to equal the sum of the state rows.
+
+Checking rather than assuming showed the warehouse had **no counted-only total anywhere**:
+`national_electoral_votes` is an unfiltered window `SUM` (`join.py`), and `count_status` is absent
+from `EC_PV_COLUMNS`, so the join views, `usvote/hybrid.py` and the API could not express "counted
+only" at all. #143 had therefore already shipped 1868 with Seymour at **80**, nine of which were
+never counted, and nothing downstream could say so.
+
+1872 makes three different totals all true at once, and one measure cannot carry them:
+
+| | appointed | cast | counted |
+|---|---|---|---|
+| **1872 national** | 366 | 366 | 349 |
+| Grant | — | 300 | 286 |
+| Greeley | — | 3 | 0 |
+| **1868 national** | 294 | 294 | 285 |
+| Seymour | — | 80 | **71** |
+
+**Decision:**
+
+1. **`dwh.votes` carries both measures.** `president_electoral_votes` is unchanged and means **cast**;
+   `president_electoral_votes_counted` is new and means **entered the final national count**. The
+   column name lives in the stdlib-only `usvote/count_status.py` for the same reason the enum does
+   (D044): `transform` derives it, `load` builds its DDL, `join` sums it, and none may depend on the
+   others.
+2. **The counted rule is strict:** `disputed` is excluded alongside `not_counted`, because Georgia's
+   nine votes in 1868 were never counted by anyone — the two chambers deadlocked. A pleasing
+   consequence: **both** of the Archives' printed 1868 totals rows are now reproducible, 294 as cast
+   and 285 as counted, where D044 could only select one.
+3. **The measure is derived by two rules, and that is deliberate.** State rows take the row rule
+   (cast when `counted`, else 0). `is_total` rows take the **sum over their year's state rows** — the
+   row rule is *wrong* for them, since aggregates are never flagged (D044) and would hand back the
+   cast value. This is exactly the fact D044 recorded that one enum value could not express.
+4. **Counted decides who won.** `president_electoral_rank` (and the `took_office` derived from it)
+   and `hybrid.ec_share_full` / `ec_determinative` all move to the counted basis. The denominator
+   stays the **appointed** allotment (D041), so `ec_share_full` is now literally the 12th Amendment's
+   test — votes *counted* over electors *appointed*. 1872 reads Grant at 286/366 = 0.781 against the
+   184-of-366 threshold Congress actually announced.
+5. **Three measures, one ladder: appointed ≥ cast ≥ counted**, with a documented gap at each step —
+   `ELECTORAL_VOTE_SHORTFALLS` opens the first (appointed, never cast) and `count_status` the second
+   (cast, never counted).
+
+**Rationale:**
+- The alternative — keep the fact at what Congress counted and correct only the denominator — would
+  have kept Grant at the familiar 286 but left the 17 cast votes and their recipients out of the
+  warehouse entirely, needing a new 17-vote row-sum exemption and leaving `not_counted` with **zero
+  instances** in the corpus. That is the mechanism D043 built, unexercised.
+- Storing rather than deriving-at-the-view is what the two-rule derivation buys: on a state row the
+  value is redundant, but on an `is_total` row it is the only place the counted total exists.
+- **Rank and `ec_share_full` had to switch together.** `assert_ec_winner_matches_rank` compares
+  `argmax(ec_share_full)` against `president_electoral_rank == 1`; had only one moved, 1872 alone
+  would have fired it. The co-switch is mandatory, not incidental.
+- **No outcome changes, and that is provable without running anything** (architect, #144): only 1868
+  and 1872 have `counted ≠ cast`, and in both the EC winner is Grant, **whose votes were entirely
+  counted** — so the winner's `ec_share_full` is identical on either basis and the argmax cannot
+  reorder. What *does* change is 1868 Seymour's `ec_share_full` (80/294 = 0.272 → 71/294 = 0.241).
+  His `hybrid_score` does **not** move: 1868 is pre-1976, so `pv_share` and the hybrid are NULL.
+- Because `counted ≤ cast ≤ appointed`, `assert_ec_shares_le_one` is **strictly safer** under the new
+  basis: a smaller numerator can only shrink a share, never manufacture a majority. D041's safety
+  property is strengthened rather than threatened.
+- Policy (c)'s `_restricted_ec_numerator` moved to the counted measure too. A coverage policy chooses
+  which *states* count toward a share, never which *basis*; leaving it on cast would have made (b)
+  and (c) disagree in 1872 for a reason unrelated to coverage. Numerically immaterial today — both
+  anomaly years have full popular-vote coverage — but the inconsistency would have been invisible.
+
+**Action required:**
+- **#139** owns the public surfacing (D047).
+
+## D047: `count_status` and the counted measure will be surfaced publicly; the API plumbing is #139's
+
+**Date:** 2026-08-10
+**Issue:** #144 · **Supersedes:** D043 §7 · **Builds on:** D028, D030, D046
+
+**Context:**
+
+D043 §7 deferred the question of whether `count_status` should reach a public surface "until a public
+surface actually covers these years". #139 is that surface — it widens the API's covered window back
+to 1824 — so the deferral has expired and #144 is where the call is recorded.
+
+**Decision:**
+
+1. **Yes, both `count_status` and `president_electoral_votes_counted` are surfaced publicly.** An API
+   that reports Grant at 300 electoral votes in 1872 with no way to see that 14 were refused is worse
+   than one that omits the year: the number looks ordinary and contradicts every reference the reader
+   can check.
+2. **The plumbing is #139's, not #144's.** `usvote/join.py` gains **two** columns in `EC_PV_COLUMNS`
+   here — the per-row `president_electoral_votes_counted` and the national
+   `national_counted_electoral_votes` — because the analysis surface needs both for D046: coverage
+   policy (c) re-sums the measure over a *restricted* state set, which a national total cannot give
+   it. `snapshot_schema.DATA_COLUMNS` and the API models are untouched.
+   **Both are appended, never inserted**, and that is a hard rule rather than a style note:
+   PostgreSQL's `CREATE OR REPLACE VIEW` can only add trailing columns, so a mid-list insert makes
+   `rebuild_views` fail against every warehouse whose views already exist. #144 shipped exactly that
+   bug into review — it passed all 987 offline tests, because the pandas oracle builds any order —
+   and it is now pinned by a test.
+3. **Leaving them out of `DATA_COLUMNS` is safe, and was verified rather than assumed.**
+   `DATA_COLUMNS` is an **independent explicit tuple** that `snapshot.py` projects with
+   `[list(DATA_COLUMNS)]`; the only test coupling the two runs `DATA_COLUMNS → API model`, never
+   `EC_PV_COLUMNS → DATA_COLUMNS`. So an added join-view column does not propagate to the snapshot,
+   the content hash, or the served payload.
+
+**Rationale:**
+- Splitting the decision from its plumbing keeps #144 to one coherent slice (ingest 1872 + model the
+  two measures) while giving #139 a settled answer to build against instead of a re-litigation.
+- The containment property is what makes the split honest. Had `DATA_COLUMNS` been derived from
+  `EC_PV_COLUMNS`, adding a column here would have silently changed the public payload and the
+  snapshot version — a D028/D030 surprise. It is not, and a test proves the direction.
+
+**Action required:**
+- **#139** threads both columns through `snapshot.py` → the API models, and decides their public
+  field names. One thing it should not re-derive: `national_counted_electoral_votes` is **never
+  NULL** (an int at state grain, unlike PV), so it needs none of the `_INTEGER_COLUMNS`/`_to_int64`
+  NULL handling the PV columns require.
+- **Blog Post 3** (`social/drafts/2026-08-05-it-takes-270-but-270-of-what.md`) describes this model in
+  the present tense and cites #57 as the record. Per D043's action item it is **the post that
+  changes** where it diverges from shipped behaviour — in particular it must not describe 1872's
+  electoral totals without saying which basis it means.
+
+## D048: the public surface widens to 1824, and it carries a second provenance
+
+**Date:** 2026-08-10
+**Issue:** #139 (E8-S9) · **Implements:** #134 option 2 · **Builds on:** D024, D028, D030,
+D041, D046 · **Discharges:** D047's action item
+
+**Context:**
+
+The public API covered **13 of 51** in-scope elections. `ec_pv_redistributable` is EC-left and
+already carried every EC state row from 1824 on; `snapshot.build_snapshot` filtered the rows
+without popular votes away. So 38 elections — including every year the blog series' historical
+posts turn on — were unreachable on the artifact those posts point readers at, and 1824 or 1872
+returned a **404**: a coverage gap rendered as a nonexistence, which is the missing-vs-zero
+error the series exists to describe, committed by the series' own evidence.
+
+**Decision:**
+
+1. **The served window is the full EC span, 1824–2024**; the redistributable popular vote keeps
+   its own narrower window. `SnapshotMeta` carries **both** (`year_min`/`year_max` and
+   `pv_year_min`/`pv_year_max`), so coverage is *stated* rather than inferred from a field of
+   nulls. 1,734 rows / 25 candidates → **5,623 rows / 96 candidates**.
+2. **Every fact row carries a `pv_status`, `NOT NULL`.** Widening without it would have shipped
+   ~3,900 bare NULL popular votes, conflating "no popular vote was ever held here" with "no
+   source reaches this far back" — the exact error this project describes. 1860 South Carolina
+   (`legislature_chosen`) and 1860 New York (`popular_vote`) both show a null popular vote, and
+   the two nulls now mean different things.
+3. **The classifications are derived from the in-repo catalog, never from `dwh.pv_state_status`**
+   (#134 option (C), built in #140). Membership comes from the EC spine; the 32 catalogued
+   absences supply the two absence statuses; `popular_vote` is the residual. **The warehouse
+   roster is not read at all**, so no UCSB-provenanced value is on the public path and D030 stays
+   structural rather than becoming an authorized editorial crossing. UCSB's roster is the
+   cross-source *control* that validates ours — never an input to it — and the property is
+   **proved, not grepped**: `usvote.snapshot` imports cleanly in a subprocess where
+   `usvote.ucsb` is unimportable.
+4. **`count_status` and both counted measures are surfaced** (D047's plumbing). Without them the
+   API would report Grant at 300 in 1872 with no way to see that 14 votes were refused — a
+   number contradicting every reference a reader can check. `count_status_reason` is the one
+   free-text column that ships, and it ships **because it is Archives prose** (a U.S. Government
+   work, 17 U.S.C. § 105) where `pv_state_status.note` is UCSB's. The build pins every served
+   reason to the sentences in `COUNT_STATUS_OVERRIDES` — but that is a **containment** check,
+   not a provenance one, and the distinction matters: it catches a reason arriving from anywhere
+   other than the curated map (a hand-edited warehouse, a migration, a future second writer),
+   while the map itself is exactly where a new correction is added. So unlike `pv_status` —
+   whose enum is closed in a module no correction workflow touches — the thing keeping
+   non-public-domain text off this column is **review of the catalog**, where each entry carries
+   its Archives URL in a comment. A first draft of this entry claimed the guard made the
+   provenance structural; it does not, and the honest close is to make the citation
+   machine-checkable in `usvote/transform.py` (a per-entry source field asserted to be an
+   `archives.gov` URL). Recorded as a known residual rather than asserted away.
+5. **`national_rollup` gains the appointed denominator.** A counted total is not checkable
+   without one: 1872 is Grant **286 of 366**, and 1824 is the **261** the contingent election
+   turns on. Delegated to `hybrid.ec_denominator_by_year`, because the obvious re-derivation
+   multiplies each state's allotment by the candidate count.
+6. **Provenance is heterogeneous.** `snapshot_meta` gains `ec_source` / `ec_license` (NARA /
+   US-PD) beside the PV pair, which keep their unprefixed names for compatibility. Recorded in
+   the *artifact*, not hardcoded in the serving layer, so the advertised source cannot drift from
+   the one that was built. `redistributable_note` names both sources with their windows, and
+   OpenAPI's single `info.license` slot now advertises the **EC** license — it covers every row,
+   where CC0 covers only the popular-vote window.
+7. **A scoped warehouse can no longer build a snapshot.** The roster derives over the full
+   `ec_ingest_years()` span and raises if the warehouse is short a year. This **retires the
+   scoped-subset promise** `SnapshotMeta`'s docstring made, deliberately and in the same change.
+8. **`SNAPSHOT_SCHEMA_VERSION` 1 → 2.** The content hash covers only `ec_pv` data rows, so a
+   shape or roll-up-derivation change is invisible to it; the version must move by hand.
+
+**Rationale:**
+- The widening is *one deleted filter* at the fact level. Almost all the work is the honesty
+  scaffolding around it — which is the right ratio for a public artifact whose selling point is
+  "check the claim yourself".
+- **Catalogue-early paid off twice.** #140 curated the absences while 1868 was still gated; #144
+  settled the surfacing question. This issue therefore needed no new historical research and no
+  re-litigation, only plumbing.
+- The rights argument is now *demonstrated* rather than asserted. Fred's own test — "could this
+  value have been obtained from a different source?" — is answered by 32 cited rows that are that
+  other source.
+- Two guards look redundant and are not. The pre-window PV guard's unique catch is a **fabricated
+  zero** (a `min_count=1` regression turning an all-null year into `0`), not laundered UCSB —
+  `assert_redistributable_only` already fires on that. And its floor is a **constant**: the
+  obvious "lowest year with any PV" spelling is vacuous under exactly the failure it exists to
+  catch, since repointing the build at `ec_pv_preferred` slides the observed floor down with the
+  bad rows.
+- No outcome changes for 1976–2024. 2000 still reads Bush 271 / rank 1 / took office against
+  Gore's larger popular vote — the thesis year is untouched.
+
+**Action required:**
+- **The deploy is sequenced, not done.** The widened snapshot must reach production by the D034/
+  D035 path (rebuild → GCS → hash-tagged image → Cloudflare purge), and the schema bump means the
+  **image and snapshot cut over together**. #139 stays open with that as its sole remaining item.
+- The **local Archives corpus does not exist on this machine**, so the D034 zero-network build
+  path is unavailable; run `python -m usvote corpus` before the deploy rebuild.
+- **#102 / E8-S8** inherits `MIT_PV_YEAR_MIN` and the pre-window guard for `pv_share` /
+  `hybrid_score`. It should also resolve `pv_coverage` to **the in-repo catalog**, which is now
+  the public roster of record — `usvote.hybrid` still reads the UCSB-inclusive
+  `dwh.pv_state_status`, and publishing a coverage figure derived from data D030 excludes would
+  undo point 3.
+- **#130 guardrail G5** ("reproducible from the public API") becomes keepable pre-1976; amend it.
+- The **2028 `LATEST_ELECTION_YEAR` bump will fail the snapshot build** until the new year is
+  reviewed and added to the absence catalog. That is the designed behaviour, recorded here so it
+  is recognized as the feature it is rather than treated as a regression.
+
+---
+
+## D049: `tooling/` joins mypy's scope when the publish path lands there
+
+**Date:** 2026-08-12
+**Issue:** #132 (E11) · **Builds on:** #152's `tooling/` test coverage
+
+**Context:**
+
+`[tool.mypy] files` was `["src", "tests"]`, chosen when `tooling/` held nothing — the scripts
+there are not package modules, nothing imports them by name, and `usvote` is what ships. #132
+puts `tooling/publish-to-pages.py` in that directory: the code that decides which bytes reach a
+public website, whose whole design is a set of fail-closed conditions. #152 had already put
+`tooling/render-og-card.py` under test for the same reason (it decides what every published share
+card looks like).
+
+The pre-#132 state was the worst of both: `tests/unit/test_og_card_render.py` imports the renderer
+**by path**, so mypy checked the call sites in the test and never the definitions in the script.
+The issue asked for a deliberate decision either way rather than an inherited default.
+
+**Decision:**
+
+`files = ["src", "tests", "tooling"]`. The cost was measured, not estimated: the two new scripts
+were clean, and widening surfaced exactly two findings, both in the pre-existing renderer —
+`Image.LANCZOS` (an untyped int the Pillow stubs don't expose; swapped for the identical-valued
+`Image.Resampling.LANCZOS`) and `sys.exit(render(...))`, where `render` returns `None`, so the
+call forwarded nothing and only read as if it did. Both fixed here; all three cards re-render
+byte-identical afterwards.
+
+**Rationale:**
+
+- **Scope should follow consequence, not packaging.** "Not importable, therefore unchecked" was a
+  reasonable default when `tooling/` was empty and is the wrong one now that the directory decides
+  what reaches a public site and a public timeline. Nothing about `usvote` being the shipped
+  artifact makes a bad `og_card_source` resolution cheaper.
+- **The measurement is the argument.** Two findings across three scripts is a small enough bill
+  that deferring would have been a choice to keep a known gap.
+- **The ongoing cost is one rule:** a new `tooling/` script must carry annotations
+  (`disallow_untyped_defs` reaches it now). That is the same bar `src/` and `tests/` already meet.
+- **What this does *not* do:** ruff already covered `tooling/` (`extend-exclude` lists only
+  notebooks), and pytest's `testpaths = ["tests"]` is unchanged — the ported tests live in
+  `tests/unit/`, not beside the scripts as they do upstream, so they are collected by the existing
+  configuration rather than a second one.
+
+**Noted, deliberately not done here:** `scripts/` stays outside the scope, and by this entry's own
+"scope should follow consequence" reasoning it has a claim —
+`scripts/make_placeholder_snapshot.py` is load-bearing for CI's `docker-build` job. It is left out
+because the widening was scoped to the directory #132 touches and its cost was measured there;
+extending to a second directory on the same PR would be an unmeasured guess. Worth revisiting on
+the next change that lands in `scripts/`.
+
+---
+
+## D050: the hybrid views materialize policy (b) only, with the pandas builders kept as the tested oracle
+
+**Date:** 2026-08-22
+
+**Context:** #124 (E7-S5) had to expose `usvote/hybrid.py`'s computation as warehouse views —
+the read seam D039 settled for #102. The module had shipped **no SQL by design** (D037 note,
+architect ruling 2026-07-28) precisely so that this story could translate it, and it was written
+to make that translation mechanical: every step relationally expressible, the winner kept
+separable from the tie check because a view cannot `raise`.
+
+**Decision:**
+
+1. **Four views, two per surface.** `hybrid_preferred` / `hybrid_redistributable` at the
+   per-`(year, candidate)` grain and `hybrid_summary_preferred` /
+   `hybrid_summary_redistributable` at the per-`(year)` grain, all from one parameterized builder
+   pair, created by `usvote.hybrid.create_hybrid_views` and rebuilt by `warehouse.rebuild_views`
+   as a third step after `create_ec_pv_views`. D039 named the seam
+   "`hybrid_redistributable` (+ its per-election `hybrid_summary`)" without pinning the summary's
+   spelling; #124's AC requires **one per surface**, and a single `hybrid_summary` cannot be both,
+   so the surface is carried in the name.
+2. **The SQL implements coverage policy (b) only.** (c) stays reachable from Python alone. This is
+   a property, not a limitation: it is what makes the public surface's denominator treatment
+   *fixed* rather than configurable, which is what #102 relies on (D038/D042).
+3. **The pandas builders become the tested oracle, not a second implementation.** The house
+   dual-expression pattern of `join.py` and `pv/views.py`: the SQL string drives the live view and
+   is unit-tested for shape; `build_hybrid_frame` / `build_hybrid_summary` are re-run against
+   frames read back from the live views by an integration test.
+4. **The view-creation preconditions are the existing guards, and their limit is stated rather
+   than papered over.** (Plus one guard at the *input* grain — see the fan-out note below.) `create_hybrid_views` calls `build_hybrid_from_db` per surface first, so
+   the shares-≤-1, tie, rank-agreement and roster-disagreement checks all run over the live join
+   view — as `build_hybrid_from_db` promised #124 would inherit. But those validate the **pandas**
+   side, so a SQL/oracle drift passes every one of them. The differential integration test is the
+   only thing that covers it, and it is deliberately **not** gated on any corpus so it runs on any
+   integration box.
+5. **`pv_coverage`'s two nulls keep two spellings in SQL.**
+   `CASE WHEN NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.year = a.year) THEN NULL ELSE
+   coalesce(sum(...) FILTER (...), 0) END`. A bare `FILTER` sum returns NULL both for a year the
+   roster does not reach (coverage *unknown*) and for a year it reaches with no popular-vote
+   state (a real `0`), and collapsing those is exactly what D024's no-`unknown` design exists to
+   prevent.
+
+   **Correction (code review, same PR): the reach test is `EXISTS` over the roster, not `count()`
+   over the joined rows.** This entry first wrote it as
+   `CASE WHEN count(pv_status) = 0 THEN NULL …`, which asks a subtly different question — whether
+   the roster carries the year *for a state the EC spine has that year* — where the pandas oracle
+   asks whether the roster carries the year at all (`roster_years = set(resolved["year"])`). The
+   two agree only while D024 §6 keeps both derived from one spine; where they part, one side
+   reports a known `0.0` and the other an unknown NULL, which is the very distinction this column
+   exists to preserve. `tests/unit/test_hybrid.py::TestCoverageNullEncoding
+   ::test_the_roster_reach_test_matches_the_oracle_s_own` now pins the `EXISTS` form and asserts
+   the `count(...)` form is absent.
+6. **`party` is resolved by `min`, not required constant — a finding from the live corpus.** The
+   first version of the carried-column guard required every rolled-up column to be constant within
+   `(year, candidate_id)` and **failed the real two-source build**: MIT writes `REPUBLICAN` /
+   `DEMOCRAT` (its `party_simplified`) while UCSB writes `Republican` / `Democratic`, and
+   `pv_preferred` resolves the 1976–2024 overlap **per key, not per year** (D017), so a getter
+   MIT's D019 filter drops in one state keeps its UCSB spelling there. One party, two spellings.
+   `roll_up_national`'s pandas `first` would pick by row order — not merely different from the
+   SQL but non-deterministic — so `party` leaves the constancy guard and is resolved with `min`,
+   which is stable under row order. Deliberately not "the plurality party", which would make a
+   candidate's displayed label depend on vote counts. `roll_up_national` itself is **untouched**,
+   so the snapshot's `national_rollup` (D029/D037/F) and its content hash are unaffected.
+
+   **Correction (code review, same PR): `min` is only the same pick on both sides under a
+   byte-ordered collation.** This entry first claimed the two were "spelled identically in pandas
+   and in SQL". That is false. Python's `min` compares codepoints; Postgres `min(text)` compares
+   under the database collation, and on the usual `en_US.UTF-8` it returns `Republican` where
+   Python returns `REPUBLICAN` — a disagreement on precisely the mixed-spelling case the
+   resolution exists for, and one no offline test could see. The SQL therefore emits
+   `min(party COLLATE "C")`. `min(candidate)` needs no cast: `assert_carried_columns_constant`
+   proves it constant within the group, and `min` over one distinct value is
+   collation-independent. The differential test was seeding a single party spelling everywhere,
+   which is why it passed; it now seeds MIT's `REPUBLICAN` against UCSB's `Republican` on one
+   candidate-year, and fails without the cast.
+
+7. **The output-grain fan-out guards are a contract check, not a live tripwire, and say so.**
+   Both frames `assert_no_fan_out` inspects are group-by outputs, so duplicate keys are
+   impossible by construction; the guard is there against a future builder that stops
+   aggregating. It notably does **not** catch the failure it is naturally read as catching — a
+   raw `dwh.pv_votes` union leaking into the join view still collapses to one row per key here
+   and surfaces as a *doubled* `national_pv_votes` (the denominator is protected by the
+   per-`(year, state)` `max`). That is caught at the grain where it is expressible:
+   `create_hybrid_views` runs `usvote.join.assert_no_fan_out` on the input join frame. An
+   earlier docstring claimed the coverage this one disclaims (code review).
+
+**Consequences:**
+
+- **A breaking column change to a per-candidate view now needs a `DROP ... CASCADE` migration.**
+  `hybrid_summary_*` depends on `hybrid_*`, so the D047 append-only rule that governs
+  `EC_PV_COLUMNS` now binds `HYBRID_CANDIDATE_COLUMNS` and `HYBRID_SUMMARY_COLUMNS` too — with a
+  second view on top, `CREATE OR REPLACE VIEW` has less room than it does for `ec_pv`. Both
+  tuples now carry hand-written literal order pins (`HYBRID_CANDIDATE_COLUMNS` gained one here;
+  the gap was recorded as a follow-up after #123).
+- **AC-6's real-data assertions only ever run on a machine with all three corpora.** The gated
+  test pins the 2000/2016 flips against real national figures, the twelve partial-coverage years
+  from `docs/pv-coverage.md`, and 1824 under both policies — and skips in CI. Running it is a
+  merge precondition, on the same footing as `TestRealCorpus` (D022).
+- **2000's hybrid does not follow its popular vote, and that is now pinned.** On real national
+  denominators Nader's votes dilute Gore's PV share (Bush 0.4908 to Gore 0.4887), so
+  `hybrid_flip` is `false` in 2000 even though `pv_flip` is `true` — the opposite of what #123's
+  two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
+
+---
+
+## D051: the D017 layer-3 overlap tolerance is a three-part rule at three grains, calibrated from #70
+
+**Date:** 2026-08-23
+**Context:** D017 §3 made the 1976–2024 MIT/UCSB overlap a **validation gate** — "disagreements
+beyond a tolerance are flagged with provenance, not silently resolved" — but named no tolerance and
+shipped no implementation, deferring both to a research task (#70). That task landed in PR #168:
+[`research-pv-overlap.md`](research-pv-overlap.md) differences the two D017 single-source views
+(`dwh.pv_redistributable`, `dwh.pv_ucsb`) at the `(year, state, candidate)` cell grain, at the
+national roll-up grain, and at the national **margin** grain, and recommends thresholds in its §6.
+It also returned the verdict D017 §3 was waiting on — **the benign-seam assumption is CONFIRMED**
+(annotated onto D017 above). This entry **adopts** §6's thresholds so the gate has a decision to be
+implemented from, rather than an implementation issue citing a research spike directly. The spike
+deliberately declined to author this itself: `decisions.md` is append-only, so adopting a
+freshly-derived number is a human-authorized act, not a side effect of measuring it.
+**Decision:** Three thresholds at three grains. **Not one relative ceiling** — see the rationale.
+
+| # | Gate | Grain | Threshold | Observed 2026-08-22 | Catches |
+|---|------|-------|-----------|---------------------|---------|
+| 1 | Exact-match-rate floor | cell | **≥ 90% overall**, and **≥ 80% in any single year** | 93.44% overall; worst year 84.31% (1976) | many cells drifting slightly — a methodology step |
+| 2 | Per-cell relative ceiling | cell | **flag at 1%** (→ the D005 reliability list), **fail at 15%** | 7 of 87 divergent cells flag; 2 above 2%, 1 above 5%, **none above 10%** | one blown cell — a parse or unit regression |
+| 3 | Margin difference | national, in **pp** | **≤ 0.25 pp** | max **0.0337 pp** | the grain E7's published outputs actually depend on |
+
+**Thresholds 1 and 2 are the D017 layer-3 gate proper** and run at the cell grain over the PV
+union. **Their relative delta has a basis, and the measure is asymmetric, so it is part of the
+decision and not an implementation detail:** `relpct = |MIT − UCSB| ÷ UCSB × 100` — **UCSB is the
+denominator** (research §2). #167 implements against that definition; read as `÷ MIT` or `÷ mean`
+the 1% and 15% lines are different lines. **Threshold 3 is an E7 trustworthiness check** and belongs with the hybrid computation, not
+with the union — it is stated here because it is the threshold on the quantity D017's benign-seam
+caveat actually blesses.
+
+**Threshold 3 presupposes a denominator, and the denominator is D017's, not a choice:** the
+national margin is computed on **each source's own provided state-total column**
+(`Σ_states max(state_total_votes)`, what `usvote/hybrid.py::roll_up_national` computes as
+`national_pv_denominator`), **never a re-sum of candidate rows**.
+
+**Rationale:**
+- **Why not a single number.** With 93.44% of cells *exactly* equal, the failure that matters is
+  not one blown cell but many cells drifting slightly — a methodology step, which is precisely what
+  D017 §3 exists to detect. Any per-cell ceiling loose enough to tolerate real canvass revisions
+  passes that regression while the exact-match rate collapses. Threshold 1 is the instrument for
+  it; threshold 2 cannot be.
+- **Why 2 fails at 15% and not 10%.** No divergent cell exceeds 10% today and one exceeds 5%, so a
+  10% line sits close enough to live data to redden on an ordinary canvass revision. 15% still
+  catches an order-of-magnitude error, which is what a hard fail should be for. (The exact observed
+  maximum is deliberately not recorded — it is a **reconstruction vector**; see the licensing
+  bullet below for what that means and where the test lives.)
+- **Why 1's per-year floor is the tight one, on purpose.** 80% sits **4.3 points** under 1976's
+  observed 84.31%. In *points* that is not the table's smallest gap — the overall floor's is 3.44
+  — but points are the wrong unit for comparing floors over populations two orders of magnitude
+  apart. In **cells** the per-year floor allows ~20 divergent cells of a year's 102 against 16
+  observed in 1976, about **4 cells of slack**; the overall floor allows ~133 of 1326 against 87
+  observed, about **46**. A single state-year canvass revision in a bad year could approach the
+  first and could not come near the second. That is deliberate: the per-year floor is the instrument for exactly the
+  *localized* regression that would move one year, so slack defeats it. **Expect this to be the
+  first threshold to need review.**
+- **Why 3 is in percentage points.** That is the unit the claim is made in. 0.25 pp sits ~2× below
+  the smallest actual margin *in the measured window* (0.5113 pp), so within that range a passing
+  gate leaves no margin close enough to flip. It is **not a guarantee on unseen data**: a future
+  election decided by 0.2 pp would pass this gate and could still be source-sensitive.
+- **Why the roll-up grain is deliberately not gated.** Every national roll-up row lands under
+  0.15%, tighter than the cell grain, so thresholds 1 and 2 dominate it. A fourth threshold would
+  fire only where one of those already had.
+- **The denominator rule above is empirically vindicated, not stylistic.** D017's benign-seam
+  caveat predicted in the abstract that re-summing candidate rows would make margins sensitive to
+  each source's minor-candidate coverage (D007 scopes candidates to EC-getters, so a re-sum differs
+  systematically between sources). #70 **hit it in practice**: an early draft re-summed, and its
+  1992 margin read **6.96 pp** against the universally published ~5.6-pp Clinton–Bush margin — a
+  reader's first sanity check, failed. Recomputing on the provided denominator moved the maximum
+  cross-source delta 0.0498 → **0.0337 pp** and the safety ratio 10.7× → **15.2×**: the verdict
+  came back **stronger**, not weaker. Threshold 3's number is only meaningful on that denominator.
+  **Each ratio is taken within its own basis, and both halves move** — the re-sum basis also reads
+  2000's margin as 0.5322 pp, so 0.5322 ÷ 0.0498 = 10.7, while the provided basis gives
+  0.5113 ÷ 0.0337 = 15.2. Dividing the *published* 0.5113 by the *re-sum* 0.0498 mixes the two and
+  reproduces neither.
+  *(Those three figures — 6.96 pp, 0.0498, 10.7× — are published here for the first time rather
+  than reused from the finding, so the §2 test below was applied to each rather than assumed:
+  6.96 pp is a **MIT-only** quantity — Clinton minus Bush over a re-sum of MIT's own candidate
+  rows — computed directly from the CC0 CSV, which also reproduces the 0.5322 pp figure above.
+  It is **not**
+  reproducible from research §8's recipe, which builds the full warehouse and states that UCSB is
+  required, nor from the shipped `research-pv-overlap.sql`, which emits only the provided-denominator
+  margin. The other two are cross-source **ratios**, the class §2 blesses and of which §5.2 already
+  publishes thirteen.)*
+- **The published figures here are aggregates, and that is a licensing constraint, not a style
+  choice.** UCSB is `redistributable=false` (D016) and this repository is public, so committing a
+  UCSB `(year, state, candidate)` value **is** redistribution. **D022 is the byte-grain rule** (no
+  UCSB HTML is ever committed); the **individual-record** grain and the operative test are authored
+  in [research §2](research-pv-overlap.md), and that test is *"does this figure let a reader
+  reconstruct an individual record they would otherwise have to get from UCSB?"* — **not** "is this
+  figure a UCSB integer?". The distinction is the whole rule, because **the leaks #70's review
+  caught printed no UCSB integer either**: a per-year max *relative* deviation inverts via
+  `UCSB = MIT / (1 ± rel)` once the cell is attributed, MIT being CC0 and exactly reproducible,
+  which is why threshold 2's tail is carried here as **counts above thresholds** rather than as a
+  maximum. Research §5.3's blockquote works one such chain end to end. **Any figure derived from
+  this study inherits that test**, not merely a restatement of these thresholds — and the caught
+  vector was a chain across two figures in different sections, so it is chains that need checking,
+  not lines.
+
+**What this does not settle** — unchanged by a confirming result, and restated because a table of
+green numbers reads as more reassurance than it is:
+- **Stationarity.** Agreement measured *inside* 1976–2024 licenses reading UCSB *before* 1976 only
+  if UCSB's methodology is stationary across its own span. No in-overlap measurement can establish
+  that. See the D017 trailer and research §7.
+- **Accuracy.** Agreement is consistency between two modern sources, not correctness of a
+  19th-century tally.
+- **Raw national PV *counts* across the seam.** Only 4 of 26 roll-up rows agree exactly; small
+  per-cell differences accumulate rather than cancel when summed. D017 already said so; the
+  measurement confirms it rather than relaxing it.
+
+**Action required:**
+- **#167 implements all three thresholds** — it is the issue this entry exists to anchor, and
+  before this it would have had to cite a research spike for its numbers. The split above is about
+  *where the code lives*, not about what #167 delivers: thresholds 1 and 2 as the layer-3 gate over
+  the PV union, threshold 3 (#167's own AC-5) as the E7 trustworthiness check on
+  `hybrid_summary_preferred.pv_margin`, valid only on the provided-total denominator above.
+- **Revisit threshold 1's per-year floor first** if any of these needs loosening. **In cells** —
+  the unit the comparison holds in — it carries the least slack by design: ~4 against the overall
+  floor's ~46. In *points* it does not, and that is the reading to avoid.

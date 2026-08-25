@@ -108,7 +108,14 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 "tests/**" = ["E501"]
 
 [tool.mypy]
-files = ["src", "tests"]
+# `tooling` joined src/tests in #132 (D049). These are scripts, not package
+# modules — nothing imports them by name — but they are the code that decides
+# which bytes reach a public website (publish-to-pages.py) and what every
+# published share card looks like (render-og-card.py). Their tests import them by
+# path, so before this widening mypy checked the call sites and not the
+# definitions. The cost was two real findings in render-og-card.py; the ongoing
+# cost is that a new tooling/ script must carry annotations.
+files = ["src", "tests", "tooling"]
 # Pragmatic strictness (issue #19): require annotations and surface the common
 # unsoundness (implicit Optional, unreachable code, silently-Any returns, stale
 # ignores). Not full `strict = true` yet — `disallow_any_*` would drown in the

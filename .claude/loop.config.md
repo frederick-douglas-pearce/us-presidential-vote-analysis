@@ -22,7 +22,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). Current active epic: `epic:internal-api` (E8) | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation) | inferred from available agent roster |
-| `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the step-9 gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
+| `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
 | `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching the API serve surface (`usvote/api/`), the DB write path, or scraping/network code | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
 | `PRIORITY_LABELS` | `priority:high` > `priority:medium` > `priority:low`; tiebreak issue number ascending | inferred from `gh label list` (`priority:high`=Must have, `medium`=Should have, `low`=Nice to have) |
@@ -31,6 +31,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `TEST_CMD` | `uv run pytest` (offline unit suite; integration excluded by default via `addopts = -m 'not integration'`). Live-DB: `uv run pytest -m integration` (needs `USVOTE_TEST_DB_*`). Coverage: `uv run pytest --cov=usvote` | from `pyproject.toml` `[tool.pytest.ini_options]` + CLAUDE.md |
 | `LINT_CMD` | `uv run ruff check` (E,F,I,UP,B,SIM,C4 @ line-length 88; notebooks excluded) | from `pyproject.toml` `[tool.ruff]` + CI `ci.yml` |
 | `TYPE_CMD` | `uv run mypy` (checks `src` + `tests`; `disallow_untyped_defs`) | from `pyproject.toml` `[tool.mypy]` + CI |
+| `HERMETIC_TEST_CMD` | `unshare -rn -- sh -c 'ip link set lo up && uv run pytest'` | The one repo in the corpus that **declares an offline tier** (`CLAUDE.md`: "unit tests are offline (no network/DB)"), with **no socket-blocking tool** installed — so the block is a network namespace. **Verified 2026-08-10 (AC4):** canary `socket.create_connection(('1.1.1.1',443),3)` fails under the block with `OSError: [Errno 101] Network is unreachable` and connects without it; the tier passes under the block — **1012 passed, 14 skipped, 11 deselected, 19.23s**. `uv run` resolves offline against the synced `.venv`. **`ip link set lo up` is not optional** — a fresh netns leaves loopback DOWN, so `connect()` to `127.0.0.1` fails while `bind`/`listen` succeed. Caveats: `ip` is iproute2 (`ifconfig lo up` on minimal images); `unshare -r` maps the caller to **uid 0**, so a future test asserting `PermissionError` behaves differently. ⚠ **Never delete this row.** |
 | `CI_STATUS_CMD` | `gh pr checks <PR>` | GitHub host; CI is `.github/workflows/ci.yml` (jobs: `checks`, `integration`) |
 | `BRANCH_FMT` | `feature/<issue#>-<topic>` for features; `docs/<topic>` for docs-only (e.g. `feature/97-api-read-endpoints`, `docs/local-smoke-test`) | inferred from `git branch -a` + recent merge commits; CLAUDE.md says `feature/<topic>` |
 | `COMMIT_CONV` | Imperative subject with a trailing `(#<issue>)` reference; occasional `docs:`/`fix`-style prefixes. **Not** strict Conventional Commits. Co-author trailer per harness policy | inferred from `git log --no-merges` |
@@ -41,12 +42,12 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `LEDGER_ROOT` | `.claude/loop/` | **gitignored** — local working state, never committed |
 | `RELEASE_SCHEME` | No release cycle. `pyproject.toml` version = `0.1.0` (`Development Status :: 3 - Alpha`), no release-please/semantic-release config | merge gate reads "≤ patch bump or no bump" |
 
-### `CODE_REVIEW` — the step-9 gate is `/code-review`, and **not** these three
+### `CODE_REVIEW` — the code-review gate is `/code-review`, and **not** these three
 
 Three neighbouring commands are easy to reach for by mistake. Only the first satisfies the gate:
 
 - ✅ **`/code-review`** — the bug-hunting review of the working diff. **This is `CODE_REVIEW`.**
-  Run it after the AC-verifier (engine step 9), address viable findings, and land them as the
+  Run it on the PR branch once the PR is open, address viable findings, and land them as the
   repo's conventional `Address code-review findings on X (#NN)` follow-up commit.
 - ❌ **`/review <PR#>`** — reviews a *GitHub PR*. Useful, and past iterations journaled it in this
   slot, but it is a different tool with a different scope (the PR as published, not your working

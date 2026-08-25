@@ -15,17 +15,30 @@ serve-time boundary forbids (both enforced by tests).
 
 **Two grains, two builders.** :func:`build_hybrid_frame` is per ``(year, candidate)`` —
 the scores; :func:`build_hybrid_summary` is per ``(year)`` — the winners, the D041
-``ec_determinative`` flag, and the coverage flag. Flip detection and the three-method
-margins are **#123**, not here; view materialization is **#124**.
+``ec_determinative`` flag, the coverage flag, and — as of **#123** — the two flips
+(``pv_flip`` / ``hybrid_flip``, each method's winner against the EC baseline) and the
+three percentage-point margins. **#124** materialized both as warehouse views.
 
-**This module ships no SQL, deliberately** (architect ruling, Fred 2026-07-28).
-``join.py`` pairs a SQL builder with a pandas oracle because the same epic
-materializes the view; #121 performs no DB write, so a builder here would be dead code —
-and a view cannot ``raise``, so #124 must express the winners as a window rank plus a
-separate precondition query anyway. Two consequences are honoured throughout: every
-step stays relationally expressible (group-by aggregate, join, rank), and **the tie
-check is a separate ``assert_*``, never embedded in a winner column** — so #124's
-translation is mechanical.
+**The module ships SQL as of #124, and the pandas builders became its tested oracle**
+(D050) — the dual-expression pattern of ``join.py`` and ``pv/views.py``:
+:func:`build_hybrid_candidate_sql` and :func:`build_hybrid_summary_sql` drive the four
+live views, while :func:`build_hybrid_frame` / :func:`build_hybrid_summary` are re-run
+against frames read back from them by a differential integration test.
+
+It shipped **no** SQL until then, deliberately (architect ruling, Fred 2026-07-28): #121
+performed no DB write, so a builder would have been dead code. That deferral is why the
+translation was mechanical when it came, and the two constraints it imposed are still
+live and still load-bearing — every step stays relationally expressible (group-by
+aggregate, join, rank), and **the tie check is a separate ``assert_*``, never embedded
+in a winner column**, because a view cannot ``raise``. The winners are a window rank and
+:func:`assert_no_winner_tie` is a view-creation precondition
+(:func:`create_hybrid_views`).
+
+**What the guards do and do not cover.** Those preconditions run over the *pandas* side,
+so a drift between the two expressions passes every one of them; only the differential
+test (``tests/integration/test_hybrid_views.py::
+test_the_live_views_match_the_pandas_oracle``) covers that, which is why it is
+deliberately not corpus-gated.
 
 **The EC share is split in two, and that split is a safety property** (D037/A). Both
 denominators below look parallel and are not:
@@ -51,11 +64,17 @@ it: ``ec_determinative`` simply does not read that column.
 
 **The majority basis is the appointed allotment** (D041), exactly the 12th Amendment's
 "majority of the whole number of Electors **appointed**", while the numerators are votes
-actually **cast**. Real shortfalls exist (the 2000 DC abstention, faithless electors),
-so Σ ``president_electoral_votes`` can be *less* than ``ec_denominator`` and candidate
-shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
+actually **counted** (#144, D046). Those are three different quantities and they form a
+ladder — **appointed ≥ cast ≥ counted** — with a documented gap at each step:
+``ELECTORAL_VOTE_SHORTFALLS`` opens the first (appointed, never cast: the 2000 DC
+abstention, 1832 Maryland) and ``count_status`` opens the second (cast, never counted:
+1868's disputed nine, 1872's rejected seventeen).
+
+So Σ ``national_counted_electoral_votes`` can be *less* than ``ec_denominator`` and
+candidate shares sum to **≤ 1.0, never == 1.0** — correct, not a bug
 (:func:`assert_ec_shares_le_one`). 2000 is Bush **271 of 538 appointed**, not 269 of
-537 cast.
+537 cast; 1872 is Grant **286 of 366 appointed** against the 184 Congress announced,
+not 286 of the 352 its own table totals.
 """
 
 from __future__ import annotations
@@ -65,8 +84,16 @@ from typing import Literal
 
 import pandas as pd
 
-from usvote.join import EC_PV_PREFERRED_VIEW, EC_PV_REDISTRIBUTABLE_VIEW
+from usvote.count_status import COUNTED_VOTES_COLUMN
+from usvote.db import DBC
+from usvote.join import (
+    EC_PV_PREFERRED_VIEW,
+    EC_PV_REDISTRIBUTABLE_VIEW,
+)
+from usvote.join import assert_no_fan_out as assert_join_no_fan_out
 from usvote.load import SCHEMA
+from usvote.pv.overlap import read_overlap_frames
+from usvote.pv.source import MIT_PV_YEAR_MIN, SOURCE_MIT
 from usvote.pv.status import (
     PV_STATUS_POPULAR_VOTE,
     ROSTER_SCHEMA,
@@ -74,24 +101,40 @@ from usvote.pv.status import (
 )
 
 __all__ = [
+    "CARRIED_CANDIDATE_COLUMNS",
     "COVERAGE_POLICIES",
     "COVERAGE_POLICY_MISMATCHED",
     "COVERAGE_POLICY_RESTRICTED",
     "HYBRID_CANDIDATE_COLUMNS",
     "HYBRID_CANDIDATE_GRAIN",
+    "HYBRID_PREFERRED_VIEW",
+    "HYBRID_REDISTRIBUTABLE_VIEW",
     "HYBRID_SUMMARY_COLUMNS",
     "HYBRID_SUMMARY_GRAIN",
+    "HYBRID_SUMMARY_PREFERRED_VIEW",
+    "HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW",
+    "HYBRID_SURFACES",
+    "MARGIN_DIFF_MAX_PP",
     "REQUIRED_JOIN_COLUMNS",
     "CoveragePolicy",
     "HybridError",
     "apply_coverage_policy",
+    "assert_carried_columns_constant",
+    "assert_db_margin_agreement",
     "assert_ec_shares_le_one",
     "assert_ec_winner_matches_rank",
+    "assert_margin_agreement",
+    "assert_no_fan_out",
     "assert_no_winner_tie",
+    "assert_redistributable_only_source",
+    "build_hybrid_candidate_sql",
     "build_hybrid_frame",
     "build_hybrid_from_db",
     "build_hybrid_summary",
+    "build_hybrid_summary_sql",
+    "create_hybrid_views",
     "ec_denominator_by_year",
+    "national_pv_margin_by_year",
     "pv_coverage_by_year",
     "read_ec_pv_join",
     "read_pv_status_roster",
@@ -111,9 +154,10 @@ CoveragePolicy = Literal["mismatched", "restricted"]
 #: all EC-casting states and the PV share over the popular-vote states, and *flag* the
 #: mismatch with ``pv_coverage < 1.0``. ``restricted`` (c) narrows **both halves of the
 #: EC share** to the popular-vote states so both denominators span one sub-electorate.
-#: (c) is reachable only by an explicit argument; nothing in ``warehouse.py`` or #124
-#: passes one, which is what makes the public surface's treatment fixed rather than
-#: configurable (the property #102 relies on).
+#: (c) is reachable only by an explicit argument; neither ``warehouse.py`` nor the SQL
+#: builders pass one — the views materialize (b) alone (D050 §2) — which is what makes
+#: the public surface's treatment fixed rather than configurable (the property #102
+#: relies on).
 COVERAGE_POLICY_MISMATCHED: CoveragePolicy = "mismatched"
 COVERAGE_POLICY_RESTRICTED: CoveragePolicy = "restricted"
 COVERAGE_POLICIES: tuple[CoveragePolicy, ...] = (
@@ -139,6 +183,7 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
     "candidate",
     "party",
     "national_electoral_votes",
+    "national_counted_electoral_votes",
     "ec_denominator",
     "ec_share_full",
     "national_pv_votes",
@@ -151,7 +196,22 @@ HYBRID_CANDIDATE_COLUMNS: tuple[str, ...] = (
     "took_office",
 )
 
-#: The per-election summary's column contract, in order.
+#: The per-election summary's column contract, in order: identity, the three winners and
+#: the two E7-S2 flags, then #123's flips and margins.
+#:
+#: **Append, never insert**, and the order is pinned by a hand-written literal in
+#: ``TestShape.test_the_summary_column_order_is_pinned_to_a_literal`` — the twin of the
+#: ``EC_PV_COLUMNS[:15]`` pin in ``tests/unit/test_join.py``. It has to be a literal:
+#: this frame is built with ``columns=list(HYBRID_SUMMARY_COLUMNS)`` below, so any
+#: assert comparing the frame against the constant is circular and passes under a
+#: reorder or a mid-list insert alike. #124 materialized this tuple as the
+#: ``hybrid_summary_preferred`` / ``hybrid_summary_redistributable`` views, so the D047
+#: constraint on
+#: :data:`usvote.join.EC_PV_COLUMNS` applies here too — ``CREATE OR REPLACE VIEW`` can
+#: only add trailing columns, so a mid-list insert breaks a rebuild against an existing
+#: warehouse — and with a summary view reading a candidate view, a breaking change now
+#: needs an explicit ``DROP ... CASCADE`` migration rather than a ``CREATE OR REPLACE``
+#: (D050). The literal pin is what catches the drift before the DDL does.
 HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "year",
     "ec_denominator",
@@ -160,11 +220,82 @@ HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "hybrid_winner",
     "ec_determinative",
     "pv_coverage",
+    "pv_flip",
+    "hybrid_flip",
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
+)
+
+#: The four materialized hybrid views (#124), two per resolved surface. Named to mirror
+#: the join views they wrap (:data:`usvote.join.EC_PV_PREFERRED_VIEW` etc.) with the
+#: ``ec_pv_`` prefix dropped, so a hybrid view is never confused with its input.
+#: ``hybrid_preferred`` is the analysis surface (full 1824-2024 history when UCSB is
+#: loaded); ``hybrid_redistributable`` is the public API surface (#102 / D039) and —
+#: because it wraps the *independently defined* ``ec_pv_redistributable`` (D017) — can
+#: never carry a UCSB-derived number, which is the structural half of D030.
+HYBRID_PREFERRED_VIEW = "hybrid_preferred"
+HYBRID_REDISTRIBUTABLE_VIEW = "hybrid_redistributable"
+
+#: The per-election companions. D039 names the seam ``hybrid_redistributable`` "+ its
+#: per-election ``hybrid_summary``" without pinning the summary's spelling, and #124's
+#: acceptance criteria require **one per surface** — a single ``hybrid_summary`` cannot
+#: be both — so the surface is carried in the name (D050).
+HYBRID_SUMMARY_PREFERRED_VIEW = "hybrid_summary_preferred"
+HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW = "hybrid_summary_redistributable"
+
+#: ``(join view, per-candidate view, per-election view)`` — one entry per surface, so
+#: :func:`create_hybrid_views` loops rather than repeating itself and a third surface
+#: would be one row here.
+#:
+#: **Each row's two outputs must carry its own input's surface suffix**, pinned offline
+#: by ``TestViewConstants.test_each_output_name_matches_its_own_input_join_view``
+#: (#166). Without it, swapping the two output-name *pairs* between rows — each row
+#: keeping its input, emitting the other's names — builds ``hybrid_redistributable``
+#: over ``ec_pv_preferred``, i.e. over UCSB-provenanced rows, while it keeps the name
+#: the public path trusts; the entire offline suite passed under exactly that swap
+#: before #166.
+#:
+#: **That test pins this table and nothing else.** Two further links complete the chain,
+#: each pinned by its own test in ``tests/unit/test_hybrid.py``: that
+#: :func:`create_hybrid_views` issues each row's SQL under that row's name, by
+#: ``TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName``; and that a builder's SQL
+#: reads the join view it was given and never the sibling surface's, by
+#: ``TestRedistributableLeakGuardIsStructural``.
+HYBRID_SURFACES: tuple[tuple[str, str, str], ...] = (
+    (EC_PV_PREFERRED_VIEW, HYBRID_PREFERRED_VIEW, HYBRID_SUMMARY_PREFERRED_VIEW),
+    (
+        EC_PV_REDISTRIBUTABLE_VIEW,
+        HYBRID_REDISTRIBUTABLE_VIEW,
+        HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW,
+    ),
+)
+
+#: Columns that must be **constant within** :data:`HYBRID_CANDIDATE_GRAIN`, checked by
+#: :func:`assert_carried_columns_constant` as a view-creation precondition. Each is
+#: structurally constant — ``candidate`` is joined on ``candidate_id``, the two national
+#: totals are window sums over exactly this partition, and the rank and ``took_office``
+#: are broadcast per candidate-year by the transform — so a variation is an assembly
+#: bug, not a data property, and must fail loud rather than be quietly tie-broken.
+#:
+#: **``party`` is deliberately not in this set**, and that is a finding rather than an
+#: omission: on the UCSB-bearing preferred surface it genuinely varies, because the two
+#: sources *spell the same party differently* (``REPUBLICAN``/``Republican``,
+#: ``DEMOCRAT``/``Democratic``) and ``pv_preferred`` keeps a UCSB row wherever MIT has
+#: none for that key (D017 resolves the overlap **per key**, not per year). Requiring
+#: constancy there would fail every real two-source build over a capitalization
+#: difference. It is resolved deterministically instead — see :func:`_resolved_party`.
+CARRIED_CANDIDATE_COLUMNS: tuple[str, ...] = (
+    "candidate",
+    "national_electoral_votes",
+    "national_counted_electoral_votes",
+    "president_electoral_rank",
+    "took_office",
 )
 
 #: The columns this module reads off the resolved join view. A strict subset of
-#: :data:`usvote.join.EC_PV_COLUMNS` (pinned by a test), which is the shape that
-#: actually exists — there is no live hybrid view to pin against until #124.
+#: :data:`usvote.join.EC_PV_COLUMNS` (pinned by a test) — the shape this module *reads*,
+#: as distinct from :data:`HYBRID_CANDIDATE_COLUMNS`, the shape it produces.
 REQUIRED_JOIN_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
@@ -174,10 +305,14 @@ REQUIRED_JOIN_COLUMNS: tuple[str, ...] = (
     "total_electoral_votes",
     "president_electoral_votes",
     "national_electoral_votes",
+    "national_counted_electoral_votes",
     "president_electoral_rank",
     "took_office",
     "candidate_votes",
     "state_total_votes",
+    # Per-row, and distinct from the national sum above: policy (c) re-sums the counted
+    # measure over a restricted state set, which the national total cannot give it.
+    COUNTED_VOTES_COLUMN,
 )
 
 #: What :func:`roll_up_national` derives itself; a ``carry`` entry may not shadow one.
@@ -256,6 +391,124 @@ def roll_up_national(
         .rename(columns={"state_total_votes": "national_pv_denominator"})
     )
     return per_candidate.merge(denominator, on="year", how="left")
+
+
+# --- D051 gate 3: the cross-source margin-agreement check (#167) -------------
+#
+# D017 layer 3's third threshold. Gates 1 and 2 run at the cell grain over the PV union
+# and live in `usvote.pv.overlap`; this one is the **E7 trustworthiness check** and
+# lives here, beside the computation it protects (D051). That placement is forced rather
+# than preferred: the derivation below calls `roll_up_national`, and a home under
+# `usvote/pv/` would need a `pv -> hybrid` import, which `test_layering.py` forbids.
+
+#: Gate 3: the largest tolerated difference, in **percentage points**, between the
+#: national popular-vote margin computed from MIT and the same margin computed from
+#: UCSB, in any overlap year. D051 / `.claude/specs/research-pv-overlap.md` §6
+#: threshold 3; observed maximum **0.0337 pp**.
+#:
+#: **Percentage points, not a ratio** — that is the unit the claim is made in. 0.25 pp
+#: sits about 2x below the smallest actual margin in the measured window (0.5113 pp), so
+#: within that range a passing gate leaves no margin close enough to flip. It is **not a
+#: guarantee on unseen data**: a future election decided by 0.2 pp would pass this gate
+#: and could still be source-sensitive.
+MARGIN_DIFF_MAX_PP = 0.25
+
+
+def national_pv_margin_by_year(pv_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-year national popular-vote margin, in percentage points, for one source.
+
+    Takes a :data:`usvote.pv.schema.SHARED_PV_COLUMNS`-shaped single-source frame (a
+    read of ``pv_redistributable`` or ``pv_ucsb``) and returns ``year``/``pv_margin``.
+
+    **The denominator is the source's own PROVIDED state totals**, never a re-sum of
+    candidate rows, and that is a D017 rule rather than a preference — which is why this
+    calls :func:`roll_up_national` instead of summing here. D007 scopes candidates to
+    the EC-getters, so a re-sum differs *systematically* between two sources that cover
+    minor candidates differently. #70 hit it in practice: an early draft re-summed and
+    read 1992's margin as 6.96 pp against the universally published ~5.6 pp, failing a
+    reader's first sanity check. On the provided denominator the maximum cross-source
+    delta moved 0.0498 -> 0.0337 pp — the verdict came back *stronger* (D051).
+
+    The top-2 gap itself is :func:`_margin`, shared with the summary frame's three
+    margins, so "percentage points, over that method's own non-NULL scores, ``None``
+    under fewer than two candidates" has one definition rather than two.
+    """
+    rolled = roll_up_national(pv_df, key=("year", "candidate"), carry={})
+    rolled["share"] = rolled["national_pv_votes"] / rolled["national_pv_denominator"]
+    margins = [
+        {"year": int(year), "pv_margin": _margin(group["share"])}
+        for year, group in rolled.groupby("year", sort=True)
+    ]
+    return pd.DataFrame(margins, columns=["year", "pv_margin"])
+
+
+def assert_margin_agreement(
+    mit_df: pd.DataFrame,
+    ucsb_df: pd.DataFrame,
+    *,
+    error_cls: type[Exception] = HybridError,
+) -> pd.DataFrame:
+    """Raise when any overlap year's two national margins differ by > the D051 ceiling.
+
+    Returns the per-year comparison frame (``year``, ``mit_margin``, ``ucsb_margin``,
+    ``diff_pp``) so a caller can report it; raises :class:`HybridError` on a breach.
+
+    Both frames are re-filtered to the overlap window here as well as at the read, so
+    the oracle is correct when called directly from a test — the same self-defense
+    :func:`usvote.pv.overlap.compute_overlap_report` applies, and for the same reason.
+
+    **Years either source cannot score are skipped, not failed.**
+    :func:`national_pv_margin_by_year` returns ``None`` for a year with fewer than two
+    scored candidates, and a missing margin is a coverage gap — comparing it against
+    anything would invent a difference out of an absence (the same reasoning that makes
+    :func:`_flip` NULL rather than ``True`` on an all-NULL year).
+    """
+    mit_df = mit_df.loc[mit_df["year"] >= MIT_PV_YEAR_MIN]
+    ucsb_df = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
+    merged = national_pv_margin_by_year(mit_df).merge(
+        national_pv_margin_by_year(ucsb_df),
+        on="year",
+        how="inner",
+        suffixes=("_mit", "_ucsb"),
+    )
+    comparable = merged.loc[
+        merged["pv_margin_mit"].notna() & merged["pv_margin_ucsb"].notna()
+    ].copy()
+    comparable["diff_pp"] = (
+        comparable["pv_margin_mit"] - comparable["pv_margin_ucsb"]
+    ).abs()
+    breaches = comparable.loc[comparable["diff_pp"] > MARGIN_DIFF_MAX_PP]
+    if not breaches.empty:
+        offenders = [
+            f"{int(row.year)}: {row.diff_pp:.4f} pp"
+            for row in breaches.itertuples(index=False)
+        ]
+        raise error_cls(
+            "the national popular-vote margin is source-sensitive beyond the D051 "
+            f"gate-3 ceiling of {MARGIN_DIFF_MAX_PP} pp "
+            "(see .claude/specs/research-pv-overlap.md §6): " + "; ".join(offenders)
+        )
+    return comparable.rename(
+        columns={"pv_margin_mit": "mit_margin", "pv_margin_ucsb": "ucsb_margin"}
+    ).reset_index(drop=True)
+
+
+def assert_db_margin_agreement(
+    dbc: DBC, *, schema: str = ROSTER_SCHEMA
+) -> pd.DataFrame | None:
+    """Live-DB form of gate 3; ``None`` when UCSB is absent (AC-3), raising nothing.
+
+    Reads through :func:`usvote.pv.overlap.read_overlap_frames`, which is the single
+    expression of the two-view read, the overlap-window filter and the UCSB skip probe —
+    all three AC-pinned — so this gate and the cell-grain gates beside it cannot drift
+    apart on any of them. ``schema`` is forwarded for the same reason its cell-grain
+    twin :func:`usvote.pv.overlap.assert_db_overlap_within_tolerance` takes one: a
+    non-default-schema caller must not silently validate a different warehouse.
+    """
+    frames = read_overlap_frames(dbc, schema=schema)
+    if frames is None:
+        return None
+    return assert_margin_agreement(*frames)
 
 
 # --- the appointed electoral allotment --------------------------------------
@@ -391,7 +644,7 @@ def pv_coverage_by_year(
 def _restricted_ec_numerator(
     ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame, key: Sequence[str]
 ) -> pd.DataFrame:
-    """Per-``key`` Σ ``president_electoral_votes``, ``popular_vote`` states only.
+    """Per-``key`` Σ counted electoral votes, ``popular_vote`` states only.
 
     Policy (c)'s EC numerator, and it must be **recomputed from the state rows** — the
     carried ``national_electoral_votes`` is a window SUM over *every* state, so pairing
@@ -401,9 +654,15 @@ def _restricted_ec_numerator(
     makes harmless (``ec_determinative`` never reads this column) and that this function
     must not commit anyway.
 
-    No dedup, unlike :func:`ec_denominator_by_year`: ``president_electoral_votes`` is
-    genuinely per ``(state, candidate)``, not a per-state allotment broadcast across
-    candidate rows, so a straight sum over the restricted state set is correct.
+    No dedup, unlike :func:`ec_denominator_by_year`: the measure is genuinely per
+    ``(state, candidate)``, not a per-state allotment broadcast across candidate rows,
+    so a straight sum over the restricted state set is correct.
+
+    Sums the **counted** measure, matching ``ec_share_full`` (#144, D046). A policy
+    chooses which *states* count toward the share, never which *basis* — pairing a cast
+    numerator with a counted one would make (c) and (b) disagree in 1872 for a reason
+    that has nothing to do with coverage. (Immaterial numerically today: both anomaly
+    years have full popular-vote coverage, so (c) restricts nothing there.)
     """
     resolved = _resolve_roster(roster_df)
     pv_states = resolved.loc[
@@ -411,9 +670,9 @@ def _restricted_ec_numerator(
     ]
     restricted = ec_pv_df.merge(pv_states, on=["year", "state"], how="inner")
     return (
-        restricted.groupby(list(key), as_index=False)["president_electoral_votes"]
+        restricted.groupby(list(key), as_index=False)[COUNTED_VOTES_COLUMN]
         .sum()
-        .rename(columns={"president_electoral_votes": "restricted_electoral_votes"})
+        .rename(columns={COUNTED_VOTES_COLUMN: "restricted_electoral_votes"})
     )
 
 
@@ -445,7 +704,7 @@ def apply_coverage_policy(
       it is already restricted. (c) therefore moves the EC half alone.
 
     Both branches keep every step relationally expressible (group-by aggregate, join),
-    so #124's translation to SQL stays mechanical.
+    which is what kept #124's translation to SQL mechanical.
 
     ``key`` is the grain ``national`` is on, and exists for the same reason
     :func:`roll_up_national` takes one: (c)'s numerator must be grouped by *whatever*
@@ -463,8 +722,11 @@ def apply_coverage_policy(
     **unreachable** — a non-NULL numerator over a zero denominator would require
     ``popular_vote`` states whose allotments sum to zero, which the join view cannot
     produce — and a guard no mutation can kill is dead code, so it is gone (AC-verify,
-    #122). On today's MIT-only redistributable surface the first path is *every* year:
-    the roster carries no MIT rows at all (#127), so (c) returns NULL throughout there.
+    #122). On the MIT-only redistributable surface that first path is now exactly the
+    **pre-1976** years: since #127 the roster carries MIT's own rows for 1976-2024, so
+    (c) is a no-op there (every state is ``popular_vote``, so restricting changes
+    nothing) and returns NULL only for the years MIT does not reach. Before the
+    backfill the roster held no MIT rows at all and (c) returned NULL throughout.
 
     ``ec_share_full`` and ``ec_determinative`` are deliberately **outside this
     function's reach** (D037/A) — policy-invariant, computed in
@@ -506,6 +768,41 @@ def apply_coverage_policy(
 # --- the two builders -------------------------------------------------------
 
 
+def _resolved_party(ec_pv_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-``(year, candidate_id)`` party, resolved deterministically by ``min``.
+
+    **Not carried through** :func:`roll_up_national`, whose ``first`` would be
+    order-dependent here, and **not** required constant by
+    :func:`assert_carried_columns_constant`, because on the UCSB-bearing preferred
+    surface it genuinely is not: MIT writes ``REPUBLICAN``/``DEMOCRAT`` (its
+    ``party_simplified``) while UCSB writes ``Republican``/``Democratic``, and
+    ``pv_preferred`` keeps a UCSB row wherever MIT has none for that key — D017
+    resolves the 1976-2024 overlap **per key**, not per year, so a getter MIT's D019
+    filter drops in one state keeps its UCSB spelling there.
+
+    So the two values are one party under two spellings, and any pick is arbitrary. What
+    matters is that the pick is **the same on both sides of the seam**: ``min`` is
+    stable, needs no ordering a view cannot express, and skips nulls (returning null
+    for an all-null group) in pandas and SQL alike, so a getter with no popular vote
+    anywhere keeps a NULL party rather than a fabricated one.
+
+    **The two are only the same pick under a byte-ordered collation, and the SQL says so
+    explicitly.** Python's ``min`` compares codepoints; Postgres ``min(text)`` compares
+    under the database collation, and on the usual ``en_US.UTF-8`` it returns
+    ``'Republican'`` where this function returns ``'REPUBLICAN'`` — a silent
+    disagreement on precisely the mixed-spelling case this resolution exists for. So
+    :func:`build_hybrid_candidate_sql` emits ``min(party COLLATE "C")``. Found at code
+    review, after both this docstring and D050 had asserted the two were identical.
+
+    Deliberately *not* "the party of the plurality of votes", which reads better and is
+    a different quantity: it would make a candidate's displayed party depend on vote
+    counts, so a recount could change it — a worse failure than an arbitrary-but-stable
+    label.
+    """
+    grain = list(HYBRID_CANDIDATE_GRAIN)
+    return ec_pv_df.groupby(grain, as_index=False)["party"].min()
+
+
 def build_hybrid_frame(
     ec_pv_df: pd.DataFrame,
     roster_df: pd.DataFrame,
@@ -545,15 +842,24 @@ def build_hybrid_frame(
         key=HYBRID_CANDIDATE_GRAIN,
         carry={
             "candidate": "candidate",
-            "party": "party",
             "national_electoral_votes": "national_electoral_votes",
+            "national_counted_electoral_votes": "national_counted_electoral_votes",
             "president_electoral_rank": "president_electoral_rank",
             "took_office": "took_office",
         },
     )
+    # party is resolved, not carried -- roll_up_national's ``first`` is order-dependent
+    # and the two sources spell one party two ways. See _resolved_party.
+    national = national.merge(
+        _resolved_party(ec_pv_df), on=list(HYBRID_CANDIDATE_GRAIN), how="left"
+    )
     national = national.merge(ec_denominator_by_year(ec_pv_df), on="year", how="left")
+    # Counted, not cast (#144, D046): who won is settled by the votes Congress counted,
+    # so the share that feeds ec_determinative divides the counted total by the
+    # appointed allotment — exactly the 12th Amendment's test. Identical to the cast
+    # basis in every year but 1868 and 1872.
     national["ec_share_full"] = (
-        national["national_electoral_votes"] / national["ec_denominator"]
+        national["national_counted_electoral_votes"] / national["ec_denominator"]
     )
     frame = apply_coverage_policy(
         national, ec_pv_df, roster_df, policy=policy, key=HYBRID_CANDIDATE_GRAIN
@@ -572,13 +878,60 @@ def _winner(scores: pd.Series, names: pd.Series) -> str | None:
     """The name maximizing ``scores`` over **non-NULL** entries; ``None`` if all NULL.
 
     Deliberately does **not** raise on a tie — :func:`assert_no_winner_tie` owns that,
-    kept separate so #124 can translate this to a SQL window rank (a view cannot
-    ``raise``) and make the tie check a precondition query.
+    kept separate so #124 could translate this to a SQL window rank (a view cannot
+    ``raise``) and make the tie check a view-creation precondition.
     """
     ranked = scores.dropna()
     if ranked.empty:
         return None
     return str(names.loc[ranked.idxmax()])
+
+
+def _flip(method_winner: str | None, ec_winner: str | None) -> object:
+    """``True`` when a method names a different winner than the EC baseline; else NULL.
+
+    **Guarded explicitly rather than written as ``method_winner != ec_winner``**, and
+    the difference is not stylistic. :func:`_winner` returns a Python ``None`` for an
+    all-NULL year, not ``pd.NA``, so ``!=`` does **not** propagate to NULL the way it
+    would over a pandas column — ``None != "Trump"`` is plain ``True``. A bare ``!=``
+    would therefore report a *flip* for every year carrying no popular vote at all:
+    worse than the ``false`` #123 forbids, because it invents a headline result out of
+    a coverage gap.
+
+    A NULL ``ec_winner`` is likewise NULL, not ``True`` — a flip is defined against the
+    EC baseline, and with no baseline there is nothing to differ from. That branch is
+    **defensive and unreachable on real data**: the EC fact is dense (``parse.py`` reads
+    the Archives' ``-`` as ``0``, so a loser is an explicit 0-EV row) and the appointed
+    denominator is positive, so every in-scope year resolves an EC winner.
+    """
+    if method_winner is None or ec_winner is None:
+        return pd.NA
+    return method_winner != ec_winner
+
+
+def _margin(scores: pd.Series) -> float | None:
+    """The top-2 gap in ``scores``, in percentage points; ``None`` under fewer than two.
+
+    Percentage points only (D037) — the scores are already ratios, so the gap is scaled
+    by 100 exactly once. 2000's electoral margin reads ``0.93``, never ``0.0093``.
+
+    **Computed over that method's own non-NULL entries**, which is why each margin takes
+    its own series rather than sharing one filtered frame: the three methods' top-2 sets
+    genuinely differ within a single year. 2016 is the live case — five of its seven
+    rows are faithless-elector and "Other" candidates carrying electoral votes but no
+    popular vote, so the EC gap is taken over seven candidates and the popular-vote gap
+    over two.
+
+    **Fewer than two scored candidates yields ``None``**, covering both the all-NULL
+    year (a warehouse built without UCSB has no pre-1976 popular vote) and the
+    lone-candidate year. A "top-2 gap" is undefined with one entry, and falling back
+    to ``top1 - 0`` would report a *share* under a column named margin — a wrong number
+    rather than an absent one.
+    """
+    ranked = scores.dropna().sort_values(ascending=False)
+    if len(ranked) < 2:
+        return None
+    return float((ranked.iloc[0] - ranked.iloc[1]) * 100.0)
 
 
 def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
@@ -598,12 +951,35 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
     ``ec_determinative`` and ``pv_coverage`` are **orthogonal** — 1824 is both "EC not
     determinative" and "partial PV coverage", two separate true facts.
 
-    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). Flips and
-    margins are #123.
+    **The flips** (#123) answer the thesis question (D001) per election: did this method
+    name a different winner than the Electoral College? The EC baseline is the rank-1
+    electoral-vote leader — ``argmax(ec_share_full)``, which
+    :func:`assert_ec_winner_matches_rank` cross-checks against the spine's
+    ``president_electoral_rank == 1`` — and deliberately **not** ``took_office``, which
+    diverges in a contingent election (1824's rank-1 was Jackson; the House installed
+    Adams). A flip whose method has no winner is NULL, never ``false`` — see
+    :func:`_flip` for why that needs an explicit guard.
+
+    **The three margins** are each method's top-2 gap in percentage points, over that
+    method's own non-NULL scores (:func:`_margin`). ``ec_margin`` reads
+    ``ec_share_full``, not the policy-selected ``ec_share_hybrid``, so it stays
+    coherent with the
+    ``ec_winner`` and ``ec_determinative`` computed from the same column: under coverage
+    policy (c) the hybrid share can re-rank candidates, which would leave a reported EC
+    margin describing a different ordering than the reported EC winner. On the shipped
+    default (b) the two columns are numerically identical, so this only bites under (c).
+    ``hybrid_margin`` reads ``hybrid_score`` and therefore tracks the D037 formula
+    automatically; the asymmetry between the two is deliberate, because they measure
+    different things.
+
+    Note it reads ``ec_share_full``, never ``ec_share_hybrid`` (D037/A). The SQL twin is
+    :func:`build_hybrid_summary_sql`.
     """
     rows: list[dict[str, object]] = []
     for year, group in hybrid_frame.groupby("year", sort=True):
         ec_winner = _winner(group["ec_share_full"], group["candidate"])
+        pv_winner = _winner(group["pv_share"], group["candidate"])
+        hybrid_winner = _winner(group["hybrid_score"], group["candidate"])
         determinative: object = pd.NA
         if ec_winner is not None:
             leader = group.loc[group["candidate"] == ec_winner, "ec_share_full"].iloc[0]
@@ -612,11 +988,20 @@ def build_hybrid_summary(hybrid_frame: pd.DataFrame) -> pd.DataFrame:
             "year": year,
             "ec_denominator": group["ec_denominator"].iloc[0],
             "ec_winner": ec_winner,
-            "pv_winner": _winner(group["pv_share"], group["candidate"]),
-            "hybrid_winner": _winner(group["hybrid_score"], group["candidate"]),
+            "pv_winner": pv_winner,
+            "hybrid_winner": hybrid_winner,
             "ec_determinative": determinative,
             "pv_coverage": group["pv_coverage"].iloc[0],
+            "pv_flip": _flip(pv_winner, ec_winner),
+            "hybrid_flip": _flip(hybrid_winner, ec_winner),
+            "ec_margin": _margin(group["ec_share_full"]),
+            "pv_margin": _margin(group["pv_share"]),
+            "hybrid_margin": _margin(group["hybrid_score"]),
         })
+    # ``columns=`` follows the constant rather than validating against it (unlike
+    # ``build_hybrid_frame``'s ``frame[list(...)]``, which raises on a declared-but-
+    # unproduced column). The order is backstopped by the literal-tuple assert named
+    # on HYBRID_SUMMARY_COLUMNS above, which no builder spelling could provide.
     return pd.DataFrame(rows, columns=list(HYBRID_SUMMARY_COLUMNS))
 
 
@@ -631,12 +1016,14 @@ def assert_ec_shares_le_one(
 ) -> None:
     """Assert per-year Σ ``ec_share_full`` ≤ 1.0 — **never** that it equals 1.0 (D041).
 
-    The denominator is the **appointed** allotment; the numerators are votes **cast**.
-    Real shortfalls (the 2000 DC abstention, faithless electors) make the sum strictly
-    less than
-    1.0 in such a year — 2000 is 537 of 538 — so an ``== 1.0`` assertion would fail on
-    correct data. Exceeding 1.0, though, means a denominator bug: dividing by *cast*
-    rather than *appointed*, or a denominator that lost a state.
+    The denominator is the **appointed** allotment; the numerators are votes **counted**
+    (#144). Both gaps in the appointed ≥ cast ≥ counted ladder make the sum strictly
+    less than 1.0 — 2000 is 537 of 538 cast, 1872 is 349 of 366 counted — so an
+    ``== 1.0`` assertion would fail on correct data. Exceeding 1.0, though, means a
+    denominator bug: dividing by *cast* or *counted* rather than *appointed*, or a
+    denominator that lost a state. Widening the numerator's basis can only shrink each
+    share, so this guard is strictly safer under the counted basis than it was under
+    cast.
     """
     totals = hybrid_frame.groupby("year")["ec_share_full"].sum()
     over = totals.loc[totals > 1.0 + tolerance]
@@ -665,9 +1052,10 @@ def assert_no_winner_tie(
     such year.
 
     Kept **separate from the winner derivation** on purpose (architect ruling, Fred
-    2026-07-28): #124 materializes these as SQL views, where a tie surfaces as two
-    rank-1 rows and this becomes a precondition query. A ``raise`` baked into a winner
-    column could not survive that translation.
+    2026-07-28), and #124 is where that paid off: the winners are now a SQL window rank,
+    where a tie would surface as two rank-1 rows and be broken arbitrarily, so this runs
+    as a :func:`create_hybrid_views` precondition instead. A ``raise`` baked into a
+    winner column could not have survived that translation.
     """
     for year, group in hybrid_frame.groupby("year", sort=True):
         scored = group[score_column].dropna()
@@ -690,9 +1078,14 @@ def assert_ec_winner_matches_rank(
     """Assert the EC winner is the candidate the spine already ranks first.
 
     ``argmax(ec_share_full)`` and ``president_electoral_rank == 1`` are two independent
-    paths to one fact — both monotonic in ``national_electoral_votes``, one derived here
-    and one carried from ``dwh.votes``. They must agree; a disagreement means the frame
-    assembly misaligned candidates, which no per-column check would catch.
+    paths to one fact — both monotonic in ``national_counted_electoral_votes``, one
+    derived here and one carried from ``dwh.votes``. They must agree; a disagreement
+    means the frame assembly misaligned candidates, which no per-column check would
+    catch.
+
+    The two share a **basis**, and that is load-bearing rather than incidental: the rank
+    switched to the counted measure in #144 for the same reason this share did, and had
+    only one of them moved, 1872 alone would have been enough to fire this guard.
 
     Not a claim about who took office: 1824's rank-1 was Jackson while the House
     installed Adams (``took_office``), and both are correct.
@@ -776,41 +1169,48 @@ def build_hybrid_from_db(
     *,
     view: str = EC_PV_PREFERRED_VIEW,
     schema: str = SCHEMA,
+    roster_schema: str = ROSTER_SCHEMA,
     policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read the join view + roster; return ``(candidate frame, election summary)``.
 
     Local Postgres is required here, at **build time only** — the served API never opens
-    this connection (D028). #124 is what materializes the result as
-    ``hybrid_preferred``/``hybrid_redistributable`` plus their ``hybrid_summary``
-    companions and wires the rebuild into ``usvote.warehouse``.
+    this connection (D028). #124 materialized the result as
+    ``hybrid_preferred``/``hybrid_redistributable`` plus their ``hybrid_summary_*``
+    companions (:func:`create_hybrid_views`) and wired the rebuild into
+    ``usvote.warehouse``.
 
     **The roster read is scoped to the surface** — the sources actually present in
     ``view`` — so the MIT-only redistributable surface is not handed UCSB's roster and
     made to claim full coverage for years it holds no popular vote for (code review,
     #126). A view with no PV at all yields an empty source set, hence NULL coverage.
 
-    **On ``ec_pv_redistributable`` that scope currently matches nothing** (#127): MIT
-    writes no ``pv_state_status`` rows — only UCSB calls ``load_pv_status`` — so the
-    public surface reports NULL ``pv_coverage`` for every year, 1976-2024 included,
-    where the true EV-weighted coverage is ``1.0``. #127 backfills those rows; until it
-    lands, NULL is the honest reading of an absent roster, not a bug in this scoping.
+    **On ``ec_pv_redistributable`` that scope now matches MIT's own rows** (#127,
+    landed): ``run_mit_pipeline`` calls ``load_pv_status``, so 1976-2024 reports the
+    true EV-weighted ``1.0`` and pre-1976 stays NULL — no PV *and* no MIT roster row
+    reaches those years, which is the honest reading of an absent roster rather than a
+    fabricated ``0.0``. Before the backfill this scope matched **nothing**, so the
+    public surface reported NULL for *every* year including the fully-covered modern
+    ones; that was the bug #127 fixed, not a flaw in this scoping.
 
     ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
-    anything else** — #124 materializes the views from this default and ``warehouse.py``
-    never names a policy, which is why the public surface's treatment is fixed rather
-    than configurable (a test pins that no other module even mentions the constants).
+    anything else** — the views are built from this default and ``warehouse.py`` never
+    names a policy, which is why the public surface's treatment is fixed rather than
+    configurable (a test pins that no other module even mentions the constants).
 
     **The guards run here, not only in tests** (code review, #126). They exist to catch
     a denominator bug or a real dead heat, and on live warehouse data build time is the
     only place either can arise — the same reason
     :func:`usvote.join.create_ec_pv_views` runs
     :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
-    its upstream. #124 inherits them as its view-creation preconditions.
+    its upstream. :func:`create_hybrid_views` runs this function for exactly that
+    reason, inheriting all four as its view-creation preconditions.
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
     surface_sources = set(ec_pv_df["source"].dropna().unique())
-    roster_df = read_pv_status_roster(dbc, sources=surface_sources)
+    roster_df = read_pv_status_roster(
+        dbc, sources=surface_sources, schema=roster_schema
+    )
     frame = build_hybrid_frame(ec_pv_df, roster_df, policy=policy)
     summary = build_hybrid_summary(frame)
 
@@ -819,3 +1219,462 @@ def build_hybrid_from_db(
         assert_no_winner_tie(frame, score)
     assert_ec_winner_matches_rank(frame, summary)
     return frame, summary
+
+
+# --- SQL builders (drive the live views, #124) ------------------------------
+
+
+def _candidate_sql_cte(ec_pv_view: str, schema: str, roster_ref: str) -> str:
+    """The CTE block shared by the per-candidate builder — one per oracle step.
+
+    Split out so :func:`build_hybrid_candidate_sql` reads as the projection it is, and
+    so each CTE can be named after the pure function it mirrors.
+    """
+    src = f"{schema}.{ec_pv_view}"
+    return (
+        # ec_denominator_by_year: dedup (year, state) first -- a bare aggregate over the
+        # joined rows would multiply each state's allotment by the candidate count.
+        "WITH allot AS ("
+        " SELECT year, state, max(total_electoral_votes) AS state_electoral_votes"
+        f" FROM {src} GROUP BY year, state"
+        "), ec_denom AS ("
+        " SELECT year, sum(state_electoral_votes) AS ec_denominator"
+        " FROM allot GROUP BY year"
+        # _resolve_roster, scoped to the sources this surface actually carries -- the
+        # scoping build_hybrid_from_db does, so the MIT-only surface is never handed
+        # UCSB's roster and made to claim coverage for a year it holds no PV for.
+        "), roster AS ("
+        " SELECT year, state, min(pv_status) AS pv_status"
+        f" FROM {roster_ref}"
+        f" WHERE source IN (SELECT DISTINCT source FROM {src}"
+        " WHERE source IS NOT NULL)"
+        " GROUP BY year, state"
+        # pv_coverage_by_year's numerator. The CASE is load-bearing: a bare FILTER sum
+        # returns NULL both for a year the roster does not reach (coverage *unknown*)
+        # and for a year it reaches with no popular-vote state (a real 0). Collapsing
+        # those is exactly what D024's no-`unknown` design exists to prevent.
+        "), coverage AS ("
+        " SELECT a.year, CASE WHEN NOT EXISTS"
+        " (SELECT 1 FROM roster r2 WHERE r2.year = a.year) THEN NULL ELSE"
+        " coalesce(sum(a.state_electoral_votes)"
+        f" FILTER (WHERE r.pv_status = '{PV_STATUS_POPULAR_VOTE}'), 0)"
+        " END AS covered_electoral_votes"
+        " FROM allot a LEFT JOIN roster r ON r.year = a.year AND r.state = a.state"
+        " GROUP BY a.year"
+        # roll_up_national's denominator half: per-(year, state) max BEFORE the year
+        # sum.
+        # max skips NULL, so a no-PV getter's NULL row cannot silently drop the state.
+        "), pv_state AS ("
+        " SELECT year, state, max(state_total_votes) AS state_total_votes"
+        f" FROM {src} GROUP BY year, state"
+        "), pv_denom AS ("
+        " SELECT year, sum(state_total_votes) AS national_pv_denominator"
+        " FROM pv_state GROUP BY year"
+        # roll_up_national's per-candidate half. sum() over an all-NULL group returns
+        # NULL, which *is* pandas min_count=1: a getter with no PV anywhere stays NULL
+        # rather than becoming a fabricated 0.
+        "), national AS ("
+        " SELECT year, candidate_id, min(candidate) AS candidate,"
+        # COLLATE "C" is load-bearing, not decoration: Postgres min(text) is
+        # collation-dependent, and under the usual en_US.UTF-8 it returns 'Republican'
+        # where Python's codepoint min in _resolved_party returns 'REPUBLICAN' -- a
+        # silent disagreement on exactly the mixed-spelling case party is resolved for.
+        # min(candidate) needs no such cast: assert_carried_columns_constant proves it
+        # constant within the group, and min over one distinct value is
+        # collation-independent.
+        ' min(party COLLATE "C") AS party,'
+        " max(national_electoral_votes) AS national_electoral_votes,"
+        " max(national_counted_electoral_votes)"
+        " AS national_counted_electoral_votes,"
+        " min(president_electoral_rank) AS president_electoral_rank,"
+        " bool_or(took_office) AS took_office,"
+        " sum(candidate_votes) AS national_pv_votes"
+        f" FROM {src} GROUP BY year, candidate_id"
+        ")"
+    )
+
+
+def build_hybrid_candidate_sql(
+    ec_pv_view: str,
+    *,
+    schema: str = SCHEMA,
+    roster_schema: str = ROSTER_SCHEMA,
+    roster_table: str = ROSTER_TABLE,
+) -> str:
+    """Return the per-``(year, candidate)`` SELECT over ``ec_pv_view`` — coverage (b).
+
+    The SQL expression of :func:`build_hybrid_frame`, emitting exactly
+    :data:`HYBRID_CANDIDATE_COLUMNS` in order. One builder for both surfaces
+    (``ec_pv_view`` is ``ec_pv_preferred`` or ``ec_pv_redistributable``), mirroring
+    :func:`usvote.join.build_ec_pv_join_sql` and :func:`usvote.pv.views
+    .build_pv_preferred_sql` — the house dual-expression pattern, where this string
+    drives the live view and the pandas builder is the oracle a differential
+    integration test re-runs against it.
+
+    **Coverage policy (b) only, and that is a property rather than a limitation**
+    (D038/D050). (c) stays reachable only from Python, which is what makes the public
+    surface's denominator treatment *fixed* rather than configurable — the property
+    #102 relies on. See :func:`apply_coverage_policy`.
+
+    **Every ratio casts its numerator to ``double precision`` first.** Postgres
+    integer-divides two integers, so ``national_counted_electoral_votes /
+    ec_denominator`` would silently read ``0`` for every candidate in every year — a
+    plausible-looking column of zeros rather than an error. This is checked
+    numerically, not by string shape (a string assert cannot survive a rewording).
+    """
+    ctes = _candidate_sql_cte(
+        ec_pv_view, schema, f"{roster_schema}.{roster_table}"
+    )
+    ec_share = (
+        "n.national_counted_electoral_votes::double precision / d.ec_denominator"
+    )
+    pv_share = "n.national_pv_votes::double precision / p.national_pv_denominator"
+    return (
+        f"{ctes}"
+        " SELECT n.year, n.candidate_id, n.candidate, n.party,"
+        " n.national_electoral_votes, n.national_counted_electoral_votes,"
+        " d.ec_denominator,"
+        f" {ec_share} AS ec_share_full,"
+        " n.national_pv_votes, p.national_pv_denominator,"
+        f" {pv_share} AS pv_share,"
+        # Policy (b): the EC share is NOT restricted; the mismatch is flagged by
+        # pv_coverage < 1.0 instead. ec_share_hybrid is therefore ec_share_full here.
+        f" {ec_share} AS ec_share_hybrid,"
+        " c.covered_electoral_votes::double precision / d.ec_denominator"
+        " AS pv_coverage,"
+        # D037: the average of the two ratios, NULL-propagating by construction.
+        f" ({ec_share} + {pv_share}) / 2 AS hybrid_score,"
+        " n.president_electoral_rank, n.took_office"
+        " FROM national n"
+        " JOIN ec_denom d ON d.year = n.year"
+        " LEFT JOIN pv_denom p ON p.year = n.year"
+        " LEFT JOIN coverage c ON c.year = n.year"
+    )
+
+
+def build_hybrid_summary_sql(hybrid_view: str, *, schema: str = SCHEMA) -> str:
+    """Return the per-``(year)`` SELECT over ``hybrid_view`` — winners, flips, margins.
+
+    The SQL expression of :func:`build_hybrid_summary`, emitting exactly
+    :data:`HYBRID_SUMMARY_COLUMNS` in order.
+
+    Three translations carry the whole correctness argument:
+
+    - **The winner is a window rank, not a ``raise``-bearing argmax.** ``row_number()
+      ... DESC NULLS LAST`` plus ``FILTER (WHERE rn = 1 AND <score> IS NOT NULL)``
+      reproduces :func:`_winner`: an all-NULL year sorts a NULL row to rank 1, and the
+      ``IS NOT NULL`` is what turns that into a NULL winner instead of an arbitrary
+      candidate. A *tie* would make the pick arbitrary, which is precisely why
+      :func:`assert_no_winner_tie` runs as a view-creation precondition (a view cannot
+      ``raise``) rather than as logic inside this column.
+    - **The margin is rank-1 minus rank-2 and needs no explicit arity check.** With
+      fewer than two scored candidates the rank-2 term is NULL — either because no such
+      row exists or because its score is NULL — so the whole expression is NULL. Never
+      ``top1 - 0``, which would report a *share* under a column named margin.
+    - **The flip is an explicit ``CASE``, not ``<>``.** Same reason :func:`_flip` is
+      guarded: with no winner there is no baseline to differ from, and a method with no
+      winner must read NULL rather than inventing a headline result out of a coverage
+      gap.
+
+    ``ec_margin`` reads ``ec_share_full``, never the policy-selected
+    ``ec_share_hybrid``, so it stays coherent with the ``ec_winner`` and
+    ``ec_determinative`` derived from that same column.
+    """
+    src = f"{schema}.{hybrid_view}"
+    ranks = ", ".join(
+        f"row_number() OVER (PARTITION BY year ORDER BY {score} DESC NULLS LAST)"
+        f" AS {alias}_rn"
+        for alias, score in (
+            ("ec", "ec_share_full"),
+            ("pv", "pv_share"),
+            ("hybrid", "hybrid_score"),
+        )
+    )
+    winners = ", ".join(
+        f"max(candidate) FILTER (WHERE {alias}_rn = 1 AND {score} IS NOT NULL)"
+        f" AS {alias}_winner"
+        for alias, score in (
+            ("ec", "ec_share_full"),
+            ("pv", "pv_share"),
+            ("hybrid", "hybrid_score"),
+        )
+    )
+    margins = ", ".join(
+        f"(max({score}) FILTER (WHERE {alias}_rn = 1)"
+        f" - max({score}) FILTER (WHERE {alias}_rn = 2)) * 100.0 AS {alias}_margin"
+        for alias, score in (
+            ("ec", "ec_share_full"),
+            ("pv", "pv_share"),
+            ("hybrid", "hybrid_score"),
+        )
+    )
+    flips = ", ".join(
+        f"CASE WHEN {alias}_winner IS NULL OR ec_winner IS NULL THEN NULL"
+        f" ELSE {alias}_winner <> ec_winner END AS {alias}_flip"
+        for alias in ("pv", "hybrid")
+    )
+    return (
+        "WITH ranked AS ("
+        " SELECT year, candidate, ec_denominator, pv_coverage,"
+        " ec_share_full, pv_share, hybrid_score,"
+        f" {ranks}"
+        f" FROM {src}"
+        "), agg AS ("
+        " SELECT year, max(ec_denominator) AS ec_denominator,"
+        " max(pv_coverage) AS pv_coverage,"
+        f" {winners},"
+        # The leader's own share, so a strict > 0.5 is the 12th Amendment's test on the
+        # appointed allotment. NULL (not false) where there is no EC winner at all.
+        " bool_or(ec_share_full > 0.5)"
+        " FILTER (WHERE ec_rn = 1 AND ec_share_full IS NOT NULL)"
+        " AS ec_determinative,"
+        f" {margins}"
+        " FROM ranked GROUP BY year"
+        ")"
+        " SELECT year, ec_denominator, ec_winner, pv_winner, hybrid_winner,"
+        " ec_determinative, pv_coverage,"
+        f" {flips},"
+        " ec_margin, pv_margin, hybrid_margin"
+        " FROM agg"
+    )
+
+
+# --- view-creation preconditions + the creator (#124) -----------------------
+
+
+def assert_carried_columns_constant(
+    ec_pv_df: pd.DataFrame, *, error_cls: type[Exception] = HybridError
+) -> None:
+    """Assert each :data:`CARRIED_CANDIDATE_COLUMNS` entry is constant per
+    candidate-year.
+
+    The guard that keeps the SQL builder and the pandas oracle honest with each other.
+    :func:`roll_up_national` carries these with pandas ``first`` while
+    :func:`build_hybrid_candidate_sql` carries them with ``min``/``max``/``bool_or``,
+    and the two agree **only** where the column does not vary within
+    :data:`HYBRID_CANDIDATE_GRAIN`.
+
+    Every column in that set is **structurally** constant, so a variation is an assembly
+    bug rather than a property of the data: ``candidate`` is joined on ``candidate_id``,
+    the two national totals are window sums over exactly this partition, and the rank
+    and ``took_office`` are broadcast per candidate-year by the transform.
+
+    A divergence would be **silent in both directions**, which is why this raises rather
+    than being noted in a comment: pandas ``first`` reads the first non-null row of an
+    unordered ``SELECT``, so the oracle would not merely differ from the SQL — it would
+    not be deterministic either. The same shape as
+    :func:`ec_denominator_by_year`'s allotment check, and for the same reason.
+
+    ``party`` is **not** in the set; it varies legitimately and is resolved instead
+    (:func:`_resolved_party`).
+    """
+    present = [c for c in CARRIED_CANDIDATE_COLUMNS if c in ec_pv_df.columns]
+    grouped = ec_pv_df.groupby(list(HYBRID_CANDIDATE_GRAIN))
+    counts = grouped[present].nunique(dropna=True)
+    offenders = {}
+    for col in present:
+        keys = counts.index[counts[col] > 1]
+        if not len(keys):
+            continue
+        # Name the values, not just the key: "party varies in (2016, 3)" sends the
+        # reader hunting, while the two spellings usually identify the cause outright.
+        offenders[col] = {
+            key: sorted(
+                {str(v) for v in grouped.get_group(key)[col].dropna().unique()}
+            )
+            for key in list(keys)[:5]
+        }
+    if offenders:
+        raise error_cls(
+            "carried column(s) vary within (year, candidate_id), so the SQL view and "
+            "the pandas oracle would disagree (and 'first' would not even be "
+            f"deterministic): {offenders}"
+        )
+
+
+def assert_redistributable_only_source(
+    ec_pv_df: pd.DataFrame, *, error_cls: type[Exception] = HybridError
+) -> None:
+    """Assert no ``redistributable = false`` / non-MIT row is on the public surface.
+
+    #124's "defense in depth" data guard, the sibling of
+    :func:`usvote.snapshot.assert_redistributable_only` — **reimplemented here rather
+    than imported**, because :mod:`usvote.snapshot` already imports *from* this module
+    (``HybridError``, ``ec_denominator_by_year``, ``roll_up_national``), so importing it
+    back would be a circular import.
+
+    It runs on the **input join frame, pre-aggregation**: after the roll-up to
+    ``(year, candidate)`` there is no ``source``/``redistributable`` column left to
+    assert on. And it runs against **live data**, as a view-creation precondition — a
+    clean assertion over a hand-authored fixture would prove nothing, which is the
+    vacuity the structural view-definition test exists to cover instead.
+
+    A getter MIT does not cover has NULL PV (NULL ``source`` and ``redistributable``),
+    which is fine — an honest D005 gap. Only an explicit ``False`` or a non-MIT
+    ``source`` is a violation.
+    """
+    if "redistributable" in ec_pv_df.columns:
+        bad = ec_pv_df["redistributable"] == False  # noqa: E712 -- NULL must NOT match
+        if bool(bad.any()):
+            cols = ["year", "state", "candidate"]
+            raise error_cls(
+                "redistributable=false row(s) reached the redistributable hybrid "
+                "surface (D030) — the guard exists for exactly this regression: "
+                f"{ec_pv_df.loc[bad, cols].head().values.tolist()}"
+            )
+    non_mit = ec_pv_df["source"].dropna().ne(SOURCE_MIT)
+    if bool(non_mit.any()):
+        offenders = sorted(ec_pv_df["source"].dropna()[non_mit].unique())
+        raise error_cls(
+            f"non-MIT source(s) {offenders} reached the redistributable hybrid "
+            "surface (D016/D030) — only MIT is redistributable."
+        )
+
+
+def assert_no_fan_out(
+    df: pd.DataFrame,
+    key: Sequence[str],
+    *,
+    error_cls: type[Exception] = HybridError,
+) -> None:
+    """Assert one row per ``key`` — the :func:`usvote.join.assert_no_fan_out` analogue.
+
+    Called at both grains: :data:`HYBRID_CANDIDATE_GRAIN` for the per-candidate view and
+    :data:`HYBRID_SUMMARY_GRAIN` for the summary.
+
+    **Be precise about what this can and cannot catch, because the obvious reading is
+    wrong.** Both frames it inspects are group-by outputs, so duplicate keys are
+    impossible *by construction* today — it is a contract check against a future builder
+    that stops aggregating, not a live tripwire. In particular it does **not** catch the
+    failure it is naturally assumed to: a raw ``dwh.pv_votes`` union leaking into the
+    join view (two rows per 1976-2024 overlap key) still collapses to one row per key
+    here, and surfaces instead as a **doubled** ``national_pv_votes`` — the denominator
+    is protected by the per-``(year, state)`` ``max``, so ``pv_share`` doubles while
+    this guard sees nothing. That failure is caught upstream, at the grain where it is
+    expressible, by :func:`usvote.join.assert_no_fan_out` on the input join frame, which
+    :func:`create_hybrid_views` runs as a precondition. An earlier version of this
+    docstring claimed the coverage this one disclaims (code review, #124).
+    """
+    dupes = df.loc[df.duplicated(list(key), keep=False)]
+    if not dupes.empty:
+        raise error_cls(
+            f"hybrid frame fanned out (>1 row per {tuple(key)}): "
+            f"{dupes[list(key)].values.tolist()}"
+        )
+
+
+def _relation_exists(dbc: DBC, schema: str, name: str) -> bool:
+    """Return whether ``schema.name`` exists, via ``to_regclass`` (NULL when absent).
+
+    The same cheap non-raising probe :func:`usvote.join.create_ec_pv_views` uses, kept
+    local for the reason that one is: a module does not reach into another's private
+    helper.
+    """
+    got = dbc.select_query_to_df(f"SELECT to_regclass('{schema}.{name}') AS relation")
+    return got["relation"].iloc[0] is not None
+
+
+def create_hybrid_views(
+    dbc: DBC,
+    *,
+    schema: str = SCHEMA,
+    roster_schema: str = ROSTER_SCHEMA,
+    replace: bool = True,
+    close: bool = False,
+) -> None:
+    """Create all four hybrid views, after the per-surface preconditions pass.
+
+    Mirrors :func:`usvote.join.create_ec_pv_views`: probe **every** input, then per
+    surface run the guards as **preconditions** and create. The per-candidate view is
+    created first and its summary second, because the summary reads it.
+
+    **All probing happens before any creation, and that ordering is the point.** This
+    function opens no transaction and ``DBC`` commits per statement, so a probe inside
+    the loop would let a failure on the second surface leave the first surface's pair
+    created and committed — a warehouse advertising two of four hybrid views. The guards
+    themselves stay per-surface (they need that surface's data), so this narrows the
+    window rather than closing it; what it removes is the *foreseeable* half-build,
+    where an input is simply absent.
+
+    **Seven preconditions run before anything is created**, over exactly the data the
+    views will express. Three are checked here directly, on the input join frame:
+
+    - :func:`assert_redistributable_only_source` — redistributable surface only (D030);
+    - :func:`assert_carried_columns_constant` — the columns the SQL carries with
+      ``min``/``max``/``bool_or`` really are constant per candidate-year;
+    - :func:`usvote.join.assert_no_fan_out` — at the **input** grain, the one grain
+      where a raw-union leak is expressible (see :func:`assert_no_fan_out` for why the
+      two output-grain checks cannot see it).
+
+    Four more come from calling :func:`build_hybrid_from_db`, which is what that
+    function promised #124 would inherit: ``assert_ec_shares_le_one``,
+    ``assert_no_winner_tie`` on all three scores, ``assert_ec_winner_matches_rank``, and
+    (inside ``_resolve_roster``) the cross-source status-disagreement check. The tie
+    check matters most: a view cannot ``raise``, and a genuine dead heat would otherwise
+    make the window-rank winner an arbitrary pick.
+
+    **Know what these guards do and do not cover.** They validate the *pandas*
+    derivation, not the emitted SQL, so a SQL/oracle drift passes every one of them.
+    What covers that is the differential integration test, which reads both grains
+    back from the live views and compares them to the oracle. Stated here
+    because the asymmetry is easy to forget when adding a guard later.
+
+    ``replace`` defaults to ``True`` (``CREATE OR REPLACE VIEW`` — idempotent and
+    non-destructive). Note the consequence of the new view-on-view dependency (D050): a
+    *breaking* column change to a per-candidate view now needs an explicit
+    ``DROP ... CASCADE`` migration, since its summary depends on it.
+    """
+    # EVERY input is probed before ANY view is created. DBC commits per statement and
+    # this function opens no transaction, so probing inside the loop below would let a
+    # failure on the second surface leave the first surface's pair created and
+    # committed -- a warehouse advertising two of four hybrid views. The sibling
+    # usvote.join.create_ec_pv_views probes both of its inputs up front for exactly this
+    # reason. The roster is probed too: it is a required input (read_pv_status_roster),
+    # and without this its absence surfaces mid-loop as a raw psycopg2 UndefinedTable,
+    # which also aborts the connection -- the opacity the probe exists to prevent.
+    for join_view, _, _ in HYBRID_SURFACES:
+        if not _relation_exists(dbc, schema, join_view):
+            raise HybridError(
+                f"{schema}.{join_view} does not exist — run "
+                "usvote.join.create_ec_pv_views (or usvote.warehouse.rebuild_views) "
+                "before create_hybrid_views."
+            )
+    if not _relation_exists(dbc, roster_schema, ROSTER_TABLE):
+        raise HybridError(
+            f"{roster_schema}.{ROSTER_TABLE} does not exist — load a popular-vote "
+            "source (which writes the D024 roster) before create_hybrid_views; "
+            "pv_coverage cannot be derived without it."
+        )
+
+    for join_view, candidate_view, summary_view in HYBRID_SURFACES:
+        # Licensing and carried-column guards first, so a leak or a SQL/oracle
+        # divergence fails before the (more expensive) derivation runs.
+        ec_pv_df = read_ec_pv_join(dbc, view=join_view, schema=schema)
+        if join_view == EC_PV_REDISTRIBUTABLE_VIEW:
+            assert_redistributable_only_source(ec_pv_df)
+        assert_carried_columns_constant(ec_pv_df)
+        # At the INPUT grain, where a raw-union leak is actually expressible: two rows
+        # per 1976-2024 overlap key would double national_pv_votes while collapsing
+        # invisibly at the output grains below (see assert_no_fan_out).
+        assert_join_no_fan_out(ec_pv_df)
+        frame, summary = build_hybrid_from_db(
+            dbc, view=join_view, schema=schema, roster_schema=roster_schema
+        )
+        assert_no_fan_out(frame, HYBRID_CANDIDATE_GRAIN)
+        assert_no_fan_out(summary, HYBRID_SUMMARY_GRAIN)
+        dbc.create_view(
+            schema,
+            candidate_view,
+            build_hybrid_candidate_sql(
+                join_view, schema=schema, roster_schema=roster_schema
+            ),
+            replace=replace,
+        )
+        dbc.create_view(
+            schema,
+            summary_view,
+            build_hybrid_summary_sql(candidate_view, schema=schema),
+            replace=replace,
+        )
+    if close:
+        dbc.close_connection()

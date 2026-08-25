@@ -11,6 +11,7 @@ real-database load is covered by the integration test in
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from tests._helpers import (
@@ -21,8 +22,15 @@ from tests._helpers import (
     record_inserts,
 )
 from usvote import scrape
+from usvote.count_status import (
+    COUNT_STATUS_COLUMN,
+    COUNT_STATUS_COUNTED,
+    COUNT_STATUS_DISPUTED,
+    COUNT_STATUS_NOT_COUNTED,
+    COUNT_STATUS_REASON_COLUMN,
+    COUNTED_VOTES_COLUMN,
+)
 from usvote.load import SCHEMA
-from usvote.parse import ParseError
 from usvote.pipeline import (
     EC_SPINE_FLOOR,
     LATEST_ELECTION_YEAR,
@@ -33,7 +41,13 @@ from usvote.pipeline import (
     run_ec_pipeline,
 )
 from usvote.scrape import Fetch, fetch_from_dir
-from usvote.transform import TransformError
+from usvote.transform import (
+    ELECTORAL_VOTE_SHORTFALLS,
+    OTHER_CANDIDATES,
+    OTHER_VOTES,
+    TransformError,
+    apply_other_candidates,
+)
 
 # --- election_years --------------------------------------------------------
 
@@ -61,13 +75,19 @@ def test_election_years_defaults_to_module_latest() -> None:
     assert max(election_years()) == LATEST_ELECTION_YEAR
 
 
-def test_ec_ingest_years_applies_floor_and_reconstruction_exclusions() -> None:
+def test_ec_ingest_years_applies_the_floor_and_the_now_empty_gate() -> None:
     years = ec_ingest_years(2024)
     # The default ingest starts at the 1824 comparison floor (D009) ...
     assert min(years) == EC_SPINE_FLOOR == 1824
     assert 1820 not in years  # post-12A but below the floor (deferred)
     assert 1800 not in years  # pre-12th-Amendment (out of scope, D010)
-    # ... 1868 and 1872 are real elections but excluded pending dedicated modeling ...
+    # ... the Reconstruction gate is now EMPTY — 1868 was ingested by #143 and 1872 by
+    # #144, so the spine is unbroken from the floor to the latest year ...
+    assert frozenset() == UNSUPPORTED_EC_YEARS
+    assert {1868, 1872} <= years
+    assert years == set(range(1824, 2025, 4))
+    # ... and the gate mechanism itself is retained (not deleted) for a future era, so
+    # its contract still holds vacuously: every gated year is a real election year.
     assert election_years(2024) >= UNSUPPORTED_EC_YEARS
     assert not (UNSUPPORTED_EC_YEARS & years)
     # ... and the modern spine through the latest year is retained.
@@ -174,36 +194,204 @@ def test_run_ec_pipeline_pre1892_spine_offline(
     assert (jackson["party"], jackson["party_2"]) == ("D-R", "D")
 
 
-@pytest.mark.parametrize(
-    ("year", "exc", "match"),
-    [
-        # 1872: Greeley's scattered votes parse as an "Others" column with no
-        # registered correction -> TransformError.
-        (1872, TransformError, "no registered correction"),
-        # 1868: Georgia's contested "(9)" is a non-numeric vote cell -> ParseError.
-        (1868, ParseError, "un-modelled vote notation"),
-    ],
-)
-def test_run_ec_pipeline_rejects_gated_reconstruction_year(
-    recording_conn: RecordingConnection,
-    monkeypatch: pytest.MonkeyPatch,
-    year: int,
-    exc: type[Exception],
-    match: str,
+def test_an_unregistered_others_column_still_fails_loud() -> None:
+    """The gate is empty, but the guard that made it necessary must not have rotted.
+
+    Until #144 this was a *parametrized* test over ``UNSUPPORTED_EC_YEARS``: an explicit
+    ``years={1872}`` had to raise ``TransformError`` rather than silently load wrong
+    data. That year is now ingested and the gate is empty, so there is no year left to
+    parametrize over — and deleting the test outright would retire the guarantee along
+    with the year.
+
+    What actually protected 1872 was :func:`apply_other_candidates` refusing an
+    "Other(s)" placeholder column with no registered correction, and that guarantee is
+    permanent: it is what will catch the *next* wide year (a re-scrape, an Archives edit,
+    or the deferred pre-1824 era, D010). So the test moves down a level and exercises the
+    guard directly, on a synthetic year no correction registers.
+    """
+    unregistered = pd.DataFrame([
+        {
+            "year": 1796,
+            "president_candidate_name": "Others",
+            "col_ind": 3,
+            "president_candidate_state": None,
+        }
+    ])
+    with pytest.raises(TransformError, match="no registered correction"):
+        apply_other_candidates(unregistered)
+    # And the corrected years are exactly the ones that carry a registered split, so a
+    # year cannot be quietly dropped from the registry while a placeholder still parses.
+    assert set(OTHER_CANDIDATES) == set(OTHER_VOTES)
+    assert 1872 in OTHER_CANDIDATES
+
+
+def test_run_ec_pipeline_1868_contested_count_offline(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Both years are excluded from the default ingest (UNSUPPORTED_EC_YEARS); an
-    # explicit years={year} must fail loudly with a typed, located error rather than
-    # silently loading wrong data or crashing with a bare ValueError.
+    """1868 end-to-end (#143): the year the gate used to exclude now loads clean.
+
+    Exercises the whole slice at once — the dual-totals selection, the parenthesized
+    ``(9)``, the three dash-allotment states, and ``count_status`` reaching the fact —
+    against the real saved Archives page.
+    """
     record_inserts(monkeypatch)
-    with pytest.raises(exc, match=match):
-        run_ec_pipeline(
-            make_dbc(recording_conn),
-            "unused.shp",
-            replace=True,
-            years={year},
-            fetch=fetch_from_dir(FIXTURES_DIR),
-            load_geo=lambda _p: fake_state_geo(),
-        )
+    candidates_df, _state_df, votes_df = run_ec_pipeline(
+        make_dbc(recording_conn),
+        "unused.shp",
+        replace=True,
+        years={1868},
+        fetch=fetch_from_dir(FIXTURES_DIR),
+        load_geo=lambda _p: fake_state_geo(),
+    )
+    by_id = candidates_df.set_index("candidate_id")["name"].to_dict()
+    tot = votes_df[votes_df["is_total"]]
+    ev = {
+        by_id[int(r["candidate_id"])]: int(r["president_electoral_votes"])
+        for _, r in tot.iterrows()
+    }
+    # The *including-Georgia* totals: 294 appointed, Grant 214, Seymour 80. The 285/71
+    # reading is the one the source also prints and this pipeline must not adopt (D044).
+    assert ev == {"Ulysses S. Grant": 214, "Horatio Seymour": 80}
+    assert int(tot["total_electoral_votes"].iloc[0]) == 294
+
+    # #144: the counted basis reproduces the *other* row the same page prints — the one
+    # D044 had to reject as the cast total. Both readings now exist, one per measure,
+    # and neither is a curated literal: 285 = 294 - Georgia's 9, derived by
+    # _add_counted_votes summing the state rows.
+    counted = {
+        by_id[int(r["candidate_id"])]: int(r[COUNTED_VOTES_COLUMN])
+        for _, r in tot.iterrows()
+    }
+    assert counted == {"Ulysses S. Grant": 214, "Horatio Seymour": 71}
+    assert sum(counted.values()) == 285
+
+    state_rows = votes_df[votes_df["state"].notna()]
+    # Mississippi/Texas/Virginia appointed no electors: real 0-EV rows, not missing ones.
+    unreadmitted = state_rows[
+        state_rows["state"].isin(["Mississippi", "Texas", "Virginia"])
+    ]
+    assert len(unreadmitted) == 6  # 3 states x 2 candidates — dense, per D026
+    assert set(unreadmitted["total_electoral_votes"]) == {0}
+    assert set(unreadmitted["president_electoral_votes"]) == {0}
+
+    # Georgia's nine are Seymour's, and they are flagged `disputed` with the Archives'
+    # own sentence — the row exists and carries its votes; only their counting is open.
+    georgia = state_rows[state_rows["state"] == "Georgia"]
+    seymour_id = next(cid for cid, name in by_id.items() if name == "Horatio Seymour")
+    seymour_ga = georgia[georgia["candidate_id"] == seymour_id].iloc[0]
+    assert int(seymour_ga["president_electoral_votes"]) == 9
+    assert seymour_ga[COUNT_STATUS_COLUMN] == COUNT_STATUS_DISPUTED
+    assert "could not agree whether to accept" in seymour_ga[COUNT_STATUS_REASON_COLUMN]
+
+    # Exactly one row in the year is flagged; everything else is plainly `counted`,
+    # including the national totals row that aggregates the disputed nine (D044).
+    flagged = votes_df[votes_df[COUNT_STATUS_COLUMN] != COUNT_STATUS_COUNTED]
+    assert len(flagged) == 1
+    assert set(tot[COUNT_STATUS_COLUMN]) == {COUNT_STATUS_COUNTED}
+    # 1868 must NOT acquire a shortfall entry: its votes were cast, then contested —
+    # the other mechanism entirely (D043 §6).
+    assert not [key for key in ELECTORAL_VOTE_SHORTFALLS if key[0] == 1868]
+
+
+def test_run_ec_pipeline_1872_rejected_votes_offline(
+    recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1872 end-to-end (#144): the last gated year, and the hardest.
+
+    Exercises the whole slice against the real saved Archives page — the four-way
+    "Others" split, the 17 votes the table omits entirely, the AR/LA allotments printed
+    as "-", and both electoral-vote measures reaching the fact.
+
+    The three totals it pins are three different true statements about 1872:
+    **366 appointed** (what Congress announced, against the page's own 352),
+    **366 cast**, and **349 counted**.
+    """
+    record_inserts(monkeypatch)
+    candidates_df, _state_df, votes_df = run_ec_pipeline(
+        make_dbc(recording_conn),
+        "unused.shp",
+        replace=True,
+        years={1872},
+        fetch=fetch_from_dir(FIXTURES_DIR),
+        load_geo=lambda _p: fake_state_geo(),
+    )
+    by_id = candidates_df.set_index("candidate_id")["name"].to_dict()
+    tot = votes_df[votes_df["is_total"]]
+    cast = {
+        by_id[int(r["candidate_id"])]: int(r["president_electoral_votes"])
+        for _, r in tot.iterrows()
+    }
+    counted = {
+        by_id[int(r["candidate_id"])]: int(r[COUNTED_VOTES_COLUMN])
+        for _, r in tot.iterrows()
+    }
+    # Greeley's four scattered recipients, each reconciled against the page's own note
+    # 10 ("Gratz Brown received 18 votes; Hendricks 42; Jenkins 2; Davis 1").
+    assert cast == {
+        "Ulysses S. Grant": 300,
+        "Thomas A. Hendricks": 42,
+        "Benjamin Gratz Brown": 18,
+        "Charles J. Jenkins": 2,
+        "David Davis": 1,
+        "Horace Greeley": 3,
+    }
+    # Grant loses AR's 6 + LA's 8, Greeley all 3: 17 rejected, 349 counted.
+    assert counted["Ulysses S. Grant"] == 286
+    assert counted["Horace Greeley"] == 0
+    assert sum(cast.values()) == 366
+    assert sum(counted.values()) == 349
+    # The appointed denominator is 366 — NOT the 352 the Archives totals row prints,
+    # which omits the two states whose returns were refused (D045).
+    assert int(tot["total_electoral_votes"].iloc[0]) == 366
+
+    state_rows = votes_df[votes_df["state"].notna()]
+    ev = {
+        (r["state"], by_id[int(r["candidate_id"])]): int(r["president_electoral_votes"])
+        for _, r in state_rows.iterrows()
+    }
+    # Georgia only reconciles because the 3 Greeley votes were synthesized from note 4:
+    # the page prints 8 of its 11.
+    assert ev[("Georgia", "Horace Greeley")] == 3
+    assert ev[("Georgia", "Benjamin Gratz Brown")] == 6
+    assert ev[("Georgia", "Charles J. Jenkins")] == 2
+    assert (
+        sum(v for (state, _c), v in ev.items() if state == "Georgia")
+        == int(state_rows.loc[state_rows["state"] == "Georgia",
+                              "total_electoral_votes"].iloc[0])
+        == 11
+    )
+    # Arkansas and Louisiana appointed their full complement and cast for Grant; only
+    # the returns were refused. Contrast 1868's Mississippi/Texas/Virginia, which
+    # appointed nobody and are genuine 0-EV rows (D043 s2) — the distinction this year
+    # exists to keep.
+    for state, appointed in (("Arkansas", 6), ("Louisiana", 8)):
+        assert ev[(state, "Ulysses S. Grant")] == appointed
+        assert int(state_rows.loc[state_rows["state"] == state,
+                                  "total_electoral_votes"].iloc[0]) == appointed
+
+    # Exactly three flagged rows, all `not_counted`, each carrying the Archives' own
+    # sentence; the national totals row stays plainly `counted` (D044).
+    flagged = votes_df[votes_df[COUNT_STATUS_COLUMN] != COUNT_STATUS_COUNTED]
+    assert len(flagged) == 3
+    assert set(flagged[COUNT_STATUS_COLUMN]) == {COUNT_STATUS_NOT_COUNTED}
+    assert set(flagged["state"]) == {"Georgia", "Arkansas", "Louisiana"}
+    assert flagged[COUNT_STATUS_REASON_COLUMN].str.strip().astype(bool).all()
+    assert set(tot[COUNT_STATUS_COLUMN]) == {COUNT_STATUS_COUNTED}
+    # Cast-then-refused is the count_status mechanism, never the shortfall one: these
+    # votes WERE cast, so every row still sums to its allotment (D043 s6).
+    assert not [key for key in ELECTORAL_VOTE_SHORTFALLS if key[0] == 1872]
+
+    # Rank is on the counted basis, so Greeley's 3 rejected votes put him last rather
+    # than fourth — and Grant, whose 286 all counted, is still unambiguously rank 1.
+    rank = {
+        by_id[int(r["candidate_id"])]: int(r["president_electoral_rank"])
+        for _, r in tot.iterrows()
+    }
+    assert rank["Ulysses S. Grant"] == 1
+    assert rank["Horace Greeley"] == max(rank.values())
+    assert set(tot.loc[tot["took_office"], "candidate_id"].map(by_id)) == {
+        "Ulysses S. Grant"
+    }
 
 
 def test_run_ec_pipeline_2024_footnoted_state_offline(

@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tests.fixtures.api_snapshot import (  # noqa: E402  (after the sys.path shim)
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_pv_status_frame,
 )
 from usvote.snapshot import build_snapshot  # noqa: E402  (after the sys.path shim)
 
@@ -41,7 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     out_path = args[0] if args else "api_snapshot.sqlite"
     meta = build_snapshot(
-        synthetic_ec_pv_frame(), out_path, build_timestamp=SNAPSHOT_TS
+        synthetic_ec_pv_frame(),
+        out_path,
+        pv_status_df=synthetic_pv_status_frame(),
+        build_timestamp=SNAPSHOT_TS,
     )
     print(
         f"wrote placeholder snapshot -> {out_path} "

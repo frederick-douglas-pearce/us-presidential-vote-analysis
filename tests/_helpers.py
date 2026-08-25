@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -238,6 +239,35 @@ def make_dbc(conn: RecordingConnection) -> DBC:
     return DBC({"dbname": "test"}, connect=lambda **_: conn)
 
 
+class QueryDispatchDBC:
+    """A read-only ``DBC`` stand-in that answers by matching a relation in the query.
+
+    Deliberately not a mock: the callers under test are expected to *issue the reads
+    they claim*, so this serves real frames and records every query for the caller to
+    assert on (``pv_votes`` never appearing is a real assertion in the #167 tests).
+
+    ``routes`` maps a substring of the SQL — normally a relation name — to the frame to
+    return; the first match in insertion order wins, and ``default`` answers anything
+    unmatched. It implements only ``select_query_to_df``, which is all a read-only seam
+    uses, so a caller that takes a ``DBC`` casts at the call site — and keeps the stub
+    itself, since ``.queries`` is usually the point.
+    """
+
+    def __init__(
+        self, routes: dict[str, pd.DataFrame], default: pd.DataFrame
+    ) -> None:
+        self.routes = routes
+        self.default = default
+        self.queries: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        for needle, frame in self.routes.items():
+            if needle in query:
+                return frame.copy()
+        return self.default.copy()
+
+
 def record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     """Patch ``usvote.db.execute_values`` to capture ``(sql, argslist)``; return the log.
 
@@ -276,3 +306,92 @@ def fake_state_geo() -> pd.DataFrame:
         "INTPTLAT": "+18.0", "INTPTLON": "-66.0",
     })
     return pd.DataFrame(rows)
+
+
+def non_null_flag(value: object, *, label: str) -> bool:
+    """A boolean cell normalized to a Python ``bool``, rejecting every NULL shape loudly.
+
+    Exists because neither ``is`` nor ``bool(...)`` is correct on its own for a nullable
+    boolean, and which one is wrong depends on data the assert cannot see (#165):
+
+    - **From a live view.** ``pd.read_sql`` types a boolean column as ``object`` (cells are
+      Python ``bool``/``None``) when it carries a NULL, and as ``bool`` (cells are
+      ``numpy.bool_``) when it does not. So ``cell is False`` passes on the first and fails
+      on the second **against a correct value**, while ``bool(cell)`` maps ``None`` to
+      ``False`` — silently turning a ``NULL`` into a passing false. That laundering is what
+      #165 was filed for.
+    - **From the pandas builders.** :func:`usvote.hybrid.build_hybrid_summary` nulls as
+      ``pd.NA``, where ``bool(pd.NA)`` raises ``TypeError`` — loud, but an exception rather
+      than a diagnosis. A null *float* materializes as ``np.nan`` instead, which is the
+      fourth spelling and the one that defeats ``is not None``.
+
+    Rejecting all four and returning the Python singleton lets a call site keep the readable
+    ``is True`` / ``is False`` spelling and have it mean what it says, on either path and
+    under either dtype::
+
+        assert non_null_flag(summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip") is False
+
+    ``label`` is required and names the cell in every failure message: the value alone
+    cannot say where it was read, and a helper whose whole job is a good diagnosis should
+    not be callable without one.
+
+    **The message deliberately does not name a producing function.** This guards flips
+    (:func:`usvote.hybrid._flip`) *and* ``ec_determinative``, whose NULL comes from
+    ``build_hybrid_summary``'s own ``pd.NA`` branch and, in SQL, from a filtered
+    ``bool_or`` — so a hardcoded pointer would send half its callers to the wrong place.
+    ``label`` carries the specifics instead.
+    """
+    assert pd.api.types.is_scalar(value), (
+        f"{label} is not a scalar cell: {value!r} ({type(value).__name__}). Pass a single "
+        f"cell — a Series or array would make the null check below ambiguous, and a "
+        f"one-element sequence would slip past it entirely."
+    )
+    assert not pd.isna(value), (
+        f"{label} came back NULL — a NULL boolean here is the 'no value derived' "
+        f"encoding, which means the derivation broke. It is never a legitimate false."
+    )
+    assert isinstance(value, bool | np.bool_), (
+        f"{label} is not a boolean cell: {value!r} ({type(value).__name__}). "
+        f"bool() would coerce it silently, which is the class of bug this guards."
+    )
+    return bool(value)
+
+
+def narrow_mit_spine_to_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scope MIT's D024 roster read to the states its fusion sample actually covers.
+
+    Since #127 ``run_mit_pipeline`` derives its roster from the **EC spine** — the
+    independence that makes ``assert_roster_covers_facts`` a real silent-drop guard
+    rather than a frame compared against itself. That guard is strict by design: every
+    ``popular_vote`` roster state must have vote rows.
+
+    ``MIT_FUSION_SAMPLE_CSV`` is a deliberate **two-state extract** (2000 Florida, 2016
+    New York) chosen to exercise fusion aggregation, while the EC fixtures seed the
+    *real* Archives spine — all 51 jurisdictions per year. Run together, the guard
+    correctly reports the other 50 states as missing: the pair models an MIT load that
+    could not exist, and before #127 nothing could see that.
+
+    Rather than weaken the guard or grow the sample to 51 states x 2 years, these
+    integration tests narrow the participation read to the sample's own states. The
+    shipped path is otherwise untouched, and the derivation itself is covered
+    exhaustively offline in ``tests/unit/test_pv_status.py`` — including the case this
+    narrowing suppresses (a spine state the source lost must raise).
+    """
+    from usvote.mit import pipeline as mit_pipeline
+
+    real = mit_pipeline.read_ec_participation
+
+    def narrowed(dbc: Any, *, years: Any = None) -> pd.DataFrame:
+        frame = real(dbc, years=years)
+        sample = pd.read_csv(MIT_FUSION_SAMPLE_CSV)
+        # Narrow per ``(year, state)``, not per state: the sample carries Florida in
+        # 2000 and New York in 2016, so a state-only filter would leave Florida in the
+        # 2016 roster with no 2016 vote rows — and the guard would (correctly) fire.
+        pairs = {(int(y), str(s).title()) for y, s in zip(sample["year"], sample["state"], strict=True)}
+        keep = [
+            bool(pd.isna(s)) or (int(y), str(s)) in pairs
+            for y, s in zip(frame["year"], frame["state"], strict=True)
+        ]
+        return frame[keep]
+
+    monkeypatch.setattr(mit_pipeline, "read_ec_participation", narrowed)

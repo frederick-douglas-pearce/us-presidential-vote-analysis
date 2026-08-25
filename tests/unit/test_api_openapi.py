@@ -13,7 +13,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tests.fixtures.api_snapshot import SNAPSHOT_TS, synthetic_ec_pv_frame
+from tests.fixtures.api_snapshot import (
+    SNAPSHOT_TS,
+    synthetic_ec_pv_frame,
+    synthetic_pv_status_frame,
+)
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
 from usvote.snapshot import build_snapshot
@@ -24,7 +28,7 @@ from usvote.snapshot import build_snapshot
 def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     info = client.get("/openapi.json").json()["info"]
     assert info["title"] == "US Presidential Vote API"
-    assert info["version"] == "0.2.0"
+    assert info["version"] == "0.3.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -38,9 +42,17 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
 
 
 def test_openapi_contact_and_license(client: TestClient) -> None:
+    """``info.license`` advertises the **electoral-college** license, not CC0.
+
+    OpenAPI allows exactly one license entry and this surface has two data licenses.
+    Since #139 the EC one is chosen because it covers every row, where CC0 covers only
+    the popular-vote window — advertising CC0 as *the* license would put the narrower
+    claim on the broader dataset. Both are stated in full in the description.
+    """
     info = client.get("/openapi.json").json()["info"]
     assert info["contact"]["url"].startswith("https://github.com/")
-    assert info["license"]["name"].startswith("CC0")
+    assert info["license"]["name"].startswith("Public domain")
+    assert "17 U.S.C." in info["license"]["name"]
     assert info["license"]["url"].startswith("http")
 
 
@@ -59,7 +71,12 @@ def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None
     serves the fully-rendered static description instead of crashing.
     """
     out = str(tmp_path / "snapshot.sqlite")
-    build_snapshot(synthetic_ec_pv_frame(), out, build_timestamp=SNAPSHOT_TS)
+    build_snapshot(
+        synthetic_ec_pv_frame(),
+        out,
+        pv_status_df=synthetic_pv_status_frame(),
+        build_timestamp=SNAPSHOT_TS,
+    )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
     app = create_app(settings)  # no `with TestClient` → lifespan not run
     desc = app.openapi()["info"]["description"]

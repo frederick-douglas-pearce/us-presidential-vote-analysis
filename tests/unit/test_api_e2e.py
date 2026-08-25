@@ -33,7 +33,12 @@ def test_health_then_meta_then_data_walk(client: TestClient) -> None:
     health = client.get("/health").json()
     assert health["status"] == "ok"
     assert health["snapshot_loaded"] is True
-    assert health["coverage"] == {"year_min": 2016, "year_max": 2020}
+    assert health["coverage"] == {
+        "year_min": 1860,
+        "year_max": 2020,
+        "pv_year_min": 2016,
+        "pv_year_max": 2020,
+    }
     assert health["source"] == "MIT"
 
     # 2. /v1/meta — provenance + the content-hash ETag.
@@ -45,7 +50,13 @@ def test_health_then_meta_then_data_walk(client: TestClient) -> None:
     # 3. /v1/elections — the covered years, envelope intact.
     elections = client.get("/v1/elections").json()
     _assert_envelope(elections)
-    assert [item["year"] for item in elections["data"]] == [2016, 2020]
+    assert [item["year"] for item in elections["data"]] == [1860, 2016, 2020]
+    # The widened surface: 1860 is served, and says so about its popular vote.
+    assert [item["has_popular_vote"] for item in elections["data"]] == [
+        False,
+        True,
+        True,
+    ]
 
     # 4. /v1/elections/{year} — per-state rows (public field names) + sibling summary.
     year_body = client.get("/v1/elections/2020").json()
@@ -60,7 +71,18 @@ def test_health_then_meta_then_data_walk(client: TestClient) -> None:
     tx = client.get("/v1/states/TX").json()
     _assert_envelope(tx)
     assert {r["state_usps"] for r in tx["data"]} == {"TX"}
-    assert {r["year"] for r in tx["data"]} == {2016, 2020}
+    assert {r["year"] for r in tx["data"]} == {1860, 2016, 2020}
+
+    # 5b. The pre-popular-vote era is reachable, and its nulls are explained rather
+    # than bare — the whole point of widening the window (#139).
+    historical = client.get("/v1/elections/1860").json()
+    _assert_envelope(historical)
+    by_state = {r["state"]: r for r in historical["data"]}
+    assert by_state["Vermont"]["popular_votes"] is None
+    assert by_state["Vermont"]["pv_status"] == "legislature_chosen"
+    assert by_state["Nevada"]["pv_status"] == "not_participating"
+    assert by_state["Texas"]["pv_status"] == "popular_vote"  # held, just not covered
+    assert historical["summary"][0]["national_electoral_denominator"] == 18
 
     cand = client.get("/v1/candidates/cand-a").json()
     _assert_envelope(cand)

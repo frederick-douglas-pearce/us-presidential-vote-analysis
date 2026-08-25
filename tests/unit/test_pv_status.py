@@ -24,6 +24,7 @@ from usvote.pv.status import (
     assert_roster_covers_facts,
     assert_roster_shape,
     assert_unique_roster_grain,
+    build_popular_vote_roster,
     build_status_column_defs,
 )
 
@@ -40,6 +41,18 @@ def _roster(*rows: tuple[str, int, str | None, str, str | None]) -> pd.DataFrame
 def _facts(*rows: tuple[str, int, str]) -> pd.DataFrame:
     return pd.DataFrame(
         [{"source": s, "year": y, "state": st} for s, y, st in rows]
+    )
+
+
+def _participation(*rows: tuple[int, str | None, bool]) -> pd.DataFrame:
+    """A :func:`usvote.spine.read_ec_participation`-shaped frame ``(year, state, is_total)``.
+
+    ``total_electoral_votes`` is deliberately omitted — the roster derivation must not
+    need it (D024 §5 keeps the EC fact the sole source of electoral-vote truth), so a
+    frame without it is the honest input to build against.
+    """
+    return pd.DataFrame(
+        [{"year": y, "state": st, "is_total": t} for y, st, t in rows]
     )
 
 
@@ -199,4 +212,131 @@ class TestTwoWayAssert:
                 source="UCSB",
                 years={1900},
                 error_cls=UCSBRosterError,
+            )
+
+
+class TestBuildPopularVoteRoster:
+    """The mechanical roster derivation D024 §6/§Rationale anticipated (#127)."""
+
+    def test_one_popular_vote_row_per_distinct_participating_state(self) -> None:
+        """A ``SELECT DISTINCT`` over the spine; totals rows excluded (D024 §6)."""
+        roster = build_popular_vote_roster(
+            _participation(
+                (1976, "Ohio", False),
+                (1976, "Iowa", False),
+                (1976, None, True),   # the per-year totals row: state IS NULL
+                (2020, "Ohio", False),
+            ),
+            source="MIT",
+            years={1976, 2020},
+        )
+
+        assert list(roster.columns) == list(ROSTER_COLUMNS)
+        assert roster[["year", "state"]].values.tolist() == [
+            [1976, "Iowa"],
+            [1976, "Ohio"],
+            [2020, "Ohio"],
+        ]
+        assert set(roster["pv_status"]) == {PV_STATUS_POPULAR_VOTE}
+        assert set(roster["source"]) == {"MIT"}
+
+    def test_totals_rows_never_become_a_null_roster_state(self) -> None:
+        """``votes.state`` is NULL on totals rows — a naive DISTINCT loads garbage."""
+        roster = build_popular_vote_roster(
+            _participation((1976, None, True), (1976, "Ohio", False)),
+            source="MIT",
+            years={1976},
+        )
+        assert roster["state"].tolist() == ["Ohio"]
+        assert_roster_shape(roster)  # would fail on a null key
+
+    def test_years_scopes_the_roster_and_is_never_inferred(self) -> None:
+        """The spine spans 1824-2024; a source's roster covers only its own years."""
+        roster = build_popular_vote_roster(
+            _participation((1900, "Ohio", False), (1976, "Ohio", False)),
+            source="MIT",
+            years={1976},
+        )
+        assert roster["year"].tolist() == [1976]
+
+    def test_note_is_null_on_every_row(self) -> None:
+        """``note`` carries an *absence*'s cause, and there are no absences here.
+
+        Load-bearing for D022/D030: the note is the one roster field that can hold
+        verbatim UCSB prose, so a derivation that invented note text would put
+        non-redistributable content on a source that has none.
+        """
+        roster = build_popular_vote_roster(
+            _participation((1976, "Ohio", False)), source="MIT", years={1976}
+        )
+        assert roster["note"].isna().all()
+
+    def test_the_two_way_assert_catches_a_dropped_state(self) -> None:
+        """**The reason the roster comes from the spine and not the source's facts.**
+
+        A ``(year, state)`` lost during transform (``_drop_unattributable_rows``, the
+        D019 party filter, a bad join) is still in the spine, so it lands as a
+        ``popular_vote`` roster state with no vote rows and check 1 fires. Derived from
+        the source's own facts the roster would have lost the state too, both sides
+        would agree, and the year would quietly report ``pv_coverage`` below ``1.0`` —
+        which no sum validator can see, and which #69's PV->EC anti-join cannot either
+        (it finds phantom rows, the opposite direction).
+        """
+        spine = _participation((1976, "Ohio", False), (1976, "Iowa", False))
+        roster = build_popular_vote_roster(spine, source="MIT", years={1976})
+        dropped_iowa = _facts(("MIT", 1976, "Ohio"))
+
+        with pytest.raises(PVRosterError, match="have no vote rows"):
+            assert_roster_covers_facts(
+                dropped_iowa, roster, source="MIT", years={1976}
+            )
+
+    def test_the_two_way_assert_passes_on_a_complete_load(self) -> None:
+        spine = _participation((1976, "Ohio", False), (1976, "Iowa", False))
+        roster = build_popular_vote_roster(spine, source="MIT", years={1976})
+        facts = _facts(("MIT", 1976, "Ohio"), ("MIT", 1976, "Iowa"))
+
+        assert_roster_shape(roster)
+        assert_unique_roster_grain(roster)
+        assert_roster_covers_facts(facts, roster, source="MIT", years={1976})
+
+    def test_a_year_absent_from_the_spine_yields_no_rows_for_it(self) -> None:
+        """Surfaced by the assert as the pipeline-sequencing failure it is."""
+        roster = build_popular_vote_roster(
+            _participation((1976, "Ohio", False)), source="MIT", years={1976, 2020}
+        )
+        assert roster["year"].tolist() == [1976]
+        with pytest.raises(PVRosterError, match="pipeline-sequencing"):
+            assert_roster_covers_facts(
+                _facts(("MIT", 1976, "Ohio")),
+                roster,
+                source="MIT",
+                years={1976, 2020},
+            )
+
+    def test_pv_facts_passed_by_mistake_raise_the_typed_error(self) -> None:
+        """The PV fact frame has no ``is_total``; say so rather than KeyError.
+
+        The message must name **this** function, not the shared ``build_roster`` it
+        delegates to: ``usvote/mit/`` never calls that symbol, so an operator handed it
+        would grep for something that appears nowhere on their code path.
+        """
+        with pytest.raises(PVRosterError, match="EC participation frame is missing"):
+            build_popular_vote_roster(
+                _facts(("MIT", 1976, "Ohio")), source="MIT", years={1976}
+            )
+        with pytest.raises(PVRosterError, match=r"build_popular_vote_roster\('MIT'\)"):
+            build_popular_vote_roster(
+                _facts(("MIT", 1976, "Ohio")), source="MIT", years={1976}
+            )
+
+    def test_error_class_is_overridable(self) -> None:
+        from usvote.mit.pipeline import MITRosterError
+
+        with pytest.raises(MITRosterError):
+            build_popular_vote_roster(
+                _facts(("MIT", 1976, "Ohio")),
+                source="MIT",
+                years={1976},
+                error_cls=MITRosterError,
             )

@@ -23,13 +23,19 @@ spine, never the reverse).
 from __future__ import annotations
 
 # EC-getters (president EVs > 0) who, by design, have NO popular-vote row in any source
-# — so a reciprocal completeness / winner-has-PV guard must not require one. Two causes,
-# both historically closed:
+# — so a reciprocal completeness / winner-has-PV guard must not require one. Three
+# causes, all historically closed:
 #   - a state chose its electors by legislature and awarded them to this candidate, who
 #     was never on a popular-vote ballot (1832 Floyd, 1836 Mangum — both South Carolina,
 #     whose D024 roster row is `legislature_chosen`); and
 #   - a *faithless* or *unpledged* elector cast a presidential vote for someone who was
-#     not a presidential candidate that year (all the rest).
+#     not a presidential candidate that year (all the rest); and
+#   - the 1872 case, which is its own cause and the only one of its kind: Horace Greeley
+#     died between the popular vote and the meeting of the electors, so his pledged
+#     electors scattered their presidential votes across four men who had never run for
+#     president. All four received electoral votes without ever appearing on a ballot.
+#     (Greeley himself is NOT here — he ran, and took 43.8% of the popular vote; his 3
+#     rejected Georgia votes keep him an EC-getter on the cast basis, #144/D046.)
 # Keyed by the canonical EC name, matching the EC-getter frame. Without this exemption a
 # guard would false-positive on every one of these (the hazard the #38 architect review
 # flagged: 1960 Byrd, the 2016 faithless set, 2004 Edwards, …). The litmus for what
@@ -40,6 +46,11 @@ from __future__ import annotations
 EC_GETTERS_WITHOUT_POPULAR_VOTE: frozenset[tuple[int, str]] = frozenset({
     (1832, "John Floyd"),          # SC legislature-chosen (Nullifier), 11 EV
     (1836, "Willie P. Mangum"),    # SC legislature-chosen, 11 EV
+    # 1872 — Greeley's electors, redistributed after his death (#144). None ran.
+    (1872, "Thomas A. Hendricks"),  # 42 EV
+    (1872, "Benjamin Gratz Brown"),  # 18 EV, Greeley's own running mate
+    (1872, "Charles J. Jenkins"),  # 2 EV
+    (1872, "David Davis"),         # 1 EV
     (1956, "Walter B. Jones"),     # faithless AL elector, 1 EV
     (1960, "Harry F. Byrd"),       # unpledged Southern electors, 15 EV
     (1972, "John Hospers"),        # faithless VA elector (Libertarian), 1 EV

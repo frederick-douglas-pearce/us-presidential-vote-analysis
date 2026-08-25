@@ -30,7 +30,12 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
+from tests._helpers import (
+    FIXTURES_DIR,
+    MIT_FUSION_SAMPLE_CSV,
+    fake_state_geo,
+    narrow_mit_spine_to_sample,
+)
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.load import build_pv_union, load_pv_records
@@ -176,12 +181,16 @@ def test_union_views_resolve_a_synthetic_overlap(
 )
 def test_union_over_a_real_two_source_load(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: real MIT + real UCSB for 2016+2020, then the D017 views.
 
     The only check that resolves the views over genuinely reconciled two-source data.
     Doubly gated so CI never touches the UCSB snapshot (D022).
     """
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.mit.pipeline import run_mit_pipeline
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir

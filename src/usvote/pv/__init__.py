@@ -4,8 +4,9 @@ The Electoral-College pipeline is the flat top-level ``usvote`` package (the
 source-of-truth spine, D006); each popular-vote *source* nests as its own sibling
 subpackage (``usvote/mit/``, later ``usvote/ucsb/`` — the source-namespacing
 convention, D015). This ``usvote/pv/`` package is the third kind of thing: neither a
-source nor the EC spine, but the **shared, source-neutral PV contract** both PV
-sources conform to and load through.
+source nor the EC spine, but the **source-neutral shared layer** — mostly the PV
+contract both sources conform to and load through, plus (since #140) one module that
+carries source-neutral *data*.
 
 It holds the shared PV contract, deliberately owned by no single source:
 
@@ -23,9 +24,28 @@ It holds the shared PV contract, deliberately owned by no single source:
   per-source attributes (``precedence_rank``/``redistributable``/``license``) *and* the
   source-name literals ``SOURCE_MIT``/``SOURCE_UCSB`` both source transforms stamp.
 - :mod:`usvote.pv.views` — the three D017 resolution views over the raw union.
+- :mod:`usvote.pv.overlap` — the D017 **layer-3** gate (#167, D051): MIT-vs-UCSB
+  agreement at the ``(year, state, candidate)`` cell grain, over two of those views.
+  It reports keys and never magnitudes, which is a D030/D022 licensing constraint made
+  structural rather than a style choice. D051's third threshold is the national
+  margin-difference ceiling and lives in :mod:`usvote.hybrid` instead — beside the
+  computation it protects, and unable to live here because it calls
+  ``roll_up_national``.
 - :mod:`usvote.pv.load` — the write seams: ``load_pv_records`` (the one fact seam every
   source loads through, tagged by its ``source`` value), ``load_pv_status``, plus the
   #68 union seams ``load_pv_source`` / ``create_pv_views`` / ``build_pv_union``.
+
+One module here is **not** a contract, and the difference is worth stating rather than
+letting the list above imply otherwise:
+
+- :mod:`usvote.pv.absences` — the in-repo pre-1976 popular-vote absence catalog (#140):
+  32 ``(year, state)`` pairs at which no popular vote was held, each with a
+  public-domain citation, plus the derivation that layers them onto the EC spine's
+  roster. It carries **data and a derivation**, where every module above carries a
+  shape, a guard, or a seam. It belongs here anyway for the same reason the roster
+  contract does — which states held no popular vote is a fact about the *election*, not
+  about UCSB or MIT — and putting it under ``usvote/ucsb/`` would make the cross-source
+  control test that validates it circular.
 
 MIT (#66) is the first source to land, so per D018 ("DDL is finalized at the first
 load story") it is #66 that *creates* the shared fact table; the UCSB load (#37) reuses

@@ -13,6 +13,16 @@ reverse must never happen. Two greppable invariants express it:
   ``warehouse.py`` composition root, or ``hybrid.py``. A back-import inverts D015 into a
   cycle.
 
+A third invariant joined them in #140, and it guards a different property — not layering
+but **provenance**. ``usvote/pv/absences.py`` classifies pre-1976 popular-vote absences
+from public-domain sources so the public snapshot needs no UCSB input (D022/D030), and
+``tests/unit/test_ucsb_transform.py::TestRealCorpus`` uses UCSB as the *control* that
+validates it. Both properties collapse if the two ever touch, in either direction: a
+forward import would make the catalog UCSB-derived after all, and a **back**-import
+(anything under ``usvote/ucsb/`` reaching for the catalog) would make the control test
+circular — UCSB would be checking a number it had supplied. The back-direction is the one
+with teeth, so it is enforced as its own test rather than folded into the sweep above.
+
 **Why this file exists.** Both rules were cited as "the greppable ``dwh.votes`` guard" in
 several docstrings (``join.py``, ``warehouse.py``, ``test_api_import_graph.py``) and by the
 ``warehouse`` back-import test, which says it "mirrors" it. It turned out only the
@@ -33,6 +43,8 @@ would hide.
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -209,3 +221,167 @@ def test_the_ec_domain_modules_are_importable_without_a_pv_source_importing_back
 ) -> None:
     """Import them standalone — a cycle would surface here as an ImportError."""
     __import__(module)
+
+
+# --- the #140 provenance firewall -------------------------------------------
+
+
+ABSENCES = PKG_ROOT / "pv" / "absences.py"
+
+
+def test_the_absence_catalog_imports_nothing_from_ucsb() -> None:
+    """The forward direction: the catalog must not be UCSB-derived (D022/D030)."""
+    assert not imports(ABSENCES.read_text(), "usvote.ucsb")
+
+
+def test_the_absence_catalog_reads_no_ucsb_artifact() -> None:
+    """Not just imports — no corpus path, no env var, no ``ucsb`` literal in code.
+
+    Over :func:`code_only`, so the module's docstring may explain the UCSB relationship
+    (it must, in fact) without the guard punishing accurate documentation.
+    """
+    source = code_only(ABSENCES.read_text()).lower()
+    for needle in ("ucsb", "usvote_ucsb_html_dir"):
+        assert needle not in source, (
+            f"usvote/pv/absences.py names {needle!r} in code. The catalog's whole value "
+            "is that it reaches its classifications without UCSB; explain the "
+            "relationship in the docstring instead."
+        )
+
+
+def test_nothing_under_ucsb_imports_the_absence_catalog() -> None:
+    """The **back** direction — the one that protects something.
+
+    ``TestRealCorpus`` checks the curated roster against UCSB's. If any ``usvote/ucsb/``
+    module imported the catalog, UCSB's roster could inherit the very classifications it
+    is supposed to be independently corroborating, and the control test would pass by
+    construction while proving nothing.
+    """
+    modules = _modules_under("ucsb")
+    assert modules, "found no modules under usvote/ucsb/ — the guard would pass vacuously"
+    offenders = [
+        py.relative_to(PKG_ROOT).as_posix()
+        for py in modules
+        if imports(py.read_text(), "usvote.pv.absences")
+    ]
+    assert not offenders, (
+        "these must not import usvote.pv.absences — it would make the "
+        f"TestRealCorpus cross-source control test circular: {offenders}"
+    )
+
+
+#: Derives the curated roster in a **fresh interpreter** with ``usvote.ucsb`` made
+#: unimportable, then reports what it observed. Proving the property beats grepping for
+#: it: a lazy in-function import, or a transitive one through ``usvote.pv.status``, would
+#: survive both static checks above and die here. Run as a subprocess rather than by
+#: deleting from ``sys.modules`` — that leaks into every test that follows.
+_NO_UCSB_PROGRAM = """
+import sys
+
+
+class _BlockUCSB:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "usvote.ucsb" or fullname.startswith("usvote.ucsb."):
+            raise ImportError(f"usvote.ucsb is unimportable in this process: {fullname}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockUCSB())
+
+import pandas as pd
+
+from usvote.pv.absences import build_curated_roster
+from usvote.pv.status import PV_STATUS_LEGISLATURE_CHOSEN, PV_STATUS_POPULAR_VOTE
+
+LEGISLATURE = ["Delaware", "Georgia", "Louisiana", "New York", "South Carolina",
+               "Vermont"]
+frame = pd.DataFrame(
+    [{"year": 1824, "state": s, "is_total": False, "total_electoral_votes": 5}
+     for s in [*LEGISLATURE, "Pennsylvania"]]
+    + [{"year": 1824, "state": None, "is_total": True, "total_electoral_votes": 99}]
+)
+roster = build_curated_roster(frame, source="PROOF", years=[1824])
+by_state = dict(zip(roster["state"], roster["pv_status"]))
+
+assert len(roster) == 7, roster
+assert all(by_state[s] == PV_STATUS_LEGISLATURE_CHOSEN for s in LEGISLATURE), by_state
+assert by_state["Pennsylvania"] == PV_STATUS_POPULAR_VOTE, by_state
+assert "usvote.ucsb" not in sys.modules, sorted(sys.modules)
+print("OK")
+"""
+
+
+def test_the_curated_roster_derives_with_ucsb_unimportable() -> None:
+    """The strongest form of the firewall: prove it, don't grep it."""
+    result = subprocess.run(
+        [sys.executable, "-c", _NO_UCSB_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode == 0, (
+        f"deriving the curated roster reached usvote.ucsb.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("OK")
+
+
+#: The same blocker, applied to the module that builds the **public artifact** (#139).
+#: `build_curated_roster` proving itself UCSB-free is necessary but not sufficient: what
+#: matters for D030 is that the whole snapshot build — imports and all — never reaches
+#: UCSB, which is the claim D048 makes and the reason the pre-1976 `pv_status` may ship.
+_NO_UCSB_SNAPSHOT_PROGRAM = """
+import sys
+
+
+class _BlockUCSB:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "usvote.ucsb" or fullname.startswith("usvote.ucsb."):
+            raise ImportError(f"usvote.ucsb is unimportable in this process: {fullname}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockUCSB())
+
+import usvote.snapshot  # the public snapshot build, DB stack and all
+
+assert hasattr(usvote.snapshot, "derive_curated_pv_status_roster")
+assert "usvote.ucsb" not in sys.modules, sorted(sys.modules)
+print("OK")
+"""
+
+
+def test_the_snapshot_build_imports_with_ucsb_unimportable() -> None:
+    """The public snapshot build reaches no UCSB code, proven rather than asserted.
+
+    D048's licensing claim rests on this: the pre-1976 ``pv_status`` values may ship
+    because they come from the in-repo catalog over the EC spine, not from UCSB's
+    roster. A stray import — added later for convenience, or arriving transitively —
+    would quietly make the claim false while every other test stayed green.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _NO_UCSB_SNAPSHOT_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode == 0, (
+        f"importing usvote.snapshot reached usvote.ucsb.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("OK")
+
+
+def test_the_ucsb_blocker_in_that_program_actually_blocks() -> None:
+    """Non-vacuity: if the blocker were inert the proof above would prove nothing."""
+    probe = _NO_UCSB_PROGRAM.replace(
+        'print("OK")', 'import usvote.ucsb.transform\nprint("NOT BLOCKED")'
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode != 0
+    assert "unimportable in this process" in result.stderr

@@ -187,7 +187,7 @@ def ec_html_dir_from_env(
     domain and the live scrape still works without it, so nothing calls this unless the
     caller asked for corpus-backed behavior. What the variable buys is a warehouse
     rebuild that costs zero requests — the path that feeds the public API snapshot
-    (D034) — rather than re-scraping ~49 pages of a site whose ``robots.txt`` asks for a
+    (D034) — rather than re-scraping ~50 pages of a site whose ``robots.txt`` asks for a
     10-second crawl delay. ``environ`` is injectable for testing.
     """
     unset_hint = (

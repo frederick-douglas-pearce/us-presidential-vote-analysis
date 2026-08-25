@@ -43,6 +43,9 @@ coverage/
 # dev-loop ledger (local working state, never committed)
 .claude/loop/
 
+# Agent worktrees (transient git worktrees created for isolated agent runs)
+.claude/worktrees/
+
 # Outreach working area (blog post drafts, social copy, etc.). Mirrors the
 # claude-code-sessions policy — pre-publication scratch stays untracked, curated
 # assets are tracked — with one deviation that matters here: `social/candidates.md`
@@ -52,3 +55,7 @@ coverage/
 # Only the rendered OG cards and their committable build inputs are versioned.
 /social/*
 !/social/images/
+
+# Node toolchain for the Prettier gate on posts/ (package.json + the lockfile
+# are tracked; the installed tree is not).
+node_modules/

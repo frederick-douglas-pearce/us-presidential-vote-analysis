@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -53,6 +52,9 @@ TITLE_SIZE = 42
 TITLE_YS = {1: (72,), 2: (50, 94)}
 SUBHEAD_Y = 128
 SUBHEAD_SIZE = 23
+# PANEL_Y/PANEL_H describe the *band* the specimen occupies, and PANEL_H is also the
+# tallest a panel may get. A panel shorter than the band is centred inside it — see
+# `_panel_box`.
 PANEL_Y = 148
 PANEL_H = 436
 HEAD_H = 40
@@ -60,6 +62,14 @@ ROW_SIZE = 16
 ROW_LEAD = 18
 ROW_PAD_X = 26
 ROW_TOP_PAD = 24
+# Slack below the last row's baseline. Calibrated so a full-height panel is exactly
+# PANEL_H: HEAD_H + ROW_TOP_PAD + MAX_ROWS*ROW_LEAD + PANEL_BOTTOM_PAD == 436.
+PANEL_BOTTOM_PAD = 12
+# Derived from the SAME budget `_panel_box` spends, bottom pad included. Dropping the
+# pad here would agree with `_panel_box` only by the accident of the floor-division
+# remainder: raise PANEL_BOTTOM_PAD and a brief at MAX_ROWS would compute a height
+# above PANEL_H, get silently clamped, and lose the padding it was meant to have.
+MAX_ROWS = (PANEL_H - HEAD_H - ROW_TOP_PAD - PANEL_BOTTOM_PAD) // ROW_LEAD
 # Opt-in per panel via `mono = true`. Specimens that are *tables* (a value column
 # beside a label column) want uniform digit width; specimens that are bare name
 # lists don't. Panels without the flag render exactly as before, so already-shipped
@@ -88,6 +98,31 @@ def _subhead_block(text: str) -> str:
     )
 
 
+def _assert_no_collapsing_runs(panel: dict) -> None:
+    """Reject run-of-spaces column padding, which SVG silently collapses.
+
+    ``<text>`` inherits ``xml:space="default"``, so ``"1824   John Quincy Adams"``
+    ships as ``1824 John Quincy Adams`` — the gutter the brief's author saw in the
+    TOML is simply not in the render. It is invisible when every leading token is the
+    same width (all-4-digit years survive it by luck) and silently ruins the column
+    the moment they are not.
+
+    Emitting ``xml:space="preserve"`` would fix it globally but rewrite the SVG of
+    every already-shipped card, which is exactly the property this chassis promises
+    not to break. So the brief carries U+00A0 instead, and this guard makes the
+    requirement enforced rather than remembered.
+    """
+    for row in panel["rows"]:
+        for text in (row,) if isinstance(row, str) else tuple(row):
+            if "  " in text:
+                raise SystemExit(
+                    f"panel '{panel['label']}' row {text!r} pads a column with "
+                    f"consecutive spaces, which SVG collapses to one. Use U+00A0 "
+                    f'("\\u00A0" in TOML) for a literal gutter, or a [label, value] '
+                    f"pair to anchor a value column."
+                )
+
+
 def _row(x: float, w: float, y: float, row: str | list[str], font: str) -> list[str]:
     """One positional row: a bare label, or a [label, value] pair.
 
@@ -112,27 +147,50 @@ def _row(x: float, w: float, y: float, row: str | list[str], font: str) -> list[
     return parts
 
 
+def _panel_box(n_rows: int) -> tuple[int, int]:
+    """``(top, height)`` for a panel holding ``n_rows``, centred in the specimen band.
+
+    The chassis was built for ~20-row specimens and hardcoded the panel at the full
+    band height, which is fine while every card is a long state list. It is not fine
+    for a short specimen: post 1's evidence is five rows, and five rows clumped at the
+    top of a box sized for twenty reads as a rendering fault rather than as restraint.
+
+    So the panel now fits its content and is centred in the band it used to fill. A
+    full-height brief is unaffected by construction — at ``MAX_ROWS`` the height
+    saturates at ``PANEL_H`` and the offset is zero, so already-shipped briefs
+    re-render byte-identical (asserted in ``tests`` via the two committed cards).
+    """
+    height = min(
+        PANEL_H, HEAD_H + ROW_TOP_PAD + n_rows * ROW_LEAD + PANEL_BOTTOM_PAD
+    )
+    # Integer division on purpose: a half-pixel offset buys nothing visually, and a
+    # float would render as y="148.0" where the rest of the chassis emits y="148" —
+    # enough to break byte-identity on the already-shipped cards.
+    return PANEL_Y + (PANEL_H - height) // 2, height
+
+
 def _panel(x: float, w: float, panel: dict) -> str:
     """One record panel: rounded card, header bar, then index-aligned rows."""
     rows = panel["rows"]
-    max_rows = (PANEL_H - HEAD_H - ROW_TOP_PAD) // ROW_LEAD
-    if len(rows) > max_rows:
+    if len(rows) > MAX_ROWS:
         raise SystemExit(
-            f"panel '{panel['label']}' has {len(rows)} rows, max {max_rows}"
+            f"panel '{panel['label']}' has {len(rows)} rows, max {MAX_ROWS}"
         )
+    _assert_no_collapsing_runs(panel)
 
-    head_y = PANEL_Y + HEAD_H
+    top, height = _panel_box(len(rows))
+    head_y = top + HEAD_H
     parts = [
-        f'<rect x="{x}" y="{PANEL_Y}" width="{w}" height="{PANEL_H}" rx="14" '
+        f'<rect x="{x}" y="{top}" width="{w}" height="{height}" rx="14" '
         f'fill="{PANEL_BG}"/>',
-        f'<rect x="{x}" y="{PANEL_Y}" width="{w}" height="{HEAD_H}" rx="14" '
+        f'<rect x="{x}" y="{top}" width="{w}" height="{HEAD_H}" rx="14" '
         f'fill="{PANEL_HEAD}"/>',
         # Square off the header bar's bottom corners so it reads as a bar, not a pill.
         f'<rect x="{x}" y="{head_y - 14}" width="{w}" height="14" '
         f'fill="{PANEL_HEAD}"/>',
-        f'<text x="{x + ROW_PAD_X}" y="{PANEL_Y + 27}" fill="{FG}" font-size="20" '
+        f'<text x="{x + ROW_PAD_X}" y="{top + 27}" fill="{FG}" font-size="20" '
         f'font-weight="500">{escape(panel["label"])}</text>',
-        f'<text x="{x + w - ROW_PAD_X}" y="{PANEL_Y + 27}" text-anchor="end" '
+        f'<text x="{x + w - ROW_PAD_X}" y="{top + 27}" text-anchor="end" '
         f'fill="{MUTED}" '
         f'font-size="17" font-weight="300">{escape(panel["sublabel"])}</text>',
     ]
@@ -198,7 +256,10 @@ def render(brief_path: Path) -> None:
     flat = Image.new("RGB", img.size, BG)
     flat.paste(img, mask=img.split()[3])
     flat.save(png2x)
-    flat.resize((WIDTH, HEIGHT), Image.LANCZOS).save(png1x)
+    # `Image.Resampling.LANCZOS`, not the bare `Image.LANCZOS` alias: the latter
+    # is an untyped int the Pillow stubs don't expose, and #132 brought tooling/
+    # into mypy's scope. Same value (1), same resample, no behaviour change.
+    flat.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS).save(png1x)
 
     for p in (svg_path, png2x, png1x):
         print(f"wrote {p.relative_to(Path.cwd()) if Path.cwd() in p.parents else p}")
@@ -207,4 +268,7 @@ def render(brief_path: Path) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("brief", type=Path, help="path to og-card.toml")
-    sys.exit(render(ap.parse_args().brief))
+    # `render` returns None and signals failure by raising (SystemExit from the
+    # guards, CalledProcessError from Inkscape), so there is no code to forward —
+    # falling off the end exits 0. `sys.exit(render(...))` read as if there were.
+    render(ap.parse_args().brief)

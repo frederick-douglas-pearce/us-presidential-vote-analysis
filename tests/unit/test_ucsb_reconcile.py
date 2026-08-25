@@ -113,7 +113,7 @@ class TestCandidateMap:
             assert len(values) == len(set(values)), f"duplicate canonical name in {year}"
 
     def test_recurring_surnames_map_to_distinct_people(self) -> None:
-        # The same-name-collision hazard across 49 years (docs/canonical-keys.md).
+        # The same-name-collision hazard across 51 years (docs/canonical-keys.md).
         assert (
             UCSB_CANDIDATE_RECONCILIATIONS[(1904, "THEODORE ROOSEVELT")]
             != UCSB_CANDIDATE_RECONCILIATIONS[(1932, "FRANKLIN D. ROOSEVELT")]
@@ -128,9 +128,15 @@ class TestCandidateMap:
         )
 
     def test_map_and_set_sizes(self) -> None:
-        assert len(UCSB_CANDIDATE_RECONCILIATIONS) == 111
+        # 111 -> 113 when #143 admitted 1868 (Grant + Seymour, both EV-getters);
+        # 113 -> 115 when #144 admitted 1872 (Grant + Greeley, the latter under UCSB's
+        # own "GREEFLEY" typo).
+        assert len(UCSB_CANDIDATE_RECONCILIATIONS) == 115
         assert len(UCSB_NON_GETTER_COLUMNS) == 8
-        assert len(EC_GETTERS_WITHOUT_POPULAR_VOTE) == 13
+        # 13 -> 17: 1872's four Others recipients received electoral votes from Greeley's
+        # electors after his death without ever running, so they have no popular vote in
+        # any source. The largest single-year addition to this set (#144).
+        assert len(EC_GETTERS_WITHOUT_POPULAR_VOTE) == 17
 
     def test_map_and_drops_are_disjoint(self) -> None:
         assert not (set(UCSB_CANDIDATE_RECONCILIATIONS) & UCSB_NON_GETTER_COLUMNS)

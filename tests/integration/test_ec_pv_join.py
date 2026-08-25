@@ -33,7 +33,13 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from tests._helpers import FIXTURES_DIR, MIT_FUSION_SAMPLE_CSV, fake_state_geo
+from tests._helpers import (
+    FIXTURES_DIR,
+    MIT_FUSION_SAMPLE_CSV,
+    fake_state_geo,
+    narrow_mit_spine_to_sample,
+    non_null_flag,
+)
 from usvote.db import DBC
 from usvote.getters import EC_GETTERS_WITHOUT_POPULAR_VOTE
 from usvote.join import (
@@ -171,7 +177,15 @@ def test_join_resolves_a_synthetic_participant_set(
         )
         assert ucsb_pref["ev"].iloc[0] == 0
         assert ucsb_pref["source"].iloc[0] == SOURCE_UCSB
-        assert not bool(ucsb_pref["redistributable"].iloc[0])
+        # ``redistributable`` is genuinely nullable on this view: join.py's
+        # ``LEFT JOIN dwh.pv_source`` leaves it NULL for any EC row with no PV match
+        # (the pandas oracle spells the same gap ``pd.NA``). From the live view a NULL
+        # arrives as None, and ``not bool(None)`` is True -- so the old shape passed on
+        # a broken NULL exactly as on a real false (#165).
+        assert non_null_flag(
+            ucsb_pref["redistributable"].iloc[0],
+            label="2020 California UCSB redistributable",
+        ) is False
 
         # The public surface: NO UCSB row, and NO redistributable = false row ever.
         leak = dbc.select_query_to_df(
@@ -289,6 +303,7 @@ def test_winner_has_pv_runs_end_to_end_on_the_live_view(
 )
 def test_join_over_a_real_two_source_load(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: real MIT + real UCSB for 2016+2020, then the D026 join views.
 
@@ -301,6 +316,9 @@ def test_join_over_a_real_two_source_load(
     result as the old ``years={2016}`` wiring, now via the shared warehouse scope. Doubly
     gated so CI never touches the UCSB snapshot (D022).
     """
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.scrape import fetch_from_dir
     from usvote.warehouse import SOURCE_EC as WH_EC
     from usvote.warehouse import SOURCE_MIT as WH_MIT
@@ -317,6 +335,15 @@ def test_join_over_a_real_two_source_load(
             ucsb_html_dir=_CORPUS,
             years=years,
             replace=True,
+            # The #167 / D051 overlap gates measure a *population*, and this build's
+            # sources are deliberately asymmetric: the fusion sample is a two-state MIT
+            # extract, so MIT contributes 2 of the ~204 cells UCSB covers for these two
+            # years. An agreement rate over that population says nothing about either
+            # source. (Both paired cells also happen to be genuinely divergent in the
+            # real data -- why is not established here and is not asserted.) The gates
+            # are exercised on a complete build by
+            # ``test_hybrid_views.py::test_hybrid_views_over_a_real_full_warehouse``.
+            validate_overlap=False,
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),
         )
@@ -379,6 +406,7 @@ def test_join_over_a_real_two_source_load(
 @pytest.mark.integration
 def test_warehouse_builds_the_redistributable_core_end_to_end(
     integration_db_config: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Drive ``run_warehouse`` over EC fixtures + the MIT fusion sample, no UCSB.
 
@@ -390,6 +418,9 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
     ``rebuild_views`` step the ``DROP SCHEMA ... CASCADE`` would leave no
     ``ec_pv_preferred`` to query.
     """
+    # The fusion sample is a 2-state extract; narrow MIT's #127 spine-derived
+    # roster read to match (see narrow_mit_spine_to_sample).
+    narrow_mit_spine_to_sample(monkeypatch)
     from usvote.scrape import fetch_from_dir
     from usvote.warehouse import SOURCE_EC as WH_EC
     from usvote.warehouse import SOURCE_MIT as WH_MIT
