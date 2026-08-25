@@ -1,12 +1,12 @@
 ---
 layout: post
 title: "It Takes 270, But 270 of What?"
-date: 2026-08-05 00:00:00-0800
+date: 2026-08-25 00:00:00-0800
 description: "Electors appointed, votes cast, votes counted: three numbers that are usually identical, and the four elections where they weren't."
-categories: ["american-history"]
+categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/it-takes-270-but-270-of-what-og.png
-og_card_source: social/images/2026-08-05-linkedin-it-takes-270-but-270-of-what/og-card.png
+og_card_source: social/images/2026-08-25-linkedin-it-takes-270-but-270-of-what/og-card.png
 featured: false
 ---
 
@@ -58,7 +58,7 @@ But those two totals disagree about the wrong thing. Georgia's nine electors wer
 
 That leaves the real dispute to be recorded rather than resolved. In [the model these two years get](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/57), every vote row carries a status: counted, not counted, or disputed. Georgia's nine in 1868 are marked **disputed**, with the Archives' own sentence attached as the reason. Three of Georgia's eleven in 1872 are marked **not counted**, since the House said no, while the other eight are counted: status belongs to a vote, not to a state. Arkansas's six and Louisiana's eight are not counted either.
 
-The gap between those two labels is the whole point. *Not counted* means Congress decided no. *Disputed* means Congress never reached a decision. A single "contested" flag covering both would be quietly asserting that 1868 was settled.
+The gap between those two labels is the whole point. _Not counted_ means Congress decided no. _Disputed_ means Congress never reached a decision. A single "contested" flag covering both would be quietly asserting that 1868 was settled.
 
 So ask this record for 1868's total and it asks back whether you want the disputed votes in it. That isn't evasion. It's the only honest answer to a question the Senate and the House never agreed on.
 
