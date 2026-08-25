@@ -10,6 +10,7 @@ loud/explicit UCSB gating for ``usvote all``. No DB, no network.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from typing import Any
 
 import pytest
@@ -625,10 +626,12 @@ def test_all_forwards_no_validate_overlap(
     assert top_env["warehouse"][0]["validate_overlap"] is False
 
 
+@pytest.mark.parametrize("gate_error", ["overlap", "hybrid"])
 def test_a_breached_overlap_gate_reports_instead_of_raising(
     top_env: dict[str, list],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
+    gate_error: str,
 ) -> None:
     """A gate breach exits 1 with guidance, not a traceback.
 
@@ -637,11 +640,23 @@ def test_a_breached_overlap_gate_reports_instead_of_raising(
     (``docs/deploy-cloud-run.md`` runs ``python -m usvote all`` before the snapshot).
     The message must say the warehouse *did* build, because that is what decides the
     operator's next move.
+
+    **Parametrized over both gate errors** because the ``except`` arm names two, and a
+    mutation dropping ``HybridError`` from it survived the whole suite: gates 1-2 raise
+    ``PVOverlapError`` and gate 3 raises ``HybridError``, so testing only the first
+    leaves a gate-3 breach exiting with a bare traceback on the runbook's own path.
     """
+    from usvote.hybrid import HybridError
     from usvote.pv.overlap import PVOverlapError
 
+    exc: Exception = (
+        PVOverlapError("gate 1 (overall): 12.00% of 100 overlap cells")
+        if gate_error == "overlap"
+        else HybridError("gate 3: national margins differ by 0.90 pp")
+    )
+
     def boom(*_a: Any, **_k: Any) -> None:
-        raise PVOverlapError("gate 1 (overall): 12.00% of 100 overlap cells")
+        raise exc
 
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     monkeypatch.setattr(top, "run_warehouse", boom)
@@ -651,6 +666,42 @@ def test_a_breached_overlap_gate_reports_instead_of_raising(
     assert "Overlap validation failed" in err
     assert "--no-validate-overlap" in err
     assert "were built before this check ran" in err
+
+
+def test_the_overlap_receipt_reaches_stdout_on_a_clean_build(
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """AC-4: a D005 list computed on every build and never shown is not *produced*.
+
+    ``TestTheOverlapNote`` below exercises ``_overlap_note`` directly, which leaves the
+    call site untested — a mutation dropping the ``print()`` around it computed the
+    receipt, discarded it, and kept the suite green. That is the exact failure the note
+    exists to prevent, so the assertion has to run through ``main`` rather than through
+    the helper.
+    """
+    from usvote.pv.overlap import OverlapKey, OverlapReport
+
+    report = OverlapReport(
+        cells=1326,
+        exact=1239,
+        exact_pct=93.44,
+        flagged=(OverlapKey(year=1976, state="Vermont", candidate="Gerald R. Ford"),),
+    )
+    real_wh = top.run_warehouse
+
+    def wh(*a: Any, **k: Any) -> WarehouseResult:
+        return dataclasses.replace(real_wh(*a, **k), overlap=report)
+
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", wh)
+
+    assert top.main(["all"]) == 0
+    out = capsys.readouterr().out
+    assert "Overlap validation:" in out
+    assert "93.44%" in out and "1326" in out
+    assert "1976 Vermont Gerald R. Ford" in out
 
 
 class TestTheOverlapNote:

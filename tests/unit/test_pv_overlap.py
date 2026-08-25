@@ -136,6 +136,25 @@ class TestReportShape:
         fields = {f.name for f in dataclasses.fields(OverlapKey)}
         assert fields == {"year", "state", "candidate", "party"}
 
+    def test_two_keys_differing_only_in_party_spelling_are_the_same_key(self) -> None:
+        """``party`` is ``compare=False``, and the field set alone does not pin that.
+
+        MIT spells the party ``REPUBLICAN`` where UCSB spells it ``Republican`` across
+        the entire overlap, so a consumer deduping keys across the two surfaces gets
+        two entries for one cell the moment ``party`` enters equality. The identity is
+        ``RESOLVED_KEY`` -- the three columns the merge itself joins on -- and hashing
+        has to agree with that or a ``set``/``dict`` of keys silently disagrees with
+        ``==``. Added at the acceptance gate: a mutation flipping ``compare=False`` to
+        ``compare=True`` survived the whole suite, because the one existing equality
+        assertion compared two keys that happened to agree on party.
+        """
+        mit_spelling = OverlapKey(1976, "Ohio", "Gerald R. Ford", "REPUBLICAN")
+        ucsb_spelling = OverlapKey(1976, "Ohio", "Gerald R. Ford", "Republican")
+
+        assert mit_spelling == ucsb_spelling
+        assert hash(mit_spelling) == hash(ucsb_spelling)
+        assert len({mit_spelling, ucsb_spelling}) == 1
+
     def test_a_skipped_report_carries_no_measurements(self) -> None:
         """A skip must not read as a clean measurement to a caller that ignores it."""
         report = compute_overlap_report(
@@ -563,6 +582,50 @@ class TestGateOneExactMatchFloor:
         with pytest.raises(PVOverlapError, match="gate 1 .overall."):
             assert_overlap_within_tolerance(report)
 
+    def test_an_overall_rate_exactly_on_the_floor_does_not_raise(self) -> None:
+        """The floor is ``>= 90%``, so the comparison that fires it is strict ``<``.
+
+        No fixture in this file sat on the line — the nearest were 80% and 92% — so a
+        mutation relaxing the comparison to ``<=`` survived the whole suite, silently
+        turning D051's "at least 90%" into "more than 90%". The two disagreeing cells
+        differ by 0.99% of the UCSB value, below the flag line, so gate 2 stays out of
+        it and a raise here could only have come from gate 1.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 18)
+        for state in ("ZA", "ZB"):
+            mit_rows.append(_row(SOURCE_MIT, 1976, state, "Nominee", 100))
+            ucsb_rows.append(_row(SOURCE_UCSB, 1976, state, "Nominee", 101))
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.exact_pct == 90.0
+        assert report.flagged == ()
+        assert_overlap_within_tolerance(report)  # exactly on the floor is not a breach
+
+    def test_the_per_year_floor_uses_its_own_constant_not_the_overall_one(self) -> None:
+        """D051's two floors are separate instruments, and only one is 90.
+
+        The AC-7 literal pin proves the *constants* are 90 and 80; it cannot prove the
+        per-year branch reads the 80. A mutation pointing that branch at
+        ``EXACT_MATCH_FLOOR_OVERALL`` collapsed the two instruments into one and
+        tightened the per-year floor 80 -> 90, and nothing in the suite noticed —
+        no fixture had a year in the ``(80, 90]`` band that must pass. This is that
+        fixture: 1976 reads 85%, above the per-year floor and below the overall one, in
+        a population whose overall rate (94%) clears 90 comfortably.
+        """
+        mit_rows, ucsb_rows = _agreeing(1976, 17)
+        for state in ("ZA", "ZB", "ZC"):
+            mit_rows.append(_row(SOURCE_MIT, 1976, state, "Nominee", 100))
+            ucsb_rows.append(_row(SOURCE_UCSB, 1976, state, "Nominee", 101))
+        clean_mit, clean_ucsb = _agreeing(1980, 30, start=200)
+        mit_rows += clean_mit
+        ucsb_rows += clean_ucsb
+        report = compute_overlap_report(_frame(mit_rows), _frame(ucsb_rows))
+
+        assert report.exact_pct_by_year[1976] == 85.0
+        assert report.exact_pct == 94.0
+        assert EXACT_MATCH_FLOOR_PER_YEAR < 85.0 < EXACT_MATCH_FLOOR_OVERALL
+        assert_overlap_within_tolerance(report)  # 85% clears the per-year floor of 80
+
     def test_one_bad_year_raises_even_when_the_overall_rate_passes(self) -> None:
         """The discriminating case, and the reason gate 1 carries two floors.
 
@@ -636,6 +699,19 @@ class TestGateTwoPerCellCeiling:
         assert [k.state for k in report.flagged] == ["ZZ"]
         with pytest.raises(PVOverlapError, match="gate 2"):
             assert_overlap_within_tolerance(report)
+
+    def test_a_cell_exactly_on_the_fail_line_flags_but_does_not_fail(self) -> None:
+        """Strict ``>`` on the FAIL line too -- the docstring claims both, so pin both.
+
+        The flag line has had its boundary test since the start; this one had none, and
+        the nearest fixture sat at 16.00%. A mutation relaxing this comparison to ``>=``
+        survived the whole suite. The distinction is not cosmetic: at exactly the line
+        a cell must join the D005 list without reddening the build.
+        """
+        report = self._one_cell(11_500, 10_000)  # exactly 15.00%
+        assert report.failed == ()
+        assert [k.state for k in report.flagged] == ["ZZ"]
+        assert_overlap_within_tolerance(report)  # on the line is not a breach
 
     def test_the_relative_delta_is_taken_against_the_ucsb_value(self) -> None:
         """AC-6: the basis is ``|MIT - UCSB| / UCSB``, and it must be able to FAIL.
