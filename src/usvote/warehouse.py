@@ -234,9 +234,10 @@ def run_warehouse(
       a full UCSB corpus, as ``tests/integration/test_ec_pv_join.py::
       test_join_over_a_real_two_source_load`` does — yields few paired cells, and an
       agreement *rate* over a handful of cells says nothing about either source. That
-      one test is the only caller that opts out for that *reason*; the other two
-      ``validate_overlap=False`` call sites are unit tests exercising the flag itself.
-      A UCSB-less build needs nothing, since both gates skip on their own (AC-3).
+      one test is the only caller that opts out for that *reason*. The other opt-outs
+      are unit tests exercising the flag itself — one passing the kwarg, one the
+      ``--no-validate-overlap`` CLI spelling. A UCSB-less build needs nothing, since
+      both gates skip on their own (AC-3).
 
     Opens no transaction itself; see the module docstring for the per-source-atomic
     model and why a failed build is recovered with ``replace=True``, not a bare re-run.

@@ -671,6 +671,28 @@ class TestTheOverlapNote:
         assert "not applicable" in note and "UCSB is not loaded" in note
         assert "passed" not in note
 
+    def test_a_skip_that_excluded_years_names_them(self) -> None:
+        """The one skip path that populates ``uncovered_years`` must print them.
+
+        Its sibling above covers only the *empty* arm — ``SKIP_UCSB_ABSENT`` excludes
+        nothing — so without this the whole ``(excluded: ...)`` clause could be deleted
+        and the suite would stay green. Verified: reverting the clause reddens this test
+        and nothing else. An operator told only "no comparable years" cannot tell which
+        years stopped being compared, which is the one thing this skip needs to say.
+        """
+        from usvote.pv.overlap import SKIP_ALL_YEARS_AT_FRONTIER, OverlapReport
+
+        note = top._overlap_note(
+            OverlapReport(
+                skipped=True,
+                skip_reason=SKIP_ALL_YEARS_AT_FRONTIER,
+                uncovered_years=(2024, 2028),
+            )
+        )
+        assert "not applicable" in note and "no comparable years" in note
+        assert "excluded: 2024, 2028" in note
+        assert "passed" not in note
+
     def test_a_clean_run_names_the_flagged_keys_and_no_magnitudes(self) -> None:
         """AC-4: the D005 list is only "produced" if an operator can see it.
 

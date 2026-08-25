@@ -311,8 +311,8 @@ class TestPopulation:
         failure mode rather than covering all of it: a disjoint pair whose years all sit
         at or beyond the frontier is excluded down to nothing and **skips** instead —
         pinned by ``test_everything_at_or_beyond_the_frontier_skips_rather_than_reading_
-        green``. Below the frontier, which is where every real election is, a total loss
-        of overlap fails.
+        green``. Below the frontier — every election but the newest — a total loss of
+        overlap fails.
         """
         mit_rows, _ = _agreeing(1976, 6)
         _, ucsb_rows = _agreeing(1980, 6, start=50)

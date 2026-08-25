@@ -136,14 +136,14 @@ SKIP_NO_OVERLAP_CELLS = (
     "in the window"
 )
 
-#: Skip reason: both sources have rows in the window, but every year either of them
-#: carries sits at or beyond the spine frontier, so all of them are excluded as refresh
+#: Skip reason: both sources have rows in the window, but every in-window year either
+#: of them carries sits at or beyond the spine frontier, so all are excluded as refresh
 #: and nothing is left to compare. Kept distinct from :data:`SKIP_NO_OVERLAP_CELLS`
 #: because that one asserts a source is *empty*, which is false here — and a reason that
 #: misreports which of the two states was reached sends an operator to the wrong place.
 SKIP_ALL_YEARS_AT_FRONTIER = (
-    "no comparable years — every year either source carries sits at or beyond the "
-    "spine frontier"
+    "no comparable years — every in-window year either source carries sits at or "
+    "beyond the spine frontier"
 )
 
 
@@ -240,6 +240,10 @@ def compute_overlap_report(
     normally read from ``pv_redistributable``/``pv_ucsb`` by
     :func:`read_overlap_frames`. Both are filtered to ``year >= MIT_PV_YEAR_MIN`` here
     as well as at the read, so the oracle is correct when called directly from a test.
+    ``spine_max`` overrides the frontier below and is a **test seam only** — no caller
+    under ``src/`` passes it, and a test that needs the *derived* frontier to move must
+    patch :func:`usvote.years.ec_ingest_years` instead, since injecting a value here
+    would pass whether the default is derived or hardcoded.
 
     **The population is the FULL OUTER key set**, mirroring research query 1, which
     counts one-sided rows directly rather than filtering them away. A key present in
@@ -282,17 +286,15 @@ def compute_overlap_report(
     the spine, UCSB's ingest scope and the snapshot window moves this frontier too, so a
     stale constant fails all of them together rather than leaving one boundary behind.
 
-    **What it still cannot see, stated rather than hidden:** a source dropping the
-    **frontier year itself**. MIT losing 2024 is excluded by the same clause that lets a
-    mid-refresh 2024 through — that is the exemption, not a hole in it — so the year
-    vanishes from ``ec_pv_redistributable`` and the public API behind it while gate 1
-    reads 100%. It takes one malformed CSV, nothing more. **Only the frontier is exposed
-    this way**: ``uncovered`` is a per-year set, so a drop anywhere *below* the frontier
-    stays scored and trips gate 1 no matter what else the source carries. The honest
-    owner of the frontier case is a MIT year-contiguity guard beside the source's own
-    invariants (**#177**), not a second clause here: "MIT's loaded years have a hole" is
-    a single-source question, and answering it here would drag the circular data ceiling
-    back into the module that just dropped it.
+    **What it still cannot see, stated rather than hidden:** a source dropping a year
+    **at or beyond the frontier**. MIT losing 2024 is excluded by the same clause that
+    lets a mid-refresh 2024 through — that is the exemption, not a hole in it — so the
+    year's popular vote goes silently null (the year itself still ships; the join is
+    EC-left) and the gate stays green. It takes one malformed CSV, nothing more. Nothing
+    *below* the frontier is ever excluded, whatever else the source carries. The honest
+    owner is a guard beside MIT's own invariants (**#177**), not a second clause here:
+    "did MIT lose a year it used to have?" is a single-source question, and answering it
+    here would drag the circular data ceiling back into the module that just dropped it.
 
     **Do not look for a second owner of the below-frontier case — MIT has none.** MIT's
     D024 roster/fact guard cannot see a wholly-missing MIT year, because
@@ -310,8 +312,8 @@ def compute_overlap_report(
     like from here (AC-3), and without it AC-3's "skipped, not failed" would hold only
     for callers routed through :func:`read_overlap_frames`. Neither carve-out ever
     excludes a *partial* year: a source that lost only some of a year's rows still
-    scores them one-sided and still trips gate 1, the case the per-year floor exists
-    for.
+    scores them one-sided, so they count against both floors — which is what the
+    per-year floor is for, since one year's loss can hide inside the overall rate.
 
     **The relative delta is** ``|MIT - UCSB| / max(UCSB, 1) * 100`` — **UCSB is the
     denominator** (D051, research §2). The measure is asymmetric, so this is part of the
