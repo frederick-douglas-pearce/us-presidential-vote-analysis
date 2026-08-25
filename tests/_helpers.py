@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -248,7 +248,9 @@ class QueryDispatchDBC:
 
     ``routes`` maps a substring of the SQL — normally a relation name — to the frame to
     return; the first match in insertion order wins, and ``default`` answers anything
-    unmatched. Use :func:`query_dispatch_dbc` to get one typed as a ``DBC``.
+    unmatched. It implements only ``select_query_to_df``, which is all a read-only seam
+    uses, so a caller that takes a ``DBC`` casts at the call site — and keeps the stub
+    itself, since ``.queries`` is usually the point.
     """
 
     def __init__(
@@ -264,20 +266,6 @@ class QueryDispatchDBC:
             if needle in query:
                 return frame.copy()
         return self.default.copy()
-
-
-def query_dispatch_dbc(
-    routes: dict[str, pd.DataFrame], default: pd.DataFrame
-) -> DBC:
-    """A :class:`QueryDispatchDBC` typed as a ``DBC``, for a caller that takes one.
-
-    The ``cast`` lives here rather than at each call site: the stub implements only
-    ``select_query_to_df``, which is all a read-only seam uses, and spreading
-    ``cast(Any, stub)`` across test modules is what this replaces. Keep a reference to
-    the stub itself when you need ``.queries`` — construct :class:`QueryDispatchDBC`
-    directly and cast at the call, or read it back off the returned object.
-    """
-    return cast(DBC, QueryDispatchDBC(routes, default))
 
 
 def record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:

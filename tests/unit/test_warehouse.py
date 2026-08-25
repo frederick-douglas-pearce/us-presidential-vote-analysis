@@ -262,11 +262,14 @@ def test_run_warehouse_validates_the_overlap_after_the_views_are_built(
 ) -> None:
     """#167 / D051: the two raising gates run **last**, and that is load-bearing.
 
-    They are the only step in the build that can raise. Anywhere earlier, a breach would
-    leave a warehouse holding facts but no join/hybrid views — and its only documented
-    recovery, ``replace=True``, rebuilds and re-hits the same breach, so a threshold
-    D051 expects to retune could brick the build. Last means a breach reports loudly
-    over a *complete* warehouse.
+    They are not the only step that can raise — ``create_ec_pv_views`` and
+    ``create_hybrid_views`` run raising preconditions of their own — but they are the
+    only raising step whose threshold is *expected to move* (D051 says gate 1's per-year
+    floor is the first to need review). Anywhere earlier, a breach of a movable
+    threshold would leave a warehouse holding facts but no join/hybrid views — and its
+    only documented recovery, ``replace=True``, rebuilds and re-hits the same breach, so
+    retuning could brick the build. Last means a breach reports loudly over a *complete*
+    warehouse.
 
     Asserting the whole ordered list rather than membership is the point: a gate moved
     one step earlier still runs, still passes a presence check, and re-opens exactly the
@@ -294,8 +297,9 @@ def test_validate_overlap_false_skips_both_gates(
     """The flag is explicit and caller-supplied, in the ``ucsb_html_dir`` spirit.
 
     A build whose sources are deliberately partial — a state-scoped MIT extract against
-    a full UCSB corpus, which two integration tests use — has too few paired cells for
-    an agreement *rate* to mean anything, so such a caller opts out rather than the gate
+    a full UCSB corpus, which ``test_ec_pv_join.py::test_join_over_a_real_two_source_load``
+    does, and it is the only such caller in the tree — has too few paired cells for an
+    agreement *rate* to mean anything, so such a caller opts out rather than the gate
     guessing from the data whether it was handed a sample.
     """
     _also_record_the_gates(monkeypatch, recorder)

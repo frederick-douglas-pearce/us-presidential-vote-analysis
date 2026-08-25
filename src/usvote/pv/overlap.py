@@ -197,8 +197,10 @@ class OverlapReport:
     one_sided: tuple[OverlapKey, ...] = ()
     flagged: tuple[OverlapKey, ...] = ()
     failed: tuple[OverlapKey, ...] = ()
-    #: Years reached by only one source, excluded from every count above. A coverage
-    #: gap, not a disagreement — see :func:`compute_overlap_report`.
+    #: Years reached by only one source **above the shared ceiling**, excluded from
+    #: every count above as ordinary asymmetric refresh. A one-sided year at or below
+    #: the ceiling is a regression and does *not* appear here — it stays in the
+    #: population and trips gate 1. See :func:`compute_overlap_report`.
     uncovered_years: tuple[int, ...] = ()
 
 
@@ -234,34 +236,48 @@ def compute_overlap_report(
     dropping exactly the rows a regression would create — the inner-join-silent-drop
     hazard, one level up from where this package already guards it.
 
-    **A year only ONE source covers is excluded, not scored 0%** — listed in
-    :attr:`OverlapReport.uncovered_years`. The window has a floor
-    (:data:`~usvote.pv.source.MIT_PV_YEAR_MIN`) and deliberately no ceiling, so without
-    this the ordinary case of asymmetric refresh would break the build: MIT is a CSV
-    drop and the UCSB corpus is a manual snapshot, so when 2028 lands in one before the
-    other, every cell of that year is one-sided, its rate reads 0%, and gate 1 raises at
-    the end of an otherwise complete build. The reference script avoided this with a
-    hardcoded ``BETWEEN 1976 AND 2024``; deriving the covered years does the same job
-    without a ceiling that goes stale. Gate 3 already treats such a year the same way
-    (:func:`usvote.hybrid.assert_margin_agreement` inner-joins on year), so the two
-    gates now agree about what a coverage gap is.
+    **A year only one source covers is excluded ONLY above the shared ceiling**, where
+    the ceiling is ``min(max MIT year, max UCSB year)`` and an excluded year is listed
+    in :attr:`OverlapReport.uncovered_years`. The window has a fixed floor
+    (:data:`~usvote.pv.source.MIT_PV_YEAR_MIN`) and deliberately no ceiling, and that
+    asymmetry is what settles which one-sided years are legitimate:
 
-    **The same carve-out applies at the window level, and it stays narrow at both.** A
-    source with no rows *at all* in the window skips outright — that is what a UCSB-less
-    warehouse looks like from here (AC-3), and without it AC-3's "skipped, not failed"
-    would hold only for callers routed through :func:`read_overlap_frames`. What is
-    excluded is always a *whole* year or a whole window that one source does not reach.
-    A source that lost only *some* of a year's rows still scores them as one-sided and
-    still trips gate 1 — the case the per-year floor exists for, and the reason this is
-    an exclusion of empty years rather than of one-sided rows.
+    - **Above** the ceiling: ordinary asymmetric refresh. MIT is a CSV drop and the UCSB
+      corpus is a manual snapshot, so one source reaching a new election first is
+      expected — when 2028 lands in one before the other, "not loaded yet" and "lost"
+      are indistinguishable, and for a *future* election "not yet" is the honest
+      reading. Scored, that year reads 0% and gate 1 raises at the end of an otherwise
+      complete build, so it is excluded instead.
+    - **At or below** the ceiling: a regression. It stays in the population, its cells
+      count as one-sided, its year rate reads 0%, and gate 1's per-year floor trips.
+      Post-1976 both sources are comprehensive, so there is no benign reading of MIT
+      dropping 2020, or of a UCSB re-snapshot that starts at 1980 and leaves 1976
+      MIT-only — "UCSB has not loaded 1976 yet" is not a thing that happens.
 
-    **What the exclusion costs, stated rather than hidden:** a source that stops
-    covering a year entirely now reports as a coverage gap instead of a breach. That
-    regression has an owner — each source's own D024 roster/fact guard,
-    :func:`usvote.pv.status.assert_roster_covers_facts`, which fails loud when a state
-    the roster marks ``popular_vote`` has no vote rows — and it is a better instrument
-    for it than an agreement rate, because it knows which states were *supposed* to have
-    rows.
+    The ceiling is derived from the data rather than maintained, so it cannot go stale
+    the way the reference script's hardcoded ``BETWEEN 1976 AND 2024`` would. **What it
+    still cannot see, stated rather than hidden:** the *shorter* source losing its own
+    newest year — MIT dropping 2024 while UCSB keeps it — which is genuinely
+    indistinguishable from MIT not having reached 2024 yet. That is the residue of the
+    same ambiguity, not an oversight.
+
+    **Do not look for a second owner of the interior case; there is not one.** Each
+    source's D024 roster/fact guard
+    (:func:`usvote.pv.status.assert_roster_covers_facts`) cannot see a wholly-missing
+    MIT year, because :mod:`usvote.mit.pipeline` derives its in-scope years from the
+    rows MIT actually loaded — a year that vanished entirely is never compared against
+    anything. Gate 3 inner-joins on year and so skips every one-sided year, above the
+    ceiling or below it. That leaves gates 1-2 as the only instrument pointed at an
+    interior coverage hole, which is precisely why the exclusion has to stop at the
+    ceiling rather than swallow every one-sided year.
+
+    **The window-level carve-out is separate, and stays narrow.** A source with no rows
+    *at all* in the window skips outright — that is what a UCSB-less warehouse looks
+    like from here (AC-3), and without it AC-3's "skipped, not failed" would hold only
+    for callers routed through :func:`read_overlap_frames`. Neither carve-out ever
+    excludes a *partial* year: a source that lost only some of a year's rows still
+    scores them one-sided and still trips gate 1, the case the per-year floor exists
+    for.
 
     **The relative delta is** ``|MIT - UCSB| / max(UCSB, 1) * 100`` — **UCSB is the
     denominator** (D051, research §2). The measure is asymmetric, so this is part of the
@@ -278,16 +294,20 @@ def compute_overlap_report(
     ucsb = ucsb_df.loc[ucsb_df["year"] >= MIT_PV_YEAR_MIN]
     if mit.empty or ucsb.empty:
         return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
-    # Years only one source reaches are a coverage gap, not a disagreement -- see the
-    # docstring. Excluded before the merge so they cannot enter any count or list.
-    covered = set(mit["year"].unique()) & set(ucsb["year"].unique())
-    uncovered = tuple(
-        sorted((set(mit["year"].unique()) | set(ucsb["year"].unique())) - covered)
-    )
-    mit = mit.loc[mit["year"].isin(covered)]
-    ucsb = ucsb.loc[ucsb["year"].isin(covered)]
-    if not covered:
-        return OverlapReport(skipped=True, skip_reason=SKIP_NO_OVERLAP_CELLS)
+    mit_years = {int(y) for y in mit["year"].unique()}
+    ucsb_years = {int(y) for y in ucsb["year"].unique()}
+    # A one-sided year is a refresh gap only ABOVE the shared ceiling; at or below it,
+    # it is a regression and stays in the population -- see the docstring.
+    ceiling = min(max(mit_years), max(ucsb_years))
+    one_sided_years = mit_years ^ ucsb_years
+    uncovered = tuple(sorted(y for y in one_sided_years if y > ceiling))
+    scored = (mit_years | ucsb_years) - set(uncovered)
+    # ``scored`` is never empty, so nothing below divides by zero: the ceiling year
+    # belongs to at least one source and is by construction not above the ceiling, so
+    # it always survives -- including when the two sources share no year at all, which
+    # is a total-coverage regression and must fail rather than skip.
+    mit = mit.loc[mit["year"].isin(scored)]
+    ucsb = ucsb.loc[ucsb["year"].isin(scored)]
 
     merged = mit[[*key, "party", "candidate_votes"]].merge(
         ucsb[[*key, "party", "candidate_votes"]],
@@ -350,7 +370,9 @@ def assert_overlap_within_tolerance(
         # Name the one-sided count alongside the rate. A breach has two very different
         # causes -- cells that disagree, and cells one source stopped carrying -- and
         # the rate alone cannot tell them apart, so a reader would start in the wrong
-        # place. This is the only path on which ``one_sided`` surfaces during a build.
+        # place. This is the only path that surfaces ``one_sided`` in a *raised*
+        # message; a green build reports it too, via ``WarehouseResult.overlap`` and
+        # the CLI completion line.
         one_sided_note = (
             f"; {len(report.one_sided)} of them are carried by only one source"
             if report.one_sided

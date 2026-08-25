@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests._helpers import QueryDispatchDBC
 from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
 from usvote import hybrid
 from usvote.count_status import (
@@ -2903,19 +2904,14 @@ def _two_way_year(
     ]
 
 
-class _MarginStubDBC:
-    """Serves ``pv_redistributable`` / ``pv_ucsb`` reads for the gate-3 live form."""
+def _margin_stub(mit: pd.DataFrame, ucsb: pd.DataFrame) -> QueryDispatchDBC:
+    """Serves ``pv_redistributable`` / ``pv_ucsb`` reads for the gate-3 live form.
 
-    def __init__(self, mit: pd.DataFrame, ucsb: pd.DataFrame) -> None:
-        self.mit = mit
-        self.ucsb = ucsb
-        self.queries: list[str] = []
-
-    def select_query_to_df(self, query: str) -> pd.DataFrame:
-        self.queries.append(query)
-        if "pv_ucsb" in query:
-            return self.ucsb.copy()
-        return self.mit.copy()
+    The same shared double the #167 cell-grain tests use, routed identically — the two
+    gates read through one seam (``read_overlap_frames``), so their stubs must not be
+    able to drift into disagreeing about what that seam issues.
+    """
+    return QueryDispatchDBC({"pv_ucsb": ucsb}, mit)
 
 
 class TestNationalPvMarginByYear:
@@ -3025,7 +3021,7 @@ class TestMarginAgreement:
         """AC-3: gate 3 takes the same skip as the cell-grain gates, via the same seam."""
         mit = pd.DataFrame(_two_way_year(SOURCE_MIT, 1976, 5_500, 4_500, total=10_000))
         empty = pd.DataFrame(columns=list(SHARED_PV_COLUMNS))
-        dbc = _MarginStubDBC(mit, empty)
+        dbc = _margin_stub(mit, empty)
         assert hybrid.assert_db_margin_agreement(cast(Any, dbc)) is None
 
     def test_the_live_form_reads_the_two_single_source_views(self) -> None:
@@ -3034,7 +3030,7 @@ class TestMarginAgreement:
         ucsb = pd.DataFrame(
             _two_way_year(SOURCE_UCSB, 1976, 5_500, 4_500, total=10_000)
         )
-        dbc = _MarginStubDBC(mit, ucsb)
+        dbc = _margin_stub(mit, ucsb)
         hybrid.assert_db_margin_agreement(cast(Any, dbc))
         joined = " ".join(dbc.queries)
         assert "pv_redistributable" in joined and "pv_ucsb" in joined

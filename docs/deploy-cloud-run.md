@@ -147,9 +147,10 @@ gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 
 **A UCSB-bearing build also runs the D017 layer-3 overlap gates** (#167 / D051) as its last
 step, after every view exists. They compare MIT against UCSB and **skip** when UCSB is absent,
-so an EC + MIT build is unaffected. A breach exits `1` with the offending keys named and the
-warehouse already fully built — the data is in place and only the cross-source agreement check
-failed, so re-running with `--replace` rebuilds the same facts and re-hits the same breach.
+so an EC + MIT build is unaffected. A breach exits `1` with the offending years or cells
+named — gate 1 reports years and rates, gate 2 reports keys — and the warehouse already fully
+built: the data is in place and only the cross-source agreement check failed, so re-running
+with `--replace` rebuilds the same facts and re-hits the same breach.
 `--no-validate-overlap` accepts the build if the thresholds are the thing under review (D051
 expects gate 1's per-year floor to be the first to need it).
 
