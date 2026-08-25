@@ -61,11 +61,12 @@ from pathlib import Path
 import pandas as pd
 
 from usvote.db import DBC
-from usvote.hybrid import create_hybrid_views
+from usvote.hybrid import assert_db_margin_agreement, create_hybrid_views
 from usvote.join import create_ec_pv_views
 from usvote.mit.pipeline import run_mit_pipeline
 from usvote.pipeline import run_ec_pipeline
 from usvote.pv.load import build_pv_union
+from usvote.pv.overlap import OverlapReport, assert_db_overlap_within_tolerance
 from usvote.scrape import Fetch, fetch_url
 from usvote.transform import load_state_geo
 from usvote.ucsb.pipeline import run_ucsb_pipeline
@@ -108,6 +109,21 @@ class WarehouseResult:
     ucsb_roster_rows: int | None
     sources_loaded: frozenset[str]
     views_built: bool
+    #: What the D017 layer-3 cell-grain gates measured (#167) — including gate 2's D005
+    #: reliability list in :attr:`~usvote.pv.overlap.OverlapReport.flagged` and the
+    #: one-sided cells in ``one_sided``, both as keys carrying **no** magnitudes (the
+    #: D030/D022 constraint; see :mod:`usvote.pv.overlap`).
+    #:
+    #: The whole report rather than just the flag list, because the two things a reader
+    #: needs after a green build are *what was flagged* and *what neither floor saw* —
+    #: a source can stop carrying ~130 cells and still clear both floors, and only
+    #: ``one_sided`` says so.
+    #:
+    #: ``None`` when the gates did not run at all (``validate_overlap=False``); a
+    #: ``skipped`` report when they ran and found nothing to measure (UCSB absent, or
+    #: no covered year). Both differ from a populated report with empty lists, which
+    #: means "ran, found none". Flagged keys are reported, never a build failure.
+    overlap: OverlapReport | None = None
 
 
 def rebuild_views(dbc: DBC) -> None:
@@ -133,6 +149,12 @@ def rebuild_views(dbc: DBC) -> None:
     views too, with no extra wiring. That is what leaves E7's analysis surface and
     #102's read seam (D039) populated after a full rebuild.
 
+    **The D017 layer-3 overlap gates (#167) are deliberately NOT here**, and the reason
+    is this function's own contract: it makes the views consistent with *whatever facts
+    are present*, which is why it is factored out for a future ``views`` subcommand at
+    all. Cross-source agreement is a statement about a **complete** build, so it lives
+    in :func:`run_warehouse` behind an explicit ``validate_overlap`` flag.
+
     Factored out of :func:`run_warehouse` so a future ``views`` subcommand — rebuild
     the views without re-scraping the sources — is a thin wrapper over this, not a
     restructuring of the orchestrator (#84 follow-up).
@@ -150,6 +172,7 @@ def run_warehouse(
     ucsb_html_dir: str | Path | None = None,
     years: Collection[int] | None = None,
     replace: bool = False,
+    validate_overlap: bool = True,
     environ: Mapping[str, str] | None = None,
     fetch: Fetch = fetch_url,
     load_geo: Callable[[str], pd.DataFrame] = load_state_geo,
@@ -172,6 +195,10 @@ def run_warehouse(
        magic). Also ``replace=False``.
     4. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
        rebuilt.
+    5. the **D017 layer-3 overlap gates** (#167, D051), when ``validate_overlap`` — MIT
+       vs. UCSB agreement at the cell grain
+       (:func:`usvote.pv.overlap.assert_db_overlap_within_tolerance`) and at the
+       national margin grain (:func:`usvote.hybrid.assert_db_margin_agreement`).
 
     ``years`` scopes every source to the same subset of elections (e.g. ``{2016, 2020}``
     to match the fixtures); ``None`` loads each source's full range. ``environ`` is
@@ -185,6 +212,32 @@ def run_warehouse(
     never leaks the connection on a partial build. The orchestrator owns the connection
     across the whole build, so the individual pipelines are called with their default
     ``close=False``.
+
+    ``validate_overlap`` gates step 5 **explicitly, in the same spirit as**
+    ``ucsb_html_dir`` — no environment magic, and the default is on, so the shipped
+    ``python -m usvote all`` always validates. Two things make the flag necessary rather
+    than convenient:
+
+    - **They run after every view exists, because they are the only raising step whose
+      threshold is expected to move.** They are not the only step that can raise —
+      :func:`usvote.join.create_ec_pv_views` and
+      :func:`usvote.hybrid.create_hybrid_views` run raising preconditions of their own —
+      but those assert structural facts (a PV row matching no EC row, a dead-heat
+      winner), which a rebuild does not change and nobody retunes. D051 says outright of
+      gate 1's per-year floor: "expect this to be the first threshold to need review". A
+      breach of a *movable* threshold between the builders would leave a warehouse with
+      facts but no join/hybrid views, whose only documented recovery — ``replace=True``
+      — rebuilds and re-hits the same breach. Running last means a breach reports over a
+      complete warehouse instead.
+    - **They measure a population, so they are meaningful only on a complete build.** A
+      build whose sources are deliberately partial — a state-scoped MIT extract against
+      a full UCSB corpus, as ``tests/integration/test_ec_pv_join.py::
+      test_join_over_a_real_two_source_load`` does — yields few paired cells, and an
+      agreement *rate* over a handful of cells says nothing about either source. That
+      one test is the only caller that opts out for that *reason*. The other opt-outs
+      are unit tests exercising the flag itself — one passing the kwarg, one the
+      ``--no-validate-overlap`` CLI spelling. A UCSB-less build needs nothing, since
+      both gates skip on their own (AC-3).
 
     Opens no transaction itself; see the module docstring for the per-source-atomic
     model and why a failed build is recovered with ``replace=True``, not a bare re-run.
@@ -219,6 +272,13 @@ def run_warehouse(
 
         rebuild_views(dbc)
 
+        # The D017 layer-3 gates, last -- after every view exists, and only on a build
+        # the caller vouches is complete. Both skip on their own when UCSB is absent.
+        overlap: OverlapReport | None = None
+        if validate_overlap:
+            overlap = assert_db_overlap_within_tolerance(dbc)
+            assert_db_margin_agreement(dbc)
+
         return WarehouseResult(
             ec_rows=ec_rows,
             mit_rows=mit_rows,
@@ -227,6 +287,7 @@ def run_warehouse(
             ucsb_roster_rows=ucsb_roster_rows,
             sources_loaded=frozenset(sources),
             views_built=True,
+            overlap=overlap,
         )
     finally:
         # Close on either exit — success after the views, or a mid-build failure — so a

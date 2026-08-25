@@ -395,6 +395,9 @@ cross-1976 trend is published.
 - [`src/usvote/pv/absences.py`](../src/usvote/pv/absences.py) — the absence catalog and its
   citations
 - [`research-pv-overlap.md`](../.claude/specs/research-pv-overlap.md) — E7-S1 (#70): the measured
-  MIT-vs-UCSB agreement across the 1976 source seam, and the recommended D017 layer-3 tolerance
+  MIT-vs-UCSB agreement across the 1976 source seam, and the D017 layer-3 tolerance it
+  recommended — **adopted** as [D051](../.claude/specs/decisions.md) and **implemented** in #167
+  ([`src/usvote/pv/overlap.py`](../src/usvote/pv/overlap.py), plus gate 3 in
+  [`src/usvote/hybrid.py`](../src/usvote/hybrid.py))
 - [`ucsb-html-formats.md`](ucsb-html-formats.md) — the source-corpus survey the roster design came
   from

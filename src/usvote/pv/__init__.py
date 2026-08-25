@@ -24,6 +24,13 @@ It holds the shared PV contract, deliberately owned by no single source:
   per-source attributes (``precedence_rank``/``redistributable``/``license``) *and* the
   source-name literals ``SOURCE_MIT``/``SOURCE_UCSB`` both source transforms stamp.
 - :mod:`usvote.pv.views` — the three D017 resolution views over the raw union.
+- :mod:`usvote.pv.overlap` — the D017 **layer-3** gate (#167, D051): MIT-vs-UCSB
+  agreement at the ``(year, state, candidate)`` cell grain, over two of those views.
+  It reports keys and never magnitudes, which is a D030/D022 licensing constraint made
+  structural rather than a style choice. D051's third threshold is the national
+  margin-difference ceiling and lives in :mod:`usvote.hybrid` instead — beside the
+  computation it protects, and unable to live here because it calls
+  ``roll_up_national``.
 - :mod:`usvote.pv.load` — the write seams: ``load_pv_records`` (the one fact seam every
   source loads through, tagged by its ``source`` value), ``load_pv_status``, plus the
   #68 union seams ``load_pv_source`` / ``create_pv_views`` / ``build_pv_union``.

@@ -239,6 +239,35 @@ def make_dbc(conn: RecordingConnection) -> DBC:
     return DBC({"dbname": "test"}, connect=lambda **_: conn)
 
 
+class QueryDispatchDBC:
+    """A read-only ``DBC`` stand-in that answers by matching a relation in the query.
+
+    Deliberately not a mock: the callers under test are expected to *issue the reads
+    they claim*, so this serves real frames and records every query for the caller to
+    assert on (``pv_votes`` never appearing is a real assertion in the #167 tests).
+
+    ``routes`` maps a substring of the SQL — normally a relation name — to the frame to
+    return; the first match in insertion order wins, and ``default`` answers anything
+    unmatched. It implements only ``select_query_to_df``, which is all a read-only seam
+    uses, so a caller that takes a ``DBC`` casts at the call site — and keeps the stub
+    itself, since ``.queries`` is usually the point.
+    """
+
+    def __init__(
+        self, routes: dict[str, pd.DataFrame], default: pd.DataFrame
+    ) -> None:
+        self.routes = routes
+        self.default = default
+        self.queries: list[str] = []
+
+    def select_query_to_df(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        for needle, frame in self.routes.items():
+            if needle in query:
+                return frame.copy()
+        return self.default.copy()
+
+
 def record_inserts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     """Patch ``usvote.db.execute_values`` to capture ``(sql, argslist)``; return the log.
 

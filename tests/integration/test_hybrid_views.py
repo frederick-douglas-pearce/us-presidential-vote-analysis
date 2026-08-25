@@ -42,6 +42,7 @@ import pytest
 from tests._helpers import FIXTURES_DIR, fake_state_geo, non_null_flag
 from usvote import hybrid
 from usvote.db import DBC
+from usvote.hybrid import assert_db_margin_agreement
 from usvote.join import (
     EC_PV_PREFERRED_VIEW,
     EC_PV_REDISTRIBUTABLE_VIEW,
@@ -49,6 +50,7 @@ from usvote.join import (
 )
 from usvote.load import SCHEMA
 from usvote.pv.load import build_pv_union, load_pv_records, load_pv_status
+from usvote.pv.overlap import assert_db_overlap_within_tolerance
 from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, SOURCE_UCSB
 from usvote.pv.status import (
@@ -492,6 +494,53 @@ def test_hybrid_views_over_a_real_full_warehouse(
         # case where an intuition-driven assert goes the wrong way (#125's first draft
         # did exactly that, caught at the architect gate).
         assert float(summary.loc[1864, "pv_coverage"]) == 1.0
+
+        # --- #167 / D051: the D017 layer-3 gates over the real overlap --------
+        # AC-3's own acceptance evidence, which cannot run in CI (D022) — this is the
+        # only place the gates meet real MIT-vs-UCSB data. Every figure asserted here is
+        # already published in decisions.md (D051) / research-pv-overlap.md §3 and
+        # §6, so the
+        # test commits no new UCSB-derived quantity.
+        # ``run_warehouse`` already ran both gates (``validate_overlap`` defaults on),
+        # so assert the receipt carries what they measured -- that is the shipped path.
+        # The direct call below then re-reads the LIVE views for the detailed
+        # assertions, which is a stronger check than trusting the receipt alone.
+        assert result.overlap is not None and not result.overlap.skipped
+        assert len(result.overlap.flagged) == 7
+        report = assert_db_overlap_within_tolerance(dbc)
+        assert not report.skipped, (
+            "UCSB is loaded in this build, so the gate must measure rather than skip — "
+            "a skip here would make every assertion below vacuous"
+        )
+        assert report.cells == 1326, "the overlap population drifted from research §3"
+        assert report.exact_pct == pytest.approx(93.44, abs=0.01)
+        assert report.one_sided == (), (
+            "research §3 measured zero one-sided cells; a non-empty list means one "
+            "source stopped covering a key the other still carries"
+        )
+        assert len(report.flagged) == 7, "D051 threshold 2 flags 7 of 87 divergent cells"
+        worst_year, worst_pct = min(
+            report.exact_pct_by_year.items(), key=lambda kv: kv[1]
+        )
+        # Assert WHICH year as well as the value: if 1976 improved and another year
+        # degraded to the same rate, a value-only assert passes under a message that
+        # has silently become false.
+        assert (worst_year, round(worst_pct, 2)) == (1976, 84.31), "research §6"
+
+        # Gate 3, and the fork-(d) reconciliation: the margin this gate scores for the
+        # redistributable source must BE the margin the site publishes. Without it the
+        # gate could be green about a quantity nothing downstream reads.
+        compared = assert_db_margin_agreement(dbc)
+        assert compared is not None and len(compared) == 13
+        assert compared["diff_pp"].max() == pytest.approx(0.0337, abs=0.0001)
+        for row in compared.itertuples(index=False):
+            assert float(summary.loc[int(row.year), "pv_margin"]) == pytest.approx(
+                float(row.mit_margin), abs=1e-6
+            ), (
+                f"{int(row.year)}: gate 3's MIT-side margin diverges from the published "
+                f"{hybrid.HYBRID_SUMMARY_PREFERRED_VIEW}.pv_margin — the gate would be "
+                "measuring something the site does not publish"
+            )
 
         # --- C2: 1824 under BOTH coverage policies ---------------------------
         # The views materialize (b) only; (c) is reachable from Python alone, which is

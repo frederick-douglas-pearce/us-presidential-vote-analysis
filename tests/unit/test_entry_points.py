@@ -10,6 +10,7 @@ loud/explicit UCSB gating for ``usvote all``. No DB, no network.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from typing import Any
 
 import pytest
@@ -60,6 +61,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         *,
         ucsb_html_dir: Any,
         replace: bool,
+        validate_overlap: bool,
         fetch: Any,
         environ: Any,
         close: bool,
@@ -67,7 +69,12 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         # No default on `fetch`, matching its siblings: if _run_all stopped forwarding
         # it, this double must fail rather than silently accept None.
         calls["warehouse"].append(
-            {"ucsb_html_dir": ucsb_html_dir, "replace": replace, "fetch": fetch}
+            {
+                "ucsb_html_dir": ucsb_html_dir,
+                "replace": replace,
+                "validate_overlap": validate_overlap,
+                "fetch": fetch,
+            }
         )
         loaded = {SOURCE_EC, SOURCE_MIT} | (
             {SOURCE_UCSB} if ucsb_html_dir is not None else set()
@@ -107,7 +114,12 @@ def test_all_autodetects_ucsb_when_snapshot_present(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     assert top.main(["all", "--replace"]) == 0
     assert top_env["warehouse"] == [
-        {"ucsb_html_dir": "snap/", "replace": True, "fetch": top.scrape.fetch_url}
+        {
+            "ucsb_html_dir": "snap/",
+            "replace": True,
+            "validate_overlap": True,
+            "fetch": top.scrape.fetch_url,
+        }
     ]
 
 
@@ -120,7 +132,12 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", absent)
     assert top.main(["all"]) == 0
     assert top_env["warehouse"] == [
-        {"ucsb_html_dir": None, "replace": False, "fetch": top.scrape.fetch_url}
+        {
+            "ucsb_html_dir": None,
+            "replace": False,
+            "validate_overlap": True,
+            "fetch": top.scrape.fetch_url,
+        }
     ]
     # The skip must be loud (D024): a prominent notice on stderr.
     assert "WITHOUT UCSB" in capsys.readouterr().err
@@ -138,7 +155,12 @@ def test_all_no_ucsb_skips_without_probing_env(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", boom)
     assert top.main(["all", "--no-ucsb"]) == 0
     assert top_env["warehouse"] == [
-        {"ucsb_html_dir": None, "replace": False, "fetch": top.scrape.fetch_url}
+        {
+            "ucsb_html_dir": None,
+            "replace": False,
+            "validate_overlap": True,
+            "fetch": top.scrape.fetch_url,
+        }
     ]
     # Still loud (D024), but the remedy acknowledges the deliberate choice rather than
     # suggesting --require-ucsb / USVOTE_UCSB_HTML_DIR as if UCSB were missing by accident.
@@ -585,3 +607,166 @@ def test_an_unset_corpus_variable_is_announced(
     out = capsys.readouterr().out
     assert top.config.EC_HTML_DIR_VAR in out
     assert "scraping archives.gov live" in out
+
+
+# --- the D017 layer-3 overlap gates on the CLI (#167) -------------------------
+
+
+def test_all_forwards_no_validate_overlap(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--no-validate-overlap`` must reach ``run_warehouse``, not just parse.
+
+    The flag is the only escape hatch from a gate whose thresholds D051 expects to
+    retune, and the failure it exists for happens after a multi-minute build — so a flag
+    that parses and is then dropped is worse than no flag at all.
+    """
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    assert top.main(["all", "--no-validate-overlap"]) == 0
+    assert top_env["warehouse"][0]["validate_overlap"] is False
+
+
+@pytest.mark.parametrize("gate_error", ["overlap", "hybrid"])
+def test_a_breached_overlap_gate_reports_instead_of_raising(
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    gate_error: str,
+) -> None:
+    """A gate breach exits 1 with guidance, not a traceback.
+
+    ``PVOverlapError`` is a ``RuntimeError`` sibling of ``PipelineError``, not a
+    subclass, so it needs its own arm — and this path is on the deploy runbook
+    (``docs/deploy-cloud-run.md`` runs ``python -m usvote all`` before the snapshot).
+    The message must say the warehouse *did* build, because that is what decides the
+    operator's next move.
+
+    **Parametrized over both gate errors** because the ``except`` arm names two, and a
+    mutation dropping ``HybridError`` from it survived the whole suite: gates 1-2 raise
+    ``PVOverlapError`` and gate 3 raises ``HybridError``, so testing only the first
+    leaves a gate-3 breach exiting with a bare traceback on the runbook's own path.
+    """
+    from usvote.hybrid import HybridError
+    from usvote.pv.overlap import PVOverlapError
+
+    exc: Exception = (
+        PVOverlapError("gate 1 (overall): 12.00% of 100 overlap cells")
+        if gate_error == "overlap"
+        else HybridError("gate 3: national margins differ by 0.90 pp")
+    )
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise exc
+
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+
+    assert top.main(["all"]) == 1
+    err = capsys.readouterr().err
+    assert "Overlap validation failed" in err
+    assert "--no-validate-overlap" in err
+    assert "were built before this check ran" in err
+
+
+def test_the_overlap_receipt_reaches_stdout_on_a_clean_build(
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """AC-4: a D005 list computed on every build and never shown is not *produced*.
+
+    ``TestTheOverlapNote`` below exercises ``_overlap_note`` directly, which leaves the
+    call site untested — a mutation dropping the ``print()`` around it computed the
+    receipt, discarded it, and kept the suite green. That is the exact failure the note
+    exists to prevent, so the assertion has to run through ``main`` rather than through
+    the helper.
+    """
+    from usvote.pv.overlap import OverlapKey, OverlapReport
+
+    report = OverlapReport(
+        cells=1326,
+        exact=1239,
+        exact_pct=93.44,
+        flagged=(OverlapKey(year=1976, state="Vermont", candidate="Gerald R. Ford"),),
+    )
+    real_wh = top.run_warehouse
+
+    def wh(*a: Any, **k: Any) -> WarehouseResult:
+        return dataclasses.replace(real_wh(*a, **k), overlap=report)
+
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", wh)
+
+    assert top.main(["all"]) == 0
+    out = capsys.readouterr().out
+    assert "Overlap validation:" in out
+    assert "93.44%" in out and "1326" in out
+    assert "1976 Vermont Gerald R. Ford" in out
+
+
+class TestTheOverlapNote:
+    """The completion line must distinguish all three gate outcomes."""
+
+    def test_a_switched_off_gate_never_reads_as_clean(self) -> None:
+        """The failure this line exists to prevent: silence meaning two things."""
+        note = top._overlap_note(None)
+        assert "SKIPPED" in note and "nothing checked" in note
+        assert "passed" not in note
+
+    def test_a_skipped_gate_reports_its_reason_and_not_a_pass(self) -> None:
+        from usvote.pv.overlap import SKIP_UCSB_ABSENT, OverlapReport
+
+        note = top._overlap_note(
+            OverlapReport(skipped=True, skip_reason=SKIP_UCSB_ABSENT)
+        )
+        assert "not applicable" in note and "UCSB is not loaded" in note
+        assert "passed" not in note
+
+    def test_a_skip_that_excluded_years_names_them(self) -> None:
+        """The one skip path that populates ``uncovered_years`` must print them.
+
+        Its sibling above covers only the *empty* arm — ``SKIP_UCSB_ABSENT`` excludes
+        nothing — so without this the whole ``(excluded: ...)`` clause could be deleted
+        and the suite would stay green. Verified: reverting the clause reddens this test
+        and nothing else. An operator told only "no comparable years" cannot tell which
+        years stopped being compared, which is the one thing this skip needs to say.
+        """
+        from usvote.pv.overlap import SKIP_ALL_YEARS_AT_FRONTIER, OverlapReport
+
+        note = top._overlap_note(
+            OverlapReport(
+                skipped=True,
+                skip_reason=SKIP_ALL_YEARS_AT_FRONTIER,
+                uncovered_years=(2024, 2028),
+            )
+        )
+        assert "not applicable" in note and "no comparable years" in note
+        assert "excluded: 2024, 2028" in note
+        assert "passed" not in note
+
+    def test_a_clean_run_names_the_flagged_keys_and_no_magnitudes(self) -> None:
+        """AC-4: the D005 list is only "produced" if an operator can see it.
+
+        Keys only — the same D030/D022 constraint that shapes ``OverlapKey`` governs
+        anything printed from one.
+        """
+        from usvote.pv.overlap import OverlapKey, OverlapReport
+
+        note = top._overlap_note(
+            OverlapReport(
+                cells=1326,
+                exact=1239,
+                exact_pct=93.44,
+                flagged=(
+                    OverlapKey(
+                        year=1976, state="State0", candidate="Nominee", party="D"
+                    ),
+                ),
+                one_sided=(),
+                uncovered_years=(2028,),
+            )
+        )
+        assert "93.44%" in note and "1326" in note
+        assert "1 flagged" in note and "1976 State0 Nominee" in note
+        assert "2028" in note and "excluded" in note
+        assert "1239" not in note  # a count of exact cells is not per-cell data
