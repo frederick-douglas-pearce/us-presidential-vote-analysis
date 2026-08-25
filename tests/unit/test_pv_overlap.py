@@ -585,7 +585,7 @@ class TestGateOneExactMatchFloor:
     def test_an_overall_rate_exactly_on_the_floor_does_not_raise(self) -> None:
         """The floor is ``>= 90%``, so the comparison that fires it is strict ``<``.
 
-        No fixture in this file sat on the line — the nearest were 80% and 92% — so a
+        No fixture in this file sat on the line — the nearest were 80% and 94% — so a
         mutation relaxing the comparison to ``<=`` survived the whole suite, silently
         turning D051's "at least 90%" into "more than 90%". The two disagreeing cells
         differ by 0.99% of the UCSB value, below the flag line, so gate 2 stays out of
@@ -630,7 +630,7 @@ class TestGateOneExactMatchFloor:
         """The discriminating case, and the reason gate 1 carries two floors.
 
         A localized regression — one year's canvass re-parsed wrong — is diluted by
-        every other year in the overall rate. Here the overall rate is 92% (above the
+        every other year in the overall rate. Here the overall rate is 96% (above the
         90% floor) while 1980 sits at 50%, and the gate must still fire. Without the
         per-year floor this passes, which is precisely the D051 rationale
         ("the per-year floor is the instrument for exactly the *localized* regression").
