@@ -6,10 +6,14 @@ Excluded from the default suite by the ``integration`` marker; run with
 **Why this exists.** The snapshot is the *public artifact* — what the Cloud Run image
 bakes in and what ``api.us-presidential-election-center.org`` serves — and until this
 test its entire build path was verified only offline, against hand-authored synthetic
-frames. Four things were covered by a person remembering to run a manual build and by
-nothing else: the catalog-vs-spine agreement across all 51 years, slug uniqueness over
-the real candidate set, the ``state_usps`` join resolving for every state, and
-``national_electoral_denominator`` matching the real appointed allotments.
+frames. Three things were covered by a person remembering to run a manual build and by nothing
+else: slug uniqueness over the real candidate set, the ``state_usps`` join resolving for
+every state, and ``national_electoral_denominator`` matching the real appointed
+allotments. A fourth — the catalog-vs-spine agreement across all 51 years — **is**
+covered offline (``tests/unit/test_pv_absences.py::TestRealShapes::test_the_whole_curated_span_yields_32_absences_and_nothing_else``, which runs
+``build_curated_roster`` over every year in ``CURATED_YEARS``), but against the
+*committed roster fixture*; what this test adds there is the **live warehouse spine**,
+so fixture-vs-pipeline drift has somewhere to fail.
 
 **What this test covers, stated honestly.** It is **data-integrity** coverage, not
 **mechanism** coverage, and the distinction is load-bearing:
@@ -17,7 +21,7 @@ the real candidate set, the ``state_usps`` join resolving for every state, and
 - :func:`~usvote.pv.absences.assert_catalog_matches_spine` is a **no-op on correct
   data**, so disabling it entirely would not change a single number asserted below.
   Its *mechanism* is mutation-covered offline in
-  ``tests/unit/test_pv_absences.py`` (``TestAssertCatalogMatchesSpine``), which feeds
+  ``tests/unit/test_pv_absences.py`` (``TestCatalogMatchesSpine``), which feeds
   phantom, miscast, uncatalogued and null-EV entries and asserts each raises.
 - What this test adds instead is that every catalogued absence **reached a real fact
   row** and survived the roster merge onto the artifact as written.
@@ -33,21 +37,37 @@ exists in the real spine and reached the artifact, and the ``m:1`` roster merge
 preserved each value — a catalogued state that silently failed to join, or a status
 mangled in transit, fails here.
 
-**The spine-independent pins are the literals below it**: :data:`PINNED_ABSENCES` names
-cells against hardcoded expectations, so editing or deleting a catalog entry fails
-(by mismatch, or by ``KeyError`` on a deleted key) rather than moving both sides at
-once. :data:`ABSENCE_CELL_COUNT` pins the catalog's size the same way. The remaining
-catalog entries are covered by the offline suite and by ``TestRealCorpus``'s
-cross-source control, not here.
+**The spine-independent pins are the literals below it**, and each catches a different
+edit — worth stating exactly, since mis-attributing a mechanism is the error that put
+them here:
+
+- **A deleted entry** fails :data:`ABSENCE_CELL_COUNT` (31 != 32). It never reaches the
+  ``PINNED_ABSENCES`` loop, which runs after. Note it does *not* raise during the build
+  for a state with electoral votes: ``assert_catalog_matches_spine``'s uncatalogued
+  check fires only for zero-EV spine states, so a deleted Colorado 1876 simply
+  reclassifies to ``popular_vote`` as the residual.
+- **A flipped status** raises in production before an artifact exists — the miscast
+  check partitions the two statuses on ``total_electoral_votes == 0``, so the test
+  errors rather than asserting.
+- **A re-keyed entry** — ``(1876, "Colorado")`` becoming ``(1880, "Colorado")`` — is the
+  pins' genuinely unique mutant: no phantom, no miscast, count unchanged, and the set
+  equality moves with it. Only the ``KeyError`` in the pinned loop catches it.
+
+**The residual, stated rather than implied:** a same-size **swap** — one entry deleted
+and another added with electoral votes and a consistent status — keeps the count at 32
+and moves both sides of the equality, so nothing here detects it. It is caught in CI by
+the offline literal set in ``tests/unit/test_pv_absences.py::TestCatalogIntegrity::test_the_in_scope_catalog_is_exactly_32_rows_split_18_14``, which pins the
+catalog's size and its 18/14 split directly.
 
 **Three corpora, deliberately not four.** ``USVOTE_UCSB_HTML_DIR`` is **not** required
 and must not become required. Since #139/D048 the build derives ``pv_status`` in-process
 from :mod:`usvote.pv.absences` over the EC spine and **never** reads
 ``dwh.pv_state_status``, whose pre-1976 rows are UCSB-derived (D022/D030). A snapshot
 test that needed the UCSB corpus would assert a dependency the licensing firewall says
-does not exist. The catalog-vs-UCSB agreement is ``TestRealCorpus``'s job, and the
+does not exist. The catalog-vs-UCSB agreement is
+``tests/unit/test_ucsb_transform.py::TestRealCorpus``'s job, and the
 "no UCSB value on the redistributable surface" property is held by
-``tests/unit/test_layering.py`` and by ``test_hybrid_views.py``'s own checks.
+``tests/unit/test_layering.py`` and by ``tests/integration/test_hybrid_views.py``'s own checks.
 """
 
 from __future__ import annotations
@@ -70,8 +90,10 @@ from usvote.pv.status import (
 )
 from usvote.snapshot import build_snapshot_from_db
 from usvote.snapshot_schema import (
+    DATA_COLUMNS,
     DATA_TABLE,
     META_TABLE,
+    ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
 )
@@ -111,8 +133,8 @@ ROW_COUNT = 5623
 ABSENCE_CELL_COUNT = 32
 
 #: Spine-independent classification pins — hardcoded expectations, chosen to span both
-#: non-``popular_vote`` statuses, both citation families and four decades, so a single
-#: mis-set entry cannot hide behind its neighbours.
+#: non-``popular_vote`` statuses, all three citation families and four decades, so a
+#: single mis-set entry cannot hide behind its neighbours.
 PINNED_ABSENCES: dict[tuple[int, str], str] = {
     # McPherson v. Blacker: the legislature appointed electors.
     (1824, "South Carolina"): PV_STATUS_LEGISLATURE_CHOSEN,
@@ -129,7 +151,7 @@ PINNED_ABSENCES: dict[tuple[int, str], str] = {
 def _corpus_fetch(html_dir: str) -> Any:
     """A ``Fetch`` replaying the local Archives corpus, verified complete first.
 
-    Mirrors the helper in ``test_hybrid_views.py``; kept local rather than shared
+    Mirrors the helper in ``tests/integration/test_hybrid_views.py``; kept local rather than shared
     because the coupling cost of a shared private test helper exceeds four lines.
     ``assert_corpus_covers_years`` is the load-bearing call: a corpus short a year
     fails loud here instead of yielding a warehouse quietly missing an election.
@@ -182,10 +204,13 @@ def test_snapshot_from_a_real_full_span_warehouse(
         meta = build_snapshot_from_db(dbc, str(out))
 
         # --- AC-1: the returned metadata --------------------------------------
-        # NOTE: ``schema_version == SNAPSHOT_SCHEMA_VERSION`` pins the symbol to itself
-        # and would silently follow a hand-bump. It is kept because a *shape* change
-        # trips the column-set assertion below; when #102 (E8-S8) bumps 2 -> 3 by hand,
-        # the shape guard that makes the D034 cutover contract enforceable belongs here.
+        # NOTE: ``schema_version == SNAPSHOT_SCHEMA_VERSION`` pins the symbol to
+        # itself and would silently follow a hand-bump. What makes that acceptable is
+        # the column-set assertion further down (search ``PRAGMA table_info``), which
+        # pins the artifact's shape against the ``snapshot_schema`` contract — so a
+        # shape change that forgot its version bump fails there. That is the guard
+        # #102 (E8-S8) needs for the D034 "image and snapshot cut over together"
+        # contract, landed here rather than left as a note asking someone to add it.
         assert meta.schema_version == SNAPSHOT_SCHEMA_VERSION
         assert (meta.year_min, meta.year_max) == (SERVED_YEAR_MIN, SERVED_YEAR_MAX)
         assert (meta.pv_year_min, meta.pv_year_max) == (PV_YEAR_MIN, PV_YEAR_MAX)
@@ -224,6 +249,22 @@ def test_snapshot_from_a_real_full_span_warehouse(
             # short a year cannot pass the window assertions above by accident.
             assert one(f"SELECT count(DISTINCT year) FROM {DATA_TABLE}") == SERVED_YEARS
 
+            # --- the artifact's SHAPE matches the contract ----------------------
+            # The guard that makes the self-pinning ``schema_version`` assertion above
+            # safe: a column added or removed without a version bump fails here.
+            # ``PRAGMA table_info`` returns (cid, name, type, notnull, default, pk).
+            for table, contract in (
+                (DATA_TABLE, DATA_COLUMNS),
+                (ROLLUP_TABLE, ROLLUP_COLUMNS),
+            ):
+                shipped = tuple(
+                    r[1] for r in conn.execute(f"PRAGMA table_info({table})")
+                )
+                assert shipped == contract, (
+                    f"{table} shape drifted from snapshot_schema: shipped {shipped}, "
+                    f"contract {contract}"
+                )
+
             # --- AC-1: pv_status is non-null on every row -----------------------
             # Largely redundant with the ``NOT NULL`` column and ``add_pv_status``'s
             # anti-join; kept as cheap artifact-level confirmation. The assertion that
@@ -258,7 +299,11 @@ def test_snapshot_from_a_real_full_span_warehouse(
             )
             # The spine-INDEPENDENT half: hardcoded expectations, so a catalog edit
             # fails here even though it would move both sides of the equality above.
-            assert len(absent_cells) == ABSENCE_CELL_COUNT
+            assert len(absent_cells) == ABSENCE_CELL_COUNT, (
+                f"expected {ABSENCE_CELL_COUNT} catalogued absences on the artifact, "
+                f"got {len(absent_cells)} — an entry was added or deleted, which the "
+                "set equality above cannot see (both sides derive from the catalog)"
+            )
             for (year, state), expected_status in PINNED_ABSENCES.items():
                 assert absent_cells[(year, state)] == expected_status, (
                     f"{year} {state} must ship as {expected_status!r}"
