@@ -310,6 +310,10 @@ def test_snapshot_tables_have_expected_shape(tmp_path: Path) -> None:
     assert (data["candidate_slug"] == data["candidate"].map(candidate_slug)).all()
     # state_usps is carried for the /v1/states/{...} path key (#97).
     assert set(data.loc[data["state"] == "California", "state_usps"]) == {"CA"}
+    # The shipped rollup table's columns come from a hand-written CREATE TABLE in
+    # usvote.snapshot._create_tables, maintained independently of ROLLUP_COLUMNS.
+    # Assert they agree (ec_pv is covered by the DATA_TABLE line above).
+    assert list(_read(out, ROLLUP_TABLE).columns) == list(ROLLUP_COLUMNS)
 
 
 def test_add_candidate_slug_is_pure() -> None:
@@ -865,13 +869,13 @@ def test_build_from_db_reads_then_builds(
     every genuine 1860s entry look like a typo. This test owns the read→build→close
     wiring; the derivation itself is covered by the ``_full_spine`` tests above.
 
-    **Known gap, stated rather than implied:** there is no integration test that builds a
-    snapshot from a live warehouse, so the interaction of this derivation with the
-    *actual* ``dwh.votes`` across all 51 years — plus slug uniqueness over the real 96
-    candidates and the ``state_usps`` join — is verified only by a manual local run
-    (#139 did one). It is not easily added to the current integration suite, whose
-    warehouses are year-scoped and which D048 §7 now deliberately forbids snapshotting.
-    Closing it means a full-span warehouse fixture, which is its own piece of work.
+    **That gap is now closed (#150).**
+    ``tests/integration/test_snapshot_build.py::test_snapshot_from_a_real_full_span_warehouse``
+    builds a real 51-year EC+MIT warehouse from the local Archives corpus and snapshots
+    it, so the derivation meets the *actual* ``dwh.votes`` — along with slug uniqueness
+    over the real 96 candidates and the ``state_usps`` join. It is corpus-gated and
+    skips in CI, so it does not cover this wiring on every run; that is what keeps this
+    test worth having.
     """
     import usvote.snapshot as snapshot_mod
     from usvote.snapshot import build_snapshot_from_db
