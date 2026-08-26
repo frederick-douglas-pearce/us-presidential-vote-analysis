@@ -19,14 +19,26 @@ the real candidate set, the ``state_usps`` join resolving for every state, and
   Its *mechanism* is mutation-covered offline in
   ``tests/unit/test_pv_absences.py`` (``TestAssertCatalogMatchesSpine``), which feeds
   phantom, miscast, uncatalogued and null-EV entries and asserts each raises.
-- What this test adds instead is that the **real** ``dwh.votes`` frame agrees with the
-  in-repo catalog end-to-end, on the artifact as written. That is why
-  :func:`test_snapshot_from_a_real_full_span_warehouse` asserts the *content* of
-  ``pv_status`` against :data:`~usvote.pv.absences.PV_ABSENCE_CATALOG` rather than only
-  its non-nullness: a misclassification — 1824 South Carolina shipping as
-  ``popular_vote`` instead of ``legislature_chosen`` — passes ``NOT NULL``, passes a
-  distinct-values-in-enum check, passes the modern-years guard and passes every count.
-  Nothing but a positive content assertion catches it.
+- What this test adds instead is that every catalogued absence **reached a real fact
+  row** and survived the roster merge onto the artifact as written.
+
+**What the catalog comparison does and does not prove — stated precisely, because the
+obvious reading is wrong.** ``absent_cells == expected`` compares the artifact's
+non-``popular_vote`` cells against :data:`~usvote.pv.absences.PV_ABSENCE_CATALOG`, and
+the artifact's ``pv_status`` is *itself* derived from that same catalog
+(``derive_curated_pv_status_roster`` -> ``build_curated_roster``). **Both sides move
+together**, so that equality cannot detect a wrong or deleted catalog entry. What it
+does prove is real but narrower: every catalog key matched a ``(year, state)`` that
+exists in the real spine and reached the artifact, and the ``m:1`` roster merge
+preserved each value — a catalogued state that silently failed to join, or a status
+mangled in transit, fails here.
+
+**The spine-independent pins are the literals below it**: :data:`PINNED_ABSENCES` names
+cells against hardcoded expectations, so editing or deleting a catalog entry fails
+(by mismatch, or by ``KeyError`` on a deleted key) rather than moving both sides at
+once. :data:`ABSENCE_CELL_COUNT` pins the catalog's size the same way. The remaining
+catalog entries are covered by the offline suite and by ``TestRealCorpus``'s
+cross-source control, not here.
 
 **Three corpora, deliberately not four.** ``USVOTE_UCSB_HTML_DIR`` is **not** required
 and must not become required. Since #139/D048 the build derives ``pv_status`` in-process
@@ -87,6 +99,32 @@ CANDIDATE_COUNT = 96
 GRANT_1872_CAST = 300
 GRANT_1872_COUNTED = 286
 
+#: Fact rows across the served span. Pinned rather than bounded for the same reason
+#: :data:`CANDIDATE_COUNT` is: `> 0` cannot notice a build that keeps every year and
+#: every candidate while dropping most *state* rows within them — a state-scoped source
+#: extract, or an EC-left join regression leaving one row per year.
+ROW_COUNT = 5623
+
+#: Size of :data:`~usvote.pv.absences.PV_ABSENCE_CATALOG`, pinned as a literal so a
+#: catalog entry added or deleted fails here. The set equality in the test cannot: the
+#: artifact's ``pv_status`` derives from that same catalog, so both sides move together.
+ABSENCE_CELL_COUNT = 32
+
+#: Spine-independent classification pins — hardcoded expectations, chosen to span both
+#: non-``popular_vote`` statuses, both citation families and four decades, so a single
+#: mis-set entry cannot hide behind its neighbours.
+PINNED_ABSENCES: dict[tuple[int, str], str] = {
+    # McPherson v. Blacker: the legislature appointed electors.
+    (1824, "South Carolina"): PV_STATUS_LEGISLATURE_CHOSEN,
+    (1832, "South Carolina"): PV_STATUS_LEGISLATURE_CHOSEN,
+    (1848, "South Carolina"): PV_STATUS_LEGISLATURE_CHOSEN,
+    # H.R. 126: no returns from the seceded states.
+    (1864, "Alabama"): PV_STATUS_NOT_PARTICIPATING,
+    (1864, "Texas"): PV_STATUS_NOT_PARTICIPATING,
+    # Colo. Const. of 1876, Schedule s 19: the first-year legislative appointment.
+    (1876, "Colorado"): PV_STATUS_LEGISLATURE_CHOSEN,
+}
+
 
 def _corpus_fetch(html_dir: str) -> Any:
     """A ``Fetch`` replaying the local Archives corpus, verified complete first.
@@ -134,8 +172,9 @@ def test_snapshot_from_a_real_full_span_warehouse(
         )
         assert result.views_built
         # Non-vacuity, and the D030 point in one assertion: a two-source build is what
-        # the public artifact is built from. UCSB is skipped at warehouse.py:265
-        # (``if ucsb_html_dir is not None``), not merely absent from the environment.
+        # the public artifact is built from. UCSB is skipped by ``run_warehouse``'s
+        # ``if ucsb_html_dir is not None``, not merely absent from the environment.
+        # (No line number: any edit above it in warehouse.py would silently repoint it.)
         assert result.sources_loaded == frozenset({"ec", "mit"})
 
         out = tmp_path / "snapshot.sqlite"
@@ -156,19 +195,30 @@ def test_snapshot_from_a_real_full_span_warehouse(
             "lower suggests a name reconciliation merged two people, higher suggests "
             "one person split across spellings"
         )
-        assert meta.row_count > 0
+        assert meta.row_count == ROW_COUNT, (
+            f"expected {ROW_COUNT} fact rows across the served span, got "
+            f"{meta.row_count} — a bare `> 0` would not notice a build that dropped "
+            "most state rows within years while keeping every year present"
+        )
 
         conn = sqlite3.connect(str(out))
         try:
+
             def one(sql: str, *args: Any) -> Any:
-                return conn.execute(sql, args).fetchone()[0]
+                """First column of the single expected row, or fail naming the query.
+
+                Without the guard a query that matches nothing dies with
+                ``TypeError: 'NoneType' object is not subscriptable``, pointing at the
+                subscript rather than at the missing row — and a missing row is the
+                likely shape here, since a canonical name shift (``docs/corrections.md``
+                records several) silently empties a ``WHERE candidate = ...``.
+                """
+                row = conn.execute(sql, args).fetchone()
+                assert row is not None, f"query matched no row: {sql}"
+                return row[0]
 
             # --- the artifact matches the metadata ------------------------------
             assert one(f"SELECT count(*) FROM {DATA_TABLE}") == meta.row_count
-            assert (
-                one(f"SELECT count(DISTINCT candidate_slug) FROM {DATA_TABLE}")
-                == meta.candidate_count
-            )
             assert one(f"SELECT count(*) FROM {META_TABLE}") == 1
             # Non-vacuity: every election in the served span is present, so a build
             # short a year cannot pass the window assertions above by accident.
@@ -178,9 +228,9 @@ def test_snapshot_from_a_real_full_span_warehouse(
             # Largely redundant with the ``NOT NULL`` column and ``add_pv_status``'s
             # anti-join; kept as cheap artifact-level confirmation. The assertion that
             # actually guards is the content check below, not this one.
-            assert one(
-                f"SELECT count(*) FROM {DATA_TABLE} WHERE pv_status IS NULL"
-            ) == 0
+            assert (
+                one(f"SELECT count(*) FROM {DATA_TABLE} WHERE pv_status IS NULL") == 0
+            )
             distinct_status = {
                 r[0]
                 for r in conn.execute(f"SELECT DISTINCT pv_status FROM {DATA_TABLE}")
@@ -206,29 +256,42 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 "absence catalog — a difference is either a spine change the catalog "
                 "has not caught up with, or a misclassification on the public surface"
             )
-            # Two named cells, so a wholesale swap of the comparison cannot pass.
-            assert absent_cells[(1824, "South Carolina")] == (
-                PV_STATUS_LEGISLATURE_CHOSEN
-            )
-            assert absent_cells[(1864, "Alabama")] == PV_STATUS_NOT_PARTICIPATING
+            # The spine-INDEPENDENT half: hardcoded expectations, so a catalog edit
+            # fails here even though it would move both sides of the equality above.
+            assert len(absent_cells) == ABSENCE_CELL_COUNT
+            for (year, state), expected_status in PINNED_ABSENCES.items():
+                assert absent_cells[(year, state)] == expected_status, (
+                    f"{year} {state} must ship as {expected_status!r}"
+                )
 
             # --- AC-3, anomaly 1: 1872 Grant, cast vs counted vs appointed ------
-            cast, counted = conn.execute(
+            grant = conn.execute(
                 f"SELECT national_electoral_votes, national_counted_electoral_votes "
                 f"FROM {ROLLUP_TABLE} WHERE year = 1872 AND candidate LIKE '%Grant%'"
             ).fetchone()
+            assert grant is not None, "no 1872 Grant row in the national rollup"
+            cast, counted = grant
             appointed = one(
                 f"SELECT national_electoral_denominator FROM {ROLLUP_TABLE} "
                 "WHERE year = 1872 LIMIT 1"
             )
-            assert (cast, counted, appointed) == (GRANT_1872_CAST, GRANT_1872_COUNTED, 366)
+            assert (cast, counted, appointed) == (
+                GRANT_1872_CAST,
+                GRANT_1872_COUNTED,
+                366,
+            )
 
             # --- AC-3, anomaly 2: 1868 Georgia is disputed, on the right person -
-            status, reason = conn.execute(
+            georgia = conn.execute(
                 f"SELECT count_status, count_status_reason FROM {DATA_TABLE} "
                 "WHERE year = 1868 AND state = 'Georgia' AND candidate = ?",
                 ("Horatio Seymour",),
             ).fetchone()
+            assert georgia is not None, (
+                "no 1868 Georgia row for 'Horatio Seymour' — a canonical name shift "
+                "would empty this filter silently"
+            )
+            status, reason = georgia
             assert status == "disputed"
             assert reason, "a disputed row must carry the Archives' own sentence"
 
