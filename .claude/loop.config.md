@@ -19,7 +19,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). Current active epic: `epic:internal-api` (E8) | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
+| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). Current active epic: `epic:tech-debt` (E12) — #150 then #102 (`epic:internal-api`). Standing queue: `epic:tech-debt` (E12, #179) never closes; `epic:census` (E10, #129) is scoped but pre-review | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation) | inferred from available agent roster |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
