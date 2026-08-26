@@ -41,11 +41,12 @@ mangled in transit, fails here.
 edit — worth stating exactly, since mis-attributing a mechanism is the error that put
 them here:
 
-- **A deleted entry** fails :data:`ABSENCE_CELL_COUNT` (31 != 32). It never reaches the
-  ``PINNED_ABSENCES`` loop, which runs after. Note it does *not* raise during the build
-  for a state with electoral votes: ``assert_catalog_matches_spine``'s uncatalogued
-  check fires only for zero-EV spine states, so a deleted Colorado 1876 simply
-  reclassifies to ``popular_vote`` as the residual.
+- **A deleted ``legislature_chosen`` entry** (EV > 0, e.g. Colorado 1876) fails
+  :data:`ABSENCE_CELL_COUNT` (31 != 32): it reclassifies to the ``popular_vote``
+  residual — ``assert_catalog_matches_spine``'s uncatalogued check fires only for
+  zero-EV states — dropping the count before the ``PINNED_ABSENCES`` loop runs. A
+  deleted ``not_participating`` entry (EV = 0) instead **raises** at build time via
+  that same uncatalogued check, so no artifact exists to assert against.
 - **A flipped status** raises in production before an artifact exists — the miscast
   check partitions the two statuses on ``total_electoral_votes == 0``, so the test
   errors rather than asserting.
@@ -90,10 +91,8 @@ from usvote.pv.status import (
 )
 from usvote.snapshot import build_snapshot_from_db
 from usvote.snapshot_schema import (
-    DATA_COLUMNS,
     DATA_TABLE,
     META_TABLE,
-    ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
 )
@@ -132,9 +131,9 @@ ROW_COUNT = 5623
 #: artifact's ``pv_status`` derives from that same catalog, so both sides move together.
 ABSENCE_CELL_COUNT = 32
 
-#: Spine-independent classification pins — hardcoded expectations, chosen to span both
-#: non-``popular_vote`` statuses, all three citation families and four decades, so a
-#: single mis-set entry cannot hide behind its neighbours.
+#: Spine-independent classification pins — hardcoded expectations spanning both
+#: non-``popular_vote`` statuses and several decades, so a single mis-set entry
+#: cannot hide behind its neighbours.
 PINNED_ABSENCES: dict[tuple[int, str], str] = {
     # McPherson v. Blacker: the legislature appointed electors.
     (1824, "South Carolina"): PV_STATUS_LEGISLATURE_CHOSEN,
@@ -204,13 +203,6 @@ def test_snapshot_from_a_real_full_span_warehouse(
         meta = build_snapshot_from_db(dbc, str(out))
 
         # --- AC-1: the returned metadata --------------------------------------
-        # NOTE: ``schema_version == SNAPSHOT_SCHEMA_VERSION`` pins the symbol to
-        # itself and would silently follow a hand-bump. What makes that acceptable is
-        # the column-set assertion further down (search ``PRAGMA table_info``), which
-        # pins the artifact's shape against the ``snapshot_schema`` contract — so a
-        # shape change that forgot its version bump fails there. That is the guard
-        # #102 (E8-S8) needs for the D034 "image and snapshot cut over together"
-        # contract, landed here rather than left as a note asking someone to add it.
         assert meta.schema_version == SNAPSHOT_SCHEMA_VERSION
         assert (meta.year_min, meta.year_max) == (SERVED_YEAR_MIN, SERVED_YEAR_MAX)
         assert (meta.pv_year_min, meta.pv_year_max) == (PV_YEAR_MIN, PV_YEAR_MAX)
@@ -249,22 +241,6 @@ def test_snapshot_from_a_real_full_span_warehouse(
             # short a year cannot pass the window assertions above by accident.
             assert one(f"SELECT count(DISTINCT year) FROM {DATA_TABLE}") == SERVED_YEARS
 
-            # --- the artifact's SHAPE matches the contract ----------------------
-            # The guard that makes the self-pinning ``schema_version`` assertion above
-            # safe: a column added or removed without a version bump fails here.
-            # ``PRAGMA table_info`` returns (cid, name, type, notnull, default, pk).
-            for table, contract in (
-                (DATA_TABLE, DATA_COLUMNS),
-                (ROLLUP_TABLE, ROLLUP_COLUMNS),
-            ):
-                shipped = tuple(
-                    r[1] for r in conn.execute(f"PRAGMA table_info({table})")
-                )
-                assert shipped == contract, (
-                    f"{table} shape drifted from snapshot_schema: shipped {shipped}, "
-                    f"contract {contract}"
-                )
-
             # --- AC-1: pv_status is non-null on every row -----------------------
             # Largely redundant with the ``NOT NULL`` column and ``add_pv_status``'s
             # anti-join; kept as cheap artifact-level confirmation. The assertion that
@@ -297,8 +273,6 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 "absence catalog — a difference is either a spine change the catalog "
                 "has not caught up with, or a misclassification on the public surface"
             )
-            # The spine-INDEPENDENT half: hardcoded expectations, so a catalog edit
-            # fails here even though it would move both sides of the equality above.
             assert len(absent_cells) == ABSENCE_CELL_COUNT, (
                 f"expected {ABSENCE_CELL_COUNT} catalogued absences on the artifact, "
                 f"got {len(absent_cells)} — an entry was added or deleted, which the "

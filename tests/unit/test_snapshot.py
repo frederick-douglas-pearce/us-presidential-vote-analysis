@@ -154,59 +154,290 @@ def _ec_pv_frame() -> pd.DataFrame:
         # McGovern's votes are cast but not counted, so cast (12) and counted (0)
         # diverge on a row the snapshot actually ships. Without a row like this the two
         # measures would be indistinguishable everywhere offline.
-        _row(1972, "Texas", 6, "Richard Nixon", 26, 26, 1, True,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None),
-        _row(1972, "Texas", 7, "George McGovern", 0, 12, 2, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, national_counted_ev=0),
-        _row(1972, "California", 6, "Richard Nixon", 0, 26, 1, True,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=12),
-        _row(1972, "California", 7, "George McGovern", 12, 12, 2, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=12,
-             counted_ev=0, national_counted_ev=0,
-             count_status=COUNT_STATUS_NOT_COUNTED,
-             count_status_reason=_ARCHIVES_REASON),
-        _row(1972, "Washington", 6, "Richard Nixon", 0, 26, 1, True,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=0),
-        _row(1972, "Washington", 7, "George McGovern", 0, 12, 2, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=0,
-             national_counted_ev=0),
+        _row(
+            1972,
+            "Texas",
+            6,
+            "Richard Nixon",
+            26,
+            26,
+            1,
+            True,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+        ),
+        _row(
+            1972,
+            "Texas",
+            7,
+            "George McGovern",
+            0,
+            12,
+            2,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            national_counted_ev=0,
+        ),
+        _row(
+            1972,
+            "California",
+            6,
+            "Richard Nixon",
+            0,
+            26,
+            1,
+            True,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=12,
+        ),
+        _row(
+            1972,
+            "California",
+            7,
+            "George McGovern",
+            12,
+            12,
+            2,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=12,
+            counted_ev=0,
+            national_counted_ev=0,
+            count_status=COUNT_STATUS_NOT_COUNTED,
+            count_status_reason=_ARCHIVES_REASON,
+        ),
+        _row(
+            1972,
+            "Washington",
+            6,
+            "Richard Nixon",
+            0,
+            26,
+            1,
+            True,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=0,
+        ),
+        _row(
+            1972,
+            "Washington",
+            7,
+            "George McGovern",
+            0,
+            12,
+            2,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=0,
+            national_counted_ev=0,
+        ),
         # --- 2016: C (49 EV), D wins (55, took office), F faithless (1 EV, no PV) ---
-        _row(2016, "Texas", 3, "Cand C", 38, 49, 2, False,
-             candidate_votes=4000000, state_total=9000000),
-        _row(2016, "Texas", 4, "Cand D", 0, 55, 1, True,
-             candidate_votes=3800000, state_total=9000000),
-        _row(2016, "Texas", 5, "Faithless F", 0, 1, 3, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None),
-        _row(2016, "California", 3, "Cand C", 0, 49, 2, False,
-             candidate_votes=3000000, state_total=12000000, total_ev=55),
-        _row(2016, "California", 4, "Cand D", 55, 55, 1, True,
-             candidate_votes=7000000, state_total=12000000, total_ev=55),
-        _row(2016, "California", 5, "Faithless F", 0, 1, 3, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=55),
-        _row(2016, "Washington", 3, "Cand C", 11, 49, 2, False,
-             candidate_votes=1400000, state_total=3000000, total_ev=12),
-        _row(2016, "Washington", 4, "Cand D", 0, 55, 1, True,
-             candidate_votes=1300000, state_total=3000000, total_ev=12),
-        _row(2016, "Washington", 5, "Faithless F", 1, 1, 3, False,
-             candidate_votes=None, state_total=None, source=None, party=None,
-             reliability=None, redistributable=None, total_ev=12),
+        _row(
+            2016,
+            "Texas",
+            3,
+            "Cand C",
+            38,
+            49,
+            2,
+            False,
+            candidate_votes=4000000,
+            state_total=9000000,
+        ),
+        _row(
+            2016,
+            "Texas",
+            4,
+            "Cand D",
+            0,
+            55,
+            1,
+            True,
+            candidate_votes=3800000,
+            state_total=9000000,
+        ),
+        _row(
+            2016,
+            "Texas",
+            5,
+            "Faithless F",
+            0,
+            1,
+            3,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+        ),
+        _row(
+            2016,
+            "California",
+            3,
+            "Cand C",
+            0,
+            49,
+            2,
+            False,
+            candidate_votes=3000000,
+            state_total=12000000,
+            total_ev=55,
+        ),
+        _row(
+            2016,
+            "California",
+            4,
+            "Cand D",
+            55,
+            55,
+            1,
+            True,
+            candidate_votes=7000000,
+            state_total=12000000,
+            total_ev=55,
+        ),
+        _row(
+            2016,
+            "California",
+            5,
+            "Faithless F",
+            0,
+            1,
+            3,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=55,
+        ),
+        _row(
+            2016,
+            "Washington",
+            3,
+            "Cand C",
+            11,
+            49,
+            2,
+            False,
+            candidate_votes=1400000,
+            state_total=3000000,
+            total_ev=12,
+        ),
+        _row(
+            2016,
+            "Washington",
+            4,
+            "Cand D",
+            0,
+            55,
+            1,
+            True,
+            candidate_votes=1300000,
+            state_total=3000000,
+            total_ev=12,
+        ),
+        _row(
+            2016,
+            "Washington",
+            5,
+            "Faithless F",
+            1,
+            1,
+            3,
+            False,
+            candidate_votes=None,
+            state_total=None,
+            source=None,
+            party=None,
+            reliability=None,
+            redistributable=None,
+            total_ev=12,
+        ),
         # --- 2020: A (38 EV), B wins (55, took office) ---
-        _row(2020, "Texas", 1, "Cand A", 38, 38, 2, False,
-             candidate_votes=5000000, state_total=11000000),
-        _row(2020, "Texas", 2, "Cand B", 0, 55, 1, True,
-             candidate_votes=5500000, state_total=11000000),
-        _row(2020, "California", 1, "Cand A", 0, 38, 2, False,
-             candidate_votes=6000000, state_total=17000000, total_ev=55),
-        _row(2020, "California", 2, "Cand B", 55, 55, 1, True,
-             candidate_votes=11000000, state_total=17000000, total_ev=55),
+        _row(
+            2020,
+            "Texas",
+            1,
+            "Cand A",
+            38,
+            38,
+            2,
+            False,
+            candidate_votes=5000000,
+            state_total=11000000,
+        ),
+        _row(
+            2020,
+            "Texas",
+            2,
+            "Cand B",
+            0,
+            55,
+            1,
+            True,
+            candidate_votes=5500000,
+            state_total=11000000,
+        ),
+        _row(
+            2020,
+            "California",
+            1,
+            "Cand A",
+            0,
+            38,
+            2,
+            False,
+            candidate_votes=6000000,
+            state_total=17000000,
+            total_ev=55,
+        ),
+        _row(
+            2020,
+            "California",
+            2,
+            "Cand B",
+            55,
+            55,
+            1,
+            True,
+            candidate_votes=11000000,
+            state_total=17000000,
+            total_ev=55,
+        ),
     ]
     # The enriched shape build_snapshot consumes: the view columns + state_usps.
     return pd.DataFrame(rows)[[*EC_PV_COLUMNS, "state_usps"]]
@@ -310,6 +541,10 @@ def test_snapshot_tables_have_expected_shape(tmp_path: Path) -> None:
     assert (data["candidate_slug"] == data["candidate"].map(candidate_slug)).all()
     # state_usps is carried for the /v1/states/{...} path key (#97).
     assert set(data.loc[data["state"] == "California", "state_usps"]) == {"CA"}
+    # The shipped rollup table's columns come from a hand-written CREATE TABLE in
+    # usvote.snapshot._create_tables, maintained independently of ROLLUP_COLUMNS.
+    # Assert they agree (ec_pv is covered by the DATA_TABLE line above).
+    assert list(_read(out, ROLLUP_TABLE).columns) == list(ROLLUP_COLUMNS)
 
 
 def test_add_candidate_slug_is_pure() -> None:
@@ -358,12 +593,16 @@ def test_every_row_carries_a_pv_status(tmp_path: Path) -> None:
     out, _ = _build(tmp_path)
     data = _read(out, DATA_TABLE).set_index(["year", "state"])
     assert data["pv_status"].notna().all()
-    assert data.loc[(1972, "California"), "pv_status"].eq(
-        PV_STATUS_LEGISLATURE_CHOSEN
-    ).all()
-    assert data.loc[(1972, "Washington"), "pv_status"].eq(
-        PV_STATUS_NOT_PARTICIPATING
-    ).all()
+    assert (
+        data.loc[(1972, "California"), "pv_status"]
+        .eq(PV_STATUS_LEGISLATURE_CHOSEN)
+        .all()
+    )
+    assert (
+        data.loc[(1972, "Washington"), "pv_status"]
+        .eq(PV_STATUS_NOT_PARTICIPATING)
+        .all()
+    )
     # ... and a state that DID hold one, whose votes simply predate MIT's window, is a
     # third, distinct thing — both have null popular_votes, and that is the point.
     assert data.loc[(1972, "Texas"), "pv_status"].eq(PV_STATUS_POPULAR_VOTE).all()
@@ -473,7 +712,7 @@ def test_in_window_null_pv_getter_survives(tmp_path: Path) -> None:
 
 
 def test_no_pv_anywhere_still_fails_loud() -> None:
-    """"MIT was never loaded" must still fail, even though the years now ship.
+    """ "MIT was never loaded" must still fail, even though the years now ship.
 
     The guard is repointed rather than removed: it used to mean "the snapshot would be
     empty", and now means "the snapshot would carry electoral-college data with no
@@ -772,22 +1011,32 @@ def _full_spine() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for year in ec_ingest_years():
         rows.append(
-            {"year": year, "state": "Ordinaryland", "is_total": False,
-             "total_electoral_votes": 7}
+            {
+                "year": year,
+                "state": "Ordinaryland",
+                "is_total": False,
+                "total_electoral_votes": 7,
+            }
         )
         rows.append(
-            {"year": year, "state": None, "is_total": True,
-             "total_electoral_votes": 100}
+            {
+                "year": year,
+                "state": None,
+                "is_total": True,
+                "total_electoral_votes": 100,
+            }
         )
     for (year, state), entry in PV_ABSENCE_CATALOG.items():
-        rows.append({
-            "year": year,
-            "state": state,
-            "is_total": False,
-            "total_electoral_votes": (
-                0 if entry.pv_status == PV_STATUS_NOT_PARTICIPATING else 5
-            ),
-        })
+        rows.append(
+            {
+                "year": year,
+                "state": state,
+                "is_total": False,
+                "total_electoral_votes": (
+                    0 if entry.pv_status == PV_STATUS_NOT_PARTICIPATING else 5
+                ),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -877,7 +1126,9 @@ def test_build_from_db_reads_then_builds(
     from usvote.snapshot import build_snapshot_from_db
 
     monkeypatch.setattr(
-        snapshot_mod, "derive_curated_pv_status_roster", lambda dbc, schema=None: _status_frame()
+        snapshot_mod,
+        "derive_curated_pv_status_roster",
+        lambda dbc, schema=None: _status_frame(),
     )
     stub = _StubDBC(exists=True)
     out = tmp_path / "snapshot.sqlite"
