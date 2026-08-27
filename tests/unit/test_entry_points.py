@@ -820,3 +820,71 @@ class TestTheOverlapNote:
         assert "1 flagged" in note and "1976 State0 Nominee" in note
         assert "2028" in note and "excluded" in note
         assert "1239" not in note  # a count of exact cells is not per-cell data
+
+
+def test_a_failed_coverage_guard_reports_instead_of_raising(
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """``usvote all`` must exit 1 with guidance, not a traceback (#177).
+
+    ``MITCoverageError`` subclasses ``MITTransformError(RuntimeError)``, which is a
+    *sibling* of ``PipelineError`` and of the ``(PVOverlapError, HybridError)`` pair —
+    so it matches neither surrounding arm and needs its own, exactly as its overlap
+    sibling above does. This test exists because that sibling's docstring records the
+    mutation it caught: dropping ``HybridError`` from its arm "survived the whole
+    suite". An untested arm here is the same shape.
+
+    **The message's factual claim is what is asserted, not just the exit code.** The
+    guard runs at the MIT read seam, which is *after* the EC pipeline has scraped and
+    committed — so unlike an overlap breach, the warehouse really is half-built, and
+    the operator's next move depends on being told which half.
+    """
+    from usvote.mit.validate import MITCoverageError
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise MITCoverageError(
+            "assert_mit_year_coverage: MIT's newest covered election is 2020"
+        )
+
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+
+    assert top.main(["all"]) == 1
+    err = capsys.readouterr().err
+    assert "MIT year-coverage check failed" in err
+    assert "The EC spine loaded and committed before this ran" in err
+    assert "--replace" in err, "the recovery, which a bare re-run does not achieve"
+    assert "--no-validate-coverage" in err
+
+
+def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
+    mit_env: list[dict], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The MIT entry point's arm, and the leak it exists to stop.
+
+    ``run_mit_pipeline`` has no ``try/finally`` around its body, so its ``close=True``
+    never fires on a raise — unlike ``run_warehouse``, which closes in a ``finally``.
+    The arm must therefore close the connection itself, and this asserts it does rather
+    than only that the message is right.
+    """
+    from usvote.mit.validate import MITCoverageError
+
+    closed: list[bool] = []
+
+    class _DBC:
+        def close_connection(self) -> None:
+            closed.append(True)
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise MITCoverageError("assert_mit_year_coverage: MIT's covered years are wrong")
+
+    monkeypatch.setattr(mit_main, "DBC", lambda cfg: _DBC())
+    monkeypatch.setattr(mit_main, "run_mit_pipeline", boom)
+
+    assert mit_main.main([]) == 1
+    err = capsys.readouterr().err
+    assert "MIT year-coverage check failed" in err
+    assert "Nothing was loaded" in err
+    assert closed == [True], "the arm closes the connection run_mit_pipeline could not"

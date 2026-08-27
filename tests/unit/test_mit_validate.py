@@ -15,6 +15,7 @@ non-redundant rather than belt-and-braces.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -23,21 +24,79 @@ from usvote.mit.transform import MITTransformError
 from usvote.mit.validate import MITCoverageError, assert_mit_year_coverage
 from usvote.pv.source import MIT_PV_YEAR_MAX, MIT_PV_YEAR_MIN
 
-#: The full shipped span, **derived from the two constants rather than re-typed**.
-#: Hardcoding ``range(1976, 2025, 4)`` would quietly hollow out
-#: :meth:`TestTheGuardAcceptsRealCoverage.
-#: test_the_default_expected_max_is_the_shipped_constant` on the next cycle bump: its
-#: ``one_short`` filter would then remove nothing, so the test would keep passing while
-#: no longer exercising its claim — the very staleness it exists to prevent, one level
-#: up. Measured against the real ``1976-2024-president.csv``, this is 13 contiguous
-#: elections; :meth:`TestTheGuardAcceptsRealCoverage.test_the_full_shipped_span_passes`
-#: is what stays red until a bumped constant is matched by a refreshed file.
+#: The full shipped span, **derived from the two constants** so that a cycle bump moves
+#: it and the branch tests built on it keep exercising their claims — in particular
+#: ``one_short`` in
+#: :meth:`TestTheGuardAcceptsRealCoverage.test_the_default_expected_max_is_the_shipped_constant`,
+#: which a hardcoded span would leave filtering nothing.
+#:
+#: **Deriving it costs the bump alarm, which is why the literal below exists.** A
+#: derived span moves *with* ``MIT_PV_YEAR_MAX``, so nothing built on it can notice the
+#: constant being bumped — including
+#: :meth:`TestTheGuardAcceptsRealCoverage.test_the_full_shipped_span_passes`, which is
+#: tautological and never goes red. An earlier revision of this comment claimed the
+#: opposite; it was wrong, and the claim outlived the mechanism it described.
 FULL_SPAN = list(range(MIT_PV_YEAR_MIN, MIT_PV_YEAR_MAX + 1, 4))
+
+#: The shipped span **as actually measured**, written as a literal precisely because it
+#: must not move when the constants do. This is the bump alarm
+#: :data:`FULL_SPAN` cannot be:
+#: :meth:`TestTheGuardAcceptsRealCoverage.test_the_derived_span_matches_what_was_measured`
+#: goes red the moment ``MIT_PV_YEAR_MAX`` is bumped, and stays red until somebody
+#: edits this tuple *deliberately*.
+#:
+#: **It pins an acknowledgement, not the file — do not read it as verification.**
+#: Nothing here opens a CSV; the guard's own tests are pure over year sets (see the
+#: module docstring), and the pin against the shipped bytes is **#187**. What this buys
+#: is that bumping the constant cannot be a one-character edit nobody looked at, which
+#: is the same thing ``usvote.pv.absences.CURATED_YEAR_COUNT`` buys for an unreviewed
+#: election year. D052 records why no *mechanical* check can force the bump itself.
+#:
+#: Measured 2026-08-27 against ``1976-2024-president.csv``: 13 contiguous elections.
+#: The election after the shipped span — the ``>`` branch's input. Derived, because
+#: a literal would fall *inside* :data:`FULL_SPAN` after a bump and stop raising.
+NEXT_CYCLE = MIT_PV_YEAR_MAX + 4
+
+MEASURED_SHIPPED_SPAN: tuple[int, ...] = (
+    1976,
+    1980,
+    1984,
+    1988,
+    1992,
+    1996,
+    2000,
+    2004,
+    2008,
+    2012,
+    2016,
+    2020,
+    2024,
+)
 
 
 class TestTheGuardAcceptsRealCoverage:
     def test_the_full_shipped_span_passes(self) -> None:
+        """Non-tautological only in the sense that it exercises both checks at once.
+
+        It cannot detect a bumped constant — :data:`FULL_SPAN` is derived from the same
+        constant, so it moves too. :meth:`test_the_derived_span_matches_what_was_measured`
+        is what does that.
+        """
         assert_mit_year_coverage(FULL_SPAN)
+
+    def test_the_derived_span_matches_what_was_measured(self) -> None:
+        """The bump alarm. Red on the next cycle, until the literal is updated.
+
+        Deriving :data:`FULL_SPAN` from the constants is right for the branch tests and
+        removes the one thing the old hardcoded span did by accident: go red when
+        ``MIT_PV_YEAR_MAX`` was bumped without the data behind it being refreshed. This
+        puts that back, deliberately rather than by accident.
+
+        **What it does not do:** open the file. It asserts that the span the constants
+        imply is still the span someone recorded having measured — an acknowledgement,
+        not a verification. #187 owns the real thing.
+        """
+        assert tuple(FULL_SPAN) == MEASURED_SHIPPED_SPAN
 
     def test_order_and_duplicates_do_not_matter(self) -> None:
         """The input is a year *set*; a frame's ``unique()`` order is not guaranteed."""
@@ -69,10 +128,15 @@ class TestInteriorHoles:
         with pytest.raises(MITCoverageError, match=r"\[1996, 2008\]"):
             assert_mit_year_coverage(holed)
 
-    def test_a_year_that_is_not_an_election_year_is_reported_from_the_other_side(
+    def test_a_year_that_is_not_an_election_year_is_screened_out_and_named(
         self,
     ) -> None:
-        """A stray 1977 is caught by the same set comparison, as a non-election year."""
+        """A stray 1977 is caught by the calendar screen, before the bounds are taken.
+
+        Named for the mechanism rather than the outcome: it is *not* the contiguity
+        comparison that finds it — that difference is one-directional and its other
+        side is empty by construction.
+        """
         with pytest.raises(MITCoverageError, match=r"non-election year\(s\) \[1977\]"):
             assert_mit_year_coverage([*FULL_SPAN, 1977])
 
@@ -100,9 +164,10 @@ class TestHighWater:
     def test_the_message_names_the_elections_whose_popular_vote_would_go_null(
         self,
     ) -> None:
-        truncated = [y for y in FULL_SPAN if y <= 2016]
+        truncated = [y for y in FULL_SPAN if y <= FULL_SPAN[-3]]
+        lost = FULL_SPAN[-2:]
 
-        with pytest.raises(MITCoverageError, match=r"\[2020, 2024\]"):
+        with pytest.raises(MITCoverageError, match=re.escape(str(lost))):
             assert_mit_year_coverage(truncated)
 
     def test_a_later_maximum_raises_as_a_stale_constant(self) -> None:
@@ -111,14 +176,18 @@ class TestHighWater:
         A scoped build only ever *lowers* the observed maximum, so unlike
         ``min(observed) > MIT_PV_YEAR_MIN`` there is no benign scoped-build reading
         here: above means MIT published a newer cycle and the constant is stale.
+
+        ``NEXT_CYCLE`` rather than a literal 2028: once the constant is bumped, a
+        literal would sit *inside* :data:`FULL_SPAN`, making ``max == expected_max``
+        so nothing raises and this test's premise inverts.
         """
         with pytest.raises(MITCoverageError, match=r"constant is stale"):
-            assert_mit_year_coverage([*FULL_SPAN, 2028])
+            assert_mit_year_coverage([*FULL_SPAN, NEXT_CYCLE])
 
     def test_the_stale_constant_message_says_the_guard_itself_goes_weak(self) -> None:
         """Not decoration: it is the reason the ``>`` side is an error at all."""
-        with pytest.raises(MITCoverageError, match=r"no longer notice 2028"):
-            assert_mit_year_coverage([*FULL_SPAN, 2028])
+        with pytest.raises(MITCoverageError, match=rf"no longer notice {NEXT_CYCLE}"):
+            assert_mit_year_coverage([*FULL_SPAN, NEXT_CYCLE])
 
 
 class TestTheFloorIsSomebodyElsesJob:

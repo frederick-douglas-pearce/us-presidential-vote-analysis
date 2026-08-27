@@ -79,12 +79,17 @@ def assert_mit_year_coverage(
     never mention that 2024, the year whose popular vote actually goes null, is gone.
     Strays are therefore split out **before** the bounds are derived.
 
-    1. **Contiguity** — the observed set must be exactly the election years in the
-       closed range ``[min(observed), max(observed)]``. The lower bound is the
-       *observed* minimum, never :data:`~usvote.pv.source.MIT_PV_YEAR_MIN`: the floor
-       belongs to :func:`usvote.pv.source.assert_mit_year_floor`, which permits a
-       build starting later (see this module's docstring). A year that is not an
-       election year at all is reported by the same comparison, from the other side.
+    1. **Contiguity** — the observed *election* years must be exactly the election
+       years in the closed range ``[min(election), max(election)]``. Both bounds are
+       taken from the years that survived the stray screen, **not** from the raw input:
+       that is what stops a single typo'd year from redefining the span (see above).
+       The lower bound is in particular never
+       :data:`~usvote.pv.source.MIT_PV_YEAR_MIN` — the floor belongs to
+       :func:`usvote.pv.source.assert_mit_year_floor`, which permits a build starting
+       later (see this module's docstring). A year that is not an election year at all
+       is **not** reported by this comparison: the screen catches it first, and
+       ``missing`` is a one-directional difference whose other side is empty by
+       construction.
     2. **High-water** — ``max(observed) == expected_max``, raising in **both**
        directions. Below is the truncation this guard exists for. Above means MIT
        published a newer cycle while the constant stayed put, which makes every guard

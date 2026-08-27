@@ -2819,7 +2819,8 @@ MIT's loaded year set had no owner. Two failures survived:
   license, precedence rank, redistributable flag and floor. The *guard's* placement is what #177
   constrains; the constant's is not.
 - **Two checks, because they answer different questions.** Contiguity over
-  `[min(observed), max(observed)]` reaches case 1. It **provably cannot reach case 2**: a file
+  `[min(election), max(election)]` — the bounds taken *after* non-election years are screened
+  out, so a single typo cannot redefine the span — reaches case 1. It **provably cannot reach case 2**: a file
   truncated after 2020 is a perfectly contiguous run of elections, so contiguity has nothing to
   object to. Case 2 needs something that *remembers* MIT reached 2024, which is the constant.
 - **The high-water check is an equality, raising in both directions** — the asymmetry with
