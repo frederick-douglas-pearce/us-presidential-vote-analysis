@@ -22,8 +22,8 @@ bottom is what the backlog expands into GitHub issues and stories.
 | **E4** UCSB historical PV ingest | **Done** (#33) — parses six header eras across ~1824–1972; non-redistributable, so no UCSB bytes are committed and its acceptance corpus lives outside the repo (D022/D023) |
 | **E5** MIT PV ingestion | **Done** (#62) — the CC0 1976–2024 core |
 | **E6** Canonical key + cross-source join | **Done** (#63) — `ec_pv_preferred` (analysis) and `ec_pv_redistributable` (public), joined EC-left on the canonical `(year, state, candidate)` grain |
-| **E7** Hybrid computation | **Partly done** (#120) — the three-method computation core is built (`usvote/hybrid.py`, #121/#122): EC share, PV share, the hybrid average, `ec_determinative`, and EV-weighted coverage. **Open:** flip detection and three-method margins (#123), materializing the results as views (#124), the partial-coverage explanatory note (#125) |
-| **E8** Internal API | **Done, and past its MVP bar** (#94) — a read-only SQLite snapshot served by FastAPI with no live DB (D028), publicly deployed to Cloud Run behind Cloudflare and **live at `https://api.us-presidential-election-center.org`** (#101, D034/D035). The served window was widened from the MIT-only 1976–2024 back to the full **1824–2024** EC span in #139. **Open:** hybrid/flip/margin fields, gated on E7 (#102) |
+| **E7** Hybrid computation | **Done** (#120) — the three-method computation core is built (`usvote/hybrid.py`, #121/#122): EC share, PV share, the hybrid average, `ec_determinative`, and EV-weighted coverage. **Done** — flip detection and three-method margins (#123), the four materialized views (#124), the partial-coverage note (#125) and the D017 layer-3 overlap gate (#167) all landed |
+| **E8** Internal API | **Done, and past its MVP bar** (#94) — a read-only SQLite snapshot served by FastAPI with no live DB (D028), publicly deployed to Cloud Run behind Cloudflare and **live at `https://api.us-presidential-election-center.org`** (#101, D034/D035). The served window was widened from the MIT-only 1976–2024 back to the full **1824–2024** EC span in #139. **Open:** hybrid/flip/margin fields (#102) — E7 has landed, so this is no longer gated |
 | **E9** Analytical explorer data mart | **Not started** |
 | **E10** Census / apportionment analysis | **Not started** (#129) — added after this outline was written |
 | *(unnumbered)* Publishing | **Done and in use** — see below |
@@ -204,7 +204,7 @@ the original plan; the **Status** column is where each one actually got to.
 | **E4** | UCSB historical PV scrape + ingest | scrape/parse/transform/load messy UCSB HTML → state-level PV; `source=UCSB`, `redistributable=false`; ~1824–1972 breadth | M2 (scoped + filed; un-deferred) | **Done** (#33) |
 | **E5** | MIT PV ingestion | load clean MIT 1976–2024 CSV; API-eligible modern core (covers 2000/2016 splits); `source=MIT` | M2 (named) | **Done** (#62) |
 | **E6** | Canonical key + cross-source join | shared candidate/state spine; conform MIT + UCSB onto EC as source of truth | M2 (named) | **Done** (#63) |
-| **E7** | Hybrid computation | EC/PV average; flip detection; three-method margin comparison | M3 (named) | **Partly done** (#120) — core built (#121/#122); #123/#124/#125 open |
+| **E7** | Hybrid computation | EC/PV average; flip detection; three-method margin comparison | M3 (named) | **Done** (#120) |
 | **E8** | Internal API | FastAPI/REST over `ec_pv_redistributable` via a read-only embedded snapshot (no live DB); redistributable-only; MVP bar = powers our app; **depends only on E6, not E7** (D028–D032) | M3 (scoped + filed, #94) | **Done + publicly deployed**; #102 open |
 | **E9** | Analytical explorer data mart | query surface for flips/margins/maps/narrative | M3 (named) | Not started |
 | **E10** | Census / apportionment analysis | state population + apportionment; the per-capita elector-weight drift question | *(added later)* | Not started (#129) |

@@ -315,9 +315,12 @@ The decision record makes the same distinction directly: D024's licensing note h
 roster's free-text `note` column is non-redistributable source prose, while "the `pv_status` enum
 is a bare historical fact and carries no such restriction."
 
-**From the public API** (no database required — one request per year). Note that `pv_coverage` is
-**not itself a served field today**; until the hybrid fields land on the API, derive it from the
-served `pv_status` and `state_electoral_votes`, which is what this does:
+**From the public API** (no database required — one request per year). Since **#102**
+`pv_coverage` is served directly, on both the summary rows and the per-election `election`
+object — but a **deployed** API only carries it once the snapshot and image cut over together
+(D034/D053), so the recipe below stays useful: it derives the same figure from the
+long-served `pv_status` and `state_electoral_votes`, and is what to use against an older
+deployment.
 
 ```bash
 curl -s https://api.us-presidential-election-center.org/v1/elections/1824 \

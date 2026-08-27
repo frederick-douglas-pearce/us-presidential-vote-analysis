@@ -77,7 +77,12 @@ API_TITLE = "US Presidential Vote API"
 #: ``info.license`` flipped from CC0 to the EC public-domain statement, and ``EcPvRow``
 #: gained four required fields. ``SNAPSHOT_SCHEMA_VERSION`` moved for the same event —
 #: this is the half of it external consumers can actually see.
-API_VERSION = "0.3.0"
+#:
+#: 0.3.0 -> 0.4.0 by #102, on the same rule: ``NationalSummaryRow`` gained five hybrid
+#: fields, both year endpoints gained an ``election`` object, and ``/summary`` returns a
+#: new response model. Additive, hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 2 -> 3
+#: for the same event.
+API_VERSION = "0.4.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -100,6 +105,12 @@ vs. who won the national popular vote** — including the elections where those 
 when a candidate loses the national popular vote yet still takes office. Each
 candidate's national electoral-vote total, finishing rank, and whether they took
 office sit alongside the popular-vote totals.
+
+**Three methods, compared for you.** Each election also carries an `election` object
+giving the winner under three methods — the Electoral College, the national popular
+vote, and a **hybrid** (the average of the two shares) — with a flip flag per method and
+each method's top-two margin in percentage points. Precomputed, so the comparison does
+not depend on a consumer re-deriving it from the raw totals.
 
 **Coverage:** {coverage_window} (US presidential elections).
 
