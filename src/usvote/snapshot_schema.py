@@ -129,28 +129,21 @@ ROLLUP_COLUMNS: tuple[str, ...] = (
     # exists to prevent, so the surface answers it rather than delegating it.
     "national_electoral_denominator",
     # --- #102 / E8-S8: appended, never inserted -----------------------------
-    # The five per-candidate hybrid fields. They live here rather than in a sibling
-    # ``hybrid_rollup`` table because this table's grain IS the hybrid frame's public
-    # grain: ``ROLLUP_COLUMNS`` and ``usvote.hybrid.HYBRID_CANDIDATE_COLUMNS`` already
-    # share nine names, and ``national_electoral_denominator`` above is
-    # ``ec_denominator`` under another name — so a sibling would duplicate ten columns
-    # at the same key and give a consumer two tables to join for one row.
+    # The five per-candidate hybrid fields. Here rather than in a sibling
+    # ``hybrid_rollup`` table: same grain as the hybrid frame, so a sibling would
+    # duplicate the key and the shared columns and force a two-table join for one row.
     #
-    # **The EC share is split in two, and the split is a safety property** (D037/A).
-    # ``ec_share_full`` is policy-invariant and is the only input to the winner and to
-    # "was there an EC majority"; ``ec_share_hybrid`` is the policy-selected value that
-    # feeds ``hybrid_score`` alone. Under the shipped policy (b) they are equal, which
-    # is exactly why shipping both matters: a consumer who sees one column cannot tell
-    # that the guarantee exists.
+    # The EC share is split in two as a safety property (D037/A): ``ec_share_full`` is
+    # policy-invariant and decides the winner; ``ec_share_hybrid`` feeds
+    # ``hybrid_score`` alone. They are equal under the shipped policy — both ship so a
+    # consumer can check that rather than trust it.
     "ec_share_full",
     "pv_share",
     "ec_share_hybrid",
     # Σ electoral votes over the year's ``popular_vote`` states ÷ the appointed
-    # denominator (D024 §8) — EV-weighted, not state-count-weighted. **Derived from the
-    # in-repo absence catalog, never from ``dwh.pv_state_status``** (D048's action item
-    # for #102), so it is real for all 51 years — 1824 reads 190/261 = 0.728 — where
-    # the warehouse view reads NULL before 1976. See ``usvote.snapshot`` for why the
-    # two differ on purpose.
+    # denominator (D024 §8) — EV-weighted, not state-count-weighted. Derived from the
+    # in-repo absence catalog, never from ``dwh.pv_state_status`` (D048/D053), so it is
+    # real for every year served where the warehouse view is NULL before 1976.
     "pv_coverage",
     # ``(ec_share_hybrid + pv_share) / 2`` — the average of two ratios, highest wins
     # (D037). NULL wherever the popular vote is, i.e. every year before the PV window.
@@ -159,22 +152,17 @@ ROLLUP_COLUMNS: tuple[str, ...] = (
 
 #: The per-election hybrid summary's columns, in order (#102 / E8-S8).
 #:
-#: **An independent explicit projection of**
-#: :data:`usvote.hybrid.HYBRID_SUMMARY_COLUMNS` **, not an alias of it** — the same
-#: one-way containment :data:`DATA_COLUMNS` keeps against ``usvote.join.EC_PV_COLUMNS``
-#: (D047 §3). Aliasing the warehouse tuple would
-#: make every future column added to the *view* reach the public payload automatically,
-#: which is the property that decoupling exists to deny. A test asserts this tuple is a
-#: subset of the warehouse tuple plus the three derived slug columns
-#: (``test_snapshot.py::test_the_summary_tuple_is_contained_by_the_warehouse_tuple``);
-#: **the reverse assert is forbidden**, for the same reason it is forbidden for
-#: ``DATA_COLUMNS``.
+#: An **independent explicit projection** of
+#: :data:`usvote.hybrid.HYBRID_SUMMARY_COLUMNS`, not an alias — the one-way containment
+#: :data:`DATA_COLUMNS` keeps against ``usvote.join.EC_PV_COLUMNS`` (D047 §3), so a
+#: column added to the warehouse view reaches the public payload only when someone lists
+#: it here too. Pinned by
+#: ``test_snapshot.py::test_the_summary_tuple_is_contained_by_the_warehouse_tuple``;
+#: **the reverse assert is forbidden**.
 #:
-#: The three winners arrive from the hybrid summary as candidate **names** (
-#: :func:`usvote.hybrid._winner` returns a name), and each ships beside a
-#: ``*_slug`` minted by the build so a consumer can pivot straight to
-#: ``/v1/candidates/{slug}`` without a name-matching round trip (D006). A NULL winner
-#: yields a NULL slug — never an empty string.
+#: Winners arrive as candidate **names**; each ships beside a ``*_slug`` minted by the
+#: build so a consumer can pivot to ``/v1/candidates/{slug}`` (D006). A NULL winner
+#: yields a NULL slug, never an empty string.
 HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "year",
     "ec_denominator",

@@ -989,7 +989,7 @@ def test_the_hybrid_summary_table_carries_the_contract_columns(
 def test_a_popular_vote_flip_is_reported_with_its_margins(tmp_path: Path) -> None:
     """The acceptance criteria's flip case, end to end through the snapshot.
 
-    C leads the popular vote, D holds 55 of the 93 electoral votes and took office, so
+    C leads the popular vote, D holds 55 of the 105 electoral votes and took office, so
     ``pv_flip`` is **true**. This is the assertion the base fixture cannot make.
     """
     out, _ = _build(tmp_path, frame=_flipped_frame())

@@ -26,7 +26,12 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from usvote.api import provenance
-from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE, SnapshotMeta
+from usvote.snapshot_schema import (
+    EC_LICENSE,
+    EC_SOURCE,
+    SNAPSHOT_SCHEMA_VERSION,
+    SnapshotMeta,
+)
 
 #: Snapshot columns intentionally **not** on any public model. Empty today (every
 #: ``ec_pv`` / ``national_rollup`` / ``hybrid_summary`` column is exposed under a public
@@ -135,11 +140,10 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
     "hybrid_score": 0.4887,
 }
 
-#: 2000 is the worked example on purpose: it is the year the whole project turns on, and
-#: it is the one where the three methods visibly disagree — Gore wins the popular vote,
-#: Bush the electoral college, and the hybrid still follows Bush. So ``pv_flip`` is true
-#: and ``hybrid_flip`` is false in the same row, which is exactly the distinction a
-#: consumer reading one flag would miss.
+#: 2000 is the worked example: the popular vote and the electoral college split
+#: (``pv_flip`` true) but the hybrid still follows the electoral college
+#: (``hybrid_flip`` false) — exactly the distinction a consumer reading one flag would
+#: miss.
 _ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
     "year": 2000,
     "electoral_denominator": 538,
@@ -204,7 +208,7 @@ _META_EXAMPLE: dict[str, Any] = {"provenance": _PROVENANCE_EXAMPLE, "count": 2}
 
 _SNAPSHOT_META_RESPONSE_EXAMPLE: dict[str, Any] = {
     "provenance": _PROVENANCE_EXAMPLE,
-    "schema_version": 2,
+    "schema_version": SNAPSHOT_SCHEMA_VERSION,
     "row_count": 5623,
     "candidate_count": 96,
     "build_timestamp": "2026-08-10T01:05:05.969957+00:00",
