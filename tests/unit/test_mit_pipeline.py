@@ -20,12 +20,14 @@ import pytest
 
 from tests._helpers import (
     MIT_FUSION_SAMPLE_CSV,
+    MIT_SAMPLE_CSV,
     RecordingConnection,
     make_dbc,
     record_inserts,
 )
 from usvote.mit import pipeline as mit_pipeline
 from usvote.mit.pipeline import MITRosterError, run_mit_pipeline
+from usvote.mit.validate import MITCoverageError
 from usvote.pv.schema import PV_SCHEMA, PV_TABLE, SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import (
@@ -237,3 +239,80 @@ def test_the_spine_read_is_scoped_to_the_years_mit_actually_loaded(
     run_mit_pipeline(make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV, years={2016})
 
     assert seen["years"] == frozenset({2016})
+
+
+class TestYearCoverageWiring:
+    """The #177 guard's wiring: off by default here, and run *before* ``years``."""
+
+    def test_the_guard_is_off_by_default(
+        self, recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fusion fixture covers 2000 and 2016 — non-contiguous, and nowhere near
+        ``MIT_PV_YEAR_MAX`` — so a default-on guard would fail this load.
+
+        This is the offline-fixture half of why the shipped default lives on
+        ``run_warehouse`` instead; the other half (guard ordering) is below.
+        """
+        record_inserts(monkeypatch)
+        _stub_spine(monkeypatch)
+
+        loaded, _ = run_mit_pipeline(
+            make_dbc(recording_conn), path=MIT_FUSION_SAMPLE_CSV
+        )
+
+        assert set(loaded["year"]) == {2000, 2016}
+
+    def test_the_same_load_fails_once_the_guard_is_switched_on(
+        self, recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The flag, and nothing else, is what decides — the pair with the test above."""
+        record_inserts(monkeypatch)
+        _stub_spine(monkeypatch)
+
+        with pytest.raises(MITCoverageError, match=r"contiguous run"):
+            run_mit_pipeline(
+                make_dbc(recording_conn),
+                path=MIT_FUSION_SAMPLE_CSV,
+                validate_coverage=True,
+            )
+
+    def test_the_guard_reads_the_raw_frame_not_the_filtered_one(
+        self, recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pins the *placement*, which no outcome-only assertion could distinguish.
+
+        ``MIT_SAMPLE_CSV`` covers 1976, 2000, 2016 and 2024 — a holed file. Scoped to
+        ``years={2024}`` the **filtered** frame is a single year, which is trivially
+        contiguous *and* reaches ``MIT_PV_YEAR_MAX``, so a guard running after the
+        filter would pass here. It must raise, because the question is about the file.
+
+        This is the test that goes red if the call is ever moved below the ``years``
+        filter — a move that leaves every other test in this suite green, and would
+        let a scoped build launder a truncated CSV by selecting around the gap.
+        """
+        record_inserts(monkeypatch)
+        _stub_spine(monkeypatch)
+
+        with pytest.raises(MITCoverageError, match=r"missing election year"):
+            run_mit_pipeline(
+                make_dbc(recording_conn),
+                path=MIT_SAMPLE_CSV,
+                years={2024},
+                validate_coverage=True,
+            )
+
+    def test_nothing_is_written_when_the_guard_fires(
+        self, recording_conn: RecordingConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It runs at the read seam, so it precedes the transaction entirely."""
+        record_inserts(monkeypatch)
+        _stub_spine(monkeypatch)
+
+        with pytest.raises(MITCoverageError):
+            run_mit_pipeline(
+                make_dbc(recording_conn),
+                path=MIT_FUSION_SAMPLE_CSV,
+                validate_coverage=True,
+            )
+
+        assert recording_conn.commits == 0

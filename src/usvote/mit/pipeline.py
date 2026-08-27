@@ -33,6 +33,7 @@ from usvote.db import DBC
 from usvote.mit.read import load_mit_president_csv
 from usvote.mit.reconcile import reconcile_mit
 from usvote.mit.transform import MITTransformError, transform_mit
+from usvote.mit.validate import assert_mit_year_coverage
 from usvote.pv.load import load_pv_records, load_pv_status
 from usvote.pv.source import SOURCE_MIT
 from usvote.pv.status import assert_roster_covers_facts, build_popular_vote_roster
@@ -54,6 +55,7 @@ def run_mit_pipeline(
     years: Collection[int] | None = None,
     environ: Mapping[str, str] | None = None,
     replace: bool = False,
+    validate_coverage: bool = False,
     close: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the end-to-end MIT PV ingestion and return the loaded frames.
@@ -94,8 +96,32 @@ def run_mit_pipeline(
     spine survives), matching
     :func:`usvote.ucsb.pipeline.run_ucsb_pipeline`. Returns ``(pv_votes, roster)`` as
     inserted, for inspection/validation.
+
+    ``validate_coverage`` runs the #177 year-coverage guard
+    (:func:`usvote.mit.validate.assert_mit_year_coverage`) over the **raw** frame,
+    *before* the ``years`` filter. Two things follow from that placement, and both are
+    deliberate. It asks its question about the **file** — so a legitimately scoped
+    build against the real CSV is still fully guarded, rather than having its own
+    scoping mistaken for the truncation the guard is hunting. And because a *hole* in
+    the raw file is what fails, the guard sees a truncated CSV even when ``years``
+    would have selected around the gap.
+
+    **It defaults to** ``False`` **here and** ``True`` **on**
+    :func:`usvote.warehouse.run_warehouse`, which is where the shipped build runs and
+    where ``validate_overlap`` already lives. Defaulting it ``True`` at *this* seam
+    would fail the offline fixtures, which are non-contiguous on purpose
+    (``mit_fusion_sample.csv`` covers 2000 and 2016), and — worse — would **reorder
+    which guard fires first**, turning this function's own "no rows for requested
+    years" ``ValueError`` and its D024 ``MITRosterError`` into a coverage error raised
+    ahead of both.
     """
     raw = load_mit_president_csv(path, environ=environ)
+    if validate_coverage:
+        # On the RAW frame, before the ``years`` filter: the question is whether the
+        # *file* still covers what MIT publishes, and a scoped build must not be able
+        # to mask a hole by selecting around it (#177). Off by default here — see the
+        # docstring for why the shipped default lives on run_warehouse instead.
+        assert_mit_year_coverage(raw["year"].unique().tolist())
     if years is not None:
         matched = raw["year"].isin(years)
         if not matched.any():

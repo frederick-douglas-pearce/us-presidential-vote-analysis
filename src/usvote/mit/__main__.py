@@ -55,7 +55,13 @@ def _run_load(replace: bool) -> int:
         print(e, file=sys.stderr)
         return 1
 
-    loaded, roster = run_mit_pipeline(dbc, csv_path, replace=replace, close=True)
+    # ``validate_coverage=True`` explicitly: this is a shipped entry point loading the
+    # real CSV, so a truncated file must be refused here exactly as it is on the
+    # ``python -m usvote all`` path (#177). The flag's ``False`` default belongs to
+    # ``run_mit_pipeline`` itself, whose other callers are fixture-driven tests.
+    loaded, roster = run_mit_pipeline(
+        dbc, csv_path, replace=replace, validate_coverage=True, close=True
+    )
     print(
         f"MIT ingestion complete — {len(loaded)} dwh.pv_votes rows, "
         f"{len(roster)} dwh.pv_state_status roster rows."

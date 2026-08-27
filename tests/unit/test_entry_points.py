@@ -244,9 +244,20 @@ def _recording_mit_pipeline(calls: list[dict]) -> Any:
     """
 
     def _fake(
-        dbc: object, path: Any, *, replace: bool = False, close: bool = False
+        dbc: object,
+        path: Any,
+        *,
+        replace: bool = False,
+        validate_coverage: bool = False,
+        close: bool = False,
     ) -> tuple[list[int], list[int]]:
-        calls.append({"path": path, "replace": replace})
+        calls.append(
+            {
+                "path": path,
+                "replace": replace,
+                "validate_coverage": validate_coverage,
+            }
+        )
         return ([0] * 2, [0] * 3)
 
     return _fake
@@ -274,7 +285,14 @@ def test_mit_bare_and_load_run_pipeline(
 ) -> None:
     # Bare ``python -m usvote.mit`` loads (the single subcommand's default).
     assert mit_main.main(argv) == 0
-    assert mit_env == [{"path": "mit.csv", "replace": replace}]
+    # ``validate_coverage`` is asserted True, not merely accepted: this is a shipped
+    # entry point pointed at the real CSV, and ``run_mit_pipeline``'s own default is
+    # ``False`` (its other callers are fixture-driven). So the CLI passing it
+    # explicitly is the whole of what switches the #177 guard on here, and dropping
+    # that kwarg would otherwise leave every suite green.
+    assert mit_env == [
+        {"path": "mit.csv", "replace": replace, "validate_coverage": True}
+    ]
 
 
 # --- corpus resolution at the CLI (#89) -------------------------------------

@@ -438,9 +438,22 @@ class TestPopulation:
         """Pinning the limit the docstring states, so it stays a decision not a bug.
 
         MIT really *losing* 2024 is excluded by the same clause that lets a mid-refresh
-        2024 through — that is the exemption itself, not a hole in it — so the gate
-        stays green and the year is gone from the public API. One malformed CSV reaches
-        it; its owner is the MIT year-contiguity guard filed as #177.
+        2024 through — that is the exemption itself, not a hole in it — so **this gate
+        stays green**, which is what the assertion below pins. One malformed CSV
+        reaches it.
+
+        **Its owner shipped in #177, and it is not a contiguity guard** — the name this
+        docstring used to give it was wrong in the way that matters. A file truncated
+        after 2020 is still a perfectly contiguous run of elections, so contiguity has
+        nothing to object to; catching a dropped *newest* year needs an explicit
+        high-water mark (``MIT_PV_YEAR_MAX``). Both checks live in
+        :func:`usvote.mit.validate.assert_mit_year_coverage`.
+
+        **What that changed here: nothing, deliberately.** The guard is single-source
+        and sits upstream at the MIT read seam, so this gate's own exemption is
+        untouched and this test still asserts it. What it changes is *downstream*: on
+        the shipped build path the year no longer reaches the public API with a
+        silently-null popular vote, because the build is refused first.
 
         The companion assertion is what keeps the limit *narrow*: the same source also
         dropping 1984 does raise, because ``uncovered`` is a per-year set and nothing

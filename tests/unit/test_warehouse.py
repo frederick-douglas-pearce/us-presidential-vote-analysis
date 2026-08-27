@@ -59,9 +59,16 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
 
     def mit(
         dbc: object, path: Any = None, *, years: Any = None,
-        environ: Any = None, replace: bool = False, **_: Any,
+        environ: Any = None, replace: bool = False,
+        validate_coverage: bool = False, **_: Any,
     ) -> tuple[list[int], list[int]]:
-        calls.append(("mit", {"path": path, "replace": replace, "years": years}))
+        record = {
+            "path": path,
+            "replace": replace,
+            "years": years,
+            "validate_coverage": validate_coverage,
+        }
+        calls.append(("mit", record))
         return ([0] * 3, [0] * 6)  # 3 pv_votes, 6 roster (#127)
 
     def ucsb(
@@ -372,3 +379,29 @@ def test_a_skipped_gate_is_distinguishable_from_a_clean_one(
 # still records ``views``, and ``test_rebuild_views_sequences_union_then_join_then_hybrid``
 # pins that ``rebuild_views`` calls ``create_hybrid_views``. The live end-to-end check is
 # ``tests/integration/test_hybrid_views.py``. (Architect ruling, #124 code review.)
+
+
+def test_the_mit_coverage_guard_is_on_by_default_here(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """#177: the shipped build refuses a truncated MIT CSV rather than building green.
+
+    ``run_mit_pipeline``'s own default is ``False`` — it is fixture-driven callers that
+    need it off — so this seam is where the guard is actually switched on, and the
+    forwarding is the whole of that. Without this test the default could be flipped at
+    either end with no suite anywhere going red.
+    """
+    run_warehouse(dbc, "states.shp", "mit.csv")
+
+    assert dict(recorder)["mit"]["validate_coverage"] is True
+
+
+def test_the_mit_coverage_guard_can_be_switched_off(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """The escape the fixture-driven integration builds take (a two-state MIT extract
+    is non-contiguous by construction, which is a property of the fixture and not of
+    MIT's file)."""
+    run_warehouse(dbc, "states.shp", "mit.csv", validate_coverage=False)
+
+    assert dict(recorder)["mit"]["validate_coverage"] is False

@@ -173,6 +173,7 @@ def run_warehouse(
     years: Collection[int] | None = None,
     replace: bool = False,
     validate_overlap: bool = True,
+    validate_coverage: bool = True,
     environ: Mapping[str, str] | None = None,
     fetch: Fetch = fetch_url,
     load_geo: Callable[[str], pd.DataFrame] = load_state_geo,
@@ -239,6 +240,16 @@ def run_warehouse(
       ``--no-validate-overlap`` CLI spelling. A UCSB-less build needs nothing, since
       both gates skip on their own (AC-3).
 
+    ``validate_coverage`` gates the #177 MIT year-coverage guard the same explicit way,
+    and defaults on for the same reason: this is where the shipped ``python -m usvote
+    all`` runs, so this is where a truncated MIT CSV must be refused rather than built
+    green. It is passed to :func:`usvote.mit.pipeline.run_mit_pipeline`, whose own
+    default is ``False`` — the asymmetry is deliberate and that function's docstring
+    carries the argument for it. **Do not read the pairing with ``validate_overlap`` as
+    redundancy**: the overlap gate answers a *cross-source* question and skips entirely
+    when UCSB is absent, which is every public clone (D022), so on an EC + MIT build
+    this is the only year-coverage check that runs at all.
+
     Opens no transaction itself; see the module docstring for the per-source-atomic
     model and why a failed build is recovered with ``replace=True``, not a bare re-run.
     """
@@ -254,7 +265,12 @@ def run_warehouse(
         ec_rows = len(votes_df)
 
         mit_loaded, mit_roster = run_mit_pipeline(
-            dbc, mit_csv_path, years=years, environ=environ, replace=False
+            dbc,
+            mit_csv_path,
+            years=years,
+            environ=environ,
+            replace=False,
+            validate_coverage=validate_coverage,
         )
         mit_rows = len(mit_loaded)
         mit_roster_rows = len(mit_roster)
