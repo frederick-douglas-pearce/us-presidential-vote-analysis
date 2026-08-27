@@ -32,7 +32,13 @@ from dataclasses import dataclass
 #: source/license. A snapshot and the image that serves it must cut over **together**
 #: (D034) — :meth:`usvote.api.repository.SnapshotRepository.open` hard-fails on a
 #: mismatch, which is the intended fail-loud, not a deploy bug.
-SNAPSHOT_SCHEMA_VERSION = 2
+#:
+#: ``3`` (#102 / E8-S8) — the three-method comparison ships. ``national_rollup`` gained
+#: the five per-candidate hybrid fields (the two EC shares, the PV share, the coverage
+#: flag and the hybrid score); a new ``hybrid_summary`` table carries the per-election
+#: grain (three winners, two flips, three margins). Nothing was removed and no existing
+#: column changed meaning.
+SNAPSHOT_SCHEMA_VERSION = 3
 
 #: The **electoral-college** provenance codes (#139 / D048), written into
 #: ``snapshot_meta`` by every build. The PV codes are read from the ``pv_source``
@@ -48,9 +54,15 @@ SNAPSHOT_SCHEMA_VERSION = 2
 EC_SOURCE = "NARA"
 EC_LICENSE = "US-PD"
 
-#: The three snapshot tables (the serving contract E8-S2/S3 read).
+#: The four snapshot tables (the serving contract E8-S2/S3 read).
 DATA_TABLE = "ec_pv"
 ROLLUP_TABLE = "national_rollup"
+#: The per-**election** grain (#102 / E8-S8). A fourth table rather than more columns on
+#: ``national_rollup``, because its grain is ``year`` alone: the three winners, the two
+#: flips and the three margins are properties of the *election*, and broadcasting them
+#: across a per-candidate table would repeat one year's answer once per candidate and
+#: invite a consumer to group by the wrong key.
+HYBRID_SUMMARY_TABLE = "hybrid_summary"
 META_TABLE = "snapshot_meta"
 
 #: The ``ec_pv`` fact columns, in order. This is ``usvote.join.EC_PV_COLUMNS`` with the
@@ -116,6 +128,66 @@ ROLLUP_COLUMNS: tuple[str, ...] = (
     # the candidate count — the exact bug :func:`usvote.hybrid.ec_denominator_by_year`
     # exists to prevent, so the surface answers it rather than delegating it.
     "national_electoral_denominator",
+    # --- #102 / E8-S8: appended, never inserted -----------------------------
+    # The five per-candidate hybrid fields. Here rather than in a sibling
+    # ``hybrid_rollup`` table: same grain as the hybrid frame, so a sibling would
+    # duplicate the key and the shared columns and force a two-table join for one row.
+    #
+    # The EC share is split in two as a safety property (D037/A): ``ec_share_full`` is
+    # policy-invariant and decides the winner; ``ec_share_hybrid`` feeds
+    # ``hybrid_score`` alone. They are equal under the shipped policy — both ship so a
+    # consumer can check that rather than trust it.
+    "ec_share_full",
+    "pv_share",
+    "ec_share_hybrid",
+    # Σ electoral votes over the year's ``popular_vote`` states ÷ the appointed
+    # denominator (D024 §8) — EV-weighted, not state-count-weighted. Derived from the
+    # in-repo absence catalog, never from ``dwh.pv_state_status`` (D048/D053), so it is
+    # real for every year served where the warehouse view is NULL before 1976.
+    "pv_coverage",
+    # ``(ec_share_hybrid + pv_share) / 2`` — the average of two ratios, highest wins
+    # (D037). NULL wherever the popular vote is, i.e. every year before the PV window.
+    "hybrid_score",
+)
+
+#: The per-election hybrid summary's columns, in order (#102 / E8-S8).
+#:
+#: An **independent explicit projection** of
+#: :data:`usvote.hybrid.HYBRID_SUMMARY_COLUMNS`, not an alias — the one-way containment
+#: :data:`DATA_COLUMNS` keeps against ``usvote.join.EC_PV_COLUMNS`` (D047 §3), so a
+#: column added to the warehouse view reaches the public payload only when someone lists
+#: it here too. Pinned by
+#: ``test_snapshot.py::test_the_summary_tuple_is_contained_by_the_warehouse_tuple``;
+#: **the reverse assert is forbidden**.
+#:
+#: Winners arrive as candidate **names**; each ships beside a ``*_slug`` minted by the
+#: build so a consumer can pivot to ``/v1/candidates/{slug}`` (D006). A NULL winner
+#: yields a NULL slug, never an empty string.
+HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
+    "year",
+    "ec_denominator",
+    "ec_winner",
+    "ec_winner_slug",
+    "pv_winner",
+    "pv_winner_slug",
+    "hybrid_winner",
+    "hybrid_winner_slug",
+    # True only on a **strict** majority of the appointed electors. ``False`` means *no
+    # EC majority* — a populated, expected state (the hybrid's motivating case, and the
+    # reason 1824 went to the House), never a null-because-broken.
+    "ec_determinative",
+    "pv_coverage",
+    # NULL, never False, where a method has no winner — a method with no popular vote
+    # cannot be said to agree *or* disagree with the electoral college.
+    "pv_flip",
+    "hybrid_flip",
+    # Top-2 gaps in **percentage points**, each taken over that method's own non-NULL
+    # scores — necessary, not fastidious, because a candidate can hold electoral votes
+    # and no popular vote (faithless electors), so the three top-2 sets genuinely differ
+    # within one year. Fewer than two scored candidates yields NULL, never ``top1 - 0``.
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
 )
 
 

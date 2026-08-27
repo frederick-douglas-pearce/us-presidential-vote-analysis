@@ -28,7 +28,10 @@ from usvote.snapshot import build_snapshot
 def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     info = client.get("/openapi.json").json()["info"]
     assert info["title"] == "US Presidential Vote API"
-    assert info["version"] == "0.3.0"
+    # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
+    # value and stop pinning the thing that matters: that a human moved it when the
+    # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102.
+    assert info["version"] == "0.4.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -39,6 +42,11 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     assert "UCSB" in desc
     # Points a first-time developer at the docs.
     assert "/docs" in desc and "/redoc" in desc
+    # The three-method comparison is the headline feature #102 shipped; without this the
+    # paragraph advertising it could be deleted and every other assertion here would
+    # still pass.
+    assert "hybrid" in desc.lower()
+    assert "flip" in desc.lower()
 
 
 def test_openapi_contact_and_license(client: TestClient) -> None:
@@ -109,7 +117,14 @@ def test_endpoints_carry_the_right_tags(client: TestClient) -> None:
 
 def test_response_schemas_carry_examples(client: TestClient) -> None:
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    for name in ("EcPvRow", "NationalSummaryRow", "Provenance", "Meta", "ErrorBody"):
+    for name in (
+        "EcPvRow",
+        "NationalSummaryRow",
+        "ElectionSummary",
+        "Provenance",
+        "Meta",
+        "ErrorBody",
+    ):
         assert schemas[name].get("examples"), f"{name} ships no OpenAPI example"
 
 

@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 
 from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
+from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_COLUMNS
@@ -48,12 +49,22 @@ from usvote.snapshot import (
     SnapshotError,
     SnapshotMeta,
     add_candidate_slug,
+    assert_no_hybrid_pv_below_mit_window,
+    assert_no_pv_aggregate_below_mit_window,
+    build_hybrid_tables,
     build_national_rollup,
     build_snapshot,
     derive_curated_pv_status_roster,
     read_redistributable,
 )
-from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE
+from usvote.snapshot_schema import (
+    EC_LICENSE,
+    EC_SOURCE,
+    HYBRID_SUMMARY_TABLE,
+)
+from usvote.snapshot_schema import (
+    HYBRID_SUMMARY_COLUMNS as SNAPSHOT_HYBRID_SUMMARY_COLUMNS,
+)
 from usvote.years import ec_ingest_years
 
 _TS = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
@@ -594,7 +605,14 @@ def test_rollup_delegates_to_the_shared_primitive() -> None:
         on="year",
         how="left",
     )
-    via_snapshot = build_national_rollup(frame)
+    direct = direct.merge(
+        build_hybrid_tables(frame, _status_frame(frame))[0],
+        on=["year", "candidate_slug"],
+        how="left",
+    )
+    via_snapshot = build_national_rollup(
+        frame, build_hybrid_tables(frame, _status_frame(frame))[0]
+    )
     # Project the reference onto ROLLUP_COLUMNS, not onto whatever build_national_rollup
     # happened to return — reprojecting onto its own output can never detect a change to
     # the snapshot's column selection or order, which is half of what this pins.
@@ -618,7 +636,10 @@ def test_rollup_keeps_an_all_null_pv_year_denominator_null_not_zero() -> None:
     serves them — so the year now reaches the roll-up on the real path too, and
     :func:`usvote.snapshot.assert_no_pv_aggregate_below_mit_window` guards it there.)
     """
-    rollup = build_national_rollup(add_candidate_slug(_ec_pv_frame()))
+    slugged = add_candidate_slug(_ec_pv_frame())
+    rollup = build_national_rollup(
+        slugged, build_hybrid_tables(slugged, _status_frame())[0]
+    )
     pre_window = rollup.loc[rollup["year"] == 1972]
     assert not pre_window.empty
     assert pre_window["national_pv_denominator"].isna().all()
@@ -895,3 +916,357 @@ def test_build_from_db_reads_then_builds(
     assert meta.year_min == 1972
     assert meta.pv_year_min == 2016
     assert stub.closed
+
+
+# --- #102 / E8-S8: the hybrid, flip and margin fields -----------------------
+
+
+def _flipped_frame() -> pd.DataFrame:
+    """:func:`_ec_pv_frame` with 2016's popular vote swapped so PV and EC disagree.
+
+    The base fixture has **no flip** — in both 2016 and 2020 the same candidate leads
+    the electoral college and the popular vote — so it cannot exercise the fields this
+    story exists for. Swapping ``candidate_votes`` between C and D in 2016 makes C the
+    popular-vote winner while D keeps the 55 electoral votes and the presidency, which
+    is the 2000/2016 shape the acceptance criteria name.
+
+    Built as a *separate* frame rather than by editing :func:`_ec_pv_frame` on purpose:
+    the base fixture's content hash is pinned by other tests, and a flip is not the
+    ordinary case a fixture should default to.
+    """
+    frame = _ec_pv_frame().copy()
+    is_2016 = frame["year"] == 2016
+    c = is_2016 & (frame["candidate"] == "Cand C")
+    d = is_2016 & (frame["candidate"] == "Cand D")
+    c_votes = frame.loc[c, "candidate_votes"].to_numpy()
+    d_votes = frame.loc[d, "candidate_votes"].to_numpy()
+    frame.loc[c, "candidate_votes"] = d_votes
+    frame.loc[d, "candidate_votes"] = c_votes
+    return frame
+
+
+def _hybrid_summary_rows(out: Path) -> dict[int, dict[str, object]]:
+    """Read the snapshot's ``hybrid_summary`` table back, keyed by year."""
+    conn = sqlite3.connect(out)
+    try:
+        conn.row_factory = sqlite3.Row
+        cols = ", ".join(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
+        rows = conn.execute(f"SELECT {cols} FROM {HYBRID_SUMMARY_TABLE}").fetchall()
+    finally:
+        conn.close()
+    return {int(r["year"]): dict(r) for r in rows}
+
+
+def test_the_snapshot_writes_a_hybrid_summary_row_per_election(tmp_path: Path) -> None:
+    out, _ = _build(tmp_path)
+    summary = _hybrid_summary_rows(out)
+    assert set(summary) == {1972, 2016, 2020}, (
+        "one row per served election — the table's grain is the year alone"
+    )
+
+
+def test_the_hybrid_summary_table_carries_the_contract_columns(
+    tmp_path: Path,
+) -> None:
+    """The written table's columns are exactly the contract tuple, in order.
+
+    Pins the DDL against the tuple. Without it a column appended to
+    ``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` but not to ``_create_tables`` would fail
+    only at INSERT against a real build, and a column reordered in one but not the
+    other would silently write values into the wrong fields.
+    """
+    out, _ = _build(tmp_path)
+    conn = sqlite3.connect(out)
+    try:
+        cols = [r[1] for r in conn.execute(
+            f"PRAGMA table_info({HYBRID_SUMMARY_TABLE})"
+        ).fetchall()]
+    finally:
+        conn.close()
+    assert tuple(cols) == SNAPSHOT_HYBRID_SUMMARY_COLUMNS
+
+
+def test_a_popular_vote_flip_is_reported_with_its_margins(tmp_path: Path) -> None:
+    """The acceptance criteria's flip case, end to end through the snapshot.
+
+    C leads the popular vote, D holds 55 of the 105 electoral votes and took office, so
+    ``pv_flip`` is **true**. This is the assertion the base fixture cannot make.
+    """
+    out, _ = _build(tmp_path, frame=_flipped_frame())
+    row = _hybrid_summary_rows(out)[2016]
+
+    assert row["ec_winner"] == "Cand D"
+    assert row["pv_winner"] == "Cand C"
+    assert bool(row["pv_flip"]) is True
+    # Slugs ship beside the names so a consumer can pivot to /v1/candidates/{slug}
+    # without matching on a display name.
+    assert row["ec_winner_slug"] == "cand-d"
+    assert row["pv_winner_slug"] == "cand-c"
+    # Percentage points, and strictly positive: a flip with a zero margin would mean a
+    # tie, which `assert_no_winner_tie` rejects before the build gets here.
+    assert isinstance(row["pv_margin"], float) and row["pv_margin"] > 0.0
+    assert isinstance(row["ec_margin"], float) and row["ec_margin"] > 0.0
+
+
+def test_a_year_without_a_flip_reports_false_not_null(tmp_path: Path) -> None:
+    """The negative leg — ``false`` and ``null`` must not be confused.
+
+    2020's PV and EC winners agree, so ``pv_flip`` is ``False``. Asserting this beside
+    the flip case is what stops a regression that returns NULL everywhere from reading
+    as "no flips found".
+    """
+    out, _ = _build(tmp_path)
+    row = _hybrid_summary_rows(out)[2020]
+    assert row["pv_flip"] is not None, "an agreeing year is False, never NULL"
+    assert bool(row["pv_flip"]) is False
+
+
+def test_the_pre_window_year_has_null_pv_fields_but_real_ec_ones(
+    tmp_path: Path,
+) -> None:
+    """1972 (pre-PV-window): the PV half is NULL, the EC half is real.
+
+    The distinction #102 turns on. A method with no popular vote has no winner, no flip
+    and no margin — but the electoral college is fully recorded, so its winner, margin
+    and denominator are populated. Collapsing the two halves into "the year is empty"
+    is exactly the missing-vs-zero error this surface exists to avoid.
+    """
+    out, _ = _build(tmp_path)
+    row = _hybrid_summary_rows(out)[1972]
+
+    assert row["pv_winner"] is None
+    assert row["pv_winner_slug"] is None
+    assert row["hybrid_winner"] is None
+    assert row["pv_flip"] is None, "no winner ⇒ NULL, never False and never True"
+    assert row["hybrid_flip"] is None
+    assert row["pv_margin"] is None
+    assert row["hybrid_margin"] is None
+
+    assert row["ec_winner"] == "Richard Nixon"
+    assert row["ec_winner_slug"] == "richard-nixon"
+    assert row["ec_margin"] is not None
+    assert row["ec_denominator"] is not None
+
+
+def test_pv_coverage_is_real_before_the_pv_window(tmp_path: Path) -> None:
+    """The point of deriving coverage from the curated roster rather than the warehouse.
+
+    1972's roster marks Washington ``legislature_chosen``, so coverage is a real
+    fraction strictly between 0 and 1 — **not** the NULL that
+    ``hybrid_redistributable`` reports for every pre-window year, and not a fabricated
+    ``0``. This is the one column where the snapshot and the warehouse view diverge on
+    purpose (D048's action item for #102).
+    """
+    out, _ = _build(tmp_path)
+    coverage = _hybrid_summary_rows(out)[1972]["pv_coverage"]
+    assert isinstance(coverage, float), (
+        "coverage comes from the in-repo catalog, which reaches every served year — "
+        f"got {coverage!r}"
+    )
+    assert 0.0 < coverage < 1.0
+
+
+def test_the_rollup_carries_the_five_per_candidate_hybrid_fields(
+    tmp_path: Path,
+) -> None:
+    """The per-candidate half lands on ``national_rollup``, not a sibling table."""
+    out, _ = _build(tmp_path)
+    conn = sqlite3.connect(out)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT * FROM {ROLLUP_TABLE} WHERE year = 2020"  # noqa: S608
+        ).fetchall()
+    finally:
+        conn.close()
+    # dict(), not `in row`: membership on a sqlite3.Row tests VALUES, not column names,
+    # so `field in rows[0]` is silently the wrong question (and passed here only
+    # because it then failed for the right reason).
+    present = dict(rows[0])
+    for field in (
+        "ec_share_full",
+        "pv_share",
+        "ec_share_hybrid",
+        "pv_coverage",
+        "hybrid_score",
+    ):
+        assert field in present
+        assert all(r[field] is not None for r in rows), (
+            f"{field} must be populated inside the popular-vote window"
+        )
+
+
+def test_the_two_ec_shares_are_equal_under_the_shipped_policy(
+    tmp_path: Path,
+) -> None:
+    """``ec_share_hybrid == ec_share_full`` — the D037/A safety property, made visible.
+
+    The published coverage policy never restricts the electoral share, so no coverage
+    rule can manufacture a majority that did not exist. Both columns ship precisely so
+    a consumer can check that rather than take it on trust; this test is the same check
+    on the build side.
+    """
+    out, _ = _build(tmp_path)
+    conn = sqlite3.connect(out)
+    try:
+        rows = conn.execute(
+            f"SELECT ec_share_full, ec_share_hybrid FROM {ROLLUP_TABLE}"  # noqa: S608
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows
+    for full, hybrid_share in rows:
+        assert full == hybrid_share
+
+
+@pytest.mark.parametrize("column", ["pv_share", "hybrid_score"])
+def test_the_rollup_guard_rejects_a_pre_window_hybrid_share(column: str) -> None:
+    """The roll-up's pre-window guard reaches the two PV-derived hybrid columns.
+
+    **Exercised on the guard directly, and that is not laziness — it is the only way.**
+    The realistic route in (give 1972 a popular vote so its shares become non-null) is
+    caught *upstream* by ``assert_mit_year_floor``, which fires on the raw frame before
+    the roll-up is ever built. So a build-level test would pass while asserting nothing
+    about these two columns: it would be green because a **different** guard stopped it.
+    Calling the guard with a frame it would actually see is what pins the column list.
+
+    The sibling ``test_the_hybrid_summary_guard_rejects_a_pre_window_value`` covers the
+    other new table for the same reason.
+    """
+    rollup = pd.DataFrame(
+        {
+            "year": [1972],
+            "candidate_slug": ["someone"],
+            "national_pv_votes": [None],
+            "national_pv_denominator": [None],
+            "pv_share": [None],
+            "hybrid_score": [None],
+        }
+    )
+    rollup[column] = [0.5]
+    with pytest.raises(SnapshotError, match=column):
+        assert_no_pv_aggregate_below_mit_window(rollup)
+
+
+def test_the_rollup_guard_permits_the_columns_that_are_real_pre_window() -> None:
+    """The **exclusions**, which matter as much as the inclusions.
+
+    ``ec_share_full``, ``ec_share_hybrid`` and ``pv_coverage`` are populated for every
+    served year and must NOT be guarded — a guard over ``pv_coverage`` in particular
+    would reject exactly the thing #102 shipped, since deriving it from the in-repo
+    catalog is what makes it real before 1976. Without this test, "guard everything
+    that looks PV-ish" is a one-line change that passes its sibling above.
+    """
+    rollup = pd.DataFrame(
+        {
+            "year": [1972],
+            "candidate_slug": ["someone"],
+            "national_pv_votes": [None],
+            "national_pv_denominator": [None],
+            "pv_share": [None],
+            "hybrid_score": [None],
+            "ec_share_full": [0.61],
+            "ec_share_hybrid": [0.61],
+            "pv_coverage": [0.72],
+        }
+    )
+    assert_no_pv_aggregate_below_mit_window(rollup)
+
+
+_HYBRID_SUMMARY_GUARDED = (
+    ("pv_margin", 1.5),
+    ("hybrid_margin", 1.5),
+    ("pv_flip", True),
+    ("hybrid_flip", True),
+    ("pv_winner", "Somebody"),
+    ("pv_winner_slug", "somebody"),
+    ("hybrid_winner", "Somebody"),
+    ("hybrid_winner_slug", "somebody"),
+)
+
+
+@pytest.mark.parametrize(("column", "value"), _HYBRID_SUMMARY_GUARDED)
+def test_the_hybrid_summary_guard_rejects_a_pre_window_value(
+    column: str, value: object
+) -> None:
+    """:func:`assert_no_hybrid_pv_below_mit_window` fires on each guarded column.
+
+    Exercised directly because the build-level guards upstream of it would catch the
+    realistic route in. What this pins is that the summary table has a guard **of its
+    own** — the roll-up guard cannot see this table — and that the guard covers every
+    column it claims to.
+
+    The four winner columns were added at code review; this leg is what pins them.
+    """
+    summary = pd.DataFrame(
+        {
+            "year": [1972],
+            **{col: [None] for col, _ in _HYBRID_SUMMARY_GUARDED},
+        }
+    )
+    summary[column] = [value]
+    with pytest.raises(SnapshotError, match=column):
+        assert_no_hybrid_pv_below_mit_window(summary)
+
+
+def test_the_hybrid_summary_guard_passes_a_clean_pre_window_row() -> None:
+    """The negative leg: an all-NULL pre-window row is fine, so the guard is not vacuous.
+
+    Without this, a guard that raised unconditionally would satisfy every leg above.
+    """
+    summary = pd.DataFrame(
+        {
+            "year": [1972],
+            **{col: [None] for col, _ in _HYBRID_SUMMARY_GUARDED},
+        }
+    )
+    assert_no_hybrid_pv_below_mit_window(summary)
+
+
+def test_the_schema_version_moved_for_the_new_shape() -> None:
+    """AC-2: the content hash covers ``ec_pv`` only, so the version moves by hand.
+
+    A literal, deliberately. Comparing the constant to itself would pass under any
+    value; the whole obligation is that a human moved it when the derived tables
+    changed shape, and only a literal records that.
+    """
+    assert SNAPSHOT_SCHEMA_VERSION == 3
+
+
+def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
+    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + the slugs.
+
+    **The test the schema docstring claimed and this change originally did not write**
+    (caught at code review). Without it the one-way containment is a comment, not a
+    guard.
+
+    Note precisely what does and does not keep a warehouse column off the public
+    payload. **This assert does not** — it subtracts the warehouse tuple, so growing
+    that tuple only grows the subtrahend and leaves this green. What denies automatic
+    reach is that the snapshot tuple is a **hand-written literal**: a new warehouse
+    column arrives on the public surface only when someone types it here too.
+
+    **A subset assert, and the direction is the whole point.** The reverse — asserting
+    the snapshot tuple covers the warehouse tuple — is **forbidden** (D047 §3), for the
+    same reason it is forbidden for ``DATA_COLUMNS`` against ``EC_PV_COLUMNS``: coupling
+    them would undo the decoupling. What this catches is a hand-typed name in the
+    snapshot tuple that no warehouse column supplies, which would ``KeyError`` only
+    against a real warehouse — on the one machine that has one.
+    """
+    derived = {"ec_winner_slug", "pv_winner_slug", "hybrid_winner_slug"}
+    unexplained = (
+        set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
+        - set(hybrid.HYBRID_SUMMARY_COLUMNS)
+        - derived
+    )
+    assert not unexplained, (
+        "hybrid_summary columns that no warehouse column supplies and that are not "
+        f"minted by the build: {unexplained}"
+    )
+    # Non-vacuity: the derived set must actually be needed, or the assert above would
+    # pass with `derived` empty and stop pinning anything about the slugs.
+    assert derived <= set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
+    assert not (derived & set(hybrid.HYBRID_SUMMARY_COLUMNS)), (
+        "the slug columns are minted by the snapshot build; if the warehouse view "
+        "starts carrying them, this test's `derived` allowance is hiding a real overlap"
+    )

@@ -104,7 +104,7 @@ from, since that map is also where a new correction is added. The provenance res
 of the catalog, where each entry carries its Archives URL. See the note in
 `assert_count_status_reasons_are_catalogued`.
 
-## The three tables
+## The four tables
 
 ### `ec_pv` — the joined fact
 
@@ -176,6 +176,55 @@ popular vote — so no single status is true of a whole year. A summary's null p
 disambiguated at **year** level instead, via `meta.provenance.coverage` and the
 `has_popular_vote` flag on `GET /v1/elections`. Per-state reasons live on `ec_pv`.
 
+### `hybrid_summary` — the per-election three-method comparison
+
+Added in **#102** (E8-S8). One row per **year** — not per candidate — carrying the three
+winners (each with its public `candidate_slug` beside the display name), the two flip
+booleans, the three top-2 margins in **percentage points**, `ec_determinative`,
+`ec_denominator` and `pv_coverage`. `/v1/elections/{year}` and
+`/v1/elections/{year}/summary` return it as a single `election` key.
+
+The grain is why it is a fourth table rather than more columns on `national_rollup`: the
+winners and margins are properties of the *election*, and broadcasting them across a
+per-candidate table would repeat one answer once per candidate and invite a consumer to
+group by the wrong key. The **per-candidate** half of the hybrid — `ec_share_full`,
+`pv_share`, `ec_share_hybrid`, `pv_coverage` and `hybrid_score` — does live on
+`national_rollup`, because that table's grain already *is* the hybrid frame's public grain.
+
+**Every null here is meaningful, and never a `false`.** Before the popular-vote window this
+surface has no popular vote, so `pv_winner`, `hybrid_winner`, both flips and two of the
+three margins are NULL — never `false`, which would assert that the popular vote *agreed*
+with the electoral college in a year there was none. The electoral-college fields
+(`ec_winner`, `ec_margin`, `ec_denominator`, `ec_determinative`) are populated for every
+served year back to 1824. And `ec_determinative: false` is a **real answer** — no candidate
+reached a majority of the appointed electors, which is 1824 and is the case the hybrid
+exists to speak to — not a missing value.
+
+**`ec_share_full` and `ec_share_hybrid` are shipped separately even though they are equal.**
+The published coverage policy never restricts the electoral share, so no coverage rule can
+manufacture a majority that did not exist (D037/A). Both columns ship precisely so a
+consumer can *check* that rather than take it on trust; one column would make the guarantee
+invisible.
+
+#### One intended difference from the warehouse view
+
+The snapshot derives the hybrid **in-process from the in-repo absence catalog**
+(`usvote/pv/absences.py`), not by reading the `hybrid_redistributable` warehouse view
+(#102, superseding D039's read mechanism; D048's action item). Everything the two produce is
+identical **except `pv_coverage`**, and that one column differs on purpose:
+
+| | pre-1976 `pv_coverage` |
+|---|---|
+| `hybrid_redistributable` (warehouse view) | **NULL** — its roster read is scoped to the sources the view carries, and MIT's roster starts at 1976 |
+| this snapshot | the **real** figure — 1824 is 190/261 ≈ 0.728 |
+
+The reason is provenance, not convenience: the warehouse roster's pre-1976 rows are
+UCSB-derived, and UCSB grants no redistribution rights (D022/D030), whereas every entry in
+the in-repo catalog carries a public-domain citation. Under the published policy
+`pv_coverage` feeds no score, so replacing it changes no share, winner, flip or margin —
+which is what makes the divergence safe as well as deliberate. If you are diffing the view
+against the artifact, this column is the expected difference and the only one.
+
 ### `snapshot_meta` — one provenance row
 
 `snapshot_version`, `schema_version`, `row_count`, `candidate_count`, `year_min`/`year_max`
@@ -198,6 +247,13 @@ warehouse, same version") with the freshness/ETag contract ("identical data, ide
 version") the API (E8-S2) serves.
 
 Because the hash covers only the `ec_pv` data rows — **not** the derived `national_rollup`
-— a change to how the roll-up is *computed* over identical underlying data would not move
-the hash on its own. Such a change therefore **must** bump `SNAPSHOT_SCHEMA_VERSION` (which
-is folded into the hash), so cached consumers see a new version.
+or `hybrid_summary` — a change to how those are *computed* over identical underlying data
+would not move the hash on its own. Such a change therefore **must** bump
+`SNAPSHOT_SCHEMA_VERSION` (which is folded into the hash), so cached consumers see a new
+version. #102 is the worked example: it added a whole table and five roll-up columns without
+touching a single fact row, so the hash would not have moved at all — the version went 2 → 3
+by hand.
+
+Widening the hash to cover the derived tables was considered and rejected. The version is a
+*content* address for the facts; a derived table that changed while the facts did not is a
+**code** change, and the schema version is the instrument for that.

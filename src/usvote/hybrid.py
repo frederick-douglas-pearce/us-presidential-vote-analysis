@@ -130,6 +130,7 @@ __all__ = [
     "build_hybrid_candidate_sql",
     "build_hybrid_frame",
     "build_hybrid_from_db",
+    "build_hybrid_from_frames",
     "build_hybrid_summary",
     "build_hybrid_summary_sql",
     "create_hybrid_views",
@@ -1205,12 +1206,55 @@ def build_hybrid_from_db(
     :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
     its upstream. :func:`create_hybrid_views` runs this function for exactly that
     reason, inheriting all four as its view-creation preconditions.
+
+    **The build-and-guard half lives in** :func:`build_hybrid_from_frames` **(#102)**,
+    so the snapshot build can run the identical guard set on frames it already holds
+    without opening this connection. All this function adds is the two reads.
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
     surface_sources = set(ec_pv_df["source"].dropna().unique())
     roster_df = read_pv_status_roster(
         dbc, sources=surface_sources, schema=roster_schema
     )
+    return build_hybrid_from_frames(ec_pv_df, roster_df, policy=policy)
+
+
+def build_hybrid_from_frames(
+    ec_pv_df: pd.DataFrame,
+    roster_df: pd.DataFrame,
+    *,
+    policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build both hybrid grains from frames, running the four guards. **DB-free.**
+
+    The guarded core :func:`build_hybrid_from_db` wraps — extracted in #102 so the
+    snapshot build gets the *same* validation without a database. Returns
+    ``(candidate frame, election summary)``.
+
+    **Why this is an extraction and not a convenience wrapper.** #102 computes the
+    public surface's hybrid in-process from the frames
+    :func:`usvote.snapshot.build_snapshot` already holds, rather than reading
+    ``hybrid_redistributable`` — so it never passes
+    through :func:`create_hybrid_views` and would otherwise inherit **none** of that
+    function's preconditions. Four of the seven are these; the other three
+    (:func:`assert_redistributable_only_source`,
+    :func:`assert_carried_columns_constant`, :func:`usvote.join.assert_no_fan_out` on
+    the input) are the caller's, because they constrain the *input* frame rather than
+    the derivation, and the snapshot's equivalents differ
+    (:func:`usvote.snapshot.assert_redistributable_only` covers the first).
+
+    **:func:`assert_no_winner_tie` is the one that must not be skipped.**
+    :func:`build_hybrid_summary` deliberately does **not** raise on a tie — a view
+    cannot ``raise``, so #124 split the check out (see that function) — which means a
+    caller that builds the summary without this guard ships an **arbitrary** winner on a
+    genuine dead heat, silently. That is precisely the shape a second, unguarded build
+    path would have introduced.
+
+    The roster needs only ``(year, state, pv_status)``: :func:`_resolve_roster` groups
+    on ``(year, state)`` and never reads ``source``, so a single-source roster — the
+    in-repo curated one (:func:`usvote.pv.absences.build_curated_roster`) as much as a
+    warehouse read — satisfies it unchanged.
+    """
     frame = build_hybrid_frame(ec_pv_df, roster_df, policy=policy)
     summary = build_hybrid_summary(frame)
 

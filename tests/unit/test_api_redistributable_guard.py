@@ -125,3 +125,55 @@ def test_no_endpoint_surfaces_an_uncatalogued_count_reason(client: TestClient) -
         for row in client.get(path).json()["data"]:
             reason = row["electoral_count_status_reason"]
             assert reason is None or reason in allowed, f"{path}: {reason!r}"
+
+
+#: The paths whose response carries the per-election ``election`` object (#102).
+_ELECTION_OBJECT_PATHS = (
+    [f"/v1/elections/{y}" for y in (1860, 2016, 2020)]
+    + [f"/v1/elections/{y}/summary" for y in (1860, 2016, 2020)]
+)
+
+#: Every field the ``election`` object is allowed to carry. A **whitelist**, because the
+#: sweeps above iterate ``body["data"]`` and so cannot see this object at all — #102 added
+#: a public surface outside their reach, and the way this guard would fail is a future
+#: column landing on ``hybrid_summary`` and reaching the API without anyone asking whose
+#: text it is.
+_ALLOWED_ELECTION_FIELDS = frozenset(
+    {
+        "year",
+        "electoral_denominator",
+        "ec_winner",
+        "ec_winner_slug",
+        "pv_winner",
+        "pv_winner_slug",
+        "hybrid_winner",
+        "hybrid_winner_slug",
+        "ec_determinative",
+        "pv_coverage",
+        "pv_flip",
+        "hybrid_flip",
+        "ec_margin",
+        "pv_margin",
+        "hybrid_margin",
+    }
+)
+
+
+def test_the_election_object_carries_no_unexpected_field(client: TestClient) -> None:
+    """The per-election object ships exactly the fields we vetted, and no others (#102).
+
+    The three sweeps above iterate ``body["data"]``, so the ``election`` key #102 added is
+    **outside every one of them**. Found during this issue's security review, which
+    cleared it as a non-exposure — the object carries no ``source``, ``pv_status`` or
+    ``note`` — while noting the surface was unswept. A whitelist rather than a
+    blocklist: it fails on anything new, including the field nobody thought to forbid.
+
+    The only free text here is the three winner **names**, which come from
+    ``dwh.candidate`` (the NARA spine, US-PD) via the same column the fact rows already
+    expose as ``candidate`` — not from a popular-vote source.
+    """
+    for path in _ELECTION_OBJECT_PATHS:
+        election = client.get(path).json()["election"]
+        assert election is not None, f"{path}: no election object"
+        unexpected = set(election) - _ALLOWED_ELECTION_FIELDS
+        assert not unexpected, f"{path}: unvetted field(s) on the public surface: {unexpected}"

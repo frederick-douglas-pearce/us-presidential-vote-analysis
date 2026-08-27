@@ -18,7 +18,11 @@ import pydantic
 from usvote.api import models
 from usvote.join import EC_PV_COLUMNS
 from usvote.snapshot import DERIVED_DATA_COLUMNS
-from usvote.snapshot_schema import DATA_COLUMNS, ROLLUP_COLUMNS
+from usvote.snapshot_schema import (
+    DATA_COLUMNS,
+    HYBRID_SUMMARY_COLUMNS,
+    ROLLUP_COLUMNS,
+)
 
 
 def _mapped_columns(model: type[pydantic.BaseModel]) -> set[str]:
@@ -40,6 +44,21 @@ def test_every_rollup_column_is_mapped_or_dropped() -> None:
     covered = _mapped_columns(models.NationalSummaryRow) | models._DROPPED_COLUMNS
     missing = set(ROLLUP_COLUMNS) - covered
     assert not missing, f"unmapped rollup columns (add a field or drop them): {missing}"
+
+
+def test_every_hybrid_summary_column_is_mapped_or_dropped() -> None:
+    """The third tuple joins the drift guard (#102).
+
+    Without this, every column on the new ``hybrid_summary`` table sits **outside** the
+    guard's coverage: the two asserts above read ``DATA_COLUMNS`` and
+    ``ROLLUP_COLUMNS`` only, so a per-election field added to the snapshot contract and
+    never given a model field would surface nowhere and fail nothing.
+    """
+    covered = _mapped_columns(models.ElectionSummary) | models._DROPPED_COLUMNS
+    missing = set(HYBRID_SUMMARY_COLUMNS) - covered
+    assert not missing, (
+        f"unmapped hybrid_summary columns (add a field or drop them): {missing}"
+    )
 
 
 def test_every_data_column_comes_from_the_join_view_or_is_explicitly_derived() -> None:

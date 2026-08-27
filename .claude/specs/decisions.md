@@ -2882,3 +2882,110 @@ build". Nothing inside this repo can distinguish "MIT has not published 2028 yet
 published 2028 and nobody downloaded it"; the discriminating fact lives upstream. #187's real-file
 pin is the nearest available instrument, and it closes the case where the file *was* refreshed
 (which the `>` branch already catches) rather than this one.
+
+---
+
+## D053: the public hybrid is recomputed from the in-repo catalog, not read from `hybrid_redistributable`
+
+**Date:** 2026-08-27
+**Issue:** #102 (E8-S8) · **Supersedes the read mechanism of:** D039 · **Discharges:** D048's
+action item for #102 · **Builds on:** D024, D028, D030, D037, D038, D047, D048, D050
+
+**Context:**
+
+D039 (2026-07-28) decided #102's read seam before E7 existed: the snapshot build would
+*consume* `hybrid_redistributable` + its per-election summary, materializing them the way it
+already materializes `ec_pv_redistributable`. Two things changed underneath that decision.
+
+First, **#139/D048 widened the served window to 1824–2024**. D039's premise — "that surface is
+MIT-only 1976–2024 where every state holds a popular vote, so `apply_coverage_policy` degrades
+to identity (`pv_coverage == 1.0`)" — stopped being true: on the widened redistributable
+surface `pv_coverage` is `1.0` for thirteen years and **NULL for the other thirty-eight**,
+because `build_hybrid_from_db` scopes its roster read to the sources the view carries and
+MIT's roster starts at 1976. (D039's *conclusion* survives for a stronger reason than it
+gave: policy (b) never restricts the EC share at all, whatever the coverage.)
+
+Second, **D048's action list named this issue directly**: "#102 … should also resolve
+`pv_coverage` to **the in-repo catalog**, which is now the public roster of record —
+`usvote.hybrid` still reads the UCSB-inclusive `dwh.pv_state_status`, and publishing a
+coverage figure derived from data D030 excludes would undo point 3."
+
+**Decision:**
+
+1. **The snapshot recomputes the hybrid in-process** via `usvote.hybrid.build_hybrid_from_frames`
+   on the two frames `build_snapshot` already holds — the `ec_pv_redistributable` frame and the
+   **curated** `(year, state, pv_status)` roster from `derive_curated_pv_status_roster`. It does
+   **not** read `hybrid_redistributable` or `hybrid_summary_redistributable`. This adds **no new
+   database read**: both inputs were already arguments.
+2. **`pv_coverage` on the public artifact therefore comes from `PV_ABSENCE_CATALOG`**, and is a
+   real EV-weighted figure for all 51 served years (1824 = 190/261 ≈ 0.728) where the warehouse
+   view reads NULL for 38 of them. **This is the one intended divergence between the view and the
+   artifact, and no other column differs**: under the shipped policy (b) `pv_coverage` feeds no
+   score, so every share, winner, flip and margin is identical to the view's. Pinned by
+   `tests/integration/test_snapshot_build.py`, which asserts the match on 2000/2016 *and* asserts
+   the view is NULL at 1824 while the snapshot is not.
+3. **The guard set moved with the derivation.** `build_hybrid_from_frames` is an extraction from
+   `build_hybrid_from_db`, carrying `assert_ec_shares_le_one`, `assert_no_winner_tie` on all
+   three scores and `assert_ec_winner_matches_rank`; both callers use it, so the two paths cannot
+   drift. Without this the snapshot would have inherited **none** of `create_hybrid_views`'
+   preconditions — and `build_hybrid_summary` deliberately does not raise on a tie (a view cannot
+   `raise`, so #124 split that check out), so an unguarded second path would have shipped an
+   **arbitrary winner on a dead heat**, silently. Found at the architect gate, not in review.
+4. **Layout:** the five per-candidate fields (`ec_share_full`, `pv_share`, `ec_share_hybrid`,
+   `pv_coverage`, `hybrid_score`) are **appended to `national_rollup`**, whose grain already *is*
+   the hybrid frame's public grain — a sibling table would duplicate ten columns at the same key.
+   The per-election grain gets a **new `hybrid_summary` table**, because winners and margins are
+   properties of the election, not of a candidate.
+5. **The three winners ship as `candidate_slug` beside the display name.** The hybrid summary
+   yields winners as canonical *names*; the build maps them through the same collision-checked
+   `name -> slug` table the fact rows use (NULL winner → NULL slug), so a consumer can pivot to
+   `/v1/candidates/{slug}` without matching on a display string (D006).
+6. **Both new snapshot column tuples are independent explicit projections**, never aliases of
+   `usvote.hybrid`'s tuples — the same one-way containment `DATA_COLUMNS` keeps against
+   `EC_PV_COLUMNS` (D047 §3). Aliasing would make every column later added to a warehouse view
+   reach the public payload automatically, which is exactly what the decoupling denies.
+7. **`SNAPSHOT_SCHEMA_VERSION` 2 → 3**, by hand. The content hash covers `ec_pv` fact rows only,
+   so a new table and five derived columns are invisible to it. Snapshot and image cut over
+   together (D034).
+
+**Rationale:**
+
+- **Recomputing is the *consistent* choice, not merely an acceptable reinterpretation.** There is
+  **no `national_rollup` view in the warehouse** — `build_national_rollup` has computed the
+  roll-up in-process by calling `roll_up_national` since #121. Extending that pattern to the
+  hybrid is continuity; reading views for the hybrid while computing the roll-up in-process, in
+  the same function, would have been the inconsistency.
+- D039's own intent is **honoured, not overridden**: it wanted one derivation, single-sourced in
+  `usvote.hybrid` (D037/OQ4). Calling E7's builders is that. What is superseded is the
+  *mechanism* — "consume the views" — which its stale arithmetic premise had motivated.
+- It keeps `build_snapshot` a **pure frame function**, so the whole contract stays unit-testable
+  offline from a small synthetic frame. Two new DB reads would have moved that boundary.
+- The provenance argument is the decisive one. `hybrid_redistributable`'s roster scoping means no
+  UCSB *value* reaches it **today** — so this is not the closing of a live leak. It is the
+  removal of a **coupling**: the public path would otherwise depend on a warehouse table whose
+  pre-1976 rows are UCSB-derived, and D048 §3 spent #140 making that path structural rather than
+  incidental. A coupling that is currently harmless is still the thing that makes a future change
+  harmful.
+- **The reader gets more, not less:** `pv_coverage` becomes a real number for 38 years that
+  previously read NULL, and every figure behind it carries a public-domain citation.
+
+**What this does NOT change:**
+
+- **The hybrid views remain live** and are not deprecated. `hybrid_preferred` /
+  `hybrid_redistributable` and their summaries stay the warehouse analysis surface and the
+  differential test's oracle target, and **E9's mart can still read them** — D039 anticipated
+  that, and nothing here forecloses it. Do not read this decision as "the hybrid views are dead."
+- **Policy (b) remains the only policy on the public surface** (D038/D050 §2). Nothing here makes
+  the coverage treatment configurable.
+
+**Action required:**
+
+- **Deploy is sequenced, not done.** The schema bump means the snapshot and the serving image
+  must cut over **together** (D034): rebuild → GCS → hash-tagged image → Cloudflare purge.
+  Unlike #139, #102 closes on merge and the cutover is tracked separately — Fred's call at the
+  2026-08-27 plan gate.
+- The **2028 `LATEST_ELECTION_YEAR` bump's fail-loud is strengthened** by this change: the
+  curated roster now feeds `pv_coverage` on the public hybrid fields as well as `pv_status`, so
+  an unreviewed new year fails the build in one more place. That is the designed behaviour
+  (D048's own note, `CURATED_YEAR_COUNT`'s pin), recorded here so it is recognised as the feature
+  it is rather than treated as a regression.

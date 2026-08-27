@@ -136,26 +136,29 @@ def get_election(
     return models.ElectionResponse(
         data=data,
         summary=[models.NationalSummaryRow.model_validate(s) for s in summary],
+        election=_election_summary(repo, year),
         meta=_meta(repo, len(data)),
     )
 
 
 @router.get(
     "/elections/{year}/summary",
-    response_model=models.Envelope[models.NationalSummaryRow],
+    response_model=models.ElectionSummaryResponse,
     responses=_NOT_FOUND_RESPONSE,
-    summary="The national roll-up for one election year.",
+    summary="The national roll-up and three-method comparison for one election year.",
     tags=["Elections"],
 )
 def get_election_summary(
     year: int,
     request: Request,
     response: Response,
-) -> models.Envelope[models.NationalSummaryRow]:
-    """Per-candidate national EC + PV totals (+ denominator) for a year.
+) -> models.ElectionSummaryResponse:
+    """Per-candidate national EC + PV totals, plus the per-election comparison.
 
-    Reads the precomputed ``national_rollup`` — no aggregation in the handler. No
-    hybrid / flip / margin (those are E8-S8).
+    Reads the precomputed ``national_rollup`` and ``hybrid_summary`` — no aggregation
+    in the handler. ``data`` is per candidate (totals, shares and the hybrid score);
+    ``election`` is the single per-year object carrying the three winners, the two
+    flips and the three margins (#102).
     """
     repo = _repo(request)
     # Gate on the roll-up itself (not ``ec_pv`` via ``year_exists``): existence and the
@@ -166,7 +169,9 @@ def get_election_summary(
         raise ResourceNotFound("year_not_found", _unknown_year_message(repo, year))
     cache_dependency(request, response)
     data = [models.NationalSummaryRow.model_validate(r) for r in rows]
-    return models.Envelope(data=data, meta=_meta(repo, len(data)))
+    return models.ElectionSummaryResponse(
+        data=data, election=_election_summary(repo, year), meta=_meta(repo, len(data))
+    )
 
 
 @router.get(
@@ -227,6 +232,20 @@ def get_candidate(
     rows = repo.rows_by_candidate(slug, year_from=year_from, year_to=year_to)
     data = [models.EcPvRow.model_validate(r) for r in rows]
     return models.Envelope(data=data, meta=_meta(repo, len(data)))
+
+
+def _election_summary(
+    repo: SnapshotRepository, year: int
+) -> models.ElectionSummary | None:
+    """The per-election hybrid summary for a year, or ``None`` if the snapshot has none.
+
+    A missing row is rendered as a null ``election`` key rather than a 404 or a 500: the
+    caller has already established the year exists, so absence here is a build gap in a
+    derived table, and the fact rows and roll-up beside it are still correct. Failing
+    the whole response would withhold good data over a missing derivation.
+    """
+    row = repo.hybrid_summary_by_year(year)
+    return models.ElectionSummary.model_validate(row) if row is not None else None
 
 
 def _unknown_year_message(repo: SnapshotRepository, year: int) -> str:

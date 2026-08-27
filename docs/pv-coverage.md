@@ -25,13 +25,23 @@ with its verified numbers.
 > human-browsable description of what it produces.
 >
 > **Which surface these numbers come from, because `pv_coverage` is surface-dependent by design.**
-> The tables below are computed on **`ec_pv_preferred`**, the full-history analysis surface. The
-> roster read is scoped to the sources a view actually carries, so on the **redistributable**
-> surface — the MIT-only one a public consumer reads — `pv_coverage` is `1.0` for 1976–2024 and
-> **NULL for every year before it**, including all twelve tabulated here. That is deliberate and
-> correct: no popular vote *and* no roster row reaches those years on that surface, and NULL is the
-> honest reading of an absent roster rather than a fabricated `0.0`. What a public consumer *does*
-> get for those years is the per-row `pv_status`, which is what the reproduction recipe below uses.
+> The tables below are computed on **`ec_pv_preferred`**, the full-history analysis surface, and
+> they are also what the **public API** now serves — but the two arrive there by different routes,
+> and the third surface in play still reads NULL. Three things to keep apart:
+>
+> | Surface | Pre-1976 `pv_coverage` | Why |
+> |---|---|---|
+> | `ec_pv_preferred` (analysis) | the figures tabulated below | the full-history roster, UCSB included |
+> | `hybrid_redistributable` (warehouse view) | **NULL** | its roster read is scoped to the sources the view carries, and MIT's roster starts at 1976 |
+> | the **public API snapshot** | the figures tabulated below | since **#102** it derives coverage from the in-repo [`PV_ABSENCE_CATALOG`](../src/usvote/pv/absences.py), which reaches every served year |
+>
+> **The middle row and the bottom row disagree on purpose** — that is the one intended divergence
+> between the warehouse view and the artifact built from it, and it is the whole of D048's action
+> item for #102. The view's NULL is the honest reading of an absent *roster*; the snapshot's figure
+> is the honest reading of the *election*, and it is available publicly because every classification
+> behind it carries a public-domain citation rather than coming from UCSB. **An earlier version of
+> this note said a public consumer reads NULL for every pre-1976 year. That is no longer true**, and
+> the reproduction recipe below reflects the catalog-derived route.
 
 ## What the number measures
 
@@ -254,8 +264,11 @@ wording, substitute the values:
 - `1.0` — *"Popular-vote coverage: complete."*
 - `NULL` — *"Popular-vote coverage is not established for this election on this data surface."*
 
-Note which of these a public consumer actually reaches for a pre-1976 year: the **`NULL`** one. The
-`< 1.0` template is for a surface carrying the full-history roster.
+Which of these a pre-1976 year reaches depends on the year, and since **#102** it is never the
+`NULL` one: the twelve partial-coverage years render **`< 1.0`** (1824 as "73% of electoral
+votes"), and 1880–1972 render **`1.0`** — every state held a popular vote, even though this
+surface carries no counts for it. The **`NULL`** template is still live, but only for the
+`hybrid_redistributable` warehouse view, whose roster does not reach those years.
 
 ## Provenance, and how to reproduce these numbers
 
@@ -302,9 +315,12 @@ The decision record makes the same distinction directly: D024's licensing note h
 roster's free-text `note` column is non-redistributable source prose, while "the `pv_status` enum
 is a bare historical fact and carries no such restriction."
 
-**From the public API** (no database required — one request per year). Note that `pv_coverage` is
-**not itself a served field today**; until the hybrid fields land on the API, derive it from the
-served `pv_status` and `state_electoral_votes`, which is what this does:
+**From the public API** (no database required — one request per year). Since **#102**
+`pv_coverage` is served directly, on both the summary rows and the per-election `election`
+object — but a **deployed** API only carries it once the snapshot and image cut over together
+(D034/D053), so the recipe below stays useful: it derives the same figure from the
+long-served `pv_status` and `state_electoral_votes`, and is what to use against an older
+deployment.
 
 ```bash
 curl -s https://api.us-presidential-election-center.org/v1/elections/1824 \
