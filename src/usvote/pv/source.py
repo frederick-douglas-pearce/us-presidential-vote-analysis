@@ -83,10 +83,12 @@ MIT_PV_YEAR_MIN = 1976
 #: Cross-checked by :func:`usvote.mit.validate.assert_mit_year_coverage`, and — unlike
 #: the floor — as an **equality**, raising in both directions. The asymmetry is not an
 #: oversight: a scoped build only ever *lowers* the observed maximum, so there is no
-#: benign "ordinary scoped build" reading of ``max(observed) > MIT_PV_YEAR_MAX`` the way
-#: there is for ``min(observed) > MIT_PV_YEAR_MIN``. Above means MIT published a newer
-#: cycle and this constant is stale — every guard keyed on it is now silently one
-#: election too weak — and below is the truncation itself.
+#: benign "ordinary scoped build" reading of ``max(election) > MIT_PV_YEAR_MAX`` the
+#: way there is for ``min(observed) > MIT_PV_YEAR_MIN``. The two spellings differ on
+#: purpose: the coverage guard screens non-election years out before taking its
+#: maximum, while the floor guard below reads the raw minimum. Above means MIT
+#: published a newer cycle and this constant is stale — every guard keyed on it is now
+#: silently one election too weak — and below is the truncation itself.
 MIT_PV_YEAR_MAX = 2024
 
 #: The warehouse schema and reference-table name. ``pv_source`` co-locates in the same

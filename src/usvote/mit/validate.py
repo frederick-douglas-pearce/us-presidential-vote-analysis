@@ -16,31 +16,12 @@ lands. So a MIT CSV that stopped at 2020 built green and 2024's popular vote wen
 silently null — announced by ``meta.pv_year_max`` and ``has_popular_vote``, never
 refused.
 
-**Two failures, two mechanisms, and the second is why this module is not one check.**
-
-- An **interior hole** (1976…1992, 2000…2024 — 1996 simply missing) is a contiguity
-  question, answerable from the observed set alone.
-- A **dropped newest year** is not. A contiguity run over ``[min(observed),
-  max(observed)]`` is *trivially satisfied* when the year that vanished is the one
-  that defined the upper bound — contiguity provably cannot reach it. Deciding it
-  needs something that remembers MIT used to reach 2024, which is
-  :data:`~usvote.pv.source.MIT_PV_YEAR_MAX`.
-
-**Why this is not in** :mod:`usvote.pv`. "Did MIT's own year set change?" is a
-**single-source** question. Answering it inside the cross-source overlap gate would
-drag back the data-derived ceiling #167 removed precisely because it was circular —
-letting the data define the boundary meant to detect the data being wrong. The
-dependency runs ``mit -> pv.source`` and ``mit -> years``, both the allowed direction
-(D006/D015).
-
-**The floor is deliberately not checked here** (#177's "leave the bottom alone").
-:func:`usvote.pv.source.assert_mit_year_floor` owns it and deliberately **passes**
-``min(observed) > MIT_PV_YEAR_MIN`` as an ordinary scoped build. Collapsing both
-checks into one span equality — ``observed == [MIT_PV_YEAR_MIN, MIT_PV_YEAR_MAX]`` —
-looks strictly stronger and is instead *incoherent*: it would demand ``min == 1976``
-while the floor guard permits ``min > 1976``, leaving two owners of the same bound
-with contradictory semantics. The contiguity check's lower bound is therefore
-``min(observed)``, **never** :data:`~usvote.pv.source.MIT_PV_YEAR_MIN`. See D052.
+**D052 owns the rationale** — why two checks rather than one, why the high-water
+comparison is an equality raising in both directions, why the floor stays with
+:func:`usvote.pv.source.assert_mit_year_floor` rather than being folded in here, and
+the limit no mechanical check can close. It is stated there once; this module does not
+restate it. The dependency runs ``mit -> pv.source`` and ``mit -> years``, both the
+allowed direction (D006/D015).
 """
 
 from __future__ import annotations
@@ -70,46 +51,16 @@ def assert_mit_year_coverage(
 ) -> None:
     """Assert MIT's covered election years are contiguous and reach ``expected_max``.
 
-    Two checks over the set of election years ``observed_years`` carries, plus a
-    non-election-year screen. **Every problem found is reported in one error**, rather
-    than raising on the first: the message is this guard's entire product, and
-    short-circuiting hides the worst case behind the mildest one. A file with a
-    typo'd ``2022`` row *and* 2024 truncated would otherwise report only the stray
-    year — because a raw maximum of 2022 makes the span look complete at 2020 — and
-    never mention that 2024, the year whose popular vote actually goes null, is gone.
-    Strays are therefore split out **before** the bounds are derived.
-
-    1. **Contiguity** — the observed *election* years must be exactly the election
-       years in the closed range ``[min(election), max(election)]``. Both bounds are
-       taken from the years that survived the stray screen, **not** from the raw input:
-       that is what stops a single typo'd year from redefining the span (see above).
-       The lower bound is in particular never
-       :data:`~usvote.pv.source.MIT_PV_YEAR_MIN` — the floor belongs to
-       :func:`usvote.pv.source.assert_mit_year_floor`, which permits a build starting
-       later (see this module's docstring). A year that is not an election year at all
-       is **not** reported by this comparison: the screen catches it first, and
-       ``missing`` is a one-directional difference whose other side is empty by
-       construction.
-    2. **High-water** — ``max(observed) == expected_max``, raising in **both**
-       directions. Below is the truncation this guard exists for. Above means MIT
-       published a newer cycle while the constant stayed put, which makes every guard
-       keyed on it silently one election too weak; the deliberate bump is the fix, and
-       forcing it is the point. Unlike the floor there is no benign reading of the
-       ``>`` side — a scoped build only ever *lowers* the observed maximum.
-
-    A year that is **not an integer** — a blank cell types the column ``float64`` with
-    NaN, and the read stage returns the CSV verbatim — raises ``error_cls`` too, rather
-    than letting a bare ``ValueError`` escape from the conversion. This guard runs
-    before ``transform_mit``, so it now meets such a row first.
-
-    An **empty** ``observed_years`` raises. That is the opposite of
-    :func:`~usvote.pv.source.assert_mit_year_floor`'s treatment, and deliberately so:
-    a floor question is vacuous on an empty set, while "every year disappeared" is the
-    maximal case of precisely the failure this guard is about, and passing it would
-    make the guard vacuous under its own worst input.
+    Raises ``error_cls`` when the election years ``observed_years`` carries are holed,
+    do not reach ``expected_max``, or overshoot it; when a value is not an integer
+    (a blank cell types the column ``float64`` with NaN, and the read stage returns the
+    CSV verbatim); and when there are no election years at all. **Every problem found
+    is reported in one error**, never the first one only — the message is this guard's
+    entire product, and a stray year must not be able to hide a truncation behind it.
 
     ``expected_max`` is injectable so both high-water branches are testable offline
-    without moving the shipped constant; no caller under ``src/`` passes it.
+    without moving the shipped constant; no caller under ``src/`` passes it. See D052
+    for why each check is shaped the way it is.
     """
     try:
         years = sorted({int(y) for y in observed_years})

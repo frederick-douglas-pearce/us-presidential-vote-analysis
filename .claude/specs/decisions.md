@@ -2826,7 +2826,7 @@ MIT's loaded year set had no owner. Two failures survived:
 - **The high-water check is an equality, raising in both directions** — the asymmetry with
   `assert_mit_year_floor` is deliberate. A scoped build only ever *lowers* the observed maximum,
   so unlike `min(observed) > MIT_PV_YEAR_MIN` there is no benign "ordinary scoped build" reading
-  of `max(observed) > MIT_PV_YEAR_MAX`. Above means MIT published a newer cycle and the constant
+  of `max(election) > MIT_PV_YEAR_MAX`. Above means MIT published a newer cycle and the constant
   is stale — which makes every guard keyed on it, this one included, one election too weak.
 - **Run on the raw frame, before the `years` filter.** The question is about the **file**, so a
   legitimately scoped build against the real CSV stays fully guarded and cannot launder a hole by
@@ -2843,7 +2843,7 @@ a *bottom* assert free, so the two checks appear to collapse into one span equal
 **incoherent**: it demands `min == 1976` while `assert_mit_year_floor` deliberately **passes**
 `min > 1976` as an ordinary scoped build, leaving two owners of the same bound with contradictory
 semantics. #177's "leave the bottom alone" is honored as written; the contiguity check's lower
-bound is `min(observed)`, never `MIT_PV_YEAR_MIN`.
+bound is `min(election)`, never `MIT_PV_YEAR_MIN`.
 
 **Rationale.** The failure is single-condition and unguarded, which is a worse shape than a
 low-likelihood multi-condition one. Both branches were verified against **real MIT files** rather
@@ -2867,7 +2867,7 @@ reproduced without inventing it.
 fires once the *newer* CSV is already in place. So this sequence stays green and reproduces #177's
 motivating failure one cycle later: 2028 is held, `LATEST_ELECTION_YEAR` is bumped to 2028 because
 the EC spine needs it, MIT publishes its 2028 file, and nobody refreshes the local CSV.
-`max(observed) == 2024 == MIT_PV_YEAR_MAX`, so the coverage guard passes; the overlap gate cannot
+`max(election) == 2024 == MIT_PV_YEAR_MAX`, so the coverage guard passes; the overlap gate cannot
 see it either, since 2028 is in neither source's years and so never enters `one_sided_years` at all
 — and on a UCSB-less clone it does not run. 2028 then ships with a silently-null popular vote,
 announced by `meta.pv_year_max` and `has_popular_vote` and refused by nothing.

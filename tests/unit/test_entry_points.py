@@ -836,10 +836,12 @@ def test_a_failed_coverage_guard_reports_instead_of_raising(
     mutation it caught: dropping ``HybridError`` from its arm "survived the whole
     suite". An untested arm here is the same shape.
 
-    **The message's factual claim is what is asserted, not just the exit code.** The
-    guard runs at the MIT read seam, which is *after* the EC pipeline has scraped and
-    committed — so unlike an overlap breach, the warehouse really is half-built, and
-    the operator's next move depends on being told which half.
+    **This asserts the message makes its claim, not that the claim is true** — the
+    truth of it is established by inspection (``warehouse.py`` runs MIT after the EC
+    pipeline has scraped and committed, and rebuilds views only afterwards), not by
+    anything here. What the assertions buy is that the sentences cannot be dropped
+    silently: unlike an overlap breach the warehouse really is half-built, and the
+    operator's next move depends on being told which half.
     """
     from usvote.mit.validate import MITCoverageError
 
