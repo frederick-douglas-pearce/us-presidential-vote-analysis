@@ -2857,6 +2857,27 @@ reproduced without inventing it.
   check that would go red if MIT re-released with a different span while `MIT_PV_YEAR_MAX` stayed
   at 2024 — and the end-to-end proof that a truncated CSV is refused by a real `run_warehouse`
   build. Both are #187.
-- **The cycle bump now touches `MIT_PV_YEAR_MAX`** alongside `LATEST_ELECTION_YEAR`
-  (`usvote/years.py`). The `>` branch's error message says so, because forcing the deliberate bump
-  is the whole mechanism.
+- **The cycle bump should touch `MIT_PV_YEAR_MAX`** alongside `LATEST_ELECTION_YEAR`
+  (`usvote/years.py`), and the `>` branch's error message says so. **It is a documented
+  maintenance step, not something the code forces** — an earlier draft of this entry claimed it was
+  forced, which #188's review disproved.
+
+**The limit, stated rather than hidden** (the posture #167 took with its own). The `>` branch only
+fires once the *newer* CSV is already in place. So this sequence stays green and reproduces #177's
+motivating failure one cycle later: 2028 is held, `LATEST_ELECTION_YEAR` is bumped to 2028 because
+the EC spine needs it, MIT publishes its 2028 file, and nobody refreshes the local CSV.
+`max(observed) == 2024 == MIT_PV_YEAR_MAX`, so the coverage guard passes; the overlap gate cannot
+see it either, since 2028 is in neither source's years and so never enters `one_sided_years` at all
+— and on a UCSB-less clone it does not run. 2028 then ships with a silently-null popular vote,
+announced by `meta.pv_year_max` and `has_popular_vote` and refused by nothing.
+
+**The obvious mechanical fix is wrong, and that is why this is a documented limit rather than a
+bug.** Asserting `MIT_PV_YEAR_MAX >= LATEST_ELECTION_YEAR` would fail **every legitimate mid-cycle
+build** — the spine learns about an election as soon as the constant is bumped, while MIT publishes
+months later, and that window is exactly the asymmetric-refresh state #167's frontier exemption
+exists to permit. It is the same trap from the other side: #177 says outright that a guard "must
+not simply assert 'MIT reaches the spine frontier': that is false for every legitimate mid-cycle
+build". Nothing inside this repo can distinguish "MIT has not published 2028 yet" from "MIT
+published 2028 and nobody downloaded it"; the discriminating fact lives upstream. #187's real-file
+pin is the nearest available instrument, and it closes the case where the file *was* refreshed
+(which the `>` branch already catches) rather than this one.

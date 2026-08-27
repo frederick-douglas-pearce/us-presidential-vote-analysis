@@ -62,6 +62,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         ucsb_html_dir: Any,
         replace: bool,
         validate_overlap: bool,
+        validate_coverage: bool,
         fetch: Any,
         environ: Any,
         close: bool,
@@ -73,6 +74,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
                 "ucsb_html_dir": ucsb_html_dir,
                 "replace": replace,
                 "validate_overlap": validate_overlap,
+                "validate_coverage": validate_coverage,
                 "fetch": fetch,
             }
         )
@@ -118,6 +120,7 @@ def test_all_autodetects_ucsb_when_snapshot_present(
             "ucsb_html_dir": "snap/",
             "replace": True,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -136,6 +139,7 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
             "ucsb_html_dir": None,
             "replace": False,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -159,6 +163,7 @@ def test_all_no_ucsb_skips_without_probing_env(
             "ucsb_html_dir": None,
             "replace": False,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -642,6 +647,33 @@ def test_all_forwards_no_validate_overlap(
     monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     assert top.main(["all", "--no-validate-overlap"]) == 0
     assert top_env["warehouse"][0]["validate_overlap"] is False
+
+
+def test_all_forwards_no_validate_coverage(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--no-validate-coverage`` must reach ``run_warehouse``, and default to on.
+
+    Same argument as its overlap sibling above, with one addition: the #177 guard is
+    strict in **both** directions, so it refuses two builds an operator may legitimately
+    want — a knowingly partial MIT extract, and the window after MIT publishes a new
+    cycle but before ``MIT_PV_YEAR_MAX`` is bumped. Without a flag that actually
+    forwards, the only workaround for either is editing source.
+    """
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+
+    assert top.main(["all", "--no-validate-coverage"]) == 0
+    assert top_env["warehouse"][0]["validate_coverage"] is False
+
+
+def test_all_validates_coverage_by_default(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that matters more: the shipped build refuses a truncated MIT CSV."""
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["validate_coverage"] is True
 
 
 @pytest.mark.parametrize("gate_error", ["overlap", "hybrid"])

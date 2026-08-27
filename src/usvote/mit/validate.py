@@ -70,10 +70,14 @@ def assert_mit_year_coverage(
 ) -> None:
     """Assert MIT's covered election years are contiguous and reach ``expected_max``.
 
-    Two checks, applied in order, over the set of election years ``observed_years``
-    carries. **Contiguity is checked first** because its message names the specific
-    missing years, which is the more actionable diagnostic on a file that is both
-    holed and truncated.
+    Two checks over the set of election years ``observed_years`` carries, plus a
+    non-election-year screen. **Every problem found is reported in one error**, rather
+    than raising on the first: the message is this guard's entire product, and
+    short-circuiting hides the worst case behind the mildest one. A file with a
+    typo'd ``2022`` row *and* 2024 truncated would otherwise report only the stray
+    year — because a raw maximum of 2022 makes the span look complete at 2020 — and
+    never mention that 2024, the year whose popular vote actually goes null, is gone.
+    Strays are therefore split out **before** the bounds are derived.
 
     1. **Contiguity** — the observed set must be exactly the election years in the
        closed range ``[min(observed), max(observed)]``. The lower bound is the
@@ -88,6 +92,11 @@ def assert_mit_year_coverage(
        forcing it is the point. Unlike the floor there is no benign reading of the
        ``>`` side — a scoped build only ever *lowers* the observed maximum.
 
+    A year that is **not an integer** — a blank cell types the column ``float64`` with
+    NaN, and the read stage returns the CSV verbatim — raises ``error_cls`` too, rather
+    than letting a bare ``ValueError`` escape from the conversion. This guard runs
+    before ``transform_mit``, so it now meets such a row first.
+
     An **empty** ``observed_years`` raises. That is the opposite of
     :func:`~usvote.pv.source.assert_mit_year_floor`'s treatment, and deliberately so:
     a floor question is vacuous on an empty set, while "every year disappeared" is the
@@ -97,7 +106,20 @@ def assert_mit_year_coverage(
     ``expected_max`` is injectable so both high-water branches are testable offline
     without moving the shipped constant; no caller under ``src/`` passes it.
     """
-    years = sorted({int(y) for y in observed_years})
+    try:
+        years = sorted({int(y) for y in observed_years})
+    except (TypeError, ValueError) as exc:
+        # A blank ``year`` cell makes pandas type the column float64 with NaN, and the
+        # read stage returns the CSV verbatim (no dtype coercion), so this guard is the
+        # first thing to touch it — running before ``transform_mit``'s coercion, which
+        # used to be where such a row surfaced. Keep the failure inside the typed
+        # contract rather than letting a bare ValueError escape from a set
+        # comprehension.
+        raise error_cls(
+            f"{caller}: MIT's year column carries a value that is not an integer "
+            f"({exc}). A blank or malformed year cell does this; the CSV is malformed."
+        ) from exc
+
     if not years:
         raise error_cls(
             f"{caller}: no MIT election years at all. Every year the file should "
@@ -105,41 +127,62 @@ def assert_mit_year_coverage(
             "and not an empty or header-only file."
         )
 
-    observed = set(years)
-    low, high = years[0], years[-1]
+    # Split strays out BEFORE deriving the bounds. Taking ``high`` from the raw maximum
+    # lets a single typo'd year both mislabel itself and silence the high-water check: a
+    # file with a stray 2022 and 2024 truncated would report only "non-election year
+    # [2022]" and never mention that 2024 — the year whose popular vote actually goes
+    # null — is gone, because ``election_years(latest=2022)`` stops at 2020 and the
+    # span then looks complete. The message is this guard's entire product, so it
+    # reports every problem it found rather than the first.
+    calendar = set(election_years(latest=max(years)))
+    stray = sorted(set(years) - calendar)
+    election = sorted(set(years) & calendar)
+
+    if not election:
+        raise error_cls(
+            f"{caller}: no MIT election years at all — the file carries "
+            f"{stray}, none of which is an election year. Check the CSV is the full "
+            "1976-2024-president.csv and that its year column is intact."
+        )
+
+    low, high = election[0], election[-1]
+    problems: list[str] = []
+
+    if stray:
+        problems.append(
+            f"non-election year(s) {stray}, which no US presidential election falls on"
+        )
 
     expected_span = {y for y in election_years(latest=high) if y >= low}
-    if observed != expected_span:
-        detail = []
-        missing = sorted(expected_span - observed)
-        unexpected = sorted(observed - expected_span)
-        if missing:
-            detail.append(f"missing election year(s) {missing}")
-        if unexpected:
-            detail.append(f"non-election year(s) {unexpected}")
-        raise error_cls(
-            f"{caller}: MIT's covered years are not a contiguous run of elections "
-            f"from {low} to {high} — {'; '.join(detail)}. A hole means the CSV is "
-            "truncated or malformed, and nothing downstream would notice: MIT's "
-            "roster derives its in-scope years from the rows MIT actually loaded."
+    missing = sorted(expected_span - set(election))
+    if missing:
+        problems.append(
+            f"not a contiguous run of elections from {low} to {high} — missing "
+            f"election year(s) {missing}. A hole means the CSV is truncated or "
+            "malformed, and nothing downstream would notice: MIT's roster derives its "
+            "in-scope years from the rows MIT actually loaded"
         )
 
     if high < expected_max:
         lost = sorted(y for y in election_years(latest=expected_max) if y > high)
-        raise error_cls(
-            f"{caller}: MIT's newest covered election is {high}, but the file is "
-            f"known to reach MIT_PV_YEAR_MAX={expected_max}. The popular vote for "
-            f"{lost} would go silently null — the join is EC-left, so those years "
-            "still ship, with no popular vote and no failure. Either the CSV is "
-            "truncated, or MIT withdrew a year, in which case update the constant "
-            "in usvote/pv/source.py deliberately."
+        problems.append(
+            f"the newest covered election is {high}, but the file is known to reach "
+            f"MIT_PV_YEAR_MAX={expected_max} — the popular vote for {lost} would go "
+            "silently null, since the join is EC-left so those years still ship, with "
+            "no popular vote and no failure. Either the CSV is truncated, or MIT "
+            "withdrew a year, in which case update the constant in usvote/pv/source.py "
+            "deliberately"
         )
-    if high > expected_max:
-        raise error_cls(
-            f"{caller}: MIT now covers {high}, later than "
-            f"MIT_PV_YEAR_MAX={expected_max}. The constant is stale, so every guard "
-            "keyed on it is one election too weak — including this one, which would "
-            f"no longer notice {high} disappearing. Bump MIT_PV_YEAR_MAX in "
-            "usvote/pv/source.py (and re-read LATEST_ELECTION_YEAR in "
-            "usvote/years.py, which the same cycle bump touches)."
+    elif high > expected_max:
+        problems.append(
+            f"MIT now covers {high}, later than MIT_PV_YEAR_MAX={expected_max}. The "
+            "constant is stale, so every guard keyed on it is one election too weak — "
+            f"including this one, which would no longer notice {high} disappearing. "
+            "Bump MIT_PV_YEAR_MAX in usvote/pv/source.py (and re-read "
+            "LATEST_ELECTION_YEAR in usvote/years.py, which the same cycle bump "
+            "touches)"
         )
+
+    if problems:
+        detail = "; ".join(problems)
+        raise error_cls(f"{caller}: MIT's covered years are wrong — {detail}.")

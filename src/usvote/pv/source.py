@@ -70,7 +70,15 @@ MIT_PV_YEAR_MIN = 1976
 #: false for every legitimate mid-cycle build, which is the same circularity the #167
 #: overlap gate removed from the other side — letting the data define the boundary meant
 #: to detect the data being wrong. Only something that *remembers* 2024 can decide it,
-#: and a constant the cycle bump already touches is the cheapest such memory.
+#: and an explicit constant is the cheapest such memory.
+#:
+#: **Bumping it each cycle is a documented maintenance step, not one the code forces**,
+#: and the gap is worth knowing: the ``>`` branch below fires only once the *newer* CSV
+#: is in place, so bumping ``LATEST_ELECTION_YEAR`` for the spine while leaving a stale
+#: CSV here passes silently. Nothing in this repo can tell "MIT has not published yet"
+#: from "MIT published and nobody downloaded it", and the check that would look
+#: obvious — requiring this to reach ``LATEST_ELECTION_YEAR`` — is false for every
+#: legitimate mid-cycle build. D052 states the limit in full.
 #:
 #: Cross-checked by :func:`usvote.mit.validate.assert_mit_year_coverage`, and — unlike
 #: the floor — as an **equality**, raising in both directions. The asymmetry is not an

@@ -241,7 +241,8 @@ def run_warehouse(
       both gates skip on their own (AC-3).
 
     ``validate_coverage`` gates the #177 MIT year-coverage guard the same explicit way,
-    and defaults on for the same reason: this is where the shipped ``python -m usvote
+    down to the matching ``--no-validate-coverage`` CLI escape, and defaults on for the
+    same reason: this is where the shipped ``python -m usvote
     all`` runs, so this is where a truncated MIT CSV must be refused rather than built
     green. It is passed to :func:`usvote.mit.pipeline.run_mit_pipeline`, whose own
     default is ``False`` — the asymmetry is deliberate and that function's docstring

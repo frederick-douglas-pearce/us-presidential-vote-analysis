@@ -15,15 +15,24 @@ non-redundant rather than belt-and-braces.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from usvote.mit.transform import MITTransformError
 from usvote.mit.validate import MITCoverageError, assert_mit_year_coverage
 from usvote.pv.source import MIT_PV_YEAR_MAX, MIT_PV_YEAR_MIN
 
-#: The real file's span, as measured from
-#: ``1976-2024-president.csv``: 13 contiguous elections.
-FULL_SPAN = list(range(1976, 2025, 4))
+#: The full shipped span, **derived from the two constants rather than re-typed**.
+#: Hardcoding ``range(1976, 2025, 4)`` would quietly hollow out
+#: :meth:`TestTheGuardAcceptsRealCoverage.
+#: test_the_default_expected_max_is_the_shipped_constant` on the next cycle bump: its
+#: ``one_short`` filter would then remove nothing, so the test would keep passing while
+#: no longer exercising its claim — the very staleness it exists to prevent, one level
+#: up. Measured against the real ``1976-2024-president.csv``, this is 13 contiguous
+#: elections; :meth:`TestTheGuardAcceptsRealCoverage.test_the_full_shipped_span_passes`
+#: is what stays red until a bumped constant is matched by a refreshed file.
+FULL_SPAN = list(range(MIT_PV_YEAR_MIN, MIT_PV_YEAR_MAX + 1, 4))
 
 
 class TestTheGuardAcceptsRealCoverage:
@@ -154,3 +163,50 @@ class TestParameterisation:
     def test_the_error_is_a_mit_transform_error(self) -> None:
         """So a coverage failure is separable by type, and still catchable as MIT's."""
         assert issubclass(MITCoverageError, MITTransformError)
+
+
+class TestMalformedInput:
+    """Findings from #188's review round 1 — both verified before being fixed."""
+
+    def test_a_non_integer_year_stays_inside_the_typed_contract(self) -> None:
+        """A blank ``year`` cell types the column ``float64`` with NaN.
+
+        ``load_mit_president_csv`` returns the CSV "verbatim — no dtype coercion", and
+        this guard runs **before** ``transform_mit``, so it is the first thing to meet
+        such a row. Before the fix ``int(nan)`` escaped as a bare ``ValueError``:
+        untyped, uncatchable as ``MITTransformError``, and carrying none of this
+        module's diagnostics — on precisely the malformed-CSV input it claims to own.
+        """
+        # ``list[Any]`` deliberately: the signature says ``Collection[int]`` and
+        # pandas hands over a NaN anyway, which is the whole point of the test.
+        with_nan: list[Any] = [*FULL_SPAN, float("nan")]
+
+        with pytest.raises(MITCoverageError, match=r"not an integer"):
+            assert_mit_year_coverage(with_nan)
+
+    def test_a_stray_year_does_not_silence_the_high_water_check(self) -> None:
+        """The regression pin for the mislabel-and-suppress bug (review round 1).
+
+        A typo'd ``2022`` row alongside a truncated 2024 used to report **only**
+        ``non-election year(s) [2022]``. Taking the contiguity bound from the raw
+        maximum made ``election_years(latest=2022)`` stop at 2020, so the span looked
+        complete and the high-water check was never reached — the guard named the
+        harmless typo and stayed silent about the year whose popular vote actually
+        goes null. Both must now appear.
+        """
+        truncated_with_stray = [y for y in FULL_SPAN if y <= 2020] + [2022]
+
+        with pytest.raises(MITCoverageError) as exc:
+            assert_mit_year_coverage(truncated_with_stray)
+
+        message = str(exc.value)
+        assert "[2022]" in message, "the stray year is still reported"
+        assert "newest covered election is 2020" in message, "and so is the truncation"
+        assert f"[{MIT_PV_YEAR_MAX}]" in message, "naming the year that would go null"
+
+    def test_a_file_of_nothing_but_stray_years_says_so(self) -> None:
+        """The degenerate case of the split: no election year survives the screen."""
+        with pytest.raises(
+            MITCoverageError, match=r"none of which is an election year"
+        ):
+            assert_mit_year_coverage([1977, 1978])
