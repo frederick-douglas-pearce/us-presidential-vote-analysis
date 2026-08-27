@@ -2,12 +2,13 @@
 
 The public surface of the API. Each snapshot column (:mod:`usvote.snapshot_schema`
 ``DATA_COLUMNS`` / ``ROLLUP_COLUMNS`` / ``HYBRID_SUMMARY_COLUMNS``) maps to a **field on
-one of these models** whose name reads naturally to an external consumer — the ``president_*`` internal prefix (this
-candidate's per-state electoral votes, not "the president's") is renamed to a clearer
-public name. The snapshot column is the field's ``validation_alias`` (input only), so a
-row keyed by snapshot columns validates directly (``model_validate(dict(row))``) while
-the response serializes back under the **public field name** (FastAPI dumps
-``by_alias=True``, falling back to the field name when only a validation alias is set).
+one of these models** whose name reads naturally to an external consumer — the
+``president_*`` internal prefix (this candidate's per-state electoral votes, not "the
+president's") is renamed to a clearer public name. The snapshot column is the field's
+``validation_alias`` (input only), so a row keyed by snapshot columns validates directly
+(``model_validate(dict(row))``) while the response serializes back under the **public
+field name** (FastAPI dumps ``by_alias=True``, falling back to the field name when only
+a validation alias is set).
 
 That column↔field mapping is the single source of truth a drift guard keys off
 (``tests/unit/test_api_models.py``): every ``DATA_COLUMNS`` / ``ROLLUP_COLUMNS`` /
