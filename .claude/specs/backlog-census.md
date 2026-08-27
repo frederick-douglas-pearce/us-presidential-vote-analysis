@@ -6,9 +6,10 @@
 > **#181** (S2), **#182** (S3), **#183** (S4), **#184** (S5). Filing is **not** approval of
 > the design — **Open questions 1, 4 and 5 are unanswered**, and OQ1 (coverage floor) and OQ4
 > (the redistributable branch plan) decide the shape of S2 and S5. Each of #181–#184 carries a
-> banner saying so and pointing at S1. The proposed decisions below (**D052–D056**) are
+> banner saying so and pointing at S1. The proposed decisions below (**D053–D057**) are
 > **candidates**, not recorded — `decisions.md` is append-only and the highest number currently
-> recorded is **D051**, so D052 is the next free slot. Decisions referenced as D0NN live in
+> recorded is **D052** (#177's MIT year-coverage guard, which took the next free slot while this
+> backlog was pre-review), so D053 is the next free slot. Decisions referenced as D0NN live in
 > [`decisions.md`](decisions.md).
 
 Each `E10-SN` section below is a GitHub issue body ready to paste **verbatim**. E10 is
@@ -113,7 +114,7 @@ minimum-subset answer:
 - **Coverage floor.** A **modern, clean, unambiguously public-domain** window from
   `api.census.gov` (resident population, ~1900/1930–2020) carries the "two-century-ish drift"
   finding and **dodges the hardest work in the epic** — the PDF/scanned early-census parse
-  (S2), the three-fifths / "Indians not taxed" apportionment-population modeling (D053), and the
+  (S2), the three-fifths / "Indians not taxed" apportionment-population modeling (D054), and the
   worst statehood/boundary corrections (S3, e.g. WV/VA 1863). The full 1790/1824 backfill stays
   the epic's eventual target but is **not** on Post 4's critical path.
 - **Public-API exposure is optional for the post and licensing-gated anyway.** The
@@ -183,7 +184,7 @@ suite. Budget it to run **well ahead** of S2–S5.
   and **in what machine-readability** *per era*. The specific unknown #129 names: whether the early
   censuses (pre-~1900) are structured downloads or **PDF/scanned tables**. The answer decides
   whether S2 is one clean-load story or must split into snapshot + parse + transform (see S2).
-- **Both population series are addressed** (D053): whether each source publishes the
+- **Both population series are addressed** (D054): whether each source publishes the
   **apportionment population** (the input to seat allocation) and the **resident population** (the
   per-capita denominator), and where they diverge historically (three-fifths clause pre-1868;
   "Indians not taxed" excluded through 1940; modern overseas-federal-personnel movements). A source
@@ -235,7 +236,7 @@ Fetch, parse, transform, and load decennial state population into the warehouse 
 **source-namespaced subpackage** `src/usvote/census/` (D015) — its own scrape/parse/transform/load
 and a `pipeline.py` (`run_census_pipeline`), mirroring `usvote/mit/` and `usvote/ucsb/`. The
 loaded grain is `(census_year, state, series, population)` where `series ∈ {apportionment,
-resident}` (D053). Snapshot the source material locally (D023 / #89 pattern) so rebuilds need no
+resident}` (D054). Snapshot the source material locally (D023 / #89 pattern) so rebuilds need no
 network.
 
 > **Shape gated on S1 (do not final-file until S1 lands).** If S1 finds the source is a
@@ -255,7 +256,7 @@ network.
   reads the spine, it does not redefine it (the greppable D015 invariant, enforced by a test
   mirroring the existing layering guards).
 - The load lands `(census_year, state, series, population)` in `dwh` with **`series` labeled**
-  (`apportionment` / `resident`) — **never a single blended population column** (D053). Carrying
+  (`apportionment` / `resident`) — **never a single blended population column** (D054). Carrying
   only one series is the named failure mode; the schema must hold both and say which is which.
 - **State conformance is deferred to S3** but the loader must not invent states: a population row
   for a jurisdiction the EC spine does not recognize in that era **raises**, it is not silently
@@ -266,7 +267,7 @@ network.
   `USVOTE_MIT_CSV_PATH` (exact name architect's call; propose `USVOTE_CENSUS_CORPUS_DIR`), with a
   `manifest.json` carrying per-file sha256/bytes/source-url as the EC corpus does (#89).
 - **No fabricated values (D005):** a state/year with no published figure loads as **NULL with
-  provenance**, never a zero or an interpolation. Interpolation is explicitly out (D054, S3).
+  provenance**, never a zero or an interpolation. Interpolation is explicitly out (D055, S3).
 - **Licensing posture is set at load (D014 pattern):** every population row carries a `source` and
   a `redistributable` flag, exactly as PV rows do — so the S1 verdict is a first-class per-row data
   attribute, not a comment. If the source is non-redistributable, `redistributable=false` on every
@@ -281,7 +282,7 @@ network.
 
 ### Implementation Notes
 
-- The `series` distinction is not cosmetic — it is the D053 split, the census analogue of D041's
+- The `series` distinction is not cosmetic — it is the D054 split, the census analogue of D041's
   `ec_share_full` / `ec_share_hybrid`: two numbers equal in the easy modern years and divergent
   exactly where it matters historically. Load both wherever the source provides both; where the
   source provides only one, load it labeled and record the gap.
@@ -314,11 +315,11 @@ joined to: (1) reconcile census state names/entries against the **EC participati
 population conforms to the spine rather than establishing a second answer for which states existed
 when (D006/D015); and (2) build the explicit **`election_year → governing_census_year`** mapping —
 the join that decides *which census actually determined a given election's allotment* — as a
-tested lookup, never an interpolation or a nearest-decade rounding (D054).
+tested lookup, never an interpolation or a nearest-decade rounding (D055).
 
 ### Acceptance Criteria
 
-- **The `election_year → governing_census_year` mapping is an explicit, tested lookup** (D054). The
+- **The `election_year → governing_census_year` mapping is an explicit, tested lookup** (D055). The
   census taken in year *C* apportions the House for the following decade, so it governs presidential
   elections until the next census's apportionment takes effect. **The wrong-easy-answer is
   nearest-decade rounding**, which maps `2020 → 2020`; the correct mapping is **`2020 → 2010`**
@@ -336,7 +337,7 @@ tested lookup, never an interpolation or a nearest-decade rounding (D054).
   a state, holds no census-apportioned House seats, but casts 3 electoral votes since 1964** (the
   23rd Amendment). DC's persons-per-EV is computable but its seat-reconciliation (S4) is special:
   its 3 votes are not census-apportioned.
-- **No interpolated population anywhere in the loaded data** (D005/D054). An election year that is
+- **No interpolated population anywhere in the loaded data** (D005/D055). An election year that is
   not a census year takes the **governing-census figure**, labeled as of that census — the
   staleness is stated, not smoothed away. A test asserts no synthesized between-census values exist.
 - **The Reconstruction years are in scope** (correcting #129): 1868 → governing census 1860, 1872 →
@@ -462,7 +463,7 @@ bump.
   calendar) — created and rebuilt by `usvote/warehouse.py::rebuild_views` after the join views, so
   a `run_warehouse` / `python -m usvote all` build leaves it populated (and a `--replace` build
   rebuilds it).
-- **The view states which population series it used** (D053). The default per-capita denominator is
+- **The view states which population series it used** (D054). The default per-capita denominator is
   **resident population** (Open question 2); the view carries the series label so a consumer can
   never mistake an apportionment-population figure for a resident-population one. A fan-out guard
   asserts one row per `(year, state)`.
@@ -483,7 +484,7 @@ bump.
 
 ### Acceptance Criteria — Branch B (source is non-redistributable)
 
-- **The firewall is structural, not editorial** (D030/D056). The population-derived columns **cannot
+- **The firewall is structural, not editorial** (D030/D057). The population-derived columns **cannot
   reach the snapshot** — enforced the way the UCSB firewall is: either (i) the snapshot build never
   imports `usvote/census/` and a `test_layering.py`-style subprocess test proves the snapshot builds
   with `usvote.census` made **unimportable**, or (ii) a two-view split where only a public-domain
@@ -514,17 +515,17 @@ _Story of epic #129 (E10 — census / apportionment analysis)._
 
 ## Proposed decisions (candidates for Fred + architect — NOT yet in `decisions.md`)
 
-Record in [`decisions.md`](decisions.md) as **D052–D056** only once approved (append-only; the
-highest recorded is **D051**). Summaries here for backlog readability.
+Record in [`decisions.md`](decisions.md) as **D053–D057** only once approved (append-only; the
+highest recorded is **D052**). Summaries here for backlog readability.
 
-- **D052 (proposed) — The population dimension conforms to the EC spine and lands as
+- **D053 (proposed) — The population dimension conforms to the EC spine and lands as
   `usvote/census/`, a source-namespaced subpackage (D006/D015).** It reads the state roster and
   recorded allotments *from* the warehouse and is never a second source of truth for which states
   existed when — the direction is `census -> spine`, never the reverse, exactly as MIT/UCSB depend
   on the spine. (Largely an application of D006/D015 to a non-election source; recorded to name the
   census-specific shape. May collapse into "just apply D006/D015" at Fred's discretion. **Note:** it
   does **not** pre-decide `dwh`-dimension vs. separate-schema — that is Open question 3.)
-- **D053 (proposed) — Carry two population series, apportionment and resident, labeled, never
+- **D054 (proposed) — Carry two population series, apportionment and resident, labeled, never
   blended.** The census analogue of D041's `ec_share_full` / `ec_share_hybrid` split: two numbers
   equal in the easy modern years and divergent exactly where it matters (three-fifths clause
   pre-1868; "Indians not taxed" excluded through 1940). Apportionment population answers *"why this
@@ -532,20 +533,20 @@ highest recorded is **D051**). Summaries here for backlog readability.
   people per electoral vote?"* (the per-capita denominator). Carrying only one is the failure mode;
   any derived figure states which it used. This is material with historical weight — a definition of
   "population" that counted some people as fractions of a person is not a column-naming wrinkle.
-- **D054 (proposed) — The election→census join is an explicit `election_year →
+- **D055 (proposed) — The election→census join is an explicit `election_year →
   governing_census_year` lookup; no interpolated population, ever (D005).** The census that governs
   an election is the one whose apportionment was *in force*, not the nearest decade — `2020 → 2010`,
   not `2020 → 2020`. Between-census election years take the governing-census figure with the
   staleness labeled, never a smoothed interpolation (invented data, D005). Getting the lag wrong
   shifts every per-capita figure by up to ten years in a way that still looks plausible.
-- **D055 (proposed) — The census-derived seat count reconciles against recorded
+- **D056 (proposed) — The census-derived seat count reconciles against recorded
   `total_electoral_votes`; the Archives win on disagreement (D006), disagreements are documented
   corrections (`docs/corrections.md`), not silent adjustments.** The two-way assert (D024 shape) is
   the epic's strongest validation. It reconciles against the **appointed** allotment (D041/D046) and
   against the Census Bureau's **published** seats-per-state (never a re-run of the apportionment
   method), after adding the +2 senatorial votes per state and special-casing DC's non-apportioned 3.
   An unexplained gap fails the build.
-- **D056 (proposed) — The population dimension's public-surface exposure is gated on the E10-S1
+- **D057 (proposed) — The population dimension's public-surface exposure is gated on the E10-S1
   licensing verdict and enforced structurally (extends D030).** Public-domain source (Census
   Bureau) → the per-capita series may reach the snapshot/API with a `SNAPSHOT_SCHEMA_VERSION` bump.
   Non-redistributable source (NHGIS) → it inherits the UCSB/D030 analysis-only posture, and a
@@ -571,12 +572,12 @@ highest recorded is **D051**). Summaries here for backlog readability.
 2. **Which population series is authoritative for the per-capita question?** (#129 OQ2)
    - **Recommendation: both, for different jobs** — **resident** population as the per-capita
      denominator (S5), **apportionment** population for the seat-count reconciliation (S4). Confirm
-     during/after S1; it is the D053 split and shapes the S2 schema.
+     during/after S1; it is the D054 split and shapes the S2 schema.
 
 3. **Does the population dimension belong in `dwh` (conforming to `state`) or a separate schema?**
    (#129 OQ3) — it is not an election fact and does not fit the star schema's existing grain.
    - **Recommendation: a conforming dimension in `dwh` attached to `state`** (it conforms to the
-     spine, D006), but flag that it is not an election fact — architect's call at S2 design. D052 is
+     spine, D006), but flag that it is not an election fact — architect's call at S2 design. D053 is
      deliberately written *not* to pre-decide this.
 
 4. **The redistributable branch plan, if full-history data turns out non-redistributable.** S1 may

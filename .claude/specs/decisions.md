@@ -2788,3 +2788,97 @@ green numbers reads as more reassurance than it is:
 - **Revisit threshold 1's per-year floor first** if any of these needs loosening. **In cells** —
   the unit the comparison holds in — it carries the least slack by design: ~4 against the overall
   floor's ~46. In *points* it does not, and that is the reading to avoid.
+
+---
+
+## D052: MIT's year coverage is guarded at its own read seam, by two checks and not one
+
+**Date:** 2026-08-27
+**Context:** #177 (split out of #167 to keep the D017 layer-3 gate single-concern)
+
+MIT's loaded year set had no owner. Two failures survived:
+
+1. **An interior hole** — MIT loads 1976…1992, 2000…2024 with 1996 simply missing. The D024
+   roster assert cannot see it, because `usvote/mit/pipeline.py` derives its in-scope years from
+   the rows MIT actually loaded — a frame compared against itself. The #167/D051 overlap gate
+   *does* catch it (1996 sits below the frontier, reads 0%, trips gate 1's per-year floor), but
+   only when UCSB is loaded, which a public EC + MIT clone never is (D022).
+2. **A dropped newest year** — MIT loses 2024 entirely. The overlap gate excludes it by the very
+   clause that lets a legitimate mid-refresh 2024 through, so the build stays green and 2024's
+   popular vote goes silently null. It takes one malformed CSV and nothing else.
+
+**Decision.**
+
+- **The guard lives at MIT's own read seam** — `usvote/mit/validate.py`,
+  `assert_mit_year_coverage` — not as a second clause in `usvote/pv/overlap.py`. "Did MIT lose a
+  year it used to have?" is a **single-source** question; answering it inside a cross-source gate
+  would drag back the data-derived ceiling #167 removed precisely because it was circular.
+- **The constant `MIT_PV_YEAR_MAX = 2024` sits beside `MIT_PV_YEAR_MIN` in `usvote/pv/source.py`.**
+  MIT's published span is one fact and the cycle bump should touch one file. This is not a D015
+  erosion: `source.py` is the per-source-attribute reference module and already holds MIT's
+  license, precedence rank, redistributable flag and floor. The *guard's* placement is what #177
+  constrains; the constant's is not.
+- **Two checks, because they answer different questions.** Contiguity over
+  `[min(election), max(election)]` — the bounds taken *after* non-election years are screened
+  out, so a single typo cannot redefine the span — reaches case 1. It **provably cannot reach case 2**: a file
+  truncated after 2020 is a perfectly contiguous run of elections, so contiguity has nothing to
+  object to. Case 2 needs something that *remembers* MIT reached 2024, which is the constant.
+- **The high-water check is an equality, raising in both directions** — the asymmetry with
+  `assert_mit_year_floor` is deliberate. A scoped build only ever *lowers* the observed maximum,
+  so unlike `min(observed) > MIT_PV_YEAR_MIN` there is no benign "ordinary scoped build" reading
+  of `max(election) > MIT_PV_YEAR_MAX`. Above means MIT published a newer cycle and the constant
+  is stale — which makes every guard keyed on it, this one included, one election too weak.
+- **Run on the raw frame, before the `years` filter.** The question is about the **file**, so a
+  legitimately scoped build against the real CSV stays fully guarded and cannot launder a hole by
+  selecting around it.
+- **Flag topology: `validate_coverage=False` on `run_mit_pipeline`, `True` on `run_warehouse`**
+  (forwarded) and explicit `True` from `usvote/mit/__main__.py`. Defaulting it on at the *pipeline*
+  fails the deliberately non-contiguous offline fixtures and — worse — **reorders which guard fires
+  first**, turning that function's own "no rows for requested years" `ValueError` and its D024
+  `MITRosterError` into a coverage error raised ahead of both.
+
+**The declined widening, recorded because it will be re-proposed.** The raw-frame placement makes
+a *bottom* assert free, so the two checks appear to collapse into one span equality —
+`observed == [MIT_PV_YEAR_MIN, MIT_PV_YEAR_MAX]`. That looks strictly stronger and is instead
+**incoherent**: it demands `min == 1976` while `assert_mit_year_floor` deliberately **passes**
+`min > 1976` as an ordinary scoped build, leaving two owners of the same bound with contradictory
+semantics. #177's "leave the bottom alone" is honored as written; the contiguity check's lower
+bound is `min(election)`, never `MIT_PV_YEAR_MIN`.
+
+**Rationale.** The failure is single-condition and unguarded, which is a worse shape than a
+low-likelihood multi-condition one. Both branches were verified against **real MIT files** rather
+than only synthetic year sets: the shipped `1976-2024-president.csv` passes, and the older
+`1976-2016-president.csv` sitting beside it in the same data directory is refused, naming
+`[2020, 2024]` — the actual failure mode ("the pipeline was pointed at last cycle's file"),
+reproduced without inventing it.
+
+**Action required:**
+- **#187 carries the integration coverage.** Every branch here is offline-testable from a year set,
+  so this landed unit-tier. What no unit test reaches is the pin *against the real file*: every
+  check that ships today reasons over a year set handed to it, never over the shipped bytes. Nor
+  is there an end-to-end proof that a truncated CSV is refused by a real `run_warehouse` build.
+  Both are #187.
+- **The cycle bump should touch `MIT_PV_YEAR_MAX`** alongside `LATEST_ELECTION_YEAR`
+  (`usvote/years.py`), and the `>` branch's error message says so. **It is a documented
+  maintenance step, not something the code forces** — an earlier draft of this entry claimed it was
+  forced, which #188's review disproved.
+
+**The limit, stated rather than hidden** (the posture #167 took with its own). The `>` branch only
+fires once the *newer* CSV is already in place. So this sequence stays green and reproduces #177's
+motivating failure one cycle later: 2028 is held, `LATEST_ELECTION_YEAR` is bumped to 2028 because
+the EC spine needs it, MIT publishes its 2028 file, and nobody refreshes the local CSV.
+`max(election) == 2024 == MIT_PV_YEAR_MAX`, so the coverage guard passes; the overlap gate cannot
+see it either, since 2028 is in neither source's years and so never enters `one_sided_years` at all
+— and on a UCSB-less clone it does not run. 2028 then ships with a silently-null popular vote,
+announced by `meta.pv_year_max` and `has_popular_vote` and refused by nothing.
+
+**The obvious mechanical fix is wrong, and that is why this is a documented limit rather than a
+bug.** Asserting `MIT_PV_YEAR_MAX >= LATEST_ELECTION_YEAR` would fail **every legitimate mid-cycle
+build** — the spine learns about an election as soon as the constant is bumped, while MIT publishes
+months later, and that window is exactly the asymmetric-refresh state #167's frontier exemption
+exists to permit. It is the same trap from the other side: #177 says outright that a guard "must
+not simply assert 'MIT reaches the spine frontier': that is false for every legitimate mid-cycle
+build". Nothing inside this repo can distinguish "MIT has not published 2028 yet" from "MIT
+published 2028 and nobody downloaded it"; the discriminating fact lives upstream. #187's real-file
+pin is the nearest available instrument, and it closes the case where the file *was* refreshed
+(which the `>` branch already catches) rather than this one.

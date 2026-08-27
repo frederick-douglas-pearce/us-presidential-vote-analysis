@@ -49,6 +49,7 @@ from usvote import config, scrape
 from usvote.db import DBC, DBConnectionError
 from usvote.hybrid import HybridError
 from usvote.mit.config import mit_csv_path_from_env
+from usvote.mit.validate import MITCoverageError
 from usvote.pipeline import PipelineError, run_ec_pipeline
 from usvote.pv.overlap import OverlapReport, PVOverlapError
 from usvote.ucsb.config import ucsb_html_dir_from_env
@@ -279,12 +280,31 @@ def _run_all(args: argparse.Namespace) -> int:
             ucsb_html_dir=ucsb_html_dir,
             replace=args.replace,
             validate_overlap=not getattr(args, "no_validate_overlap", False),
+            validate_coverage=not getattr(args, "no_validate_coverage", False),
             fetch=ec_fetch,
             environ=environ,
             close=True,
         )
     except PipelineError as e:
         return _report_incomplete_scrape(e, dbc)
+    except MITCoverageError as e:
+        # #177's guard runs at the MIT read seam, which is *after* the EC spine has
+        # already scraped and committed -- so unlike the overlap gate below, the
+        # warehouse here is genuinely half-built, and saying which half is the whole
+        # point. MITCoverageError subclasses MITTransformError(RuntimeError), matching
+        # neither arm around it, so without this it escaped as a bare traceback after a
+        # multi-minute build.
+        print(f"MIT year-coverage check failed: {e}", file=sys.stderr)
+        print(
+            "The EC spine loaded and committed before this ran; MIT did not load, and "
+            "no PV table, join view or hybrid view was built. Recover by refreshing "
+            "the MIT CSV and re-running with --replace (a bare re-run hits a "
+            "unique-violation on the already-loaded EC spine). Use "
+            "--no-validate-coverage only if you intend to build against a knowingly "
+            "partial MIT extract.",
+            file=sys.stderr,
+        )
+        return 1
     except (PVOverlapError, HybridError) as e:
         # The D017 layer-3 gates (#167) are the last step, so a breach here means the
         # warehouse itself built completely -- say so, because the operator's next move
@@ -420,6 +440,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip the D017 layer-3 MIT/UCSB overlap gates (#167). They run by default "
         "and are the build's only movable-threshold check, so an escape hatch exists "
         "for a deliberately partial build or a threshold pending review (D051).",
+    )
+    all_p.add_argument(
+        "--no-validate-coverage",
+        action="store_true",
+        help="Skip the #177 MIT year-coverage guard. It runs by default and is strict "
+        "in both directions, so the escape exists for the two builds it would "
+        "otherwise refuse outright: a deliberately partial MIT extract, and the window "
+        "after MIT publishes a new cycle but before MIT_PV_YEAR_MAX is bumped (D052).",
     )
     all_p.add_argument(
         "--no-corpus",

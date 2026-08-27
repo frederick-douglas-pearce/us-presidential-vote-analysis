@@ -288,13 +288,23 @@ def compute_overlap_report(
 
     **What it still cannot see, stated rather than hidden:** a source dropping a year
     **at or beyond the frontier**. MIT losing 2024 is excluded by the same clause that
-    lets a mid-refresh 2024 through — that is the exemption, not a hole in it — so the
-    year's popular vote goes silently null (the year itself still ships; the join is
-    EC-left) and the gate stays green. It takes one malformed CSV, nothing more. Nothing
-    *below* the frontier is ever excluded, whatever else the source carries. The honest
-    owner is a guard beside MIT's own invariants (**#177**), not a second clause here:
-    "did MIT lose a year it used to have?" is a single-source question, and answering it
-    here would drag the circular data ceiling back into the module that just dropped it.
+    lets a mid-refresh 2024 through — that is the exemption, not a hole in it — so this
+    gate stays green. It takes one malformed CSV, nothing more. Nothing *below* the
+    frontier is ever excluded, whatever else the source carries. The honest owner is a
+    guard beside MIT's own invariants, not a second clause here: "did MIT lose a year it
+    used to have?" is a single-source question, and answering it here would drag the
+    circular data ceiling back into the module that just dropped it.
+
+    **That owner now exists** (#177):
+    :func:`usvote.mit.validate.assert_mit_year_coverage` refuses such a CSV at the MIT
+    read seam, so on the shipped build path
+    (:func:`usvote.warehouse.run_warehouse`, where it defaults on) the year no longer
+    reaches the snapshot with a silently-null popular vote — the build fails instead.
+    **Nothing about this gate changed**, and the exemption above is still exactly as
+    stated: the guard sits upstream, is single-source, and is off by default at
+    :func:`usvote.mit.pipeline.run_mit_pipeline` itself, so a caller driving that
+    function directly with ``validate_coverage=False`` still reaches the limit described
+    here.
 
     **Do not look for a second owner of the below-frontier case — MIT has none.** MIT's
     D024 roster/fact guard cannot see a wholly-missing MIT year, because

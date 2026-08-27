@@ -62,6 +62,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         ucsb_html_dir: Any,
         replace: bool,
         validate_overlap: bool,
+        validate_coverage: bool,
         fetch: Any,
         environ: Any,
         close: bool,
@@ -73,6 +74,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
                 "ucsb_html_dir": ucsb_html_dir,
                 "replace": replace,
                 "validate_overlap": validate_overlap,
+                "validate_coverage": validate_coverage,
                 "fetch": fetch,
             }
         )
@@ -118,6 +120,7 @@ def test_all_autodetects_ucsb_when_snapshot_present(
             "ucsb_html_dir": "snap/",
             "replace": True,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -136,6 +139,7 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
             "ucsb_html_dir": None,
             "replace": False,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -159,6 +163,7 @@ def test_all_no_ucsb_skips_without_probing_env(
             "ucsb_html_dir": None,
             "replace": False,
             "validate_overlap": True,
+            "validate_coverage": True,
             "fetch": top.scrape.fetch_url,
         }
     ]
@@ -244,9 +249,20 @@ def _recording_mit_pipeline(calls: list[dict]) -> Any:
     """
 
     def _fake(
-        dbc: object, path: Any, *, replace: bool = False, close: bool = False
+        dbc: object,
+        path: Any,
+        *,
+        replace: bool = False,
+        validate_coverage: bool = False,
+        close: bool = False,
     ) -> tuple[list[int], list[int]]:
-        calls.append({"path": path, "replace": replace})
+        calls.append(
+            {
+                "path": path,
+                "replace": replace,
+                "validate_coverage": validate_coverage,
+            }
+        )
         return ([0] * 2, [0] * 3)
 
     return _fake
@@ -274,7 +290,14 @@ def test_mit_bare_and_load_run_pipeline(
 ) -> None:
     # Bare ``python -m usvote.mit`` loads (the single subcommand's default).
     assert mit_main.main(argv) == 0
-    assert mit_env == [{"path": "mit.csv", "replace": replace}]
+    # ``validate_coverage`` is asserted True, not merely accepted: this is a shipped
+    # entry point pointed at the real CSV, and ``run_mit_pipeline``'s own default is
+    # ``False`` (its other callers are fixture-driven). So the CLI passing it
+    # explicitly is the whole of what switches the #177 guard on here, and dropping
+    # that kwarg would otherwise leave every suite green.
+    assert mit_env == [
+        {"path": "mit.csv", "replace": replace, "validate_coverage": True}
+    ]
 
 
 # --- corpus resolution at the CLI (#89) -------------------------------------
@@ -626,6 +649,33 @@ def test_all_forwards_no_validate_overlap(
     assert top_env["warehouse"][0]["validate_overlap"] is False
 
 
+def test_all_forwards_no_validate_coverage(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--no-validate-coverage`` must reach ``run_warehouse``, and default to on.
+
+    Same argument as its overlap sibling above, with one addition: the #177 guard is
+    strict in **both** directions, so it refuses two builds an operator may legitimately
+    want — a knowingly partial MIT extract, and the window after MIT publishes a new
+    cycle but before ``MIT_PV_YEAR_MAX`` is bumped. Without a flag that actually
+    forwards, the only workaround for either is editing source.
+    """
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+
+    assert top.main(["all", "--no-validate-coverage"]) == 0
+    assert top_env["warehouse"][0]["validate_coverage"] is False
+
+
+def test_all_validates_coverage_by_default(
+    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that matters more: the shipped build refuses a truncated MIT CSV."""
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["validate_coverage"] is True
+
+
 @pytest.mark.parametrize("gate_error", ["overlap", "hybrid"])
 def test_a_breached_overlap_gate_reports_instead_of_raising(
     top_env: dict[str, list],
@@ -770,3 +820,73 @@ class TestTheOverlapNote:
         assert "1 flagged" in note and "1976 State0 Nominee" in note
         assert "2028" in note and "excluded" in note
         assert "1239" not in note  # a count of exact cells is not per-cell data
+
+
+def test_a_failed_coverage_guard_reports_instead_of_raising(
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """``usvote all`` must exit 1 with guidance, not a traceback (#177).
+
+    ``MITCoverageError`` subclasses ``MITTransformError(RuntimeError)``, which is a
+    *sibling* of ``PipelineError`` and of the ``(PVOverlapError, HybridError)`` pair —
+    so it matches neither surrounding arm and needs its own, exactly as its overlap
+    sibling above does. This test exists because that sibling's docstring records the
+    mutation it caught: dropping ``HybridError`` from its arm "survived the whole
+    suite". An untested arm here is the same shape.
+
+    **This asserts the message makes its claim, not that the claim is true** — the
+    truth of it is established by inspection (``warehouse.py`` runs MIT after the EC
+    pipeline has scraped and committed, and rebuilds views only afterwards), not by
+    anything here. What the assertions buy is that the sentences cannot be dropped
+    silently: unlike an overlap breach the warehouse really is half-built, and the
+    operator's next move depends on being told which half.
+    """
+    from usvote.mit.validate import MITCoverageError
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise MITCoverageError(
+            "assert_mit_year_coverage: MIT's newest covered election is 2020"
+        )
+
+    monkeypatch.setattr(top, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+
+    assert top.main(["all"]) == 1
+    err = capsys.readouterr().err
+    assert "MIT year-coverage check failed" in err
+    assert "The EC spine loaded and committed before this ran" in err
+    assert "--replace" in err, "the recovery, which a bare re-run does not achieve"
+    assert "--no-validate-coverage" in err
+
+
+def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
+    mit_env: list[dict], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The MIT entry point's arm, and the leak it exists to stop.
+
+    ``run_mit_pipeline`` has no ``try/finally`` around its body, so its ``close=True``
+    never fires on a raise — unlike ``run_warehouse``, which closes in a ``finally``.
+    The arm must therefore close the connection itself, and this asserts it does rather
+    than only that the message is right.
+    """
+    from usvote.mit.validate import MITCoverageError
+
+    closed: list[bool] = []
+
+    class _DBC:
+        def close_connection(self) -> None:
+            closed.append(True)
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise MITCoverageError("assert_mit_year_coverage: MIT's covered years are wrong")
+
+    monkeypatch.setattr(mit_main, "DBC", lambda cfg: _DBC())
+    monkeypatch.setattr(mit_main, "run_mit_pipeline", boom)
+
+    assert mit_main.main([]) == 1
+    err = capsys.readouterr().err
+    assert "MIT year-coverage check failed" in err
+    assert "Nothing was loaded" in err
+    assert closed == [True], "the arm closes the connection run_mit_pipeline could not"

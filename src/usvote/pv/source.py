@@ -58,6 +58,39 @@ SOURCE_UCSB = "UCSB"
 #: constant is stale and must fail loud; starting *later* is an ordinary scoped build.
 MIT_PV_YEAR_MIN = 1976
 
+#: The most recent election MIT's file covers — the **high-water mark** of the
+#: redistributable popular vote, and the twin of :data:`MIT_PV_YEAR_MIN`. Provenance is
+#: the same filename: ``1976-2024-president.csv``.
+#:
+#: **Why an explicit constant rather than an observed maximum** (#177). The failure this
+#: guards is a MIT file that silently stops reaching the newest election it used to
+#: reach — one malformed or truncated CSV does it. Every *observed* spelling of that
+#: check is vacuous under exactly that failure: an observed max slides down with the
+#: truncation, and "MIT reaches the spine frontier" (``max(ec_ingest_years())``) is
+#: false for every legitimate mid-cycle build, which is the same circularity the #167
+#: overlap gate removed from the other side — letting the data define the boundary meant
+#: to detect the data being wrong. Only something that *remembers* 2024 can decide it,
+#: and an explicit constant is the cheapest such memory.
+#:
+#: **Bumping it each cycle is a documented maintenance step, not one the code forces**,
+#: and the gap is worth knowing: the ``>`` branch below fires only once the *newer* CSV
+#: is in place, so bumping ``LATEST_ELECTION_YEAR`` for the spine while leaving a stale
+#: CSV here passes silently. Nothing in this repo can tell "MIT has not published yet"
+#: from "MIT published and nobody downloaded it", and the check that would look
+#: obvious — requiring this to reach ``LATEST_ELECTION_YEAR`` — is false for every
+#: legitimate mid-cycle build. D052 states the limit in full.
+#:
+#: Cross-checked by :func:`usvote.mit.validate.assert_mit_year_coverage`, and — unlike
+#: the floor — as an **equality**, raising in both directions. The asymmetry is not an
+#: oversight: a scoped build only ever *lowers* the observed maximum, so there is no
+#: benign "ordinary scoped build" reading of ``max(election) > MIT_PV_YEAR_MAX`` the
+#: way there is for ``min(observed) > MIT_PV_YEAR_MIN``. The two spellings differ on
+#: purpose: the coverage guard screens non-election years out before taking its
+#: maximum, while the floor guard below reads the raw minimum. Above means MIT
+#: published a newer cycle and this constant is stale — every guard keyed on it is now
+#: silently one election too weak — and below is the truncation itself.
+MIT_PV_YEAR_MAX = 2024
+
 #: The warehouse schema and reference-table name. ``pv_source`` co-locates in the same
 #: schema as ``pv_votes`` and the EC spine (D021), and the resolution views join the two
 #: on ``source`` **within one schema** — so this is *aliased* to

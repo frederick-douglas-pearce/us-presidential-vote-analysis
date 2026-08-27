@@ -34,9 +34,10 @@ from usvote.config import ConfigError
 from usvote.db import DBC, DBConnectionError
 from usvote.mit.config import mit_csv_path_from_env
 from usvote.mit.pipeline import run_mit_pipeline
+from usvote.mit.validate import MITCoverageError
 
 
-def _run_load(replace: bool) -> int:
+def _run_load(replace: bool, validate_coverage: bool = True) -> int:
     environ = os.environ
     try:
         csv_path = mit_csv_path_from_env(environ)
@@ -55,7 +56,31 @@ def _run_load(replace: bool) -> int:
         print(e, file=sys.stderr)
         return 1
 
-    loaded, roster = run_mit_pipeline(dbc, csv_path, replace=replace, close=True)
+    # ``validate_coverage`` defaults True here: this is a shipped entry point loading
+    # the real CSV, so a truncated file must be refused exactly as on the
+    # ``python -m usvote all`` path (#177). The flag's ``False`` default belongs to
+    # ``run_mit_pipeline`` itself, whose other callers are fixture-driven tests.
+    try:
+        loaded, roster = run_mit_pipeline(
+            dbc,
+            csv_path,
+            replace=replace,
+            validate_coverage=validate_coverage,
+            close=True,
+        )
+    except MITCoverageError as e:
+        # ``run_mit_pipeline`` has no try/finally, so its ``close=True`` never fires on
+        # a raise -- close here rather than leaking the connection. Nothing was written:
+        # the guard runs at the read seam, before the transaction opens.
+        print(f"MIT year-coverage check failed: {e}", file=sys.stderr)
+        print(
+            "Nothing was loaded — the guard runs at the read seam, before any write. "
+            "Refresh the MIT CSV, or pass --no-validate-coverage to load a knowingly "
+            "partial extract.",
+            file=sys.stderr,
+        )
+        dbc.close_connection()
+        return 1
     print(
         f"MIT ingestion complete — {len(loaded)} dwh.pv_votes rows, "
         f"{len(roster)} dwh.pv_state_status roster rows."
@@ -85,11 +110,20 @@ def main(argv: list[str] | None = None) -> int:
         "including the pre-1976 legislature_chosen / not_participating roster, which "
         "only a UCSB reload restores.",
     )
+    load_p.add_argument(
+        "--no-validate-coverage",
+        action="store_true",
+        help="Skip the #177 MIT year-coverage guard (contiguity + the "
+        "MIT_PV_YEAR_MAX high-water mark). It runs by default; the escape exists for a "
+        "knowingly partial MIT extract, and for the window after MIT publishes a new "
+        "cycle but before the constant is bumped (D052).",
+    )
     args = parser.parse_args(argv)
 
     # Bare (``command is None``) and explicit ``load`` both run the pipeline.
     replace = bool(getattr(args, "replace", False))
-    return _run_load(replace)
+    validate_coverage = not bool(getattr(args, "no_validate_coverage", False))
+    return _run_load(replace, validate_coverage)
 
 
 if __name__ == "__main__":

@@ -344,6 +344,11 @@ def test_join_over_a_real_two_source_load(
             # are exercised on a complete build by
             # ``test_hybrid_views.py::test_hybrid_views_over_a_real_full_warehouse``.
             validate_overlap=False,
+            # And the #177 coverage guard off for a *different* reason than the line
+            # above: the fusion sample is a two-state extract covering 2000 and 2016
+            # only, so it is non-contiguous and does not reach MIT_PV_YEAR_MAX by
+            # design. That is a property of the fixture, not of MIT's file.
+            validate_coverage=False,
             fetch=fetch_from_dir(FIXTURES_DIR),
             load_geo=lambda _p: fake_state_geo(),
         )
@@ -433,6 +438,11 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
             "unused.shp",
             MIT_FUSION_SAMPLE_CSV,
             ucsb_html_dir=None,  # explicit skip — the redistributable EC + MIT core only
+            # The #177 coverage guard is off because the fusion sample covers 2000 and
+            # 2016 only. Note this site needs its own opt-out even though it runs no
+            # overlap gate: those skip on their own when UCSB is absent, whereas the
+            # coverage guard is single-source and would fire here.
+            validate_coverage=False,
             years={2016, 2020},
             replace=True,
             fetch=fetch_from_dir(FIXTURES_DIR),
