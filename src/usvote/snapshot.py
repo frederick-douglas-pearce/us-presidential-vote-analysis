@@ -90,7 +90,12 @@ from usvote import config
 from usvote.config import ConfigError
 from usvote.count_status import COUNT_STATUS_REASON_COLUMN
 from usvote.db import DBC, DBConnectionError
-from usvote.hybrid import HybridError, ec_denominator_by_year, roll_up_national
+from usvote.hybrid import (
+    HybridError,
+    build_hybrid_from_frames,
+    ec_denominator_by_year,
+    roll_up_national,
+)
 from usvote.join import EC_PV_REDISTRIBUTABLE_VIEW
 from usvote.load import SCHEMA
 from usvote.pv.absences import build_curated_roster
@@ -111,11 +116,22 @@ from usvote.snapshot_schema import (
     DATA_TABLE,
     EC_LICENSE,
     EC_SOURCE,
+    HYBRID_SUMMARY_TABLE,
     META_TABLE,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotMeta,
+)
+
+# Aliased on import, deliberately: `usvote.hybrid` exports a tuple of the SAME NAME with
+# a DIFFERENT membership (no slug columns — the warehouse view carries `candidate_id`,
+# never the public slug). This module needs both, and a bare `HYBRID_SUMMARY_COLUMNS`
+# here would silently resolve to whichever import came last. The #139 review caught the
+# same shape in `read_pv_status_roster` vs `derive_curated_pv_status_roster`; this is
+# that lesson applied before review rather than after.
+from usvote.snapshot_schema import (
+    HYBRID_SUMMARY_COLUMNS as SNAPSHOT_HYBRID_SUMMARY_COLUMNS,
 )
 from usvote.spine import read_ec_participation
 from usvote.transform import COUNT_STATUS_OVERRIDES
@@ -461,10 +477,25 @@ def assert_no_pv_aggregate_below_mit_window(rollup_df: pd.DataFrame) -> None:
     would turn an all-NULL pre-1976 year into a national popular vote of ``0`` — a
     correctness bug, not a licensing one, and one that would publish "in 1860, 0 people
     voted" with every other guard green.
+
+    **``pv_share`` and ``hybrid_score`` joined the guarded set in #102**, and only those
+    two of the five new hybrid columns. Both are NULL pre-window because both divide by
+    a popular vote that is not there, so a non-null value is the same fabricated zero
+    this guard exists to catch, one derivation further on. The other three are
+    deliberately **not** guarded: ``ec_share_full`` and ``ec_share_hybrid`` are real
+    pre-1976 (the EC record is complete back to 1824, and policy (b) leaves the two
+    equal), and ``pv_coverage`` is real there **by design** — deriving it from the
+    in-repo catalog instead of the warehouse roster is what #102 changed, so guarding it
+    would reject the feature.
     """
     _assert_no_pv_below_window(
         rollup_df,
-        columns=("national_pv_votes", "national_pv_denominator"),
+        columns=(
+            "national_pv_votes",
+            "national_pv_denominator",
+            "pv_share",
+            "hybrid_score",
+        ),
         key_columns=("year", "candidate_slug"),
         kind="roll-up row",
     )
@@ -496,8 +527,17 @@ def _assert_no_pv_below_window(
             )
 
 
-def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
+def build_national_rollup(
+    data_df: pd.DataFrame, hybrid_fields: pd.DataFrame
+) -> pd.DataFrame:
     """Precompute the per-``(year, candidate_slug)`` national roll-up (#97's summary).
+
+    ``hybrid_fields`` is :func:`build_hybrid_tables`' first return value — the five
+    per-candidate hybrid columns at this table's own grain. It is a **required**
+    argument rather than an optional one on purpose: defaulting it would let a caller
+    silently emit a roll-up whose hybrid columns are all NULL, which is
+    indistinguishable on inspection from a pre-window year and would ship as a valid
+    snapshot.
 
     - ``national_electoral_votes`` — the view's window sum, constant per candidate-year,
       so ``first`` is exact.
@@ -560,7 +600,154 @@ def build_national_rollup(data_df: pd.DataFrame) -> pd.DataFrame:
             f"the appointed electoral denominator could not be derived: {e}"
         ) from e
     rollup = rollup.merge(denominator, on="year", how="left", validate="m:1")
+    # The five per-candidate hybrid fields (#102). Merged here rather than by the caller
+    # so this function keeps sole ownership of the ROLLUP_COLUMNS projection below — the
+    # contract this docstring claims. `validate="1:1"` is the load-bearing part: the
+    # hybrid frame is per (year, candidate_id) and this table is per (year,
+    # candidate_slug), so a slug collapsing two ids would fan the roll-up out rather
+    # than fail. `add_candidate_slug` already rejects a name collision; this rejects the
+    # residual case where two ids share one canonical name.
+    rollup = rollup.merge(
+        hybrid_fields, on=["year", "candidate_slug"], how="left", validate="1:1"
+    )
     return rollup[list(ROLLUP_COLUMNS)]
+
+
+#: The per-candidate hybrid fields merged onto the roll-up (#102). Named here rather
+#: than sliced out of :data:`ROLLUP_COLUMNS` because these five are exactly the columns
+#: :func:`usvote.hybrid.build_hybrid_frame` contributes — the other ten the roll-up
+#: carries are its own.
+_HYBRID_ROLLUP_FIELDS: tuple[str, ...] = (
+    "ec_share_full",
+    "pv_share",
+    "ec_share_hybrid",
+    "pv_coverage",
+    "hybrid_score",
+)
+
+#: The three ``(winner name column, winner slug column)`` pairs on the summary (#102).
+_WINNER_SLUG_PAIRS: tuple[tuple[str, str], ...] = (
+    ("ec_winner", "ec_winner_slug"),
+    ("pv_winner", "pv_winner_slug"),
+    ("hybrid_winner", "hybrid_winner_slug"),
+)
+
+
+def build_hybrid_tables(
+    slugged_df: pd.DataFrame, pv_status_df: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Derive the hybrid at both grains, keyed on the **public** ``candidate_slug``.
+
+    Returns ``(per-candidate fields, per-election summary)``: the first is
+    ``(year, candidate_slug)`` + :data:`_HYBRID_ROLLUP_FIELDS`, ready to merge onto the
+    roll-up; the second is the ``hybrid_summary`` table.
+
+    **This recomputes rather than reading ``hybrid_redistributable``, and the reason is
+    provenance** (#102, superseding D039's read mechanism; D048's action item). The
+    warehouse view derives ``pv_coverage`` from ``dwh.pv_state_status``, whose pre-1976
+    rows are UCSB-derived — and while the emitted SQL scopes that read to the sources
+    present in the redistributable surface (so no UCSB *value* reaches it today), it
+    re-couples the public artifact to the warehouse roster that D048 §3 deliberately
+    removed from this path. Passing the **curated** roster instead — the same in-repo
+    catalog that already supplies ``pv_status`` — keeps the provenance firewall
+    structural rather than incidental.
+
+    **What that costs, stated so nobody files it as a bug:** the snapshot's
+    ``pv_coverage`` and the ``hybrid_redistributable`` view's **differ on purpose** for
+    every year before the popular-vote window. The view reads NULL there (no MIT roster
+    row reaches those years); this reads the real EV-weighted figure — 1824 is
+    190/261 = 0.728. **No other column differs.** Under the shipped policy (b)
+    ``apply_coverage_policy`` sets ``ec_share_hybrid = ec_share_full`` unconditionally,
+    so ``pv_coverage`` is the *only* roster-dependent output: every share, score,
+    winner, flip and margin is identical to the view's.
+
+    **The derivation itself is E7's** — :func:`usvote.hybrid.build_hybrid_from_frames`,
+    the same guarded core :func:`usvote.hybrid.build_hybrid_from_db` uses, so this path
+    inherits ``assert_ec_shares_le_one``, ``assert_no_winner_tie`` on all three scores
+    and ``assert_ec_winner_matches_rank`` rather than recomputing unvalidated. That
+    matters most for the tie check: :func:`usvote.hybrid.build_hybrid_summary` does not
+    raise on a dead heat (a view cannot ``raise``, so #124 split the guard out), and
+    without it this build would ship an arbitrary winner.
+
+    **The slug mapping is reused, never re-derived.** Both grains key off the
+    ``candidate_id -> candidate_slug`` map already minted and **collision-checked** by
+    :func:`add_candidate_slug`; the summary's three winner names map through the same
+    table. Re-running :func:`usvote.slug.candidate_slug` here would be a second
+    derivation that could disagree with the fact table's after a slug-rule change, and
+    it would skip the collision check.
+    """
+    frame, summary = build_hybrid_from_frames(slugged_df, pv_status_df)
+
+    id_to_slug = slugged_df[["candidate_id", "candidate_slug"]].drop_duplicates()
+    # `m:1`, not `1:1`: the hybrid frame's grain is (year, candidate_id), so a candidate
+    # who ran twice appears once per year. What must be unique is the RIGHT side — one
+    # slug per candidate_id — and `m:1` is exactly the assertion that checks it.
+    per_candidate = frame.merge(
+        id_to_slug, on="candidate_id", how="left", validate="m:1"
+    )
+    missing = per_candidate["candidate_slug"].isna()
+    if bool(missing.any()):
+        # Cannot happen while the frame is built from `slugged_df`; asserted because a
+        # silent NaN slug here would merge every unmatched candidate into one roll-up
+        # row rather than failing.
+        raise SnapshotError(
+            "hybrid frame carries candidate_id(s) absent from the slug map: "
+            f"{per_candidate.loc[missing, 'candidate_id'].unique().tolist()}"
+        )
+    per_candidate = per_candidate[
+        ["year", "candidate_slug", *_HYBRID_ROLLUP_FIELDS]
+    ]
+
+    name_to_slug = dict(
+        slugged_df[["candidate", "candidate_slug"]].drop_duplicates().values
+    )
+    out = summary.copy()
+    for name_col, slug_col in _WINNER_SLUG_PAIRS:
+        # `.map` on a dict yields NaN for a missing key; a NULL winner (a method with no
+        # scored candidate) must stay NULL rather than become the string "nan".
+        out[slug_col] = out[name_col].map(name_to_slug).astype("object")
+        out.loc[out[name_col].isna(), slug_col] = None
+        unmapped = out[slug_col].isna() & out[name_col].notna()
+        if bool(unmapped.any()):
+            raise SnapshotError(
+                "hybrid summary names a winner absent from the slug map: "
+                f"{out.loc[unmapped, name_col].unique().tolist()}"
+            )
+    return per_candidate, out[list(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)]
+
+
+def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
+    """Assert the hybrid summary carries no PV-derived value below the PV window.
+
+    The third member of the pre-window guard family
+    (:func:`assert_no_pv_below_mit_window` covers the fact table,
+    :func:`assert_no_pv_aggregate_below_mit_window` the roll-up), and it exists because
+    #102 added a table those two do not see.
+
+    **Only the PV-derived columns are guarded, and the exclusions are the point.**
+    ``pv_margin`` and ``hybrid_margin`` must be NULL before the window because both
+    derive from a popular vote that does not exist there. ``ec_margin``,
+    ``ec_denominator``, ``ec_determinative`` and the EC winner are **real** pre-1976 and
+    must not be guarded — the electoral-college record is complete back to 1824. Nor is
+    ``pv_coverage``: deriving it from the in-repo catalog rather than the warehouse
+    roster is exactly what #102 changed, so a real pre-window value there is the
+    feature, and a guard would reject the thing this issue shipped.
+
+    ``pv_flip``/``hybrid_flip`` are NULL pre-window by construction
+    (:func:`usvote.hybrid._flip` returns NULL when a method has no winner) and are
+    asserted anyway: that construction is one ``!=`` away from reporting a flip on every
+    pre-window year, which is the regression #165 hardened the 2000 assertion against.
+    """
+    pre = summary_df[summary_df["year"] < MIT_PV_YEAR_MIN]
+    for col in ("pv_margin", "hybrid_margin", "pv_flip", "hybrid_flip"):
+        bad = pre[pre[col].notna()]
+        if not bad.empty:
+            raise SnapshotError(
+                f"{len(bad)} hybrid-summary row(s) below {MIT_PV_YEAR_MIN} carry a "
+                f"non-null {col}: {bad['year'].head(10).tolist()}. A method with no "
+                "popular vote has no winner and no margin — NULL, never 0 and never "
+                "False (D005/D048)."
+            )
 
 
 def _to_int64(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
@@ -634,10 +821,19 @@ def build_snapshot(
     Steps: assert redistributable-only (D030); broadcast ``pv_status``
     (:func:`add_pv_status`, *after* the redistributable guard, which reads a column
     named ``source``); mint the candidate slug + drop ``candidate_id`` (D006)
-    **over the whole frame** — see the note below; precompute the national roll-up and
-    run both halves of the pre-window PV guard; content-hash the fact rows (D028); and
-    write the three tables to ``out_path`` atomically (temp file + ``os.replace``) so a
-    partial write never leaves a corrupt snapshot.
+    **over the whole frame** — see the note below; derive the hybrid at both grains
+    (:func:`build_hybrid_tables`); precompute the national roll-up and run all three
+    halves of the pre-window PV guard; content-hash the fact rows (D028); and write the
+    four tables to ``out_path`` atomically (temp file + ``os.replace``) so a partial
+    write never leaves a corrupt snapshot.
+
+    **The content hash still covers the ``ec_pv`` fact rows only**, so #102's new
+    ``hybrid_summary`` table and the roll-up's five new columns are **invisible** to it
+    — which is exactly why :data:`SNAPSHOT_SCHEMA_VERSION` had to move by hand (2 → 3).
+    Widening the hash to cover the derived tables was considered and rejected: the
+    version is a *content* address for the facts, and a derived table that changed while
+    the facts did not is a code change, which the schema version is the right instrument
+    for.
 
     **Slugs are minted over every row, and the old ordering is gone.** This used to
     filter to the served window *first* so that a collision between two candidates the
@@ -675,8 +871,13 @@ def build_snapshot(
     assert_count_status_reasons_are_catalogued(data_df)
     assert_no_pv_below_mit_window(data_df)
 
+    # The hybrid is derived from `slugged` (the join-view shape, which still carries
+    # `candidate_id`) and the **curated** roster, never from `hybrid_redistributable` —
+    # see `build_hybrid_tables` for why, and for the one intended divergence.
+    hybrid_fields, hybrid_summary_df = build_hybrid_tables(slugged, pv_status_df)
+
     rollup_df = _to_int64(
-        build_national_rollup(data_df),
+        build_national_rollup(data_df, hybrid_fields),
         (
             "national_electoral_votes",
             "national_counted_electoral_votes",
@@ -687,6 +888,8 @@ def build_snapshot(
         ),
     )
     assert_no_pv_aggregate_below_mit_window(rollup_df)
+    hybrid_summary_df = _to_int64(hybrid_summary_df, ("ec_denominator",))
+    assert_no_hybrid_pv_below_mit_window(hybrid_summary_df)
 
     ts = build_timestamp if build_timestamp is not None else datetime.now(UTC)
     meta = SnapshotMeta(
@@ -704,7 +907,7 @@ def build_snapshot(
         ec_license=EC_LICENSE,
         build_timestamp=ts.isoformat(),
     )
-    _write_sqlite(out_path, data_df, rollup_df, meta)
+    _write_sqlite(out_path, data_df, rollup_df, hybrid_summary_df, meta)
     return meta
 
 
@@ -712,9 +915,10 @@ def _write_sqlite(
     out_path: str,
     data_df: pd.DataFrame,
     rollup_df: pd.DataFrame,
+    hybrid_summary_df: pd.DataFrame,
     meta: SnapshotMeta,
 ) -> None:
-    """Write the three tables to a fresh SQLite file at ``out_path``, atomically.
+    """Write the four tables to a fresh SQLite file at ``out_path``, atomically.
 
     Built into a temp file in the same directory then ``os.replace``-d over ``out_path``
     so a reader (or a re-run) never sees a half-written snapshot. The file is opened
@@ -738,6 +942,12 @@ def _write_sqlite(
                 f"VALUES ({','.join('?' * len(ROLLUP_COLUMNS))})",
                 _rows(rollup_df),
             )
+            cols = SNAPSHOT_HYBRID_SUMMARY_COLUMNS
+            conn.executemany(
+                f"INSERT INTO {HYBRID_SUMMARY_TABLE} ({','.join(cols)}) "
+                f"VALUES ({','.join('?' * len(cols))})",
+                _rows(hybrid_summary_df),
+            )
             meta_cols = tuple(asdict(meta))
             conn.execute(
                 f"INSERT INTO {META_TABLE} ({','.join(meta_cols)}) "
@@ -755,7 +965,9 @@ def _write_sqlite(
 
 
 def _create_tables(conn: sqlite3.Connection) -> None:
-    """Create the ``ec_pv`` / ``national_rollup`` / ``snapshot_meta`` tables+indexes."""
+    """Create the four snapshot tables (+ indexes): ``ec_pv``, ``national_rollup``,
+    ``hybrid_summary``, ``snapshot_meta``.
+    """
     conn.execute(
         f"CREATE TABLE {DATA_TABLE} ("
         " year INTEGER NOT NULL,"
@@ -807,7 +1019,50 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " national_pv_denominator INTEGER,"
         " national_counted_electoral_votes INTEGER,"
         " national_electoral_denominator INTEGER,"
+        # --- #102: the five per-candidate hybrid fields. REAL, not INTEGER: every one
+        # is a ratio in [0, 1]. All five are nullable, and each for its own reason --
+        # the two PV-derived ones (pv_share, hybrid_score) are NULL for every
+        # pre-window year, while the EC shares are NULL only if a denominator is
+        # missing, which the guards make unreachable.
+        " ec_share_full REAL,"
+        " pv_share REAL,"
+        " ec_share_hybrid REAL,"
+        " pv_coverage REAL,"
+        " hybrid_score REAL,"
         " PRIMARY KEY (year, candidate_slug))"
+    )
+    conn.execute(
+        f"CREATE TABLE {HYBRID_SUMMARY_TABLE} ("
+        # One row per election -- hence `year` alone as the PRIMARY KEY, which also
+        # makes a fan-out from the summary derivation fail loud at INSERT rather than
+        # ship duplicate years (the same reasoning as the two tables above).
+        " year INTEGER NOT NULL PRIMARY KEY,"
+        " ec_denominator INTEGER,"
+        # The winners are nullable together with their slugs: a method with no scored
+        # candidate has no winner. Only the EC winner is non-null for every year the
+        # snapshot serves, and that is a property of the data, not a constraint -- an
+        # EC-winner NOT NULL here would turn a future gap into a build crash rather
+        # than an honest NULL.
+        " ec_winner TEXT,"
+        " ec_winner_slug TEXT,"
+        " pv_winner TEXT,"
+        " pv_winner_slug TEXT,"
+        " hybrid_winner TEXT,"
+        " hybrid_winner_slug TEXT,"
+        # Stored as INTEGER (SQLite has no boolean), matching `took_office` above.
+        # Nullable, and the three-state reading is deliberate: 1 = an EC majority,
+        # 0 = NO majority (a real, expected answer -- 1824 -- never a broken one),
+        # NULL = not derivable.
+        " ec_determinative INTEGER,"
+        " pv_coverage REAL,"
+        # NULL where the method has no winner -- never 0, which would assert the method
+        # agreed with the electoral college.
+        " pv_flip INTEGER,"
+        " hybrid_flip INTEGER,"
+        # Percentage points, so REAL and not a ratio.
+        " ec_margin REAL,"
+        " pv_margin REAL,"
+        " hybrid_margin REAL)"
     )
     conn.execute(
         f"CREATE TABLE {META_TABLE} ("

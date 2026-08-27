@@ -80,6 +80,7 @@ from typing import Any
 
 import pytest
 
+from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
 from usvote.pv.absences import PV_ABSENCE_CATALOG
@@ -92,6 +93,7 @@ from usvote.pv.status import (
 from usvote.snapshot import build_snapshot_from_db
 from usvote.snapshot_schema import (
     DATA_TABLE,
+    HYBRID_SUMMARY_TABLE,
     META_TABLE,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -329,6 +331,82 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 )
                 == 271
             )
+
+            # --- #102: the hybrid tables, and the ONE intended divergence -------
+            # The snapshot derives the hybrid in-process from the CURATED roster
+            # rather than reading `hybrid_redistributable`, so this is the only place
+            # the two can be compared on real data. Everything except `pv_coverage`
+            # must match the view exactly; `pv_coverage` must differ, and differ in a
+            # specific direction. Without this, a future edit to the SQL builder that
+            # misses the pandas oracle drifts the deployed view from the artifact
+            # silently -- neither side's own tests would notice.
+            assert (
+                one(f"SELECT count(*) FROM {HYBRID_SUMMARY_TABLE}") == SERVED_YEARS
+            ), "one hybrid_summary row per served election"
+
+            for year in (2000, 2016):
+                snap = conn.execute(
+                    "SELECT ec_winner, pv_winner, hybrid_winner, pv_flip, "
+                    f"hybrid_flip, ec_margin, pv_margin, hybrid_margin, pv_coverage "
+                    f"FROM {HYBRID_SUMMARY_TABLE} WHERE year = ?",
+                    (year,),
+                ).fetchone()
+                assert snap is not None, f"no hybrid_summary row for {year}"
+                view = dbc.select_query_to_df(
+                    "SELECT ec_winner, pv_winner, hybrid_winner, pv_flip, "
+                    "hybrid_flip, ec_margin, pv_margin, hybrid_margin, pv_coverage "
+                    f"FROM {SCHEMA}.{hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW} "
+                    f"WHERE year = {year}"
+                )
+                assert len(view) == 1
+                row = view.iloc[0]
+                assert snap[0] == row["ec_winner"]
+                assert snap[1] == row["pv_winner"]
+                assert snap[2] == row["hybrid_winner"]
+                assert bool(snap[3]) is bool(row["pv_flip"])
+                assert bool(snap[4]) is bool(row["hybrid_flip"])
+                for i, col in enumerate(
+                    ("ec_margin", "pv_margin", "hybrid_margin"), start=5
+                ):
+                    assert snap[i] == pytest.approx(float(row[col])), (
+                        f"{year} {col} drifted between the snapshot and the view"
+                    )
+                # Inside the PV window the two rosters agree, so coverage matches too.
+                assert snap[8] == pytest.approx(float(row["pv_coverage"]))
+
+            # 2000 is the thesis year: the popular vote flips, the hybrid does not
+            # (Nader's votes dilute Gore's PV share on the real national denominator).
+            flip_2000 = conn.execute(
+                f"SELECT pv_flip, hybrid_flip FROM {HYBRID_SUMMARY_TABLE} "
+                "WHERE year = 2000"
+            ).fetchone()
+            assert bool(flip_2000[0]) is True, "2000 must flip on the popular vote"
+            assert bool(flip_2000[1]) is False, (
+                "2000 must NOT flip on the hybrid — asserted because the two-way unit "
+                "fixture points the other way"
+            )
+
+            # The divergence itself, which is the whole of D048's action item for #102:
+            # BEFORE the popular-vote window the view has no roster row and reads NULL,
+            # while the snapshot reads the real catalog-derived figure.
+            pre_window_view = dbc.select_query_to_df(
+                "SELECT pv_coverage FROM "
+                f"{SCHEMA}.{hybrid.HYBRID_SUMMARY_REDISTRIBUTABLE_VIEW} "
+                "WHERE year = 1824"
+            )
+            assert pre_window_view["pv_coverage"].isna().all(), (
+                "the warehouse view is expected to read NULL here — if this ever "
+                "becomes non-null the divergence below is no longer the intended one"
+            )
+            coverage_1824 = one(
+                f"SELECT pv_coverage FROM {HYBRID_SUMMARY_TABLE} WHERE year = 1824"
+            )
+            assert coverage_1824 is not None, (
+                "the snapshot must carry a real 1824 coverage figure — this is the "
+                "column #102 repointed at the in-repo catalog (D048)"
+            )
+            # 1824: six legislatures appointed electors holding 71 of 261 votes.
+            assert float(coverage_1824) == pytest.approx(190 / 261, abs=1e-6)
         finally:
             conn.close()
     finally:

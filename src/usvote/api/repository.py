@@ -29,6 +29,8 @@ from pathlib import Path
 from usvote.snapshot_schema import (
     DATA_COLUMNS,
     DATA_TABLE,
+    HYBRID_SUMMARY_COLUMNS,
+    HYBRID_SUMMARY_TABLE,
     META_TABLE,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
@@ -248,6 +250,28 @@ class SnapshotRepository:
             "ORDER BY president_electoral_rank",
             (year,),
         )
+
+    def hybrid_summary_by_year(self, year: int) -> dict[str, object] | None:
+        """The per-election hybrid summary for a year, or ``None`` if absent (#102).
+
+        Returns a **single row or None**, not a list, because the table's grain is
+        ``year`` alone — the three winners, two flips and three margins are properties
+        of the election. Returning a one-element list would invite a caller to iterate
+        and quietly tolerate the two-row case that the table's PRIMARY KEY makes
+        impossible.
+
+        ``None`` is a real answer rather than an error: it means the snapshot has no
+        summary for that year. Callers gate on the year's existence separately (the
+        routes already 404 on an unknown year before reading this), so ``None`` here
+        signals a build gap, and the route renders it as a null ``election`` key rather
+        than failing the whole response — the fact rows are still good.
+        """
+        cols = ", ".join(HYBRID_SUMMARY_COLUMNS)
+        rows = self._select(
+            f"SELECT {cols} FROM {HYBRID_SUMMARY_TABLE} WHERE year = ?",  # noqa: S608
+            (year,),
+        )
+        return rows[0] if rows else None
 
     def state_exists(self, usps: str) -> bool:
         """Whether the snapshot contains this USPS state code (else 404)."""

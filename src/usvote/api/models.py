@@ -1,8 +1,8 @@
 """Pydantic response models + the shared ``{data, meta}`` envelope (E8-S3, #97).
 
 The public surface of the API. Each snapshot column (:mod:`usvote.snapshot_schema`
-``DATA_COLUMNS`` / ``ROLLUP_COLUMNS``) maps to a **field on one of these models** whose
-name reads naturally to an external consumer — the ``president_*`` internal prefix (this
+``DATA_COLUMNS`` / ``ROLLUP_COLUMNS`` / ``HYBRID_SUMMARY_COLUMNS``) maps to a **field on
+one of these models** whose name reads naturally to an external consumer — the ``president_*`` internal prefix (this
 candidate's per-state electoral votes, not "the president's") is renamed to a clearer
 public name. The snapshot column is the field's ``validation_alias`` (input only), so a
 row keyed by snapshot columns validates directly (``model_validate(dict(row))``) while
@@ -10,9 +10,10 @@ the response serializes back under the **public field name** (FastAPI dumps
 ``by_alias=True``, falling back to the field name when only a validation alias is set).
 
 That column↔field mapping is the single source of truth a drift guard keys off
-(``tests/unit/test_api_models.py``): every ``DATA_COLUMNS`` / ``ROLLUP_COLUMNS`` entry
-must be a field name / validation alias on its model or on :data:`_DROPPED_COLUMNS`, so
-a column added to the snapshot contract cannot silently fail to surface.
+(``tests/unit/test_api_models.py``): every ``DATA_COLUMNS`` / ``ROLLUP_COLUMNS`` /
+``HYBRID_SUMMARY_COLUMNS`` entry must be a field name / validation alias on its model or
+on :data:`_DROPPED_COLUMNS`, so a column added to the snapshot contract cannot silently
+fail to surface.
 
 Boundary (D028): pydantic + :mod:`usvote.snapshot_schema` only (no pandas, no DB).
 """
@@ -27,9 +28,9 @@ from usvote.api import provenance
 from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE, SnapshotMeta
 
 #: Snapshot columns intentionally **not** on any public model. Empty today (every
-#: ``ec_pv`` / ``national_rollup`` column is exposed under a public name), but the drift
-#: guard reads this list, so a deliberately-internal future column has an explicit home
-#: here rather than silently failing the completeness assert.
+#: ``ec_pv`` / ``national_rollup`` / ``hybrid_summary`` column is exposed under a public
+#: name), but the drift guard reads this list, so a deliberately-internal future column
+#: has an explicit home here rather than silently failing the completeness assert.
 _DROPPED_COLUMNS: frozenset[str] = frozenset()
 
 
@@ -126,6 +127,35 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
     "took_office": False,
     "national_pv_votes": 50996062,
     "national_pv_denominator": 105593982,
+    "ec_share_full": 0.4944,
+    "pv_share": 0.4829,
+    "ec_share_hybrid": 0.4944,
+    "pv_coverage": 1.0,
+    "hybrid_score": 0.4887,
+}
+
+#: 2000 is the worked example on purpose: it is the year the whole project turns on, and
+#: it is the one where the three methods visibly disagree — Gore wins the popular vote,
+#: Bush the electoral college, and the hybrid still follows Bush because Nader's votes
+#: dilute Gore's PV share on the real national denominator. So ``pv_flip`` is true and
+#: ``hybrid_flip`` is false in the same row, which is exactly the distinction a consumer
+#: reading one flag would miss.
+_ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
+    "year": 2000,
+    "electoral_denominator": 538,
+    "ec_winner": "George W. Bush",
+    "ec_winner_slug": "george-w-bush",
+    "pv_winner": "Albert Gore Jr.",
+    "pv_winner_slug": "albert-gore-jr",
+    "hybrid_winner": "George W. Bush",
+    "hybrid_winner_slug": "george-w-bush",
+    "ec_determinative": True,
+    "pv_coverage": 1.0,
+    "pv_flip": True,
+    "hybrid_flip": False,
+    "ec_margin": 0.9294,
+    "pv_margin": 0.5113,
+    "hybrid_margin": 0.2204,
 }
 
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {
@@ -365,6 +395,143 @@ class NationalSummaryRow(BaseModel):
         description="Total votes cast nationally this year (each state counted once).",
     )
 
+    # --- #102 / E8-S8: the per-candidate hybrid fields ------------------------
+    ec_share_full: float | None = Field(
+        default=None,
+        description=(
+            "This candidate's COUNTED electoral votes ÷ the year's appointed "
+            "denominator. Policy-invariant, and the only share the winner and "
+            "'was there a majority' are derived from. Real for every year served."
+        ),
+    )
+    pv_share: float | None = Field(
+        default=None,
+        description=(
+            "This candidate's national popular votes ÷ the year's total votes cast. "
+            "None before the popular-vote window."
+        ),
+    )
+    ec_share_hybrid: float | None = Field(
+        default=None,
+        description=(
+            "The electoral share used in the hybrid average. Equal to ec_share_full "
+            "under the published coverage policy — shipped as its own field because "
+            "the guarantee that no coverage rule can manufacture a majority is only "
+            "checkable if both are visible."
+        ),
+    )
+    pv_coverage: float | None = Field(
+        default=None,
+        description=(
+            "Share of the year's appointed electors from states that held a popular "
+            "vote, electoral-vote-weighted. 1.0 from 1880 on; 0.728 in 1824, when six "
+            "legislatures appointed electors directly. Real for every year served."
+        ),
+    )
+    hybrid_score: float | None = Field(
+        default=None,
+        description=(
+            "(ec_share_hybrid + pv_share) / 2 — the average of the two ratios; highest "
+            "wins. None before the popular-vote window."
+        ),
+    )
+
+
+class ElectionSummary(BaseModel):
+    """The per-**election** three-method comparison (#102 / E8-S8).
+
+    One object per year, not per candidate — the winners, flips and margins are
+    properties of the election. It is the answer to "would this election have gone
+    differently under another method", precomputed so a consumer does not re-derive a
+    contested average from the raw columns.
+
+    **Every nullable field here is null for a reason worth reading.** Before the
+    popular-vote window there is no popular vote on this surface, so ``pv_winner``,
+    ``hybrid_winner`` and their slugs, both flips and two of the three margins are
+    null — and null, never ``false``: a method with no winner cannot be said to agree
+    *or* disagree with the electoral college. The electoral-college fields
+    (``ec_winner``, ``ec_margin``, ``electoral_denominator``, ``ec_determinative``) and
+    ``pv_coverage`` are populated for **every** year the API serves, back to 1824.
+
+    **``ec_determinative: false`` is a real answer, not a gap** — it means no candidate
+    reached a majority of the appointed electors and the election went to the House.
+    That is the case the hybrid exists to speak to.
+    """
+
+    model_config = _config(_ELECTION_SUMMARY_EXAMPLE)
+
+    year: int = Field(description="Election year.")
+    electoral_denominator: int | None = Field(
+        default=None,
+        validation_alias="ec_denominator",
+        description=(
+            "The year's whole number of electors APPOINTED — the 12th Amendment's "
+            "denominator, each state counted once."
+        ),
+    )
+    ec_winner: str | None = Field(
+        default=None, description="Candidate with the largest counted electoral share."
+    )
+    ec_winner_slug: str | None = Field(
+        default=None, description="Public slug of the electoral-college winner."
+    )
+    pv_winner: str | None = Field(
+        default=None,
+        description="Candidate with the largest national popular-vote share.",
+    )
+    pv_winner_slug: str | None = Field(
+        default=None, description="Public slug of the popular-vote winner."
+    )
+    hybrid_winner: str | None = Field(
+        default=None, description="Candidate with the highest hybrid score."
+    )
+    hybrid_winner_slug: str | None = Field(
+        default=None, description="Public slug of the hybrid winner."
+    )
+    ec_determinative: bool | None = Field(
+        default=None,
+        description=(
+            "Whether some candidate held a STRICT majority of the appointed electors. "
+            "False means no majority — a real outcome (1824), not a missing value."
+        ),
+    )
+    pv_coverage: float | None = Field(
+        default=None,
+        description=(
+            "Share of the year's appointed electors from states that held a popular "
+            "vote, electoral-vote-weighted."
+        ),
+    )
+    pv_flip: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the popular-vote winner differs from the electoral-college "
+            "winner. Null where there is no popular-vote winner — never false."
+        ),
+    )
+    hybrid_flip: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the hybrid winner differs from the electoral-college winner. "
+            "Null where there is no hybrid winner — never false."
+        ),
+    )
+    ec_margin: float | None = Field(
+        default=None,
+        description=(
+            "Top-two gap in the electoral share, in PERCENTAGE POINTS. Null with "
+            "fewer than two scored candidates."
+        ),
+    )
+    pv_margin: float | None = Field(
+        default=None,
+        description="Top-two gap in the popular-vote share, in percentage points.",
+    )
+    hybrid_margin: float | None = Field(
+        default=None,
+        description="Top-two gap in the hybrid score, in percentage points.",
+    )
+
 
 class YearListItem(BaseModel):
     """One entry in the list-years index: a covered year and its candidate count."""
@@ -530,11 +697,33 @@ class ElectionResponse(BaseModel):
     """One election: its per-state fact rows plus the national roll-up (AC point 2).
 
     ``data`` carries the state rows; ``summary`` carries the per-candidate national
-    roll-up. ``meta.count`` counts ``data`` only.
+    roll-up; ``election`` carries the per-election three-method comparison (#102).
+    ``meta.count`` counts ``data`` only.
+
+    **``election`` is a sibling key rather than a new endpoint**, and rather than a
+    field repeated on every ``summary`` row: its grain is the year, so hanging it off
+    each candidate would repeat one answer N times and invite grouping by the wrong
+    key. It is nullable so a snapshot missing the summary for a year still serves its
+    fact rows instead of failing the whole response.
     """
 
     data: list[EcPvRow]
     summary: list[NationalSummaryRow]
+    election: ElectionSummary | None = None
+    meta: Meta
+
+
+class ElectionSummaryResponse(BaseModel):
+    """The year-summary endpoint's envelope: roll-up rows + the per-election object.
+
+    A dedicated model rather than :class:`Envelope`, because the generic envelope is
+    ``{data, meta}`` and has no home for a singleton — and widening ``Envelope`` itself
+    would put an ``election`` key on the state and candidate responses, where there is
+    no single election to summarize.
+    """
+
+    data: list[NationalSummaryRow]
+    election: ElectionSummary | None = None
     meta: Meta
 
 

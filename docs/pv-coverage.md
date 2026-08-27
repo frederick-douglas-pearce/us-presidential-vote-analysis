@@ -25,13 +25,23 @@ with its verified numbers.
 > human-browsable description of what it produces.
 >
 > **Which surface these numbers come from, because `pv_coverage` is surface-dependent by design.**
-> The tables below are computed on **`ec_pv_preferred`**, the full-history analysis surface. The
-> roster read is scoped to the sources a view actually carries, so on the **redistributable**
-> surface — the MIT-only one a public consumer reads — `pv_coverage` is `1.0` for 1976–2024 and
-> **NULL for every year before it**, including all twelve tabulated here. That is deliberate and
-> correct: no popular vote *and* no roster row reaches those years on that surface, and NULL is the
-> honest reading of an absent roster rather than a fabricated `0.0`. What a public consumer *does*
-> get for those years is the per-row `pv_status`, which is what the reproduction recipe below uses.
+> The tables below are computed on **`ec_pv_preferred`**, the full-history analysis surface, and
+> they are also what the **public API** now serves — but the two arrive there by different routes,
+> and the third surface in play still reads NULL. Three things to keep apart:
+>
+> | Surface | Pre-1976 `pv_coverage` | Why |
+> |---|---|---|
+> | `ec_pv_preferred` (analysis) | the figures tabulated below | the full-history roster, UCSB included |
+> | `hybrid_redistributable` (warehouse view) | **NULL** | its roster read is scoped to the sources the view carries, and MIT's roster starts at 1976 |
+> | the **public API snapshot** | the figures tabulated below | since **#102** it derives coverage from the in-repo [`PV_ABSENCE_CATALOG`](../src/usvote/pv/absences.py), which reaches every served year |
+>
+> **The middle row and the bottom row disagree on purpose** — that is the one intended divergence
+> between the warehouse view and the artifact built from it, and it is the whole of D048's action
+> item for #102. The view's NULL is the honest reading of an absent *roster*; the snapshot's figure
+> is the honest reading of the *election*, and it is available publicly because every classification
+> behind it carries a public-domain citation rather than coming from UCSB. **An earlier version of
+> this note said a public consumer reads NULL for every pre-1976 year. That is no longer true**, and
+> the reproduction recipe below reflects the catalog-derived route.
 
 ## What the number measures
 
@@ -254,8 +264,11 @@ wording, substitute the values:
 - `1.0` — *"Popular-vote coverage: complete."*
 - `NULL` — *"Popular-vote coverage is not established for this election on this data surface."*
 
-Note which of these a public consumer actually reaches for a pre-1976 year: the **`NULL`** one. The
-`< 1.0` template is for a surface carrying the full-history roster.
+Note which of these a public consumer reaches for a pre-1976 year: since **#102**, the **`< 1.0`**
+one — the public snapshot carries a real catalog-derived figure for every served year, so 1824
+renders as "73% of electoral votes" rather than as "not established". The **`NULL`** template is
+still live, but now only for the `hybrid_redistributable` warehouse view, whose roster does not
+reach those years.
 
 ## Provenance, and how to reproduce these numbers
 

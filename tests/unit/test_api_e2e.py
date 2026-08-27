@@ -14,6 +14,7 @@ It runs in CI: the snapshot is built from an in-memory synthetic frame via
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -118,3 +119,92 @@ def test_2016_flip_is_observable_through_summary(client: TestClient) -> None:
     assert took_office["national_pv_votes"] < rival["national_pv_votes"]
     assert took_office["national_pv_votes"] == 13_000_000
     assert rival["national_pv_votes"] == 18_000_000
+
+
+def test_2016_flip_is_stated_outright_by_the_election_summary(
+    client: TestClient,
+) -> None:
+    """#102: the flip the sibling test *infers* from two totals is now **stated**.
+
+    That test compares ``national_electoral_votes`` against ``national_pv_votes`` and
+    concludes a flip happened. This asserts the API says so itself — which is the whole
+    point of the story: a consumer should not have to re-derive the comparison to learn
+    the answer, and re-deriving it is where they get the denominator wrong.
+    """
+    body = client.get("/v1/elections/2016/summary").json()
+    election = body["election"]
+
+    assert election["year"] == 2016
+    assert election["ec_winner_slug"] == "cand-b"
+    assert election["pv_winner_slug"] == "cand-a"
+    assert election["pv_flip"] is True
+    # The names ship beside the slugs, so a display consumer needs no second call.
+    assert election["ec_winner"] == "Cand B"
+    assert election["pv_winner"] == "Cand A"
+    # Margins are percentage points and both methods are contested here.
+    assert election["ec_margin"] > 0.0
+    assert election["pv_margin"] > 0.0
+
+
+def test_the_election_summary_rides_along_on_the_year_endpoint(
+    client: TestClient,
+) -> None:
+    """``/v1/elections/{year}`` carries the same object, so one call answers everything.
+
+    The state rows, the per-candidate roll-up and the per-election comparison arrive
+    together; a reader who wants "who won, and would another method disagree" makes one
+    request.
+    """
+    body = client.get("/v1/elections/2016").json()
+    assert body["election"]["pv_flip"] is True
+    assert body["election"]["year"] == 2016
+    # `meta.count` still counts `data` only — the new key must not change it.
+    assert body["meta"]["count"] == len(body["data"])
+
+
+def test_a_pre_popular_vote_year_reports_null_flips_not_false(
+    client: TestClient,
+) -> None:
+    """1860: the EC half is answered, the PV half is null — and null, not ``false``.
+
+    ``false`` would assert that the popular vote *agreed* with the electoral college in
+    a year this surface has no popular vote for. That is the missing-vs-zero error the
+    whole project is about, so it gets an explicit test rather than being left to the
+    construction that happens to produce it.
+    """
+    election = client.get("/v1/elections/1860/summary").json()["election"]
+
+    assert election["pv_flip"] is None
+    assert election["hybrid_flip"] is None
+    assert election["pv_winner"] is None
+    assert election["pv_winner_slug"] is None
+    # The electoral college is fully recorded back to 1824 — this half must be real.
+    assert election["ec_winner"] is not None
+    assert election["ec_winner_slug"] is not None
+    assert election["electoral_denominator"] is not None
+    # And coverage is real, because it comes from the in-repo catalog rather than the
+    # warehouse roster (the divergence #102 introduced on purpose).
+    assert election["pv_coverage"] is not None
+
+
+def test_the_per_candidate_hybrid_fields_reach_the_summary_rows(
+    client: TestClient,
+) -> None:
+    """AC-4's per-candidate half: shares and the hybrid score on each roll-up row."""
+    rows = client.get("/v1/elections/2016/summary").json()["data"]
+    for row in rows:
+        for field in (
+            "ec_share_full",
+            "pv_share",
+            "ec_share_hybrid",
+            "pv_coverage",
+            "hybrid_score",
+        ):
+            assert field in row, f"{field} must surface on the summary row"
+            assert row[field] is not None
+        # The D037/A safety property, visible to a consumer.
+        assert row["ec_share_full"] == row["ec_share_hybrid"]
+        # The hybrid really is the average of the two ratios, not a ratio of sums.
+        assert row["hybrid_score"] == pytest.approx(
+            (row["ec_share_hybrid"] + row["pv_share"]) / 2
+        )
