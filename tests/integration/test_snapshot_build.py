@@ -374,8 +374,7 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 # Inside the PV window the two rosters agree, so coverage matches too.
                 assert snap[8] == pytest.approx(float(row["pv_coverage"]))
 
-            # 2000 is the thesis year: the popular vote flips, the hybrid does not
-            # (Nader's votes dilute Gore's PV share on the real national denominator).
+            # 2000 is the thesis year: the popular vote flips, the hybrid does not.
             flip_2000 = conn.execute(
                 f"SELECT pv_flip, hybrid_flip FROM {HYBRID_SUMMARY_TABLE} "
                 "WHERE year = 2000"
@@ -385,6 +384,9 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 "2000 must NOT flip on the hybrid — asserted because the two-way unit "
                 "fixture points the other way"
             )
+            # Why it does not flip is deliberately NOT explained here: the repo's
+            # standing explanation (that Nader's votes dilute Gore's PV share) is
+            # false, and correcting it where it originates is filed separately.
 
             # The divergence itself, which is the whole of D048's action item for #102:
             # BEFORE the popular-vote window the view has no roster row and reads NULL,

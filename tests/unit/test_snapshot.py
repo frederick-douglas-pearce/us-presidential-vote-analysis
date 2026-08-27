@@ -1130,7 +1130,7 @@ def test_the_rollup_guard_rejects_a_pre_window_hybrid_share(column: str) -> None
     about these two columns: it would be green because a **different** guard stopped it.
     Calling the guard with a frame it would actually see is what pins the column list.
 
-    The sibling ``test_the_hybrid_summary_guard_rejects_a_pre_window_margin`` covers the
+    The sibling ``test_the_hybrid_summary_guard_rejects_a_pre_window_value`` covers the
     other new table for the same reason.
     """
     rollup = pd.DataFrame(
@@ -1196,10 +1196,7 @@ def test_the_hybrid_summary_guard_rejects_a_pre_window_value(
     own** — the roll-up guard cannot see this table — and that the guard covers every
     column it claims to.
 
-    **The four winner columns were added at code review**, and the scenario is concrete:
-    a regression in :func:`usvote.hybrid._winner` that stopped dropping NA scores would
-    publish a *named* popular-vote winner for 1860 beside a null margin and a null flip.
-    The margin-only guard this test originally covered would have passed it.
+    The four winner columns were added at code review; this leg is what pins them.
     """
     summary = pd.DataFrame(
         {
@@ -1241,10 +1238,13 @@ def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
 
     **The test the schema docstring claimed and this change originally did not write**
     (caught at code review). Without it the one-way containment is a comment, not a
-    guard, and the property it is supposed to hold is exactly the one that matters: a
-    column added later to ``usvote.hybrid.HYBRID_SUMMARY_COLUMNS`` — the warehouse view's
-    contract — must NOT reach the public payload just by existing. The snapshot tuple is
-    an *independent explicit projection*, and this is what keeps it one.
+    guard.
+
+    Note precisely what does and does not keep a warehouse column off the public
+    payload. **This assert does not** — it subtracts the warehouse tuple, so growing
+    that tuple only grows the subtrahend and leaves this green. What denies automatic
+    reach is that the snapshot tuple is a **hand-written literal**: a new warehouse
+    column arrives on the public surface only when someone types it here too.
 
     **A subset assert, and the direction is the whole point.** The reverse — asserting
     the snapshot tuple covers the warehouse tuple — is **forbidden** (D047 §3), for the

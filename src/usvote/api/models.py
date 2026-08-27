@@ -137,10 +137,9 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
 
 #: 2000 is the worked example on purpose: it is the year the whole project turns on, and
 #: it is the one where the three methods visibly disagree — Gore wins the popular vote,
-#: Bush the electoral college, and the hybrid still follows Bush because Nader's votes
-#: dilute Gore's PV share on the real national denominator. So ``pv_flip`` is true and
-#: ``hybrid_flip`` is false in the same row, which is exactly the distinction a consumer
-#: reading one flag would miss.
+#: Bush the electoral college, and the hybrid still follows Bush. So ``pv_flip`` is true
+#: and ``hybrid_flip`` is false in the same row, which is exactly the distinction a
+#: consumer reading one flag would miss.
 _ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
     "year": 2000,
     "electoral_denominator": 538,

@@ -126,10 +126,9 @@ from usvote.snapshot_schema import (
 
 # Aliased on import, deliberately: `usvote.hybrid` exports a tuple of the SAME NAME with
 # a DIFFERENT membership (no slug columns — the warehouse view carries `candidate_id`,
-# never the public slug). This module needs both, and a bare `HYBRID_SUMMARY_COLUMNS`
-# here would silently resolve to whichever import came last. The #139 review caught the
-# same shape in `read_pv_status_roster` vs `derive_curated_pv_status_roster`; this is
-# that lesson applied before review rather than after.
+# never the public slug). The alias keeps the two distinguishable at a glance here and
+# in the tests, which import both. Precedent: the #139 review caught the same collision
+# shape in `read_pv_status_roster` vs `derive_curated_pv_status_roster`.
 from usvote.snapshot_schema import (
     HYBRID_SUMMARY_COLUMNS as SNAPSHOT_HYBRID_SUMMARY_COLUMNS,
 )
@@ -705,8 +704,11 @@ def build_hybrid_tables(
             id_to_slug, on="candidate_id", how="left", validate="m:1"
         )
     except pd.errors.MergeError as e:
+        # `m:1` fails when the RIGHT side is not unique, i.e. one candidate_id maps to
+        # more than one slug. (Two ids sharing one slug is a different fault, and
+        # `add_candidate_slug` rejects it before this point.)
         raise SnapshotError(
-            f"two candidate_ids share one slug, so the roll-up would fan out: {e}"
+            f"one candidate_id maps to more than one candidate_slug: {e}"
         ) from e
     missing = per_candidate["candidate_slug"].isna()
     if bool(missing.any()):
@@ -765,13 +767,8 @@ def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
     asserted anyway: that construction is one ``!=`` away from reporting a flip on every
     pre-window year, which is the regression #165 hardened the 2000 assertion against.
 
-    **The two winner columns and their slugs are guarded for the same reason** (added at
-    code review, #102). They are NULL pre-window by the same construction —
-    :func:`usvote.hybrid._winner` drops NA scores before taking the argmax — and a
-    regression there would publish a *named* pre-window popular-vote winner beside a
-    null margin and a null flip. Guarding only the margins would let that through: the
-    unit tests catch it on the synthetic fixture, but this is the guard that runs
-    against a real warehouse.
+    The two winner columns and their slugs are guarded on the same terms (added at code
+    review, #102): NULL pre-window by construction, and asserted rather than assumed.
     """
     pre = summary_df[summary_df["year"] < MIT_PV_YEAR_MIN]
     for col in (
