@@ -2854,10 +2854,10 @@ reproduced without inventing it.
 
 **Action required:**
 - **#187 carries the integration coverage.** Every branch here is offline-testable from a year set,
-  so this landed unit-tier. What no unit test reaches is the pin *against the real file* — the only
-  check that would go red if MIT re-released with a different span while `MIT_PV_YEAR_MAX` stayed
-  at 2024 — and the end-to-end proof that a truncated CSV is refused by a real `run_warehouse`
-  build. Both are #187.
+  so this landed unit-tier. What no unit test reaches is the pin *against the real file*: every
+  check that ships today reasons over a year set handed to it, never over the shipped bytes. Nor
+  is there an end-to-end proof that a truncated CSV is refused by a real `run_warehouse` build.
+  Both are #187.
 - **The cycle bump should touch `MIT_PV_YEAR_MAX`** alongside `LATEST_ELECTION_YEAR`
   (`usvote/years.py`), and the `>` branch's error message says so. **It is a documented
   maintenance step, not something the code forces** — an earlier draft of this entry claimed it was

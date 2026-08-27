@@ -83,13 +83,10 @@ def assert_mit_year_coverage(
             "and not an empty or header-only file."
         )
 
-    # Split strays out BEFORE deriving the bounds. Taking ``high`` from the raw maximum
-    # lets a single typo'd year both mislabel itself and silence the high-water check: a
-    # file with a stray 2022 and 2024 truncated would report only "non-election year
-    # [2022]" and never mention that 2024 — the year whose popular vote actually goes
-    # null — is gone, because ``election_years(latest=2022)`` stops at 2020 and the
-    # span then looks complete. The message is this guard's entire product, so it
-    # reports every problem it found rather than the first.
+    # Split strays out BEFORE deriving the bounds, so a single typo'd year cannot
+    # redefine the span it is measured against: taking ``high`` from the raw maximum
+    # makes a stray 2022 print as "the newest covered election", over a contiguity
+    # range of "from 1976 to 2022".
     calendar = set(election_years(latest=max(years)))
     stray = sorted(set(years) - calendar)
     election = sorted(set(years) & calendar)
