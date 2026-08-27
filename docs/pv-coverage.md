@@ -264,11 +264,11 @@ wording, substitute the values:
 - `1.0` — *"Popular-vote coverage: complete."*
 - `NULL` — *"Popular-vote coverage is not established for this election on this data surface."*
 
-Note which of these a public consumer reaches for a pre-1976 year: since **#102**, the **`< 1.0`**
-one — the public snapshot carries a real catalog-derived figure for every served year, so 1824
-renders as "73% of electoral votes" rather than as "not established". The **`NULL`** template is
-still live, but now only for the `hybrid_redistributable` warehouse view, whose roster does not
-reach those years.
+Which of these a pre-1976 year reaches depends on the year, and since **#102** it is never the
+`NULL` one: the twelve partial-coverage years render **`< 1.0`** (1824 as "73% of electoral
+votes"), and 1880–1972 render **`1.0`** — every state held a popular vote, even though this
+surface carries no counts for it. The **`NULL`** template is still live, but only for the
+`hybrid_redistributable` warehouse view, whose roster does not reach those years.
 
 ## Provenance, and how to reproduce these numbers
 

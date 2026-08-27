@@ -42,6 +42,11 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     assert "UCSB" in desc
     # Points a first-time developer at the docs.
     assert "/docs" in desc and "/redoc" in desc
+    # The three-method comparison is the headline feature #102 shipped; without this the
+    # paragraph advertising it could be deleted and every other assertion here would
+    # still pass.
+    assert "hybrid" in desc.lower()
+    assert "flip" in desc.lower()
 
 
 def test_openapi_contact_and_license(client: TestClient) -> None:

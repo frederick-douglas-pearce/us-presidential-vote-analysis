@@ -2,7 +2,7 @@
 
 > **Status: the plan held; most of it is built.** This document is kept as the
 > *planning* record — milestone themes, epic boundaries, and the reasoning behind them.
-> E1–E6 and E8 have since landed, E7 is partly landed, and E9 has not started; see
+> E1–E8 have since landed and E9 has not started; see
 > [Where it stands](#where-it-stands-2026-08-19) immediately below for the delivery
 > status, which is the section to trust when the two disagree. Decisions referenced as
 > D0NN live in [`../.claude/specs/decisions.md`](../.claude/specs/decisions.md).

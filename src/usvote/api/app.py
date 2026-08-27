@@ -108,8 +108,9 @@ office sit alongside the popular-vote totals.
 
 **Three methods, compared for you.** Each election also carries an `election` object
 giving the winner under three methods — the Electoral College, the national popular
-vote, and a **hybrid** (the average of the two shares) — with a flip flag per method and
-each method's top-two margin in percentage points. Precomputed, so the comparison does
+vote, and a **hybrid** (the average of the two shares) — with a flag for whether the
+popular vote or the hybrid would have flipped the electoral-college result, and each
+method's top-two margin in percentage points. Precomputed, so the comparison does
 not depend on a consumer re-deriving it from the raw totals.
 
 **Coverage:** {coverage_window} (US presidential elections).
