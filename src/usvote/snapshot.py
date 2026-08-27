@@ -607,9 +607,14 @@ def build_national_rollup(
     # candidate_slug), so a slug collapsing two ids would fan the roll-up out rather
     # than fail. `add_candidate_slug` already rejects a name collision; this rejects the
     # residual case where two ids share one canonical name.
-    rollup = rollup.merge(
-        hybrid_fields, on=["year", "candidate_slug"], how="left", validate="1:1"
-    )
+    try:
+        rollup = rollup.merge(
+            hybrid_fields, on=["year", "candidate_slug"], how="left", validate="1:1"
+        )
+    except pd.errors.MergeError as e:
+        raise SnapshotError(
+            f"the hybrid fields do not join the roll-up one-to-one: {e}"
+        ) from e
     return rollup[list(ROLLUP_COLUMNS)]
 
 
@@ -676,15 +681,33 @@ def build_hybrid_tables(
     derivation that could disagree with the fact table's after a slug-rule change, and
     it would skip the collision check.
     """
-    frame, summary = build_hybrid_from_frames(slugged_df, pv_status_df)
+    # HybridError is a RuntimeError, not a SnapshotError, and `_run_build` catches
+    # only the latter — so an un-wrapped hybrid invariant violation (a real winner tie,
+    # a roster disagreement, shares summing past 1.0) would escape as a bare traceback
+    # and exit 1 rather than "Snapshot build failed" and exit 3. The deploy runbook
+    # keys on that distinction, which is the same reason the `ec_denominator_by_year`
+    # call below wraps. Found at code review, #102.
+    try:
+        frame, summary = build_hybrid_from_frames(slugged_df, pv_status_df)
+    except HybridError as e:
+        raise SnapshotError(f"the hybrid computation failed its own guards: {e}") from e
 
     id_to_slug = slugged_df[["candidate_id", "candidate_slug"]].drop_duplicates()
     # `m:1`, not `1:1`: the hybrid frame's grain is (year, candidate_id), so a candidate
     # who ran twice appears once per year. What must be unique is the RIGHT side — one
     # slug per candidate_id — and `m:1` is exactly the assertion that checks it.
-    per_candidate = frame.merge(
-        id_to_slug, on="candidate_id", how="left", validate="m:1"
-    )
+    #
+    # A violation surfaces as pandas' own MergeError, not a SnapshotError, so it is
+    # wrapped for the reason above: the build must fail with the exit code the runbook
+    # expects, not with a traceback out of pandas.
+    try:
+        per_candidate = frame.merge(
+            id_to_slug, on="candidate_id", how="left", validate="m:1"
+        )
+    except pd.errors.MergeError as e:
+        raise SnapshotError(
+            f"two candidate_ids share one slug, so the roll-up would fan out: {e}"
+        ) from e
     missing = per_candidate["candidate_slug"].isna()
     if bool(missing.any()):
         # Cannot happen while the frame is built from `slugged_df`; asserted because a
@@ -719,6 +742,10 @@ def build_hybrid_tables(
 def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
     """Assert the hybrid summary carries no PV-derived value below the PV window.
 
+    Guards the eight columns listed below — both margins, both flips, and both winners
+    with their slugs. It does **not** guard every column on the table, and the
+    exclusions are deliberate rather than an oversight; see the paragraph on them.
+
     The third member of the pre-window guard family
     (:func:`assert_no_pv_below_mit_window` covers the fact table,
     :func:`assert_no_pv_aggregate_below_mit_window` the roll-up), and it exists because
@@ -737,9 +764,26 @@ def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
     (:func:`usvote.hybrid._flip` returns NULL when a method has no winner) and are
     asserted anyway: that construction is one ``!=`` away from reporting a flip on every
     pre-window year, which is the regression #165 hardened the 2000 assertion against.
+
+    **The two winner columns and their slugs are guarded for the same reason** (added at
+    code review, #102). They are NULL pre-window by the same construction —
+    :func:`usvote.hybrid._winner` drops NA scores before taking the argmax — and a
+    regression there would publish a *named* pre-window popular-vote winner beside a
+    null margin and a null flip. Guarding only the margins would let that through: the
+    unit tests catch it on the synthetic fixture, but this is the guard that runs
+    against a real warehouse.
     """
     pre = summary_df[summary_df["year"] < MIT_PV_YEAR_MIN]
-    for col in ("pv_margin", "hybrid_margin", "pv_flip", "hybrid_flip"):
+    for col in (
+        "pv_margin",
+        "hybrid_margin",
+        "pv_flip",
+        "hybrid_flip",
+        "pv_winner",
+        "pv_winner_slug",
+        "hybrid_winner",
+        "hybrid_winner_slug",
+    ):
         bad = pre[pre[col].notna()]
         if not bad.empty:
             raise SnapshotError(

@@ -165,8 +165,10 @@ ROLLUP_COLUMNS: tuple[str, ...] = (
 #: (D047 §3). Aliasing the warehouse tuple would
 #: make every future column added to the *view* reach the public payload automatically,
 #: which is the property that decoupling exists to deny. A test asserts this tuple is a
-#: subset of the warehouse tuple plus the two derived slug columns; **the reverse assert
-#: is forbidden**, for the same reason it is forbidden for ``DATA_COLUMNS``.
+#: subset of the warehouse tuple plus the three derived slug columns
+#: (``test_snapshot.py::test_the_summary_tuple_is_contained_by_the_warehouse_tuple``);
+#: **the reverse assert is forbidden**, for the same reason it is forbidden for
+#: ``DATA_COLUMNS``.
 #:
 #: The three winners arrive from the hybrid summary as candidate **names** (
 #: :func:`usvote.hybrid._winner` returns a name), and each ships beside a

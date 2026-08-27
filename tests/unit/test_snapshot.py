@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 
 from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
+from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_COLUMNS
@@ -1172,24 +1173,57 @@ def test_the_rollup_guard_permits_the_columns_that_are_real_pre_window() -> None
     assert_no_pv_aggregate_below_mit_window(rollup)
 
 
-def test_the_hybrid_summary_guard_rejects_a_pre_window_margin() -> None:
-    """:func:`assert_no_hybrid_pv_below_mit_window` fires on its own frame.
+_HYBRID_SUMMARY_GUARDED = (
+    ("pv_margin", 1.5),
+    ("hybrid_margin", 1.5),
+    ("pv_flip", True),
+    ("hybrid_flip", True),
+    ("pv_winner", "Somebody"),
+    ("pv_winner_slug", "somebody"),
+    ("hybrid_winner", "Somebody"),
+    ("hybrid_winner_slug", "somebody"),
+)
+
+
+@pytest.mark.parametrize(("column", "value"), _HYBRID_SUMMARY_GUARDED)
+def test_the_hybrid_summary_guard_rejects_a_pre_window_value(
+    column: str, value: object
+) -> None:
+    """:func:`assert_no_hybrid_pv_below_mit_window` fires on each guarded column.
 
     Exercised directly because the build-level guards upstream of it would catch the
     realistic route in. What this pins is that the summary table has a guard **of its
-    own** — the roll-up guard cannot see this table.
+    own** — the roll-up guard cannot see this table — and that the guard covers every
+    column it claims to.
+
+    **The four winner columns were added at code review**, and the scenario is concrete:
+    a regression in :func:`usvote.hybrid._winner` that stopped dropping NA scores would
+    publish a *named* popular-vote winner for 1860 beside a null margin and a null flip.
+    The margin-only guard this test originally covered would have passed it.
     """
     summary = pd.DataFrame(
         {
             "year": [1972],
-            "pv_margin": [1.5],
-            "hybrid_margin": [None],
-            "pv_flip": [None],
-            "hybrid_flip": [None],
+            **{col: [None] for col, _ in _HYBRID_SUMMARY_GUARDED},
         }
     )
-    with pytest.raises(SnapshotError, match="pv_margin"):
+    summary[column] = [value]
+    with pytest.raises(SnapshotError, match=column):
         assert_no_hybrid_pv_below_mit_window(summary)
+
+
+def test_the_hybrid_summary_guard_passes_a_clean_pre_window_row() -> None:
+    """The negative leg: an all-NULL pre-window row is fine, so the guard is not vacuous.
+
+    Without this, a guard that raised unconditionally would satisfy every leg above.
+    """
+    summary = pd.DataFrame(
+        {
+            "year": [1972],
+            **{col: [None] for col, _ in _HYBRID_SUMMARY_GUARDED},
+        }
+    )
+    assert_no_hybrid_pv_below_mit_window(summary)
 
 
 def test_the_schema_version_moved_for_the_new_shape() -> None:
@@ -1200,3 +1234,39 @@ def test_the_schema_version_moved_for_the_new_shape() -> None:
     changed shape, and only a literal records that.
     """
     assert SNAPSHOT_SCHEMA_VERSION == 3
+
+
+def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
+    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + the slugs.
+
+    **The test the schema docstring claimed and this change originally did not write**
+    (caught at code review). Without it the one-way containment is a comment, not a
+    guard, and the property it is supposed to hold is exactly the one that matters: a
+    column added later to ``usvote.hybrid.HYBRID_SUMMARY_COLUMNS`` — the warehouse view's
+    contract — must NOT reach the public payload just by existing. The snapshot tuple is
+    an *independent explicit projection*, and this is what keeps it one.
+
+    **A subset assert, and the direction is the whole point.** The reverse — asserting
+    the snapshot tuple covers the warehouse tuple — is **forbidden** (D047 §3), for the
+    same reason it is forbidden for ``DATA_COLUMNS`` against ``EC_PV_COLUMNS``: coupling
+    them would undo the decoupling. What this catches is a hand-typed name in the
+    snapshot tuple that no warehouse column supplies, which would ``KeyError`` only
+    against a real warehouse — on the one machine that has one.
+    """
+    derived = {"ec_winner_slug", "pv_winner_slug", "hybrid_winner_slug"}
+    unexplained = (
+        set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
+        - set(hybrid.HYBRID_SUMMARY_COLUMNS)
+        - derived
+    )
+    assert not unexplained, (
+        "hybrid_summary columns that no warehouse column supplies and that are not "
+        f"minted by the build: {unexplained}"
+    )
+    # Non-vacuity: the derived set must actually be needed, or the assert above would
+    # pass with `derived` empty and stop pinning anything about the slugs.
+    assert derived <= set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
+    assert not (derived & set(hybrid.HYBRID_SUMMARY_COLUMNS)), (
+        "the slug columns are minted by the snapshot build; if the warehouse view "
+        "starts carrying them, this test's `derived` allowance is hiding a real overlap"
+    )

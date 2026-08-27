@@ -156,7 +156,11 @@ _ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
     "hybrid_flip": False,
     "ec_margin": 0.9294,
     "pv_margin": 0.5113,
-    "hybrid_margin": 0.2204,
+    # (ec_margin - pv_margin) / 2: the two margins point in OPPOSITE directions here
+    # (Bush leads the EC, Gore the PV), so they subtract rather than add. Corrected
+    # from 0.2204 at code review — a shipped OpenAPI example that does not reconcile
+    # with its own siblings teaches a consumer the wrong formula.
+    "hybrid_margin": 0.2090,
 }
 
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {
