@@ -1,0 +1,106 @@
+# Scheduled canary for the PUBLIC API surface (#194; the #148 failure class).
+#
+# #148 was a Cloudflare edge setting (Bot Fight Mode) that 403'd every non-browser client
+# from a datacenter ASN for 34 days — this repo's CI, and every real consumer of the API
+# running on cloud infrastructure. Three things let it survive that long: it was invisible
+# from a residential IP, the only client that could see it ran on deploy (roughly monthly),
+# and its signal was read as flakiness.
+#
+# So this job is deliberately the client that was blocked: a GitHub runner (datacenter ASN)
+# with curl's own User-Agent, hitting the public hostname through Cloudflare. It asserts
+# reachability AND that the origin lock is still enforced, because "the public host returns
+# 200" is also exactly what a lock that has fallen open looks like — the pair is the
+# evidence, never either half.
+#
+# Read-only: GETs against the public API. No secrets, no GCP auth, no deploy.
+name: API canary (public surface)
+
+on:
+  schedule:
+    # Daily, deliberately off the top of the hour (GitHub's scheduler is congested there).
+    # Daily rather than weekly is a considered trade against D034's scale-to-zero: /health
+    # is `no-store`, so each run wakes the origin. One cold start a day is nothing against
+    # Cloud Run's free tier, and it buys detection within a day instead of within a deploy.
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+# A queued canary has nothing to add to a running one.
+concurrency:
+  group: api-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No hostname, no public surface to check (a fresh clone, a fork).
+    if: ${{ vars.CLOUDFLARE_HOSTNAME != '' }}
+    steps:
+      - name: Check the public API
+        env:
+          CF_HOST: ${{ vars.CLOUDFLARE_HOSTNAME }}
+          # Optional: the raw run.app URL, kept in a repo variable rather than tracked
+          # here. The origin lock is what protects the origin, not obscurity — but there
+          # is no reason to publish the bypass target either.
+          RAW_ORIGIN_URL: ${{ vars.RAW_ORIGIN_URL }}
+        run: |
+          set -uo pipefail
+          FAILURES=0
+          HDR=$(mktemp); BODY=$(mktemp)
+
+          fail() { echo "::error::$1"; FAILURES=$((FAILURES + 1)); }
+
+          # expect_status <label> <url> <want> — retries, then leaves the last response in
+          # $HDR/$BODY for follow-up assertions. Retried because this notifies a human, so
+          # one transient blip must not; collected rather than fail-fast, so a single run
+          # reports everything that is wrong instead of only the first thing.
+          expect_status() {
+            local label="$1" url="$2" want="$3" code=""
+            for i in 1 2 3; do
+              code=$(curl -sS -o "$BODY" -D "$HDR" -w '%{http_code}' --max-time 20 "$url" || echo 000)
+              if [ "$code" = "$want" ]; then echo "  ✓ ${label}: ${code}"; return 0; fi
+              [ "$i" -lt 3 ] && sleep 10
+            done
+            fail "${label}: got ${code}, want ${want} — ${url}"
+            echo "--- response headers ---"; cat "$HDR"
+            echo "--- body (first 600 bytes) ---"; head -c 600 "$BODY"; echo
+            return 1
+          }
+
+          echo "=== through Cloudflare (datacenter IP, curl UA — the #148 client) ==="
+
+          if expect_status "/health" "https://${CF_HOST}/health" 200; then
+            guard=$(jq -r '.origin_guard // "missing"' "$BODY")
+            [ "$guard" = "enforced" ] \
+              || fail "origin_guard is '${guard}', want 'enforced' — the /v1 origin lock is open"
+            loaded=$(jq -r '.snapshot_loaded // false' "$BODY")
+            [ "$loaded" = "true" ] \
+              || fail "snapshot_loaded=${loaded} — the service is up but holds no data"
+          fi
+
+          # The exact assertion that was 403 for 34 days.
+          if expect_status "/v1/meta" "https://${CF_HOST}/v1/meta" 200; then
+            grep -qi '^server: cloudflare' "$HDR" \
+              || fail "/v1/meta did not traverse Cloudflare (no 'server: cloudflare' header) — DNS or the Worker route may have moved"
+            rows=$(jq -r '.row_count // 0' "$BODY")
+            [ "$rows" -gt 0 ] 2>/dev/null || fail "row_count=${rows} — the served snapshot is empty"
+          fi
+
+          # A real data route, so a reachable API serving a broken snapshot is caught too.
+          if expect_status "/v1/elections/2000/summary" "https://${CF_HOST}/v1/elections/2000/summary" 200; then
+            n=$(jq -r '.data | length' "$BODY" 2>/dev/null || echo 0)
+            [ "$n" -gt 0 ] 2>/dev/null || fail "the 2000 summary returned no rows — reachable, but serving a broken snapshot"
+          fi
+
+          if [ -n "${RAW_ORIGIN_URL}" ]; then
+            echo "=== direct to the origin (no Cloudflare) ==="
+            expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403
+          else
+            echo "  – raw origin-lock check skipped (RAW_ORIGIN_URL variable unset)"
+          fi
+
+          if [ "$FAILURES" -ne 0 ]; then
+            echo "::error::API canary: ${FAILURES} check(s) failed against https://${CF_HOST}"
+            exit 1
+          fi
+          echo "API canary: all checks passed."
