@@ -129,7 +129,12 @@ jobs:
           ref: ${{ env.PAGES_BRANCH }}
           token: ${{ secrets.PAGES_SYNC_TOKEN }}
           path: pages
-          # Full history so the reconcile/retry loop can reset onto a moved tip.
+          # Full history so the reconcile/retry loop can reset onto a moved tip —
+          # AND so the shared-namespace guard (#157) can read who last published
+          # each target. Do NOT shorten this to speed the job: the reconcile loop
+          # would still work, but `git log -- <path>` would hit the shallow
+          # boundary, report no history for every pre-tip target, and refuse every
+          # update. See tooling/publish-to-pages.py.
           fetch-depth: 0
           # persist-credentials (default true) stores the PAT in pages/.git/config
           # for the push below. NEVER cat that file, dump `env`, or upload the

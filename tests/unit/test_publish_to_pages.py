@@ -114,23 +114,23 @@ class Sandbox:
         *,
         dry_run: bool = False,
         source_repo: str = OUR_REPO,
-        last_writer: Callable[[Path], str | None] | None = None,
+        pages_owner: Callable[[Path], str | None] | None = None,
     ) -> None:
         """Publish through `run()`.
 
-        `last_writer` defaults to "every existing target is ours", which is the
+        `pages_owner` defaults to "every existing target is ours", which is the
         world every test written before #157 assumed. The cross-repo tests pass
         one to model the other publisher; the real git-backed implementation is
         exercised separately, against a throwaway repo.
         """
-        writer = last_writer or (lambda _dest: sync_subject(source_repo))
+        owner = pages_owner or (lambda _dest: source_repo)
         self.ptp.run(
             sources,
             self.pages_posts,
             self.pages_assets,
             dry_run,
             source_repo,
-            writer,
+            owner,
         )
 
 
@@ -357,30 +357,33 @@ def test_non_ascii_body_round_trips(box: Sandbox) -> None:
     assert "em dash — and a curly quote’s tail." in published
 
 
+
+
 # --- the shared-namespace provenance guard (#157) ---------------------------
 #
 # Two repos publish into ONE Pages namespace, and `build_plan`'s collision check
 # sees only its own repo's posts — so a cross-repo collision enters neither
 # publisher's plan and overwrites a card silently under two green Actions.
-# `assert_no_foreign_overwrite` closes that by asking the Pages history who
-# wrote the target last.
+# `assert_no_foreign_overwrite` closes that by asking the Pages history which
+# publisher owns the target.
 #
 # The tests below split deliberately: the POLICY is exercised with an injected
-# `last_writer` (fast, and it can model a sibling repo that isn't here), while
-# the real git-backed reader gets its own tests against a throwaway repo. The
-# unit tier is offline, not subprocess-free — the hermetic block is a network
-# namespace, so `git` runs fine under it.
+# `pages_owner` (fast, and it can model a sibling repo that isn't here), while
+# the real git-backed reader gets its own tests against a throwaway repo. Those
+# shell out, which the unit tier already does elsewhere — see
+# `tests/unit/test_layering.py`, which runs its import-graph checks as
+# subprocesses.
 
 
 def _explode(dest: Path) -> str | None:
-    """A `last_writer` that fails the test if it is ever called.
+    """A `pages_owner` that fails the test if it is ever called.
 
     A spy, not a stub, and the distinction is the point: "an unchanged target
     doesn't consult git" is a claim about the MECHANISM, and a test that merely
     asserted the publish succeeded would stay green with the whole guard
     deleted.
     """
-    raise AssertionError(f"last_writer must not be consulted for {dest}")
+    raise AssertionError(f"pages_owner must not be consulted for {dest}")
 
 
 def test_a_card_owned_by_the_sibling_repo_is_not_overwritten(box: Sandbox) -> None:
@@ -388,32 +391,30 @@ def test_a_card_owned_by_the_sibling_repo_is_not_overwritten(box: Sandbox) -> No
     src = box.add_post("shared", "social/images/shared/og-card.png", card_bytes=b"OURS")
     (box.pages_assets / "shared-og.png").write_bytes(b"THEIRS")
 
-    with pytest.raises(box.ptp.PublishError, match=r"last published by 'claude-code-sessions'"):
-        box.publish([src], last_writer=lambda _d: sync_subject(THEIR_REPO))
+    with pytest.raises(
+        box.ptp.PublishError, match=r"last published by 'claude-code-sessions'"
+    ):
+        box.publish([src], pages_owner=lambda _d: THEIR_REPO)
 
     # Fail-closed means fail-BEFORE-writing, so their bytes must still be there.
     assert (box.pages_assets / "shared-og.png").read_bytes() == b"THEIRS"
 
 
-def test_a_target_written_by_a_non_sync_commit_is_not_overwritten(box: Sandbox) -> None:
-    """A site-owned asset (the live `og_banner.png` is one) is foreign too."""
+def test_a_target_no_publisher_owns_is_refused_with_a_different_remedy(
+    box: Sandbox,
+) -> None:
+    """A site-owned or hand-written target (the live `og_banner.png` is one).
+
+    Refused like a sibling's card, but the advice must NOT be "rename your
+    slug": there is no other series to disambiguate from, and renaming an
+    already-published post moves a live permalink and share-card URL. Asserting
+    the remedy, not just the refusal, is the point of this test.
+    """
     src = box.add_post("banner", "social/images/banner/og-card.png", card_bytes=b"OURS")
     (box.pages_assets / "banner-og.png").write_bytes(b"SITE")
 
-    with pytest.raises(box.ptp.PublishError, match=r"last writer was not a Pages sync"):
-        box.publish(
-            [src],
-            last_writer=lambda _d: "Add OG banner image and update config to use it",
-        )
-
-
-def test_a_target_with_no_history_is_not_overwritten(box: Sandbox) -> None:
-    """Present on disk, absent from history — anomalous, so refuse."""
-    src = box.add_post("orphan", "social/images/orphan/og-card.png", card_bytes=b"OURS")
-    (box.pages_assets / "orphan-og.png").write_bytes(b"MYSTERY")
-
-    with pytest.raises(box.ptp.PublishError, match=r"no commit history in the Pages tree"):
-        box.publish([src], last_writer=lambda _d: None)
+    with pytest.raises(box.ptp.PublishError, match=r"do NOT rename this post's slug"):
+        box.publish([src], pages_owner=lambda _d: None)
 
 
 def test_post_targets_are_guarded_as_well_as_cards(box: Sandbox) -> None:
@@ -427,8 +428,10 @@ def test_post_targets_are_guarded_as_well_as_cards(box: Sandbox) -> None:
     (box.pages_assets / "dup-og.png").write_bytes(b"CARD")  # identical: not the trigger
     (box.pages_posts / src.name).write_bytes(b"---\nlayout: post\n---\ntheirs\n")
 
-    with pytest.raises(box.ptp.PublishError, match=r"\(post for .*\): it was last published by"):
-        box.publish([src], last_writer=lambda _d: sync_subject(THEIR_REPO))
+    with pytest.raises(
+        box.ptp.PublishError, match=r"\(post for .*\): it was last published by"
+    ):
+        box.publish([src], pages_owner=lambda _d: THEIR_REPO)
 
 
 def test_our_own_target_is_overwritten_normally(box: Sandbox) -> None:
@@ -436,7 +439,7 @@ def test_our_own_target_is_overwritten_normally(box: Sandbox) -> None:
     src = box.add_post("ours", "social/images/ours/og-card.png", card_bytes=b"NEW")
     (box.pages_assets / "ours-og.png").write_bytes(b"OLD")
 
-    box.publish([src], last_writer=lambda _d: sync_subject(OUR_REPO))
+    box.publish([src], pages_owner=lambda _d: OUR_REPO)
 
     assert (box.pages_assets / "ours-og.png").read_bytes() == b"NEW"
 
@@ -451,14 +454,14 @@ def test_an_unchanged_target_never_consults_provenance(box: Sandbox) -> None:
     src = box.add_post("idem", "social/images/idem/og-card.png")
     box.publish([src])  # first publish creates the targets
 
-    box.publish([src], last_writer=_explode)  # second must consult nothing
+    box.publish([src], pages_owner=_explode)  # second must consult nothing
 
 
 def test_an_absent_target_never_consults_provenance(box: Sandbox) -> None:
     """Nothing to overwrite — the first publish of a new card asks git nothing."""
     src = box.add_post("brandnew", "social/images/brandnew/og-card.png")
 
-    box.publish([src], last_writer=_explode)
+    box.publish([src], pages_owner=_explode)
 
     assert (box.pages_assets / "brandnew-og.png").is_file()
 
@@ -471,11 +474,11 @@ def test_a_foreign_overwrite_aborts_the_whole_batch_before_any_write(
     dirty = box.add_post("dirty", "social/images/dirty/og-card.png", card_bytes=b"OURS")
     (box.pages_assets / "dirty-og.png").write_bytes(b"THEIRS")
 
-    def writer(dest: Path) -> str | None:
-        return sync_subject(THEIR_REPO if "dirty" in dest.name else OUR_REPO)
+    def owner(dest: Path) -> str | None:
+        return THEIR_REPO if "dirty" in dest.name else OUR_REPO
 
     with pytest.raises(box.ptp.PublishError, match="refusing to overwrite"):
-        box.publish([clean, dirty], last_writer=writer)
+        box.publish([clean, dirty], pages_owner=owner)
 
     assert not (box.pages_posts / clean.name).exists()
     assert not (box.pages_assets / "clean-og.png").exists()
@@ -483,11 +486,34 @@ def test_a_foreign_overwrite_aborts_the_whole_batch_before_any_write(
 
 def test_dry_run_still_refuses_a_foreign_overwrite(box: Sandbox) -> None:
     """The operator dry-run is the pre-publish preview — it must surface this."""
-    src = box.add_post("preview", "social/images/preview/og-card.png", card_bytes=b"OURS")
+    src = box.add_post(
+        "preview", "social/images/preview/og-card.png", card_bytes=b"OURS"
+    )
     (box.pages_assets / "preview-og.png").write_bytes(b"THEIRS")
 
     with pytest.raises(box.ptp.PublishError, match="refusing to overwrite"):
-        box.publish([src], dry_run=True, last_writer=lambda _d: sync_subject(THEIR_REPO))
+        box.publish([src], dry_run=True, pages_owner=lambda _d: THEIR_REPO)
+
+
+def test_an_empty_source_repo_is_refused(box: Sandbox) -> None:
+    """`required=True` accepts "", and an empty slug fails SILENTLY downstream.
+
+    It would commit `... posts from @<sha>`, which the subject pattern can never
+    parse, so every later update of that post reads as owned by nobody.
+    """
+    src = box.add_post("empty", "social/images/empty/og-card.png")
+    with pytest.raises(box.ptp.PublishError, match="must not be empty"):
+        box.ptp.main(
+            [
+                str(src),
+                "--posts-dir",
+                str(box.pages_posts),
+                "--assets-dir",
+                str(box.pages_assets),
+                "--source-repo",
+                "  ",
+            ]
+        )
 
 
 @pytest.mark.parametrize(
@@ -496,11 +522,12 @@ def test_dry_run_still_refuses_a_foreign_overwrite(box: Sandbox) -> None:
         (sync_subject(OUR_REPO), OUR_REPO),
         (sync_subject(THEIR_REPO), THEIR_REPO),
         ("chore(sync): publish posts from a.repo_x-1@deadbee", "a.repo_x-1"),
-        # Everything a non-sync writer leaves behind reads as "not ours".
+        # Everything a non-sync writer leaves behind reads as "not a sync".
         ("Add OG banner image and update config to use it", None),
         ("Update ESG news feed - 2026-08-28", None),
         ("chore(sync): publish posts from norepo", None),  # no @sha
         ("prefixed chore(sync): publish posts from x@1", None),  # must match at ^
+        ("chore(sync): publish posts from @deadbee", None),  # the empty-slug commit
     ],
 )
 def test_sync_source_repo_parses_the_subject(
@@ -522,8 +549,16 @@ def _git(cwd: Path, *args: str) -> None:
     )
 
 
-def test_git_last_writer_reads_a_real_sibling_sync_and_fails_closed(
-    box: Sandbox, tmp_path: Path
+@pytest.fixture
+def pages_repo(box: Sandbox, tmp_path: Path) -> Path:
+    """The sandbox's Pages tree, made a real git repo."""
+    pages = tmp_path / "pages"
+    _git(pages, "init", "-q", ".")
+    return pages
+
+
+def test_a_real_sibling_sync_is_read_and_refused(
+    box: Sandbox, pages_repo: Path
 ) -> None:
     """The whole path end-to-end on real history: read -> parse -> refuse.
 
@@ -531,40 +566,74 @@ def test_git_last_writer_reads_a_real_sibling_sync_and_fails_closed(
     likely to rot silently — a reader that returned the wrong thing on the
     "ours" case would merely publish, which is what it does anyway.
     """
-    pages = tmp_path / "pages"
-    _git(pages, "init", "-q", ".")
     (box.pages_assets / "real-og.png").write_bytes(b"THEIRS")
-    _git(pages, "add", ".")
-    _git(pages, "commit", "-q", "-m", sync_subject(THEIR_REPO))
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(THEIR_REPO))
 
     src = box.add_post("real", "social/images/real/og-card.png", card_bytes=b"OURS")
 
-    # No injected writer: this exercises ptp.git_last_writer itself.
-    with pytest.raises(box.ptp.PublishError, match=r"last published by 'claude-code-sessions'"):
+    # No injected owner: this exercises ptp.git_pages_owner itself.
+    with pytest.raises(
+        box.ptp.PublishError, match=r"last published by 'claude-code-sessions'"
+    ):
         box.ptp.run([src], box.pages_posts, box.pages_assets, False, OUR_REPO)
 
     assert (box.pages_assets / "real-og.png").read_bytes() == b"THEIRS"
 
 
-def test_git_last_writer_returns_none_for_a_path_with_no_history(
-    box: Sandbox, tmp_path: Path
+def test_a_hand_edit_on_top_of_our_sync_does_not_brick_the_publish(
+    box: Sandbox, pages_repo: Path
 ) -> None:
-    """`git log` exits 0 with empty output here — that is "no history", not an error."""
-    pages = tmp_path / "pages"
-    _git(pages, "init", "-q", ".")
-    _git(pages, "commit", "-q", "--allow-empty", "-m", "init")
+    """The most recent SYNC commit decides ownership — not the most recent commit.
+
+    Someone fixing a typo on the Pages side, or a site-wide `prettier --write`,
+    must not permanently reclassify our own post as foreign. It would: the
+    Action re-publishes every dated post on every run and aborts the batch on
+    the first refusal, so reading the latest commit of any kind would block ALL
+    future publishing, on every retry, until the Pages repo was hand-edited.
+    """
+    target = box.pages_assets / "ours-og.png"
+    target.write_bytes(b"V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+    target.write_bytes(b"HAND-EDITED ON THE SITE")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", "Fix a typo in the card alt text")
+
+    assert box.ptp.git_pages_owner(target) == OUR_REPO
+
+
+def test_a_site_owned_target_has_no_pages_owner(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """Real history with no sync commit at all — the `og_banner.png` shape."""
+    target = box.pages_assets / "og_banner.png"
+    target.write_bytes(b"BANNER")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", "Add OG banner image and update config")
+
+    assert box.ptp.git_pages_owner(target) is None
+
+
+def test_a_path_with_no_history_has_no_pages_owner(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """`git log` exits 0 with empty output here — "no history", not an error."""
+    _git(pages_repo, "commit", "-q", "--allow-empty", "-m", "init")
     stray = box.pages_assets / "stray-og.png"
     stray.write_bytes(b"UNTRACKED")
 
-    assert box.ptp.git_last_writer(stray) is None
+    assert box.ptp.git_pages_owner(stray) is None
 
 
-def test_git_outside_a_checkout_is_a_distinct_failure(box: Sandbox) -> None:
-    """Exit 128, not empty output — and it must not read as "rename your slug".
+def test_a_target_outside_the_checkout_is_a_distinct_failure(box: Sandbox) -> None:
+    """Not a checkout -> its own error, and never "rename your slug".
 
-    Both conditions refuse the write; only this one is an operator error about
-    the target directory, and a guard that misdirects during an incident is a
-    regression wearing fail-loud's clothes.
+    Bounded explicitly rather than relying on `tmp_path` sitting outside every
+    repository: git walks upward for `.git`, so with an unbounded walk this test
+    would pass or fail on where pytest put its temp dir — and in production an
+    operator who cloned the Pages site inside another repo would silently get
+    that repo's history consulted.
     """
-    with pytest.raises(box.ptp.PublishError, match="is the target directory a git checkout"):
-        box.ptp.git_last_writer(box.pages_assets / "anything.png")
+    with pytest.raises(box.ptp.PublishError, match="is not inside a git checkout"):
+        box.ptp.git_pages_owner(box.pages_assets / "anything.png")

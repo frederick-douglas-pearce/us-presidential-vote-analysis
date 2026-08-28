@@ -142,7 +142,10 @@ produces something that looks the same and fails differently:
 3. **Atomicity is validate-all-then-write.** The full plan is built and validated before
    a single byte is written, so one bad post can't half-publish a batch.
 4. **The guard reuses the publisher's `build_plan`** rather than re-deriving the rules,
-   so it cannot drift. A future fail-closed condition is inherited for free.
+   so it cannot drift from what `build_plan` enforces — a future fail-closed condition
+   added _there_ is inherited for free. It does **not** cover everything publish
+   enforces: the shared-namespace check needs the Pages history, and this guard has no
+   Pages checkout, so a cross-repo clash passes here and stops at the sync (below).
 
 ### Previewing a publish locally
 

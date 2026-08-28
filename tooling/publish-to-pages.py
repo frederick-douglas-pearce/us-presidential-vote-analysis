@@ -70,8 +70,11 @@ is closed by `assert_no_foreign_overwrite`, a SECOND Phase-1 validator: before
 any write, a target that already exists with different bytes must have been
 written last by a sync from THIS repo, or the run aborts. The provenance is the
 Pages repo's own history — each sync commits as
-`chore(sync): publish posts from <repo>@<sha>` — which is why the Action checks
-out Pages at `fetch-depth: 0`.
+`chore(sync): publish posts from <repo>@<sha>`. That history has to be there:
+the Action's `fetch-depth: 0` predates this guard (it exists for the
+reconcile-retry loop) but the guard now depends on it too, and the workflow
+says so at the checkout step — a shallow clone would return no history for
+every pre-tip target and refuse every update.
 
 Two properties of that guard are load-bearing rather than incidental:
 
@@ -311,47 +314,120 @@ def sync_source_repo(subject: str) -> str | None:
     return m.group("repo") if m else None
 
 
-def git_last_writer(dest: Path) -> str | None:
-    """Subject of the last commit touching `dest`, or None if it has no history.
+def git_pages_owner(dest: Path) -> str | None:
+    """Source repo of the most recent Pages SYNC commit touching `dest`.
 
-    Runs `git -C <dest's own dir>` — git walks upward to find `.git`, so the
-    Pages root is neither needed nor computed (`assets_dir.parent.parent` would
-    be a guess about someone else's layout).
+    None means no sync commit touches it at all — a site-owned asset
+    (`assets/img/og_banner.png` is one), or a file only ever written by hand.
+
+    **The most recent SYNC commit, not the most recent commit.** Reading the
+    latest commit of any kind would let one ordinary edit on the Pages side —
+    a typo fixed in place, or a site-wide `prettier --write` (which has turned
+    that site red twice; see .github/workflows/prettier.yml) — permanently
+    reclassify our own post as foreign. Since the Action re-publishes every
+    dated post on every run and aborts the whole batch on the first refusal,
+    that would block *all* future publishing, on every retry, until someone
+    hand-edited the Pages repo. Skipping non-sync commits keeps the question
+    the one that matters: which publisher put this target here?
+
+    Overwriting a later hand edit to one of OUR posts is correct, and is the
+    contract that already held: this repo's `posts/` is the source of record,
+    and every run rewrites its own targets from it.
+
+    Runs `git -C <dest's own dir>` — git walks upward for `.git`, so the Pages
+    root is neither needed nor computed. The walk is then bounded by checking
+    the repo it found actually contains `dest`, so a Pages tree that is not a
+    checkout cannot silently borrow an ancestor repository's history.
+    """
+    # Both ways of not being in the right repository — no repository at all, or
+    # an ancestor one that git's upward walk found instead — are the same
+    # operator error and get the same message.
+    toplevel = _git_toplevel(dest)
+    if toplevel is None or not _contains(toplevel, dest):
+        raise PublishError(
+            f"{dest.parent} is not inside a git checkout of the Pages repo "
+            f"(git resolved: {toplevel or 'no repository'}) — the "
+            f"shared-namespace guard reads the Pages history, so --posts-dir "
+            f"and --assets-dir must point into a real clone."
+        )
+    log = _git_out(dest, "log", "--format=%s", "--", str(dest))
+    for subject in log.splitlines():
+        owner = sync_source_repo(subject)
+        if owner is not None:
+            return owner
+    return None
+
+
+def _contains(root: Path, dest: Path) -> bool:
+    """Whether `dest` lies inside `root`. Bounds git's unbounded upward walk."""
+    try:
+        dest.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _git_toplevel(dest: Path) -> Path | None:
+    """Root of the git repo containing `dest`'s directory, or None if there is none.
+
+    A non-zero exit here is not an anomaly — it is the ordinary answer for "that
+    is not a checkout" — so it returns None rather than raising, and the caller
+    turns it into the one error that covers both ways of missing the repo.
+    """
+    proc = _git_run(dest, "rev-parse", "--show-toplevel")
+    out = (proc.stdout or "").strip()
+    return Path(out) if proc.returncode == 0 and out else None
+
+
+def _git_out(dest: Path, *args: str) -> str:
+    """Stdout of a git command run in `dest`'s directory. Fail closed, loudly.
 
     **Empty output and a git failure are different conditions and are not
     collapsed.** `git log` exits 0 with empty stdout for a path it has no
-    history for, and 128 outside a checkout. Both refuse the write, but the
-    operator remedy differs — "rename your slug" is actively misleading when the
-    real cause is "that directory is not a git checkout", and a fail-loud guard
-    whose message sends you the wrong way is a regression wearing fail-loud's
-    clothes.
+    history for, and non-zero outside a checkout. Both refuse the write, but
+    the operator remedy differs, and a fail-loud guard whose message sends you
+    the wrong way is a regression wearing fail-loud's clothes.
+
+    Decoded as explicit UTF-8 rather than left to the runner's locale, for the
+    reason `build_plan` gives about reading posts: a commit subject this cannot
+    decode must not escape as a `UnicodeDecodeError` traceback past `main()`'s
+    `except PublishError` handler.
+    """
+    proc = _git_run(dest, *args)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        raise PublishError(
+            f"could not read Pages history for {dest} (git {args[0]} exited "
+            f"{proc.returncode}) — is the target directory a git checkout? "
+            f"{stderr[0] if stderr else 'no-stderr'}"
+        )
+    return (proc.stdout or "").strip()
+
+
+def _git_run(dest: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git in `dest`'s directory, capturing output. Never raises on exit code.
+
+    Decoded as explicit UTF-8 rather than left to the runner's locale, for the
+    reason `build_plan` gives about reading posts: a commit subject this cannot
+    decode must not escape as a `UnicodeDecodeError` traceback past `main()`'s
+    `except PublishError` handler, which is where the operator message lives.
     """
     try:
-        proc = subprocess.run(
-            [
-                "git", "-C", str(dest.parent),
-                "log", "-1", "--format=%s", "--", str(dest),
-            ],
+        return subprocess.run(
+            ["git", "-C", str(dest.parent), *args],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except OSError as e:
         raise PublishError(f"could not run git to read Pages history: {e}") from e
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip().splitlines()
-        raise PublishError(
-            f"could not read Pages history for {dest} (git exited "
-            f"{proc.returncode}) — is the target directory a git checkout? "
-            f"{stderr[0] if stderr else 'no-stderr'}"
-        )
-    return proc.stdout.strip() or None
 
 
 def assert_no_foreign_overwrite(
     plan: dict[Path, PlanEntry],
     source_repo: str,
-    last_writer: Callable[[Path], str | None] = git_last_writer,
+    pages_owner: Callable[[Path], str | None] = git_pages_owner,
 ) -> None:
     """Phase 1: refuse to overwrite a target another publisher owns. No writes.
 
@@ -370,24 +446,32 @@ def assert_no_foreign_overwrite(
     operationally as well as for cost — the Action's reconcile-retry loop
     re-transforms against a moved tip on every attempt, and the common case
     there is a target whose bytes already match.
+
+    **Each refusal carries the remedy that fits it, and they are not the same
+    remedy.** "Rename your slug" is right for a live collision with the sibling
+    series and actively wrong for a site-owned file, where renaming an
+    already-published post would break a permalink and a share-card URL that
+    are already in the wild.
     """
     for dest in sorted(plan):
         entry = plan[dest]
         if not dest.exists() or _unchanged(dest, entry.data):
             continue
-        subject = last_writer(dest)
-        owner = sync_source_repo(subject) if subject is not None else None
+        owner = pages_owner(dest)
         if owner == source_repo:
             continue
-        if subject is None:
-            detail = "it has no commit history in the Pages tree"
-        elif owner is None:
-            detail = f"its last writer was not a Pages sync ({subject!r})"
-        else:
-            detail = f"it was last published by {owner!r}"
+        where = f"{dest} ({entry.kind} for {entry.post_name})"
+        if owner is None:
+            raise PublishError(
+                f"refusing to overwrite {where}: no Pages sync commit in its "
+                f"history, so it is not published by any of these repos — it "
+                f"is site-owned or hand-written. Reconcile it on the Pages "
+                f"side; do NOT rename this post's slug, which would move a "
+                f"permalink and a share-card URL that are already live."
+            )
         raise PublishError(
-            f"refusing to overwrite {dest} ({entry.kind} for {entry.post_name}): "
-            f"{detail}, not by {source_repo!r}. The Pages site is a namespace "
+            f"refusing to overwrite {where}: it was last published by "
+            f"{owner!r}, not by {source_repo!r}. The Pages site is a namespace "
             f"shared with another publisher — rename this post's slug so its "
             f"targets are unique across both series."
         )
@@ -422,7 +506,7 @@ def run(
     assets_dir: Path,
     dry_run: bool,
     source_repo: str,
-    last_writer: Callable[[Path], str | None] = git_last_writer,
+    pages_owner: Callable[[Path], str | None] = git_pages_owner,
 ) -> int:
     # Phase-1 preconditions: the Pages dirs must already exist. Do NOT mkdir —
     # absence means the worktree isn't checked out, an operator error.
@@ -438,7 +522,7 @@ def run(
     # stand-in dirs and no Pages checkout. Not gated on `dry_run` — the operator
     # dry-run runs against a real Pages checkout and is exactly the preview that
     # should surface a foreign collision before the real push does.
-    assert_no_foreign_overwrite(plan, source_repo, last_writer)
+    assert_no_foreign_overwrite(plan, source_repo, pages_owner)
 
     # Phase 2: apply. Content-compare means unchanged outputs write nothing.
     prefix = "[dry-run] " if dry_run else ""
@@ -482,6 +566,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dry-run", action="store_true", help="resolve + compare, but write nothing"
     )
     args = ap.parse_args(argv)
+    # `required=True` accepts an empty string, and an empty slug is the one
+    # value that fails SILENTLY: every target of a brand-new post is absent, so
+    # the guard waves the run through, and it commits `... posts from @<sha>`,
+    # which `_SYNC_SUBJECT` can never parse. Every later update of that post
+    # then reads as owned by nobody, forever. The workflow feeds this from
+    # `github.event.repository.name`; check it rather than trust it.
+    if not args.source_repo.strip():
+        raise PublishError("--source-repo must not be empty")
     return run(
         args.sources,
         args.posts_dir,
