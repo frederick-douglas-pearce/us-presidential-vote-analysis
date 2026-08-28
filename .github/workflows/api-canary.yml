@@ -33,6 +33,8 @@ jobs:
   canary:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Never checks out, never calls the API — no token needed at all.
+    permissions: {}
     # No hostname, no public surface to check (a fresh clone, a fork).
     if: ${{ vars.CLOUDFLARE_HOSTNAME != '' }}
     steps:
@@ -47,6 +49,7 @@ jobs:
           set -uo pipefail
           FAILURES=0
           HDR=$(mktemp); BODY=$(mktemp)
+          origin_version=""
 
           fail() { echo "::error::$1"; FAILURES=$((FAILURES + 1)); }
 
@@ -57,7 +60,7 @@ jobs:
           expect_status() {
             local label="$1" url="$2" want="$3" code=""
             for i in 1 2 3; do
-              code=$(curl -sS -o "$BODY" -D "$HDR" -w '%{http_code}' --max-time 20 "$url" || echo 000)
+              code=$(curl -sS -o "$BODY" -D "$HDR" -w '%{http_code}' --max-time 20 "$url") || code=000
               if [ "$code" = "$want" ]; then echo "  ✓ ${label}: ${code}"; return 0; fi
               [ "$i" -lt 3 ] && sleep 10
             done
@@ -76,6 +79,8 @@ jobs:
             loaded=$(jq -r '.snapshot_loaded // false' "$BODY")
             [ "$loaded" = "true" ] \
               || fail "snapshot_loaded=${loaded} — the service is up but holds no data"
+            # /health is `no-store`, so this is always the ORIGIN's answer, never the edge's.
+            origin_version=$(jq -r '.snapshot_version // ""' "$BODY")
           fi
 
           # The exact assertion that was 403 for 34 days.
@@ -84,9 +89,23 @@ jobs:
               || fail "/v1/meta did not traverse Cloudflare (no 'server: cloudflare' header) — DNS or the Worker route may have moved"
             rows=$(jq -r '.row_count // 0' "$BODY")
             [ "$rows" -gt 0 ] 2>/dev/null || fail "row_count=${rows} — the served snapshot is empty"
+
+            # The two ends must agree on which snapshot is live. /v1/meta is edge-cached
+            # and its ETag *is* the snapshot content hash, so a mismatch against /health
+            # above means the edge holds a version the origin has moved off — a purge
+            # that failed, or failed at this colo. The deploy gate checks the purge at
+            # cutover (#148) and nothing checks it afterwards, while the edge hold is
+            # `s-maxage` 30 days. Deliberately oracle-free: the canary has no expected
+            # version, only the requirement that the two ends agree.
+            edge_version=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); print $2}')
+            if [ -n "$origin_version" ] && [ "$edge_version" != "$origin_version" ]; then
+              fail "the edge is serving snapshot '${edge_version:-none}' but the origin has '${origin_version}' — stale edge cache"
+            fi
           fi
 
           # A real data route, so a reachable API serving a broken snapshot is caught too.
+          # 2000 is deliberate and must not be bumped to "the latest election": a historical
+          # year is present in every snapshot this API will ever serve, so it cannot drift.
           if expect_status "/v1/elections/2000/summary" "https://${CF_HOST}/v1/elections/2000/summary" 200; then
             n=$(jq -r '.data | length' "$BODY" 2>/dev/null || echo 0)
             [ "$n" -gt 0 ] 2>/dev/null || fail "the 2000 summary returned no rows — reachable, but serving a broken snapshot"
@@ -96,7 +115,10 @@ jobs:
             echo "=== direct to the origin (no Cloudflare) ==="
             expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403
           else
-            echo "  – raw origin-lock check skipped (RAW_ORIGIN_URL variable unset)"
+            # Not a failure (a fork has no origin to check), but not silent either:
+            # /health's `origin_guard` is the service reporting the guard is ARMED, which
+            # is not evidence it FIRES. Only a request from outside proves that.
+            echo "::warning::raw origin-lock check skipped — set the RAW_ORIGIN_URL variable to verify the /v1 lock from outside"
           fi
 
           if [ "$FAILURES" -ne 0 ]; then
