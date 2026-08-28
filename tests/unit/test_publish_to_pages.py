@@ -35,6 +35,7 @@ def sync_subject(repo: str) -> str:
     """A Pages sync commit subject, exactly as the Action writes it."""
     return f"chore(sync): publish posts from {repo}@abc1234"
 
+
 POST_TEMPLATE = """\
 ---
 layout: post
@@ -382,6 +383,45 @@ def _explode(dest: Path) -> str | None:
     deleted.
     """
     raise AssertionError(f"pages_owner must not be consulted for {dest}")
+
+
+def test_build_plan_never_shells_out_to_git(box: Sandbox) -> None:
+    """`assert_no_foreign_overwrite` belongs to `run()`, never to `build_plan`.
+
+    `tooling/check-og-cards.py` is the PR guard: it calls `build_plan` directly
+    with inert `/__pages__/...` stand-in dirs and documents that it needs no
+    Pages repo, checkout or PAT. Move the provenance check into `build_plan` and
+    that stops being true — the guard acquires a git dependency and a
+    Pages-checkout assumption on every PR.
+
+    **The regression is silent, which is why this is a test and not a comment.**
+    Nothing else goes red: the PR guard's stand-in targets never exist, so a
+    check living in `build_plan` short-circuits on `not dest.exists()` before it
+    ever reaches git. Two review rounds on this issue were lost to prose
+    asserting properties the code did not have; this asserts one it does.
+
+    The spy sits on `_git_run`, the module's only `subprocess.run` call site,
+    because the harm named is "shell out to git" — that catches an inlined
+    guard and a hand-rolled git call alike, and survives a rename of either.
+    """
+    # The precondition IS the test. git is reached only for a target that
+    # exists with differing bytes, so without this setup the check would pass
+    # vacuously against the very mutation it exists to catch — the short-circuit
+    # would spare the misplaced guard rather than the guard being absent.
+    src = box.add_post("nogit", "social/images/nogit/og-card.png", card_bytes=b"OURS")
+    target = box.pages_assets / "nogit-og.png"
+    target.write_bytes(b"THEIRS")
+    assert target.exists() and target.read_bytes() != b"OURS"
+
+    def _no_git(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "build_plan must not shell out to git — check-og-cards.py calls it "
+            "with no Pages checkout"
+        )
+
+    box.ptp._git_run = _no_git  # type: ignore[attr-defined]
+
+    assert box.ptp.build_plan([src], box.pages_posts, box.pages_assets)
 
 
 def test_a_card_owned_by_the_sibling_repo_is_not_overwritten(box: Sandbox) -> None:

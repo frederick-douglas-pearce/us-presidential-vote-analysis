@@ -76,15 +76,10 @@ reconcile-retry loop) but the guard now depends on it too, and the workflow
 says so at the checkout step — a shallow clone would return no history for
 every pre-tip target and refuse every update.
 
-Two properties of that guard are load-bearing rather than incidental:
-
-- It lives in `run()`, NOT in `build_plan`. `tooling/check-og-cards.py` calls
-  `build_plan` directly with inert stand-in directories and needs no Pages
-  checkout at all; a git call inside `build_plan` would break the PR guard on
-  every PR.
-- It is therefore invisible to that PR guard. A slug colliding with
-  `claude-code-sessions` passes CI green and fails at publish time — loudly,
-  but late. See posts/README.md.
+One consequence is load-bearing rather than incidental: the check is invisible
+to the PR guard (`tooling/check-og-cards.py`), which has no Pages checkout. A
+slug colliding with `claude-code-sessions` passes CI green and fails at publish
+time — loudly, but late. See posts/README.md.
 
 It is also **one-sided until the sibling repo ports it**: this repo will refuse
 to overwrite a card `claude-code-sessions` owns, but not the reverse. The
@@ -330,9 +325,9 @@ def git_pages_owner(dest: Path) -> str | None:
 
     **The most recent SYNC commit, not the most recent commit.** Reading the
     latest commit of any kind would let one ordinary edit on the Pages side —
-    a typo fixed in place, or a site-wide `prettier --write` (which has turned
-    that site red twice; see .github/workflows/prettier.yml) — permanently
-    reclassify our own post as foreign. Since the Action re-publishes every
+    a typo fixed in place, or a bulk `prettier --write` of the kind that follows
+    the site going red (twice so far — see .github/workflows/prettier.yml) —
+    permanently reclassify our own post as foreign. Since the Action re-publishes every
     dated post on every run and aborts the whole batch on the first refusal,
     that would block *all* future publishing, on every retry, until someone
     hand-edited the Pages repo. Skipping non-sync commits keeps the question
@@ -342,20 +337,19 @@ def git_pages_owner(dest: Path) -> str | None:
     contract that already held: this repo's `posts/` is the source of record,
     and every run rewrites its own targets from it.
 
-    Runs `git -C <dest's own dir>` — git walks upward for `.git`, so the Pages
-    root is neither needed nor computed.
+    Runs `git -C <dest's own dir>`, letting git find the repo by its own upward
+    walk. **That walk is not bounded here, and cannot be.** An earlier attempt
+    compared the discovered toplevel against `dest`, which is a tautology: git
+    found that repo BY walking up from `dest`, so it is always an ancestor.
+    What `run()` rules out instead is narrower and decidable without git — the
+    Pages dirs may not sit inside `REPO_ROOT`.
 
-    **That walk is git's own, and this function does not bound it.** An earlier
-    attempt to bound it here compared the discovered toplevel against `dest`,
-    which is a tautology: git found that repo BY walking up from `dest`, so it
-    is always an ancestor. What is actually ruled out is narrower, and it is
-    ruled out in `run()` rather than here: the Pages dirs may not sit inside
-    this repo's own tree, which is the realistic operator slip and is decidable
-    against `REPO_ROOT` without asking git anything. A Pages tree that is not a
-    checkout but sits under some unrelated third repository will consult that
-    repository's history — which fails **closed** (no `chore(sync)` commits
-    there, so no owner, so refuse) and only in a local dry-run, since the Action
-    checks out a real clone.
+    So a Pages tree that is not a checkout, sitting under some unrelated third
+    repository, consults that repository's history. That *usually* refuses, for
+    want of any `chore(sync)` commit — but not always: a history that happens to
+    carry our own sync subject at that path grants ownership instead, which is
+    what the probe behind this rewrite actually observed. It is out of reach of
+    CI, where the Action checks source and Pages out as siblings.
     """
     toplevel = _git_toplevel(dest)
     if toplevel is None:
@@ -391,7 +385,7 @@ def _git_toplevel(dest: Path) -> Path | None:
 
     A non-zero exit here is not an anomaly — it is the ordinary answer for "that
     is not a checkout" — so it returns None rather than raising, and the caller
-    turns it into the one error that covers both ways of missing the repo.
+    raises instead.
     """
     proc = _git_run(dest, "rev-parse", "--show-toplevel")
     out = (proc.stdout or "").strip()
@@ -401,16 +395,9 @@ def _git_toplevel(dest: Path) -> Path | None:
 def _git_out(dest: Path, *args: str) -> str:
     """Stdout of a git command run in `dest`'s directory. Fail closed, loudly.
 
-    **Empty output and a git failure are different conditions and are not
+    **Empty output and a non-zero exit are different conditions and are not
     collapsed.** `git log` exits 0 with empty stdout for a path it has no
     history for, which is an ordinary answer and not an error.
-
-    Since `git_pages_owner` establishes there IS a repository before calling
-    this, a non-zero exit here no longer means "outside a checkout". The
-    reachable cause is a repository with no commits at all, where `git log`
-    exits 128 — local and test-only, unreachable against the real Pages repo,
-    which is why the message stays generic rather than naming a cause it would
-    usually be wrong about.
     """
     proc = _git_run(dest, *args)
     if proc.returncode != 0:
@@ -552,9 +539,7 @@ def run(
             )
 
     plan = build_plan(sources, posts_dir, assets_dir)
-    # The second Phase-1 validator, and it must stay HERE rather than inside
-    # `build_plan`: tooling/check-og-cards.py calls that directly with inert
-    # stand-in dirs and no Pages checkout. Not gated on `dry_run` — the operator
+    # The second Phase-1 validator. Not gated on `dry_run` — the operator
     # dry-run runs against a real Pages checkout and is exactly the preview that
     # should surface a foreign collision before the real push does.
     assert_no_foreign_overwrite(plan, source_repo, pages_owner)

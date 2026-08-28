@@ -229,7 +229,7 @@ post the site would reject:
 Four properties are load-bearing. **Target resolution is fail-closed, never a glob** &mdash; a
 missing, absolute, or repo-escaping path, a missing image, or two posts colliding on one
 target all abort with zero writes, because a wrong image shipped under a green build is the
-failure this design exists to prevent. A fifth condition joins them and is not card-specific:
+failure this design exists to prevent. One more condition joins them, and it is not card-specific:
 **a post or card target that another publisher owns** aborts too, since the Pages site is a
 namespace shared with [`claude-code-sessions`](https://github.com/frederick-douglas-pearce/claude-code-sessions). **Idempotency is
 content-compare, not push-diff**, so a re-run makes no spurious changes and no empty

@@ -3082,3 +3082,66 @@ runbook next to the box that used to say "this is probably benign".
 A second constraint, empirical: **Cloudflare rewrites the strong ETag to weak (`W/"…"`) whenever it compresses the response** — verified live, `--compressed` returns `W/"<hash>"` with `content-encoding: zstd`. The gate's extraction strips the prefix, because the *value* identifies the snapshot and the validator strength does not. Without that strip the gate would go permanently red on healthy deploys the day anything adds `--compressed` to the request — which is #148's pathology rebuilt, in the very check written to end it.
 
 **Related:** D034 (the hash-tagged-image design this finally verifies), D054, `#148`, `.github/workflows/deploy.yml`.
+
+---
+
+## D056: cross-repo Pages ownership rests on a commit-subject convention, and the guard is one-sided by design
+
+**Date:** 2026-08-28
+**Issue:** #157 · **Builds on:** #132 (the port), D049 (`tooling/` is in scope for the quality gates)
+
+**Context:**
+
+This repo and `claude-code-sessions` publish into **one** Pages namespace — the same `_posts/`
+and the same `assets/img/`. Each publisher's `build_plan` collision check sees only its *own*
+repo's posts, so a cross-repo target collision enters neither plan. `write_if_changed`
+content-compares, so the overwrite reads as a legitimate change, each repo's next sync flips it
+back, and both Actions stay green; the symptom is a wrong image on social previews, noticed by a
+reader rather than by CI. The namespace is live and populated — 15 files, three distinct owners.
+#157 adds `assert_no_foreign_overwrite`, which asks the Pages repo's own history who last
+*synced* a target before overwriting it.
+
+**Decision:**
+
+1. **Provenance is the sync commit subject** — `chore(sync): publish posts from <repo>@<sha>`,
+   read back with `git log` — **not** a frontmatter trailer and not a sidecar manifest. Both
+   alternatives were rejected for the same reason: each is a new shared artifact that is worth
+   nothing until *both* repos adopt it in lockstep, and a manifest two independent writers must
+   maintain reintroduces the cross-writer race it would exist to arbitrate. The subject already
+   exists, written by the very mechanism that would be racing, so this adds no artifact and has
+   one source. (Why the most recent *sync* commit rather than the most recent commit, and why the
+   walk is deliberately unbounded, are mechanics with their own home in `git_pages_owner`'s
+   docstring; they are not restated here.)
+
+2. **The guard is one-sided and fail-closed.** This repo refuses to overwrite a target it cannot
+   prove is its own, including one no publisher it recognizes owns. Until `claude-code-sessions`
+   ports the guard the reverse does not hold, so the first symptom is likely to be **our** publish
+   stopping over a collision we did not cause. Accepted deliberately: loud-and-late beats a silent
+   wrong share image under a green run.
+
+3. **Provenance stays out of `build_plan`** so the PR guard (`tooling/check-og-cards.py`) keeps
+   running checkout-free — pinned by
+   `tests/unit/test_publish_to_pages.py::test_build_plan_never_shells_out_to_git`, not by prose.
+   That test exists because the regression is **silent**: the PR guard's inert stand-in targets
+   never exist, so a check misplaced into `build_plan` short-circuits before reaching git and
+   nothing else goes red.
+
+**Accepted residual, and the trigger that retires it:**
+
+The sibling's half of this contract is **unverifiable from here** — no test can pin a string
+another repository controls, and reaching across the network to check it would invert the very
+coupling direction this design avoids. It was verified **by hand on 2026-08-28** against that
+repo's own `pages-sync.yml`, which hardcodes the identical subject. If it ever drifts, the
+sibling's targets parse to *no owner* and hit the fail-closed refusal — safe, but it stops the
+innocent side, which is why that refusal's message names a sibling-format drift among its causes
+rather than sending the operator to rename an already-published slug.
+
+So the operator rule — keep slugs distinct across the two series — **stands, not superseded**.
+The event that retires the one-sidedness is the sibling porting the guard; at that point the
+subject format should become a **shared constant** rather than two independently hand-verified
+regexes, or the silent-drift surface simply doubles. Recording the trigger here is what makes
+that a scheduled decision rather than a future surprise.
+
+**Related:** `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
+this entry does not duplicate), `tooling/check-og-cards.py`, `posts/README.md`,
+`.github/workflows/pages-sync.yml`, D049.
