@@ -3063,3 +3063,18 @@ runbook next to the box that used to say "this is probably benign".
 
 **Related:** D034 (the deployment this amends), D035 (the Worker front), `#148`,
 `.github/workflows/deploy.yml`, `docs/deploy-cloud-run.md` §7.
+
+---
+
+## D055: the deploy gate asserts which snapshot is serving, and the purge check must use the canonical URL
+
+**Date:** 2026-08-28
+**Issue:** #148 · **Discharges:** D054's open item · **Builds on:** D034 §2, §4
+
+**Context:** D034 tags the image with the snapshot content hash so "which data is live" is answerable, but the post-deploy gate never asked — it asserted status codes only, so a deploy serving the wrong snapshot passed it. Flagged three times on #148 and left open by D054.
+
+**Decision:** the smoke step compares the run's `snapshot_version` against what is actually serving, at **both** ends of the path: the origin's `/health` field, and the **canonical** `/v1/meta` ETag (the ETag *is* the content hash). Either mismatch fails the deploy.
+
+**The non-obvious half, and the reason this is a decision rather than a chore:** the cache-busted reachability check *cannot* be reused for the edge assertion. A per-run url is always a MISS, so it always fetches from the origin and always reads the new ETag — it is structurally blind to a failed purge. Only the canonical url, the one real users hit, tests whether the edge cut over. That matters more than it looks: the edge hold is `s-maxage` 30 days (D034 §4), so a purge that silently no-ops serves stale data for a month while every status-code assertion stays green. **Do not "tidy" the cache-buster onto this check** — it would disable it without changing a single line of its logic.
+
+**Related:** D034 (the hash-tagged-image design this finally verifies), D054, `#148`, `.github/workflows/deploy.yml`.

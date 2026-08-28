@@ -159,6 +159,7 @@ jobs:
           RAW_URL: ${{ steps.deploy.outputs.url }}
           ORIGIN_SECRET_NAME: ${{ vars.ORIGIN_SECRET_NAME }}
           CF_HOST: ${{ vars.CLOUDFLARE_HOSTNAME }}
+          SNAPSHOT_VERSION: ${{ steps.ver.outputs.snapshot_version }}
         run: |
           set -uo pipefail
           echo "raw origin: $RAW_URL"
@@ -179,6 +180,22 @@ jobs:
             echo "::error::${label} never returned ${want} (last=${code})"; return 1
           }
           wait_for "${RAW_URL}/health" 200 "raw /health" || exit 1
+
+          # #148: until now this step asserted status codes only, so a deploy serving the
+          # WRONG snapshot passed it — precisely the failure the D034 hash-tagged-image
+          # design exists to prevent. Assert the identity of the data actually serving,
+          # at both ends of the path. `snapshot_version` is the content hash read out of
+          # the snapshot in "Derive image tag" above, before the image was even built.
+          got=$(curl -s --max-time 20 "${RAW_URL}/health" \
+                | python -c "import json,sys;print(json.load(sys.stdin).get('snapshot_version',''))" \
+                || echo "")
+          if [ "$got" = "$SNAPSHOT_VERSION" ]; then
+            echo "  ✓ origin snapshot_version: ${SNAPSHOT_VERSION:0:12}…"
+          else
+            echo "::error::origin is serving snapshot_version '${got}', expected '${SNAPSHOT_VERSION}'"
+            exit 1
+          fi
+
           if [ -n "${ORIGIN_SECRET_NAME}" ]; then
             wait_for "${RAW_URL}/v1/meta" 403 "raw /v1 origin-lock" || exit 1
           fi
@@ -194,8 +211,29 @@ jobs:
             #
             # The per-run cache-buster stays, for the reason the original one got wrong:
             # it stops a 200 cached at the edge for the PREVIOUS snapshot version from
-            # satisfying this check after cutover. It cannot verify WHICH version is
-            # served — this gate still asserts status codes only, so a wrong-snapshot
-            # deploy would pass it (#148).
+            # satisfying this reachability check after cutover.
             wait_for "https://${CF_HOST}/v1/meta?deploy_smoke=${GITHUB_RUN_ID}" 200 "cloudflare /v1" || exit 1
+
+            # ...but that check is structurally blind to a FAILED PURGE: a unique url is
+            # always a MISS, so it always fetches from the origin and always sees the new
+            # ETag. Only the CANONICAL url — the one real users hit — tests whether the
+            # edge actually cut over. It matters because the edge hold is `s-maxage` 30
+            # days (D034), so a purge that silently no-ops serves stale data for a month.
+            # Retried: the purge is asynchronous and the previous step only requested it.
+            # The ETag is the snapshot content hash, so this is the same assertion as the
+            # origin check above, made at the other end of the path.
+            edge_ok=0
+            for i in $(seq 1 15); do
+              etag=$(curl -s -o /dev/null -D - --max-time 20 "https://${CF_HOST}/v1/meta" \
+                     | tr -d '\r' | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); print $2}')
+              if [ "$etag" = "$SNAPSHOT_VERSION" ]; then
+                echo "  ✓ edge is serving the new version (try ${i})"; edge_ok=1; break
+              fi
+              echo "  … edge ETag is '${etag:-none}', want ${SNAPSHOT_VERSION:0:12}… (try ${i}); retrying"
+              sleep 4
+            done
+            if [ "$edge_ok" -ne 1 ]; then
+              echo "::error::the Cloudflare edge is still serving a previous version — the cache purge did not take"
+              exit 1
+            fi
           fi
