@@ -256,7 +256,7 @@ Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decision
    Test: `curl https://api.<domain>/health` → 200.
 4. **Rate limiting** (the Worker does NOT rate-limit): Security → WAF → Rate limiting rules →
    `Hostname eq api.<domain> and URI Path starts_with "/v1"` → 60 req/min per IP → Block.
-   Enable **Bot Fight Mode** (Security → Bots).
+   **Do NOT enable Bot Fight Mode** (Security → Bots) — see the box below.
 5. **Zone ID + Cache-Purge token:** zone Overview → copy the **Zone ID**; My Profile → API
    Tokens → create a token scoped to **Zone · Cache Purge** on this zone only.
 
@@ -265,12 +265,28 @@ Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decision
 the workflow**. Now the raw `run.app` `/v1` returns **403** while `https://api.<domain>/v1`
 returns **200** through the cached, rate-limited edge — the post-deploy smoke asserts both.
 
-> **If the smoke step fails on `cloudflare /v1` (#148).** It runs immediately after the cache
-> purge and revision cutover, and this assertion false-failed on both of the first two
-> deploys while the deploy itself was fine — healing on its own within minutes each time. It
-> now uses a **per-run cache-buster** (`?deploy_smoke=$GITHUB_RUN_ID`) so a 403 cached at the
-> runner's edge colo during cutover cannot be replayed to every retry, plus a longer budget
-> (45 tries ≈ 3 min) for that check alone.
+> **Do not enable Bot Fight Mode on this zone (#148 / D054).** It was on here from
+> 2026-07-25 to 2026-08-28, and it 403s every non-browser client from a datacenter ASN —
+> which is both this workflow's smoke test and every real consumer of a read-only JSON API
+> running on cloud infrastructure. It is invisible from a residential IP, so "it works in my
+> browser" does not clear it. Free-tier BFM is zone-wide and cannot be scoped or skipped
+> (per-path exemptions need Super Bot Fight Mode on Pro+), so it is all or nothing. The rate
+> limit, the edge cache, `max-instances=1`, the budget kill-switch and the origin secret lock
+> all remain — BFM was never what protected the origin.
+>
+> **If the smoke step fails on `cloudflare /v1`,** the fast discriminator is whether the
+> requests reached the origin at all:
+>
+> ```
+> gcloud logging read 'resource.type="cloud_run_revision"
+>   AND resource.labels.service_name="usvote-api"
+>   AND timestamp>="<window-start>" AND timestamp<="<window-end>"' \
+>   --project <project> --format='value(timestamp, httpRequest.status, httpRequest.requestUrl)'
+> ```
+>
+> Arrivals carrying 403s → the origin guard rejected the Worker's secret. **No arrivals at
+> all → Cloudflare blocked it at the edge**, and Security → Events names the feature
+> (free-plan retention is short, so look the same day).
 >
 > **Before assuming a repeat is benign, check the one thing that matters:** that the raw
 > `run.app` `/v1` still returns **403**. `https://api.<domain>/v1` returning 200 is *also*
