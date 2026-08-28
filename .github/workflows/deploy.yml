@@ -166,10 +166,9 @@ jobs:
           # after a cache purge + revision cutover, so the first hits can wake a cold
           # container or miss the just-purged edge and briefly return the wrong code.
           # Retry each assertion before failing, so a warm-up race isn't a false deploy
-          # failure. Tries default to 15 (~60s); the Cloudflare check overrides it — see
-          # below.
-          wait_for() {  # wait_for <url> <expected-code> <label> [tries]
-            local url="$1" want="$2" label="$3" tries="${4:-15}" code=""
+          # failure. Every check gets the same budget: 15 tries (~60s).
+          wait_for() {  # wait_for <url> <expected-code> <label>
+            local url="$1" want="$2" label="$3" tries=15 code=""
             for i in $(seq 1 "$tries"); do
               code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo 000)
               if [ "$code" = "$want" ]; then
@@ -184,21 +183,19 @@ jobs:
             wait_for "${RAW_URL}/v1/meta" 403 "raw /v1 origin-lock" || exit 1
           fi
           if [ -n "${CF_HOST}" ]; then
-            # The Cloudflare assertion gets a cache-buster and a longer budget (#148).
-            # It false-failed on BOTH deploys that have run this step, each time while
-            # the deploy itself was fine — and each time it healed on its own within
-            # minutes. The retry loop above was itself the fix for the first failure,
-            # and 60s of retrying the SAME url was not enough for the second.
+            # This assertion failed on all three deploys that ran it and never once
+            # passed (#148). The cause was NOT a cutover race: Cloud Run's request log
+            # shows ZERO origin arrivals across both failure windows, and Cloudflare
+            # Security Events logged one Bot Fight Mode block per retry. BFM challenges
+            # non-browser clients from datacenter ASNs — every GitHub runner, and every
+            # real consumer of this API running on cloud infrastructure. It was removed
+            # from the zone on 2026-08-28 (D054): the gate was reporting a live defect,
+            # not flaking.
             #
-            # Why a unique url rather than only more retries: the likeliest mechanism is
-            # that a 403 served during the purge/cutover race gets cached at whichever
-            # edge colo the runner hits, and the Worker then replays it. Retrying one url
-            # cannot escape that — every try is a cache hit on the poisoned entry — so
-            # more patience alone would just fail more slowly. A per-run url cannot
-            # collide with a cached error, and is harmless if the theory is wrong.
-            #
-            # Keep BOTH: the cache-buster addresses a stale edge entry, the longer budget
-            # addresses a genuinely slow cutover. They cover different causes, and the
-            # cost of over-waiting is only time on a workflow that already takes minutes.
-            wait_for "https://${CF_HOST}/v1/meta?deploy_smoke=${GITHUB_RUN_ID}" 200 "cloudflare /v1" 45 || exit 1
+            # The per-run cache-buster stays, for the reason the original one got wrong:
+            # it stops a 200 cached at the edge for the PREVIOUS snapshot version from
+            # satisfying this check after cutover. It cannot verify WHICH version is
+            # served — this gate still asserts status codes only, so a wrong-snapshot
+            # deploy would pass it (#148).
+            wait_for "https://${CF_HOST}/v1/meta?deploy_smoke=${GITHUB_RUN_ID}" 200 "cloudflare /v1" || exit 1
           fi

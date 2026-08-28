@@ -2989,3 +2989,77 @@ coverage figure derived from data D030 excludes would undo point 3."
   an unreviewed new year fails the build in one more place. That is the designed behaviour
   (D048's own note, `CURATED_YEAR_COUNT`'s pin), recorded here so it is recognised as the feature
   it is rather than treated as a regression.
+
+---
+
+## D054: Bot Fight Mode comes off the API zone — a public read-only API's clients are automated by design
+
+**Date:** 2026-08-28
+**Issue:** #148 · **Supersedes the anti-bot clause of:** D034 §1, D035 · **Leaves intact:**
+D034 §3 (origin lock), §4 (version-based caching), the rate limit, the kill-switch
+
+**Context:**
+
+D034 §1 listed "CDN + rate limiting + Bot Fight Mode" as the Cloudflare front's job, and the
+runbook's §7 step 4 told the operator to enable BFM. From the moment Cloudflare went live
+(2026-07-25) the deploy workflow's `cloudflare /v1` assertion failed on **every** deploy that
+ran it — 2026-07-25, 2026-08-11 (#139), 2026-08-28 (#192) — and **never once passed**. It was
+read as a flaky cutover race and patched twice on that premise: first a retry loop, then a
+per-run cache-buster plus a 3-minute budget. Neither helped, because neither addressed the
+cause.
+
+**What the evidence actually showed:**
+
+1. **Cloud Run's request log recorded ZERO origin arrivals** during both inspected failure
+   windows (2026-08-11 08:01:53–08:02:54Z, 2026-08-28 02:06:43–02:09:47Z), while the two raw
+   `run.app` checks in the same step arrived and passed on try 1. The 403s were served by the
+   edge and never reached the origin guard, so the "the Worker's secret is not arriving"
+   hypothesis in #148's third comment was pointed at the wrong layer.
+2. **Cloudflare Security Events logged ~45 Bot Fight Mode blocks** against the run's 45
+   retries — one per try, an exact match.
+3. **Try 1 of run 33134249539 was already 403 on `?deploy_smoke=33134249539`, a URL that had
+   never been requested.** This kills both prior theories at once: a cache cannot hit a key
+   never written, and a 60-req/min limit cannot be exceeded by a run's first request.
+4. Verified after removal, from a GitHub runner (Azure AS8075, `curl/8.5.0` — the same client
+   class that failed 45/45): `/health`, `/v1/meta`, the exact smoke URL, and a browser-UA
+   variant all return **200**, with `origin_guard: "enforced"` still reported by `/health`.
+
+**Decision:** Bot Fight Mode is **off** on this zone and must stay off. The runbook says so
+explicitly rather than merely omitting it, because the failure is invisible from a residential
+IP and a future operator would otherwise re-enable it in good faith.
+
+**Rationale:**
+
+- **It was breaking the product, not the test.** BFM's purpose is to block non-browser
+  clients. On a public read-only JSON API, non-browser clients *are* the audience — someone's
+  CI, a serverless function, a script on a VPS. For 34 days every such consumer on cloud
+  infrastructure got an opaque 403, and nothing surfaced it except the gate that was being
+  dismissed as flaky.
+- **Free-tier BFM cannot be scoped.** Per-path exemptions and skip rules need Super Bot Fight
+  Mode (Pro+), so "keep it, exempt the runner" was never available. All or nothing.
+- **There is no collateral surface.** `api.` is the only hostname on the zone with DNS records
+  (apex and `www` resolve to nothing), so BFM was protecting no website.
+- **The origin's protection is unchanged.** BFM never guarded the origin — the shared-secret
+  header (D034 §3) does, and a `run.app` bypass is still 403. What remains after removal: the
+  `/v1` rate limit (60/min per IP), the long-`s-maxage` edge cache, `max-instances=1`, the
+  budget kill-switch, and the origin lock. The cost posture is unmoved.
+
+**The generalisable lesson**, worth more than the fix: a gate that is red on every run gets
+re-diagnosed as flaky, and each patch that fails to fix it strengthens the flakiness reading.
+Two rounds of workflow changes were spent on hypotheses that one query of the origin's request
+log would have refuted in a minute — the discriminator "did the request arrive at all" is
+cheap, and separates edge from origin before any theory is needed. It is now written into the
+runbook next to the box that used to say "this is probably benign".
+
+**What this does NOT change:**
+
+- **The rate limit stays**, including its `Block` action. Note that a legitimate heavy consumer
+  tripping it also receives a 403 rather than a 429 — honest-enough behaviour, but the same
+  class of opaque answer, and worth revisiting if real traffic ever hits it.
+- **The gate still asserts status codes only.** A deploy serving the *wrong snapshot* passes
+  it. That was flagged three times on #148 and remains open; asserting `/health`'s
+  `snapshot_version` against the deployed image tag is the fix, deliberately not folded into
+  this change.
+
+**Related:** D034 (the deployment this amends), D035 (the Worker front), `#148`,
+`.github/workflows/deploy.yml`, `docs/deploy-cloud-run.md` §7.
