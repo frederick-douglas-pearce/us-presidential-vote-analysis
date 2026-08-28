@@ -186,9 +186,16 @@ jobs:
           # design exists to prevent. Assert the identity of the data actually serving,
           # at both ends of the path. `snapshot_version` is the content hash read out of
           # the snapshot in "Derive image tag" above, before the image was even built.
-          got=$(curl -s --max-time 20 "${RAW_URL}/health" \
-                | python -c "import json,sys;print(json.load(sys.stdin).get('snapshot_version',''))" \
-                || echo "")
+          # Retried only while the read comes back EMPTY (a transient curl/parse
+          # failure). A mismatch is never retried — that is a real answer, not a blip.
+          got=""
+          for i in 1 2 3; do
+            got=$(curl -s --max-time 20 "${RAW_URL}/health" \
+                  | python -c "import json,sys;print(json.load(sys.stdin).get('snapshot_version',''))" \
+                  || echo "")
+            [ -n "$got" ] && break
+            sleep 4
+          done
           if [ "$got" = "$SNAPSHOT_VERSION" ]; then
             echo "  ✓ origin snapshot_version: ${SNAPSHOT_VERSION:0:12}…"
           else
@@ -215,25 +222,35 @@ jobs:
             wait_for "https://${CF_HOST}/v1/meta?deploy_smoke=${GITHUB_RUN_ID}" 200 "cloudflare /v1" || exit 1
 
             # ...but that check is structurally blind to a FAILED PURGE: a unique url is
-            # always a MISS, so it always fetches from the origin and always sees the new
-            # ETag. Only the CANONICAL url — the one real users hit — tests whether the
-            # edge actually cut over. It matters because the edge hold is `s-maxage` 30
-            # days (D034), so a purge that silently no-ops serves stale data for a month.
+            # a distinct cache key, so it is always a MISS, always fetches from the
+            # origin, and always sees the new ETag. Only the CANONICAL url — the one real
+            # users hit, and the only key holding a pre-purge entry — tests whether the
+            # edge cut over. It matters because the Worker's edge hold is `s-maxage` 30
+            # days (D035), so a purge that silently no-ops serves stale data for a month.
             # Retried: the purge is asynchronous and the previous step only requested it.
-            # The ETag is the snapshot content hash, so this is the same assertion as the
-            # origin check above, made at the other end of the path.
+            #
+            # Scope this honestly: `caches.default` is colo-local and one runner samples
+            # one colo, so this proves THE COLO THE RUNNER HIT cut over, not every colo.
+            # It catches a total purge failure (the likely mode); a purge that leaves some
+            # other colo stale passes here. #195's canary samples more colos over time and
+            # is the compensation, not this check.
+            edge_hdr=$(mktemp)
             edge_ok=0
             for i in $(seq 1 15); do
-              etag=$(curl -s -o /dev/null -D - --max-time 20 "https://${CF_HOST}/v1/meta" \
-                     | tr -d '\r' | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); print $2}')
-              if [ "$etag" = "$SNAPSHOT_VERSION" ]; then
+              code=$(curl -s -o /dev/null -D "$edge_hdr" -w '%{http_code}' --max-time 20 "https://${CF_HOST}/v1/meta") || code=000
+              # Cloudflare rewrites a strong tag to weak (W/"…") whenever it compresses,
+              # so strip the prefix: the VALUE identifies the snapshot, not the validator
+              # strength. Without this the gate goes permanently red the day anything
+              # adds `--compressed` here — the #148 pathology, rebuilt.
+              etag=$(tr -d '\r' < "$edge_hdr" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
+              if [ "$code" = "200" ] && [ "$etag" = "$SNAPSHOT_VERSION" ]; then
                 echo "  ✓ edge is serving the new version (try ${i})"; edge_ok=1; break
               fi
-              echo "  … edge ETag is '${etag:-none}', want ${SNAPSHOT_VERSION:0:12}… (try ${i}); retrying"
+              echo "  … edge: HTTP ${code}, ETag '${etag:-none}', want 200 + ${SNAPSHOT_VERSION:0:12}… (try ${i}); retrying"
               sleep 4
             done
             if [ "$edge_ok" -ne 1 ]; then
-              echo "::error::the Cloudflare edge is still serving a previous version — the cache purge did not take"
+              echo "::error::the canonical /v1/meta is not serving this deploy's snapshot (last: HTTP ${code}, ETag '${etag:-none}') — the purge did not take, or the endpoint is failing"
               exit 1
             fi
           fi
