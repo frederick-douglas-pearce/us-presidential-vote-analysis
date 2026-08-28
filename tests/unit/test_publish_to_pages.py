@@ -357,8 +357,6 @@ def test_non_ascii_body_round_trips(box: Sandbox) -> None:
     assert "em dash — and a curly quote’s tail." in published
 
 
-
-
 # --- the shared-namespace provenance guard (#157) ---------------------------
 #
 # Two repos publish into ONE Pages namespace, and `build_plan`'s collision check
@@ -413,7 +411,9 @@ def test_a_target_no_publisher_owns_is_refused_with_a_different_remedy(
     src = box.add_post("banner", "social/images/banner/og-card.png", card_bytes=b"OURS")
     (box.pages_assets / "banner-og.png").write_bytes(b"SITE")
 
-    with pytest.raises(box.ptp.PublishError, match=r"do NOT rename this post's slug"):
+    with pytest.raises(
+        box.ptp.PublishError, match=r"do NOT reflexively rename this post's slug"
+    ):
         box.publish([src], pages_owner=lambda _d: None)
 
 
@@ -514,6 +514,37 @@ def test_an_empty_source_repo_is_refused(box: Sandbox) -> None:
                 "  ",
             ]
         )
+
+
+def test_a_padded_source_repo_is_trimmed_before_use(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """Validated and used must be the SAME value.
+
+    Trimming only for the emptiness check would let `--source-repo " ours"`
+    pass validation and then match no owner — every one of our own targets
+    refused, by a value the operator cannot see is padded. Run against real
+    history so the comparison is the real one.
+    """
+    target = box.pages_assets / "padded-og.png"
+    target.write_bytes(b"OLD")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+    src = box.add_post("padded", "social/images/padded/og-card.png", card_bytes=b"NEW")
+
+    box.ptp.main(
+        [
+            str(src),
+            "--posts-dir",
+            str(box.pages_posts),
+            "--assets-dir",
+            str(box.pages_assets),
+            "--source-repo",
+            f"  {OUR_REPO}  ",
+        ]
+    )
+
+    assert target.read_bytes() == b"NEW"
 
 
 @pytest.mark.parametrize(
@@ -626,14 +657,36 @@ def test_a_path_with_no_history_has_no_pages_owner(
     assert box.ptp.git_pages_owner(stray) is None
 
 
-def test_a_target_outside_the_checkout_is_a_distinct_failure(box: Sandbox) -> None:
-    """Not a checkout -> its own error, and never "rename your slug".
+def test_pages_dirs_inside_this_repo_are_refused(box: Sandbox) -> None:
+    """The bound that actually holds — and the MECHANISM test for it.
 
-    Bounded explicitly rather than relying on `tmp_path` sitting outside every
-    repository: git walks upward for `.git`, so with an unbounded walk this test
-    would pass or fail on where pytest put its temp dir — and in production an
-    operator who cloned the Pages site inside another repo would silently get
-    that repo's history consulted.
+    `REPO_ROOT` is derived from `__file__`, so this is a pure filesystem
+    question with no git in it. Delete the check in `run()` and this test goes
+    red, which is exactly what its predecessor could not do: that one asserted
+    the not-a-checkout error, which the `toplevel is None` branch produces on
+    its own, so it passed with the check deleted AND depended on where pytest
+    happened to put `tmp_path`.
+
+    What this catches is the realistic slip: pointing the Pages dirs at the
+    source repo, whose targets would then be written into our own tree.
+    """
+    src = box.add_post("inside", "social/images/inside/og-card.png")
+    inside = box.repo / "_posts"
+    inside.mkdir()
+
+    with pytest.raises(box.ptp.PublishError, match="is inside this repo"):
+        box.ptp.run([src], inside, box.pages_assets, False, OUR_REPO)
+
+    assert not (inside / src.name).exists()
+
+
+def test_a_target_in_no_repository_at_all_is_refused(box: Sandbox) -> None:
+    """The `toplevel is None` branch.
+
+    Environment-dependent by nature — it needs `tmp_path` to sit outside every
+    repository, which is ordinary but not guaranteed. Stated rather than
+    disguised: the deterministic bound is the test above, and this one covers a
+    different branch, not the same one twice.
     """
     with pytest.raises(box.ptp.PublishError, match="is not inside a git checkout"):
         box.ptp.git_pages_owner(box.pages_assets / "anything.png")

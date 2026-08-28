@@ -293,10 +293,18 @@ def build_plan(
 
 
 #: Every sync into the shared Pages repo commits under this subject, naming its
-#: source repo. Both publishers use the identical form, so it is the provenance
-#: the guard needs — recorded by the very mechanism that would be racing. The
-#: Action builds it from the same value it passes to `--source-repo`
-#: (see .github/workflows/pages-sync.yml).
+#: source repo — the provenance the guard needs, recorded by the very mechanism
+#: that would be racing. Our Action builds it from the same value it passes to
+#: `--source-repo` (see .github/workflows/pages-sync.yml), so OUR half cannot
+#: drift.
+#:
+#: The sibling's half is an assumption, not an invariant: it must match what
+#: `claude-code-sessions`'s own Action writes, which nothing here can check and
+#: no test pins. Verified by hand against that repo's `pages-sync.yml` on
+#: 2026-08-28 — `chore(sync): publish posts from claude-code-sessions@<sha>`,
+#: identical. If it ever drifts, its targets parse to no owner and take the
+#: "no sync commit" branch below, which is why that branch's remedy names a
+#: sibling-format drift as one of its possible causes.
 _SYNC_SUBJECT = re.compile(
     r"^chore\(sync\): publish posts from (?P<repo>[A-Za-z0-9._-]+)@"
 )
@@ -335,20 +343,26 @@ def git_pages_owner(dest: Path) -> str | None:
     and every run rewrites its own targets from it.
 
     Runs `git -C <dest's own dir>` — git walks upward for `.git`, so the Pages
-    root is neither needed nor computed. The walk is then bounded by checking
-    the repo it found actually contains `dest`, so a Pages tree that is not a
-    checkout cannot silently borrow an ancestor repository's history.
+    root is neither needed nor computed.
+
+    **That walk is git's own, and this function does not bound it.** An earlier
+    attempt to bound it here compared the discovered toplevel against `dest`,
+    which is a tautology: git found that repo BY walking up from `dest`, so it
+    is always an ancestor. What is actually ruled out is narrower, and it is
+    ruled out in `run()` rather than here: the Pages dirs may not sit inside
+    this repo's own tree, which is the realistic operator slip and is decidable
+    against `REPO_ROOT` without asking git anything. A Pages tree that is not a
+    checkout but sits under some unrelated third repository will consult that
+    repository's history — which fails **closed** (no `chore(sync)` commits
+    there, so no owner, so refuse) and only in a local dry-run, since the Action
+    checks out a real clone.
     """
-    # Both ways of not being in the right repository — no repository at all, or
-    # an ancestor one that git's upward walk found instead — are the same
-    # operator error and get the same message.
     toplevel = _git_toplevel(dest)
-    if toplevel is None or not _contains(toplevel, dest):
+    if toplevel is None:
         raise PublishError(
-            f"{dest.parent} is not inside a git checkout of the Pages repo "
-            f"(git resolved: {toplevel or 'no repository'}) — the "
-            f"shared-namespace guard reads the Pages history, so --posts-dir "
-            f"and --assets-dir must point into a real clone."
+            f"{dest.parent} is not inside a git checkout — the shared-namespace "
+            f"guard reads the Pages repo's history, so --posts-dir and "
+            f"--assets-dir must point into a real clone of it."
         )
     log = _git_out(dest, "log", "--format=%s", "--", str(dest))
     for subject in log.splitlines():
@@ -359,7 +373,12 @@ def git_pages_owner(dest: Path) -> str | None:
 
 
 def _contains(root: Path, dest: Path) -> bool:
-    """Whether `dest` lies inside `root`. Bounds git's unbounded upward walk."""
+    """Whether `dest` lies inside `root`.
+
+    Used against `REPO_ROOT`, which is derived from `__file__` and so is a value
+    this module knows exactly — never against a root git discovered by walking
+    up from `dest`, which it necessarily contains.
+    """
     try:
         dest.resolve().relative_to(root.resolve())
     except ValueError:
@@ -384,14 +403,14 @@ def _git_out(dest: Path, *args: str) -> str:
 
     **Empty output and a git failure are different conditions and are not
     collapsed.** `git log` exits 0 with empty stdout for a path it has no
-    history for, and non-zero outside a checkout. Both refuse the write, but
-    the operator remedy differs, and a fail-loud guard whose message sends you
-    the wrong way is a regression wearing fail-loud's clothes.
+    history for, which is an ordinary answer and not an error.
 
-    Decoded as explicit UTF-8 rather than left to the runner's locale, for the
-    reason `build_plan` gives about reading posts: a commit subject this cannot
-    decode must not escape as a `UnicodeDecodeError` traceback past `main()`'s
-    `except PublishError` handler.
+    Since `git_pages_owner` establishes there IS a repository before calling
+    this, a non-zero exit here no longer means "outside a checkout". The
+    reachable cause is a repository with no commits at all, where `git log`
+    exits 128 — local and test-only, unreachable against the real Pages repo,
+    which is why the message stays generic rather than naming a cause it would
+    usually be wrong about.
     """
     proc = _git_run(dest, *args)
     if proc.returncode != 0:
@@ -407,10 +426,11 @@ def _git_out(dest: Path, *args: str) -> str:
 def _git_run(dest: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run git in `dest`'s directory, capturing output. Never raises on exit code.
 
-    Decoded as explicit UTF-8 rather than left to the runner's locale, for the
-    reason `build_plan` gives about reading posts: a commit subject this cannot
-    decode must not escape as a `UnicodeDecodeError` traceback past `main()`'s
-    `except PublishError` handler, which is where the operator message lives.
+    Decoding is explicit UTF-8 rather than the runner's locale, for the reason
+    `build_plan` gives about reading posts — and `errors="replace"` because a
+    commit subject is not ours to control: an undecodable byte should degrade to
+    a replacement character, which then simply fails to parse as a sync subject,
+    rather than raise.
     """
     try:
         return subprocess.run(
@@ -464,10 +484,12 @@ def assert_no_foreign_overwrite(
         if owner is None:
             raise PublishError(
                 f"refusing to overwrite {where}: no Pages sync commit in its "
-                f"history, so it is not published by any of these repos — it "
-                f"is site-owned or hand-written. Reconcile it on the Pages "
-                f"side; do NOT rename this post's slug, which would move a "
-                f"permalink and a share-card URL that are already live."
+                f"history, so no publisher this guard recognizes owns it. It is "
+                f"site-owned, hand-written, or published by a sibling repo whose "
+                f"commit-subject format this guard no longer recognizes. Check "
+                f"who owns it on the Pages side; do NOT reflexively rename this "
+                f"post's slug, which would move a permalink and a share-card URL "
+                f"that are already live."
             )
         raise PublishError(
             f"refusing to overwrite {where}: it was last published by "
@@ -514,6 +536,19 @@ def run(
         if not d.is_dir():
             raise PublishError(
                 f"{label} not found: {d} — is the Pages worktree checked out?"
+            )
+        # A dir-sanity precondition, deliberately EAGER and deliberately here
+        # rather than in the guard: a brand-new post's targets are all absent,
+        # so nothing is arbitrated, and yet writing them into this repo's own
+        # tree is exactly the slip worth catching. `REPO_ROOT` is derived from
+        # __file__, so this asks git nothing and cannot be a tautology — unlike
+        # bounding git's own upward walk from inside `git_pages_owner`, which
+        # cannot work (see there).
+        if _contains(REPO_ROOT, d):
+            raise PublishError(
+                f"{label} is inside this repo ({d}) — --posts-dir and "
+                f"--assets-dir must point at a checkout of the Pages repo, "
+                f"not at the source repo publishing into it."
             )
 
     plan = build_plan(sources, posts_dir, assets_dir)
@@ -572,14 +607,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     # which `_SYNC_SUBJECT` can never parse. Every later update of that post
     # then reads as owned by nobody, forever. The workflow feeds this from
     # `github.event.repository.name`; check it rather than trust it.
-    if not args.source_repo.strip():
+    source_repo = args.source_repo.strip()
+    if not source_repo:
         raise PublishError("--source-repo must not be empty")
     return run(
         args.sources,
         args.posts_dir,
         args.assets_dir,
         args.dry_run,
-        args.source_repo,
+        source_repo,
     )
 
 

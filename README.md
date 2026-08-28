@@ -226,10 +226,12 @@ post the site would reject:
 | [`.github/workflows/prettier.yml`](.github/workflows/prettier.yml) | PR guard &mdash; `posts/` must be Prettier-clean in the site's exact dialect and pinned versions |
 | [`tooling/render-og-card.py`](tooling/render-og-card.py) | Renders each post's 1200&times;630 share card from a committable TOML brief, so a card can be re-generated without re-prompting |
 
-Four properties are load-bearing. **Card resolution is fail-closed, never a glob** &mdash; a
-missing, absolute, or repo-escaping path, a missing image, two posts colliding on one
-target, or a target another publisher owns all abort with zero writes, because a wrong image
-shipped under a green build is the failure this design exists to prevent. **Idempotency is
+Four properties are load-bearing. **Target resolution is fail-closed, never a glob** &mdash; a
+missing, absolute, or repo-escaping path, a missing image, or two posts colliding on one
+target all abort with zero writes, because a wrong image shipped under a green build is the
+failure this design exists to prevent. A fifth condition joins them and is not card-specific:
+**a post or card target that another publisher owns** aborts too, since the Pages site is a
+namespace shared with [`claude-code-sessions`](https://github.com/frederick-douglas-pearce/claude-code-sessions). **Idempotency is
 content-compare, not push-diff**, so a re-run makes no spurious changes and no empty
 commits. **Atomicity is validate-all-then-write**, so one bad post cannot half-publish a
 batch. And **the PR guard reuses the publisher's own plan builder** rather than re-deriving
