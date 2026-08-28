@@ -226,6 +226,7 @@ daily ESG-feed cron. Two consequences:
     intended trade (loud beats a wrong share image on a green run), not a bug.
   - **So keep the slug distinct across the two series anyway.** The guard turns a silent
     corruption into a stopped publish; it does not make the namespace safe to share.
+
 - **Pushes race.** The Action reconciles rather than force-pushing: on rejection it
   fetches, resets to the moved tip, **re-transforms against it**, and retries (bounded,
   then fails loud). Nothing another writer put there is clobbered.
