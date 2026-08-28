@@ -97,7 +97,11 @@ jobs:
             # cutover (#148) and nothing checks it afterwards, while the edge hold is
             # `s-maxage` 30 days. Deliberately oracle-free: the canary has no expected
             # version, only the requirement that the two ends agree.
-            edge_version=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); print $2}')
+            # Strip a weak-validator prefix: Cloudflare rewrites the strong tag to
+            # W/"…" whenever it compresses. The value identifies the snapshot; the
+            # validator strength does not, and treating W/hash as a mismatch would go
+            # red on a healthy API — #148's pathology, rebuilt.
+            edge_version=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
             if [ -n "$origin_version" ] && [ "$edge_version" != "$origin_version" ]; then
               fail "the edge is serving snapshot '${edge_version:-none}' but the origin has '${origin_version}' — stale edge cache"
             fi
