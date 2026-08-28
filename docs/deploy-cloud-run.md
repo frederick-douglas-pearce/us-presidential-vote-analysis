@@ -341,6 +341,55 @@ Budget Pub/Sub alert crossing your threshold, sets the service to `--max-instanc
 alerts** at 50/90/100% (Billing → Budgets & alerts). At free-tier traffic you'll never hit
 it — it's the backstop, not the plan.
 
+## 10. Monitoring: the API canary and its dead-man's switch (#194, #197)
+
+[`.github/workflows/api-canary.yml`](../.github/workflows/api-canary.yml) probes the **public**
+API daily (13:17 UTC) and on demand. It exists because of #148: a Cloudflare setting 403'd
+every non-browser client from a datacenter ASN for 34 days, and nothing between deploys ever
+looked. So the canary is deliberately *that* client — a GitHub runner, a curl User-Agent —
+and it checks the pair, never one half: the public host must serve 200 **and** the raw
+`run.app` `/v1` must still 403. A 200 through Cloudflare is also what an origin lock that
+has fallen open looks like.
+
+It needs the `CLOUDFLARE_HOSTNAME` variable (already set for the deploy) and, for the
+origin-lock half, `RAW_ORIGIN_URL`. Without the latter it runs but warns — the security
+check goes dark, and a dark check must not be a quiet one.
+
+**The dead-man's switch** answers the next question: what notices when the *canary* stops?
+Its own alerting is absence-shaped — a canary that never runs looks exactly like one that
+runs and passes — and GitHub disables `schedule:` workflows after 60 days of repository
+inactivity, which is the same stretch in which nobody is checking the API by hand either.
+
+Set it up once:
+
+1. Create a check at [healthchecks.io](https://healthchecks.io) (free tier). Period **1 day**,
+   grace **6 hours** — comfortably over the 24h cadence, so a single dropped cron run does not
+   page you. GitHub's scheduled runs are best-effort and *are* dropped under load.
+2. Copy its ping URL (`https://hc-ping.com/<uuid>`) into the repo **secret**
+   `HEALTHCHECK_PING_URL`. A secret, not a variable: leaking it only lets someone suppress
+   an alert, but there is no reason to publish it.
+3. Point the check's notification at your email.
+
+The monitor must live **outside GitHub Actions**. A second scheduled workflow watching the
+first shares the exact failure mode it is meant to catch — if cron is what broke, both go
+quiet together.
+
+What the two alerts mean:
+
+| you get | it means |
+|---|---|
+| healthchecks **"down"** (grace expired, no ping) | the canary stopped running — disabled, deleted, cron not firing, or Actions itself |
+| healthchecks **"fail"** (an explicit `/fail` ping) | the canary ran and something is wrong: the public API, the origin lock, or the canary's own step erroring out |
+
+**Test it after wiring it up, and do not skip this.** Disable the *API canary* workflow in
+Actions (⋯ → Disable workflow) and confirm healthchecks alerts once the grace window passes,
+then re-enable it. An untested dead-man's switch is being trusted for exactly the reason the
+silence was being trusted.
+
+> Until `HEALTHCHECK_PING_URL` is set the canary still runs and still reports failures the
+> ordinary way; it warns on every run that the switch is not armed. That is the intended
+> unconfigured state — degraded, and audibly so.
+
 ## What this does NOT do
 
 - No live database anywhere ([D028](../.claude/specs/decisions.md)) — the snapshot is baked
