@@ -35,6 +35,13 @@ def etag_for(snapshot_version: str) -> str:
 
     A strong validator: the snapshot is immutable and the version is its content hash,
     so equal versions are byte-identical responses.
+
+    Two out-of-repo consumers parse this value back out of the response header — the
+    deploy gate (that the edge cut over to the new snapshot) and the scheduled canary
+    (that edge and origin agree). Both depend on the tag's *content* being the bare
+    ``snapshot_version`` and nothing else; neither depends on it staying **strong**,
+    since Cloudflare rewrites it to weak (``W/"…"``) whenever it compresses. Keep the
+    value exactly the hash.
     """
     return f'"{snapshot_version}"'
 

@@ -264,6 +264,11 @@ Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decision
 `CLOUDFLARE_ZONE_ID` and the **Variable** `CLOUDFLARE_HOSTNAME = api.<domain>`, then **re-run
 the workflow**. Now the raw `run.app` `/v1` returns **403** while `https://api.<domain>/v1`
 returns **200** through the cached, rate-limited edge — the post-deploy smoke asserts both.
+It also asserts **which snapshot is serving**, at both ends: the origin's `/health`
+`snapshot_version` and the *canonical* `/v1/meta` ETag must both equal the content hash this
+run built from. The second is what proves the cache purge took — the cache-busted
+reachability check cannot, since a unique url is always a MISS and so always reads the
+origin's fresh ETag (#148).
 
 > **Do not enable Bot Fight Mode on this zone (#148 / D054).** It was on here from
 > 2026-07-25 to 2026-08-28, and it 403s every non-browser client from a datacenter ASN —
