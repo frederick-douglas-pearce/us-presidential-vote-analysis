@@ -157,11 +157,25 @@ jobs:
             echo "::warning::dead-man's switch not armed — HEALTHCHECK_PING_URL is unset, so a canary that stops running would be silent (#197)"
             exit 0
           fi
-          # Success pings the base url; anything else pings /fail. Two distinguishable
+          # Success pings the base url; a real failure pings /fail. Two distinguishable
           # alerts — "the API is broken" now, and "the canary went quiet" after the
           # grace window — rather than one that means either.
-          url="${PING_URL%/}"
-          [ "${OUTCOME}" = "success" ] || url="${url}/fail"
+          #
+          # cancelled/skipped ping NOTHING. A manual cancel or a `timeout-minutes` fire
+          # is a deliberate or infrastructural stop, not evidence about the API, and
+          # paging someone with "the API is broken" for it would be a false alarm in the
+          # one system whose entire thesis is that false alarms destroy trust in the
+          # alarm. Silence is the correct signal there: a one-off is absorbed by the
+          # grace window, while a persistent one stops pings altogether and raises the
+          # "down" alert on its own — which is exactly what should happen.
+          case "${OUTCOME}" in
+            success) url="${PING_URL%/}" ;;
+            failure) url="${PING_URL%/}/fail" ;;
+            *)
+              echo "checks outcome '${OUTCOME}' — not pinging; the grace window covers a one-off, and a persistent one raises \"down\" by itself"
+              exit 0
+              ;;
+          esac
           if curl -fsS -m 20 --retry 3 -o /dev/null "$url"; then
             echo "pinged the dead-man's switch (checks: ${OUTCOME})"
           else

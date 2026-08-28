@@ -363,8 +363,13 @@ inactivity, which is the same stretch in which nobody is checking the API by han
 Set it up once:
 
 1. Create a check at [healthchecks.io](https://healthchecks.io) (free tier). Period **1 day**,
-   grace **6 hours** — comfortably over the 24h cadence, so a single dropped cron run does not
-   page you. GitHub's scheduled runs are best-effort and *are* dropped under load.
+   grace **30 hours**. That looks generous and is deliberate: GitHub *drops* scheduled runs
+   under load rather than merely delaying them, so one skipped daily run leaves a ~48h gap
+   between pings. A tighter grace would page you for a dropped cron — a false alarm in the
+   one system whose whole point is that false alarms destroy trust in the alarm. Latency is
+   nearly free here because every failure this catches is long-lived (a workflow disabled,
+   deleted, or auto-disabled at 60 days), so paying ~2 days of detection time to never cry
+   wolf is the right trade.
 2. Copy its ping URL (`https://hc-ping.com/<uuid>`) into the repo **secret**
    `HEALTHCHECK_PING_URL`. A secret, not a variable: leaking it only lets someone suppress
    an alert, but there is no reason to publish it.
@@ -381,10 +386,19 @@ What the two alerts mean:
 | healthchecks **"down"** (grace expired, no ping) | the canary stopped running — disabled, deleted, cron not firing, or Actions itself |
 | healthchecks **"fail"** (an explicit `/fail` ping) | the canary ran and something is wrong: the public API, the origin lock, or the canary's own step erroring out |
 
-**Test it after wiring it up, and do not skip this.** Disable the *API canary* workflow in
-Actions (⋯ → Disable workflow) and confirm healthchecks alerts once the grace window passes,
-then re-enable it. An untested dead-man's switch is being trusted for exactly the reason the
-silence was being trusted.
+**Test it after wiring it up, and do not skip this — in this order.**
+
+1. **Actions → API canary → Run workflow**, and confirm the check on healthchecks.io goes
+   **green**. This step is not optional padding: a check that has never been pinged sits in
+   the "new" state and *will not alert*, so disabling the workflow first would look exactly
+   like a working switch even if the ping URL had a typo in it. That is the one way this
+   switch can fail silently, and green-first is what closes it.
+2. Disable the workflow (⋯ → **Disable workflow**) and confirm healthchecks alerts once the
+   grace window passes.
+3. Re-enable it.
+
+An untested dead-man's switch is being trusted for exactly the reason the silence was being
+trusted.
 
 > Until `HEALTHCHECK_PING_URL` is set the canary still runs and still reports failures the
 > ordinary way; it warns on every run that the switch is not armed. That is the intended
