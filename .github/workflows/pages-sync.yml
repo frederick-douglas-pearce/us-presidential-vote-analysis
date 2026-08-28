@@ -52,6 +52,13 @@ env:
   # ASSETS_DIR are relative to the Pages checkout.
   PAGES_REPO: frederick-douglas-pearce/frederick-douglas-pearce.github.io
   PAGES_BRANCH: main
+  # This repo's own slug, and the ONE source for it. It is consumed twice — the
+  # sync commit subject below, and the publisher's --source-repo flag — and the
+  # provenance guard (#157) is only sound while those two agree: the guard reads
+  # a past subject and compares it to the flag, so a drift between them would
+  # make this repo's own cards read as another publisher's. Taken from GitHub
+  # rather than typed, so it cannot drift from the repository it runs in.
+  SOURCE_REPO: ${{ github.event.repository.name }}
   PAGES_POSTS_DIR: _posts
   PAGES_ASSETS_DIR: assets/img
   MAX_PUSH_ATTEMPTS: "5"
@@ -168,7 +175,8 @@ jobs:
           transform_and_stage() {
             python3 "${SOURCE}/tooling/publish-to-pages.py" "${posts[@]}" \
               --posts-dir  "${PAGES}/${PAGES_POSTS_DIR}" \
-              --assets-dir "${PAGES}/${PAGES_ASSETS_DIR}"
+              --assets-dir "${PAGES}/${PAGES_ASSETS_DIR}" \
+              --source-repo "${SOURCE_REPO}"
             git -C "${PAGES}" add "${PAGES_POSTS_DIR}" "${PAGES_ASSETS_DIR}"
           }
 
@@ -206,7 +214,7 @@ jobs:
 
           git config user.name  "pages-sync[bot]"
           git config user.email "pages-sync[bot]@users.noreply.github.com"
-          commit_msg="chore(sync): publish posts from us-presidential-vote-analysis@${GITHUB_SHA:0:7}"
+          commit_msg="chore(sync): publish posts from ${SOURCE_REPO}@${GITHUB_SHA:0:7}"
           git commit -m "${commit_msg}"
 
           # Pages main has OTHER automated writers (the daily ESG cron, and the

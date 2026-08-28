@@ -153,6 +153,7 @@ Pages repo:
 uv run python tooling/publish-to-pages.py posts/YYYY-MM-DD-<slug>.md \
     --posts-dir  /path/to/frederick-douglas-pearce.github.io/_posts \
     --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img \
+    --source-repo us-presidential-vote-analysis \
     --dry-run
 ```
 
@@ -208,10 +209,23 @@ the runner.
 That site also receives posts from `claude-code-sessions`, and the Pages repo has its own
 daily ESG-feed cron. Two consequences:
 
-- **Slugs share a namespace.** The card target is derived as
-  `assets/img/<basename of og_image>`, and the collision check sees only _this_ repo's
-  posts — so two posts from different source repos with the same `og_image` basename
-  would overwrite each other silently. Keep the slug distinct across the two series.
+- **Slugs share a namespace, and a clash now fails loud instead of overwriting.** The
+  card target is derived as `assets/img/<basename of og_image>`, and `build_plan`'s
+  collision check sees only _this_ repo's posts — so a clash with the other publisher
+  enters neither repo's plan. Since #157 the publisher also refuses to overwrite a target
+  it does not own: before any write, an existing target whose bytes differ must have been
+  written last by a sync from **this** repo, per the Pages repo's own commit history.
+  Otherwise the run aborts, having written nothing. Three things to know about it:
+
+  - **It fires at publish, never on the PR.** `tooling/check-og-cards.py` runs the
+    publisher's Phase-1 validator with no Pages checkout, so it cannot see the other
+    repo's slugs. A colliding slug passes CI green and stops at the sync.
+  - **It is one-sided until `claude-code-sessions` ports it.** This repo will not
+    overwrite a card that repo owns; the reverse is not yet true. So the first symptom is
+    likely to be **our** publish failing over an overwrite it did not cause — that is the
+    intended trade (loud beats a wrong share image on a green run), not a bug.
+  - **So keep the slug distinct across the two series anyway.** The guard turns a silent
+    corruption into a stopped publish; it does not make the namespace safe to share.
 - **Pushes race.** The Action reconciles rather than force-pushing: on rejection it
   fetches, resets to the moved tip, **re-transforms against it**, and retries (bounded,
   then fails loud). Nothing another writer put there is clobbered.

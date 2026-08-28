@@ -10,13 +10,22 @@ the reconcile-retry push; this script owns the transform, OG-image resolution,
 and the content-compare that makes re-runs idempotent.
 
 Usage:
-    publish-to-pages.py <source.md>... --posts-dir DIR --assets-dir DIR [--dry-run]
+    publish-to-pages.py <source.md>... --posts-dir DIR --assets-dir DIR
+                        --source-repo SLUG [--dry-run]
 
 Example:
     python3 tooling/publish-to-pages.py \\
         posts/2026-08-06-222-votes-away.md \\
         --posts-dir  /path/to/frederick-douglas-pearce.github.io/_posts/ \\
-        --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img/
+        --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img/ \\
+        --source-repo us-presidential-vote-analysis
+
+`--source-repo` is this repo's GitHub slug, and it is REQUIRED: it is the
+identity the shared-namespace guard below compares against. Note it is the
+HYPHENATED slug, which is not derivable from the local checkout — the working
+directory is `us_presidential_vote_analysis`. The Action passes
+`${{ github.event.repository.name }}`, which is the same value it builds the
+sync commit subject from.
 
 What it does, per post:
 
@@ -55,19 +64,38 @@ content-compare plus the Action's reconcile-retry self-heal it, and the
 realistic failure (a missing card) is caught in Phase 1 before any write.
 
 **Shared Pages namespace.** This site also receives posts from
-`claude-code-sessions`. The collision check below sees only *this* repo's posts,
-so two posts from different source repos whose `og_image` basenames matched
-would overwrite each other silently. Detecting that would need provenance the
-publisher does not have; the mitigation is an operator rule — keep the slug
-distinct across the two series (see posts/README.md).
+`claude-code-sessions`. `build_plan`'s collision check sees only *this* repo's
+posts, so a cross-repo collision never enters either publisher's plan. That gap
+is closed by `assert_no_foreign_overwrite`, a SECOND Phase-1 validator: before
+any write, a target that already exists with different bytes must have been
+written last by a sync from THIS repo, or the run aborts. The provenance is the
+Pages repo's own history — each sync commits as
+`chore(sync): publish posts from <repo>@<sha>` — which is why the Action checks
+out Pages at `fetch-depth: 0`.
+
+Two properties of that guard are load-bearing rather than incidental:
+
+- It lives in `run()`, NOT in `build_plan`. `tooling/check-og-cards.py` calls
+  `build_plan` directly with inert stand-in directories and needs no Pages
+  checkout at all; a git call inside `build_plan` would break the PR guard on
+  every PR.
+- It is therefore invisible to that PR guard. A slug colliding with
+  `claude-code-sessions` passes CI green and fails at publish time — loudly,
+  but late. See posts/README.md.
+
+It is also **one-sided until the sibling repo ports it**: this repo will refuse
+to overwrite a card `claude-code-sessions` owns, but not the reverse. The
+operator rule — keep the slug distinct across the two series — is therefore
+still worth following, not superseded (see posts/README.md).
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -261,13 +289,127 @@ def build_plan(
     return plan
 
 
+#: Every sync into the shared Pages repo commits under this subject, naming its
+#: source repo. Both publishers use the identical form, so it is the provenance
+#: the guard needs — recorded by the very mechanism that would be racing. The
+#: Action builds it from the same value it passes to `--source-repo`
+#: (see .github/workflows/pages-sync.yml).
+_SYNC_SUBJECT = re.compile(
+    r"^chore\(sync\): publish posts from (?P<repo>[A-Za-z0-9._-]+)@"
+)
+
+
+def sync_source_repo(subject: str) -> str | None:
+    """The source repo a Pages sync commit names, or None if it is not one.
+
+    None covers every non-sync writer — a hand commit, the site's own history
+    (`assets/img/og_banner.png` is one), the daily ESG cron. The caller treats
+    that as foreign, because "someone else wrote this" is the question, not
+    "which sync wrote this".
+    """
+    m = _SYNC_SUBJECT.match(subject)
+    return m.group("repo") if m else None
+
+
+def git_last_writer(dest: Path) -> str | None:
+    """Subject of the last commit touching `dest`, or None if it has no history.
+
+    Runs `git -C <dest's own dir>` — git walks upward to find `.git`, so the
+    Pages root is neither needed nor computed (`assets_dir.parent.parent` would
+    be a guess about someone else's layout).
+
+    **Empty output and a git failure are different conditions and are not
+    collapsed.** `git log` exits 0 with empty stdout for a path it has no
+    history for, and 128 outside a checkout. Both refuse the write, but the
+    operator remedy differs — "rename your slug" is actively misleading when the
+    real cause is "that directory is not a git checkout", and a fail-loud guard
+    whose message sends you the wrong way is a regression wearing fail-loud's
+    clothes.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", str(dest.parent),
+                "log", "-1", "--format=%s", "--", str(dest),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as e:
+        raise PublishError(f"could not run git to read Pages history: {e}") from e
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip().splitlines()
+        raise PublishError(
+            f"could not read Pages history for {dest} (git exited "
+            f"{proc.returncode}) — is the target directory a git checkout? "
+            f"{stderr[0] if stderr else 'no-stderr'}"
+        )
+    return proc.stdout.strip() or None
+
+
+def assert_no_foreign_overwrite(
+    plan: dict[Path, PlanEntry],
+    source_repo: str,
+    last_writer: Callable[[Path], str | None] = git_last_writer,
+) -> None:
+    """Phase 1: refuse to overwrite a target another publisher owns. No writes.
+
+    The shared-namespace guard. `build_plan` catches two of THIS repo's posts
+    colliding; this catches a collision with the OTHER publisher, which never
+    enters either repo's plan (see the module docstring).
+
+    Deliberately checks BOTH target kinds. The card is the likelier collision —
+    a shared slug like `token-accounting-og.png` is plausible across two
+    technical series, where a post collision needs the same filename on the same
+    date — but a silently clobbered post is the worse outcome, and one uniform
+    loop is less code than a kind-based exception.
+
+    An **unchanged** target is waved through without consulting git: Phase 2
+    will not write it, so there is nothing to arbitrate. That matters
+    operationally as well as for cost — the Action's reconcile-retry loop
+    re-transforms against a moved tip on every attempt, and the common case
+    there is a target whose bytes already match.
+    """
+    for dest in sorted(plan):
+        entry = plan[dest]
+        if not dest.exists() or _unchanged(dest, entry.data):
+            continue
+        subject = last_writer(dest)
+        owner = sync_source_repo(subject) if subject is not None else None
+        if owner == source_repo:
+            continue
+        if subject is None:
+            detail = "it has no commit history in the Pages tree"
+        elif owner is None:
+            detail = f"its last writer was not a Pages sync ({subject!r})"
+        else:
+            detail = f"it was last published by {owner!r}"
+        raise PublishError(
+            f"refusing to overwrite {dest} ({entry.kind} for {entry.post_name}): "
+            f"{detail}, not by {source_repo!r}. The Pages site is a namespace "
+            f"shared with another publisher — rename this post's slug so its "
+            f"targets are unique across both series."
+        )
+
+
+def _unchanged(dest: Path, data: bytes) -> bool:
+    """Whether `dest` already holds exactly `data` — the content-compare predicate.
+
+    Shared by `assert_no_foreign_overwrite` and `write_if_changed` so the two
+    cannot drift: a target the guard waves through as unchanged is exactly the
+    target Phase 2 declines to write.
+    """
+    return dest.exists() and dest.read_bytes() == data
+
+
 def write_if_changed(dest: Path, data: bytes, dry_run: bool) -> bool:
     """Write `data` to `dest` only if the bytes differ. Returns whether changed.
 
     The parent dir is a precondition (checked up front), never created here — a
     missing Pages dir means the worktree isn't set up, which should fail loud.
     """
-    if dest.exists() and dest.read_bytes() == data:
+    if _unchanged(dest, data):
         return False
     if not dry_run:
         dest.write_bytes(data)
@@ -275,7 +417,12 @@ def write_if_changed(dest: Path, data: bytes, dry_run: bool) -> bool:
 
 
 def run(
-    sources: Sequence[Path], posts_dir: Path, assets_dir: Path, dry_run: bool
+    sources: Sequence[Path],
+    posts_dir: Path,
+    assets_dir: Path,
+    dry_run: bool,
+    source_repo: str,
+    last_writer: Callable[[Path], str | None] = git_last_writer,
 ) -> int:
     # Phase-1 preconditions: the Pages dirs must already exist. Do NOT mkdir —
     # absence means the worktree isn't checked out, an operator error.
@@ -286,6 +433,12 @@ def run(
             )
 
     plan = build_plan(sources, posts_dir, assets_dir)
+    # The second Phase-1 validator, and it must stay HERE rather than inside
+    # `build_plan`: tooling/check-og-cards.py calls that directly with inert
+    # stand-in dirs and no Pages checkout. Not gated on `dry_run` — the operator
+    # dry-run runs against a real Pages checkout and is exactly the preview that
+    # should surface a foreign collision before the real push does.
+    assert_no_foreign_overwrite(plan, source_repo, last_writer)
 
     # Phase 2: apply. Content-compare means unchanged outputs write nothing.
     prefix = "[dry-run] " if dry_run else ""
@@ -317,10 +470,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--assets-dir", required=True, type=Path, help="Pages assets/img/ directory"
     )
     ap.add_argument(
+        "--source-repo",
+        required=True,
+        metavar="SLUG",
+        help=(
+            "this repo's GitHub slug (hyphenated), used to tell our own Pages "
+            "targets from another publisher's"
+        ),
+    )
+    ap.add_argument(
         "--dry-run", action="store_true", help="resolve + compare, but write nothing"
     )
     args = ap.parse_args(argv)
-    return run(args.sources, args.posts_dir, args.assets_dir, args.dry_run)
+    return run(
+        args.sources,
+        args.posts_dir,
+        args.assets_dir,
+        args.dry_run,
+        args.source_repo,
+    )
 
 
 if __name__ == "__main__":
