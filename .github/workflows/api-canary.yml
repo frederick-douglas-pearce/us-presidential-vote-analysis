@@ -39,6 +39,7 @@ jobs:
     if: ${{ vars.CLOUDFLARE_HOSTNAME != '' }}
     steps:
       - name: Check the public API
+        id: checks
         env:
           CF_HOST: ${{ vars.CLOUDFLARE_HOSTNAME }}
           # Optional: the raw run.app URL, kept in a repo variable rather than tracked
@@ -130,3 +131,56 @@ jobs:
             exit 1
           fi
           echo "API canary: all checks passed."
+
+      # Dead-man's switch (#197). The checks above detect a broken API; this detects a
+      # broken CANARY. Its alerting is otherwise absence-shaped — a canary that stops
+      # running looks exactly like one that runs and passes, i.e. like nothing — and
+      # GitHub disables `schedule:` workflows after 60 days of repo inactivity, which is
+      # precisely the stretch when nobody is checking the API by hand either.
+      #
+      # The monitor has to live OUTSIDE GitHub Actions. A second scheduled workflow
+      # watching this one shares the exact failure mode it is meant to catch: if cron is
+      # what broke, both go quiet together and the silence still reads as health.
+      #
+      # `always()` on purpose, and it is the point rather than a convenience: it fires
+      # even when the step above died for a reason that is not an API failure at all —
+      # a missing `jq`, a runner image change, an unbound variable — which converts
+      # "the canary quietly broke" into an immediate, specific alert.
+      - name: Ping the dead-man's switch
+        if: always()
+        env:
+          PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
+          OUTCOME: ${{ steps.checks.outcome }}
+        run: |
+          set -uo pipefail
+          if [ -z "${PING_URL}" ]; then
+            echo "::warning::dead-man's switch not armed — HEALTHCHECK_PING_URL is unset, so a canary that stops running would be silent (#197)"
+            exit 0
+          fi
+          # Success pings the base url; a real failure pings /fail. Two distinguishable
+          # alerts — "the API is broken" now, and "the canary went quiet" after the
+          # grace window — rather than one that means either.
+          #
+          # cancelled/skipped ping NOTHING. A manual cancel or a `timeout-minutes` fire
+          # is a deliberate or infrastructural stop, not evidence about the API, and
+          # paging someone with "the API is broken" for it would be a false alarm in the
+          # one system whose entire thesis is that false alarms destroy trust in the
+          # alarm. Silence is the correct signal there: a one-off is absorbed by the
+          # grace window, while a persistent one stops pings altogether and raises the
+          # "down" alert on its own — which is exactly what should happen.
+          case "${OUTCOME}" in
+            success) url="${PING_URL%/}" ;;
+            failure) url="${PING_URL%/}/fail" ;;
+            *)
+              echo "checks outcome '${OUTCOME}' — not pinging; the grace window covers a one-off, and a persistent one raises \"down\" by itself"
+              exit 0
+              ;;
+          esac
+          if curl -fsS -m 20 --retry 3 -o /dev/null "$url"; then
+            echo "pinged the dead-man's switch (checks: ${OUTCOME})"
+          else
+            # Never fail the job over the ping: a missing ping IS the alert, so the
+            # monitor still fires. Warn so a persistently unreachable monitor — which
+            # would page on every run — is attributable.
+            echo "::warning::dead-man's switch ping failed (checks: ${OUTCOME}); the monitor will alert on the missing ping, which is the designed fallback"
+          fi
