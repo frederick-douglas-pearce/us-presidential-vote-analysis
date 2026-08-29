@@ -226,14 +226,19 @@ post the site would reject:
 | [`.github/workflows/prettier.yml`](.github/workflows/prettier.yml) | PR guard &mdash; `posts/` must be Prettier-clean in the site's exact dialect and pinned versions |
 | [`tooling/render-og-card.py`](tooling/render-og-card.py) | Renders each post's 1200&times;630 share card from a committable TOML brief, so a card can be re-generated without re-prompting |
 
-Four properties are load-bearing. **Card resolution is fail-closed, never a glob** &mdash; a
+Four properties are load-bearing. **Target resolution is fail-closed, never a glob** &mdash; a
 missing, absolute, or repo-escaping path, a missing image, or two posts colliding on one
 target all abort with zero writes, because a wrong image shipped under a green build is the
-failure this design exists to prevent. **Idempotency is content-compare, not push-diff**, so
-a re-run makes no spurious changes and no empty commits. **Atomicity is
-validate-all-then-write**, so one bad post cannot half-publish a batch. And **the PR guard
-reuses the publisher's own plan builder** rather than re-deriving its rules, so the two
-cannot drift and a future fail-closed condition is inherited for free.
+failure this design exists to prevent. One more condition joins them, and it is not card-specific:
+**a post or card target that another publisher owns** aborts too, since the Pages site is a
+namespace shared with [`claude-code-sessions`](https://github.com/frederick-douglas-pearce/claude-code-sessions). **Idempotency is
+content-compare, not push-diff**, so a re-run makes no spurious changes and no empty
+commits. **Atomicity is validate-all-then-write**, so one bad post cannot half-publish a
+batch. And **the PR guard reuses the publisher's own plan builder** rather than re-deriving
+its rules, so the two cannot drift and a future condition added *to that builder* is
+inherited for free &mdash; with one deliberate exception: the shared-namespace check needs the
+Pages repo's history, which the PR guard does not have, so a slug clashing with the sibling
+publisher passes CI and stops at the sync instead.
 
 Two editorial guardrails apply to everything published: nothing critical of a data source
 is ever published (findings about the National Archives, MIT Election Lab, or UCSB go to

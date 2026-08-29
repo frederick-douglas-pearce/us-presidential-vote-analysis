@@ -52,6 +52,13 @@ env:
   # ASSETS_DIR are relative to the Pages checkout.
   PAGES_REPO: frederick-douglas-pearce/frederick-douglas-pearce.github.io
   PAGES_BRANCH: main
+  # This repo's own slug, and the ONE source for it. It is consumed twice — the
+  # sync commit subject below, and the publisher's --source-repo flag — and the
+  # provenance guard (#157) is only sound while those two agree: the guard reads
+  # a past subject and compares it to the flag, so a drift between them would
+  # make this repo's own cards read as another publisher's. Taken from GitHub
+  # rather than typed, so it cannot drift from the repository it runs in.
+  SOURCE_REPO: ${{ github.event.repository.name }}
   PAGES_POSTS_DIR: _posts
   PAGES_ASSETS_DIR: assets/img
   MAX_PUSH_ATTEMPTS: "5"
@@ -122,7 +129,14 @@ jobs:
           ref: ${{ env.PAGES_BRANCH }}
           token: ${{ secrets.PAGES_SYNC_TOKEN }}
           path: pages
-          # Full history so the reconcile/retry loop can reset onto a moved tip.
+          # Full history so the reconcile/retry loop can reset onto a moved tip —
+          # AND so the shared-namespace guard (#157) can read who last published
+          # each target. Do NOT shorten this to speed the job: the reconcile loop
+          # would still work, and the guard would not go noisy — it would go
+          # SILENT. A shallow tip is parentless, so every path reads as added
+          # there and resolves to whoever that tip's sync names, which right
+          # after one of our own publishes is us. The sibling's cards would then
+          # be overwritten with no refusal. See tooling/publish-to-pages.py.
           fetch-depth: 0
           # persist-credentials (default true) stores the PAT in pages/.git/config
           # for the push below. NEVER cat that file, dump `env`, or upload the
@@ -168,7 +182,8 @@ jobs:
           transform_and_stage() {
             python3 "${SOURCE}/tooling/publish-to-pages.py" "${posts[@]}" \
               --posts-dir  "${PAGES}/${PAGES_POSTS_DIR}" \
-              --assets-dir "${PAGES}/${PAGES_ASSETS_DIR}"
+              --assets-dir "${PAGES}/${PAGES_ASSETS_DIR}" \
+              --source-repo "${SOURCE_REPO}"
             git -C "${PAGES}" add "${PAGES_POSTS_DIR}" "${PAGES_ASSETS_DIR}"
           }
 
@@ -206,7 +221,7 @@ jobs:
 
           git config user.name  "pages-sync[bot]"
           git config user.email "pages-sync[bot]@users.noreply.github.com"
-          commit_msg="chore(sync): publish posts from us-presidential-vote-analysis@${GITHUB_SHA:0:7}"
+          commit_msg="chore(sync): publish posts from ${SOURCE_REPO}@${GITHUB_SHA:0:7}"
           git commit -m "${commit_msg}"
 
           # Pages main has OTHER automated writers (the daily ESG cron, and the

@@ -14,8 +14,17 @@ the same fail-closed conditions — missing/empty `og_card_source`, an absolute 
 repo-escaping path, a missing source file, a missing `og_image`, and cross-post
 image-target collisions — surface on the PR instead of on `main`. By reusing
 `build_plan` rather than re-deriving the rules, the guard cannot drift from what
-publish actually enforces; if a future format adds a fail-closed condition there,
-the guard inherits it for free.
+`build_plan` enforces; a future fail-closed condition added THERE is inherited
+for free.
+
+**It does not cover everything publish enforces, and the gap is deliberate.**
+`publish-to-pages.py` runs a second Phase-1 validator outside `build_plan` —
+`assert_no_foreign_overwrite`, the shared-namespace guard (#157) — which needs
+the Pages repo's commit history to decide whether a target belongs to this repo
+or to `claude-code-sessions`. This guard has no Pages checkout by design (see
+below), so it structurally cannot run that check: a slug that collides with the
+sibling publisher passes here green and stops at the sync. That is recorded in
+posts/README.md, where an author writing a slug will meet it.
 
 Unlike the source repo (where `posts/` is direct-commit-allowed to `main`, making
 its guard advisory), this repo is PR-per-feature-branch, so the guard is a real

@@ -10,13 +10,22 @@ the reconcile-retry push; this script owns the transform, OG-image resolution,
 and the content-compare that makes re-runs idempotent.
 
 Usage:
-    publish-to-pages.py <source.md>... --posts-dir DIR --assets-dir DIR [--dry-run]
+    publish-to-pages.py <source.md>... --posts-dir DIR --assets-dir DIR
+                        --source-repo SLUG [--dry-run]
 
 Example:
     python3 tooling/publish-to-pages.py \\
         posts/2026-08-06-222-votes-away.md \\
         --posts-dir  /path/to/frederick-douglas-pearce.github.io/_posts/ \\
-        --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img/
+        --assets-dir /path/to/frederick-douglas-pearce.github.io/assets/img/ \\
+        --source-repo us-presidential-vote-analysis
+
+`--source-repo` is this repo's GitHub slug, and it is REQUIRED: it is the
+identity the shared-namespace guard below compares against. Note it is the
+HYPHENATED slug — the working directory is `us_presidential_vote_analysis`,
+so it is not the directory name. The Action passes
+`${{ github.event.repository.name }}`, which is the same value it builds the
+sync commit subject from.
 
 What it does, per post:
 
@@ -55,19 +64,39 @@ content-compare plus the Action's reconcile-retry self-heal it, and the
 realistic failure (a missing card) is caught in Phase 1 before any write.
 
 **Shared Pages namespace.** This site also receives posts from
-`claude-code-sessions`. The collision check below sees only *this* repo's posts,
-so two posts from different source repos whose `og_image` basenames matched
-would overwrite each other silently. Detecting that would need provenance the
-publisher does not have; the mitigation is an operator rule — keep the slug
-distinct across the two series (see posts/README.md).
+`claude-code-sessions`. `build_plan`'s collision check sees only *this* repo's
+posts, so a cross-repo collision never enters either publisher's plan. That gap
+is closed by `assert_no_foreign_overwrite`, a SECOND Phase-1 validator: before
+any write, a target that already exists with different bytes must have been
+written last by a sync from THIS repo, or the run aborts. The provenance is the
+Pages repo's own history — each sync commits as
+`chore(sync): publish posts from <repo>@<sha>`. That history has to be there:
+the Action's `fetch-depth: 0` predates this guard (it exists for the
+reconcile-retry loop) but the guard now depends on it too, and the workflow
+says so at the checkout step. A shallow clone does not merely degrade this — it
+**silently fails open**: the grafted tip is parentless, so every path reads as
+added there and every target resolves to whoever the tip's sync names. Right
+after any of our own publishes that is *us*, so the sibling's cards would be
+overwritten with no refusal at all — the exact bug this guard exists to fix.
+
+One consequence is load-bearing rather than incidental: the check is invisible
+to the PR guard (`tooling/check-og-cards.py`), which has no Pages checkout. A
+slug colliding with `claude-code-sessions` passes CI green and fails at publish
+time — loudly, but late. See posts/README.md.
+
+It is also **one-sided until the sibling repo ports it**: this repo will refuse
+to overwrite a card `claude-code-sessions` owns, but not the reverse. The
+operator rule — keep the slug distinct across the two series — is therefore
+still worth following, not superseded (see posts/README.md).
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -261,13 +290,235 @@ def build_plan(
     return plan
 
 
+#: Every sync into the shared Pages repo commits under this subject, naming its
+#: source repo — the provenance the guard needs, recorded by the very mechanism
+#: that would be racing. Our Action builds it from the same value it passes to
+#: `--source-repo` (see .github/workflows/pages-sync.yml), so OUR half cannot
+#: drift.
+#:
+#: The sibling's half is an assumption, not an invariant: it must match what
+#: `claude-code-sessions`'s own Action writes, which nothing here can check and
+#: no test pins. Verified by hand against that repo's `pages-sync.yml` on
+#: 2026-08-28 — `chore(sync): publish posts from claude-code-sessions@<sha>`,
+#: identical. Drift does not degrade this safely. A drifted subject is not read
+#: as "theirs" — it is not read at all, so the scan walks past it, and the
+#: outcome turns on what it finds NEXT, not on what we ourselves published:
+#:
+#:   - an older sync of OURS -> the target reads as ours and the overwrite
+#:     proceeds, silently re-opening the hole this guard closes;
+#:   - no recognizable sync at all -> owned by nobody, taking the "no sync
+#:     commit" branch below, which is why that branch's remedy names
+#:     sibling-format drift among its causes;
+#:   - an older WELL-FORMED sync of theirs, i.e. any card they published before
+#:     the drift -> still reads as theirs and still refuses; drift is a no-op.
+#:
+#: See D056 and #200.
+_SYNC_SUBJECT = re.compile(
+    r"^chore\(sync\): publish posts from (?P<repo>[A-Za-z0-9._-]+)@"
+)
+
+
+def sync_source_repo(subject: str) -> str | None:
+    """The source repo a Pages sync commit names, or None if it is not one.
+
+    None covers every non-sync writer — a hand commit, the site's own history
+    (`assets/img/og_banner.png` is one), the daily ESG cron. The caller treats
+    that as foreign, because "someone else wrote this" is the question, not
+    "which sync wrote this".
+    """
+    m = _SYNC_SUBJECT.match(subject)
+    return m.group("repo") if m else None
+
+
+def git_pages_owner(dest: Path) -> str | None:
+    """Source repo of the most recent Pages SYNC commit touching `dest`.
+
+    None means no sync commit touches it at all — a site-owned asset
+    (`assets/img/og_banner.png` is one), or a file only ever written by hand.
+
+    **The most recent SYNC commit, not the most recent commit.** Reading the
+    latest commit of any kind would let one ordinary edit on the Pages side —
+    a typo fixed in place, or a bulk `prettier --write` of the kind that follows
+    the site going red (twice so far — see .github/workflows/prettier.yml) —
+    permanently reclassify our own post as foreign. Since the Action re-publishes every
+    dated post on every run and aborts the whole batch on the first refusal,
+    that would block *all* future publishing, on every retry, until someone
+    hand-edited the Pages repo. Skipping non-sync commits keeps the question
+    the one that matters: which publisher put this target here?
+
+    Overwriting a later hand edit to one of OUR posts is correct, and is the
+    contract that already held: this repo's `posts/` is the source of record,
+    and every run rewrites its own targets from it.
+
+    Runs `git -C <dest's own dir>`, letting git find the repo by its own upward
+    walk. **That walk is not bounded here.** An earlier attempt compared the
+    discovered toplevel against `dest`, which is a tautology: git found that
+    repo BY walking up from `dest`, so it is always an ancestor. A bound from
+    one target alone would need a different question entirely (`git ls-files
+    --error-unmatch`, say); it is not attempted, rather than impossible.
+    What `run()` rules out instead is narrower and decidable without git — the
+    Pages dirs may not sit inside `REPO_ROOT`.
+
+    So a Pages tree that is not a checkout, sitting under some unrelated third
+    repository, consults that repository's history. That *usually* refuses, for
+    want of any `chore(sync)` commit — but not always: a history that happens to
+    carry our own sync subject at that path grants ownership instead, which is
+    what the probe behind this rewrite actually observed. It is out of reach of
+    CI, where the Action checks source and Pages out as siblings.
+    """
+    toplevel = _git_toplevel(dest)
+    if toplevel is None:
+        raise PublishError(
+            f"{dest.parent} is not inside a git checkout — the shared-namespace "
+            f"guard reads the Pages repo's history, so --posts-dir and "
+            f"--assets-dir must point into a real clone of it."
+        )
+    log = _git_out(dest, "log", "--format=%s", "--", str(dest))
+    for subject in log.splitlines():
+        owner = sync_source_repo(subject)
+        if owner is not None:
+            return owner
+    return None
+
+
+def _contains(root: Path, dest: Path) -> bool:
+    """Whether `dest` lies inside `root`.
+
+    Used against `REPO_ROOT`, which is derived from `__file__` and so is a value
+    this module knows exactly — never against a root git discovered by walking
+    up from `dest`, which it necessarily contains.
+    """
+    try:
+        dest.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _git_toplevel(dest: Path) -> Path | None:
+    """Root of the git repo containing `dest`'s directory, or None if there is none.
+
+    A non-zero exit here is not an anomaly — it is the ordinary answer for "that
+    is not a checkout" — so it returns None rather than raising, and the caller
+    raises instead.
+    """
+    proc = _git_run(dest, "rev-parse", "--show-toplevel")
+    out = (proc.stdout or "").strip()
+    return Path(out) if proc.returncode == 0 and out else None
+
+
+def _git_out(dest: Path, *args: str) -> str:
+    """Stdout of a git command run in `dest`'s directory. Fail closed, loudly.
+
+    **Empty output and a non-zero exit are different conditions and are not
+    collapsed.** `git log` exits 0 with empty stdout for a path it has no
+    history for, which is an ordinary answer and not an error.
+    """
+    proc = _git_run(dest, *args)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        raise PublishError(
+            f"could not read Pages history for {dest} (git {args[0]} exited "
+            f"{proc.returncode}) — the repository was found, so the likely "
+            f"cause is that it has no commits yet. "
+            f"{stderr[0] if stderr else 'no-stderr'}"
+        )
+    return (proc.stdout or "").strip()
+
+
+def _git_run(dest: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git in `dest`'s directory, capturing output. Never raises on exit code.
+
+    Decoding is explicit UTF-8 rather than the runner's locale, for the reason
+    `build_plan` gives about reading posts — and `errors="replace"` because a
+    commit subject is not ours to control: an undecodable byte should degrade to
+    a replacement character, which then simply fails to parse as a sync subject,
+    rather than raise.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(dest.parent), *args],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as e:
+        raise PublishError(f"could not run git to read Pages history: {e}") from e
+
+
+def assert_no_foreign_overwrite(
+    plan: dict[Path, PlanEntry],
+    source_repo: str,
+    pages_owner: Callable[[Path], str | None] = git_pages_owner,
+) -> None:
+    """Phase 1: refuse to overwrite a target another publisher owns. No writes.
+
+    The shared-namespace guard. `build_plan` catches two of THIS repo's posts
+    colliding; this catches a collision with the OTHER publisher, which never
+    enters either repo's plan (see the module docstring).
+
+    Deliberately checks BOTH target kinds. The card is the likelier collision —
+    a shared slug like `token-accounting-og.png` is plausible across two
+    technical series, where a post collision needs the same filename on the same
+    date — but a silently clobbered post is the worse outcome, and one uniform
+    loop is less code than a kind-based exception.
+
+    An **unchanged** target is waved through without consulting git: Phase 2
+    will not write it, so there is nothing to arbitrate. That matters
+    operationally as well as for cost — the Action's reconcile-retry loop
+    re-transforms against a moved tip on every attempt, and the common case
+    there is a target whose bytes already match.
+
+    **Each refusal carries the remedy that fits it, and they are not the same
+    remedy.** "Rename your slug" is right for a live collision with the sibling
+    series and actively wrong for a site-owned file, where renaming an
+    already-published post would break a permalink and a share-card URL that
+    are already in the wild.
+    """
+    for dest in sorted(plan):
+        entry = plan[dest]
+        if not dest.exists() or _unchanged(dest, entry.data):
+            continue
+        owner = pages_owner(dest)
+        if owner == source_repo:
+            continue
+        where = f"{dest} ({entry.kind} for {entry.post_name})"
+        if owner is None:
+            raise PublishError(
+                f"refusing to overwrite {where}: no Pages sync commit in its "
+                f"history, so no publisher this guard recognizes owns it. It is "
+                f"site-owned, hand-written, or published by a sibling repo whose "
+                f"commit-subject format this guard no longer recognizes. Check "
+                f"who owns it on the Pages side; do NOT reflexively rename this "
+                f"post's slug, which would move a permalink and a share-card URL "
+                f"that are already live."
+            )
+        raise PublishError(
+            f"refusing to overwrite {where}: it was last published by "
+            f"{owner!r}, not by {source_repo!r}. The Pages site is a namespace "
+            f"shared with another publisher — rename this post's slug so its "
+            f"targets are unique across both series."
+        )
+
+
+def _unchanged(dest: Path, data: bytes) -> bool:
+    """Whether `dest` already holds exactly `data` — the content-compare predicate.
+
+    Shared by `assert_no_foreign_overwrite` and `write_if_changed` so the two
+    cannot drift: a target the guard waves through as unchanged is exactly the
+    target Phase 2 declines to write.
+    """
+    return dest.exists() and dest.read_bytes() == data
+
+
 def write_if_changed(dest: Path, data: bytes, dry_run: bool) -> bool:
     """Write `data` to `dest` only if the bytes differ. Returns whether changed.
 
     The parent dir is a precondition (checked up front), never created here — a
     missing Pages dir means the worktree isn't set up, which should fail loud.
     """
-    if dest.exists() and dest.read_bytes() == data:
+    if _unchanged(dest, data):
         return False
     if not dry_run:
         dest.write_bytes(data)
@@ -275,7 +526,12 @@ def write_if_changed(dest: Path, data: bytes, dry_run: bool) -> bool:
 
 
 def run(
-    sources: Sequence[Path], posts_dir: Path, assets_dir: Path, dry_run: bool
+    sources: Sequence[Path],
+    posts_dir: Path,
+    assets_dir: Path,
+    dry_run: bool,
+    source_repo: str,
+    pages_owner: Callable[[Path], str | None] = git_pages_owner,
 ) -> int:
     # Phase-1 preconditions: the Pages dirs must already exist. Do NOT mkdir —
     # absence means the worktree isn't checked out, an operator error.
@@ -284,8 +540,25 @@ def run(
             raise PublishError(
                 f"{label} not found: {d} — is the Pages worktree checked out?"
             )
+        # A dir-sanity precondition, deliberately EAGER and deliberately here
+        # rather than in the guard: a brand-new post's targets are all absent,
+        # so nothing is arbitrated, and yet writing them into this repo's own
+        # tree is exactly the slip worth catching. `REPO_ROOT` is derived from
+        # __file__, so this asks git nothing and cannot be a tautology — unlike
+        # the toplevel-vs-target comparison this replaced (see
+        # `git_pages_owner`).
+        if _contains(REPO_ROOT, d):
+            raise PublishError(
+                f"{label} is inside this repo ({d}) — --posts-dir and "
+                f"--assets-dir must point at a checkout of the Pages repo, "
+                f"not at the source repo publishing into it."
+            )
 
     plan = build_plan(sources, posts_dir, assets_dir)
+    # The second Phase-1 validator. Not gated on `dry_run` — the operator
+    # dry-run runs against a real Pages checkout and is exactly the preview that
+    # should surface a foreign collision before the real push does.
+    assert_no_foreign_overwrite(plan, source_repo, pages_owner)
 
     # Phase 2: apply. Content-compare means unchanged outputs write nothing.
     prefix = "[dry-run] " if dry_run else ""
@@ -317,10 +590,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--assets-dir", required=True, type=Path, help="Pages assets/img/ directory"
     )
     ap.add_argument(
+        "--source-repo",
+        required=True,
+        metavar="SLUG",
+        help=(
+            "this repo's GitHub slug (hyphenated), used to tell our own Pages "
+            "targets from another publisher's"
+        ),
+    )
+    ap.add_argument(
         "--dry-run", action="store_true", help="resolve + compare, but write nothing"
     )
     args = ap.parse_args(argv)
-    return run(args.sources, args.posts_dir, args.assets_dir, args.dry_run)
+    # `required=True` accepts an empty string, and an empty slug is the one
+    # value that fails SILENTLY: every target of a brand-new post is absent, so
+    # the guard waves the run through, and it commits `... posts from @<sha>`,
+    # which `_SYNC_SUBJECT` can never parse. Every later update of that post
+    # then reads as owned by nobody, forever. The workflow feeds this from
+    # `github.event.repository.name`; check it rather than trust it.
+    source_repo = args.source_repo.strip()
+    if not source_repo:
+        raise PublishError("--source-repo must not be empty")
+    return run(
+        args.sources,
+        args.posts_dir,
+        args.assets_dir,
+        args.dry_run,
+        source_repo,
+    )
 
 
 if __name__ == "__main__":
