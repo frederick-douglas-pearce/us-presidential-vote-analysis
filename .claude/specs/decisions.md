@@ -3097,7 +3097,7 @@ and the same `assets/img/`. Each publisher's `build_plan` collision check sees o
 repo's posts, so a cross-repo target collision enters neither plan. `write_if_changed`
 content-compares, so the overwrite reads as a legitimate change, each repo's next sync flips it
 back, and both Actions stay green; the symptom is a wrong image on social previews, noticed by a
-reader rather than by CI. The namespace is live and populated — 15 files, three distinct owners.
+reader rather than by CI. The namespace is live and shared in earnest, not prospectively.
 #157 adds `assert_no_foreign_overwrite`, which asks the Pages repo's own history who last
 *synced* a target before overwriting it.
 
@@ -3110,7 +3110,8 @@ reader rather than by CI. The namespace is live and populated — 15 files, thre
    maintain reintroduces the cross-writer race it would exist to arbitrate. The subject already
    exists, written by the very mechanism that would be racing, so this adds no artifact and has
    one source. (Why the most recent *sync* commit rather than the most recent commit, and why the
-   walk is deliberately unbounded, are mechanics with their own home in `git_pages_owner`'s
+   walk is left to git rather than bounded here, are mechanics with their own home in
+   `git_pages_owner`'s
    docstring; they are not restated here.)
 
 2. **The guard is one-sided and fail-closed.** This repo refuses to overwrite a target it cannot
@@ -3131,10 +3132,14 @@ reader rather than by CI. The namespace is live and populated — 15 files, thre
 The sibling's half of this contract is **unverifiable from here** — no test can pin a string
 another repository controls, and reaching across the network to check it would invert the very
 coupling direction this design avoids. It was verified **by hand on 2026-08-28** against that
-repo's own `pages-sync.yml`, which hardcodes the identical subject. If it ever drifts, the
-sibling's targets parse to *no owner* and hit the fail-closed refusal — safe, but it stops the
-innocent side, which is why that refusal's message names a sibling-format drift among its causes
-rather than sending the operator to rename an already-published slug.
+repo's own `pages-sync.yml`, which hardcodes the identical subject.
+
+Be precise about what drift would and would not cost, because the tempting overstatement is that
+it breaks publishing. It does not. Provenance is consulted only for a target already in our plan
+that exists with differing bytes — that is, only on a real collision, which refuses either way.
+Drift changes only **which refusal message prints**: a sibling-owned card would report as owned by
+nobody rather than by `claude-code-sessions`. That is why the no-owner message names a
+sibling-format drift among its causes, instead of sending the operator to rename a published slug.
 
 So the operator rule — keep slugs distinct across the two series — **stands, not superseded**.
 The event that retires the one-sidedness is the sibling porting the guard; at that point the

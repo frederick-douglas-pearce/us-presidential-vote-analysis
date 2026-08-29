@@ -22,8 +22,8 @@ Example:
 
 `--source-repo` is this repo's GitHub slug, and it is REQUIRED: it is the
 identity the shared-namespace guard below compares against. Note it is the
-HYPHENATED slug, which is not derivable from the local checkout — the working
-directory is `us_presidential_vote_analysis`. The Action passes
+HYPHENATED slug — the working directory is `us_presidential_vote_analysis`,
+so it is not the directory name. The Action passes
 `${{ github.event.repository.name }}`, which is the same value it builds the
 sync commit subject from.
 
@@ -338,9 +338,11 @@ def git_pages_owner(dest: Path) -> str | None:
     and every run rewrites its own targets from it.
 
     Runs `git -C <dest's own dir>`, letting git find the repo by its own upward
-    walk. **That walk is not bounded here, and cannot be.** An earlier attempt
-    compared the discovered toplevel against `dest`, which is a tautology: git
-    found that repo BY walking up from `dest`, so it is always an ancestor.
+    walk. **That walk is not bounded here.** An earlier attempt compared the
+    discovered toplevel against `dest`, which is a tautology: git found that
+    repo BY walking up from `dest`, so it is always an ancestor. A bound from
+    one target alone would need a different question entirely (`git ls-files
+    --error-unmatch`, say); it is not attempted, rather than impossible.
     What `run()` rules out instead is narrower and decidable without git — the
     Pages dirs may not sit inside `REPO_ROOT`.
 
@@ -404,7 +406,8 @@ def _git_out(dest: Path, *args: str) -> str:
         stderr = (proc.stderr or "").strip().splitlines()
         raise PublishError(
             f"could not read Pages history for {dest} (git {args[0]} exited "
-            f"{proc.returncode}) — is the target directory a git checkout? "
+            f"{proc.returncode}) — the repository was found, so the likely "
+            f"cause is that it has no commits yet. "
             f"{stderr[0] if stderr else 'no-stderr'}"
         )
     return (proc.stdout or "").strip()
@@ -529,8 +532,8 @@ def run(
         # so nothing is arbitrated, and yet writing them into this repo's own
         # tree is exactly the slip worth catching. `REPO_ROOT` is derived from
         # __file__, so this asks git nothing and cannot be a tautology — unlike
-        # bounding git's own upward walk from inside `git_pages_owner`, which
-        # cannot work (see there).
+        # the toplevel-vs-target comparison this replaced (see
+        # `git_pages_owner`).
         if _contains(REPO_ROOT, d):
             raise PublishError(
                 f"{label} is inside this repo ({d}) — --posts-dir and "

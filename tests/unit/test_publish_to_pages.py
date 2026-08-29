@@ -385,6 +385,23 @@ def _explode(dest: Path) -> str | None:
     raise AssertionError(f"pages_owner must not be consulted for {dest}")
 
 
+class _NoSubprocess:
+    """Stands in for the module's `subprocess`, failing on any use.
+
+    Patched onto the module rather than onto `_git_run`, so the claim it
+    enforces is "no git process at all" rather than "one particular helper was
+    not called" — a hand-rolled `subprocess.run(["git", ...])` resolves the same
+    module global and is caught too, and renaming the helper cannot quietly make
+    the spy inert.
+    """
+
+    def run(self, *_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "build_plan must not shell out — check-og-cards.py calls it with "
+            "no Pages checkout"
+        )
+
+
 def test_build_plan_never_shells_out_to_git(box: Sandbox) -> None:
     """`assert_no_foreign_overwrite` belongs to `run()`, never to `build_plan`.
 
@@ -397,12 +414,7 @@ def test_build_plan_never_shells_out_to_git(box: Sandbox) -> None:
     **The regression is silent, which is why this is a test and not a comment.**
     Nothing else goes red: the PR guard's stand-in targets never exist, so a
     check living in `build_plan` short-circuits on `not dest.exists()` before it
-    ever reaches git. Two review rounds on this issue were lost to prose
-    asserting properties the code did not have; this asserts one it does.
-
-    The spy sits on `_git_run`, the module's only `subprocess.run` call site,
-    because the harm named is "shell out to git" — that catches an inlined
-    guard and a hand-rolled git call alike, and survives a rename of either.
+    ever reaches git.
     """
     # The precondition IS the test. git is reached only for a target that
     # exists with differing bytes, so without this setup the check would pass
@@ -413,13 +425,9 @@ def test_build_plan_never_shells_out_to_git(box: Sandbox) -> None:
     target.write_bytes(b"THEIRS")
     assert target.exists() and target.read_bytes() != b"OURS"
 
-    def _no_git(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError(
-            "build_plan must not shell out to git — check-og-cards.py calls it "
-            "with no Pages checkout"
-        )
-
-    box.ptp._git_run = _no_git  # type: ignore[attr-defined]
+    # Patching an absent attribute would create one and spy on nothing.
+    assert hasattr(box.ptp, "subprocess")
+    box.ptp.subprocess = _NoSubprocess()  # type: ignore[attr-defined]
 
     assert box.ptp.build_plan([src], box.pages_posts, box.pages_assets)
 
