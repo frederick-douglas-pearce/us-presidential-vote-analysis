@@ -388,11 +388,13 @@ def _explode(dest: Path) -> str | None:
 class _NoSubprocess:
     """Stands in for the module's `subprocess`, failing on any use.
 
-    Patched onto the module rather than onto `_git_run`, so the claim it
-    enforces is "no git process at all" rather than "one particular helper was
-    not called" — a hand-rolled `subprocess.run(["git", ...])` resolves the same
-    module global and is caught too, and renaming the helper cannot quietly make
-    the spy inert.
+    Patched onto the module rather than onto `_git_run`, so what it enforces is
+    "no git process started through this module's `subprocess`" rather than
+    "one particular helper was not called" — a hand-rolled
+    `subprocess.run(["git", ...])` resolves the same module global and is caught
+    too, and renaming the helper cannot quietly make the spy inert. It is not a
+    bound on process creation in general: `from subprocess import run` or
+    `os.popen` would both escape it.
     """
 
     def run(self, *_args: object, **_kwargs: object) -> None:

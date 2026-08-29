@@ -3134,12 +3134,30 @@ another repository controls, and reaching across the network to check it would i
 coupling direction this design avoids. It was verified **by hand on 2026-08-28** against that
 repo's own `pages-sync.yml`, which hardcodes the identical subject.
 
-Be precise about what drift would and would not cost, because the tempting overstatement is that
-it breaks publishing. It does not. Provenance is consulted only for a target already in our plan
-that exists with differing bytes — that is, only on a real collision, which refuses either way.
-Drift changes only **which refusal message prints**: a sibling-owned card would report as owned by
-nobody rather than by `claude-code-sessions`. That is why the no-owner message names a
-sibling-format drift among its causes, instead of sending the operator to rename a published slug.
+**Drift does not degrade this guard gracefully — it silently re-opens the hole**, and that is the
+residual worth stating exactly, because it was twice written down backwards before being probed.
+It is not that drift stops publishing on the innocent side, and it is not that drift merely
+changes which refusal message prints. Ownership is the most recent commit the subject pattern
+*recognizes* (decision 1), so an unrecognizable sibling subject is not read as "theirs" — it is
+not read at all. The scan walks straight past it to the next recognizable sync, and where that is
+an older sync of **ours**, the target reads as ours and the overwrite proceeds. Reproduced against
+a real repository whose history is our sync followed by theirs:
+
+```
+no drift → owner = 'claude-code-sessions'            → refused
+drifted  → owner = 'us-presidential-vote-analysis'   → NOT refused; their bytes overwritten
+```
+
+That is the precise failure this guard exists to prevent, restored by a string change in another
+repo. It is the accepted cost of skipping non-sync commits, which is not optional: reading the
+most recent commit of *any* kind would let one hand edit or bulk reformat on the Pages side brick
+all publishing (see `git_pages_owner`). The two failure modes trade directly against each other,
+and this design takes the one that is loud when it is wrong about *our own* posts over the one
+that is silent about the sibling's.
+
+Two consequences follow. The review trigger below is not housekeeping — it is the mitigation. And
+the no-owner refusal message names sibling drift among its causes because that message is the
+*only* case where drift still surfaces at all: a target the sibling published and we never did.
 
 So the operator rule — keep slugs distinct across the two series — **stands, not superseded**.
 The event that retires the one-sidedness is the sibling porting the guard; at that point the
@@ -3147,6 +3165,6 @@ subject format should become a **shared constant** rather than two independently
 regexes, or the silent-drift surface simply doubles. Recording the trigger here is what makes
 that a scheduled decision rather than a future surprise.
 
-**Related:** `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
+**Related:** **#200** (whether the drift-fails-open residual above can be closed unilaterally, rather than only chosen), `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
 this entry does not duplicate), `tooling/check-og-cards.py`, `posts/README.md`,
 `.github/workflows/pages-sync.yml`, D049.
