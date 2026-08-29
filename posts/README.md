@@ -220,9 +220,10 @@ daily ESG-feed cron. Two consequences:
   written last by a sync from **this** repo, per the Pages repo's own commit history.
   Otherwise the run aborts, having written nothing. Three things to know about it:
 
-  - **It fires at publish, never on the PR.** `tooling/check-og-cards.py` runs the
-    publisher's Phase-1 validator with no Pages checkout, so it cannot see the other
-    repo's slugs. A colliding slug passes CI green and stops at the sync.
+  - **It fires at publish, never on the PR.** `tooling/check-og-cards.py` runs
+    `build_plan` — the _first_ of the publisher's two Phase-1 validators, and the only
+    one that needs no Pages checkout — so it cannot see the other repo's slugs. A
+    colliding slug passes CI green and stops at the sync.
   - **It is one-sided until `claude-code-sessions` ports it.** This repo will not
     overwrite a card that repo owns; the reverse is not yet true. So the first symptom is
     likely to be **our** publish failing over an overwrite it did not cause — that is the

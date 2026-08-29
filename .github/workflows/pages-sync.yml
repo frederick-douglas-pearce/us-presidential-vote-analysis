@@ -132,9 +132,11 @@ jobs:
           # Full history so the reconcile/retry loop can reset onto a moved tip —
           # AND so the shared-namespace guard (#157) can read who last published
           # each target. Do NOT shorten this to speed the job: the reconcile loop
-          # would still work, but `git log -- <path>` would hit the shallow
-          # boundary, report no history for every pre-tip target, and refuse every
-          # update. See tooling/publish-to-pages.py.
+          # would still work, and the guard would not go noisy — it would go
+          # SILENT. A shallow tip is parentless, so every path reads as added
+          # there and resolves to whoever that tip's sync names, which right
+          # after one of our own publishes is us. The sibling's cards would then
+          # be overwritten with no refusal. See tooling/publish-to-pages.py.
           fetch-depth: 0
           # persist-credentials (default true) stores the PAT in pages/.git/config
           # for the push below. NEVER cat that file, dump `env`, or upload the

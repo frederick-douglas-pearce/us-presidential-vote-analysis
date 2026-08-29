@@ -3162,8 +3162,14 @@ the no-owner refusal message names sibling drift among its causes because that m
 So the operator rule — keep slugs distinct across the two series — **stands, not superseded**.
 The event that retires the one-sidedness is the sibling porting the guard; at that point the
 subject format should become a **shared constant** rather than two independently hand-verified
-regexes, or the silent-drift surface simply doubles. Recording the trigger here is what makes
-that a scheduled decision rather than a future surprise.
+regexes, or the silent-drift surface simply doubles.
+
+**Nothing schedules that, and this entry does not pretend otherwise.** The trigger fires only if
+a human notices the sibling has ported the guard; no issue in either repo tracks it, and #200 —
+filed by this same change — says so outright. Filing the sibling-port issue is a deliberate
+post-merge action, not an oversight, but until it exists the review trigger is a note rather than
+a mechanism. The asymmetry is worth seeing plainly: the *drift* residual got an issue, the *port*
+did not.
 
 **Related:** **#200** (whether the drift-fails-open residual above can be closed unilaterally, rather than only chosen), `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
 this entry does not duplicate), `tooling/check-og-cards.py`, `posts/README.md`,

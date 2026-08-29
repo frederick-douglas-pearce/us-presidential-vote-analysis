@@ -73,8 +73,11 @@ Pages repo's own history — each sync commits as
 `chore(sync): publish posts from <repo>@<sha>`. That history has to be there:
 the Action's `fetch-depth: 0` predates this guard (it exists for the
 reconcile-retry loop) but the guard now depends on it too, and the workflow
-says so at the checkout step — a shallow clone would return no history for
-every pre-tip target and refuse every update.
+says so at the checkout step. A shallow clone does not merely degrade this — it
+**silently fails open**: the grafted tip is parentless, so every path reads as
+added there and every target resolves to whoever the tip's sync names. Right
+after any of our own publishes that is *us*, so the sibling's cards would be
+overwritten with no refusal at all — the exact bug this guard exists to fix.
 
 One consequence is load-bearing rather than incidental: the check is invisible
 to the PR guard (`tooling/check-og-cards.py`), which has no Pages checkout. A
