@@ -3164,13 +3164,25 @@ The event that retires the one-sidedness is the sibling porting the guard; at th
 subject format should become a **shared constant** rather than two independently hand-verified
 regexes, or the silent-drift surface simply doubles.
 
-**Nothing schedules that, and this entry does not pretend otherwise.** The trigger fires only if
-a human notices the sibling has ported the guard; no issue in either repo tracks it, and #200 —
-filed by this same change — says so outright. Filing the sibling-port issue is a deliberate
-post-merge action, not an oversight, but until it exists the review trigger is a note rather than
-a mechanism. The asymmetry is worth seeing plainly: the *drift* residual got an issue, the *port*
-did not.
+**Nothing scheduled that when this entry was written, and it did not pretend otherwise.** The
+trigger fires only if a human notices the sibling has ported the guard; at the time no issue in
+either repo tracked it, and #200 — filed by this same change — said so outright. Filing the
+sibling-port issue was a deliberate post-merge action, not an oversight, but until it existed the
+review trigger was a note rather than a mechanism.
 
-**Related:** **#200** (whether the drift-fails-open residual above can be closed unilaterally, rather than only chosen), `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
+**Updated 2026-08-29 — it is filed:** `frederick-douglas-pearce/claude-code-sessions#216`
+(`epic:pages-sync`, `priority:low`), carrying the transplant steps, eight acceptance criteria and
+the scratch-repo verification recipe. The trigger is now a backlog row in the repo that has to act
+on it rather than a note here; the guard stays one-sided until it lands. Two things the filing
+established that this entry had assumed or overstated. First, the two series' target basenames are
+currently **disjoint** — verified 2026-08-29, no shared post filename and no shared card name — so
+the one-sidedness is exposure without a live collision behind it, and the port is precautionary
+rather than remedial. Second, the **shared constant** above is harder than "should" implies: two
+repos cannot share a Python constant without a package, so the realistic form is both repos
+pinning the same literal and each saying so, which halves the hand-verification but does not
+retire it. Of the two residuals only #200 survives the port, being symmetric — both repos inherit
+it once both run the guard.
+
+**Related:** **#200** (whether the drift-fails-open residual above can be closed unilaterally, rather than only chosen), **`claude-code-sessions#216`** (the sibling port that retires the one-sidedness), `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
 this entry does not duplicate), `tooling/check-og-cards.py`, `posts/README.md`,
 `.github/workflows/pages-sync.yml`, D049.
