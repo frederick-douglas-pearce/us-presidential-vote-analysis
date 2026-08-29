@@ -300,14 +300,19 @@ def build_plan(
 #: `claude-code-sessions`'s own Action writes, which nothing here can check and
 #: no test pins. Verified by hand against that repo's `pages-sync.yml` on
 #: 2026-08-28 — `chore(sync): publish posts from claude-code-sessions@<sha>`,
-#: identical. Drift does not degrade this safely, and the outcome splits on
-#: whether we ever synced the path ourselves. A drifted subject is not read as
-#: "theirs" — it is not read at all, so the scan continues past it. Where no
-#: sync of ours precedes it, the target reads as owned by nobody and takes the
-#: "no sync commit" branch below, which is why that branch's remedy names
-#: sibling-format drift among its causes. Where an older sync of OURS does
-#: precede it, the target reads as ours and the overwrite proceeds — silently
-#: re-opening the hole this guard closes. See D056 and #200.
+#: identical. Drift does not degrade this safely. A drifted subject is not read
+#: as "theirs" — it is not read at all, so the scan walks past it, and the
+#: outcome turns on what it finds NEXT, not on what we ourselves published:
+#:
+#:   - an older sync of OURS -> the target reads as ours and the overwrite
+#:     proceeds, silently re-opening the hole this guard closes;
+#:   - no recognizable sync at all -> owned by nobody, taking the "no sync
+#:     commit" branch below, which is why that branch's remedy names
+#:     sibling-format drift among its causes;
+#:   - an older WELL-FORMED sync of theirs, i.e. any card they published before
+#:     the drift -> still reads as theirs and still refuses; drift is a no-op.
+#:
+#: See D056 and #200.
 _SYNC_SUBJECT = re.compile(
     r"^chore\(sync\): publish posts from (?P<repo>[A-Za-z0-9._-]+)@"
 )
