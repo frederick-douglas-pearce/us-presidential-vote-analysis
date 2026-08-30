@@ -26,6 +26,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from tests._helpers import non_null_sqlite_flag
 from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
 from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
@@ -997,7 +998,7 @@ def test_a_popular_vote_flip_is_reported_with_its_margins(tmp_path: Path) -> Non
 
     assert row["ec_winner"] == "Cand D"
     assert row["pv_winner"] == "Cand C"
-    assert bool(row["pv_flip"]) is True
+    assert non_null_sqlite_flag(row["pv_flip"], label="2016 pv_flip") is True
     # Slugs ship beside the names so a consumer can pivot to /v1/candidates/{slug}
     # without matching on a display name.
     assert row["ec_winner_slug"] == "cand-d"
@@ -1017,8 +1018,10 @@ def test_a_year_without_a_flip_reports_false_not_null(tmp_path: Path) -> None:
     """
     out, _ = _build(tmp_path)
     row = _hybrid_summary_rows(out)[2020]
-    assert row["pv_flip"] is not None, "an agreeing year is False, never NULL"
-    assert bool(row["pv_flip"]) is False
+    # "an agreeing year is False, never NULL" — the separate `is not None` assert that
+    # used to carry that is gone; non_null_sqlite_flag rejects the NULL itself, so this
+    # no longer depends on a neighbouring line staying put.
+    assert non_null_sqlite_flag(row["pv_flip"], label="2020 pv_flip") is False
 
 
 def test_the_pre_window_year_has_null_pv_fields_but_real_ec_ones(

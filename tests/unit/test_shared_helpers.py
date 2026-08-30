@@ -1,6 +1,7 @@
 """Unit coverage for the shared test helpers in ``tests/_helpers.py``.
 
-Currently just :func:`~tests._helpers.non_null_flag`, and it earns a test for a specific
+Covers the two boolean-cell helpers, :func:`~tests._helpers.non_null_flag` and its SQLite
+sibling :func:`~tests._helpers.non_null_sqlite_flag`. The first earns a test for a specific
 reason (#165). The helper's **happy path does** run in CI — it is called from
 ``test_the_live_views_match_the_pandas_oracle``, which is deliberately not corpus-gated,
 and CI runs ``pytest -m integration`` against a Postgres service container. What never runs
@@ -15,15 +16,24 @@ The rule under test is that a nullable boolean read back through pandas arrives 
 four spellings — Python ``bool``/``None`` from an object column, ``numpy.bool_`` from a
 ``bool`` column, ``pd.NA`` from the pandas builders, and ``np.nan`` for a null float — and
 that no single naive assert is correct across them. The helper's docstring covers all four.
+
+The **SQLite** helper (#172) exists because that tier has a fifth spelling the four above do
+not include: the snapshot stores every boolean as ``INTEGER`` and ``sqlite3`` is opened
+without ``detect_types``, so a read hands back a Python ``int``. ``non_null_flag`` rejects an
+``int`` on purpose, so the tier needed its own helper rather than a widened one — and the
+cases below pin *both* halves of that split, since a sibling that quietly accepted pandas
+cells too would put the "which one do I call?" trap straight back.
 """
 
 from __future__ import annotations
+
+import sqlite3
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from tests._helpers import non_null_flag
+from tests._helpers import non_null_flag, non_null_sqlite_flag
 
 
 @pytest.mark.parametrize(
@@ -162,3 +172,164 @@ def test_label_is_required() -> None:
     """
     with pytest.raises(TypeError, match="label"):
         non_null_flag(True)  # type: ignore[call-arg]
+
+
+# --- non_null_sqlite_flag (#172) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(1, True, id="int-one"),
+        pytest.param(0, False, id="int-zero"),
+    ],
+)
+def test_a_sqlite_flag_returns_the_python_singleton(
+    value: object, expected: bool
+) -> None:
+    """Identity, not just truthiness — the invariant every converted call site rests on.
+
+    ``1 is True`` is **False**, so a helper that returned what SQLite handed it would turn
+    every ``non_null_sqlite_flag(...) is True`` site red against a *correct* value. That is
+    the one way this refactor could have changed a verdict rather than a message, so it is
+    pinned here rather than left to the call sites to discover.
+    """
+    got = non_null_sqlite_flag(value, label="2016 pv_flip")
+    assert got is expected
+    assert type(got) is bool
+
+
+def test_a_sqlite_null_is_rejected_where_bool_would_launder_it() -> None:
+    """The live regression #172 found, reproduced through a real SQLite roundtrip.
+
+    ``tests/integration/test_snapshot_build.py`` asserted ``bool(hybrid_flip) is False``
+    over a snapshot read with no null guard, and ``bool(None) is False`` is **True** — so a
+    NULL passed. Only the False leg was ever silent: ``bool(None) is True`` fails. The
+    roundtrip is real rather than mocked because the premise under test is what ``sqlite3``
+    actually returns for a nullable ``INTEGER``, which is not a fact about our code.
+    """
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE t (flag INTEGER)")
+        conn.executemany("INSERT INTO t VALUES (?)", [(1,), (0,), (None,)])
+        one, zero, null = (r[0] for r in conn.execute("SELECT flag FROM t"))
+    finally:
+        conn.close()
+
+    assert (one, zero, null) == (1, 0, None)
+    assert bool(null) is False  # the laundering, stated so the fix is not vacuous
+    assert non_null_sqlite_flag(one, label="a flag") is True
+    assert non_null_sqlite_flag(zero, label="a flag") is False
+    with pytest.raises(AssertionError, match="came back NULL"):
+        non_null_sqlite_flag(null, label="2000 hybrid_flip")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(2, id="int-two"),
+        pytest.param(-1, id="int-negative"),
+    ],
+)
+def test_a_sqlite_int_outside_zero_one_is_rejected(value: object) -> None:
+    """An INTEGER column holding a boolean holds 0 or 1; anything else is a wrong column.
+
+    Without this the helper would report ``2`` as ``True``, which is the same silent
+    coercion :func:`non_null_flag` refuses for pandas cells.
+    """
+    with pytest.raises(AssertionError, match="not a 0/1 flag"):
+        non_null_sqlite_flag(value, label="2000 hybrid_flip")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(1.0, id="float-one"),
+        pytest.param("1", id="str-one"),
+        pytest.param(np.float64(1.0), id="numpy-float"),
+    ],
+)
+def test_non_sqlite_scalars_are_rejected(value: object) -> None:
+    with pytest.raises(AssertionError, match="not a SQLite boolean cell"):
+        non_null_sqlite_flag(value, label="2000 hybrid_flip")
+
+
+@pytest.mark.parametrize(
+    ("value", "helper", "match"),
+    [
+        pytest.param(
+            np.True_, non_null_sqlite_flag, "not a SQLite boolean cell", id="pandas-cell"
+        ),
+        pytest.param(
+            pd.DataFrame({"pv_flip": [True, None]}).iloc[0]["pv_flip"],
+            non_null_sqlite_flag,
+            "not a SQLite boolean cell",
+            id="pandas-nullable-cell",
+        ),
+        pytest.param(1, non_null_flag, "not a boolean cell", id="sqlite-cell"),
+    ],
+)
+def test_the_two_helpers_are_not_interchangeable(
+    value: object, helper: object, match: str
+) -> None:
+    """Each rejects the other tier's dtype, which is what makes the split enforceable.
+
+    This is the property that keeps two helpers from becoming a "which one do I call?"
+    trap: a wrong pick fails loudly at authoring time instead of quietly working.
+
+    **The ``pandas-nullable-cell`` case is the one that was actually broken**, and it is why
+    the SQLite helper checks ``type(value) is int`` rather than ``isinstance``. ``bool`` is
+    an ``int`` subclass, so an ``isinstance`` check accepted a Python ``bool`` — which is
+    exactly what ``pd.read_sql`` yields for a boolean column carrying a NULL. The pandas
+    spelling this split most needs to refuse was the one sailing through, while the
+    ``numpy.bool_`` case tested here passed for a reason that had nothing to do with the
+    intent.
+
+    A ``numpy.bool_`` is the sharpest case in the other respect — message quality rather
+    than check strictness: its bare ``__name__`` is ``"bool"``, so the rejection message
+    qualifies the type with its module or it would read as though a plain ``bool`` had been
+    refused.
+    """
+    with pytest.raises(AssertionError, match=match):
+        helper(value, label="2000 hybrid_flip")  # type: ignore[operator]
+
+
+def test_a_rejected_numpy_bool_names_its_module() -> None:
+    """``numpy.bool``'s bare ``__name__`` is ``"bool"``, so the message qualifies it.
+
+    **The match is anchored on the interpolated segment**, pairing the value with its
+    parenthesised type. The message's own prose names ``numpy.bool`` while explaining the
+    rejection, so a bare ``numpy.bool`` match is satisfied by that prose alone and cannot
+    distinguish a qualified interpolation from an unqualified one — the only thing this test
+    is here to check.
+    """
+    with pytest.raises(AssertionError, match=r"cell: np\.True_ \(numpy\.bool"):
+        non_null_sqlite_flag(np.True_, label="2000 hybrid_flip")
+
+
+def test_sqlite_label_is_required() -> None:
+    with pytest.raises(TypeError, match="label"):
+        non_null_sqlite_flag(1)  # type: ignore[call-arg]
+
+
+#: One value per rejection branch of :func:`~tests._helpers.non_null_sqlite_flag`, the SQLite
+#: twin of ``REJECTED_BY_EVERY_BRANCH`` above. The first two reach the shared
+#: :func:`~tests._helpers._non_null_scalar`; the last two reach this helper's own asserts,
+#: which no other test reads the label out of — every one of them matches only the invariant
+#: part of the message, so dropping ``label`` from either failed nothing. A mutation pass
+#: confirmed that: removing ``{label}`` from the dtype message left the suite byte-identically
+#: green. ``test_sqlite_label_is_required`` does not cover it — it pins that the *parameter* is
+#: mandatory, not that it is *used*.
+REJECTED_BY_EVERY_SQLITE_BRANCH = [
+    pytest.param(None, id="null-branch"),
+    pytest.param(pd.Series([1, 0]), id="non-scalar-branch"),
+    pytest.param(1.0, id="dtype-branch"),
+    pytest.param(2, id="range-branch"),
+]
+
+
+@pytest.mark.parametrize("value", REJECTED_BY_EVERY_SQLITE_BRANCH)
+def test_every_sqlite_message_interpolates_the_label(value: object) -> None:
+    """The label is the whole diagnostic value, so no branch may omit it."""
+    with pytest.raises(AssertionError, match="2000 hybrid_flip"):
+        non_null_sqlite_flag(value, label="2000 hybrid_flip")

@@ -341,6 +341,80 @@ def non_null_flag(value: object, *, label: str) -> bool:
     ``bool_or`` — so a hardcoded pointer would send half its callers to the wrong place.
     ``label`` carries the specifics instead.
     """
+    _non_null_scalar(value, label=label)
+    assert isinstance(value, bool | np.bool_), (
+        f"{label} is not a boolean cell: {value!r} ({type(value).__name__}). "
+        f"bool() would coerce it silently, which is the class of bug this guards."
+    )
+    return bool(value)
+
+
+def non_null_sqlite_flag(value: object, *, label: str) -> bool:
+    """The :func:`non_null_flag` of the **SQLite tier**, where a boolean is an ``int``.
+
+    The API snapshot stores every boolean as ``INTEGER`` (``usvote/snapshot.py``'s
+    ``_create_tables``: ``ec_determinative INTEGER``, ``pv_flip INTEGER``,
+    ``hybrid_flip INTEGER``, ``took_office INTEGER``), and ``sqlite3`` is opened without
+    ``detect_types``, so a read hands back a Python ``int`` — ``1``, ``0``, or ``None`` for
+    NULL. Neither half of that is what :func:`non_null_flag` accepts: it rejects an ``int``
+    on purpose, because from a *pandas* cell an int is a dtype defect. Hence two helpers
+    rather than one widened one — each strict about the dtype its own tier actually
+    produces, which catches more than a union-permissive helper would (#172).
+
+    The laundering it removes is the same one #165 named, and it is **live** in this tier:
+    ``bool(None) is False`` evaluates to ``True``, so an unguarded False-leg over a SQLite
+    read passes on a NULL. ``bool(None) is True`` fails, which is why only the False legs
+    were ever silent.
+
+    **Returns the Python singleton**, never the raw ``int``: ``1 is True`` is ``False``, so
+    a call site keeping the readable spelling would flip from green to red if this handed
+    back what SQLite gave it::
+
+        assert non_null_sqlite_flag(row["pv_flip"], label="2016 pv_flip") is True
+
+    **Accepts a plain ``int`` valued 0 or 1 and nothing else** — not ``None``, not any other
+    ``int``, not floats or strings, and **not a Python ``bool`` or a ``numpy.bool_``**. The
+    type check is ``type(value) is int``, not ``isinstance``, and the difference is the whole
+    of the split: ``isinstance(True, int)`` is ``True``, so an ``isinstance`` check would
+    accept a Python ``bool`` — which is precisely what ``pd.read_sql`` yields for a boolean
+    column **that carries a NULL** (an ``object`` column of Python ``bool``/``None`` cells,
+    the #165 case). A helper meant to be un-confusable with the pandas one that silently
+    accepts the pandas tier's nullable spelling is not un-confusable at all; it just fails to
+    say so. ``type(value) is int`` refuses every pandas spelling, which is what makes "each
+    rejects the other tier's dtype" a property rather than a wish.
+
+    SQLite gives up nothing by this: without ``detect_types`` it returns an ``int`` for an
+    ``INTEGER`` column, never a ``bool``, so no real call site is narrowed by the stricter
+    check. ``test_the_two_helpers_are_not_interchangeable`` pins both directions, including
+    the object-dtype Python ``bool`` that motivated the change.
+
+    ``label`` is required, for the reason :func:`non_null_flag` gives.
+    """
+    _non_null_scalar(value, label=label)
+    # ``type(value) is int`` and not ``isinstance``: bool is an int subclass, so isinstance
+    # would accept the Python ``bool`` that pd.read_sql yields for a NULL-carrying boolean
+    # column — the one pandas spelling this helper most needs to refuse. See the docstring.
+    assert type(value) is int, (
+        f"{label} is not a SQLite boolean cell: {value!r} "
+        f"({type(value).__module__}.{type(value).__name__}). SQLite hands back a plain int "
+        f"for an INTEGER column. "
+        f"(The type name carries its module because numpy.bool's bare __name__ is 'bool', "
+        f"identical to Python's, so an unqualified name cannot say which was passed.)"
+    )
+    assert value in (0, 1), (
+        f"{label} is not a 0/1 flag: {value!r}. An INTEGER column storing a boolean holds "
+        f"only 0 or 1, so any other value means the column is not the flag it was read as."
+    )
+    return bool(value)
+
+
+def _non_null_scalar(value: object, *, label: str) -> None:
+    """The half :func:`non_null_flag` and :func:`non_null_sqlite_flag` share.
+
+    Single-sourced because it is the half that is identical between the two tiers — a cell
+    must be one scalar and must not be NULL, whatever dtype it arrives as. Each public
+    helper keeps its own dtype assert inline rather than parameterizing it here.
+    """
     assert pd.api.types.is_scalar(value), (
         f"{label} is not a scalar cell: {value!r} ({type(value).__name__}). Pass a single "
         f"cell — a Series or array would make the null check below ambiguous, and a "
@@ -350,11 +424,6 @@ def non_null_flag(value: object, *, label: str) -> bool:
         f"{label} came back NULL — a NULL boolean here is the 'no value derived' "
         f"encoding, which means the derivation broke. It is never a legitimate false."
     )
-    assert isinstance(value, bool | np.bool_), (
-        f"{label} is not a boolean cell: {value!r} ({type(value).__name__}). "
-        f"bool() would coerce it silently, which is the class of bug this guards."
-    )
-    return bool(value)
 
 
 def narrow_mit_spine_to_sample(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -80,6 +80,7 @@ from typing import Any
 
 import pytest
 
+from tests._helpers import non_null_flag, non_null_sqlite_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
@@ -363,8 +364,15 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 assert snap[0] == row["ec_winner"]
                 assert snap[1] == row["pv_winner"]
                 assert snap[2] == row["hybrid_winner"]
-                assert bool(snap[3]) is bool(row["pv_flip"])
-                assert bool(snap[4]) is bool(row["hybrid_flip"])
+                # Cross-tier, so each side is normalized by its own helper: the snapshot
+                # is a SQLite int, the view a pandas bool. Both reject NULL first — the
+                # old `bool(a) is bool(b)` reported a match when BOTH sides were NULL.
+                for i, flip in enumerate(("pv_flip", "hybrid_flip"), start=3):
+                    snap_flip = non_null_sqlite_flag(snap[i], label=f"{year} {flip} (snapshot)")
+                    view_flip = non_null_flag(row[flip], label=f"{year} {flip} (view)")
+                    assert snap_flip == view_flip, (
+                        f"{year} {flip} drifted between the snapshot and the view"
+                    )
                 for i, col in enumerate(
                     ("ec_margin", "pv_margin", "hybrid_margin"), start=5
                 ):
@@ -379,8 +387,12 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 f"SELECT pv_flip, hybrid_flip FROM {HYBRID_SUMMARY_TABLE} "
                 "WHERE year = 2000"
             ).fetchone()
-            assert bool(flip_2000[0]) is True, "2000 must flip on the popular vote"
-            assert bool(flip_2000[1]) is False, (
+            assert (
+                non_null_sqlite_flag(flip_2000[0], label="2000 pv_flip") is True
+            ), "2000 must flip on the popular vote"
+            # The False leg is the one that was silent: `bool(None) is False` is True, so
+            # before #172 a NULL hybrid_flip passed here — the #165 laundering, live.
+            assert non_null_sqlite_flag(flip_2000[1], label="2000 hybrid_flip") is False, (
                 "2000 must NOT flip on the hybrid — asserted because the two-way unit "
                 "fixture points the other way"
             )
