@@ -796,7 +796,7 @@ class TestCoveragePolicySwitch:
         """
         df, roster = _mixed_surface()
         frame, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster),
+            cast("Any", _StubDBC(df, roster)),
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
@@ -825,10 +825,10 @@ class TestCoveragePolicySwitch:
         """
         df, roster = _mixed_surface()
         b, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster), view="ec_pv_redistributable"
+            cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable"
         )
         c, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster),
+            cast("Any", _StubDBC(df, roster)),
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
@@ -2030,7 +2030,7 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     completely covered. This test pins both halves of the fix at once.
     """
     df, roster = _mixed_surface()
-    dbc = _StubDBC(df, roster)
+    dbc = cast("Any", _StubDBC(df, roster))
     frame, summary = hybrid.build_hybrid_from_db(
         dbc, view="ec_pv_redistributable"
     )
@@ -2079,7 +2079,7 @@ def test_the_real_builders_output_yields_coverage_1_0_end_to_end() -> None:
     roster = build_popular_vote_roster(spine, source=SOURCE_MIT, years={1976})
 
     _, summary = hybrid.build_hybrid_from_db(
-        _StubDBC(df, roster), view="ec_pv_redistributable"
+        cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable"
     )
     assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
 
@@ -2094,7 +2094,7 @@ def test_a_populated_roster_still_yields_real_coverage_on_the_preferred_surface(
     """
     df, roster = _mixed_surface()
     df["source"] = SOURCE_UCSB
-    frame, summary = hybrid.build_hybrid_from_db(_StubDBC(df, roster))
+    frame, summary = hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)))
     assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
     assert not frame.empty
 
@@ -2125,14 +2125,14 @@ def test_the_entry_point_runs_the_guards_not_just_the_tests() -> None:
         "president_electoral_votes"
     ].transform("sum")
     with pytest.raises(hybrid.HybridError, match="tie"):
-        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="ec_pv_redistributable")
+        hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable")
 
 
 def test_the_entry_point_rejects_an_unresolved_view() -> None:
     """Reading the raw union would fan the 1976-2024 overlap out 2x (D017)."""
     df, roster = _mixed_surface()
     with pytest.raises(hybrid.HybridError, match="resolved"):
-        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="pv_votes")
+        hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)), view="pv_votes")
 
 
 # --- #124: the materialized views -------------------------------------------
@@ -2253,7 +2253,15 @@ class TestViewConstants:
 
 
 class TestRedistributableLeakGuardIsStructural:
-    """AC-4 **primary**: the public hybrid view can only ever read the public join view.
+    """Link 1 of 3 / AC-4 **primary**: the public hybrid view can only ever read the public join view.
+
+    Link 1 of the naming-invariant chain #166 built: this class pins **which join view a
+    builder's SQL reads for a given input**, :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName`
+    (Link 2) pins the name a view is created under against the SQL it is created with, and
+    :meth:`TestViewConstants.test_each_output_name_matches_its_own_input_join_view`
+    (Link 3) pins that every output name carries its input's surface suffix. Links 2 and 3
+    were labelled and this one was not (#174), which left the chain reading as though a
+    link were missing.
 
     This is the guard that cannot pass vacuously. A data assertion over a frame is only
     as good as the frame — if no non-redistributable row happens to be present it says
@@ -2787,11 +2795,17 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
     consistent and keep the offline suite green.
 
     **The whole creator runs; nothing is stubbed out of it.** The stub is a *connection*,
-    not a substitute for the function under test: it answers the probes and serves both
-    reads real frames, so every one of the seven view-creation preconditions executes,
-    the real :func:`usvote.hybrid.build_hybrid_from_db` derives both grains, and the SQL
+    not a substitute for the function under test: it answers the probes and serves its
+    reads real frames, so **every** view-creation precondition
+    :func:`usvote.hybrid.create_hybrid_views` enumerates executes — all of them, on the
+    redistributable-only fixture, including the conditional licensing guard — the real
+    :func:`usvote.hybrid.build_hybrid_from_frames` derives both grains, and the SQL
     captured below is the SQL that would reach Postgres — both builders being pure
-    ``str -> str`` functions of a view name.
+    ``str -> str`` functions of a view name. (This sentence carried a **count** until
+    #178, and the count was wrong: it said seven where the true figures are nine here and
+    eight on the preferred surface. It now defers to the creator's own enumeration, which
+    is the whole point of removing the scalar — a number here has to be re-derived to be
+    checked, and was not.)
 
     **What it still does not prove:** that the emitted SQL, executed by Postgres, returns
     what the pandas oracle does. Only
@@ -2855,6 +2869,131 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
         priv = issued[hybrid.HYBRID_SUMMARY_PREFERRED_VIEW]
         assert hybrid.HYBRID_PREFERRED_VIEW in priv
         assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW not in priv
+
+
+class TestTheCreatorReadsEachJoinViewExactlyOnce:
+    """AC-2 (#178): one read per surface, and the derivation gets the guarded frame.
+
+    **Why this has to assert the mechanism rather than an outcome.** Reading the join
+    view twice and reading it once produce *byte-identical views* — that is the whole
+    reason #164 sat deferred as a non-defect. So no assertion over the emitted SQL, the
+    frames, or the created names can tell the fixed code from the unfixed code. What
+    distinguishes them is **how many reads were issued** and **which frame object the
+    derivation received**, and those are the two things pinned below.
+
+    The second is the one that was actually filed. ``create_hybrid_views`` opens no
+    transaction and ``DBC`` commits per statement, so before #178 the three input guards
+    ran over a *different* read than the derivation did — a guard verdict that did not
+    strictly describe the frame the views were built from.
+    """
+
+    @staticmethod
+    def _join_reads(queries: list[str], view: str) -> list[str]:
+        """The data reads of ``view`` — **never** the ``to_regclass`` probes.
+
+        Matching the full ``SELECT * FROM dwh.<view>`` string rather than the bare view
+        name is load-bearing: :class:`_CreatingStub` logs its probes into the *same*
+        ``queries`` list, and ``SELECT to_regclass('dwh.ec_pv_preferred')`` contains the
+        view name too. A substring count would be inflated by the probe and could hide a
+        regression behind it.
+        """
+        return [q for q in queries if q == f"SELECT * FROM {hybrid.SCHEMA}.{view}"]
+
+    def test_each_join_view_is_read_exactly_once(self) -> None:
+        """Two reads total across both surfaces, where there used to be four."""
+        stub = _CreatingStub(*_redistributable_only_surface())
+        hybrid.create_hybrid_views(cast("Any", stub))
+        for join_view, _, _ in hybrid.HYBRID_SURFACES:
+            reads = self._join_reads(stub.queries, join_view)
+            # == 1, never <= 1: under <=, a reworded query string in read_ec_pv_join
+            # would drop this to 0 and the test would pass while asserting nothing.
+            assert len(reads) == 1, (
+                f"{join_view} was read {len(reads)} times, not once — the guards and the "
+                f"derivation are no longer provably reading one snapshot: {reads}"
+            )
+
+    def test_the_derivation_receives_the_very_frame_the_guards_ran_over(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `same frame object` half of AC-2, pinned by **identity**.
+
+        Equality would not do it: two reads of the same stub return equal frames, so an
+        ``assert_frame_equal`` passes on the unfixed code. Identity is what fails there.
+        """
+        guarded: list[int] = []
+        derived: list[int] = []
+        real_guard = hybrid.assert_carried_columns_constant
+        real_build = hybrid.build_hybrid_from_frames
+
+        def spy_guard(df: pd.DataFrame, **kwargs: object) -> None:
+            guarded.append(id(df))
+            real_guard(df, **kwargs)  # type: ignore[arg-type]
+
+        def spy_build(
+            ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame, **kwargs: object
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+            derived.append(id(ec_pv_df))
+            return real_build(ec_pv_df, roster_df, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(hybrid, "assert_carried_columns_constant", spy_guard)
+        monkeypatch.setattr(hybrid, "build_hybrid_from_frames", spy_build)
+        hybrid.create_hybrid_views(cast("Any", _CreatingStub(*_redistributable_only_surface())))
+
+        assert len(guarded) == len(derived) == len(hybrid.HYBRID_SURFACES)
+        assert guarded == derived, (
+            "the derivation was handed a different frame object than the one the input "
+            f"guards ran over (guarded {guarded}, derived {derived})"
+        )
+
+    def test_the_stub_would_record_a_second_read(self) -> None:
+        """Non-vacuity: the counter above can reach 2, so ``== 1`` is load-bearing.
+
+        Issues the read the pre-#178 creator issued a second time — through the real
+        :func:`usvote.hybrid.build_hybrid_from_db`, which still reads the view itself —
+        and shows the stub logs both. Without this, a matcher that silently matched
+        nothing would satisfy ``== 1`` only by accident and satisfy ``== 0`` happily.
+        """
+        stub = _CreatingStub(*_redistributable_only_surface())
+        view = EC_PV_REDISTRIBUTABLE_VIEW
+        hybrid.read_ec_pv_join(cast("Any", stub), view=view)
+        hybrid.build_hybrid_from_db(cast("Any", stub), view=view)
+        assert len(self._join_reads(stub.queries, view)) == 2
+
+
+def test_the_db_entry_point_still_reads_and_derives_the_same_result() -> None:
+    """#178 rewired ``create_hybrid_views`` past ``build_hybrid_from_db``, not through it.
+
+    That function keeps its signature and its behaviour — it is the live-warehouse seam
+    for a policy the SQL views cannot express (D050) and the oracle the integration
+    differential test runs against — so pin that the refactor left it composing the same
+    two reads into the same answer.
+    """
+    df, roster = _redistributable_only_surface()
+    frame, summary = hybrid.build_hybrid_from_db(
+        cast("Any", _StubDBC(df, roster)), view=EC_PV_REDISTRIBUTABLE_VIEW
+    )
+    direct_frame, direct_summary = hybrid.build_hybrid_from_frames(
+        df, hybrid._roster_for_surface(cast("Any", _StubDBC(df, roster)), df)
+    )
+    pd.testing.assert_frame_equal(frame, direct_frame)
+    pd.testing.assert_frame_equal(summary, direct_summary)
+
+
+def test_the_roster_scoping_has_exactly_one_expression() -> None:
+    """The #126 scoping is single-sourced in ``_roster_for_surface`` (#178).
+
+    Extraction was chosen over threading a frame through ``build_hybrid_from_db``
+    precisely so this derivation exists once. A second inline
+    ``set(df["source"].dropna().unique())`` beside the roster read would be the drift
+    this guards against — a roster scoped one way and a frame read another is the state
+    ``pv_coverage`` reports wrongly rather than loudly.
+    """
+    source = Path(hybrid.__file__).read_text()
+    scopings = source.count('set(ec_pv_df["source"].dropna().unique())')
+    assert scopings == 1, (
+        f"the surface-source scoping is spelled {scopings} times in hybrid.py; it must "
+        "have exactly one home, _roster_for_surface"
+    )
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:

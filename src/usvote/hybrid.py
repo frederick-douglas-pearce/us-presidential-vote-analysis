@@ -1113,7 +1113,7 @@ def assert_ec_winner_matches_rank(
 
 
 def read_ec_pv_join(
-    dbc: object,
+    dbc: DBC,
     *,
     view: str = EC_PV_PREFERRED_VIEW,
     schema: str = SCHEMA,
@@ -1133,11 +1133,11 @@ def read_ec_pv_join(
             "reading the raw pv_votes union would fan out the 1976-2024 overlap (D017)."
         )
     query = f"SELECT * FROM {schema}.{view}"
-    return dbc.select_query_to_df(query)  # type: ignore[attr-defined]
+    return dbc.select_query_to_df(query)
 
 
 def read_pv_status_roster(
-    dbc: object,
+    dbc: DBC,
     *,
     sources: Collection[str] | None = None,
     schema: str = ROSTER_SCHEMA,
@@ -1159,14 +1159,38 @@ def read_pv_status_roster(
     sources actually present in the chosen view.
     """
     query = f"SELECT source, year, state, pv_status FROM {schema}.{table}"
-    roster = dbc.select_query_to_df(query)  # type: ignore[attr-defined]
+    roster = dbc.select_query_to_df(query)
     if sources is None:
         return roster
     return roster.loc[roster["source"].isin(set(sources))].reset_index(drop=True)
 
 
+def _roster_for_surface(
+    dbc: DBC,
+    ec_pv_df: pd.DataFrame,
+    *,
+    schema: str = ROSTER_SCHEMA,
+) -> pd.DataFrame:
+    """Read the roster scoped to the sources ``ec_pv_df`` actually carries.
+
+    **The single expression of the #126 surface-scoping**, extracted in #178 so that
+    both ways of reaching a hybrid derivation from a live warehouse —
+    :func:`build_hybrid_from_db`, and :func:`create_hybrid_views`, which no longer goes
+    through it — derive the scope the same way. Re-deriving ``set(df["source"])`` at a
+    second call site was the alternative considered and rejected: two copies of this is
+    precisely the drift the scoping was added to fix, since a roster scoped one way and
+    a frame read another is exactly the state ``pv_coverage`` reports wrongly rather
+    than loudly (see :func:`read_pv_status_roster`).
+
+    A frame with no PV at all yields an empty source set, hence an empty roster and NULL
+    coverage — the honest reading of an absent roster, not a fabricated ``0.0``.
+    """
+    surface_sources = set(ec_pv_df["source"].dropna().unique())
+    return read_pv_status_roster(dbc, sources=surface_sources, schema=schema)
+
+
 def build_hybrid_from_db(
-    dbc: object,
+    dbc: DBC,
     *,
     view: str = EC_PV_PREFERRED_VIEW,
     schema: str = SCHEMA,
@@ -1194,28 +1218,40 @@ def build_hybrid_from_db(
     public surface reported NULL for *every* year including the fully-covered modern
     ones; that was the bug #127 fixed, not a flaw in this scoping.
 
-    ``policy`` defaults to the shipped (b) (D038) and **no production caller passes
-    anything else** — the views are built from this default and ``warehouse.py`` never
-    names a policy, which is why the public surface's treatment is fixed rather than
-    configurable (a test pins that no other module even mentions the constants).
+    ``policy`` defaults to the shipped (b) (D038). **Since #178 this function has no
+    production caller at all** — :func:`create_hybrid_views` derives through
+    :func:`build_hybrid_from_frames` directly, and the snapshot build always did — so
+    say what is actually true rather than the vacuous version: the four views are built
+    from :func:`build_hybrid_from_frames`' identical (b) default, ``warehouse.py`` never
+    names a policy, and a test pins that no other module even mentions the constants.
+    That is what keeps the public surface's treatment fixed rather than configurable.
+
+    **What this function is for, now that nothing in production calls it.** It is the
+    live-warehouse entry point for a derivation the *views cannot express*: the SQL
+    implements policy (b) only (D050), so any consumer wanting policy (c), or a grain
+    the four views do not carry, has no SQL path and must come through here — the
+    planned E9 mart being the named case. It is also the oracle
+    ``tests/integration/test_hybrid_views.py`` differentially tests the emitted SQL
+    against, which is what keeps the seam exercised meanwhile. A dashboard reaches none
+    of this: it reads the API snapshot (D028) or the materialized views.
 
     **The guards run here, not only in tests** (code review, #126). They exist to catch
     a denominator bug or a real dead heat, and on live warehouse data build time is the
     only place either can arise — the same reason
     :func:`usvote.join.create_ec_pv_views` runs
     :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
-    its upstream. :func:`create_hybrid_views` runs this function for exactly that
-    reason, inheriting all four as its view-creation preconditions.
+    its upstream. :func:`create_hybrid_views` inherits these four the same way — since
+    #178 by calling :func:`build_hybrid_from_frames` directly rather than this function,
+    which changes nothing about which guards run. They are four **of** that function's
+    preconditions, not all of them: it adds its own over the input frame and both output
+    grains, and :func:`create_hybrid_views` enumerates the whole set.
 
     **The build-and-guard half lives in** :func:`build_hybrid_from_frames` **(#102)**,
     so the snapshot build can run the identical guard set on frames it already holds
     without opening this connection. All this function adds is the two reads.
     """
     ec_pv_df = read_ec_pv_join(dbc, view=view, schema=schema)
-    surface_sources = set(ec_pv_df["source"].dropna().unique())
-    roster_df = read_pv_status_roster(
-        dbc, sources=surface_sources, schema=roster_schema
-    )
+    roster_df = _roster_for_surface(dbc, ec_pv_df, schema=roster_schema)
     return build_hybrid_from_frames(ec_pv_df, roster_df, policy=policy)
 
 
@@ -1236,12 +1272,20 @@ def build_hybrid_from_frames(
     :func:`usvote.snapshot.build_snapshot` already holds, rather than reading
     ``hybrid_redistributable`` — so it never passes
     through :func:`create_hybrid_views` and would otherwise inherit **none** of that
-    function's preconditions. Four of the seven are these; the other three
-    (:func:`assert_redistributable_only_source`,
+    function's preconditions. The four this function runs are
+    :func:`assert_ec_shares_le_one`, :func:`assert_no_winner_tie` (on all three scores),
+    :func:`assert_ec_winner_matches_rank`, and — inside :func:`_resolve_roster` — the
+    cross-source status-disagreement check.
+
+    The rest of :func:`create_hybrid_views`' set stays with **the caller**, because they
+    constrain the *input* frame or the *output* grains rather than the derivation, and
+    the snapshot's equivalents differ: :func:`assert_redistributable_only_source`
+    (which :func:`usvote.snapshot.assert_redistributable_only` covers there),
     :func:`assert_carried_columns_constant`, :func:`usvote.join.assert_no_fan_out` on
-    the input) are the caller's, because they constrain the *input* frame rather than
-    the derivation, and the snapshot's equivalents differ
-    (:func:`usvote.snapshot.assert_redistributable_only` covers the first).
+    the input, and :func:`assert_no_fan_out` at both output grains. **No count is given
+    on either side of that split**, deliberately — see :func:`create_hybrid_views`,
+    where the enumeration lives and where a scalar had drifted across five sites
+    (#174/#178).
 
     **:func:`assert_no_winner_tie` is the one that must not be skipped.**
     :func:`build_hybrid_summary` deliberately does **not** raise on a tie — a view
@@ -1285,7 +1329,7 @@ def _candidate_sql_cte(ec_pv_view: str, schema: str, roster_ref: str) -> str:
         " SELECT year, sum(state_electoral_votes) AS ec_denominator"
         " FROM allot GROUP BY year"
         # _resolve_roster, scoped to the sources this surface actually carries -- the
-        # scoping build_hybrid_from_db does, so the MIT-only surface is never handed
+        # scoping _roster_for_surface does, so the MIT-only surface is never handed
         # UCSB's roster and made to claim coverage for a year it holds no PV for.
         "), roster AS ("
         " SELECT year, state, min(pv_status) AS pv_status"
@@ -1640,22 +1684,35 @@ def create_hybrid_views(
     window rather than closing it; what it removes is the *foreseeable* half-build,
     where an input is simply absent.
 
-    **Seven preconditions run before anything is created**, over exactly the data the
-    views will express. Three are checked here directly, on the input join frame:
+    **These preconditions all run before anything is created**, over exactly the data
+    the views will express. They are enumerated rather than counted, and that is
+    deliberate: a scalar in this docstring drifted to four other sites before #178
+    corrected it, and any single number is wrong for one of the two surfaces anyway,
+    since the first guard below is conditional. A reader resolves this list against the
+    body; a count has to be re-derived to be checked, and was not.
 
-    - :func:`assert_redistributable_only_source` — redistributable surface only (D030);
+    Checked here directly — three over the input join frame, two over the derived
+    output:
+
+    - :func:`assert_redistributable_only_source` — **redistributable surface only**
+      (D030). This is the conditional one; it does not run on ``preferred``;
     - :func:`assert_carried_columns_constant` — the columns the SQL carries with
       ``min``/``max``/``bool_or`` really are constant per candidate-year;
     - :func:`usvote.join.assert_no_fan_out` — at the **input** grain, the one grain
       where a raw-union leak is expressible (see :func:`assert_no_fan_out` for why the
-      two output-grain checks cannot see it).
+      two output-grain checks cannot see it);
+    - :func:`assert_no_fan_out` at :data:`HYBRID_CANDIDATE_GRAIN`, and again at
+      :data:`HYBRID_SUMMARY_GRAIN` — contract checks on the two frames about to be
+      expressed as views. **The superseded count omitted these two entirely** (#174).
 
-    Four more come from calling :func:`build_hybrid_from_db`, which is what that
-    function promised #124 would inherit: ``assert_ec_shares_le_one``,
-    ``assert_no_winner_tie`` on all three scores, ``assert_ec_winner_matches_rank``, and
-    (inside ``_resolve_roster``) the cross-source status-disagreement check. The tie
-    check matters most: a view cannot ``raise``, and a genuine dead heat would otherwise
-    make the window-rank winner an arbitrary pick.
+    Four more come from :func:`build_hybrid_from_frames`, which #124 promised would be
+    inherited and which this function calls directly since #178 (it went through
+    :func:`build_hybrid_from_db` before, which re-read the join view to do it):
+    :func:`assert_ec_shares_le_one`, :func:`assert_no_winner_tie` on all three scores,
+    :func:`assert_ec_winner_matches_rank`, and (inside :func:`_resolve_roster`) the
+    cross-source status-disagreement check. The tie check matters most: a view cannot
+    ``raise``, and a genuine dead heat would otherwise make the window-rank winner an
+    arbitrary pick.
 
     **Know what these guards do and do not cover.** They validate the *pandas*
     derivation, not the emitted SQL, so a SQL/oracle drift passes every one of them.
@@ -1701,9 +1758,15 @@ def create_hybrid_views(
         # per 1976-2024 overlap key would double national_pv_votes while collapsing
         # invisibly at the output grains below (see assert_no_fan_out).
         assert_join_no_fan_out(ec_pv_df)
-        frame, summary = build_hybrid_from_db(
-            dbc, view=join_view, schema=schema, roster_schema=roster_schema
-        )
+        # The SAME frame the three guards above just ran over is what the derivation
+        # receives (#178). It used to call build_hybrid_from_db, which re-issued the
+        # identical SELECT and re-materialized it -- four reads of the join view per
+        # rebuild_views over the 51-year warehouse, and, the reason this was filed, a
+        # guard verdict describing a *different* read than the one the views were built
+        # from. This function opens no transaction, so those two reads were not
+        # guaranteed to see the same snapshot.
+        roster_df = _roster_for_surface(dbc, ec_pv_df, schema=roster_schema)
+        frame, summary = build_hybrid_from_frames(ec_pv_df, roster_df)
         assert_no_fan_out(frame, HYBRID_CANDIDATE_GRAIN)
         assert_no_fan_out(summary, HYBRID_SUMMARY_GRAIN)
         dbc.create_view(
