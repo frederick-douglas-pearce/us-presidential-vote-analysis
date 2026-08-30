@@ -283,18 +283,13 @@ def test_the_two_helpers_are_not_interchangeable(
     exactly what ``pd.read_sql`` yields for a boolean column carrying a NULL. The pandas
     spelling this split most needs to refuse was the one sailing through, while the
     ``numpy.bool_`` case tested here passed for a reason that had nothing to do with the
-    intent. The asserts below pin the discrimination the fix depends on.
+    intent.
 
-    A ``numpy.bool_`` is the sharpest case in the other direction: its bare
-    ``__name__`` is ``"bool"``, so the rejection message qualifies the type with its module
-    or it would read as though a plain ``bool`` had been refused.
+    A ``numpy.bool_`` is the sharpest case in the other respect — message quality rather
+    than check strictness: its bare ``__name__`` is ``"bool"``, so the rejection message
+    qualifies the type with its module or it would read as though a plain ``bool`` had been
+    refused.
     """
-    # Read through an ``object`` local: mypy narrows a literal ``True`` to a type it can
-    # reason about exactly, and would call the second check unreachable — making the
-    # assertion vanish at exactly the point it is load-bearing.
-    py_true: object = True
-    assert isinstance(py_true, int), "bool subclasses int — why isinstance was too loose"
-    assert type(py_true) is not int, "...and why `type(...) is int` is the right check"
     with pytest.raises(AssertionError, match=match):
         helper(value, label="2000 hybrid_flip")  # type: ignore[operator]
 
@@ -303,12 +298,10 @@ def test_a_rejected_numpy_bool_names_its_module() -> None:
     """``numpy.bool``'s bare ``__name__`` is ``"bool"``, so the message qualifies it.
 
     **The match is anchored on the interpolated segment**, pairing the value with its
-    parenthesised type. Matching ``numpy.bool`` anywhere in the message would be weaker: it
-    would also be satisfied by any prose elsewhere in the string that happened to name the
-    type, so the assertion would stop distinguishing a qualified interpolation from an
-    unqualified one — which is the only thing it is here to check. (An earlier revision of
-    the message did carry such prose, and the bare match still succeeded against it with the
-    qualification removed — verified, which is why the anchor is here.)
+    parenthesised type. The message's own prose names ``numpy.bool`` while explaining the
+    rejection, so a bare ``numpy.bool`` match is satisfied by that prose alone and cannot
+    distinguish a qualified interpolation from an unqualified one — the only thing this test
+    is here to check.
     """
     with pytest.raises(AssertionError, match=r"cell: np\.True_ \(numpy\.bool"):
         non_null_sqlite_flag(np.True_, label="2000 hybrid_flip")

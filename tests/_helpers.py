@@ -414,9 +414,7 @@ def _non_null_scalar(value: object, *, label: str) -> None:
 
     Single-sourced because it is the half that is identical between the two tiers — a cell
     must be one scalar and must not be NULL, whatever dtype it arrives as. Each public
-    helper keeps **its own** dtype assert inline instead of parameterizing it here: that
-    assert is the only thing that differs between them, and it is what a reader needs to see
-    at the call site to know which helper a given tier wants.
+    helper keeps its own dtype assert inline rather than parameterizing it here.
     """
     assert pd.api.types.is_scalar(value), (
         f"{label} is not a scalar cell: {value!r} ({type(value).__name__}). Pass a single "
