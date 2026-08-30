@@ -3252,9 +3252,16 @@ given for the loose form in #167's first commit describes no invariant this repo
 (`join.py:57` and `pv/load.py:66` both import it). And the view-creation precondition count is
 replaced by an **enumeration of named guards** at every site that stated it. A scalar was the
 wrong shape twice over: it had drifted to five sites, and *any* single number is wrong for one
-of the two surfaces, since the licensing guard is conditional on the surface (nine preconditions
-on `redistributable`, eight on `preferred`). An enumeration resolves against the body by reading;
-a count has to be re-derived to be checked, and was not.
+of the two surfaces, since the licensing guard is conditional — `redistributable` runs one guard
+more than `preferred`. An enumeration resolves against the body by reading; a count has to be
+re-derived to be checked, and was not.
+
+**No total is stated here either, deliberately.** An earlier draft of this entry gave the figures
+as nine and eight, which review caught: the entry would then be a *sixth* site restating the
+scalar it was recording the removal of, and adding a guard would falsify it exactly as adding one
+falsified the last. A dated log entry could defensibly carry a snapshot figure, but not this
+entry — the one whose whole claim is that the number is the wrong artifact. The enumeration in
+`create_hybrid_views` is the single authority.
 
 **Related:** #178 (superseding #164, #174, #176), D026, D038, D039, D050, `usvote/hybrid.py`
 (`_roster_for_surface`, `create_hybrid_views`, `build_hybrid_from_db`),

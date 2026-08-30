@@ -1155,8 +1155,11 @@ def read_pv_status_roster(
     EC allotment, so pointing a UCSB-bearing roster at the MIT-only
     ``ec_pv_redistributable`` view would report ``pv_coverage == 1.0`` for, say, 1900 —
     a year that surface carries no popular vote for at all. That is the exact inverse of
-    what the flag means. :func:`build_hybrid_from_db` therefore scopes this read to the
-    sources actually present in the chosen view.
+    what the flag means. :func:`_roster_for_surface` therefore scopes this read to the
+    sources actually present in the frame being computed — it is the one expression of
+    that scoping, and both :func:`build_hybrid_from_db` and the production path
+    (:func:`create_hybrid_views`, which since #178 does not go through it) reach it
+    there.
     """
     query = f"SELECT source, year, state, pv_status FROM {schema}.{table}"
     roster = dbc.select_query_to_df(query)
@@ -1272,7 +1275,7 @@ def build_hybrid_from_frames(
     :func:`usvote.snapshot.build_snapshot` already holds, rather than reading
     ``hybrid_redistributable`` — so it never passes
     through :func:`create_hybrid_views` and would otherwise inherit **none** of that
-    function's preconditions. The four this function runs are
+    function's preconditions. The ones this function runs are
     :func:`assert_ec_shares_le_one`, :func:`assert_no_winner_tie` (on all three scores),
     :func:`assert_ec_winner_matches_rank`, and — inside :func:`_resolve_roster` — the
     cross-source status-disagreement check.
@@ -1282,10 +1285,9 @@ def build_hybrid_from_frames(
     the snapshot's equivalents differ: :func:`assert_redistributable_only_source`
     (which :func:`usvote.snapshot.assert_redistributable_only` covers there),
     :func:`assert_carried_columns_constant`, :func:`usvote.join.assert_no_fan_out` on
-    the input, and :func:`assert_no_fan_out` at both output grains. **No count is given
-    on either side of that split**, deliberately — see :func:`create_hybrid_views`,
-    where the enumeration lives and where a scalar had drifted across five sites
-    (#174/#178).
+    the input, and :func:`assert_no_fan_out` at both output grains. Both sides are
+    enumerated rather than counted (#174/#178): see :func:`create_hybrid_views`, which
+    holds the authoritative list, and where a scalar had drifted across five sites.
 
     **:func:`assert_no_winner_tie` is the one that must not be skipped.**
     :func:`build_hybrid_summary` deliberately does **not** raise on a tie — a view
@@ -1691,8 +1693,7 @@ def create_hybrid_views(
     since the first guard below is conditional. A reader resolves this list against the
     body; a count has to be re-derived to be checked, and was not.
 
-    Checked here directly — three over the input join frame, two over the derived
-    output:
+    Checked here directly — over the input join frame, then over the derived output:
 
     - :func:`assert_redistributable_only_source` — **redistributable surface only**
       (D030). This is the conditional one; it does not run on ``preferred``;
@@ -1705,7 +1706,7 @@ def create_hybrid_views(
       :data:`HYBRID_SUMMARY_GRAIN` — contract checks on the two frames about to be
       expressed as views. **The superseded count omitted these two entirely** (#174).
 
-    Four more come from :func:`build_hybrid_from_frames`, which #124 promised would be
+    The rest come from :func:`build_hybrid_from_frames`, which #124 promised would be
     inherited and which this function calls directly since #178 (it went through
     :func:`build_hybrid_from_db` before, which re-read the join view to do it):
     :func:`assert_ec_shares_le_one`, :func:`assert_no_winner_tie` on all three scores,
@@ -1721,7 +1722,10 @@ def create_hybrid_views(
     because the asymmetry is easy to forget when adding a guard later.
 
     ``replace`` defaults to ``True`` (``CREATE OR REPLACE VIEW`` — idempotent and
-    non-destructive). Note the consequence of the new view-on-view dependency (D050): a
+    non-destructive). Note the consequence of the new view-on-view dependency (D050 —
+    whose §4 describes the superseded call path, this function having gone through
+    :func:`build_hybrid_from_db` until #178; **D057** records the change, and the log is
+    append-only so D050 is not edited, exactly as D042 left D039 standing): a
     *breaking* column change to a per-candidate view now needs an explicit
     ``DROP ... CASCADE`` migration, since its summary depends on it.
     """

@@ -72,9 +72,13 @@ def run_mit_pipeline(
     the **EC spine's** participating ``(year, state)`` keys tagged ``popular_vote``
     (:func:`usvote.pv.status.build_popular_vote_roster`) — none of UCSB's absence
     derivation, exactly as D024 §Rationale anticipated. Without it the roster held *no*
-    MIT rows at all, so :func:`usvote.hybrid.build_hybrid_from_db` — which scopes its
-    roster read to the sources present in the surface it is computing — read an empty
-    roster on the MIT-only ``ec_pv_redistributable`` view and reported ``pv_coverage``
+    MIT rows at all, so the hybrid derivation — which scopes its roster read to the
+    sources present in the surface it is computing, via
+    :func:`usvote.hybrid._roster_for_surface` (through
+    :func:`usvote.hybrid.build_hybrid_from_db` when this was written; since #178 the
+    production path is :func:`usvote.hybrid.create_hybrid_views` calling that helper
+    directly) — read an empty roster on the MIT-only ``ec_pv_redistributable`` view and
+    reported ``pv_coverage``
     NULL ("unknown") for 1976–2024, the years whose true EV-weighted coverage is a clean
     ``1.0``.
 

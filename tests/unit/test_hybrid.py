@@ -842,11 +842,21 @@ class TestCoveragePolicySwitch:
         assert c.loc[c["year"] == 1900, "ec_share_hybrid"].isna().all()
 
 
-#: The three functions that actually accept a ``policy``. A ``policy=`` keyword on
-#: anything else is somebody's unrelated kwarg, not a coverage selection.
-_POLICY_TAKERS = frozenset(
-    {"apply_coverage_policy", "build_hybrid_frame", "build_hybrid_from_db"}
-)
+#: Every function that actually accepts a ``policy``. A ``policy=`` keyword on anything
+#: else is somebody's unrelated kwarg, not a coverage selection.
+#:
+#: ``build_hybrid_from_frames`` was missing here until #178 and is the one that matters
+#: most now: it is the derivation **both** production paths reach — ``create_hybrid_views``
+#: since #178, and ``snapshot.build_snapshot`` since #102 — so a
+#: ``build_hybrid_from_frames(df, roster, policy=chosen)`` added to ``snapshot.py`` would
+#: have shipped policy (c) on the public API with this guard staying green. Its absence
+#: predated #178; that change is what moved the load-bearing call onto it.
+_POLICY_TAKERS = frozenset({
+    "apply_coverage_policy",
+    "build_hybrid_frame",
+    "build_hybrid_from_db",
+    "build_hybrid_from_frames",
+})
 
 
 def _policy_selections(source: str, module: str) -> list[str]:
@@ -934,7 +944,8 @@ def test_nothing_configures_a_policy_other_than_b() -> None:
     entirely on this test, so it may not have a hole that wide.
 
     Matching the parsed tree also makes it **narrow**: a ``policy=`` keyword counts only on
-    a call to one of the three functions that actually take one, so an unrelated
+    a call to one of the functions that actually take one (:data:`_POLICY_TAKERS`), so an
+    unrelated
     ``cache_policy=``/``retry_policy=`` elsewhere in the package — or the word in a comment
     or docstring — is not a false accusation of configuring coverage.
     """
@@ -2802,10 +2813,11 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
     :func:`usvote.hybrid.build_hybrid_from_frames` derives both grains, and the SQL
     captured below is the SQL that would reach Postgres — both builders being pure
     ``str -> str`` functions of a view name. (This sentence carried a **count** until
-    #178, and the count was wrong: it said seven where the true figures are nine here and
-    eight on the preferred surface. It now defers to the creator's own enumeration, which
-    is the whole point of removing the scalar — a number here has to be re-derived to be
-    checked, and was not.)
+    #178, and the count was wrong. It now names no figure at all and defers to the
+    creator's own enumeration, which is the whole point: a number restated *here* is a
+    number that has to be re-derived in another file to be checked, and was not. The
+    redistributable surface runs one guard more than the preferred one, because the
+    licensing guard is conditional — which is why no single total was ever right.)
 
     **What it still does not prove:** that the emitted SQL, executed by Postgres, returns
     what the pandas oracle does. Only
@@ -2979,6 +2991,50 @@ def test_the_db_entry_point_still_reads_and_derives_the_same_result() -> None:
     pd.testing.assert_frame_equal(summary, direct_summary)
 
 
+def _surface_scopings(source: str) -> list[int]:
+    """Line numbers of every ``set(<frame>["source"].dropna().unique())`` expression.
+
+    **Matched on the AST, not counted in source text**, for the two reasons
+    :func:`_policy_selections` is — and here both directions bite. A text count misses
+    the drift that actually matters, a second copy over a differently-named frame
+    (``join_df``, ``surface_df``), since it can only match the spelling it was given.
+    And it fails *spuriously* on the same literal quoted in a docstring or comment,
+    which is a live hazard rather than a hypothetical one: this very derivation is
+    discussed in prose in the module it guards.
+    """
+    found: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "set"
+            and len(node.args) == 1
+        ):
+            continue
+        unique = node.args[0]  # set( <...>.unique() )
+        if not (
+            isinstance(unique, ast.Call)
+            and isinstance(unique.func, ast.Attribute)
+            and unique.func.attr == "unique"
+        ):
+            continue
+        dropna = unique.func.value  # <...>.dropna()
+        if not (
+            isinstance(dropna, ast.Call)
+            and isinstance(dropna.func, ast.Attribute)
+            and dropna.func.attr == "dropna"
+        ):
+            continue
+        frame = dropna.func.value  # <frame>["source"]
+        if (
+            isinstance(frame, ast.Subscript)
+            and isinstance(frame.slice, ast.Constant)
+            and frame.slice.value == "source"
+        ):
+            found.append(node.lineno)
+    return found
+
+
 def test_the_roster_scoping_has_exactly_one_expression() -> None:
     """The #126 scoping is single-sourced in ``_roster_for_surface`` (#178).
 
@@ -2988,11 +3044,10 @@ def test_the_roster_scoping_has_exactly_one_expression() -> None:
     this guards against — a roster scoped one way and a frame read another is the state
     ``pv_coverage`` reports wrongly rather than loudly.
     """
-    source = Path(hybrid.__file__).read_text()
-    scopings = source.count('set(ec_pv_df["source"].dropna().unique())')
-    assert scopings == 1, (
-        f"the surface-source scoping is spelled {scopings} times in hybrid.py; it must "
-        "have exactly one home, _roster_for_surface"
+    scopings = _surface_scopings(Path(hybrid.__file__).read_text(encoding="utf-8"))
+    assert len(scopings) == 1, (
+        "the surface-source scoping must have exactly one home, _roster_for_surface; "
+        f"found it at hybrid.py lines {scopings}"
     )
 
 
