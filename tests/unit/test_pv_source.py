@@ -11,6 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from tests._helpers import non_null_flag
 from usvote.pv.schema import PV_SCHEMA
 from usvote.pv.source import (
     PV_SOURCE_COLUMNS,
@@ -83,10 +84,18 @@ def test_seed_encodes_mit_preferred_and_redistributable() -> None:
     frame = build_pv_source_frame().set_index("source")
     # MIT wins the overlap (lower rank) and is the only redistributable source (D016).
     assert frame.loc[SOURCE_MIT, "precedence_rank"] == 1
-    assert bool(frame.loc[SOURCE_MIT, "redistributable"]) is True
+    assert (
+        non_null_flag(frame.loc[SOURCE_MIT, "redistributable"], label="MIT redistributable")
+        is True
+    )
     # UCSB supplies pre-1976 and loses the overlap; analysis-only pending a grant (D022).
     assert frame.loc[SOURCE_UCSB, "precedence_rank"] == 2
-    assert bool(frame.loc[SOURCE_UCSB, "redistributable"]) is False
+    assert (
+        non_null_flag(
+            frame.loc[SOURCE_UCSB, "redistributable"], label="UCSB redistributable"
+        )
+        is False
+    )
 
 
 def test_seed_ranks_are_unique() -> None:

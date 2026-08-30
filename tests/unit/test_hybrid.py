@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tests._helpers import QueryDispatchDBC
+from tests._helpers import QueryDispatchDBC, non_null_flag
 from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
 from usvote import hybrid
 from usvote.count_status import (
@@ -698,9 +698,12 @@ class TestCoveragePolicySwitch:
         for frame in (b, c):
             summary = hybrid.build_hybrid_summary(frame)
             # Populated-and-False, not NULL: 1824 had no EC majority, which is a known
-            # fact about the election, never a "we could not tell" (D041).
-            assert summary["ec_determinative"].notna().all()
-            assert bool(summary["ec_determinative"].iloc[0]) is False
+            # fact about the election, never a "we could not tell" (D041). The separate
+            # notna() assert that used to guard this line is gone: non_null_flag rejects
+            # every NULL spelling itself, so the safety no longer depends on a neighbour.
+            assert non_null_flag(
+                summary["ec_determinative"].iloc[0], label="1824 ec_determinative"
+            ) is False
             assert summary["ec_winner"].iloc[0] == "Jackson"
 
     def test_a_full_coverage_year_makes_the_two_policies_identical(self) -> None:
@@ -992,8 +995,10 @@ class TestThreeMethodScores:
         # Yet the House chose Adams — rank 1 and took_office genuinely diverge, and
         # took_office is the per-candidate boolean the spine actually carries.
         by_name = frame.set_index("candidate")["took_office"]
-        assert bool(by_name["Adams"]) is True
-        assert bool(by_name["Jackson"]) is False
+        assert non_null_flag(by_name["Adams"], label="1824 Adams took_office") is True
+        assert (
+            non_null_flag(by_name["Jackson"], label="1824 Jackson took_office") is False
+        )
         assert by_name.sum() == 1  # exactly one office-holder
         jackson = frame.loc[frame["candidate"] == "Jackson"].iloc[0]
         assert jackson["president_electoral_rank"] == 1
@@ -1007,8 +1012,13 @@ class TestThreeMethodScores:
         df, roster = frame_1824()
         summary = hybrid.build_hybrid_summary(hybrid.build_hybrid_frame(df, roster))
         row = summary.iloc[0]
-        assert row["ec_determinative"] is False or row["ec_determinative"] == False  # noqa: E712
-        assert pd.notna(row["ec_determinative"])
+        # One call replaces the old `is False or == False` straddle and the pd.notna line
+        # beneath it: the straddle existed only because `np.bool_(False) is False` is
+        # False, which the helper's Python-singleton return removes.
+        assert (
+            non_null_flag(row["ec_determinative"], label="1824 ec_determinative")
+            is False
+        )
         assert row["pv_coverage"] == pytest.approx(190 / 261)
         assert pd.notna(row["pv_coverage"])
 
@@ -1782,7 +1792,10 @@ class TestCountedBasis:
             hybrid.build_hybrid_frame(frame, roster)
         ).iloc[0]
         assert summary["ec_winner"] == "Ulysses S. Grant"
-        assert bool(summary["ec_determinative"]) is True  # 214/294 = 0.728 > 0.5
+        determinative = non_null_flag(
+            summary["ec_determinative"], label="1868 ec_determinative"
+        )
+        assert determinative is True  # 214/294 = 0.728 > 0.5
         # And the rank the spine carries agrees with the share derived here — the two
         # must share a basis or assert_ec_winner_matches_rank fires (D046).
         hybrid.assert_ec_winner_matches_rank(
