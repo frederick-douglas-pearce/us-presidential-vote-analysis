@@ -310,3 +310,26 @@ def test_a_rejected_numpy_bool_names_its_module() -> None:
 def test_sqlite_label_is_required() -> None:
     with pytest.raises(TypeError, match="label"):
         non_null_sqlite_flag(1)  # type: ignore[call-arg]
+
+
+#: One value per rejection branch of :func:`~tests._helpers.non_null_sqlite_flag`, the SQLite
+#: twin of ``REJECTED_BY_EVERY_BRANCH`` above. The first two reach the shared
+#: :func:`~tests._helpers._non_null_scalar`; the last two reach this helper's own asserts,
+#: which no other test reads the label out of — every one of them matches only the invariant
+#: part of the message, so dropping ``label`` from either failed nothing. A mutation pass
+#: confirmed that: removing ``{label}`` from the dtype message left the suite byte-identically
+#: green. ``test_sqlite_label_is_required`` does not cover it — it pins that the *parameter* is
+#: mandatory, not that it is *used*.
+REJECTED_BY_EVERY_SQLITE_BRANCH = [
+    pytest.param(None, id="null-branch"),
+    pytest.param(pd.Series([1, 0]), id="non-scalar-branch"),
+    pytest.param(1.0, id="dtype-branch"),
+    pytest.param(2, id="range-branch"),
+]
+
+
+@pytest.mark.parametrize("value", REJECTED_BY_EVERY_SQLITE_BRANCH)
+def test_every_sqlite_message_interpolates_the_label(value: object) -> None:
+    """The label is the whole diagnostic value, so no branch may omit it."""
+    with pytest.raises(AssertionError, match="2000 hybrid_flip"):
+        non_null_sqlite_flag(value, label="2000 hybrid_flip")
