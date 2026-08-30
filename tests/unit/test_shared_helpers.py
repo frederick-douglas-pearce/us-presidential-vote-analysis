@@ -182,8 +182,6 @@ def test_label_is_required() -> None:
     [
         pytest.param(1, True, id="int-one"),
         pytest.param(0, False, id="int-zero"),
-        pytest.param(True, True, id="python-True"),
-        pytest.param(False, False, id="python-False"),
     ],
 )
 def test_a_sqlite_flag_returns_the_python_singleton(
@@ -262,6 +260,12 @@ def test_non_sqlite_scalars_are_rejected(value: object) -> None:
         pytest.param(
             np.True_, non_null_sqlite_flag, "not a SQLite boolean cell", id="pandas-cell"
         ),
+        pytest.param(
+            pd.DataFrame({"pv_flip": [True, None]}).iloc[0]["pv_flip"],
+            non_null_sqlite_flag,
+            "not a SQLite boolean cell",
+            id="pandas-nullable-cell",
+        ),
         pytest.param(1, non_null_flag, "not a boolean cell", id="sqlite-cell"),
     ],
 )
@@ -271,11 +275,17 @@ def test_the_two_helpers_are_not_interchangeable(
     """Each rejects the other tier's dtype, which is what makes the split enforceable.
 
     This is the property that keeps two helpers from becoming a "which one do I call?"
-    trap: a wrong pick fails loudly at authoring time instead of quietly working. It rests
-    on ``isinstance(True, int)`` being ``True`` while ``isinstance(np.bool_(True), int)`` is
-    ``False`` — asserted below, because the whole split would collapse if numpy changed it.
+    trap: a wrong pick fails loudly at authoring time instead of quietly working.
 
-    A ``numpy.bool_`` is the sharpest case in the other direction too: its bare
+    **The ``pandas-nullable-cell`` case is the one that was actually broken**, and it is why
+    the SQLite helper checks ``type(value) is int`` rather than ``isinstance``. ``bool`` is
+    an ``int`` subclass, so an ``isinstance`` check accepted a Python ``bool`` — which is
+    exactly what ``pd.read_sql`` yields for a boolean column carrying a NULL. The pandas
+    spelling this split most needs to refuse was the one sailing through, while the
+    ``numpy.bool_`` case tested here passed for a reason that had nothing to do with the
+    intent. The asserts below pin the discrimination the fix depends on.
+
+    A ``numpy.bool_`` is the sharpest case in the other direction: its bare
     ``__name__`` is ``"bool"``, so the rejection message qualifies the type with its module
     or it would read as though a plain ``bool`` had been refused.
     """
@@ -284,15 +294,24 @@ def test_the_two_helpers_are_not_interchangeable(
     # assertion vanish at exactly the point it is load-bearing.
     py_true: object = True
     np_true: object = np.True_
-    assert isinstance(py_true, int)
+    assert isinstance(py_true, int), "bool subclasses int — why isinstance was too loose"
+    assert type(py_true) is not int, "...and why `type(...) is int` is the right check"
     assert not isinstance(np_true, int)
     with pytest.raises(AssertionError, match=match):
         helper(value, label="2000 hybrid_flip")  # type: ignore[operator]
 
 
 def test_a_rejected_numpy_bool_names_its_module() -> None:
-    """``numpy.bool_.__name__`` is ``"bool"``, which alone reads as a passing type."""
-    with pytest.raises(AssertionError, match=r"numpy\.bool"):
+    """``numpy.bool_.__name__`` is ``"bool"``, which alone reads as a passing type.
+
+    **The match is anchored on the interpolated segment on purpose.** A bare
+    ``match=r"numpy\.bool"`` passes vacuously: the message's own static prose spells
+    ``numpy.bool_`` while explaining the rejection, so the regex would match even if the
+    interpolation dropped back to the unqualified ``type(value).__name__`` — reintroducing
+    exactly the bug this test documents, with the test still green. Matching the value and
+    its parenthesised type together is what makes the assertion bite.
+    """
+    with pytest.raises(AssertionError, match=r"cell: np\.True_ \(numpy\.bool"):
         non_null_sqlite_flag(np.True_, label="2000 hybrid_flip")
 
 

@@ -372,30 +372,35 @@ def non_null_sqlite_flag(value: object, *, label: str) -> bool:
 
         assert non_null_sqlite_flag(row["pv_flip"], label="2016 pv_flip") is True
 
-    **Accepts ``int``/``bool`` valued 0 or 1; rejects everything else** — ``None``, any other
-    ``int``, floats, strings, and ``numpy.bool_``. Rejecting ``numpy.bool_`` is deliberate and
-    is what keeps the two helpers non-interchangeable: a pandas cell passed here, or a SQLite
-    cell passed to :func:`non_null_flag`, fails loudly at authoring time instead of quietly
-    working and leaving the next reader to guess which spelling a site needs. Note
-    ``isinstance(True, int)`` is ``True`` while ``isinstance(np.bool_(True), int)`` is
-    ``False``, which is exactly the discrimination that makes the split enforceable.
+    **Accepts a plain ``int`` valued 0 or 1 and nothing else** — not ``None``, not any other
+    ``int``, not floats or strings, and **not a Python ``bool`` or a ``numpy.bool_``**. The
+    type check is ``type(value) is int``, not ``isinstance``, and the difference is the whole
+    of the split: ``isinstance(True, int)`` is ``True``, so an ``isinstance`` check would
+    accept a Python ``bool`` — which is precisely what ``pd.read_sql`` yields for a boolean
+    column **that carries a NULL** (an ``object`` column of Python ``bool``/``None`` cells,
+    the #165 case). A helper meant to be un-confusable with the pandas one that silently
+    accepts the pandas tier's nullable spelling is not un-confusable at all; it just fails to
+    say so. ``type(value) is int`` refuses every pandas spelling, which is what makes "each
+    rejects the other tier's dtype" a property rather than a wish.
+
+    SQLite gives up nothing by this: without ``detect_types`` it returns an ``int`` for an
+    ``INTEGER`` column, never a ``bool``, so no real call site is narrowed by the stricter
+    check. ``test_the_two_helpers_are_not_interchangeable`` pins both directions, including
+    the object-dtype Python ``bool`` that motivated the change.
 
     ``label`` is required, for the reason :func:`non_null_flag` gives.
     """
     _non_null_scalar(value, label=label)
-    # ``isinstance(value, int)`` is the whole dtype check, and it rejects ``numpy.bool_``
-    # on its own: numpy's bool is NOT an int subclass, while Python's ``bool`` is. An
-    # explicit ``and not isinstance(value, np.bool_)`` clause would read as belt-and-braces
-    # and is in fact unreachable — mypy proves it. The property is pinned instead by
-    # ``test_the_two_helpers_are_not_interchangeable``, which asserts both halves directly,
-    # so a numpy change that made ``np.bool_`` an int would fail loudly there rather than
-    # silently collapsing the split this helper's existence rests on.
-    assert isinstance(value, int), (
+    # ``type(value) is int`` and not ``isinstance``: bool is an int subclass, so isinstance
+    # would accept the Python ``bool`` that pd.read_sql yields for a NULL-carrying boolean
+    # column — the one pandas spelling this helper most needs to refuse. See the docstring.
+    assert type(value) is int, (
         f"{label} is not a SQLite boolean cell: {value!r} "
-        f"({type(value).__module__}.{type(value).__name__}). SQLite hands back an int for "
-        f"an INTEGER column; a numpy.bool_ or a float means this was read from pandas, and "
-        f"non_null_flag is the helper for that tier. (The qualified type name is "
-        f"deliberate: numpy.bool_'s bare __name__ is 'bool', which reads as a pass.)"
+        f"({type(value).__module__}.{type(value).__name__}). SQLite hands back a plain int "
+        f"for an INTEGER column; anything else — a bool, a float, a numpy scalar — means "
+        f"this was read from pandas, and non_null_flag is the helper for that tier. "
+        f"(The type name is qualified with its module because some rejected types share a "
+        f"bare __name__ with an accepted one, which would read as a pass.)"
     )
     assert value in (0, 1), (
         f"{label} is not a 0/1 flag: {value!r}. An INTEGER column storing a boolean holds "
