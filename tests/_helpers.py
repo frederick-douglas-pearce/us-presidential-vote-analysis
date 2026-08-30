@@ -397,8 +397,7 @@ def non_null_sqlite_flag(value: object, *, label: str) -> bool:
     assert type(value) is int, (
         f"{label} is not a SQLite boolean cell: {value!r} "
         f"({type(value).__module__}.{type(value).__name__}). SQLite hands back a plain int "
-        f"for an INTEGER column; anything else — a bool, a float, a numpy scalar — means "
-        f"this was read from pandas, and non_null_flag is the helper for that tier. "
+        f"for an INTEGER column. "
         f"(The type name carries its module because numpy.bool's bare __name__ is 'bool', "
         f"identical to Python's, so an unqualified name cannot say which was passed.)"
     )
