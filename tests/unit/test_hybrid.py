@@ -2764,10 +2764,10 @@ class _CreatingStub(_StubDBC):
     """:class:`_StubDBC` plus ``to_regclass`` probes and a record of what was created.
 
     Extends rather than re-implements: ``_StubDBC`` already answers both of the reads
-    :func:`usvote.hybrid.build_hybrid_from_db` issues by matching the relation in the
-    query, which is exactly what lets the **real** derivation run here. What it lacks is
-    the probe answer :func:`usvote.hybrid.create_hybrid_views` needs before it will
-    create anything, and somewhere to record the creations.
+    by matching the relation in the query, which is exactly what lets the **real**
+    derivation run here. What it lacks is the probe answer
+    :func:`usvote.hybrid.create_hybrid_views` needs before it will create anything, and
+    somewhere to record the creations.
 
     Deliberately **not** :class:`_ProbeStub`, whose ``select_query_to_df`` *refuses* data
     reads — that refusal is itself an ordering assertion for
@@ -2998,9 +2998,7 @@ def _surface_scopings(source: str) -> list[int]:
     :func:`_policy_selections` is — and here both directions bite. A text count misses
     the drift that actually matters, a second copy over a differently-named frame
     (``join_df``, ``surface_df``), since it can only match the spelling it was given.
-    And it fails *spuriously* on the same literal quoted in a docstring or comment,
-    which is a live hazard rather than a hypothetical one: this very derivation is
-    discussed in prose in the module it guards.
+    And it fails *spuriously* on the same literal quoted in a docstring or comment.
     """
     found: list[int] = []
     for node in ast.walk(ast.parse(source)):
@@ -3033,6 +3031,59 @@ def _surface_scopings(source: str) -> list[int]:
         ):
             found.append(node.lineno)
     return found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'set(ec_pv_df["source"].dropna().unique())',
+        # The drift that matters, and the one a source-text count could not see: a
+        # second copy over a differently-named frame.
+        'set(join_df["source"].dropna().unique())',
+        'x = set(surface_df["source"].dropna().unique())',
+        'read_pv_status_roster(dbc, sources=set(df["source"].dropna().unique()))',
+    ],
+)
+def test_the_scoping_guard_catches_a_copy_over_any_frame_name(source: str) -> None:
+    """Positive cases — each is a second home for the scoping and must be flagged."""
+    assert _surface_scopings(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Prose is not code. A source-text count failed on these; the AST does not see
+        # them at all, which is the second reason the matcher is parsed rather than
+        # counted.
+        '"""Docs quoting set(ec_pv_df["source"].dropna().unique()) verbatim."""',
+        '# a comment about set(ec_pv_df["source"].dropna().unique())',
+        # Real neighbours in the tree that must not be mistaken for the scoping:
+        # hybrid.assert_redistributable_only_source and snapshot's licensing guard.
+        'sorted(ec_pv_df["source"].dropna()[non_mit].unique())',
+        'set(df["party"].dropna().unique())',
+        'set(df["source"].dropna())',
+    ],
+)
+def test_the_scoping_guard_does_not_cry_wolf(source: str) -> None:
+    """Negative cases — none is a second home, so none may fail CI."""
+    assert _surface_scopings(source) == []
+
+
+def test_the_scoping_guard_states_the_spellings_it_cannot_see() -> None:
+    """**The known limit, pinned so it is a documented gap and not a surprise.**
+
+    The matcher requires the exact ``set(<frame>["source"].dropna().unique())`` shape, so
+    a drift copy written another way — ``.loc[:, "source"]``, or without the ``dropna``
+    — is invisible to it, and with the one true home still present the count stays 1 and
+    the suite stays green. Asserting the gap here rather than describing it means a later
+    widening of the matcher **fails this test** and has to come and delete it, which is
+    how the limit gets revisited instead of forgotten.
+
+    The inverse direction is safe and needs no pin: respelling the *home* drops the count
+    to 0, which fails loudly.
+    """
+    assert _surface_scopings('set(df.loc[:, "source"].dropna().unique())') == []
+    assert _surface_scopings('set(df["source"].unique())') == []
 
 
 def test_the_roster_scoping_has_exactly_one_expression() -> None:

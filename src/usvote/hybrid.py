@@ -1243,9 +1243,9 @@ def build_hybrid_from_db(
     only place either can arise — the same reason
     :func:`usvote.join.create_ec_pv_views` runs
     :func:`usvote.join.assert_db_pv_matches_ec` as a precondition rather than trusting
-    its upstream. :func:`create_hybrid_views` inherits these four the same way — since
+    its upstream. :func:`create_hybrid_views` inherits these the same way — since
     #178 by calling :func:`build_hybrid_from_frames` directly rather than this function,
-    which changes nothing about which guards run. They are four **of** that function's
+    which changes nothing about which guards run. They are **some of** that function's
     preconditions, not all of them: it adds its own over the input frame and both output
     grains, and :func:`create_hybrid_views` enumerates the whole set.
 
@@ -1264,7 +1264,7 @@ def build_hybrid_from_frames(
     *,
     policy: CoveragePolicy = COVERAGE_POLICY_MISMATCHED,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build both hybrid grains from frames, running the four guards. **DB-free.**
+    """Build both hybrid grains from frames, running the guards. **DB-free.**
 
     The guarded core :func:`build_hybrid_from_db` wraps — extracted in #102 so the
     snapshot build gets the *same* validation without a database. Returns
@@ -1762,7 +1762,7 @@ def create_hybrid_views(
         # per 1976-2024 overlap key would double national_pv_votes while collapsing
         # invisibly at the output grains below (see assert_no_fan_out).
         assert_join_no_fan_out(ec_pv_df)
-        # The SAME frame the three guards above just ran over is what the derivation
+        # The SAME frame the guards above just ran over is what the derivation
         # receives (#178). It used to call build_hybrid_from_db, which re-issued the
         # identical SELECT and re-materialized it -- four reads of the join view per
         # rebuild_views over the 51-year warehouse, and, the reason this was filed, a
