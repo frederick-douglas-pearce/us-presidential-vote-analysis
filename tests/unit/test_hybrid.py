@@ -3063,15 +3063,25 @@ def test_the_scoping_guard_catches_a_copy_over_any_frame_name(source: str) -> No
         # structural condition each; an earlier version of this comment called them all
         # "real neighbours in the tree", which they are not (code review, #178).
         'sorted(ec_pv_df["source"].dropna()[non_mit].unique())',
-        # One per condition, so that deleting any single check in the matcher fails at
-        # least one case here. Without these the suite passed with three of the four
-        # conditions removed, because the case that *reads* as covering each one is
-        # rejected a step earlier for a different reason (code review, #178).
+        # One per **structural** condition — the four that decide whether an expression
+        # is the scoping — so deleting any of those four fails at least one case here.
+        # Without them the suite passed with three of the four removed, because the case
+        # that *reads* as covering each is rejected a step earlier for a different
+        # reason (code review, #178). The matcher's `isinstance` checks are type guards
+        # rather than structural conditions and are deliberately not all pinned; the one
+        # exception is the arity check, below, which is load-bearing.
         'list(df["source"].dropna().unique())',  # callee is not `set`
         'set(df["source"].dropna().tolist())',  # tail is not `.unique()`
         'set(df["source"].fillna("x").unique())',  # middle is not `.dropna()`
         'set(df["party"].dropna().unique())',  # column is not "source"
         'set(df["source"].dropna())',  # no tail call at all
+        # Bare `set()` is not a near-miss but a crash test: `node.args[0]` raises
+        # IndexError without the arity check, and bare `set()` is real code -- twice in
+        # hybrid.py alone -- so dropping that check does not merely widen the match, it
+        # takes the whole sweep down on files that have nothing to do with the scoping
+        # (code review, #178).
+        "set()",
+        'x = set() | {df["source"]}'
     ],
 )
 def test_the_scoping_guard_does_not_cry_wolf(source: str) -> None:
@@ -3135,11 +3145,11 @@ def test_the_roster_scoping_has_exactly_one_expression() -> None:
         for path in sorted(root.rglob("*.py"))
         if not skip & set(path.relative_to(root).parts)
     ]
-    # Non-vacuity, and the reason it is an assert rather than a comment: an empty sweep
-    # is the one failure this guard cannot distinguish from success by its own result.
-    # The equality below does catch it (`[] != [the home]`) -- but only by accident of
-    # being an equality; the same guard written `len(homes) <= 1` would have passed
-    # vacuously on zero files, which is how the filter bug above went unnoticed.
+    # The equality below already fails on an empty sweep (`[] != [the home]`), so this
+    # is for the message, not the catch: it names the cause instead of leaving a bare
+    # `found: []`. The filter bug above escaped for a different reason -- the test was
+    # only ever run from a checkout that is not itself under `.claude/` (code review,
+    # #178).
     assert Path(hybrid.__file__) in scanned, (
         "the sweep reached no source tree, so it proves nothing about a second home; "
         f"scanned {len(scanned)} files under {root}"
