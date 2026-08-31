@@ -954,9 +954,13 @@ def test_policy_takers_lists_every_function_that_takes_a_policy() -> None:
     hole the entry exists to close.
 
     The parametrize above cannot catch that on its own — removing an entry just shrinks
-    it. Comparing against the real signatures is what makes a trimmed constant fail, and
-    it also catches the opposite drift: a NEW policy-taking function added to
-    :mod:`usvote.hybrid` that nobody remembered to list here.
+    it. Comparing against the real signatures is what makes a trimmed constant fail.
+
+    **Scope, because an earlier draft of this docstring overclaimed it.** `isfunction`
+    short-circuits before `signature` is asked, so a *decorated* policy-taker
+    (`functools.cache`/`lru_cache`, `partial`, a callable class) lands in neither set —
+    the equality still holds and the drift is invisible. `usvote.hybrid` has no decorated
+    function today; widening the predicate is #205.
     """
     from_signatures = {
         name
