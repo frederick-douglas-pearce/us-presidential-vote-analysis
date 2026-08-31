@@ -21,7 +21,9 @@
 > face value will produce plausible, wrong per-capita figures.
 >
 > **A different frontier appeared in place of the expected trade**, narrower and sharper:
-> **apportionment population by state is structured only back to 1910.** See §4.
+> **apportionment population by state is not published as a column at all.** Seats are, back to
+> 1789; the population behind them is national-only before 1910 and, from 1910, **derivable from
+> seats × a rounded average rather than read off** — approximate by design. See §4.
 
 **Date:** 2026-08-31 · **Method:** four parallel read-only research agents, one per source plus one
 cross-cutting, each returning summaries with per-claim URLs and a verified/inferred label.
@@ -38,9 +40,11 @@ asserts something its section does not establish. **§§9–11 are
 *derived* sections** — the fallback scan, the per-story consequences, and the checklist — and they
 restate facts established and labeled upstream rather than introducing new evidence. Two rules keep
 that from becoming a loophole: **a claim about an external artifact appearing first in §10 is
-labeled inline** (they are marked below), and **§11 is a pure index** — every cell points at a
-section that carries the evidence, and if a checklist row says something no earlier section does,
-that is a defect in the checklist, not a finding.
+labeled inline** (they are marked below), and **§11 is an index with one admitted exception** —
+every cell restates a section that carries the evidence, *except* the two rows tracking this
+epic's own bookkeeping (open-question status and decision numbering), which have no natural home in
+a source evaluation and are marked **"(stated first here)"** where they appear. Any *other* checklist
+row saying something no earlier section does is a defect in the checklist, not a finding.
 
 **A verification limit worth stating plainly.** The source characterizations in §§3–6 rest on the
 research agents' fetches; the parent independently re-fetched only three artifacts —
@@ -106,8 +110,10 @@ never trip an assert.
 kind that is not a *constraint* on the source but on how it is read — the stitch year between the
 two resident files (§4), which #181 must pin explicitly:
 
-**Apportionment population by state is structured only from 1910.** Before that, census.gov
-publishes the apportionment base **nationally only** (Table B). VERIFIED.
+**Apportionment population by state is never published as a column.** Before 1910 census.gov gives
+the apportionment base **nationally only** (Table B, VERIFIED). From 1910 the state-level files
+publish *seats* and a **rounded average population per seat**, so the population is **derived and
+approximate**, not structured — off by 25 persons on California 2020 (§4, VERIFIED by re-fetch).
 
 This turns out **not to block E10**, and the reason is worth stating precisely, because it is the
 difference between a blocked epic and an unblocked one: **#183's reconciliation does not need
@@ -120,7 +126,8 @@ unblocked for the full series only in the sense that the data exists for it, nev
 it will reconcile cleanly. The exceptions are catalogued in §10 under #183; the largest is that
 **14 `(year, state)` rows in our own EC fact carry `total_electoral_votes == 0` while the governing
 census gave those states seats** (1864 and 1868 — the fixture proves it), so the naive identity
-computes 13 against a stored 0 and fails on every Reconstruction year.
+computes 13 against a stored 0. The affected years are **1864 and 1868** — 1872 has no zero-EV
+row (§10).
 
 So the pre-1910 apportionment-population gap costs us one thing only: we cannot *re-derive* the
 apportionment from its own population base before 1910. We can still check the seat counts
@@ -134,7 +141,7 @@ themselves for the full series, which is the assert #129 calls "the epic's stron
 |---|---|---|---|---|
 | **Resident pop coverage** | **1790–2020, across two files** — 1790–1990 + 1910–2020, overlapping 1910–1990 at **different vintages** (§4) | 2000–2020 (decennial); 1990+ (estimates) | 1790–2020 | 1790–1970 (INFERRED — not characterized; ICPSR is disqualified on licence, §3, so its coverage was never assessed) |
 | **Reaches the 1824 EC floor?** | ✓ | ✗ (starts 2000) | ✓ | ✓ |
-| **Apportionment pop by state** | **1910–2020 only** | ✗ **none at all** | ✗ (resident only, INFERRED) | not assessed |
+| **Apportionment pop by state** | **never a published column** — national-only pre-1910; from 1910 **derived** as seats × rounded average, approximate (§4) | ✗ **none at all** | ✗ (resident only, INFERRED) | not assessed |
 | **Seats per state per census** | **✓ 1789–2010** (+2020 separately) | ✗ | not assessed | not assessed |
 | **Format** | XLSX (resident, both eras); CSV/XLSX (apportionment 1910+); text-layer PDF (seats 1789+) | JSON REST | extract-builder → CSV | data files |
 | **Machine-readable pre-1900?** | **✓ XLSX** | n/a | ✓ | ✓ |
@@ -245,7 +252,9 @@ is what §7's divergence table is built on. The gap is specifically **by state**
 **The scanned-PDF trap, with evidence.** The Forstall volume is the obvious-looking full-span source
 and it is a trap. Its OCR text layer reads, verbatim: `Alabama 3,266,140` (true 1960 value
 **3,266,740**), `Arizona ... 149.587` (true **749,587**), `Michigan ... 1.823,194` (true
-**7,823,194**), `Maine ... 191.423` (true **791,423**), plus `913.77~` and `Califomia`. The
+**7,823,194**), `Maine ... 191.423` (true **797,423** — the value in `tabs15-65.xlsx`; an earlier
+draft of this document wrote 791,423, a figure carried over from a research summary and never
+re-checked, which is the very failure this paragraph warns about), plus `913.77~` and `Califomia`. The
 corruption is systematic — 7→1 and comma→period. **Do not build on OCR of these volumes.** The
 `tabs15-65.xlsx` path avoids them entirely, which is the single most useful finding in this document
 for S2's cost.
@@ -270,10 +279,13 @@ included Maine.
 **This is a reconstruction, and E10 must correct for it rather than consume it naively.** The
 failure is quiet and it lands squarely on #184's per-capita series:
 
-- **Virginia's denominator is wrong for every election it was apportioned for pre-1863.** The file's
-  1860 Virginia (1,219,630) omits the 376,688 people in the counties that became West Virginia —
-  understating the denominator by ~23.6% and therefore **overstating Virginia's per-capita electoral
-  weight by roughly 31%** in exactly the era the series is most interesting.
+- **Virginia's denominator is wrong for every election it was apportioned for pre-1863.** Take the
+  worst case *inside* the affected window — the **1850** census, which governed the 1852, 1856 and
+  1860 elections: the file's Virginia (1,119,348) omits the 302,313 people in the counties that
+  became West Virginia, understating the denominator by **21.3%** and so **overstating Virginia's
+  per-capita electoral weight by ~27.0%**. (The 1860 census is larger still at 23.6%/+30.9%, but it
+  first governed 1864 — a year Virginia held **zero** electoral votes — so quoting it would overstate
+  the operative maximum. An earlier draft did exactly that.)
 - **West Virginia gets a population for censuses in which it had no electoral votes**, which is a
   divide-by-zero or a spurious infinite-weight row rather than a number.
 
@@ -592,7 +604,7 @@ apportionment-population gap never reaches it.
 
 **But do not plan this story as `seats + 2 == total_electoral_votes`.** That is the rule, not an
 identity, and this repo can already enumerate its exceptions. Written as a bare assert it fails on
-its first run, on rows we know about in advance. Four things this research pins for its ACs:
+its first run, on rows we know about in advance. Five things this research pins for its ACs:
 
 - **14 rows where a state has seats but zero electoral votes.** `tests/fixtures/ec_state_roster_by_year.json`
   records `total_electoral_votes == 0` for **11 states in 1864** (the Confederate states) and **3 in
@@ -602,8 +614,8 @@ its first run, on rows we know about in advance. Four things this research pins 
   the repo; the Table 3 readings in this bullet and the three that follow are VERIFIED by the agent
   that extracted the PDF, not re-checked by the parent) — so the naive identity computes 13 against
   a stored 0 for Virginia — and 7 against 0 for Mississippi (5 seats), 6 against 0 for Texas (4). The
-affected years are **1864 and 1868 only**: the fixture has no zero-EV rows in 1872, so this is not
-"every Reconstruction year". These are **not** data errors: they are the Reconstruction exclusions the EC fact
+  affected years are **1864 and 1868 only**: the fixture has no zero-EV rows in 1872, so this is not
+  "every Reconstruction year". These are **not** data errors: they are the Reconstruction exclusions the EC fact
   states correctly, and the reconciliation must treat them as expected, in the `docs/corrections.md`
   pattern.
 - **West Virginia fails in the opposite direction, which is why a one-sided rule is not enough.** It
