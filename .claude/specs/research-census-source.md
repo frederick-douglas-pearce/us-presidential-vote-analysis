@@ -13,8 +13,15 @@
 > the series this project needs.** State **resident** population is available, public domain and
 > fully structured, back to **1790**. NHGIS is not needed at all.
 >
-> **A different frontier appeared in its place**, and it is narrower and sharper: **apportionment
-> population by state is structured only back to 1910.** See §7.
+> **One correction rides along with it, and it is not optional.** That file reports every census on
+> **present-day** state boundaries rather than as enumerated, so Virginia's denominator for the ten
+> elections 1824–1860 omits the counties that became West Virginia — understating it by **12.8% to
+> 21.3%**. Measured, not estimated (§4). It is a one-state, ten-election documented correction
+> rather than a re-parse, which is why the recommendation stands; but a reader who takes the file at
+> face value will produce plausible, wrong per-capita figures.
+>
+> **A different frontier appeared in place of the expected trade**, narrower and sharper:
+> **apportionment population by state is structured only back to 1910.** See §4.
 
 **Date:** 2026-08-31 · **Method:** four parallel read-only research agents, one per source plus one
 cross-cutting, each returning summaries with per-claim URLs and a verified/inferred label.
@@ -24,6 +31,22 @@ fetched the artifact and read it) or **INFERRED** (reasoning from documentation 
 distinction is load-bearing: #129's own candidate list is explicitly *"working hypotheses to test,
 not findings,"* and **two of its three hypotheses turned out wrong** (§8). Claims are not laundered
 from one column to the other.
+
+**Where the labels sit, and one deliberate exception.** §§2–8 carry per-claim labels. **§§9–11 are
+*derived* sections** — the fallback scan, the per-story consequences, and the checklist — and they
+restate facts established and labeled upstream rather than introducing new evidence. Two rules keep
+that from becoming a loophole: **a claim about an external artifact appearing first in §10 is
+labeled inline** (they are marked below), and **§11 is a pure index** — every cell points at a
+section that carries the evidence, and if a checklist row says something no earlier section does,
+that is a defect in the checklist, not a finding.
+
+**A verification limit worth stating plainly.** The source characterizations in §§3–6 rest on the
+research agents' fetches; the parent independently re-fetched only three artifacts —
+`tabs15-65.xlsx` (downloaded and **parsed**, §4), `cph-2-1-1-table-3.pdf`, and
+`apportionment-2020-tableC1.xlsx` (both HTTP-verified). **The §3 licensing table was not
+independently re-fetched by the parent.** Every quote carries the URL it came from precisely so a
+reader can discharge that themselves, which is the standard this document is held to rather than
+one it claims to have already met.
 
 ---
 
@@ -57,7 +80,7 @@ full 1790–2020 series**, and the work is XLSX parsing, not OCR. OQ1's option (
 against a cost that does not exist.
 
 **Answer to Open question 4 (the redistributable branch plan): the branch is not taken.** #184
-resolves to **shape (A)** — the per-capita series may reach the snapshot and public API. There is no
+resolves to **Branch A** — the per-capita series may reach the snapshot and public API. There is no
 restricted historical layer, because there is no need for a restricted source.
 
 **Answer to Open question 2 (which series is authoritative): the backlog's recommendation stands,
@@ -65,7 +88,15 @@ and §7 explains why it is not a preference but a requirement.** Resident popula
 per-capita denominator; apportionment population is the seat-allocation input. They differ in
 **every census year 1790–2020** without exception.
 
-### The one genuine constraint, and it is not the one anyone expected
+### Two constraints, and neither is the one anyone expected
+
+**The first is the boundary basis.** The recommended file is a present-day-footprint
+reconstruction, materially affecting Virginia across ten elections (§4). Measured, bounded, and
+correctable in the `docs/corrections.md` pattern — with the residual sweep carved out as **#208**.
+It is named here, in the section written to be read alone, because it is the one defect in this
+document that produces *plausible numbers* rather than an error.
+
+**The second is a coverage frontier:**
 
 **Apportionment population by state is structured only from 1910.** Before that, census.gov
 publishes the apportionment base **nationally only** (Table B). VERIFIED.
@@ -93,16 +124,16 @@ themselves for the full series, which is the assert #129 calls "the epic's stron
 
 | Axis | **Census Bureau published tables** | **`api.census.gov`** | **IPUMS NHGIS** | ICPSR 2896 *(fallback)* |
 |---|---|---|---|---|
-| **Resident pop coverage** | **1790–2020, across two files** — 1790–1990 + 1910–2020, overlapping 1910–1990 at **different vintages** (§4) | 2000–2020 (decennial); 1990+ (estimates) | 1790–2020 | 1790–1970 |
+| **Resident pop coverage** | **1790–2020, across two files** — 1790–1990 + 1910–2020, overlapping 1910–1990 at **different vintages** (§4) | 2000–2020 (decennial); 1990+ (estimates) | 1790–2020 | 1790–1970 (INFERRED — not characterized; ICPSR is disqualified on licence, §3, so its coverage was never assessed) |
 | **Reaches the 1824 EC floor?** | ✓ | ✗ (starts 2000) | ✓ | ✓ |
 | **Apportionment pop by state** | **1910–2020 only** | ✗ **none at all** | ✗ (resident only, INFERRED) | not assessed |
 | **Seats per state per census** | **✓ 1789–2010** (+2020 separately) | ✗ | not assessed | not assessed |
 | **Format** | XLSX (resident, both eras); CSV/XLSX (apportionment 1910+); text-layer PDF (seats 1789+) | JSON REST | extract-builder → CSV | data files |
 | **Machine-readable pre-1900?** | **✓ XLSX** | n/a | ✓ | ✓ |
-| **Boundary basis** | **modern state footprints, not as-enumerated** (§4) — a correction E10 must apply | as-enumerated | harmonized (that is its selling point) | not assessed |
+| **Boundary basis** | **modern state footprints, not as-enumerated** (§4) — a correction E10 must apply | not assessed (its span begins 2000, after the last relevant change) | harmonized (that is its selling point) | not assessed |
 | **Effort to ingest** | medium — two multi-block XLSX + one PDF table parse, **plus a boundary-basis correction** | low, but irrelevant at this span | low-medium, account required | gated |
 | **Account / key required?** | **none** | **API key now mandatory** for all data queries | **yes, with a click-through licence** | membership |
-| **License** | US Gov work, 17 U.S.C. §105 (statutory inference — see §4) | **CC0 1.0, declared machine-readably** | "You will not redistribute the data without permission" | "agree not to redistribute … without the written agreement of ICPSR" |
+| **License** | US Gov work, 17 U.S.C. §105 (statutory inference — see §3) | **CC0 1.0, declared machine-readably** | "You will not redistribute the data without permission" | "agree not to redistribute … without the written agreement of ICPSR" *(secondary read, flagged — §3)* |
 | **Public-API redistributable?** | **YES** | **YES** | **NO** | **NO** |
 | **Role** | **the spine** | modern cross-check | not used | not used |
 
@@ -169,7 +200,7 @@ unknown:
 | Resident pop by state (Population Change) | 1910–2020 | XLSX / PDF | `https://www2.census.gov/programs-surveys/decennial/2020/data/apportionment/population-change-data-table.xlsx` | VERIFIED — header + rows parsed |
 | Apportionment pop + seats + seat change, by state | 1910–2020 | **CSV**, XLSX, PDF | `https://www.census.gov/data/tables/time-series/dec/apportionment-data-text.html` → `apportionment.csv` | VERIFIED — earliest row 1910 |
 | **Seats per state, full history** | **1789–2010** | **text-layer PDF**, 2 pp | `https://www2.census.gov/programs-surveys/decennial/1990/data/apportionment/cph-2-1-1-table-3.pdf` | **VERIFIED** — `pdftotext -layout` extracts cleanly |
-| **Seats per state, 2020** (Table C1) — closes the 2024 gap | 1910–2020 | XLSX | `https://www2.census.gov/programs-surveys/decennial/2020/data/apportionment/apportionment-2020-tableC1.xlsx` | **VERIFIED** — HTTP 200, 15,245 B, content-type `spreadsheetml.sheet` |
+| **Seats per state, 2020** (Table C1) — closes the 2020/2024 gap; the file spans 1910–2020, but only its **2020** column is needed, since Table 3 already covers 1789–2010 | 1910–2020 | XLSX | `https://www2.census.gov/programs-surveys/decennial/2020/data/apportionment/apportionment-2020-tableC1.xlsx` | **VERIFIED** — HTTP 200, 15,245 B, content-type `spreadsheetml.sheet` |
 | Apportionment pop base + rep count — **NATIONAL only** | 1790 | legacy `.xls` + PDF | `https://www2.census.gov/programs-surveys/decennial/1990/data/apportionment/tabb.pdf` | VERIFIED — **no state dimension** |
 | Forstall, *Population of States and Counties 1790–1990* | 1790 | **scanned PDF, unusable OCR** | `.../population-of-states-and-counties-of-the-united-states-1790-1990.pdf` | **VERIFIED unusable** — see below |
 | *Historical Statistics, Colonial Times to 1970* (Ch. A) | 1610 | scanned PDF | `https://www2.census.gov/prod2/statcomp/documents/CT1970p1-01.pdf` | VERIFIED scanned |
@@ -214,8 +245,58 @@ the trap it is — and note it is the *same* class of defect as §7's 2000 near-
 artifact that looks like a measurement.
 
 **The as-enumerated figures are what E10 needs**, since the question is *how many people did this
-state's electors actually stand for*. Recording this as a required input to #181 rather than a
-footnote (§10).
+state's electors actually stand for*.
+
+#### How big is this, actually? Measured, not assumed
+
+The first draft of this section recorded the defect and stopped there, which left #181 an
+unactionable instruction. So the file was **downloaded and parsed** (329,123 B; 51 sheets; stdlib
+`zipfile` + `xml.etree`, since the repo has no `openpyxl`) and the question answered directly.
+**VERIFIED, by reading every state sheet:**
+
+| Census | VA in file | WV in file | sum | enumerated VA | match | WV share |
+|---|---|---|---|---|---|---|
+| 1790 | 691,737 | 55,873 | 747,610 | 747,610 | **exact** | 7.5% |
+| 1820 | 938,261 | 136,808 | 1,075,069 | — | — | 12.8% |
+| 1830 | 1,044,054 | 176,924 | 1,220,978 | — | — | 14.6% |
+| 1840 | 1,025,227 | 224,537 | 1,249,764 | — | — | 18.1% |
+| 1850 | 1,119,348 | 302,313 | 1,421,661 | 1,421,661 | **exact** | 21.3% |
+| 1860 | 1,219,630 | 376,688 | 1,596,318 | 1,596,318 | **exact** | 23.6% |
+
+Three exact reconciliations against the enumerated Virginia settle the mechanism beyond argument.
+(The intermediate censuses are left blank rather than filled from memory — the enumerated figures
+for 1800–1840 were not re-verified from a primary source, and an approximate figure in a
+match column would manufacture a discrepancy that is mine, not the file's.)
+
+**The material scope, within the 1824–2024 EC span, is Virginia and only Virginia** — the sole
+post-1824 transfer of a populous territory *between two states*. The error in Virginia's per-capita
+denominator runs from **12.8%** (1820 census) to **21.3%** (1850 census), across the **ten**
+elections from 1824 to 1860. From 1864 Virginia and West Virginia are separate in the record and in
+the file alike, and Virginia holds zero electoral votes in 1864 and 1868 anyway.
+
+**The second consequence is already handled by a decision this repo made years earlier.** The file
+starts each state at the first census in which its modern footprint had a countable population —
+Alabama and Michigan at 1800, Wisconsin at 1820, Arizona and Nevada at 1860 — so it supplies
+population for many `(census, state)` pairs where the state held no electoral votes. That never
+reaches a per-capita figure, because **E10 conforms to the EC participation roster (D006/D015)**
+rather than to the population file's own state list: a state with no roster entry has no row to
+divide into. Worth stating explicitly because it looks like a second defect and is in fact the
+conformance requirement already doing its job. (Alaska and Hawaii are *not* backfilled — both start
+at 1960 — so the file is not uniformly retroactive, which is one more reason not to infer its
+behavior rather than read it.)
+
+**So the correction is a `docs/corrections.md`-shaped entry, not a re-parse** — one state, ten
+elections, one documented adjustment with provenance, exactly the pattern the repo already runs for
+historical anomalies. This is what keeps the OQ1 answer standing: the boundary problem is real, and
+it is *bounded*, and bounding it is what makes "no hard historical parse to defer" a claim about
+measured scope rather than a hope.
+
+**The residual, stated rather than buried.** Virginia is confirmed material and the minor post-1824
+adjustments (the Toledo Strip, the Platte Purchase, assorted river-boundary moves) involve land that
+was sparsely populated — but *"sparsely populated"* is a judgement here, not a measurement, and no
+exhaustive sweep of all fifty states was run. **#208 carries that sweep**, with a clean done
+condition; it is deliberately not folded into #181, because it is an analysis question and not an
+ingestion step.
 
 ### The stitch point — two files, one overlap, two vintages
 
@@ -229,7 +310,7 @@ the original publication gives 92,228,496.
 accident and each census comes from exactly one file. Whatever is chosen must be written down, since
 the two disagree by small amounts that will never trip an assert.
 
-**Parsing cost, concretely (for S2's estimate). `tabs15-65.xlsx` is one sheet per state; each sheet
+**Parsing cost, concretely (for S2's estimate).** `tabs15-65.xlsx` is one sheet per state; each sheet
 holds a NUMBER block **and** a PERCENT block with duplicate year labels, plus interleaved
 `. Sample` / `. 15% sample` sub-rows and `(NA)`/`(X)` sentinels. The apportionment and popchange
 XLSX files are awkward differently: decade-blocks laid **side by side across columns**, repeating the
@@ -393,7 +474,8 @@ sign flip is the proof.
 
 **The rule for E10:** use **resident** population as the per-capita denominator (#184), and
 **apportionment** population only where the question is *why does this state have this many seats*
-(#183, 1910+). Never use the apportionment base for per-capita work: it drops DC entirely and,
+as population arithmetic — which is **not** what #183 does: that reconciliation reads published
+**seat counts** (§10), so it needs no apportionment population at all. Never use the apportionment base for per-capita work: it drops DC entirely and,
 before 1868, undercounts enslaved states by two-fifths of the people held in slavery there.
 
 **One measurement caveat, VERIFIED.** census.gov publishes more than one **vintage** of resident
@@ -441,7 +523,7 @@ both by the Bureau's own footnote and by exact arithmetic.
 
 **#181 (E10-S2 — ingest).** Unblocked, and **cheaper than the backlog feared**. Shape: one clean
 load per file, no OCR stage, so the feared snapshot + parse + transform split is **not** required for
-the resident series. **Four** concrete requirements this research adds:
+the resident series. **Five** concrete requirements this research adds:
 - **Snapshot the source files locally** (the D023 pattern, alongside `USVOTE_EC_HTML_DIR` and the
   UCSB corpus) — mandatory rather than nice-to-have, because the API path now needs a key and the
   published files can be re-issued.
@@ -449,13 +531,14 @@ the resident series. **Four** concrete requirements this research adds:
 - **Carry both series with an explicit label**, per §7 — and note that they are available over
   *different spans*, so the schema must tolerate apportionment population being absent pre-1910
   rather than treating that as a load failure.
-- **Correct the boundary basis, or record loudly that it is uncorrected** (§4). `tabs15-65.xlsx` is
+- **Apply the boundary correction for Virginia, 1824–1860** (§4), or record loudly that it is uncorrected. `tabs15-65.xlsx` is
   built on **modern** state footprints, so pre-1863 Virginia excludes the West Virginia counties it
   was actually apportioned for, and West Virginia carries population in censuses where it held no
   electoral votes. This is the **only requirement of the four that silently produces wrong numbers
   rather than a load error**, and it is the one most likely to be missed, since the file is otherwise
   exemplary. The schema should carry the basis as a labeled attribute the way `pv_status` labels
-  coverage — a figure whose basis is not stated is the D005 problem in a new place.
+  coverage — a figure whose basis is not stated is the D005 problem in a new place. Scope is
+  **measured**: one state, ten elections, 12.8%–21.3% (§4). Residual sweep: **#208**.
 - **Fix the stitch year between the two resident files and write it down** (§4).
 
 **#182 (E10-S3 — conform + the governing-census mapping).** Unblocked and unchanged. This research
@@ -474,16 +557,21 @@ its first run, on rows we know about in advance. Four things this research pins 
 
 - **14 rows where a state has seats but zero electoral votes.** `tests/fixtures/ec_state_roster_by_year.json`
   records `total_electoral_votes == 0` for **11 states in 1864** (the Confederate states) and **3 in
-  1868** (Mississippi, Texas, Virginia). All held apportioned seats under the governing 1860/1870
-  censuses — Virginia reads `11` in Table 3's 1860 column — so the naive identity computes 13 against
+  1868** (Mississippi, Texas, Virginia). All held apportioned seats under the governing **1860**
+  census — 1868 still ran on the 1860 apportionment, the 1870 census first governing 1872 — and
+  Virginia reads `11` in Table 3's 1860 column (VERIFIED — the fixture counts are VERIFIED against
+  the repo; the Table 3 readings in this bullet and the three that follow are VERIFIED by the agent
+  that extracted the PDF, not re-checked by the parent) — so the naive identity computes 13 against
   a stored 0. These are **not** data errors: they are the Reconstruction exclusions the EC fact
   states correctly, and the reconciliation must treat them as expected, in the `docs/corrections.md`
   pattern.
 - **West Virginia fails in the opposite direction, which is why a one-sided rule is not enough.** It
-  is `(X)` in Table 3's 1860 seats column, yet appears in the 1864 and 1868 rosters with 5 electoral
-  votes. So the assert must tolerate both *seats without electoral votes* and *electoral votes
+  is `(X)` in Table 3's 1860 seats column, yet appears in the 1864 and 1868 rosters as a
+  participating state **absent from `zero_ev_states`** — i.e. holding electoral votes. (The fixture
+  deliberately carries **no** electoral-vote counts, per D024 §5, so it establishes *that* West
+  Virginia had votes, never *how many*; the count itself lives in `dwh.votes`.) So the assert must tolerate both *seats without electoral votes* and *electoral votes
   without seats*, and the second is the case a "missing state" guard would silently pass.
-- **The seats source is inconsistent about mid-decade admissions**, and this is the actual hazard
+- **The seats source is inconsistent about mid-decade admissions** (VERIFIED by extraction), and this is the actual hazard
   rather than a curiosity: Nevada and Nebraska are **retroactively filled in** at 1 seat in the 1860
   column, while West Virginia is **not**. The table cannot be read as a uniform statement of "seats
   as of that census". Likewise the **1950 column sums to 437, not the 435 actually apportioned**,
@@ -497,12 +585,12 @@ its first run, on rows we know about in advance. Four things this research pins 
   `APPORT-1920-failure` instance, now confirmed against the Bureau's own table. **But the `…` is in
   Table B (apportionment *population*), not in the seats table** — and #183 does not read Table B.
   The seats table's 1920 column is **fully populated, repeating the 1910 seats verbatim** (US 435,
-  NY 43, Maine 4, Michigan 13). A guard written for a missing 1920 row would never fire, and might
+  NY 43, Maine 4, Michigan 13 — VERIFIED by extraction). A guard written for a missing 1920 row would never fire, and might
   mishandle the real duplicated column it does find.
 
-**#184 (E10-S5 — expose).** Resolves to **shape (A)** — public-domain source, so the per-capita
+**#184 (E10-S5 — expose).** Resolves to **Branch A** — public-domain source, so the per-capita
 series may reach the snapshot and the public API, with the `SNAPSHOT_SCHEMA_VERSION` bump, the `/v1`
-route and the model↔column drift guard that shape describes. Shape (B) and its structural guard are
+route and the model↔column drift guard that shape describes. Branch B and its structural guard are
 **not** needed. The series it exposes must be built on **resident** population (§7).
 
 **Post 4 (`CLAIM-538-is-a-choice` / `APPORT-per-capita-drift`).** The blocked payoff instance is
@@ -520,9 +608,9 @@ subpackage conforming to the EC spine (D006/D015), as the backlog specified.
 | Story | Status after this finding |
 |---|---|
 | **#180 (S1)** — this document | **Complete** |
-| **#181 (S2)** — ingest | Unblocked; scope **confirmed** as a clean multi-file load, no OCR stage. Add **four** requirements: local snapshot (D023), pinned vintage, both series over different spans, and the **boundary-basis correction** (§4) — the only one of the four that fails silently |
+| **#181 (S2)** — ingest | Unblocked; scope **confirmed** as a clean multi-file load, no OCR stage. Add **five** requirements: local snapshot (D023), pinned vintage, both series over different spans, the **stitch year** between the two resident files, and the **boundary correction** for Virginia 1824–1860 (§4) — the last is the only one of the five that fails silently. Residual sweep: **#208** |
 | **#182 (S3)** — conform + governing-census map | Unblocked; unchanged in shape |
 | **#183 (S4)** — reconciliation | Seat data exists **for 1789–2024**, but `seats + 2` is a **rule with a known exception list, not an identity** — 14 zero-EV rows in 1864/1868, West Virginia failing the other way, retroactive mid-decade fills (NV/NE 1860, and 1950 summing to 437), DC, and the 1920 column being **populated** rather than missing (§10) |
-| **#184 (S5)** — expose | Resolves to **shape (A)**, public surface permitted |
+| **#184 (S5)** — expose | Resolves to **Branch A**, public surface permitted |
 | **Open questions** | **OQ1** premise void → take full span, not a modern window. **OQ2** confirmed: resident for per-capita, apportionment for seat reconciliation. **OQ4** branch not taken. **OQ3** (schema placement) still open — an architect call at S2, as the backlog said. **OQ5/OQ6** already answered on #129 |
 | **Candidate decisions** | Record as **D058–D062** (the backlog's D053–D057 slots were taken 2026-08-27..30). Confirm the next free slot at recording time |
