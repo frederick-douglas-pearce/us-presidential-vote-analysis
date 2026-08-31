@@ -3057,11 +3057,21 @@ def test_the_scoping_guard_catches_a_copy_over_any_frame_name(source: str) -> No
         # counted.
         '"""Docs quoting set(ec_pv_df["source"].dropna().unique()) verbatim."""',
         '# a comment about set(ec_pv_df["source"].dropna().unique())',
-        # Real neighbours in the tree that must not be mistaken for the scoping:
-        # hybrid.assert_redistributable_only_source and snapshot's licensing guard.
+        # A real neighbour in the tree — this exact expression is what
+        # `assert_redistributable_only_source` and `usvote.snapshot`'s licensing guard
+        # both spell. The rest below are SYNTHETIC near-misses, written to pin one
+        # structural condition each; an earlier version of this comment called them all
+        # "real neighbours in the tree", which they are not (code review, #178).
         'sorted(ec_pv_df["source"].dropna()[non_mit].unique())',
-        'set(df["party"].dropna().unique())',
-        'set(df["source"].dropna())',
+        # One per condition, so that deleting any single check in the matcher fails at
+        # least one case here. Without these the suite passed with three of the four
+        # conditions removed, because the case that *reads* as covering each one is
+        # rejected a step earlier for a different reason (code review, #178).
+        'list(df["source"].dropna().unique())',  # callee is not `set`
+        'set(df["source"].dropna().tolist())',  # tail is not `.unique()`
+        'set(df["source"].fillna("x").unique())',  # middle is not `.dropna()`
+        'set(df["party"].dropna().unique())',  # column is not "source"
+        'set(df["source"].dropna())',  # no tail call at all
     ],
 )
 def test_the_scoping_guard_does_not_cry_wolf(source: str) -> None:
@@ -3086,6 +3096,17 @@ def test_the_scoping_guard_states_the_spellings_it_cannot_see() -> None:
     assert _surface_scopings('set(df["source"].unique())') == []
 
 
+#: The one line the scoping may live on — derived from the function that owns it, so
+#: moving :func:`usvote.hybrid._roster_for_surface` within the module is not a failure.
+#: Only a SECOND home is.
+_ROSTER_SCOPING_LINE = (
+    inspect.getsourcelines(hybrid._roster_for_surface)[1]
+    + inspect.getsource(hybrid._roster_for_surface)
+    .splitlines()
+    .index('    surface_sources = set(ec_pv_df["source"].dropna().unique())')
+)
+
+
 def test_the_roster_scoping_has_exactly_one_expression() -> None:
     """The #126 scoping is single-sourced in ``_roster_for_surface`` (#178).
 
@@ -3094,11 +3115,24 @@ def test_the_roster_scoping_has_exactly_one_expression() -> None:
     ``set(df["source"].dropna().unique())`` beside the roster read would be the drift
     this guards against — a roster scoped one way and a frame read another is the state
     ``pv_coverage`` reports wrongly rather than loudly.
+
+    **Both trees are swept, not just** ``hybrid.py`` **(code review, #178).** Scanning
+    only the module made the guard blind where a copy actually was: the differential
+    oracle in ``tests/integration/test_hybrid_views.py`` re-derived the body verbatim,
+    which is the worst place for one — a copy there keeps testing the *old* rule after
+    the rule changes. Since :func:`usvote.hybrid._roster_for_surface` is importable, a
+    test needing the scoping calls it, and the sweep is what holds that.
     """
-    scopings = _surface_scopings(Path(hybrid.__file__).read_text(encoding="utf-8"))
-    assert len(scopings) == 1, (
+    root = Path(hybrid.__file__).parents[2]
+    homes = [
+        f"{path.relative_to(root)}:{line}"
+        for path in sorted(root.rglob("*.py"))
+        if ".venv" not in path.parts and "worktrees" not in path.parts
+        for line in _surface_scopings(path.read_text(encoding="utf-8"))
+    ]
+    assert homes == [f"src/usvote/hybrid.py:{_ROSTER_SCOPING_LINE}"], (
         "the surface-source scoping must have exactly one home, _roster_for_surface; "
-        f"found it at hybrid.py lines {scopings}"
+        f"found: {homes}"
     )
 
 
