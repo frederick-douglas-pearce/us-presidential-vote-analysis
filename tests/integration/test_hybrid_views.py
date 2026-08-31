@@ -547,9 +547,13 @@ def test_hybrid_views_over_a_real_full_warehouse(
         # what keeps the public surface's treatment fixed (D038/D050). So the (c) leg
         # is asserted through the builder over the same live warehouse.
         ec_pv = hybrid.read_ec_pv_join(dbc, view=EC_PV_PREFERRED_VIEW)
-        roster = hybrid.read_pv_status_roster(
-            dbc, sources=set(ec_pv["source"].dropna().unique())
-        )
+        # Through _roster_for_surface, never re-deriving its
+        # `set(frame["source"].dropna().unique())` body here (#178 code review): this
+        # leg is the differential oracle, so a copy of the scoping rule in it would
+        # keep testing the OLD rule after the rule changed -- the one place a second
+        # copy is worst. `test_the_roster_scoping_has_exactly_one_expression` sweeps
+        # both trees for exactly this shape and would fail on a re-derivation here.
+        roster = hybrid._roster_for_surface(dbc, ec_pv)
         # The margin each policy must produce, from docs/pv-coverage.md's worked 1824
         # example: (c) restricts Jackson's EC share to the popular-vote states, which
         # nearly doubles the gap without moving the winner. Pinning the VALUES is the

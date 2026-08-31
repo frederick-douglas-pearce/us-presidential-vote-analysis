@@ -796,7 +796,7 @@ class TestCoveragePolicySwitch:
         """
         df, roster = _mixed_surface()
         frame, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster),
+            cast("Any", _StubDBC(df, roster)),
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
@@ -825,10 +825,10 @@ class TestCoveragePolicySwitch:
         """
         df, roster = _mixed_surface()
         b, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster), view="ec_pv_redistributable"
+            cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable"
         )
         c, _ = hybrid.build_hybrid_from_db(
-            _StubDBC(df, roster),
+            cast("Any", _StubDBC(df, roster)),
             view="ec_pv_redistributable",
             policy=hybrid.COVERAGE_POLICY_RESTRICTED,
         )
@@ -842,11 +842,21 @@ class TestCoveragePolicySwitch:
         assert c.loc[c["year"] == 1900, "ec_share_hybrid"].isna().all()
 
 
-#: The three functions that actually accept a ``policy``. A ``policy=`` keyword on
-#: anything else is somebody's unrelated kwarg, not a coverage selection.
-_POLICY_TAKERS = frozenset(
-    {"apply_coverage_policy", "build_hybrid_frame", "build_hybrid_from_db"}
-)
+#: Every function that actually accepts a ``policy``. A ``policy=`` keyword on anything
+#: else is somebody's unrelated kwarg, not a coverage selection.
+#:
+#: ``build_hybrid_from_frames`` was missing here until #178 and is the one that matters
+#: most now: it is the derivation **both** production paths reach — ``create_hybrid_views``
+#: since #178, and ``snapshot.build_snapshot`` since #102 — so a
+#: ``build_hybrid_from_frames(df, roster, policy=chosen)`` added to ``snapshot.py`` would
+#: have shipped policy (c) on the public API with this guard staying green. Its absence
+#: predated #178; that change is what moved the load-bearing call onto it.
+_POLICY_TAKERS = frozenset({
+    "apply_coverage_policy",
+    "build_hybrid_frame",
+    "build_hybrid_from_db",
+    "build_hybrid_from_frames",
+})
 
 
 def _policy_selections(source: str, module: str) -> list[str]:
@@ -889,7 +899,11 @@ def _policy_selections(source: str, module: str) -> list[str]:
         'build_hybrid_from_db(dbc, policy="restricted")',
         'build_hybrid_from_db(dbc, policy = "restricted")',  # the whitespace hole
         "hybrid.build_hybrid_frame(df, roster, policy=chosen)",
-        "apply_coverage_policy(n, e, r, policy=COVERAGE_POLICY_RESTRICTED)",
+        # A bare literal, deliberately: spelled with COVERAGE_POLICY_RESTRICTED this
+        # case fired the constant-NAME branch and so proved nothing about
+        # `apply_coverage_policy` being in _POLICY_TAKERS at all — it read as covering
+        # the call branch while exercising a different one (Class B survivor, #178).
+        'apply_coverage_policy(n, e, r, policy="restricted")',
         "x = hybrid.COVERAGE_POLICY_RESTRICTED",
         "from usvote.hybrid import COVERAGE_POLICY_RESTRICTED as p\nuse(p)",
     ],
@@ -915,6 +929,50 @@ def test_the_policy_guard_does_not_cry_wolf(source: str) -> None:
     assert _policy_selections(source, "m.py") == []
 
 
+@pytest.mark.parametrize("name", sorted(_POLICY_TAKERS))
+def test_every_declared_policy_taker_is_actually_matched(name: str) -> None:
+    """Each entry earns its place: dropping its case makes the entry inert, not loud.
+
+    Asserts the **reason string**, not merely a non-empty list. `_policy_selections` has
+    three branches (constant name, aliased import, `policy=` on a taker) and any of them
+    satisfies a truthiness check, so a case can read as covering one branch while firing
+    another — which is exactly what the `apply_coverage_policy` case above did until #178.
+    """
+    assert _policy_selections(f'{name}(a, b, policy="restricted")', "m.py") == [
+        f"m.py:1 passes policy= to {name}"
+    ]
+
+
+def test_policy_takers_lists_every_function_that_takes_a_policy() -> None:
+    """The constant is derived from the signatures, not from memory (Class B, #178).
+
+    **The mutation pass found this set silently weakenable at two of its four entries.**
+    Deleting either left the whole suite green, and the harness then proved the gap
+    exploitable rather than merely theoretical: with `build_hybrid_from_frames` present, a
+    `policy=` added to the live `usvote.snapshot` call is caught; with the entry dropped,
+    the identical call is invisible. One deleted line in a test constant re-opened the
+    hole the entry exists to close.
+
+    The parametrize above cannot catch that on its own — removing an entry just shrinks
+    it. Comparing against the real signatures is what makes a trimmed constant fail.
+
+    **Scope, because an earlier draft of this docstring overclaimed it.** `isfunction`
+    short-circuits before `signature` is asked, so a *decorated* policy-taker
+    (`functools.cache`/`lru_cache`, `partial`, a callable class) lands in neither set —
+    the equality still holds and the drift is invisible. `usvote.hybrid` has no decorated
+    function today; widening the predicate is #205.
+    """
+    from_signatures = {
+        name
+        for name, obj in vars(hybrid).items()
+        if inspect.isfunction(obj) and "policy" in inspect.signature(obj).parameters
+    }
+    assert from_signatures == _POLICY_TAKERS, (
+        "_POLICY_TAKERS must list exactly the functions that take a `policy`; "
+        f"signatures say {sorted(from_signatures)}, constant says {sorted(_POLICY_TAKERS)}"
+    )
+
+
 def test_nothing_configures_a_policy_other_than_b() -> None:
     """Property (iii) — what actually unblocks #102 (#122).
 
@@ -934,7 +992,8 @@ def test_nothing_configures_a_policy_other_than_b() -> None:
     entirely on this test, so it may not have a hole that wide.
 
     Matching the parsed tree also makes it **narrow**: a ``policy=`` keyword counts only on
-    a call to one of the three functions that actually take one, so an unrelated
+    a call to one of the functions that actually take one (:data:`_POLICY_TAKERS`), so an
+    unrelated
     ``cache_policy=``/``retry_policy=`` elsewhere in the package — or the word in a comment
     or docstring — is not a false accusation of configuring coverage.
     """
@@ -2030,7 +2089,7 @@ def test_the_roster_read_is_scoped_to_the_sources_the_surface_actually_carries()
     completely covered. This test pins both halves of the fix at once.
     """
     df, roster = _mixed_surface()
-    dbc = _StubDBC(df, roster)
+    dbc = cast("Any", _StubDBC(df, roster))
     frame, summary = hybrid.build_hybrid_from_db(
         dbc, view="ec_pv_redistributable"
     )
@@ -2079,7 +2138,7 @@ def test_the_real_builders_output_yields_coverage_1_0_end_to_end() -> None:
     roster = build_popular_vote_roster(spine, source=SOURCE_MIT, years={1976})
 
     _, summary = hybrid.build_hybrid_from_db(
-        _StubDBC(df, roster), view="ec_pv_redistributable"
+        cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable"
     )
     assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
 
@@ -2094,7 +2153,7 @@ def test_a_populated_roster_still_yields_real_coverage_on_the_preferred_surface(
     """
     df, roster = _mixed_surface()
     df["source"] = SOURCE_UCSB
-    frame, summary = hybrid.build_hybrid_from_db(_StubDBC(df, roster))
+    frame, summary = hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)))
     assert summary.set_index("year").loc[1976, "pv_coverage"] == 1.0
     assert not frame.empty
 
@@ -2125,14 +2184,14 @@ def test_the_entry_point_runs_the_guards_not_just_the_tests() -> None:
         "president_electoral_votes"
     ].transform("sum")
     with pytest.raises(hybrid.HybridError, match="tie"):
-        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="ec_pv_redistributable")
+        hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)), view="ec_pv_redistributable")
 
 
 def test_the_entry_point_rejects_an_unresolved_view() -> None:
     """Reading the raw union would fan the 1976-2024 overlap out 2x (D017)."""
     df, roster = _mixed_surface()
     with pytest.raises(hybrid.HybridError, match="resolved"):
-        hybrid.build_hybrid_from_db(_StubDBC(df, roster), view="pv_votes")
+        hybrid.build_hybrid_from_db(cast("Any", _StubDBC(df, roster)), view="pv_votes")
 
 
 # --- #124: the materialized views -------------------------------------------
@@ -2253,7 +2312,15 @@ class TestViewConstants:
 
 
 class TestRedistributableLeakGuardIsStructural:
-    """AC-4 **primary**: the public hybrid view can only ever read the public join view.
+    """Link 1 of 3 / AC-4 **primary**: the public hybrid view can only ever read the public join view.
+
+    Link 1 of the naming-invariant chain #166 built: this class pins **which join view a
+    builder's SQL reads for a given input**, :class:`TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName`
+    (Link 2) pins the name a view is created under against the SQL it is created with, and
+    :meth:`TestViewConstants.test_each_output_name_matches_its_own_input_join_view`
+    (Link 3) pins that every output name carries its input's surface suffix. Links 2 and 3
+    were labelled and this one was not (#174), which left the chain reading as though a
+    link were missing.
 
     This is the guard that cannot pass vacuously. A data assertion over a frame is only
     as good as the frame — if no non-redistributable row happens to be present it says
@@ -2745,10 +2812,10 @@ class _CreatingStub(_StubDBC):
     """:class:`_StubDBC` plus ``to_regclass`` probes and a record of what was created.
 
     Extends rather than re-implements: ``_StubDBC`` already answers both of the reads
-    :func:`usvote.hybrid.build_hybrid_from_db` issues by matching the relation in the
-    query, which is exactly what lets the **real** derivation run here. What it lacks is
-    the probe answer :func:`usvote.hybrid.create_hybrid_views` needs before it will
-    create anything, and somewhere to record the creations.
+    by matching the relation in the query, which is exactly what lets the **real**
+    derivation run here. What it lacks is the probe answer
+    :func:`usvote.hybrid.create_hybrid_views` needs before it will create anything, and
+    somewhere to record the creations.
 
     Deliberately **not** :class:`_ProbeStub`, whose ``select_query_to_df`` *refuses* data
     reads — that refusal is itself an ordering assertion for
@@ -2787,11 +2854,18 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
     consistent and keep the offline suite green.
 
     **The whole creator runs; nothing is stubbed out of it.** The stub is a *connection*,
-    not a substitute for the function under test: it answers the probes and serves both
-    reads real frames, so every one of the seven view-creation preconditions executes,
-    the real :func:`usvote.hybrid.build_hybrid_from_db` derives both grains, and the SQL
+    not a substitute for the function under test: it answers the probes and serves its
+    reads real frames, so **every** view-creation precondition
+    :func:`usvote.hybrid.create_hybrid_views` enumerates executes — all of them, on the
+    redistributable-only fixture, including the conditional licensing guard — the real
+    :func:`usvote.hybrid.build_hybrid_from_frames` derives both grains, and the SQL
     captured below is the SQL that would reach Postgres — both builders being pure
-    ``str -> str`` functions of a view name.
+    ``str -> str`` functions of a view name. (This sentence carried a **count** until
+    #178, and the count was wrong. It now names no figure at all and defers to the
+    creator's own enumeration, which is the whole point: a number restated *here* is a
+    number that has to be re-derived in another file to be checked, and was not. The
+    redistributable surface runs one guard more than the preferred one, because the
+    licensing guard is conditional — which is why no single total was ever right.)
 
     **What it still does not prove:** that the emitted SQL, executed by Postgres, returns
     what the pandas oracle does. Only
@@ -2855,6 +2929,288 @@ class TestTheCreatorIssuesEachSurfacesSqlUnderItsOwnName:
         priv = issued[hybrid.HYBRID_SUMMARY_PREFERRED_VIEW]
         assert hybrid.HYBRID_PREFERRED_VIEW in priv
         assert hybrid.HYBRID_REDISTRIBUTABLE_VIEW not in priv
+
+
+class TestTheCreatorReadsEachJoinViewExactlyOnce:
+    """AC-2 (#178): one read per surface, and the derivation gets the guarded frame.
+
+    **Why this has to assert the mechanism rather than an outcome.** Reading the join
+    view twice and reading it once produce *byte-identical views* — that is the whole
+    reason #164 sat deferred as a non-defect. So no assertion over the emitted SQL, the
+    frames, or the created names can tell the fixed code from the unfixed code. What
+    distinguishes them is **how many reads were issued** and **which frame object the
+    derivation received**, and those are the two things pinned below.
+
+    The second is the one that was actually filed. ``create_hybrid_views`` opens no
+    transaction and ``DBC`` commits per statement, so before #178 the input guards
+    ran over a *different* read than the derivation did — a guard verdict that did not
+    strictly describe the frame the views were built from.
+    """
+
+    @staticmethod
+    def _join_reads(queries: list[str], view: str) -> list[str]:
+        """The data reads of ``view`` — **never** the ``to_regclass`` probes.
+
+        Matching the full ``SELECT * FROM dwh.<view>`` string rather than the bare view
+        name is load-bearing: :class:`_CreatingStub` logs its probes into the *same*
+        ``queries`` list, and ``SELECT to_regclass('dwh.ec_pv_preferred')`` contains the
+        view name too. A substring count would be inflated by the probe and could hide a
+        regression behind it.
+        """
+        return [q for q in queries if q == f"SELECT * FROM {hybrid.SCHEMA}.{view}"]
+
+    def test_each_join_view_is_read_exactly_once(self) -> None:
+        """Two reads total across both surfaces, where there used to be four."""
+        stub = _CreatingStub(*_redistributable_only_surface())
+        hybrid.create_hybrid_views(cast("Any", stub))
+        for join_view, _, _ in hybrid.HYBRID_SURFACES:
+            reads = self._join_reads(stub.queries, join_view)
+            # == 1, never <= 1: under <=, a reworded query string in read_ec_pv_join
+            # would drop this to 0 and the test would pass while asserting nothing.
+            assert len(reads) == 1, (
+                f"{join_view} was read {len(reads)} times, not once — the guards and the "
+                f"derivation are no longer provably reading one snapshot: {reads}"
+            )
+
+    def test_the_derivation_receives_the_very_frame_the_guards_ran_over(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `same frame object` half of AC-2, pinned by **identity**.
+
+        Equality would not do it: two reads of the same stub return equal frames, so an
+        ``assert_frame_equal`` passes on the unfixed code. Identity is what fails there.
+        """
+        guarded: list[int] = []
+        derived: list[int] = []
+        real_guard = hybrid.assert_carried_columns_constant
+        real_build = hybrid.build_hybrid_from_frames
+
+        def spy_guard(df: pd.DataFrame, **kwargs: object) -> None:
+            guarded.append(id(df))
+            real_guard(df, **kwargs)  # type: ignore[arg-type]
+
+        def spy_build(
+            ec_pv_df: pd.DataFrame, roster_df: pd.DataFrame, **kwargs: object
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+            derived.append(id(ec_pv_df))
+            return real_build(ec_pv_df, roster_df, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(hybrid, "assert_carried_columns_constant", spy_guard)
+        monkeypatch.setattr(hybrid, "build_hybrid_from_frames", spy_build)
+        hybrid.create_hybrid_views(cast("Any", _CreatingStub(*_redistributable_only_surface())))
+
+        assert len(guarded) == len(derived) == len(hybrid.HYBRID_SURFACES)
+        assert guarded == derived, (
+            "the derivation was handed a different frame object than the one the input "
+            f"guards ran over (guarded {guarded}, derived {derived})"
+        )
+
+    def test_the_stub_would_record_a_second_read(self) -> None:
+        """Non-vacuity: the counter above can reach 2, so ``== 1`` is load-bearing.
+
+        Issues the read the pre-#178 creator issued a second time — through the real
+        :func:`usvote.hybrid.build_hybrid_from_db`, which still reads the view itself —
+        and shows the stub logs both. Without this, a matcher that silently matched
+        nothing would satisfy ``== 1`` only by accident and satisfy ``== 0`` happily.
+        """
+        stub = _CreatingStub(*_redistributable_only_surface())
+        view = EC_PV_REDISTRIBUTABLE_VIEW
+        hybrid.read_ec_pv_join(cast("Any", stub), view=view)
+        hybrid.build_hybrid_from_db(cast("Any", stub), view=view)
+        assert len(self._join_reads(stub.queries, view)) == 2
+
+
+def test_the_db_entry_point_still_reads_and_derives_the_same_result() -> None:
+    """#178 rewired ``create_hybrid_views`` past ``build_hybrid_from_db``, not through it.
+
+    That function keeps its signature and its behaviour — it is the live-warehouse seam
+    for a policy the SQL views cannot express (D050) and the oracle the integration
+    differential test runs against — so pin that the refactor left it composing the same
+    two reads into the same answer.
+    """
+    df, roster = _redistributable_only_surface()
+    frame, summary = hybrid.build_hybrid_from_db(
+        cast("Any", _StubDBC(df, roster)), view=EC_PV_REDISTRIBUTABLE_VIEW
+    )
+    direct_frame, direct_summary = hybrid.build_hybrid_from_frames(
+        df, hybrid._roster_for_surface(cast("Any", _StubDBC(df, roster)), df)
+    )
+    pd.testing.assert_frame_equal(frame, direct_frame)
+    pd.testing.assert_frame_equal(summary, direct_summary)
+
+
+def _surface_scopings(source: str) -> list[int]:
+    """Line numbers of every ``set(<frame>["source"].dropna().unique())`` expression.
+
+    **Matched on the AST, not counted in source text**, for the two reasons
+    :func:`_policy_selections` is — and here both directions bite. A text count misses
+    the drift that actually matters, a second copy over a differently-named frame
+    (``join_df``, ``surface_df``), since it can only match the spelling it was given.
+    And it fails *spuriously* on the same literal quoted in a docstring or comment.
+    """
+    found: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "set"
+            and len(node.args) == 1
+        ):
+            continue
+        unique = node.args[0]  # set( <...>.unique() )
+        if not (
+            isinstance(unique, ast.Call)
+            and isinstance(unique.func, ast.Attribute)
+            and unique.func.attr == "unique"
+        ):
+            continue
+        dropna = unique.func.value  # <...>.dropna()
+        if not (
+            isinstance(dropna, ast.Call)
+            and isinstance(dropna.func, ast.Attribute)
+            and dropna.func.attr == "dropna"
+        ):
+            continue
+        frame = dropna.func.value  # <frame>["source"]
+        if (
+            isinstance(frame, ast.Subscript)
+            and isinstance(frame.slice, ast.Constant)
+            and frame.slice.value == "source"
+        ):
+            found.append(node.lineno)
+    return found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'set(ec_pv_df["source"].dropna().unique())',
+        # The drift that matters, and the one a source-text count could not see: a
+        # second copy over a differently-named frame.
+        'set(join_df["source"].dropna().unique())',
+        'x = set(surface_df["source"].dropna().unique())',
+        'read_pv_status_roster(dbc, sources=set(df["source"].dropna().unique()))',
+    ],
+)
+def test_the_scoping_guard_catches_a_copy_over_any_frame_name(source: str) -> None:
+    """Positive cases — each is a second home for the scoping and must be flagged."""
+    assert _surface_scopings(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Prose is not code. A source-text count failed on these; the AST does not see
+        # them at all, which is the second reason the matcher is parsed rather than
+        # counted.
+        '"""Docs quoting set(ec_pv_df["source"].dropna().unique()) verbatim."""',
+        '# a comment about set(ec_pv_df["source"].dropna().unique())',
+        # A real neighbour in the tree — this exact expression is what
+        # `assert_redistributable_only_source` and `usvote.snapshot`'s licensing guard
+        # both spell. The rest below are SYNTHETIC near-misses, written to pin one
+        # structural condition each; an earlier version of this comment called them all
+        # "real neighbours in the tree", which they are not (code review, #178).
+        'sorted(ec_pv_df["source"].dropna()[non_mit].unique())',
+        # One per **structural** condition — the four that decide whether an expression
+        # is the scoping — so deleting any of those four fails at least one case here.
+        # Without them the suite passed with three of the four removed, because the case
+        # that *reads* as covering each is rejected a step earlier for a different
+        # reason (code review, #178). The matcher's `isinstance` checks are type guards
+        # rather than structural conditions and are deliberately not all pinned; the one
+        # exception is the arity check, below, which is load-bearing.
+        'list(df["source"].dropna().unique())',  # callee is not `set`
+        'set(df["source"].dropna().tolist())',  # tail is not `.unique()`
+        'set(df["source"].fillna("x").unique())',  # middle is not `.dropna()`
+        'set(df["party"].dropna().unique())',  # column is not "source"
+        'set(df["source"].dropna())',  # no tail call at all
+        # Bare `set()` is not a near-miss but a crash test: `node.args[0]` raises
+        # IndexError without the arity check, and bare `set()` is real code -- twice in
+        # hybrid.py alone -- so dropping that check does not merely widen the match, it
+        # takes the whole sweep down on files that have nothing to do with the scoping
+        # (code review, #178).
+        "set()",
+        'x = set() | {df["source"]}'
+    ],
+)
+def test_the_scoping_guard_does_not_cry_wolf(source: str) -> None:
+    """Negative cases — none is a second home, so none may fail CI."""
+    assert _surface_scopings(source) == []
+
+
+def test_the_scoping_guard_states_the_spellings_it_cannot_see() -> None:
+    """**The known limit, pinned so it is a documented gap and not a surprise.**
+
+    The matcher requires the exact ``set(<frame>["source"].dropna().unique())`` shape, so
+    a drift copy written another way — ``.loc[:, "source"]``, or without the ``dropna``
+    — is invisible to it, and with the one true home still present the count stays 1 and
+    the suite stays green. Asserting the gap here rather than describing it means a later
+    widening of the matcher **fails this test** and has to come and delete it, which is
+    how the limit gets revisited instead of forgotten.
+
+    The inverse direction is safe and needs no pin: respelling the *home* drops the count
+    to 0, which fails loudly.
+    """
+    assert _surface_scopings('set(df.loc[:, "source"].dropna().unique())') == []
+    assert _surface_scopings('set(df["source"].unique())') == []
+
+
+#: The one line the scoping may live on — derived from the function that owns it, so
+#: moving :func:`usvote.hybrid._roster_for_surface` within the module is not a failure.
+#: Only a SECOND home is.
+_ROSTER_SCOPING_LINE = (
+    inspect.getsourcelines(hybrid._roster_for_surface)[1]
+    + inspect.getsource(hybrid._roster_for_surface)
+    .splitlines()
+    .index('    surface_sources = set(ec_pv_df["source"].dropna().unique())')
+)
+
+
+def test_the_roster_scoping_has_exactly_one_expression() -> None:
+    """The #126 scoping is single-sourced in ``_roster_for_surface`` (#178).
+
+    Extraction was chosen over threading a frame through ``build_hybrid_from_db``
+    precisely so this derivation exists once. A second inline
+    ``set(df["source"].dropna().unique())`` beside the roster read would be the drift
+    this guards against — a roster scoped one way and a frame read another is the state
+    ``pv_coverage`` reports wrongly rather than loudly.
+
+    **Both trees are swept, not just** ``hybrid.py`` **(code review, #178).** Scanning
+    only the module made the guard blind where a copy actually was: the differential
+    oracle in ``tests/integration/test_hybrid_views.py`` re-derived the body verbatim,
+    which is the worst place for one — a copy there keeps testing the *old* rule after
+    the rule changes. Since :func:`usvote.hybrid._roster_for_surface` is importable, a
+    test needing the scoping calls it, and the sweep is what holds that.
+    """
+    root = Path(hybrid.__file__).parents[2]
+    # Excluded on the path RELATIVE to root, never on its absolute parts. Testing
+    # `path.parts` self-disables the whole sweep whenever the checkout itself lives
+    # under one of these names -- which is exactly the layout this repo's agents run in,
+    # `.claude/worktrees/<agent>/`, where every swept path contains ".claude" and the
+    # sweep silently scans zero files (code review, #178).
+    skip = {".venv", ".claude"}
+    scanned = [
+        path
+        for path in sorted(root.rglob("*.py"))
+        if not skip & set(path.relative_to(root).parts)
+    ]
+    # The equality below already fails on an empty sweep (`[] != [the home]`), so this
+    # is for the message, not the catch: it names the cause instead of leaving a bare
+    # `found: []`. The filter bug above escaped for a different reason -- the test was
+    # only ever run from a checkout that is not itself under `.claude/` (code review,
+    # #178).
+    assert Path(hybrid.__file__) in scanned, (
+        "the sweep reached no source tree, so it proves nothing about a second home; "
+        f"scanned {len(scanned)} files under {root}"
+    )
+    homes = [
+        f"{path.relative_to(root)}:{line}"
+        for path in scanned
+        for line in _surface_scopings(path.read_text(encoding="utf-8"))
+    ]
+    assert homes == [f"src/usvote/hybrid.py:{_ROSTER_SCOPING_LINE}"], (
+        "the surface-source scoping must have exactly one home, _roster_for_surface; "
+        f"found: {homes}"
+    )
 
 
 def test_no_module_outside_hybrid_spells_a_hybrid_view_name_in_code() -> None:

@@ -3186,3 +3186,83 @@ it once both run the guard.
 **Related:** **#200** (whether the drift-fails-open residual above can be closed unilaterally, rather than only chosen), **`claude-code-sessions#216`** (the sibling port that retires the one-sidedness), `tooling/publish-to-pages.py` (`git_pages_owner` / `_SYNC_SUBJECT` — the mechanics
 this entry does not duplicate), `tooling/check-og-cards.py`, `posts/README.md`,
 `.github/workflows/pages-sync.yml`, D049.
+
+---
+
+## D057: `create_hybrid_views` derives through `build_hybrid_from_frames`, not `build_hybrid_from_db`
+
+**Date:** 2026-08-30
+
+**Context.** `create_hybrid_views` read each join view **twice** per surface: once itself, to
+feed the three input-frame guards, and once again inside `build_hybrid_from_db`, which issued
+the identical `SELECT * FROM dwh.<join_view>` and re-materialized it. Over the two surfaces that
+is four full materializations of the join view per `rebuild_views` on a path that runs on every
+`python -m usvote all` and every `--replace` build.
+
+Efficiency is not why this was filed (#164, deferred from #124's review). The consequence that
+mattered: **the guards ran over a different read than the derivation.** `create_hybrid_views`
+opens no transaction and `DBC` commits per statement, so the two reads were not guaranteed to
+see the same snapshot — a guard verdict that did not strictly describe the frame the views were
+built from. Nothing else writes during a build today, so it was theoretical; it is also exactly
+the "a verdict is bound to what it ran on" property the rest of this pipeline is careful about.
+
+**Decision.** Extract the surface-source roster scoping into a module-private
+`_roster_for_surface(dbc, ec_pv_df, *, schema)` and have `create_hybrid_views` read once, guard,
+then call `build_hybrid_from_frames(ec_pv_df, roster_df)` directly. `build_hybrid_from_db` keeps
+its public signature and behaviour, and becomes the same three-line composition.
+
+**Rationale.** The alternative the issue itself recommended was an optional `ec_pv_df` argument
+on `build_hybrid_from_db`, with the creator passing the frame it had already read. It was
+rejected at the design gate for a reason worth recording, because the rejected shape is the one
+a later reader will re-propose: **with a frame supplied, `view=` drives no computation at all** —
+the roster scoping derives from `ec_pv_df["source"]`, not from `view` — so a validation on
+`view` can only ever reject an invalid *name*. It cannot catch the case that matters, a valid
+name paired with a frame from the other surface, which would then be documented against rather
+than prevented. Under the extraction there is one loop variable throughout and **the mismatch is
+not representable**.
+
+The objection to extraction was that it would duplicate the #126 surface-scoping fix. That is
+true of *re-implementing* the scoping inline in `create_hybrid_views` and false of extracting
+it: `_roster_for_surface` is its single home, and a unit test pins that the
+`set(ec_pv_df["source"].dropna().unique())` derivation is spelled exactly once in the module.
+This also leaves **one** frame entry point (`build_hybrid_from_frames`, shared by the creator and
+the snapshot build) and **one** DB entry point, rather than two overlapping "pass me frames"
+idioms.
+
+**What this changes about D050.** D050 states that "`create_hybrid_views` calls
+`build_hybrid_from_db` per surface first". That mechanism is superseded here; **the guard
+inheritance it was describing is not.** All four derivation guards live in
+`build_hybrid_from_frames`, which the creator now calls directly, so the same guards run in the
+same order over the same frames. Only the call path changed.
+
+**`build_hybrid_from_db` now has no production caller, deliberately.** It is retained, exported
+and unchanged because it is the live-warehouse entry point for a derivation **the views cannot
+express**: the SQL implements coverage policy (b) only (D050 §2), so any consumer wanting policy
+(c) — or a grain the four views do not carry — has no SQL path and must come through Python.
+The planned E9 / `step3` mart is the named case; `docs/pv-coverage.md` already works the 1824
+example under (c). It is also the oracle `tests/integration/test_hybrid_views.py` differentially
+tests the emitted SQL against, which keeps the seam exercised meanwhile. **A dashboard reaches
+none of this** — it reads the API snapshot (D028) or the materialized views, neither of which
+opens this connection.
+
+**Folded in with it (#178).** Three EC-domain DB seams typed `dbc: object` with two
+`# type: ignore[attr-defined]` are typed `DBC`, which the module already imported
+unconditionally at `hybrid.py:88` — the "this module must not import `usvote.db`" justification
+given for the loose form in #167's first commit describes no invariant this repo holds
+(`join.py:57` and `pv/load.py:66` both import it). And the view-creation precondition count is
+replaced by an **enumeration of named guards** at every site that stated it. A scalar was the
+wrong shape twice over: it had drifted to five sites, and *any* single number is wrong for one
+of the two surfaces, since the licensing guard is conditional — `redistributable` runs one guard
+more than `preferred`. An enumeration resolves against the body by reading; a count has to be
+re-derived to be checked, and was not.
+
+**No total is stated here either, deliberately.** An earlier draft of this entry gave the figures
+as nine and eight, which review caught: the entry would then be a *sixth* site restating the
+scalar it was recording the removal of, and adding a guard would falsify it exactly as adding one
+falsified the last. A dated log entry could defensibly carry a snapshot figure, but not this
+entry — the one whose whole claim is that the number is the wrong artifact. The enumeration in
+`create_hybrid_views` is the single authority.
+
+**Related:** #178 (superseding #164, #174, #176), D026, D038, D039, D050, `usvote/hybrid.py`
+(`_roster_for_surface`, `create_hybrid_views`, `build_hybrid_from_db`),
+`tests/unit/test_hybrid.py::TestTheCreatorReadsEachJoinViewExactlyOnce`.
