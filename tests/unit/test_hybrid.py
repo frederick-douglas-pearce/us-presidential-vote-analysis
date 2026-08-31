@@ -2894,7 +2894,7 @@ class TestTheCreatorReadsEachJoinViewExactlyOnce:
     derivation received**, and those are the two things pinned below.
 
     The second is the one that was actually filed. ``create_hybrid_views`` opens no
-    transaction and ``DBC`` commits per statement, so before #178 the three input guards
+    transaction and ``DBC`` commits per statement, so before #178 the input guards
     ran over a *different* read than the derivation did — a guard verdict that did not
     strictly describe the frame the views were built from.
     """
@@ -3124,10 +3124,29 @@ def test_the_roster_scoping_has_exactly_one_expression() -> None:
     test needing the scoping calls it, and the sweep is what holds that.
     """
     root = Path(hybrid.__file__).parents[2]
+    # Excluded on the path RELATIVE to root, never on its absolute parts. Testing
+    # `path.parts` self-disables the whole sweep whenever the checkout itself lives
+    # under one of these names -- which is exactly the layout this repo's agents run in,
+    # `.claude/worktrees/<agent>/`, where every swept path contains ".claude" and the
+    # sweep silently scans zero files (code review, #178).
+    skip = {".venv", ".claude"}
+    scanned = [
+        path
+        for path in sorted(root.rglob("*.py"))
+        if not skip & set(path.relative_to(root).parts)
+    ]
+    # Non-vacuity, and the reason it is an assert rather than a comment: an empty sweep
+    # is the one failure this guard cannot distinguish from success by its own result.
+    # The equality below does catch it (`[] != [the home]`) -- but only by accident of
+    # being an equality; the same guard written `len(homes) <= 1` would have passed
+    # vacuously on zero files, which is how the filter bug above went unnoticed.
+    assert Path(hybrid.__file__) in scanned, (
+        "the sweep reached no source tree, so it proves nothing about a second home; "
+        f"scanned {len(scanned)} files under {root}"
+    )
     homes = [
         f"{path.relative_to(root)}:{line}"
-        for path in sorted(root.rglob("*.py"))
-        if ".venv" not in path.parts and "worktrees" not in path.parts
+        for path in scanned
         for line in _surface_scopings(path.read_text(encoding="utf-8"))
     ]
     assert homes == [f"src/usvote/hybrid.py:{_ROSTER_SCOPING_LINE}"], (
