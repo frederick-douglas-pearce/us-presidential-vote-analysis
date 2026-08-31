@@ -1,6 +1,20 @@
 # US Presidential Vote Analysis — Census / Apportionment Backlog (E10)
 
-> **Status: FILED, REVIEW STILL PENDING (2026-08-25).** This backlog sharpens **E10
+> **Status: PARTIALLY REVIEWED (2026-08-31) — E10 IS THE ACTIVE EPIC.** **OQ5 and OQ6 are
+> answered** (see [#129's review comment](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/129#issuecomment-5475654446)):
+> E10 is **pulled forward as the dev loop's active epic** — #180 raised to `priority:high`,
+> #181/#182/#184 to `priority:medium`, #129 itself to `priority:medium` — and the 1868/1872
+> Reconstruction correction is **confirmed**, so the census work covers those two years like
+> any other. **OQ1, OQ2, OQ3 and OQ4 remain open by design**: they are what S1 (#180) exists to
+> answer, and settling them before the finding lands would be guessing. **S2–S5 (#181–#184) are
+> therefore still not final** — their shape is visible, not settled, and S1's verdict may re-cut
+> S2 and S5 in particular. Each of #181–#184 carries a banner saying so.
+>
+> **Decision numbering drifted:** the candidate decisions below were written as **D053–D057**
+> and all five slots are now taken. They record as **D058–D062** (+5) — see the renumber note in
+> [Proposed decisions](#proposed-decisions-candidates-for-fred--architect--not-yet-in-decisionsmd).
+>
+> **Prior status: FILED, REVIEW STILL PENDING (2026-08-25).**  This backlog sharpens **E10
 > (Census / apportionment analysis)** — epic **#129** — into stories, and Fred authorized
 > filing them **ahead of** the review so the epic is visible to the dev loop: **#180** (S1),
 > **#181** (S2), **#182** (S3), **#183** (S4), **#184** (S5). Filing is **not** approval of
@@ -515,8 +529,18 @@ _Story of epic #129 (E10 — census / apportionment analysis)._
 
 ## Proposed decisions (candidates for Fred + architect — NOT yet in `decisions.md`)
 
-Record in [`decisions.md`](decisions.md) as **D053–D057** only once approved (append-only; the
-highest recorded is **D052**). Summaries here for backlog readability.
+Record in [`decisions.md`](decisions.md) as **D058–D062** only once approved (append-only; the
+highest recorded is **D057**). Summaries here for backlog readability.
+
+> **Renumbered 2026-08-31.** This section originally proposed **D053–D057**, written when D052
+> was the highest recorded. All five of those slots were taken while the backlog sat pre-review —
+> D053 (public hybrid recomputed from the catalog, #102), D054 (Bot Fight Mode off the API zone),
+> D055 (deploy gate asserts the serving snapshot), D056 (cross-repo Pages ownership), D057
+> (`create_hybrid_views` derives through `build_hybrid_from_frames`). The candidates below keep
+> their **D05N (proposed)** labels for continuity with the story bodies in #181–#184, but the
+> mapping when they are recorded is **+5**: proposed D053 → **D058**, D054 → **D059**, D055 →
+> **D060**, D056 → **D061**, D057 → **D062**. Confirm the next free slot at recording time rather
+> than trusting this note — the same drift can happen again.
 
 - **D053 (proposed) — The population dimension conforms to the EC spine and lands as
   `usvote/census/`, a source-namespaced subpackage (D006/D015).** It reads the state roster and
