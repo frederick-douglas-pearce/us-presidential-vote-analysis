@@ -899,7 +899,11 @@ def _policy_selections(source: str, module: str) -> list[str]:
         'build_hybrid_from_db(dbc, policy="restricted")',
         'build_hybrid_from_db(dbc, policy = "restricted")',  # the whitespace hole
         "hybrid.build_hybrid_frame(df, roster, policy=chosen)",
-        "apply_coverage_policy(n, e, r, policy=COVERAGE_POLICY_RESTRICTED)",
+        # A bare literal, deliberately: spelled with COVERAGE_POLICY_RESTRICTED this
+        # case fired the constant-NAME branch and so proved nothing about
+        # `apply_coverage_policy` being in _POLICY_TAKERS at all — it read as covering
+        # the call branch while exercising a different one (Class B survivor, #178).
+        'apply_coverage_policy(n, e, r, policy="restricted")',
         "x = hybrid.COVERAGE_POLICY_RESTRICTED",
         "from usvote.hybrid import COVERAGE_POLICY_RESTRICTED as p\nuse(p)",
     ],
@@ -923,6 +927,46 @@ def test_the_policy_guard_catches_every_way_of_selecting_one(source: str) -> Non
 def test_the_policy_guard_does_not_cry_wolf(source: str) -> None:
     """Negative cases — none configures coverage, so none may fail CI (#122)."""
     assert _policy_selections(source, "m.py") == []
+
+
+@pytest.mark.parametrize("name", sorted(_POLICY_TAKERS))
+def test_every_declared_policy_taker_is_actually_matched(name: str) -> None:
+    """Each entry earns its place: dropping its case makes the entry inert, not loud.
+
+    Asserts the **reason string**, not merely a non-empty list. `_policy_selections` has
+    three branches (constant name, aliased import, `policy=` on a taker) and any of them
+    satisfies a truthiness check, so a case can read as covering one branch while firing
+    another — which is exactly what the `apply_coverage_policy` case above did until #178.
+    """
+    assert _policy_selections(f'{name}(a, b, policy="restricted")', "m.py") == [
+        f"m.py:1 passes policy= to {name}"
+    ]
+
+
+def test_policy_takers_lists_every_function_that_takes_a_policy() -> None:
+    """The constant is derived from the signatures, not from memory (Class B, #178).
+
+    **The mutation pass found this set silently weakenable at two of its four entries.**
+    Deleting either left the whole suite green, and the harness then proved the gap
+    exploitable rather than merely theoretical: with `build_hybrid_from_frames` present, a
+    `policy=` added to the live `usvote.snapshot` call is caught; with the entry dropped,
+    the identical call is invisible. One deleted line in a test constant re-opened the
+    hole the entry exists to close.
+
+    The parametrize above cannot catch that on its own — removing an entry just shrinks
+    it. Comparing against the real signatures is what makes a trimmed constant fail, and
+    it also catches the opposite drift: a NEW policy-taking function added to
+    :mod:`usvote.hybrid` that nobody remembered to list here.
+    """
+    from_signatures = {
+        name
+        for name, obj in vars(hybrid).items()
+        if inspect.isfunction(obj) and "policy" in inspect.signature(obj).parameters
+    }
+    assert from_signatures == _POLICY_TAKERS, (
+        "_POLICY_TAKERS must list exactly the functions that take a `policy`; "
+        f"signatures say {sorted(from_signatures)}, constant says {sorted(_POLICY_TAKERS)}"
+    )
 
 
 def test_nothing_configures_a_policy_other_than_b() -> None:
