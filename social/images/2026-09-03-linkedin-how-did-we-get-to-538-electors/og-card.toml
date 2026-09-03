@@ -1,0 +1,106 @@
+# OG share-card brief — Post 4, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card shows a real fragment of the actual
+# record. This post's specimen inverts the one post 3 used. That card put two
+# adjacent columns side by side because they *disagreed*; this one puts two columns
+# sixteen years apart side by side because they are *identical*, down to the last
+# state. Two presidential elections, four elections apart, with the 1920 census
+# sitting between them, and not one allotment moved. The card makes the post's
+# central evidence readable without a sentence of explanation: the reader sees two
+# columns of the same numbers and the two year headers doing all the work.
+#
+# Why this window: every one of the 48 states is identical between 1912 and 1928,
+# so no slice is more favorable than another and there is no cherry-picking to
+# defend. The window is therefore chosen for legibility and for variety against the
+# two cards already shipped. Posts 2 and 3 both ran Alabama-to-Mississippi with a
+# trailing "…"; this runs New York to Wyoming with a *leading* "…", so the three
+# cards do not read as the same image. It also carries the two largest allotments
+# in the set, New York's 45 and Pennsylvania's 38, which hold up at thumbnail size
+# where a column of single digits would not.
+#
+# Panel semantics, and note they are deliberately NOT differentiated: both panels
+# render the same column of the same record, four elections apart. Post 2's card
+# used a blank slot to mean "this record does not carry this state" and post 3's
+# used one to mean "nothing of this state's was counted." There are no blanks here,
+# on purpose. Nothing is missing from either year. That is the finding.
+#
+# The leading "…" says the record continues above, so nobody reads 19 states as the
+# whole country. The 531 in each sublabel is the national total across all 48,
+# not the sum of the 19 rows shown, which is why it is labelled "531 across 48
+# states" rather than a bare total that would not add up on screen.
+#
+# Data provenance: the live public API at https://api.us-presidential-election-center.org,
+# `GET /v1/elections/1912` and `GET /v1/elections/1928`, field `state_electoral_votes`,
+# read 2026-08-31. Unlike post 3's specimen there is no committed fixture for these
+# two years, so the check is reproducible against the API rather than against the
+# repo's test corpus. Verified the same day: the two allotment maps are equal across
+# all 48 states, and each sums to 531. Both years are also readable off the National
+# Archives pages the warehouse is built from, https://www.archives.gov/electoral-college/1912
+# and https://www.archives.gov/electoral-college/1928.
+
+[card]
+title = ["How Did We Get to", "538 Electors Anyway?"]
+subhead = "Sixteen years and the 1920 census in between. Not one allotment moved."
+series_mark = "Counted, Not Assumed · 4 of 10"
+
+# Rows are index-aligned across panels: row N is the same state in both. The state
+# name repeats in each panel on purpose, so either panel can be read alone at
+# thumbnail size — the same choice posts 1 and 3 make.
+[[panel]]
+label = "1912"
+sublabel = "531 across 48 states"
+mono = true
+rows = [
+  ["…", ""],
+  ["New York", "45"],
+  ["North Carolina", "12"],
+  ["North Dakota", "5"],
+  ["Ohio", "24"],
+  ["Oklahoma", "10"],
+  ["Oregon", "5"],
+  ["Pennsylvania", "38"],
+  ["Rhode Island", "5"],
+  ["South Carolina", "9"],
+  ["South Dakota", "5"],
+  ["Tennessee", "12"],
+  ["Texas", "20"],
+  ["Utah", "4"],
+  ["Vermont", "4"],
+  ["Virginia", "12"],
+  ["Washington", "7"],
+  ["West Virginia", "8"],
+  ["Wisconsin", "13"],
+  ["Wyoming", "3"],
+]
+
+[[panel]]
+label = "1928"
+sublabel = "531 across 48 states"
+mono = true
+rows = [
+  ["…", ""],
+  ["New York", "45"],
+  ["North Carolina", "12"],
+  ["North Dakota", "5"],
+  ["Ohio", "24"],
+  ["Oklahoma", "10"],
+  ["Oregon", "5"],
+  ["Pennsylvania", "38"],
+  ["Rhode Island", "5"],
+  ["South Carolina", "9"],
+  ["South Dakota", "5"],
+  ["Tennessee", "12"],
+  ["Texas", "20"],
+  ["Utah", "4"],
+  ["Vermont", "4"],
+  ["Virginia", "12"],
+  ["Washington", "7"],
+  ["West Virginia", "8"],
+  ["Wisconsin", "13"],
+  ["Wyoming", "3"],
+]
