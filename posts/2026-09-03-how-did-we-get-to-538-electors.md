@@ -40,7 +40,7 @@ A flat national total doesn't prove that on its own. The total sat at 531 for ev
 | 1940     | 0                                | 531            |
 | 1944     | 16                               | 531            |
 
-Reapportionment happens once a decade, so zeros are ordinary. 1908, and again 1936 and 1940, are what a normal decade looks like: the map moves at the first election after a census and holds until the next one. Four zeros in a row is not normal. The allotment set drawn up for the 1912 election stood unchanged through 1928, four consecutive elections and sixteen years, with the 1920 census sitting in the middle of that stretch and changing nothing. Every other census in the surrounding half-century moved 16 to 32 states at the next election. The map that elected a president in 1924, and again in 1928, was the map drawn after the 1910 census.
+Reapportionment happens once a decade, so zeros are ordinary. 1908, and again 1936 and 1940, are what a normal decade looks like: the map moves at the first election after a census and holds until the next one. Four zeros in a row is not normal. The allotment set drawn up for the 1912 election stood unchanged through 1928, five consecutive elections and sixteen years, with the 1920 census sitting in the middle of that stretch and changing nothing. Every other census in the surrounding half-century moved 16 to 32 states at the next election. The map that elected a president in 1924, and again in 1928, was the map drawn after the 1910 census.
 
 That failure is visible in this project's own record, with no appeal to anything outside it. Why Congress let it happen is a different question, and one the record doesn't answer.
 
