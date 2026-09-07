@@ -557,7 +557,7 @@ def test_dry_run_still_refuses_a_foreign_overwrite(box: Sandbox) -> None:
 
 
 def test_an_empty_source_repo_is_refused(box: Sandbox) -> None:
-    """`required=True` accepts "", and an empty slug is unrecoverable downstream.
+    """`required=True` accepts "", and an empty slug is only refused LATER.
 
     It would commit `... posts from @<sha>`, which the subject pattern can never
     parse. Since #200 that commit is also authored by `_SYNC_AUTHOR`, so every
@@ -763,12 +763,18 @@ def test_a_path_with_no_history_has_no_pages_owner(
 # (which fails on behavior: the overwrite proceeds), plus the two that read
 # symbols `main` does not define at all, `UNATTRIBUTED_SYNC` and `_SYNC_AUTHOR`.
 #
-# The other four pass before and after, deliberately: two pin properties this
-# change had to PRESERVE (the anti-bricking skip #157's review paid for), one
-# pins the NARROWING (sync identity, not "any bot"), and one pins the two-signal
-# happy path, where a parseable subject must still win over the author branch.
-# The remaining new test is the second drift tripwire on our own half of the
-# contract, and it passes on main because the subject it renders already parses.
+# The other four pass before and after, deliberately, one role each: one pins
+# the two-signal happy path (a parseable subject must still win over the author
+# branch), one pins a property this change had to PRESERVE (the anti-bricking
+# skip #157's review paid for, here on the site's most frequent writer), one
+# pins the NARROWING (sync identity, not "any bot"), and one is the second drift
+# tripwire on our own half of the contract, which passes on main because the
+# subject it renders already parses.
+#
+# The other PRESERVE test, `test_a_hand_edit_on_top_of_our_sync_does_not_brick_
+# the_publish`, is #157's and sits ABOVE this header — it is not one of the
+# seven, and counting it here is the arithmetic slip this paragraph has now
+# made twice.
 #
 # What each one is for is stated on it, so a later reader does not mistake
 # "passes on main" for "proves nothing". Counts included on purpose: the header
@@ -820,8 +826,8 @@ def test_a_well_formed_sync_by_the_sync_bot_is_read_from_its_subject(
     """The two-signal happy path, with BOTH signals actually present.
 
     In every other owner test the commit whose SUBJECT decides the answer is
-    authored by `t`, so until this one the subject leg was only ever exercised
-    on commits the author leg would have ignored anyway. (Siblings do commit as
+    authored by `t`, so until this one the subject leg was only ever exercised on
+    commits the author leg would have ignored anyway. (Siblings do commit as
     `Fred Pearce`, `dependabot[bot]` and `pages-sync[bot]` — but never on the
     commit whose subject is the one that parses.) The
     real article carries both, and their order is what makes the whole design
