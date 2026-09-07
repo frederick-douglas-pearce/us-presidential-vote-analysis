@@ -70,7 +70,11 @@ is closed by `assert_no_foreign_overwrite`, a SECOND Phase-1 validator: before
 any write, a target that already exists with different bytes must have been
 written last by a sync from THIS repo, or the run aborts. The provenance is the
 Pages repo's own history — each sync commits as
-`chore(sync): publish posts from <repo>@<sha>`. That history has to be there:
+`chore(sync): publish posts from <repo>@<sha>`, under the author
+`pages-sync[bot]`. **Both halves are read** (#200/D058): the subject says which
+publisher, and the author says that some publisher synced this at all, so a
+sibling that rewords its subject is refused rather than walked past. That
+history has to be there:
 the Action's `fetch-depth: 0` predates this guard (it exists for the
 reconcile-retry loop) but the guard now depends on it too, and the workflow
 says so at the checkout step. A shallow clone does not merely degrade this — it
@@ -98,7 +102,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import NamedTuple
+from typing import Final, NamedTuple
 from urllib.parse import urlparse
 
 # This script lives at <repo-root>/tooling/publish-to-pages.py, so the repo root
@@ -250,8 +254,7 @@ def _add(
     if dest in plan:
         prior = plan[dest]
         raise PublishError(
-            f"target collision ({kind}) with {prior.post_name} "
-            f"({prior.kind}) at {dest}"
+            f"target collision ({kind}) with {prior.post_name} ({prior.kind}) at {dest}"
         )
     plan[dest] = PlanEntry(data, kind, post_name)
 
@@ -296,26 +299,63 @@ def build_plan(
 #: `--source-repo` (see .github/workflows/pages-sync.yml), so OUR half cannot
 #: drift.
 #:
-#: The sibling's half is an assumption, not an invariant: it must match what
-#: `claude-code-sessions`'s own Action writes, which nothing here can check and
-#: no test pins. Verified by hand against that repo's `pages-sync.yml` on
-#: 2026-08-28 — `chore(sync): publish posts from claude-code-sessions@<sha>`,
-#: identical. Drift does not degrade this safely. A drifted subject is not read
-#: as "theirs" — it is not read at all, so the scan walks past it, and the
-#: outcome turns on what it finds NEXT, not on what we ourselves published:
+#: The sibling's half is still an assumption, not an invariant: it must match
+#: what `claude-code-sessions`'s own Action writes, which no test here can pin.
+#: Verified by hand against that repo's `pages-sync.yml` on 2026-08-28, and
+#: against its 15 sync commits in the live Pages history on 2026-09-07 —
+#: `chore(sync): publish posts from claude-code-sessions@<sha>`, identical.
 #:
-#:   - an older sync of OURS -> the target reads as ours and the overwrite
-#:     proceeds, silently re-opening the hole this guard closes;
-#:   - no recognizable sync at all -> owned by nobody, taking the "no sync
-#:     commit" branch below, which is why that branch's remedy names
-#:     sibling-format drift among its causes;
-#:   - an older WELL-FORMED sync of theirs, i.e. any card they published before
-#:     the drift -> still reads as theirs and still refuses; drift is a no-op.
-#:
-#: See D056 and #200.
+#: **Drift in that subject no longer fails open**, which is the change #200 made
+#: and the reason this comment is shorter than it was. A drifted sibling subject
+#: was previously not read as "theirs" — it was not read at all, so the scan
+#: walked past it to an older sync of OURS and the overwrite proceeded silently.
+#: `_SYNC_AUTHOR` below is the second, independent signal that closes that: the
+#: commit is still authored by the sync bot, so it is now read as an
+#: unattributable sync and refused. See D058, which supersedes D056's accepted
+#: residual on this point (D056 itself is unedited — append-only).
 _SYNC_SUBJECT = re.compile(
     r"^chore\(sync\): publish posts from (?P<repo>[A-Za-z0-9._-]+)@"
 )
+
+#: The identity BOTH publishers' syncs commit under — the second signal, and the
+#: only thing standing between a reworded sibling subject and a silent
+#: overwrite. Our own Action sets it (`git config user.name` in
+#: .github/workflows/pages-sync.yml, tied to this constant by
+#: `test_the_workflow_commits_under_the_identity_the_guard_keys_on`); the
+#: sibling's is verified empirically rather than assumed — all 23 sync commits
+#: in the live Pages history, ours and theirs alike, carry it (2026-09-07).
+#:
+#: Deliberately the sync identity and NOT "any bot": the Pages repo's other
+#: automated writer is `dependabot[bot]`, and a rule keyed on the `[bot]` suffix
+#: would refuse the day it — or any future image optimizer — touched a guarded
+#: dir. Narrow makes that safety structural rather than contingent on what
+#: dependabot happens to write today. See D058.
+_SYNC_AUTHOR = "pages-sync[bot]"
+
+
+class _UnattributedSync:
+    """A sync commit whose subject this guard cannot parse. See `UNATTRIBUTED_SYNC`."""
+
+    __slots__ = ()
+
+
+#: The third outcome of `git_pages_owner`, distinct from both a repo slug and
+#: `None`: a commit authored by `_SYNC_AUTHOR` whose subject `_SYNC_SUBJECT`
+#: does not recognize. Some publisher's sync wrote this target, and we cannot
+#: tell whose — so it is refused.
+#:
+#: A distinct TYPE, not a bare `object()` and not a reserved string. A bare
+#: sentinel types as `object`, which collapses the union back to `object` and
+#: silently switches mypy off on this reader's return — losing exactly the
+#: checking that makes a sentinel better than a string here. A reserved string
+#: is worse still: it shares a domain with legitimate returns, so a
+#: `--source-repo` equal to it would compare equal and fail OPEN.
+UNATTRIBUTED_SYNC: Final = _UnattributedSync()
+
+#: What `git_pages_owner` answers, and what the `pages_owner` seam accepts:
+#: a source-repo slug, `None` (no sync commit touches the target at all), or
+#: `UNATTRIBUTED_SYNC`. Discriminate with `is` so mypy narrows all three.
+PagesOwner = str | None | _UnattributedSync
 
 
 def sync_source_repo(subject: str) -> str | None:
@@ -330,11 +370,26 @@ def sync_source_repo(subject: str) -> str | None:
     return m.group("repo") if m else None
 
 
-def git_pages_owner(dest: Path) -> str | None:
+def git_pages_owner(dest: Path) -> PagesOwner:
     """Source repo of the most recent Pages SYNC commit touching `dest`.
 
     None means no sync commit touches it at all — a site-owned asset
     (`assets/img/og_banner.png` is one), or a file only ever written by hand.
+
+    `UNATTRIBUTED_SYNC` means the most recent commit this reader could attribute
+    to a publisher at all was one it could not attribute to WHICH publisher: a
+    commit authored by `_SYNC_AUTHOR` whose subject `_SYNC_SUBJECT` does not
+    parse. That is the sibling-drift case (#200/D058), and reading it required a
+    second signal because the subject alone cannot: a drifted subject is
+    indistinguishable from prose, so it was previously skipped and the scan
+    resolved ownership to whatever it found NEXT — an older sync of ours,
+    typically, which meant the overwrite proceeded. The author survives the walk
+    where the subject does not.
+
+    **Author (%an), not committer.** They are equal for a direct-push sync in
+    both repos today, but the author is what survives a rebase or cherry-pick of
+    a sync commit, where the committer flips to whoever rewrote it — and "who
+    originally published this target" is the provenance question being asked.
 
     **The most recent SYNC commit, not the most recent commit.** Reading the
     latest commit of any kind would let one ordinary edit on the Pages side —
@@ -373,11 +428,24 @@ def git_pages_owner(dest: Path) -> str | None:
             f"guard reads the Pages repo's history, so --posts-dir and "
             f"--assets-dir must point into a real clone of it."
         )
-    log = _git_out(dest, "log", "--format=%s", "--", str(dest))
-    for subject in log.splitlines():
+    # `%an` first so the free-text subject is the tail: an author name cannot
+    # contain NUL, so the first separator is unambiguous, and `%s` is
+    # single-line so one commit stays one line.
+    log = _git_out(dest, "log", "--format=%an%x00%s", "--", str(dest))
+    for line in log.splitlines():
+        author, _, subject = line.partition("\x00")
         owner = sync_source_repo(subject)
         if owner is not None:
             return owner
+        # A sync we cannot attribute stops the walk rather than being skipped.
+        # Walking past it is the #200 failure: the next recognizable sync is
+        # usually an older one of ours, which reads as ownership we do not have.
+        if author == _SYNC_AUTHOR:
+            return UNATTRIBUTED_SYNC
+        # Anything else is a non-sync writer — a hand edit, a web merge, the
+        # site's daily ESG cron — and is skipped, which is the leg #157's review
+        # paid for: reading it as foreign would let one typo fix on the Pages
+        # side brick every future publish.
     return None
 
 
@@ -450,7 +518,7 @@ def _git_run(dest: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def assert_no_foreign_overwrite(
     plan: dict[Path, PlanEntry],
     source_repo: str,
-    pages_owner: Callable[[Path], str | None] = git_pages_owner,
+    pages_owner: Callable[[Path], PagesOwner] = git_pages_owner,
 ) -> None:
     """Phase 1: refuse to overwrite a target another publisher owns. No writes.
 
@@ -474,7 +542,11 @@ def assert_no_foreign_overwrite(
     remedy.** "Rename your slug" is right for a live collision with the sibling
     series and actively wrong for a site-owned file, where renaming an
     already-published post would break a permalink and a share-card URL that
-    are already in the wild.
+    are already in the wild. It is wrong again for the third case
+    (`UNATTRIBUTED_SYNC`, #200/D058) and for a third reason: the target is not a
+    slug collision at all, so renaming would move a live URL and leave the
+    actual defect — two publishers disagreeing about the subject format —
+    exactly where it was.
     """
     for dest in sorted(plan):
         entry = plan[dest]
@@ -484,15 +556,31 @@ def assert_no_foreign_overwrite(
         if owner == source_repo:
             continue
         where = f"{dest} ({entry.kind} for {entry.post_name})"
+        # `isinstance`, not `is UNATTRIBUTED_SYNC`: both are correct at runtime
+        # (it is a singleton), but mypy narrows a union on isinstance and does
+        # not narrow on identity against a Final instance of a non-enum type —
+        # and narrowing is what leaves `owner` a plain `str` by the last branch.
+        if isinstance(owner, _UnattributedSync):
+            raise PublishError(
+                f"refusing to overwrite {where}: the most recent sync commit "
+                f"touching it was authored by {_SYNC_AUTHOR!r} but carries a "
+                f"subject this guard cannot parse, so it names no source repo. "
+                f"Some publisher synced this target and there is no way to tell "
+                f"which. Do NOT rename this post's slug — it would move a live "
+                f"permalink and share-card URL and would not fix this. The fix "
+                f"is to realign the subject format across both publishers, which "
+                f"is expected to read "
+                f"'chore(sync): publish posts from <repo>@<sha>'."
+            )
         if owner is None:
             raise PublishError(
                 f"refusing to overwrite {where}: no Pages sync commit in its "
                 f"history, so no publisher this guard recognizes owns it. It is "
-                f"site-owned, hand-written, or published by a sibling repo whose "
-                f"commit-subject format this guard no longer recognizes. Check "
-                f"who owns it on the Pages side; do NOT reflexively rename this "
-                f"post's slug, which would move a permalink and a share-card URL "
-                f"that are already live."
+                f"site-owned, hand-written, or published by a writer that commits "
+                f"neither under the sync identity nor under a subject this guard "
+                f"parses. Check who owns it on the Pages side; do NOT reflexively "
+                f"rename this post's slug, which would move a permalink and a "
+                f"share-card URL that are already live."
             )
         raise PublishError(
             f"refusing to overwrite {where}: it was last published by "
@@ -531,7 +619,7 @@ def run(
     assets_dir: Path,
     dry_run: bool,
     source_repo: str,
-    pages_owner: Callable[[Path], str | None] = git_pages_owner,
+    pages_owner: Callable[[Path], PagesOwner] = git_pages_owner,
 ) -> int:
     # Phase-1 preconditions: the Pages dirs must already exist. Do NOT mkdir —
     # absence means the worktree isn't checked out, an operator error.
