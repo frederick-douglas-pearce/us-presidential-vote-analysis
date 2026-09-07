@@ -557,10 +557,14 @@ def test_dry_run_still_refuses_a_foreign_overwrite(box: Sandbox) -> None:
 
 
 def test_an_empty_source_repo_is_refused(box: Sandbox) -> None:
-    """`required=True` accepts "", and an empty slug fails SILENTLY downstream.
+    """`required=True` accepts "", and an empty slug is unrecoverable downstream.
 
     It would commit `... posts from @<sha>`, which the subject pattern can never
-    parse, so every later update of that post reads as owned by nobody.
+    parse. Since #200 that commit is also authored by `_SYNC_AUTHOR`, so every
+    later update of that post reads as `UNATTRIBUTED_SYNC` rather than as owned
+    by nobody — refused either way, but under a remedy naming the wrong cause.
+    Kept in step with the same account in `main()`, which is the code this
+    docstring describes.
     """
     src = box.add_post("empty", "social/images/empty/og-card.png")
     with pytest.raises(box.ptp.PublishError, match="must not be empty"):
@@ -755,12 +759,20 @@ def test_a_path_with_no_history_has_no_pages_owner(
 
 # --- #200: the second signal, when the sibling's subject drifts ------------
 #
-# Only the first of these five fails against the pre-#200 code. The other four
-# pass both before and after, deliberately: two pin properties this change had
-# to PRESERVE (the anti-bricking skip #157's review paid for), one pins the
-# NARROWING (sync identity, not "any bot"), and the last two are drift
-# tripwires on our own half of the contract. What each one is for is stated on
-# it, so a later reader does not mistake "passes on main" for "proves nothing".
+# Seven tests, and THREE of them fail against the pre-#200 code — the repro
+# (which fails on behavior: the overwrite proceeds), plus the two that read
+# symbols `main` does not define at all, `UNATTRIBUTED_SYNC` and `_SYNC_AUTHOR`.
+#
+# The other four pass before and after, deliberately: two pin properties this
+# change had to PRESERVE (the anti-bricking skip #157's review paid for), one
+# pins the NARROWING (sync identity, not "any bot"), and one pins the two-signal
+# happy path, where a parseable subject must still win over the author branch.
+# The remaining new test is the second drift tripwire on our own half of the
+# contract, and it passes on main because the subject it renders already parses.
+#
+# What each one is for is stated on it, so a later reader does not mistake
+# "passes on main" for "proves nothing". Counts included on purpose: the header
+# is the map, and a map that miscounts its own territory is worse than none.
 
 
 def test_a_drifted_sibling_sync_is_refused_not_walked_past(
@@ -807,8 +819,11 @@ def test_a_well_formed_sync_by_the_sync_bot_is_read_from_its_subject(
 ) -> None:
     """The two-signal happy path, with BOTH signals actually present.
 
-    Every other owner test commits as `t`, so until this one the subject leg was
-    only ever exercised on commits the author leg would have ignored anyway. The
+    In every other owner test the commit whose SUBJECT decides the answer is
+    authored by `t`, so until this one the subject leg was only ever exercised
+    on commits the author leg would have ignored anyway. (Siblings do commit as
+    `Fred Pearce`, `dependabot[bot]` and `pages-sync[bot]` — but never on the
+    commit whose subject is the one that parses.) The
     real article carries both, and their order is what makes the whole design
     work: the subject is tried first, so a sibling sync the guard CAN parse is
     still attributed to the sibling rather than being swallowed by the
@@ -962,6 +977,13 @@ def test_the_workflow_subject_template_still_parses(ptp: ModuleType) -> None:
         f"one of its variables, so update this test's substitution"
     )
     assert ptp.sync_source_repo(rendered) == OUR_REPO
+
+
+# --- #157: the bound on which repository's history gets consulted ----------
+#
+# Pre-#200 tests, and unchanged by it. They live below the section above only
+# because that section was inserted here; the marker is what keeps the two from
+# reading as one.
 
 
 def test_pages_dirs_inside_this_repo_are_refused(box: Sandbox) -> None:

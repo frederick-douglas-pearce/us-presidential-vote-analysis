@@ -698,15 +698,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dry-run", action="store_true", help="resolve + compare, but write nothing"
     )
     args = ap.parse_args(argv)
-    # `required=True` accepts an empty string, and an empty slug is the one
-    # value that fails SILENTLY: every target of a brand-new post is absent, so
-    # the guard waves the run through, and it commits `... posts from @<sha>`,
-    # which `_SYNC_SUBJECT` can never parse. Since #200 that commit is also
-    # authored by `_SYNC_AUTHOR`, so every later update of that post reads as
-    # `UNATTRIBUTED_SYNC` — a loud refusal, but one whose remedy ("realign the
-    # subject format across both publishers") names the wrong cause entirely.
-    # The check below is what keeps that unreachable. The workflow feeds this
-    # from `github.event.repository.name`; check it rather than trust it.
+    # `required=True` accepts an empty string, and an empty slug commits a
+    # subject `_SYNC_SUBJECT` can never parse: `... posts from @<sha>`. Nothing
+    # goes wrong at the time — every target of a brand-new post is absent, so
+    # the guard waves the run through — and the cost lands on a LATER run.
+    # Since #200 that commit is also authored by `_SYNC_AUTHOR`, so every later
+    # update of that post reads as `UNATTRIBUTED_SYNC`: a loud refusal by then,
+    # but under a remedy ("realign the subject format across both publishers")
+    # that names the wrong cause entirely.
+    #
+    # The check below closes the EMPTY case only. A non-empty slug carrying a
+    # character outside `_SYNC_SUBJECT`'s `[A-Za-z0-9._-]` — `my repo`, say —
+    # reaches the identical trap, and nothing here rejects it: the pattern is
+    # never applied to the incoming slug (#214). Unreached in practice for the
+    # reason below rather than by validation.
+    #
+    # The workflow feeds this from `github.event.repository.name`; check it
+    # rather than trust it.
     source_repo = args.source_repo.strip()
     if not source_repo:
         raise PublishError("--source-repo must not be empty")
