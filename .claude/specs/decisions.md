@@ -3360,6 +3360,14 @@ enters the blast radius.
    through the parser. The second exists precisely because the first is not sufficient — the
    identity tie says nothing about the subject, which is the string that actually drifts.
 
+   **The most plausible concrete trigger is not a workflow edit at all: `git commit --amend`
+   preserves the original author.** Someone rewording a sync commit in place on Pages `main` leaves
+   it authored by `pages-sync[bot]` with a subject that no longer parses, which is this residual
+   exactly — and reached by a routine git operation rather than by editing either publisher. (A
+   `git revert` is safe by contrast: it re-authors to the reverter, so the reverting commit is
+   skipped as an ordinary human write.) Named here because the two tripwires above watch the
+   workflow files, and nothing watches for this.
+
 **D056 is not edited.** The log is append-only, D056's "Related" already names #200, and this entry
 is where that pointer resolves.
 

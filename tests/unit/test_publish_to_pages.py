@@ -802,6 +802,30 @@ def test_a_drifted_sibling_sync_is_refused_not_walked_past(
     assert target.read_bytes() == b"THEIRS"
 
 
+def test_a_well_formed_sync_by_the_sync_bot_is_read_from_its_subject(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """The two-signal happy path, with BOTH signals actually present.
+
+    Every other owner test commits as `t`, so until this one the subject leg was
+    only ever exercised on commits the author leg would have ignored anyway. The
+    real article carries both, and their order is what makes the whole design
+    work: the subject is tried first, so a sibling sync the guard CAN parse is
+    still attributed to the sibling rather than being swallowed by the
+    author branch as merely "some publisher".
+
+    Deleting the subject-parse leg turns this red — it would return
+    UNATTRIBUTED_SYNC for a commit that says exactly whose it is.
+    """
+    target = box.pages_assets / "both-og.png"
+    target.write_bytes(b"THEIRS")
+    _git_as(SYNC_AUTHOR, pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", sync_subject(THEIR_REPO))
+    assert _last_author(pages_repo, target) == SYNC_AUTHOR
+
+    assert box.ptp.git_pages_owner(target) == THEIR_REPO
+
+
 def test_the_esg_cron_on_top_of_our_sync_does_not_brick_the_publish(
     box: Sandbox, pages_repo: Path
 ) -> None:

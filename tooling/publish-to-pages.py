@@ -354,7 +354,15 @@ UNATTRIBUTED_SYNC: Final = _UnattributedSync()
 
 #: What `git_pages_owner` answers, and what the `pages_owner` seam accepts:
 #: a source-repo slug, `None` (no sync commit touches the target at all), or
-#: `UNATTRIBUTED_SYNC`. Discriminate with `is` so mypy narrows all three.
+#: `UNATTRIBUTED_SYNC`.
+#:
+#: **Discriminate with `isinstance(owner, _UnattributedSync)` and `owner is
+#: None`, NOT with `owner is UNATTRIBUTED_SYNC`.** Both are correct at runtime,
+#: since it is a singleton — but mypy narrows a union on `isinstance` and does
+#: **not** narrow on identity against a `Final` instance of a non-enum type, so
+#: the `is` form leaves `_UnattributedSync` in the union and any later `str`
+#: operation on the remainder fails `union-attr` under this repo's gate. See
+#: the branch in `assert_no_foreign_overwrite`, which is the worked example.
 PagesOwner = str | None | _UnattributedSync
 
 
@@ -562,8 +570,8 @@ def assert_no_foreign_overwrite(
         # and narrowing is what leaves `owner` a plain `str` by the last branch.
         if isinstance(owner, _UnattributedSync):
             raise PublishError(
-                f"refusing to overwrite {where}: the most recent sync commit "
-                f"touching it was authored by {_SYNC_AUTHOR!r} but carries a "
+                f"refusing to overwrite {where}: the most recent commit "
+                f"touching it that was authored by {_SYNC_AUTHOR!r} carries a "
                 f"subject this guard cannot parse, so it names no source repo. "
                 f"Some publisher synced this target and there is no way to tell "
                 f"which. Do NOT rename this post's slug — it would move a live "
@@ -693,9 +701,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     # `required=True` accepts an empty string, and an empty slug is the one
     # value that fails SILENTLY: every target of a brand-new post is absent, so
     # the guard waves the run through, and it commits `... posts from @<sha>`,
-    # which `_SYNC_SUBJECT` can never parse. Every later update of that post
-    # then reads as owned by nobody, forever. The workflow feeds this from
-    # `github.event.repository.name`; check it rather than trust it.
+    # which `_SYNC_SUBJECT` can never parse. Since #200 that commit is also
+    # authored by `_SYNC_AUTHOR`, so every later update of that post reads as
+    # `UNATTRIBUTED_SYNC` — a loud refusal, but one whose remedy ("realign the
+    # subject format across both publishers") names the wrong cause entirely.
+    # The check below is what keeps that unreachable. The workflow feeds this
+    # from `github.event.repository.name`; check it rather than trust it.
     source_repo = args.source_repo.strip()
     if not source_repo:
         raise PublishError("--source-repo must not be empty")
