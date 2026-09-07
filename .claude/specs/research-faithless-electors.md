@@ -20,6 +20,10 @@
 > Oklahoma vote was faithless.** The other 14 were *lawfully unpledged* slates run under state statute
 > — a mechanism that exists nowhere today. Our own warehouse shows fifteen votes that look identical
 > and cannot, by itself, tell you that fourteen were routine and one was a conspiracy.
+>
+> **Revised 2026-09-07** by a follow-up verification pass, which added two things and changed no
+> finding above: Chiafalo's full name (§1) and the sourcing status of the name "Hamilton Electors"
+> (§10, flags 13–14).
 
 **Date:** 2026-09-06 · **Method:** two parallel research agents (motives; calendar/mechanics), plus
 direct reads by the parent of the *Chiafalo* slip opinion, the Supreme Court docket, the House
@@ -60,6 +64,12 @@ yielding contemporaneous AP reporting on a `.gov` host for 1948, 1956, 1960 and 
 - **"The most in a century"** is the Court's own phrase — use it; no news citation needed.
 - Petitioners: **Peter B. Chiafalo, Levi Jennet Guerra, Esther Virginia John** (caption, slip op. 1).
   Fined **$1,000 apiece** under then-Wash. Rev. Code §29A.56.340 (2016).
+- **His name is Peter _Bret_ Chiafalo — VERIFIED (added 2026-09-07).** The slip opinion abbreviates it
+  to "Peter B."; the Supreme Court merits-brief caption spells it out — "**PETER BRET CHIAFALO, LEVI
+  JENNET GUERRA, AND ESTHER VIRGINIA JOHN, Petitioners**" (Brief for Respondent State of Washington,
+  No. 19-465, cover; identical caption on the petitioners' brief, Nos. 19-465 / 19-518). He is "Bret
+  Chiafalo" throughout contemporaneous coverage. **Use "Peter Bret Chiafalo" in prose**: "Peter
+  Chiafalo" is formally correct and returns nothing useful to a reader who searches it.
 - ⚠ **The fourth Washington elector** (who voted for Faith Spotted Eagle) is **not** a petitioner.
   Nothing in the record here establishes what happened to him. **UNVERIFIED — do not assert.**
 
@@ -534,6 +544,28 @@ and the 2016 correction this project had to make would not exist.
 10. **Irwin's telegram wording** is ATTRIBUTED to an unfootnoted FairVote archive page.
 11. **The 1969 yeas/nays polarity** and **the 2016 pledged-vs-cast baseline** are both live traps.
 12. All cushion/defection arithmetic in §7 is **derived** from NARA's published totals, not quoted.
+13. 🚨 **"Hamilton Electors" is ATTRIBUTED, never VERIFIED, and appears NOWHERE in the legal
+    record** (checked 2026-09-07). It is the name the 2016 group gave itself, after **Federalist No.
+    68**; co-founded by **Micheal Baca** (Colo.) and **Bret Chiafalo** (Wash.), website launched 6 Dec
+    2016. Nine primary documents were searched, and **every "Hamilton" hit in all nine is Alexander
+    Hamilton or Federalist No. 68 — never the group**: the *Chiafalo* slip opinion; the Washington
+    Supreme Court slip opinion (No. 95347-3); the petitioners' merits brief and their reply; the State
+    of Washington's merits brief; and the RNC, Colorado / South Dakota + 44 States, Public Citizen, and
+    Campaign Legal Center + Issue One amici. **The courts describe the plan in detail and never name
+    the organization.** The name rests on Dec 2016 journalism (NYT, Politico, *Seattle Times*, AP, the
+    *Guardian*, ABC, *The Hill*), so publishing it requires naming one of those in-line — a deliberate
+    departure from this post's primary-source discipline. The cheaper fix for reader findability is the
+    verified middle name (§1, and flag 14).
+    ⚠ **One primary document remains unchecked**, and it is the likeliest to name the group, since
+    Micheal Baca co-founded it and its fact section runs long: ***Baca v. Colorado Dep't of State*, 935
+    F.3d 887 (10th Cir. 20 Aug 2019)**. Not obtainable on 2026-09-07 — `ca10.uscourts.gov` 404s on every
+    URL form tried (including the internal document ID `010110215655` recovered from the clerk's cover
+    sheet), Justia 403s, govinfo's package `USCOURTS-ca10-18-01173` holds **only** that cover letter and
+    the 1 Oct 2020 remand order (`mods.xml` confirms just two granules), and CourtListener's free search
+    tier returns 2 results for "faithless elector", so its negative means nothing. Retrieve it before
+    concluding the phrase is absent from the record *entirely* rather than from the *Chiafalo* record.
+14. **Prefer "Peter Bret Chiafalo" to "Peter Chiafalo" in prose** — see §1. The middle name is in the
+    Court's own merits-brief caption, and it is the only spelling a reader can successfully search.
 
 ## §11 — Best unfetched source
 
