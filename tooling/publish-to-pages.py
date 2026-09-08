@@ -339,7 +339,8 @@ _SYNC_AUTHOR = "pages-sync[bot]"
 #: choice.** Python's `str.splitlines()` splits on boundaries git's `%s` does not
 #: fold — `\v`, `\f`, `\r`, `\x1c`-`\x1e`, `\x85`, U+2028, U+2029 — so one commit
 #: subject can arrive as several Python "lines". Because `%an` is emitted first,
-#: every fragment AFTER such a boundary lands on a line carrying no NUL:
+#: every fragment after such a boundary IN THE SUBJECT — the attacker-controlled
+#: field, and the case this guards — lands on a line carrying no NUL:
 #: `partition("\x00")` puts it in the AUTHOR slot and leaves `subject == ""`,
 #: which can never parse as a sync. (The fragment BEFORE the first boundary
 #: keeps the NUL-bearing line and so keeps a real subject slot — harmless, since

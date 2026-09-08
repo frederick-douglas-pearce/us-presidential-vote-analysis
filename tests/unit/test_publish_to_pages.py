@@ -682,7 +682,12 @@ def _last_subject(cwd: Path, path: Path) -> str:
         capture_output=True,
         encoding="utf-8",
     )
-    return proc.stdout.strip()
+    # `.rstrip("\n")`, NOT `.strip()`: every separator this helper exists to
+    # observe is `str.isspace()` — `\v`, `\f`, `\x1c`, `\x85`, U+2028, U+2029 —
+    # so a bare strip would delete the very thing being measured the moment one
+    # sat at either end of a subject. Interior today; a trap for whoever widens
+    # SPLIT_SEPARATORS or reshapes the forged subject.
+    return proc.stdout.rstrip("\n")
 
 
 #: A sibling sync whose subject has drifted out of `_SYNC_SUBJECT`'s reach —
@@ -1077,9 +1082,17 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
     returned nothing for the forged commit would resolve to this older sync of
     ours and go red. Not scaffolding, and not the primary guard either.
 
-    The bot authorship is READ BACK rather than assumed, for the reason
-    `test_a_drifted_sibling_sync_is_refused_not_walked_past` gives: a helper that
-    silently failed to set it would leave this passing via the no-owner branch.
+    The bot authorship is read back rather than assumed — but that read-back is
+    belt-and-braces here, NOT load-bearing, and the neighbouring drift test's
+    stated reason for the same line does not carry over. If `_git_as` silently
+    failed to set the identity this test would fail LOUDLY, not pass: the walk
+    would skip the forged commit as an ordinary non-sync writer, skip the
+    empty-subject fragment, reach the older genuine sync of ours and return
+    OUR_REPO, tripping the security assertion below. And there is no reachable
+    no-owner branch in this history at all — the `sync_subject(OUR_REPO)` commit
+    guarantees the reader never returns `None`. What the read-back earns is a
+    localized diagnosis, not a caught silent pass. (#222 tracks the same claim
+    being wrong where it was inherited from.)
     """
     target = box.pages_assets / "forge-og.png"
     target.write_bytes(b"OURS-V1")
@@ -1096,8 +1109,10 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
     # producing a `splitlines()` boundary IN WHAT GIT STORED — an unasserted
     # property of SPLIT_SEPARATORS until the review that added this line. Two
     # ways it fails silently: a tuple someone edits to an ordinary character,
-    # and a git that normalizes the separator away (a `commit.cleanup` setting,
-    # a future version). Either leaves both assertions below passing trivially —
+    # and a future git that normalizes the separator away (NOT `commit.cleanup`,
+    # whose modes touch blank lines, trailing whitespace and comment lines, none
+    # of them an interior control character). Either leaves the assertions
+    # below passing trivially —
     # the subject stays one line, never parses as a sync, and the bot author
     # yields UNATTRIBUTED_SYNC for a reason with nothing to do with the forgery.
     # Both reviewers measured that vacuous green, one of them against the
@@ -1106,6 +1121,13 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
     assert len(stored.splitlines()) == 2, (
         f"{separator!r} did not split the stored subject {stored!r} — the "
         f"forgery was never constructed and this test would be vacuous"
+    )
+    # The boundary existing is the weaker fact. What the forgery depends on is
+    # that the fragment AFTER it is a well-formed sync naming US — that is what a
+    # reordered format would read and act on.
+    assert box.ptp.sync_source_repo(stored.splitlines()[1]) == OUR_REPO, (
+        f"the concealed fragment of {stored!r} is not a sync naming {OUR_REPO} — "
+        f"there is nothing here for a reordered format to misread"
     )
 
     owner = box.ptp.git_pages_owner(target)
@@ -1150,10 +1172,13 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     **What this does NOT guard**, named so the gap is known rather than assumed
     covered: `%an` → `%cn` (author-vs-committer — a different documented
     invariant, and one `_git_as` could not catch anyway since it sets both
-    identities equal), and a NON-`%s` free-text field prepended before `%an`
-    (`%b`, `%f`, ...). A prepended `%s` is caught, by the count assertion below —
-    an earlier draft of this line claimed otherwise and was wrong three lines
-    above the assertion that refutes it. Both remaining gaps are adjacent
+    identities equal); a NON-`%s` free-text field prepended before `%an` (`%b` is
+    the real vector; `%f` is not, since git sanitizes it to `[A-Za-z0-9._-]`);
+    and a MISPLACED `%x00` (see the comment on the separator assertion below —
+    `%x00%an %s` passes all three). A prepended `%s` IS caught, by the count
+    assertion. An earlier draft of this list claimed otherwise and was wrong
+    three lines above the assertion that refutes it, and omitted the misplaced
+    separator entirely. All three remaining gaps fail closed and are adjacent
     invariants, deliberately out of scope for #215.
     """
     fmt = ptp._PROVENANCE_FORMAT
@@ -1170,9 +1195,12 @@ def test_the_provenance_format_puts_the_free_text_field_last(
         f"NUL is the one byte a commit author name cannot contain, which is "
         f"what makes the first separator on a line unambiguous"
     )
-    # Presence, not position: `%x00%an %s` would satisfy this line. Position is
-    # already carried by the two assertions above, which is why it is not
-    # re-asserted here.
+    # Presence, not position — and the distinction has a real gap in it.
+    # `%x00%an %s` satisfies all three assertions above with the separator
+    # MISPLACED (leading, rather than between the fields), so `%x00`'s position
+    # is guarded by nothing here. It fails closed: the subject slot would hold
+    # "<author> <subject>", which `_SYNC_SUBJECT`'s `^` anchor rejects. Hence a
+    # documented gap, listed above, rather than a fourth assertion.
 
 
 # --- #157: the bound on which repository's history gets consulted ----------
