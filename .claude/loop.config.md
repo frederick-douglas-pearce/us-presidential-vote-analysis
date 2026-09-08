@@ -78,7 +78,21 @@ Fire `DESIGN_AGENT` (`architect`) when a plan touches any of the following; bias
   `docs/api-snapshot.md`), the `usvote/api/` import graph ("no live DB at serve time"), or any new
   `/v1` endpoint / response envelope.
 - **A new historical data correction or PV source**, or when the orchestrator is unsure.
-- **Skip** for docs-only, comment/typo, and pure test-addition changes.
+- **Skip** for docs-only, comment/typo, and pure test-addition changes — **unless the test is the
+  only acceptance guard for a shipped public contract**, in which case the architect runs, and
+  reviews what the test asserts *and fails to assert*. The contracts that qualify: the snapshot /
+  API serving contract (`snapshot_schema.py`, `docs/api-snapshot.md`, `usvote/api/`), the EC↔PV
+  join seam (`join.py`, the `ec_pv_*` views), and the D022/D030 licensing firewall
+  (`tests/unit/test_layering.py`'s UCSB-unimportable subprocess guards, and
+  `test_no_fixture_ships_real_ucsb_bytes`). The discriminator generalizes past that list —
+  **"if this test is wrong, what notices?"** — and when the honest answer is "nothing", the design
+  question is live whatever directory the diff sits in. Deliberately narrow: it does **not** fire
+  for a coverage top-up, a regression test alongside a bug fix, or a test on an already-guarded
+  surface. Motivated by #150 (`tests/integration/test_snapshot_build.py`), where the skip was
+  defensible by the letter and wrong by the spirit — the overridden architect pass found the
+  guard's headline assertion **circular**: it compared the artifact's `pv_status` against the very
+  catalog the artifact derives that column from, so a wrong entry moved both sides together and
+  nothing went red.
 
 Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/decisions.md`
 (append-only — see the guard).
