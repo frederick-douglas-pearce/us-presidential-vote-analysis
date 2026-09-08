@@ -332,6 +332,31 @@ _SYNC_SUBJECT = re.compile(
 #: dependabot happens to write today. See D058.
 _SYNC_AUTHOR = "pages-sync[bot]"
 
+#: The `git log` format the provenance walk reads — and the one place its field
+#: order is decided.
+#:
+#: **The free-text field goes LAST, and that is a security property, not a style
+#: choice.** Python's `str.splitlines()` splits on boundaries git's `%s` does not
+#: fold — `\v`, `\f`, `\r`, `\x1c`-`\x1e`, `\x85`, U+2028, U+2029 — so one commit
+#: subject can arrive as several Python "lines". Because `%an` is emitted first,
+#: every fragment such a boundary produces lands on a line carrying no NUL:
+#: `partition("\x00")` puts it in the AUTHOR slot and leaves `subject == ""`,
+#: which can never parse as a sync. Reorder this to `%s%x00%an` and a subject
+#: crafted as `typo fix<U+2028>chore(sync): publish posts from <us>@<sha>` splits
+#: into a fragment that parses as OURS — granting an overwrite of the sibling's
+#: file, silently, under a green Action.
+#:
+#: **The separator is NUL** because an author name cannot contain one, so the
+#: first `\x00` on a line is unambiguously the field boundary; and `%s` is
+#: single-line as far as git is concerned, so one commit stays one git line.
+#:
+#: Both halves are pinned by `test_the_provenance_format_puts_the_free_text_field_last`,
+#: and the security consequence by
+#: `test_a_split_forging_subject_cannot_forge_our_ownership` — both in
+#: `tests/unit/test_publish_to_pages.py`. Until #215 this order was held by a
+#: comment alone, which is the defect class this repo refuses to leave standing.
+_PROVENANCE_FORMAT: Final = "%an%x00%s"
+
 
 class _UnattributedSync:
     """A sync commit whose subject this guard cannot parse. See `UNATTRIBUTED_SYNC`."""
@@ -436,10 +461,8 @@ def git_pages_owner(dest: Path) -> PagesOwner:
             f"guard reads the Pages repo's history, so --posts-dir and "
             f"--assets-dir must point into a real clone of it."
         )
-    # `%an` first so the free-text subject is the tail: an author name cannot
-    # contain NUL, so the first separator is unambiguous, and `%s` is
-    # single-line so one commit stays one line.
-    log = _git_out(dest, "log", "--format=%an%x00%s", "--", str(dest))
+    # Field order is a security property; `_PROVENANCE_FORMAT` carries the why.
+    log = _git_out(dest, "log", f"--format={_PROVENANCE_FORMAT}", "--", str(dest))
     for line in log.splitlines():
         author, _, subject = line.partition("\x00")
         owner = sync_source_repo(subject)

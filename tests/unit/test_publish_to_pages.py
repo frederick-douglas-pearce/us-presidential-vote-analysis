@@ -985,11 +985,134 @@ def test_the_workflow_subject_template_still_parses(ptp: ModuleType) -> None:
     assert ptp.sync_source_repo(rendered) == OUR_REPO
 
 
+# --- #215: the field order is a security property --------------------------
+#
+# Two tests, and NEITHER fails against pre-#200 code — they are orthogonal to
+# #200's author-as-second-signal property. That is precisely why they sit in
+# their own section instead of under the header above, whose whole argument is
+# about which of ITS tests fail against pre-#200 code. What these guard is the
+# FIELD ORDER `_PROVENANCE_FORMAT` fixes — `%an` before `%s`, so the free-text
+# field is the tail — which was held by a comment alone until #215.
+
+
+#: Line separators `str.splitlines()` folds and git's `%s` does not, so one
+#: commit subject can arrive as several Python "lines".
+#:
+#: Two representatives of the set #215 names, chosen for different BYTE paths
+#: through the real git write/read/decode round-trip: one single-byte ASCII
+#: control, one 3-byte UTF-8. Branch coverage is identical either way — what the
+#: second buys is a guard against a future encoding change in `_git_out`
+#: handling one and not the other.
+SPLIT_SEPARATORS = ("\v", "\u2028")
+
+
+@pytest.mark.parametrize("separator", SPLIT_SEPARATORS, ids=("vt", "u2028"))
+def test_a_split_forging_subject_cannot_forge_our_ownership(
+    box: Sandbox, pages_repo: Path, separator: str
+) -> None:
+    """A forged sync hidden behind a `splitlines()` boundary must not read as ours.
+
+    THE test for #215, and the only one that exercises the wiring: the structural
+    test below pins the constant's VALUE, but nothing except running the real
+    reader over real history proves `git log` is actually handed that value. Do
+    not delete this on the theory that the structural test covers the format.
+
+    The forgery is a commit the sync bot authored whose subject does not
+    self-describe, with a well-formed sync naming US concealed behind a
+    separator git stores verbatim and Python splits on. Reorder the format to
+    `%s%x00%an` (unpacking coherently swapped) and the concealed fragment parses
+    as ours, `git_pages_owner` returns OUR_REPO, and `assert_no_foreign_overwrite`
+    permits the overwrite of a sibling-owned file. Under the shipped order the
+    same fragment lands in the author slot with an empty subject, and the real
+    line's author stops the walk instead.
+
+    **The older sync at the top is not what makes this fail on a reordered
+    format.** Under that mutation the concealed fragment parses as ours directly
+    and returns before the walk ever reaches it — verified. It is here to
+    reproduce #200's attack geometry faithfully, and to reinforce the
+    `!= OUR_REPO` leg against a *walk-past*-class mutation, where a reader that
+    returned nothing for the forged commit would resolve to this older sync of
+    ours and go red. Not scaffolding, and not the primary guard either.
+
+    The bot authorship is READ BACK rather than assumed, for the reason
+    `test_a_drifted_sibling_sync_is_refused_not_walked_past` gives: a helper that
+    silently failed to set it would leave this passing via the no-owner branch.
+    """
+    target = box.pages_assets / "forge-og.png"
+    target.write_bytes(b"OURS-V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    target.write_bytes(b"THEIRS")
+    forged = f"typo fix{separator}{sync_subject(OUR_REPO)}"
+    _git_as(SYNC_AUTHOR, pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", forged)
+    assert _last_author(pages_repo, target) == SYNC_AUTHOR
+
+    owner = box.ptp.git_pages_owner(target)
+
+    # The security floor. `assert_no_foreign_overwrite` permits an overwrite ONLY
+    # on `owner == source_repo`, so OUR_REPO is the one dangerous return and
+    # everything else refuses. Compared with `!=`, never `is not`: the reader
+    # returns a fresh `m.group(...)` string, so an identity test would pass while
+    # holding the forged slug and assert nothing at all.
+    assert owner != OUR_REPO, (
+        f"a subject split on {separator!r} forged our ownership of a "
+        f"sibling-authored target — the free-text field is no longer last in "
+        f"_PROVENANCE_FORMAT"
+    )
+    # A D058 BEHAVIOR PIN, not the security property. A bot-authored commit with
+    # an unparseable subject is definitionally an unattributable sync, so `None`
+    # here would be D058-wrong while still being security-safe. If a future
+    # refactor legitimately returns `None` for this case, re-judge it against
+    # D058 — do not reflexively restore the sentinel to make this line green.
+    assert owner is box.ptp.UNATTRIBUTED_SYNC
+
+
+def test_the_provenance_format_puts_the_free_text_field_last(
+    ptp: ModuleType,
+) -> None:
+    """The reason survives even for someone who reads only the test.
+
+    Asserts the constant's value, so it lands on what `git_pages_owner` hands
+    git rather than on the text of the function — an `inspect.getsource` regex
+    would keep passing if the live call changed and a stale literal stayed in a
+    comment.
+
+    Both of the sub-invariants the constant documents are pinned: the free-text
+    field last (the #215 security property) and NUL as the separator, spelled
+    `%x00` — git's escape for it — since an author name cannot contain a NUL, so
+    the first one on an output line is unambiguously the field boundary.
+    Pinning only the first would leave the second in exactly the comment-only
+    state #215 exists to end.
+
+    **What this does NOT guard**, named so the gap is known rather than assumed
+    covered: `%an` → `%cn` (author-vs-committer — a different documented
+    invariant, and one `_git_as` could not catch anyway since it sets both
+    identities equal), and a free-text field PREPENDED before `%an`. Both are
+    adjacent invariants, deliberately out of scope for #215.
+    """
+    fmt = ptp._PROVENANCE_FORMAT
+
+    assert fmt.endswith("%s"), (
+        f"{fmt!r} does not end with the free-text field — a subject carrying a "
+        f"separator splitlines() folds can then parse as a sync on a fragment"
+    )
+    assert fmt.count("%s") == 1, f"{fmt!r} has more than one free-text field"
+    # `%x00` is git's ESCAPE for a NUL byte — four literal characters here, not
+    # a NUL. The format DECLARES the separator; only the output contains one.
+    assert "%x00" in fmt, (
+        f"{fmt!r} does not separate its fields with git's NUL escape (%x00) — "
+        f"NUL is the one byte a commit author name cannot contain, which is "
+        f"what makes the first separator on a line unambiguous"
+    )
+
+
 # --- #157: the bound on which repository's history gets consulted ----------
 #
-# Pre-#200 tests, and unchanged by it. They live below the section above only
-# because that section was inserted here; the marker is what keeps the two from
-# reading as one.
+# Pre-#200 tests, and unchanged by it. They live below the sections above only
+# because those were inserted here; the marker is what keeps them from reading
+# as one.
 
 
 def test_pages_dirs_inside_this_repo_are_refused(box: Sandbox) -> None:
