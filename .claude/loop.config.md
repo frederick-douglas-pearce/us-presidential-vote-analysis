@@ -19,7 +19,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). Current active epic: `epic:tech-debt` (E12) — #150 then #102 (`epic:internal-api`). Standing queue: `epic:tech-debt` (E12, #179) never closes; `epic:census` (E10, #129) is scoped but pre-review | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
+| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). **Current active epic: `epic:tech-debt` (E12) — run order #186 → #215 → #191 → #214, then `RUN PARKED`; the five remaining members are `parked` past E10 (Fred, 2026-09-07). #186 is `blocked: human-only` — its diff is this file, which the engine forbids the orchestrator editing. Next epic: `epic:census` (E10, #129), entering at #181 — its gating research #180 closed 2026-08-31.** Standing queue: `epic:tech-debt` (E12, #179) never closes, so this run parks rather than completes | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation) | inferred from available agent roster |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
@@ -78,7 +78,21 @@ Fire `DESIGN_AGENT` (`architect`) when a plan touches any of the following; bias
   `docs/api-snapshot.md`), the `usvote/api/` import graph ("no live DB at serve time"), or any new
   `/v1` endpoint / response envelope.
 - **A new historical data correction or PV source**, or when the orchestrator is unsure.
-- **Skip** for docs-only, comment/typo, and pure test-addition changes.
+- **Skip** for docs-only, comment/typo, and pure test-addition changes — **unless the test is the
+  only acceptance guard for a shipped public contract**, in which case the architect runs, and
+  reviews what the test asserts *and fails to assert*. The contracts that qualify: the snapshot /
+  API serving contract (`snapshot_schema.py`, `docs/api-snapshot.md`, `usvote/api/`), the EC↔PV
+  join seam (`join.py`, the `ec_pv_*` views), and the D022/D030 licensing firewall
+  (`tests/unit/test_layering.py`'s UCSB-unimportable subprocess guards, and
+  `test_no_fixture_ships_real_ucsb_bytes`). The discriminator generalizes past that list —
+  **"if this test is wrong, what notices?"** — and when the honest answer is "nothing", the design
+  question is live whatever directory the diff sits in. Deliberately narrow: it does **not** fire
+  for a coverage top-up, a regression test alongside a bug fix, or a test on an already-guarded
+  surface. Motivated by #150 (`tests/integration/test_snapshot_build.py`), where the skip was
+  defensible by the letter and wrong by the spirit — the overridden architect pass found the
+  guard's headline assertion **circular**: it compared the artifact's `pv_status` against the very
+  catalog the artifact derives that column from, so a wrong entry moved both sides together and
+  nothing went red.
 
 Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/decisions.md`
 (append-only — see the guard).
