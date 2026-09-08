@@ -3266,3 +3266,113 @@ entry — the one whose whole claim is that the number is the wrong artifact. Th
 **Related:** #178 (superseding #164, #174, #176), D026, D038, D039, D050, `usvote/hybrid.py`
 (`_roster_for_surface`, `create_hybrid_views`, `build_hybrid_from_db`),
 `tests/unit/test_hybrid.py::TestTheCreatorReadsEachJoinViewExactlyOnce`.
+
+---
+
+## D058: Pages provenance reads two signals — the sync subject AND the sync author
+
+**Date:** 2026-09-07
+**Issue:** #200 · **Builds on:** D056 (the guard and the residual this narrows), #157 (the guard)
+
+**Context.**
+
+D056 rests ownership of a shared-namespace Pages target on the sync commit *subject*
+(`chore(sync): publish posts from <repo>@<sha>`), read back with `git log`. It recorded, precisely,
+that drift in that subject does **not** degrade safely: a subject the pattern cannot parse is not
+read as "theirs", it is not read at all, so the scan walks past it to the next recognizable sync —
+and where that is an older sync of ours, the target reads as ours and the sibling's card is
+overwritten under a green Action. D056 accepted that residual because the alternative considered at
+the time — reading the most recent commit of *any* kind — lets one hand edit or a bulk
+`prettier --write` on the Pages side permanently reclassify our own post as foreign, which bricks
+all publishing on every retry. The two failure modes trade directly, and #157 took the one that is
+loud about our own posts over the one that is silent about the sibling's.
+
+That trade was never the only option, and #200 asked whether it could be improved rather than
+merely chosen. It can, unilaterally, because a *second* signal already exists in the same history.
+
+**Decision.**
+
+1. **Provenance is now read from two independent fields: the subject and the author.** A commit
+   authored by `pages-sync[bot]` whose subject `_SYNC_SUBJECT` cannot parse is a **sync we cannot
+   attribute** — `UNATTRIBUTED_SYNC`, a third outcome of `git_pages_owner` distinct from both a
+   repo slug and `None` — and it **stops the walk and refuses**. The subject still says *which*
+   publisher; the author says *that some publisher synced this at all*, which is exactly the claim
+   that survives a reworded subject.
+
+2. **The signal is the sync identity, not "any bot".** #200 proposed the broader rule. It is
+   narrowed because the Pages repo has a second bot: a `[bot]`-suffix rule would refuse the day
+   `dependabot[bot]` — or any later image optimizer — wrote into `assets/img/`. The narrowing gives
+   up only the doubly-coordinated drift in residual 2 below, and makes the safety **structural**
+   rather than contingent on what that bot happens to touch today.
+
+3. **Author (`%an`), not committer.** They are equal for a direct-push sync in both publishers'
+   Actions, but the author survives a rebase or cherry-pick of a sync commit, where the committer
+   flips to whoever rewrote it — and "who originally published this target" is the provenance
+   question being asked.
+
+4. **Each refusal keeps its own remedy.** The unattributable-sync message says to realign the
+   subject format across both publishers and says explicitly **not** to rename the slug: this is not
+   a collision, so a rename would move a live permalink and share-card URL and leave the actual
+   defect untouched. D056's no-owner message is narrowed accordingly — it named sibling-format drift
+   among its causes because it was then the only place drift surfaced at all, which is no longer
+   true.
+
+5. **The anti-bricking skip is unchanged and is what the narrowing protects.** A hand edit, a web
+   merge, and the site's daily ESG cron are all authored by a human, fall through to the same skip
+   they always did, and still resolve ownership to the last recognizable sync. That property is what
+   #157's review paid for and it is pinned by two named tests, not by this prose:
+   `tests/unit/test_publish_to_pages.py::test_a_hand_edit_on_top_of_our_sync_does_not_brick_the_publish`
+   (the one-off edit) and `::test_the_esg_cron_on_top_of_our_sync_does_not_brick_the_publish` (the
+   site's most frequent writer).
+
+**The empirical premise, stated as dated and time-bound.**
+
+This decision's safety rests on a fact about another repository, so it is recorded the way D056
+recorded its own hand-verification rather than asserted as an invariant. Over the **entire** history
+of `frederick-douglas-pearce.github.io` (471 commits, enumerated 2026-09-07) there are four writer
+identities: `Fred Pearce` ×388 (hand edits and the daily ESG cron), `Fred Pearce` via committer
+`GitHub` ×58 (web/PR merges), `pages-sync[bot]` ×23 — **every** sync, both publishers — and
+`dependabot[bot]` ×2, touching only `.github/workflows/**` and `package*.json`. All 23 sync commits
+parse under today's pattern, so this change refuses nothing on shipping.
+
+**What would reopen the false-refusal risk is therefore nameable:** a bot-authored writer that
+begins writing into `_posts/` or `assets/img/` under the sync identity. Nothing else in that table
+enters the blast radius.
+
+**Two residuals, and the second is new.**
+
+1. **Double drift still fails open.** If the sibling changes its committer identity *and* its
+   subject, its commits are invisible again and D056's original hole reopens. Drift now costs two
+   coordinated changes instead of one; it does not cost infinity. Only the shared-constant endgame
+   eliminates the class, and it remains bilateral — tracked as `claude-code-sessions#216` (open,
+   verified 2026-09-07). This decision does not foreclose it: after that port the author signal
+   stays as a second, independent check.
+
+2. **Our own subject drift now fails CLOSED, and that is a new way to stop publishing.** Before this
+   change, a reworded subject in *this* repo's workflow was a silent no-op — our newest sync stopped
+   parsing, the walk fell back to an older parseable sync of ours, and publishing continued. Now
+   that commit is bot-authored and unparseable, so it is refused; and since the Action republishes
+   every dated post per run and aborts the batch on the first refusal, **all** publishing stops
+   until someone acts. This is D056's posture (loud about ours, never silent about theirs) taken one
+   step further, and it is accepted on that basis — but it is accepted with a tripwire rather than
+   on trust. Two tests tie the constants to the workflow that sets them: one binds `_SYNC_AUTHOR` to
+   its `git config user.name`, and one renders the workflow's own `commit_msg=` template and puts it
+   through the parser. The second exists precisely because the first is not sufficient — the
+   identity tie says nothing about the subject, which is the string that actually drifts.
+
+   **The most plausible concrete trigger is not a workflow edit at all: `git commit --amend`
+   preserves the original author.** Someone rewording a sync commit in place on Pages `main` leaves
+   it authored by `pages-sync[bot]` with a subject that no longer parses, which is this residual
+   exactly — and reached by a routine git operation rather than by editing either publisher. (A
+   `git revert` is safe by contrast: it re-authors to the reverter, so the reverting commit is
+   skipped as an ordinary human write.) Named here because the two tripwires above watch the
+   workflow files, and nothing watches for this.
+
+**D056 is not edited.** The log is append-only, D056's "Related" already names #200, and this entry
+is where that pointer resolves.
+
+**Related:** #200, #157, D049, D056, `tooling/publish-to-pages.py` (`_SYNC_AUTHOR`,
+`UNATTRIBUTED_SYNC`, `git_pages_owner`, `assert_no_foreign_overwrite`),
+`tests/unit/test_publish_to_pages.py::test_a_drifted_sibling_sync_is_refused_not_walked_past`,
+`::test_a_non_sync_bot_is_skipped_not_read_as_an_unattributable_sync`,
+`::test_the_workflow_subject_template_still_parses`, `claude-code-sessions#216`.

@@ -15,6 +15,7 @@ real checkout or the real Pages site.
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -105,7 +106,9 @@ class Sandbox:
             card.write_bytes(card_bytes)
         src = self.posts_src / (filename or f"2026-01-01-{slug}.md")
         src.write_text(
-            POST_TEMPLATE.format(slug=slug, card_rel="" if card_rel is None else card_rel)
+            POST_TEMPLATE.format(
+                slug=slug, card_rel="" if card_rel is None else card_rel
+            )
         )
         return src
 
@@ -115,7 +118,11 @@ class Sandbox:
         *,
         dry_run: bool = False,
         source_repo: str = OUR_REPO,
-        pages_owner: Callable[[Path], str | None] | None = None,
+        # `object`, not `str | None`: the seam gained a third outcome in
+        # #200 (`UNATTRIBUTED_SYNC`), and a fake returning it is exactly
+        # what `test_an_unattributable_sync_refusal_never_says_rename`
+        # injects.
+        pages_owner: Callable[[Path], object] | None = None,
     ) -> None:
         """Publish through `run()`.
 
@@ -180,7 +187,8 @@ def test_idempotent_rerun_writes_nothing(
     box: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
     src = box.add_post(
-        "retry", "social/images/2026-01-04-linkedin-retry/og-card.png",
+        "retry",
+        "social/images/2026-01-04-linkedin-retry/og-card.png",
         card_bytes=b"CARD-R",
     )
     box.publish([src])
@@ -223,7 +231,8 @@ def test_absolute_og_card_source(box: Sandbox) -> None:
 
 def test_missing_card_file(box: Sandbox) -> None:
     src = box.add_post(
-        "ghost", "social/images/2026-01-05-linkedin-ghost/og-card.png",
+        "ghost",
+        "social/images/2026-01-05-linkedin-ghost/og-card.png",
         write_card=False,
     )
     with pytest.raises(box.ptp.PublishError, match="og card source not found"):
@@ -297,7 +306,9 @@ def test_dry_run_writes_nothing(
     out = capsys.readouterr().out
     assert "[dry-run]" in out
     assert not (box.pages_posts / src.name).exists(), "dry-run must not write the post"
-    assert not (box.pages_assets / "dry-og.png").exists(), "dry-run must not write image"
+    assert not (box.pages_assets / "dry-og.png").exists(), (
+        "dry-run must not write image"
+    )
 
 
 # --- og_image → target basename --------------------------------------------
@@ -546,10 +557,14 @@ def test_dry_run_still_refuses_a_foreign_overwrite(box: Sandbox) -> None:
 
 
 def test_an_empty_source_repo_is_refused(box: Sandbox) -> None:
-    """`required=True` accepts "", and an empty slug fails SILENTLY downstream.
+    """`required=True` accepts "", and an empty slug is only refused LATER.
 
     It would commit `... posts from @<sha>`, which the subject pattern can never
-    parse, so every later update of that post reads as owned by nobody.
+    parse. Since #200 that commit is also authored by `_SYNC_AUTHOR`, so every
+    later update of that post reads as `UNATTRIBUTED_SYNC` rather than as owned
+    by nobody — refused either way, but under a remedy naming the wrong cause.
+    Kept in step with the same account in `main()`, which is the code this
+    docstring describes.
     """
     src = box.add_post("empty", "social/images/empty/og-card.png")
     with pytest.raises(box.ptp.PublishError, match="must not be empty"):
@@ -622,12 +637,49 @@ def test_sync_source_repo_parses_the_subject(
 
 def _git(cwd: Path, *args: str) -> None:
     """Run git with an explicit identity — the runner may have no global config."""
+    _git_as("t", cwd, *args)
+
+
+def _git_as(name: str, cwd: Path, *args: str) -> None:
+    """`_git`, with the commit identity as `name`.
+
+    Provenance became a two-signal question in #200 — subject AND author — so a
+    test that exercises the author leg has to be able to set it. `user.name`
+    sets author and committer alike, which is what a direct-push sync produces
+    in both publishers' Actions.
+    """
     subprocess.run(
-        ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", *args],
+        ["git", "-c", "user.email=t@example.invalid", "-c", f"user.name={name}", *args],
         cwd=cwd,
         check=True,
         capture_output=True,
     )
+
+
+def _last_author(cwd: Path, path: Path) -> str:
+    """Author of the newest commit touching `path` — read back, never assumed."""
+    proc = subprocess.run(
+        ["git", "log", "-1", "--format=%an", "--", str(path)],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return proc.stdout.strip()
+
+
+#: A sibling sync whose subject has drifted out of `_SYNC_SUBJECT`'s reach —
+#: still a sync, still committed by the bot, no longer self-describing. The
+#: precise shape does not matter; that it does not parse is the whole point.
+DRIFTED_SUBJECT = "sync: publishing posts from claude-code-sessions (abc1234)"
+
+#: The identity both publishers' Actions commit their syncs under.
+SYNC_AUTHOR = "pages-sync[bot]"
+
+#: The Pages repo's OTHER automated writer, verified over its full history on
+#: 2026-09-07. It has never touched `_posts/` or `assets/img/`, but the guard
+#: must not depend on that continuing to hold.
+OTHER_BOT = "dependabot[bot]"
 
 
 @pytest.fixture
@@ -684,9 +736,7 @@ def test_a_hand_edit_on_top_of_our_sync_does_not_brick_the_publish(
     assert box.ptp.git_pages_owner(target) == OUR_REPO
 
 
-def test_a_site_owned_target_has_no_pages_owner(
-    box: Sandbox, pages_repo: Path
-) -> None:
+def test_a_site_owned_target_has_no_pages_owner(box: Sandbox, pages_repo: Path) -> None:
     """Real history with no sync commit at all — the `og_banner.png` shape."""
     target = box.pages_assets / "og_banner.png"
     target.write_bytes(b"BANNER")
@@ -705,6 +755,241 @@ def test_a_path_with_no_history_has_no_pages_owner(
     stray.write_bytes(b"UNTRACKED")
 
     assert box.ptp.git_pages_owner(stray) is None
+
+
+# --- #200: the second signal, when the sibling's subject drifts ------------
+#
+# Seven tests, and THREE of them fail against the pre-#200 code — the repro
+# (which fails on behavior: the overwrite proceeds), plus the two that read
+# symbols `main` does not define at all, `UNATTRIBUTED_SYNC` and `_SYNC_AUTHOR`.
+#
+# The other four pass before and after, deliberately, one role each: one pins
+# the two-signal happy path (a parseable subject must still win over the author
+# branch), one pins a property this change had to PRESERVE (the anti-bricking
+# skip #157's review paid for, here on the site's most frequent writer), one
+# pins the NARROWING (sync identity, not "any bot"), and one is the second drift
+# tripwire on our own half of the contract, which passes on main because the
+# subject it renders already parses.
+#
+# The other PRESERVE test, `test_a_hand_edit_on_top_of_our_sync_does_not_brick_
+# the_publish`, is #157's and sits ABOVE this header — it is not one of the
+# seven, and counting it here is the arithmetic slip this paragraph has now
+# made twice.
+#
+# What each one is for is stated on it, so a later reader does not mistake
+# "passes on main" for "proves nothing". Counts included on purpose: the header
+# is the map, and a map that miscounts its own territory is worse than none.
+
+
+def test_a_drifted_sibling_sync_is_refused_not_walked_past(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """#200's repro, inverted. THE test for this change — it fails without it.
+
+    History is our sync (older) then theirs (newer) with a subject
+    `_SYNC_SUBJECT` cannot parse. Before #200 the drifted commit was not read as
+    "theirs" — it was not read at all, so the walk continued to our older sync,
+    the target resolved to US, and their card was silently overwritten under a
+    green Action. Now the author stops the walk.
+
+    Two details are load-bearing rather than incidental. The drifted commit must
+    genuinely be authored by the sync bot, so the author is READ BACK rather than
+    assumed — a helper that silently failed to set it would leave this test
+    passing for the wrong reason, via the no-owner branch. And the match string
+    is one only the new remedy carries: the no-owner refusal also talks about
+    subjects this guard does not parse, so a looser match could not tell the two
+    branches apart.
+    """
+    target = box.pages_assets / "drift-og.png"
+    target.write_bytes(b"OURS-V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    target.write_bytes(b"THEIRS")
+    _git_as(SYNC_AUTHOR, pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", DRIFTED_SUBJECT)
+    assert _last_author(pages_repo, target) == SYNC_AUTHOR
+
+    src = box.add_post(
+        "drift", "social/images/drift/og-card.png", card_bytes=b"OURS-V2"
+    )
+
+    with pytest.raises(box.ptp.PublishError, match="realign the subject format"):
+        box.ptp.run([src], box.pages_posts, box.pages_assets, False, OUR_REPO)
+
+    assert target.read_bytes() == b"THEIRS"
+
+
+def test_a_well_formed_sync_by_the_sync_bot_is_read_from_its_subject(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """The two-signal happy path, with BOTH signals actually present.
+
+    In every other owner test the commit whose SUBJECT decides the answer is
+    authored by `t`, so until this one the subject leg was only ever exercised on
+    commits the author leg would have ignored anyway. (Siblings do commit as
+    `Fred Pearce`, `dependabot[bot]` and `pages-sync[bot]` — but never on the
+    commit whose subject is the one that parses.) The
+    real article carries both, and their order is what makes the whole design
+    work: the subject is tried first, so a sibling sync the guard CAN parse is
+    still attributed to the sibling rather than being swallowed by the
+    author branch as merely "some publisher".
+
+    Deleting the subject-parse leg turns this red — it would return
+    UNATTRIBUTED_SYNC for a commit that says exactly whose it is.
+    """
+    target = box.pages_assets / "both-og.png"
+    target.write_bytes(b"THEIRS")
+    _git_as(SYNC_AUTHOR, pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", sync_subject(THEIR_REPO))
+    assert _last_author(pages_repo, target) == SYNC_AUTHOR
+
+    assert box.ptp.git_pages_owner(target) == THEIR_REPO
+
+
+def test_the_esg_cron_on_top_of_our_sync_does_not_brick_the_publish(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """The anti-bricking skip, on the Pages repo's most frequent writer.
+
+    The daily ESG cron authors as a human (`Fred Pearce`, 388 commits over the
+    full history), so it must keep falling through to the skip. The sibling test
+    above stops the walk on an unparseable subject — this pins that it does so
+    only for the SYNC identity, or the busiest writer on the site would refuse
+    every one of our own republishes.
+
+    Passes before #200 as well: preserving it is the point (see
+    `test_a_hand_edit_on_top_of_our_sync_does_not_brick_the_publish`, the same
+    property for a one-off hand edit).
+    """
+    target = box.pages_assets / "cron-og.png"
+    target.write_bytes(b"V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    target.write_bytes(b"V1 + a site-wide reformat")
+    _git_as("Fred Pearce", pages_repo, "add", ".")
+    _git_as(
+        "Fred Pearce",
+        pages_repo,
+        "commit",
+        "-q",
+        "-m",
+        "Update ESG news feed - 2026-09-06",
+    )
+
+    assert box.ptp.git_pages_owner(target) == OUR_REPO
+
+
+def test_a_non_sync_bot_is_skipped_not_read_as_an_unattributable_sync(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """The decision-pin: the rule keys on the SYNC identity, never on "any bot".
+
+    #200 proposed treating any bot-authored commit with an unparseable subject
+    as foreign. This repo's guard narrows that to `_SYNC_AUTHOR`, because the
+    Pages repo has a second bot — `dependabot[bot]` — and a suffix rule would
+    refuse the day it, or any later image optimizer, touched `assets/img/`.
+
+    Passes on main, and fails against an "any bot" implementation, which is what
+    earns it a place: it is the only test that holds the narrowing in position.
+    """
+    target = box.pages_assets / "bot-og.png"
+    target.write_bytes(b"V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    target.write_bytes(b"V1 + an automated tweak")
+    _git_as(OTHER_BOT, pages_repo, "add", ".")
+    _git_as(
+        OTHER_BOT,
+        pages_repo,
+        "commit",
+        "-q",
+        "-m",
+        "Bump the actions group across 1 directory",
+    )
+    assert _last_author(pages_repo, target) == OTHER_BOT
+
+    assert box.ptp.git_pages_owner(target) == OUR_REPO
+
+
+def test_an_unattributable_sync_refusal_never_says_rename(box: Sandbox) -> None:
+    """The third remedy is a third remedy — not a copy of the other two.
+
+    Renaming is right for a live slug collision with the sibling series and
+    wrong here for its own reason: this is not a collision at all, so a rename
+    would move a live permalink and a share-card URL and leave the actual
+    defect — two publishers disagreeing about a subject format — untouched.
+
+    Driven through the injected seam rather than through git, which is possible
+    only because the reader RETURNS the third outcome instead of raising it: a
+    raise would put this branch out of the seam's reach entirely.
+    """
+    (box.pages_assets / "seam-og.png").write_bytes(b"SOMEONE ELSE'S")
+    src = box.add_post("seam", "social/images/seam/og-card.png", card_bytes=b"OURS")
+
+    with pytest.raises(box.ptp.PublishError) as excinfo:
+        box.publish([src], pages_owner=lambda _dest: box.ptp.UNATTRIBUTED_SYNC)
+
+    msg = str(excinfo.value)
+    assert "realign the subject format" in msg
+    assert "Do NOT rename this post's slug" in msg
+    # The foreign-owner remedy's instruction, which is the wrong advice here.
+    assert "so its targets are unique" not in msg
+
+
+def test_the_workflow_commits_under_the_identity_the_guard_keys_on(
+    ptp: ModuleType,
+) -> None:
+    """Our half of the two-signal contract, tied to the workflow that sets it.
+
+    `_SYNC_AUTHOR` is only provenance while `pages-sync.yml` actually commits
+    under it. Nothing else notices if the workflow's identity is edited — the
+    sync would keep working and the guard would quietly stop recognizing our own
+    syncs.
+    """
+    workflow = (_REPO / ".github" / "workflows" / "pages-sync.yml").read_text()
+    m = re.search(r'git config user\.name\s+"([^"]+)"', workflow)
+    assert m is not None, "no `git config user.name` in pages-sync.yml"
+    assert m.group(1) == ptp._SYNC_AUTHOR
+
+
+def test_the_workflow_subject_template_still_parses(ptp: ModuleType) -> None:
+    """The other half — and #200 is what makes this one urgent.
+
+    BEFORE #200, drift in our OWN subject was a silent no-op: our newest sync
+    stopped parsing, the walk fell back to an older parseable sync of ours, and
+    publishing continued. AFTER it, that same commit is authored by the sync bot
+    and unparseable, so it is refused — and since the Action republishes every
+    dated post per run and aborts the batch on the first refusal, ALL publishing
+    stops until someone fixes it.
+
+    So the identity tie-test above is not sufficient: it says nothing about the
+    subject, which is the string that actually drifts. Render the workflow's own
+    template and put it through the parser.
+    """
+    workflow = (_REPO / ".github" / "workflows" / "pages-sync.yml").read_text()
+    m = re.search(r'commit_msg="([^"]+)"', workflow)
+    assert m is not None, "no `commit_msg=` template in pages-sync.yml"
+
+    rendered = (
+        m.group(1)
+        .replace("${SOURCE_REPO}", OUR_REPO)
+        .replace("${GITHUB_SHA:0:7}", "abc1234")
+    )
+    assert "$" not in rendered, (
+        f"unsubstituted shell variable in {m.group(1)!r} — the workflow renamed "
+        f"one of its variables, so update this test's substitution"
+    )
+    assert ptp.sync_source_repo(rendered) == OUR_REPO
+
+
+# --- #157: the bound on which repository's history gets consulted ----------
+#
+# Pre-#200 tests, and unchanged by it. They live below the section above only
+# because that section was inserted here; the marker is what keeps the two from
+# reading as one.
 
 
 def test_pages_dirs_inside_this_repo_are_refused(box: Sandbox) -> None:
