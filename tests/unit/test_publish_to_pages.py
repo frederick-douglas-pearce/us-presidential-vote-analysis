@@ -1111,8 +1111,8 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
     # ways it fails silently: a tuple someone edits to an ordinary character,
     # and a future git that normalizes the separator away (NOT `commit.cleanup`,
     # whose modes touch blank lines, trailing whitespace and comment lines, none
-    # of them an interior control character). Either leaves the assertions
-    # below passing trivially —
+    # of them an interior control character). Either leaves the two OWNER
+    # assertions at the end of this test passing trivially —
     # the subject stays one line, never parses as a sync, and the bot author
     # yields UNATTRIBUTED_SYNC for a reason with nothing to do with the forgery.
     # Both reviewers measured that vacuous green, one of them against the
@@ -1172,14 +1172,30 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     **What this does NOT guard**, named so the gap is known rather than assumed
     covered: `%an` → `%cn` (author-vs-committer — a different documented
     invariant, and one `_git_as` could not catch anyway since it sets both
-    identities equal); a NON-`%s` free-text field prepended before `%an` (`%b` is
-    the real vector; `%f` is not, since git sanitizes it to `[A-Za-z0-9._-]`);
-    and a MISPLACED `%x00` (see the comment on the separator assertion below —
+    identities equal — separating them needs `GIT_AUTHOR_NAME` /
+    `GIT_COMMITTER_NAME`); a NON-`%s` free-text field prepended before `%an`
+    (`%b`; `%f` is not one, since git sanitizes it to `[A-Za-z0-9._-]`); and a
+    MISPLACED `%x00` (see the comment on the separator assertion below —
     `%x00%an %s` passes all three). A prepended `%s` IS caught, by the count
-    assertion. An earlier draft of this list claimed otherwise and was wrong
-    three lines above the assertion that refutes it, and omitted the misplaced
-    separator entirely. All three remaining gaps fail closed and are adjacent
-    invariants, deliberately out of scope for #215.
+    assertion.
+
+    **These are not all equally harmless, and this list must not be read as
+    saying so.** `%b` and the misplaced `%x00` fail CLOSED — every commit
+    resolves to `None`, so the publish refuses. **`%cn` fails OPEN**, and it is
+    the one gap nothing in this file can see: `_PROVENANCE_FORMAT = "%cn%x00%s"`
+    leaves the whole suite green, while a sibling sync that was rebased or
+    cherry-picked (committer flipped, author intact) stops reading as
+    bot-authored, #200's second signal never fires, and the walk resolves
+    ownership to US. That is the D058 silent overwrite restored. **Tracked as
+    #223**, with the measurement. `"%h %an%x00%s"` is the same shape — it also
+    passes all three assertions and also kills the second signal, though other
+    tests catch it.
+
+    Two earlier drafts of this list were wrong: one claimed a prepended `%s` was
+    unguarded three lines above the assertion that guards it, and one claimed
+    all the remaining gaps failed closed, which was false about precisely the
+    one that fails open. The list is kept because #223 needs a pointer from
+    here; it is not an exhaustive enumeration and does not claim to be.
     """
     fmt = ptp._PROVENANCE_FORMAT
 
