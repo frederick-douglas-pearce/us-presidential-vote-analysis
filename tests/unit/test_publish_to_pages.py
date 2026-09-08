@@ -668,6 +668,23 @@ def _last_author(cwd: Path, path: Path) -> str:
     return proc.stdout.strip()
 
 
+def _last_subject(cwd: Path, path: Path) -> str:
+    """Subject of the newest commit touching `path` — read back, never assumed.
+
+    The twin of `_last_author`, and added for the same reason: #215's forgery is
+    only a forgery if the separator SURVIVES the round-trip into git. Asserting
+    the Python-side string would not show that.
+    """
+    proc = subprocess.run(
+        ["git", "log", "-1", "--format=%s", "--", str(path)],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return proc.stdout.strip()
+
+
 #: A sibling sync whose subject has drifted out of `_SYNC_SUBJECT`'s reach —
 #: still a sync, still committed by the bot, no longer self-describing. The
 #: precise shape does not matter; that it does not parse is the whole point.
@@ -987,12 +1004,25 @@ def test_the_workflow_subject_template_still_parses(ptp: ModuleType) -> None:
 
 # --- #215: the field order is a security property --------------------------
 #
-# Two tests, and NEITHER fails against pre-#200 code — they are orthogonal to
-# #200's author-as-second-signal property. That is precisely why they sit in
-# their own section instead of under the header above, whose whole argument is
-# about which of ITS tests fail against pre-#200 code. What these guard is the
-# FIELD ORDER `_PROVENANCE_FORMAT` fixes — `%an` before `%s`, so the free-text
-# field is the tail — which was held by a comment alone until #215.
+# Two tests, and BOTH fail against pre-#200 code — the behavioral one ON
+# BEHAVIOR (that reader returns our slug for this forged history, which is the
+# worked example in #215 itself), the structural one on a symbol `main` does not
+# define. By the convention the #200 header sets above, both count.
+#
+# They are also NOT orthogonal to #200's author-as-second-signal property.
+# Disable the author leg alone, keeping the shipped format, and the behavioral
+# test goes red: the walk falls through the forged fragment to an older genuine
+# sync of OURS and returns OUR_REPO. #200's second signal is load-bearing for
+# this test's green result.
+#
+# An earlier draft of this header asserted the opposite on both counts. It was
+# wrong, it was checkable, and it survived into a commit — in the file whose own
+# #200 header says a map that miscounts its territory is worse than none.
+#
+# What these guard that #200's tests do not is the FIELD ORDER
+# `_PROVENANCE_FORMAT` fixes — `%an` before `%s`, so the free-text field is the
+# tail — held by a comment alone until #215. They sit in their own section so
+# that adding them does not force a re-derivation of the #200 header's counts.
 
 
 #: Line separators `str.splitlines()` folds and git's `%s` does not, so one
@@ -1012,19 +1042,32 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
 ) -> None:
     """A forged sync hidden behind a `splitlines()` boundary must not read as ours.
 
-    THE test for #215, and the only one that exercises the wiring: the structural
-    test below pins the constant's VALUE, but nothing except running the real
-    reader over real history proves `git log` is actually handed that value. Do
-    not delete this on the theory that the structural test covers the format.
+    THE test for #215. It is load-bearing for the wiring in a way the structural
+    test below is not: that one pins the constant's VALUE, while this one runs
+    the real reader over real history. It is NOT the only test that would notice
+    a desynced call site — review measured seven pre-existing tests reddening on
+    one — so do not read exclusivity into it. Do still not delete it on the
+    theory that the structural test covers the format; that theory is wrong for
+    the reason above.
+
+    The gap neither test closes, named rather than left to be discovered:
+    replacing the call site with a stale LITERAL of the same value leaves the
+    whole suite green. Nothing pins that git is handed the constant rather than
+    something merely equal to it.
 
     The forgery is a commit the sync bot authored whose subject does not
     self-describe, with a well-formed sync naming US concealed behind a
     separator git stores verbatim and Python splits on. Reorder the format to
     `%s%x00%an` (unpacking coherently swapped) and the concealed fragment parses
     as ours, `git_pages_owner` returns OUR_REPO, and `assert_no_foreign_overwrite`
-    permits the overwrite of a sibling-owned file. Under the shipped order the
-    same fragment lands in the author slot with an empty subject, and the real
-    line's author stops the walk instead.
+    permits the overwrite of a sibling-owned file.
+
+    Under the shipped order the walk never examines that fragment at all: the
+    FIRST entry is `pages-sync[bot]\x00typo fix`, whose subject does not parse
+    and whose author is the sync bot, so it returns UNATTRIBUTED_SYNC there and
+    stops. The general property — that a post-boundary fragment lands in the
+    author slot with an empty subject — is what makes the concealed sync
+    unreachable, but it is not the branch this history exercises.
 
     **The older sync at the top is not what makes this fail on a reordered
     format.** Under that mutation the concealed fragment parses as ours directly
@@ -1048,6 +1091,22 @@ def test_a_split_forging_subject_cannot_forge_our_ownership(
     _git_as(SYNC_AUTHOR, pages_repo, "add", ".")
     _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", forged)
     assert _last_author(pages_repo, target) == SYNC_AUTHOR
+
+    # The entire security value of this test rests on the separator actually
+    # producing a `splitlines()` boundary IN WHAT GIT STORED — an unasserted
+    # property of SPLIT_SEPARATORS until the review that added this line. Two
+    # ways it fails silently: a tuple someone edits to an ordinary character,
+    # and a git that normalizes the separator away (a `commit.cleanup` setting,
+    # a future version). Either leaves both assertions below passing trivially —
+    # the subject stays one line, never parses as a sync, and the bot author
+    # yields UNATTRIBUTED_SYNC for a reason with nothing to do with the forgery.
+    # Both reviewers measured that vacuous green, one of them against the
+    # REORDERED format this test exists to catch.
+    stored = _last_subject(pages_repo, target)
+    assert len(stored.splitlines()) == 2, (
+        f"{separator!r} did not split the stored subject {stored!r} — the "
+        f"forgery was never constructed and this test would be vacuous"
+    )
 
     owner = box.ptp.git_pages_owner(target)
 
@@ -1074,10 +1133,12 @@ def test_the_provenance_format_puts_the_free_text_field_last(
 ) -> None:
     """The reason survives even for someone who reads only the test.
 
-    Asserts the constant's value, so it lands on what `git_pages_owner` hands
-    git rather than on the text of the function — an `inspect.getsource` regex
-    would keep passing if the live call changed and a stale literal stayed in a
-    comment.
+    Asserts the constant's VALUE. That is better than an `inspect.getsource`
+    regex, which would keep passing if the live call changed and a stale literal
+    stayed in a comment — but be precise about the limit: this lands on the
+    constant, and nothing here ties the constant to the call site. The
+    behavioral test above is what exercises that, and its docstring records the
+    residue neither of them covers.
 
     Both of the sub-invariants the constant documents are pinned: the free-text
     field last (the #215 security property) and NUL as the separator, spelled
@@ -1089,8 +1150,11 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     **What this does NOT guard**, named so the gap is known rather than assumed
     covered: `%an` → `%cn` (author-vs-committer — a different documented
     invariant, and one `_git_as` could not catch anyway since it sets both
-    identities equal), and a free-text field PREPENDED before `%an`. Both are
-    adjacent invariants, deliberately out of scope for #215.
+    identities equal), and a NON-`%s` free-text field prepended before `%an`
+    (`%b`, `%f`, ...). A prepended `%s` is caught, by the count assertion below —
+    an earlier draft of this line claimed otherwise and was wrong three lines
+    above the assertion that refutes it. Both remaining gaps are adjacent
+    invariants, deliberately out of scope for #215.
     """
     fmt = ptp._PROVENANCE_FORMAT
 
@@ -1106,6 +1170,9 @@ def test_the_provenance_format_puts_the_free_text_field_last(
         f"NUL is the one byte a commit author name cannot contain, which is "
         f"what makes the first separator on a line unambiguous"
     )
+    # Presence, not position: `%x00%an %s` would satisfy this line. Position is
+    # already carried by the two assertions above, which is why it is not
+    # re-asserted here.
 
 
 # --- #157: the bound on which repository's history gets consulted ----------
