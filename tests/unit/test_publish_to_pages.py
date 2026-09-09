@@ -1417,6 +1417,107 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
     )
 
 
+# --- #225: the path scoping is a security property -------------------------
+#
+# `git_pages_owner` reads history with `git log --format=... -- <dest>`. That
+# call carries three security-relevant arguments and this section pins the
+# third: #215 pinned the format's field ORDER, #223 its field IDENTITY, and the
+# path scoping — `"--", str(dest)` — was pinned by nothing.
+#
+# Like #223's tests and unlike #200's, the test below does NOT fail against
+# `main` as shipped: the call is already correct. The claim that carries weight
+# is the mutation one, and it was measured before the test was written —
+# deleting `"--", str(dest)` left 57 passed in this module and 1355 passed in
+# the whole unit suite, while flipping `git_pages_owner` on a sibling-owned
+# target from `claude-code-sessions` (refused) to our own slug (overwrite
+# PERMITTED). Without the pathspec the walk answers "who wrote the repo last",
+# so our own most recent sync of ANY file resolves ownership of EVERY target to
+# us — the D058 silent overwrite, reached by a third route.
+#
+# Why no existing fixture could see it: every other git-backed test here holds a
+# single target, or two syncs of the SAME target. A path-blind walk returns the
+# same answer as a path-scoped one in all of them.
+#
+# THE AUTHOR LEG IS INERT HERE, unlike #200 and #223 where it is the whole
+# point. Both commits below carry parseable subjects, so the walk returns on its
+# first branch and never reaches the `_SYNC_AUTHOR` check. `SYNC_AUTHOR` is used
+# for realism, and nothing in this section depends on it.
+#
+# Two neighbouring questions, both measured, both deliberately NOT guarded here
+# because neither can fail open:
+#
+#   * A RENAMED target loses its history under a path-scoped walk, so
+#     `git_pages_owner` returns None and `assert_no_foreign_overwrite` refuses.
+#     Fail-closed. `--follow` is therefore not used: it would trade that edge
+#     for git's heuristic rename detection, and it is a behavior change.
+#   * Dropping only the `--` SEPARATOR while keeping the path is benign in the
+#     ordinary case — git still scopes to the path — and errors (exit 128,
+#     "ambiguous argument") only when a ref happens to share the target's name,
+#     which `_git_out` turns into a PublishError. The separator disambiguates;
+#     it is the PATH that carries the security property.
+
+
+def test_a_sibling_owned_target_is_not_read_from_our_sync_of_another_file(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """THE test for #225 — two targets, two publishers, answered per-target.
+
+    The first fixture in this file that can tell a path-scoped walk from a
+    path-blind one, because it is the first with two DISTINCT targets owned by
+    two DISTINCT publishers. The sibling syncs its card; we later sync ours,
+    touching a different path.
+
+    **Non-vacuous regardless of commit ordering**, which is worth stating
+    because the obvious worry is that the test only works while our sync is the
+    newest commit. A path-blind walk consults the whole repository and so returns
+    the SAME value for both targets — and that one value cannot be both
+    `OUR_REPO` and `THEIR_REPO`. So the positive control and the attribution pin
+    are a contradiction pair: whichever ordering the fixture has, one of them
+    fires. Measured both ways under the pathspec-drop mutant, and the reordered
+    case is what makes the positive control load-bearing rather than decorative —
+    there it is the only assertion that fails.
+    """
+    theirs = box.pages_assets / "theirs-og.png"
+    theirs.write_bytes(b"THEIRS")
+    _git(pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", sync_subject(THEIR_REPO))
+
+    ours = box.pages_assets / "ours-og.png"
+    ours.write_bytes(b"OURS")
+    _git(pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    # Read the fixture back rather than assuming it: the two syncs must land on
+    # DIFFERENT paths, which is the whole geometry. One read-back per target, and
+    # what they catch is the paths COLLAPSING — point both names at one file and
+    # that file's newest subject is ours, so the first of these fails loudly
+    # instead of the test quietly becoming a same-target duplicate.
+    assert _last_subject(pages_repo, theirs) == sync_subject(THEIR_REPO)
+    assert _last_subject(pages_repo, ours) == sync_subject(OUR_REPO)
+
+    # The positive control. Free in this ordering; the ONLY assertion that fires
+    # if the fixture is ever reordered so the sibling's sync lands last.
+    assert box.ptp.git_pages_owner(ours) == OUR_REPO
+
+    owner = box.ptp.git_pages_owner(theirs)
+
+    # The security floor. `assert_no_foreign_overwrite` permits an overwrite ONLY
+    # on `owner == source_repo`, so OUR_REPO is the one dangerous return.
+    # Compared with `!=`, never `is not`: `sync_source_repo` returns a fresh
+    # `m.group("repo")`, so an identity test would pass while holding our own
+    # slug and assert nothing at all.
+    assert owner != OUR_REPO, (
+        f"a target last synced by {THEIR_REPO} was read as ours ({owner!r}) — "
+        f"the provenance walk is no longer scoped to the target path, so our "
+        f"own newest sync of any file now claims every target"
+    )
+    # The attribution pin, and the other half of the contradiction pair. Stronger
+    # than the floor: the walk must name the sibling, not merely decline to name
+    # us. Kept separate so a future refactor that legitimately returned
+    # UNATTRIBUTED_SYNC here is re-judged against D058 rather than waved through.
+    assert owner == THEIR_REPO
+
+
 # --- #157: the bound on which repository's history gets consulted ----------
 #
 # Pre-#200 tests, and unchanged by it. They live below the sections above only
