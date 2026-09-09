@@ -842,8 +842,21 @@ def test_a_site_owned_target_has_no_pages_owner(box: Sandbox, pages_repo: Path) 
 def test_a_path_with_no_history_has_no_pages_owner(
     box: Sandbox, pages_repo: Path
 ) -> None:
-    """`git log` exits 0 with empty output here — "no history", not an error."""
+    """`git log` exits 0 with empty output here — "no history", not an error.
+
+    The repo also carries a sibling sync of an UNRELATED file (#225). That is
+    not scenery: without it this test passes under a walk that falls back to a
+    repo-wide log when the path-scoped one comes back empty — a plausible
+    convenience refactor that fails OPEN, since a hand-added target would then
+    inherit whichever publisher synced last. With it, the empty answer has to be
+    the PATH's answer rather than the repository's.
+    """
     _git(pages_repo, "commit", "-q", "--allow-empty", "-m", "init")
+    other = box.pages_assets / "unrelated-og.png"
+    other.write_bytes(b"SIBLING")
+    _git(pages_repo, "add", ".")
+    _git_as(SYNC_AUTHOR, pages_repo, "commit", "-q", "-m", sync_subject(THEIR_REPO))
+
     stray = box.pages_assets / "stray-og.png"
     stray.write_bytes(b"UNTRACKED")
 
@@ -1419,10 +1432,14 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 
 # --- #225: the path scoping is a security property -------------------------
 #
-# `git_pages_owner` reads history with `git log --format=... -- <dest>`. That
-# call carries three security-relevant arguments and this section pins the
-# third: #215 pinned the format's field ORDER, #223 its field IDENTITY, and the
-# path scoping — `"--", str(dest)` — was pinned by nothing.
+# `git_pages_owner` reads history with `git log --format=... -- <dest>`. #215
+# pinned the format's field ORDER, #223 its field IDENTITY, and this section
+# pins the path scoping — `"--", str(dest)` — which was pinned by nothing.
+#
+# NOT the last unguarded argument of that call, and deliberately not counted as
+# one: `_git_run` prepends `-C <dest.parent>`, which selects WHICH repository's
+# history is read at all, and `git_pages_owner`'s own docstring says that walk
+# "is not bounded here" and describes a case where it was observed going wrong.
 #
 # Like #223's tests and unlike #200's, the test below does NOT fail against
 # `main` as shipped: the call is already correct. The claim that carries weight
@@ -1430,13 +1447,17 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 # deleting `"--", str(dest)` left 57 passed in this module and 1355 passed in
 # the whole unit suite, while flipping `git_pages_owner` on a sibling-owned
 # target from `claude-code-sessions` (refused) to our own slug (overwrite
-# PERMITTED). Without the pathspec the walk answers "who wrote the repo last",
-# so our own most recent sync of ANY file resolves ownership of EVERY target to
-# us — the D058 silent overwrite, reached by a third route.
+# PERMITTED). Without the pathspec the walk answers "who wrote the repo last":
+# whichever publisher synced most recently then owns EVERY target, and right
+# after one of our own publishes that is us, so the D058 overwrite proceeds. (If
+# the sibling synced most recently it is the mirror failure — every target,
+# including ours, reads as theirs and every republish is refused.) A route
+# neither #215's reordered format nor #223's rebased committer reaches; no
+# ordinal is given, because the count has gone stale twice in this file already.
 #
-# Why no existing fixture could see it: every other git-backed test here holds a
-# single target, or two syncs of the SAME target. A path-blind walk returns the
-# same answer as a path-scoped one in all of them.
+# Why no existing fixture could see it: no other git-backed test here holds two
+# DISTINCT targets under two DISTINCT publishers, and a path-blind walk returns
+# the same answer as a path-scoped one in every shape that does not.
 #
 # THE AUTHOR LEG IS INERT HERE, unlike #200 and #223 where it is the whole
 # point. Both commits below carry parseable subjects, so the walk returns on its
@@ -1446,10 +1467,14 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 # Two neighbouring questions, both measured, both deliberately NOT guarded here
 # because neither can fail open:
 #
-#   * A RENAMED target loses its history under a path-scoped walk, so
-#     `git_pages_owner` returns None and `assert_no_foreign_overwrite` refuses.
-#     Fail-closed. `--follow` is therefore not used: it would trade that edge
-#     for git's heuristic rename detection, and it is a behavior change.
+#   * A RENAME is only fail-closed in one of its two shapes, so it is described
+#     precisely rather than waved at. A path-scoped walk loses everything BEFORE
+#     the rename but KEEPS the renaming commit and answers from it: a rename made
+#     by hand returns None and is refused, while a rename made inside a sync
+#     commit is attributed to that sync — ours included, which permits the write.
+#     `--follow` is not used, and would not rescue the second shape anyway: the
+#     loop returns on the newest parseable sync subject, which IS the renaming
+#     commit, so nothing `--follow` adds behind it is ever reached.
 #   * Dropping only the `--` SEPARATOR while keeping the path is benign in the
 #     ordinary case — git still scopes to the path — and errors (exit 128,
 #     "ambiguous argument") only when a ref happens to share the target's name,
@@ -1495,8 +1520,10 @@ def test_a_sibling_owned_target_is_not_read_from_our_sync_of_another_file(
     assert _last_subject(pages_repo, theirs) == sync_subject(THEIR_REPO)
     assert _last_subject(pages_repo, ours) == sync_subject(OUR_REPO)
 
-    # The positive control. Free in this ordering; the ONLY assertion that fires
-    # if the fixture is ever reordered so the sibling's sync lands last.
+    # The positive control. Free in this ordering; under the pathspec-drop mutant
+    # it is the ONLY assertion that fires if the fixture is ever reordered so the
+    # sibling's sync lands last. (Reordering alone breaks nothing — the correct
+    # implementation answers per-target whatever the order.)
     assert box.ptp.git_pages_owner(ours) == OUR_REPO
 
     owner = box.ptp.git_pages_owner(theirs)
