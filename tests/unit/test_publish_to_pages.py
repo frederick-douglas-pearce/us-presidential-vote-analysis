@@ -655,17 +655,30 @@ def _git_as(name: str, cwd: Path, *args: str, author: str | None = None) -> None
     `user.name` can express the rebase/cherry-pick geometry — measured, all 55
     tests stayed green under `_PROVENANCE_FORMAT = "%cn%x00%s"` before #223.
 
-    Only `git commit` accepts `--author`, and this helper also runs `git add`,
-    so passing `author` to anything else raises rather than silently doing
-    nothing — a no-op there would build the very fixture the caller was trying
-    to avoid, with both identities equal again.
+    `--author` sets the author only on `git commit`; this helper also runs
+    `git init` and `git add`, where it is not an option at all. So passing
+    `author` to anything else raises rather than silently doing nothing — a
+    no-op there would build the very fixture the caller was trying to avoid,
+    with both identities equal again.
+
+    The author's EMAIL is derived from `author` rather than shared with the
+    committer, so `%ae` and `%ce` differ in this fixture too. Sharing one
+    address would leave a future email-field guard vacuous for exactly the
+    reason `%an`/`%cn` was until #223 — the same trap, one field over.
     """
     if author is not None and args[:1] != ("commit",):
         raise ValueError(
             f"author= is only meaningful on `git commit`, not {args[:1]} — "
-            f"--author is not an option on any other subcommand"
+            f"--author is not an option on that subcommand"
         )
-    extra = ["--author", f"{author} <t@example.invalid>"] if author else []
+    # Gated on `is not None`, matching the raise above: `author=""` would
+    # otherwise slip past the guard and append nothing, rebuilding the
+    # equal-identities fixture the guard exists to prevent.
+    extra = (
+        ["--author", f"{author} <{author}@example.invalid>"]
+        if author is not None
+        else []
+    )
     subprocess.run(
         [
             "git",
@@ -673,8 +686,12 @@ def _git_as(name: str, cwd: Path, *args: str, author: str | None = None) -> None
             "user.email=t@example.invalid",
             "-c",
             f"user.name={name}",
-            *args,
+            # `--author` goes immediately after the subcommand, not at the end:
+            # appended last it would become a pathspec for any future call that
+            # ends in `--` or a path. No call site does today.
+            *args[:1],
             *extra,
+            *args[1:],
         ],
         cwd=cwd,
         check=True,
@@ -704,8 +721,11 @@ def _last_committer(cwd: Path, path: Path) -> str:
     `--author` silently did nothing, author and committer would both be the
     rebaser, the walk would skip that commit as an ordinary non-sync writer,
     reach the older genuine sync of ours and return `OUR_REPO` — so the security
-    assertions below would fail LOUDLY. Said plainly because the neighbouring
-    #200 test states the opposite about its own read-back and is wrong to (#222).
+    assertions below would fail LOUDLY. Said plainly because
+    `test_a_drifted_sibling_sync_is_refused_not_walked_past` states the opposite
+    about its own read-back and is wrong to (#222). Naming it matters: the other
+    neighbour, `test_a_split_forging_subject_cannot_forge_our_ownership`,
+    discusses the same read-back and gets it right.
     """
     proc = subprocess.run(
         ["git", "log", "-1", "--format=%cn", "--", str(path)],
@@ -1261,12 +1281,14 @@ def test_the_provenance_format_puts_the_free_text_field_last(
 #
 # Two tests, and NEITHER fails against `main` as shipped. That is the difference
 # between this section and the two above it, and it is worth stating rather than
-# leaving a reader to assume the #200/#215 pattern holds: those changes fixed
-# BEHAVIOR, so their tests could go red on the old code. Here the constant is
-# already correct — `%an%x00%s` — and what was missing was any guard on it. So
-# the honest claim is the mutation one, and it is the one that was measured:
-# under `_PROVENANCE_FORMAT = "%cn%x00%s"` both of these go red, while on the file
-# as it stood before this section that same swap left all 55 of its tests green.
+# leaving a reader to assume the earlier pattern holds: #200 fixed BEHAVIOR, so
+# its repro could go red on the old code, and #215's structural test went red on
+# a symbol `main` did not define. Neither of those routes is open here — the
+# constant is already correct, `%an%x00%s`, and what was missing was any guard on
+# its field IDENTITY. So the honest claim is the mutation one, and it is the one
+# that was measured: under `_PROVENANCE_FORMAT = "%cn%x00%s"` both of these go
+# red, while on the file as it stood before this section that same swap left all
+# 55 of its tests green.
 #
 # What they guard that #215's tests do not is the FIELD IDENTITY — `%an` and not
 # `%cn`, held by a docstring alone until #223. The reason none of the 55 could
@@ -1294,8 +1316,8 @@ def test_a_rebased_sibling_sync_is_not_misread_as_ours(
 
     NOT redundant with `test_a_drifted_sibling_sync_is_refused_not_walked_past`
     (#200), whose drifted commit is committed by the bot too: `%an` and `%cn`
-    read identically there, which is precisely why that test — and the other 54 —
-    stayed green under the mutation.
+    read identically there, which is precisely why that test stayed green under
+    the mutation along with every other test that existed then.
 
     The subject must be unparseable for the geometry to discriminate at all, so
     the reader returns `UNATTRIBUTED_SYNC` rather than `THEIR_REPO`; the test is
@@ -1308,10 +1330,12 @@ def test_a_rebased_sibling_sync_is_not_misread_as_ours(
 
     # The `!= OUR_REPO` assertion at the end discriminates only if this older
     # sync actually resolves to us — otherwise a reader that returned anything
-    # else would satisfy it for free. Latent today, because the sentinel
-    # assertion below catches `%cn` regardless; it stops being latent the moment
-    # a refactor returns `None` for the unattributable case, which is a change
-    # this file explicitly invites (see that assertion's comment).
+    # else would satisfy it for free.
+    #
+    # Load-bearing NOW, not merely insurance: under an interposed-field format
+    # (`%an%x00%cn%x00%s`, which passes all three of #215's assertions and the
+    # identity one below) this is the ONLY assertion in the test that fires, and
+    # deleting it lets that mutant through — measured, both ways.
     assert box.ptp.git_pages_owner(target) == OUR_REPO
 
     target.write_bytes(b"THEIRS")
@@ -1326,19 +1350,26 @@ def test_a_rebased_sibling_sync_is_not_misread_as_ours(
         author=SYNC_AUTHOR,
     )
 
-    # Read back that the fixture really did separate the identities. Diagnosis,
-    # not a vacuity guard — `_last_committer` records why the distinction
-    # matters.
+    # Read back that the fixture really did separate the identities. The first
+    # two are diagnosis, not a vacuity guard — `_last_committer` records why.
     assert _last_author(pages_repo, target) == SYNC_AUTHOR
     assert _last_committer(pages_repo, target) == REBASER
+    # The third IS a vacuity guard, and the only one here. Those two pin the
+    # fixture to the constants; nothing pins the constants to EACH OTHER, so
+    # redefining `REBASER` to the sync bot erases the whole geometry and leaves
+    # this test a silently-green duplicate of #200's drift test — measured.
+    # Same shape as the `splitlines()` guard #215 added one test up, and for the
+    # same reason: a constant someone edits.
+    assert _last_author(pages_repo, target) != _last_committer(pages_repo, target)
 
     owner = box.ptp.git_pages_owner(target)
 
     # The security floor. `assert_no_foreign_overwrite` permits an overwrite ONLY
     # on `owner == source_repo`, so OUR_REPO is the one dangerous return.
     # Compared with `!=`, never `is not`: the reader returns a fresh
-    # `m.group(...)` string, so an identity test would pass while holding the
-    # forged slug and assert nothing at all.
+    # `m.group(...)` string, so an identity test would pass while holding our
+    # own slug and assert nothing at all. (No forgery in this history — that is
+    # #215's test, whose otherwise-identical comment says "forged".)
     assert owner != OUR_REPO, (
         f"a sibling sync authored by {SYNC_AUTHOR} but committed by {REBASER} "
         f"was read as ours ({owner!r}) — the provenance walk is no longer "
@@ -1358,25 +1389,26 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 ) -> None:
     """The identity half of the constant, pinned on its VALUE.
 
-    Its twin above runs the real reader; this one lands on the constant, the
-    same division of labour #215 drew between its own two tests.
+    `test_a_rebased_sibling_sync_is_not_misread_as_ours` above runs the real
+    reader; this one lands on the constant — the division of labour #215 drew
+    between `test_a_split_forging_subject_cannot_forge_our_ownership` and
+    `test_the_provenance_format_puts_the_free_text_field_last`.
 
     **Necessary, not sufficient — and the gap is measured, not guessed.**
     `"%an%h%x00%s"` (a short sha appended INSIDE the author field) satisfies this
-    assertion and all four of #215's, and still kills the author signal: the slot
-    then holds `pages-sync[bot]<sha>`, which is not `_SYNC_AUTHOR`. Measured
-    against this file as it stands, that format leaves THIS test green and is
-    caught by its behavioral twin above, together with #200's drift test and both
-    of #215's forgery params. So this assertion closes the two holes it was
-    written for — `%cn`, and a `%h ` PREFIX — and behavior covers the rest.
+    assertion and all three of #215's, and still kills the author signal: the
+    slot then holds `pages-sync[bot]<sha>`, which is not `_SYNC_AUTHOR`. It
+    leaves THIS test green and is caught by the behavioral twin above, #200's
+    drift test, and both of #215's forgery params.
 
-    Named rather than counted, deliberately: a pass/fail tally here would go
-    stale the next time anything is added to this file, which is how the #200
-    header above came to miscount its own territory twice.
+    So what this assertion actually buys is one hole nothing else could see —
+    `%cn` — plus a cheap value-level rejection of a `%h ` PREFIX, which three
+    behavioral tests already caught before it existed. Behavior covers the rest.
 
-    No enumeration of what else slips past. #215 shipped one, rewrote it four
-    times, and was wrong four times — most sharply when it claimed a gap failed
-    closed that in fact failed open. That gap was this one.
+    Named rather than counted: a pass/fail tally here goes stale the next time
+    anything is added to this file. The #200 header above shows the adjacent
+    failure mode, having miscounted its own territory twice at the moment of
+    writing.
     """
     fmt = ptp._PROVENANCE_FORMAT
 
