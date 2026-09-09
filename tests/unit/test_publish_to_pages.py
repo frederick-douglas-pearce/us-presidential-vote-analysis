@@ -668,8 +668,7 @@ def _git_as(name: str, cwd: Path, *args: str, author: str | None = None) -> None
     """
     if author is not None and args[:1] != ("commit",):
         raise ValueError(
-            f"author= is only meaningful on `git commit`, not {args[:1]} — "
-            f"--author is not an option on that subcommand"
+            f"author= is only meaningful on `git commit`, not {args[:1]}"
         )
     # Gated on `is not None`, matching the raise above: `author=""` would
     # otherwise slip past the guard and append nothing, rebuilding the
@@ -686,9 +685,7 @@ def _git_as(name: str, cwd: Path, *args: str, author: str | None = None) -> None
             "user.email=t@example.invalid",
             "-c",
             f"user.name={name}",
-            # `--author` goes immediately after the subcommand, not at the end:
-            # appended last it would become a pathspec for any future call that
-            # ends in `--` or a path. No call site does today.
+            # `--author` goes immediately after the subcommand, not at the end.
             *args[:1],
             *extra,
             *args[1:],
@@ -1358,7 +1355,8 @@ def test_a_rebased_sibling_sync_is_not_misread_as_ours(
     # fixture to the constants; nothing pins the constants to EACH OTHER, so
     # redefining `REBASER` to the sync bot erases the whole geometry and leaves
     # this test a silently-green duplicate of #200's drift test — measured.
-    # Same shape as the `splitlines()` guard #215 added one test up, and for the
+    # Same shape as the `splitlines()` guard #215 added in
+    # `test_a_split_forging_subject_cannot_forge_our_ownership`, and for the
     # same reason: a constant someone edits.
     assert _last_author(pages_repo, target) != _last_committer(pages_repo, target)
 

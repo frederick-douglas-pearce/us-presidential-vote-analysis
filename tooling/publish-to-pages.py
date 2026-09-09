@@ -433,8 +433,7 @@ def git_pages_owner(dest: Path) -> PagesOwner:
     constant. Until then this paragraph was the only thing holding it: swapping
     `_PROVENANCE_FORMAT` to `%cn` left all 55 tests in
     `tests/unit/test_publish_to_pages.py` green — and the whole unit suite with
-    them — while restoring the D058 silent overwrite for any sync commit that
-    had been rebased or cherry-picked.
+    them — while restoring the D058 silent overwrite.
 
     **The most recent SYNC commit, not the most recent commit.** Reading the
     latest commit of any kind would let one ordinary edit on the Pages side —
