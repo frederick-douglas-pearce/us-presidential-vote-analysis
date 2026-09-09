@@ -1169,33 +1169,22 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     Pinning only the first would leave the second in exactly the comment-only
     state #215 exists to end.
 
-    **What this does NOT guard**, named so the gap is known rather than assumed
-    covered: `%an` → `%cn` (author-vs-committer — a different documented
-    invariant, and one `_git_as` could not catch anyway since it sets both
-    identities equal — separating them needs `GIT_AUTHOR_NAME` /
-    `GIT_COMMITTER_NAME`); a NON-`%s` free-text field prepended before `%an`
-    (`%b`; `%f` is not one, since git sanitizes it to `[A-Za-z0-9._-]`); and a
-    MISPLACED `%x00` (see the comment on the separator assertion below —
-    `%x00%an %s` passes all three). A prepended `%s` IS caught, by the count
-    assertion.
+    **This pins the format's value, not the whole of the provenance read.** One
+    gap is worth a pointer rather than silence, because it fails OPEN and
+    nothing in this file can see it: `_PROVENANCE_FORMAT = "%cn%x00%s"` leaves
+    the entire suite green, while a *drifted* sibling sync that was rebased or
+    cherry-picked — committer flipped, author intact — stops reading as
+    bot-authored, so #200's second signal never fires and the walk resolves
+    ownership to US. That is the D058 silent overwrite restored. **Tracked with
+    its measurement as #223.**
 
-    **These are not all equally harmless, and this list must not be read as
-    saying so.** `%b` and the misplaced `%x00` fail CLOSED — every commit
-    resolves to `None`, so the publish refuses. **`%cn` fails OPEN**, and it is
-    the one gap nothing in this file can see: `_PROVENANCE_FORMAT = "%cn%x00%s"`
-    leaves the whole suite green, while a sibling sync that was rebased or
-    cherry-picked (committer flipped, author intact) stops reading as
-    bot-authored, #200's second signal never fires, and the walk resolves
-    ownership to US. That is the D058 silent overwrite restored. **Tracked as
-    #223**, with the measurement. `"%h %an%x00%s"` is the same shape — it also
-    passes all three assertions and also kills the second signal, though other
-    tests catch it.
-
-    Two earlier drafts of this list were wrong: one claimed a prepended `%s` was
-    unguarded three lines above the assertion that guards it, and one claimed
-    all the remaining gaps failed closed, which was false about precisely the
-    one that fails open. The list is kept because #223 needs a pointer from
-    here; it is not an exhaustive enumeration and does not claim to be.
+    An enumeration of the other formats these three assertions let through used
+    to live here. It was rewritten four times and was wrong all four, most
+    sharply when it asserted that every listed gap failed closed — false about
+    precisely the one that does not. It is deleted rather than corrected a fifth
+    time: it promised a completeness it never had and this test does not need,
+    while reliably manufacturing the exact defect #215 exists to remove. Deleted
+    prose cannot be false. #223 carries what was load-bearing.
     """
     fmt = ptp._PROVENANCE_FORMAT
 
@@ -1211,12 +1200,11 @@ def test_the_provenance_format_puts_the_free_text_field_last(
         f"NUL is the one byte a commit author name cannot contain, which is "
         f"what makes the first separator on a line unambiguous"
     )
-    # Presence, not position — and the distinction has a real gap in it.
-    # `%x00%an %s` satisfies all three assertions above with the separator
-    # MISPLACED (leading, rather than between the fields), so `%x00`'s position
-    # is guarded by nothing here. It fails closed: the subject slot would hold
-    # "<author> <subject>", which `_SYNC_SUBJECT`'s `^` anchor rejects. Hence a
-    # documented gap, listed above, rather than a fourth assertion.
+    # Presence, not position. `%x00%an %s` satisfies all three assertions with
+    # the separator MISPLACED (leading, rather than between the fields), so its
+    # position is guarded by nothing here. Measured fail-closed — the subject
+    # slot would hold "<author> <subject>", which `_SYNC_SUBJECT`'s `^` anchor
+    # rejects — which is why it is left unasserted rather than guarded.
 
 
 # --- #157: the bound on which repository's history gets consulted ----------
