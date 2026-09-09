@@ -847,9 +847,9 @@ def test_a_path_with_no_history_has_no_pages_owner(
     The repo also carries a sibling sync of an UNRELATED file (#225). That is
     not scenery: without it this test passes under a walk that falls back to a
     repo-wide log when the path-scoped one comes back empty — a plausible
-    convenience refactor that fails OPEN, since a hand-added target would then
-    inherit whichever publisher synced last. With it, the empty answer has to be
-    the PATH's answer rather than the repository's.
+    convenience refactor under which a hand-added target inherits whichever
+    publisher synced last, and so fails OPEN whenever that is us. With it, the
+    empty answer has to be the PATH's answer rather than the repository's.
     """
     _git(pages_repo, "commit", "-q", "--allow-empty", "-m", "init")
     other = box.pages_assets / "unrelated-og.png"
@@ -1436,8 +1436,8 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 # pinned the format's field ORDER, #223 its field IDENTITY, and this section
 # pins the path scoping — `"--", str(dest)` — which was pinned by nothing.
 #
-# NOT the last unguarded argument of that call, and deliberately not counted as
-# one: `_git_run` prepends `-C <dest.parent>`, which selects WHICH repository's
+# NOT the last security-relevant argument of that call, and deliberately not
+# counted as one: `_git_run` prepends `-C <dest.parent>`, which selects WHICH repository's
 # history is read at all, and `git_pages_owner`'s own docstring says that walk
 # "is not bounded here" and describes a case where it was observed going wrong.
 #
@@ -1452,20 +1452,17 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 # after one of our own publishes that is us, so the D058 overwrite proceeds. (If
 # the sibling synced most recently it is the mirror failure — every target,
 # including ours, reads as theirs and every republish is refused.) A route
-# neither #215's reordered format nor #223's rebased committer reaches; no
-# ordinal is given, because the count has gone stale twice in this file already.
+# neither #215's reordered format nor #223's rebased committer reaches.
 #
 # Why no existing fixture could see it: no other git-backed test here holds two
-# DISTINCT targets under two DISTINCT publishers, and a path-blind walk returns
-# the same answer as a path-scoped one in every shape that does not.
+# DISTINCT targets under two DISTINCT publishers.
 #
 # THE AUTHOR LEG IS INERT HERE, unlike #200 and #223 where it is the whole
 # point. Both commits below carry parseable subjects, so the walk returns on its
 # first branch and never reaches the `_SYNC_AUTHOR` check. `SYNC_AUTHOR` is used
 # for realism, and nothing in this section depends on it.
 #
-# Two neighbouring questions, both measured, both deliberately NOT guarded here
-# because neither can fail open:
+# Two neighbouring questions, both measured, neither guarded here:
 #
 #   * A RENAME is only fail-closed in one of its two shapes, so it is described
 #     precisely rather than waved at. A path-scoped walk loses everything BEFORE
@@ -1475,11 +1472,9 @@ def test_the_provenance_format_reads_the_author_not_the_committer(
 #     `--follow` is not used, and would not rescue the second shape anyway: the
 #     loop returns on the newest parseable sync subject, which IS the renaming
 #     commit, so nothing `--follow` adds behind it is ever reached.
-#   * Dropping only the `--` SEPARATOR while keeping the path is benign in the
-#     ordinary case — git still scopes to the path — and errors (exit 128,
-#     "ambiguous argument") only when a ref happens to share the target's name,
-#     which `_git_out` turns into a PublishError. The separator disambiguates;
-#     it is the PATH that carries the security property.
+#   * Dropping only the `--` SEPARATOR while keeping the path still scopes to
+#     the path, so it is not the half that fails open. The separator
+#     disambiguates; the PATH carries the security property.
 
 
 def test_a_sibling_owned_target_is_not_read_from_our_sync_of_another_file(
@@ -1487,20 +1482,19 @@ def test_a_sibling_owned_target_is_not_read_from_our_sync_of_another_file(
 ) -> None:
     """THE test for #225 — two targets, two publishers, answered per-target.
 
-    The first fixture in this file that can tell a path-scoped walk from a
-    path-blind one, because it is the first with two DISTINCT targets owned by
-    two DISTINCT publishers. The sibling syncs its card; we later sync ours,
-    touching a different path.
+    The only fixture here with two DISTINCT targets owned by two DISTINCT
+    publishers: the sibling syncs its card; we later sync ours, touching a
+    different path.
 
     **Non-vacuous regardless of commit ordering**, which is worth stating
     because the obvious worry is that the test only works while our sync is the
     newest commit. A path-blind walk consults the whole repository and so returns
     the SAME value for both targets — and that one value cannot be both
     `OUR_REPO` and `THEIR_REPO`. So the positive control and the attribution pin
-    are a contradiction pair: whichever ordering the fixture has, one of them
-    fires. Measured both ways under the pathspec-drop mutant, and the reordered
-    case is what makes the positive control load-bearing rather than decorative —
-    there it is the only assertion that fails.
+    cannot both hold under one. Measured both ways under the pathspec-drop
+    mutant, and the reordered case is what makes the positive control
+    load-bearing rather than decorative — there it is the only assertion that
+    fails.
     """
     theirs = box.pages_assets / "theirs-og.png"
     theirs.write_bytes(b"THEIRS")

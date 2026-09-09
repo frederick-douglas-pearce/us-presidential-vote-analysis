@@ -447,7 +447,7 @@ def git_pages_owner(dest: Path) -> PagesOwner:
 
     **A RENAME is not covered by that, and is not fail-closed in general.** A
     path-scoped walk loses everything BEFORE a rename but keeps the renaming
-    commit and answers from it. A rename made by hand is a non-sync writer, so
+    commit. A rename made by hand is a non-sync writer, so
     this returns None and the caller refuses; a rename made INSIDE a sync commit
     is attributed to that sync — ours included, which permits the write.
     `--follow` is not used, and would not rescue the second case anyway: the loop
