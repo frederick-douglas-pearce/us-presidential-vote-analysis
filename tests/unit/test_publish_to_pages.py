@@ -640,16 +640,56 @@ def _git(cwd: Path, *args: str) -> None:
     _git_as("t", cwd, *args)
 
 
-def _git_as(name: str, cwd: Path, *args: str) -> None:
+def _git_as(name: str, cwd: Path, *args: str, author: str | None = None) -> None:
     """`_git`, with the commit identity as `name`.
 
     Provenance became a two-signal question in #200 — subject AND author — so a
     test that exercises the author leg has to be able to set it. `user.name`
     sets author and committer alike, which is what a direct-push sync produces
     in both publishers' Actions.
+
+    `author` overrides the AUTHOR alone, leaving `name` as the committer, and
+    exists because that "alike" is exactly what #223 has to break: the guarded
+    property is that the walk reads `%an` and not `%cn`, and the two fields are
+    byte-identical in every fixture built without it. So no combination of
+    `user.name` can express the rebase/cherry-pick geometry — measured, all 55
+    tests stayed green under `_PROVENANCE_FORMAT = "%cn%x00%s"` before #223.
+
+    `--author` sets the author only on `git commit`; this helper also runs
+    `git init` and `git add`, where it is not an option at all. So passing
+    `author` to anything else raises rather than silently doing nothing — a
+    no-op there would build the very fixture the caller was trying to avoid,
+    with both identities equal again.
+
+    The author's EMAIL is derived from `author` rather than shared with the
+    committer, so `%ae` and `%ce` differ in this fixture too. Sharing one
+    address would leave a future email-field guard vacuous for exactly the
+    reason `%an`/`%cn` was until #223 — the same trap, one field over.
     """
+    if author is not None and args[:1] != ("commit",):
+        raise ValueError(
+            f"author= is only meaningful on `git commit`, not {args[:1]}"
+        )
+    # Gated on `is not None`, matching the raise above: `author=""` would
+    # otherwise slip past the guard and append nothing, rebuilding the
+    # equal-identities fixture the guard exists to prevent.
+    extra = (
+        ["--author", f"{author} <{author}@example.invalid>"]
+        if author is not None
+        else []
+    )
     subprocess.run(
-        ["git", "-c", "user.email=t@example.invalid", "-c", f"user.name={name}", *args],
+        [
+            "git",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            f"user.name={name}",
+            # `--author` goes immediately after the subcommand, not at the end.
+            *args[:1],
+            *extra,
+            *args[1:],
+        ],
         cwd=cwd,
         check=True,
         capture_output=True,
@@ -660,6 +700,32 @@ def _last_author(cwd: Path, path: Path) -> str:
     """Author of the newest commit touching `path` — read back, never assumed."""
     proc = subprocess.run(
         ["git", "log", "-1", "--format=%an", "--", str(path)],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return proc.stdout.strip()
+
+
+def _last_committer(cwd: Path, path: Path) -> str:
+    """Committer of the newest commit touching `path` — read back, never assumed.
+
+    The other half of `_last_author`, and the pair is what lets a fixture SHOW
+    that it separated the two identities rather than claiming it.
+
+    What this earns is a localized diagnosis, not a caught silent pass: if
+    `--author` silently did nothing, author and committer would both be the
+    rebaser, the walk would skip that commit as an ordinary non-sync writer,
+    reach the older genuine sync of ours and return `OUR_REPO` — so the security
+    assertions below would fail LOUDLY. Said plainly because
+    `test_a_drifted_sibling_sync_is_refused_not_walked_past` states the opposite
+    about its own read-back and is wrong to (#222). Naming it matters: the other
+    neighbour, `test_a_split_forging_subject_cannot_forge_our_ownership`,
+    discusses the same read-back and gets it right.
+    """
+    proc = subprocess.run(
+        ["git", "log", "-1", "--format=%cn", "--", str(path)],
         cwd=cwd,
         check=True,
         capture_output=True,
@@ -702,6 +768,11 @@ SYNC_AUTHOR = "pages-sync[bot]"
 #: 2026-09-07. It has never touched `_posts/` or `assets/img/`, but the guard
 #: must not depend on that continuing to hold.
 OTHER_BOT = "dependabot[bot]"
+
+#: Whoever rewrote a sync commit — the identity a rebase or cherry-pick puts in
+#: the COMMITTER field while leaving the author intact. Any name that is not
+#: `SYNC_AUTHOR` does the job; naming it is what makes the geometry legible.
+REBASER = "somebody-who-rebased"
 
 
 @pytest.fixture
@@ -1169,14 +1240,10 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     Pinning only the first would leave the second in exactly the comment-only
     state #215 exists to end.
 
-    **This pins the format's value, not the whole of the provenance read.** One
-    gap is worth a pointer rather than silence, because it fails OPEN and
-    nothing in this file can see it: `_PROVENANCE_FORMAT = "%cn%x00%s"` leaves
-    the entire suite green, while a *drifted* sibling sync that was rebased or
-    cherry-picked — committer flipped, author intact — stops reading as
-    bot-authored, so #200's second signal never fires and the walk resolves
-    ownership to US. That is the D058 silent overwrite restored. **Tracked with
-    its measurement as #223.**
+    **This pins the format's value, not the whole of the provenance read.** The
+    field IDENTITY is a separate property with its own two guards, added by #223:
+    `test_the_provenance_format_reads_the_author_not_the_committer` and
+    `test_a_rebased_sibling_sync_is_not_misread_as_ours`.
 
     An enumeration of the other formats these three assertions let through used
     to live here. It was rewritten four times and was wrong all four, most
@@ -1205,6 +1272,149 @@ def test_the_provenance_format_puts_the_free_text_field_last(
     # position is guarded by nothing here. Measured fail-closed — the subject
     # slot would hold "<author> <subject>", which `_SYNC_SUBJECT`'s `^` anchor
     # rejects — which is why it is left unasserted rather than guarded.
+
+
+# --- #223: the identity field is a security property -----------------------
+#
+# Two tests, and NEITHER fails against `main` as shipped. That is the difference
+# between this section and the two above it, and it is worth stating rather than
+# leaving a reader to assume the earlier pattern holds: #200 fixed BEHAVIOR, so
+# its repro could go red on the old code, and #215's structural test went red on
+# a symbol `main` did not define. Neither of those routes is open here — the
+# constant is already correct, `%an%x00%s`, and what was missing was any guard on
+# its field IDENTITY. So the honest claim is the mutation one, and it is the one
+# that was measured: under `_PROVENANCE_FORMAT = "%cn%x00%s"` both of these go
+# red, while on the file as it stood before this section that same swap left all
+# 55 of its tests green.
+#
+# What they guard that #215's tests do not is the FIELD IDENTITY — `%an` and not
+# `%cn`, held by a docstring alone until #223. The reason none of the 55 could
+# see it is that `_git_as` sets `user.name`, which sets author and committer
+# ALIKE, so the two fields are byte-identical in every fixture built without
+# `author=`.
+
+
+def test_a_rebased_sibling_sync_is_not_misread_as_ours(
+    box: Sandbox, pages_repo: Path
+) -> None:
+    """THE test for #223 — the geometry where `%an` and `%cn` disagree.
+
+    History is our sync (older) then a drifted sibling sync that was rebased or
+    cherry-picked: authored by the sync bot, COMMITTED by whoever rewrote it.
+    That is the case `git_pages_owner`'s docstring names as the reason it reads
+    the author, and it is the only geometry in this file where the two fields
+    differ at all.
+
+    Under `%cn` the drifted commit stops reading as bot-authored, so #200's
+    second signal never fires, the walk falls through to our older sync, and
+    ownership resolves to US — `assert_no_foreign_overwrite` then permits the
+    overwrite of a sibling-owned target. That is the D058 silent overwrite
+    restored, under a green Action.
+
+    NOT redundant with `test_a_drifted_sibling_sync_is_refused_not_walked_past`
+    (#200), whose drifted commit is committed by the bot too: `%an` and `%cn`
+    read identically there, which is precisely why that test stayed green under
+    the mutation along with every other test that existed then.
+
+    The subject must be unparseable for the geometry to discriminate at all, so
+    the reader returns `UNATTRIBUTED_SYNC` rather than `THEIR_REPO`; the test is
+    named for what it refuses, not for an attribution it cannot make.
+    """
+    target = box.pages_assets / "rebased-og.png"
+    target.write_bytes(b"OURS-V1")
+    _git(pages_repo, "add", ".")
+    _git(pages_repo, "commit", "-q", "-m", sync_subject(OUR_REPO))
+
+    # The `!= OUR_REPO` assertion at the end discriminates only if this older
+    # sync actually resolves to us — otherwise a reader that returned anything
+    # else would satisfy it for free.
+    #
+    # Load-bearing NOW, not merely insurance: under an interposed-field format
+    # (`%an%x00%cn%x00%s`, which passes all three of #215's assertions and the
+    # identity one below) this is the ONLY assertion in the test that fires, and
+    # deleting it lets that mutant through — measured, both ways.
+    assert box.ptp.git_pages_owner(target) == OUR_REPO
+
+    target.write_bytes(b"THEIRS")
+    _git(pages_repo, "add", ".")
+    _git_as(
+        REBASER,
+        pages_repo,
+        "commit",
+        "-q",
+        "-m",
+        DRIFTED_SUBJECT,
+        author=SYNC_AUTHOR,
+    )
+
+    # Read back that the fixture really did separate the identities. The first
+    # two are diagnosis, not a vacuity guard — `_last_committer` records why.
+    assert _last_author(pages_repo, target) == SYNC_AUTHOR
+    assert _last_committer(pages_repo, target) == REBASER
+    # The third IS a vacuity guard, and the only one here. Those two pin the
+    # fixture to the constants; nothing pins the constants to EACH OTHER, so
+    # redefining `REBASER` to the sync bot erases the whole geometry and leaves
+    # this test a silently-green duplicate of #200's drift test — measured.
+    # Same shape as the `splitlines()` guard #215 added in
+    # `test_a_split_forging_subject_cannot_forge_our_ownership`, and for the
+    # same reason: a constant someone edits.
+    assert _last_author(pages_repo, target) != _last_committer(pages_repo, target)
+
+    owner = box.ptp.git_pages_owner(target)
+
+    # The security floor. `assert_no_foreign_overwrite` permits an overwrite ONLY
+    # on `owner == source_repo`, so OUR_REPO is the one dangerous return.
+    # Compared with `!=`, never `is not`: the reader returns a fresh
+    # `m.group(...)` string, so an identity test would pass while holding our
+    # own slug and assert nothing at all. (No forgery in this history — that is
+    # #215's test, whose otherwise-identical comment says "forged".)
+    assert owner != OUR_REPO, (
+        f"a sibling sync authored by {SYNC_AUTHOR} but committed by {REBASER} "
+        f"was read as ours ({owner!r}) — the provenance walk is no longer "
+        f"reading %an"
+    )
+    # A D058 BEHAVIOR PIN, not the security property. A bot-authored commit with
+    # an unparseable subject is definitionally an unattributable sync, so `None`
+    # here would be D058-wrong while still being security-safe. If a future
+    # refactor legitimately returns `None`, re-judge it against D058 — and note
+    # that the `== OUR_REPO` assertion above is what keeps the `!=` leg
+    # meaningful in that world.
+    assert owner is box.ptp.UNATTRIBUTED_SYNC
+
+
+def test_the_provenance_format_reads_the_author_not_the_committer(
+    ptp: ModuleType,
+) -> None:
+    """The identity half of the constant, pinned on its VALUE.
+
+    `test_a_rebased_sibling_sync_is_not_misread_as_ours` above runs the real
+    reader; this one lands on the constant — the division of labour #215 drew
+    between `test_a_split_forging_subject_cannot_forge_our_ownership` and
+    `test_the_provenance_format_puts_the_free_text_field_last`.
+
+    **Necessary, not sufficient — and the gap is measured, not guessed.**
+    `"%an%h%x00%s"` (a short sha appended INSIDE the author field) satisfies this
+    assertion and all three of #215's, and still kills the author signal: the
+    slot then holds `pages-sync[bot]<sha>`, which is not `_SYNC_AUTHOR`. It
+    leaves THIS test green and is caught by the behavioral twin above, #200's
+    drift test, and both of #215's forgery params.
+
+    So what this assertion actually buys is one hole nothing else could see —
+    `%cn` — plus a cheap value-level rejection of a `%h ` PREFIX, which three
+    behavioral tests already caught before it existed. Behavior covers the rest.
+
+    Named rather than counted: a pass/fail tally here goes stale the next time
+    anything is added to this file. The #200 header above shows the adjacent
+    failure mode, having miscounted its own territory twice at the moment of
+    writing.
+    """
+    fmt = ptp._PROVENANCE_FORMAT
+
+    assert fmt.startswith("%an"), (
+        f"{fmt!r} does not lead with the AUTHOR field — a committer-based read "
+        f"(%cn) resolves a rebased or cherry-picked sibling sync to us, which "
+        f"is the D058 silent overwrite"
+    )
 
 
 # --- #157: the bound on which repository's history gets consulted ----------

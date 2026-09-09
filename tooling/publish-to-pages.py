@@ -427,6 +427,13 @@ def git_pages_owner(dest: Path) -> PagesOwner:
     both repos today, but the author is what survives a rebase or cherry-pick of
     a sync commit, where the committer flips to whoever rewrote it — and "who
     originally published this target" is the provenance question being asked.
+    Guarded since #223 by `test_a_rebased_sibling_sync_is_not_misread_as_ours`,
+    which builds a history where the two differ, and by
+    `test_the_provenance_format_reads_the_author_not_the_committer` on the
+    constant. Until then this paragraph was the only thing holding it: swapping
+    `_PROVENANCE_FORMAT` to `%cn` left all 55 tests in
+    `tests/unit/test_publish_to_pages.py` green — and the whole unit suite with
+    them — while restoring the D058 silent overwrite.
 
     **The most recent SYNC commit, not the most recent commit.** Reading the
     latest commit of any kind would let one ordinary edit on the Pages side —
