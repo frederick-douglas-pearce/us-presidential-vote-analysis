@@ -435,6 +435,25 @@ def git_pages_owner(dest: Path) -> PagesOwner:
     `tests/unit/test_publish_to_pages.py` green — and the whole unit suite with
     them — while restoring the D058 silent overwrite.
 
+    **Scoped to `dest`, by the `-- <path>` pathspec on the log call.** The
+    summary line above says *touching `dest`*; this is the mechanism that makes
+    it true, and it is load-bearing rather than incidental. Drop the pathspec and
+    the walk answers "who wrote the repo last" instead of "who wrote this target
+    last": whichever publisher synced most recently then owns EVERY target, and
+    right after one of our own publishes that is us, so the D058 overwrite
+    proceeds. Measured, and green across the whole unit suite until #225 — see
+    `test_a_sibling_owned_target_is_not_read_from_our_sync_of_another_file`,
+    the first fixture here holding two targets owned by two publishers.
+
+    **A RENAME is not covered by that, and is not fail-closed in general.** A
+    path-scoped walk loses everything BEFORE a rename but keeps the renaming
+    commit. A rename made by hand is a non-sync writer, so
+    this returns None and the caller refuses; a rename made INSIDE a sync commit
+    is attributed to that sync — ours included, which permits the write.
+    `--follow` is not used, and would not rescue the second case anyway: the loop
+    below returns on the newest parseable sync subject, which IS the renaming
+    commit, so nothing `--follow` adds behind it is ever reached.
+
     **The most recent SYNC commit, not the most recent commit.** Reading the
     latest commit of any kind would let one ordinary edit on the Pages side —
     a typo fixed in place, or a bulk `prettier --write` of the kind that follows
