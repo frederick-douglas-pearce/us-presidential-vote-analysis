@@ -2568,7 +2568,7 @@ the next change that lands in `scripts/`.
 
 ## D050: the hybrid views materialize policy (b) only, with the pandas builders kept as the tested oracle
 
-**Date:** 2026-08-22
+**Date:** 2026-08-22 (corrected 2026-09-11 — see the correction under the third consequence)
 
 **Context:** #124 (E7-S5) had to expose `usvote/hybrid.py`'s computation as warehouse views —
 the read seam D039 settled for #102. The module had shipped **no SQL by design** (D037 note,
@@ -2667,6 +2667,17 @@ separable from the tie check because a view cannot `raise`.
   denominators Nader's votes dilute Gore's PV share (Bush 0.4908 to Gore 0.4887), so
   `hybrid_flip` is `false` in 2000 even though `pv_flip` is `true` — the opposite of what #123's
   two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
+
+  **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
+  is false.** Nader's votes are not why the hybrid stays with Bush. The hybrid is the **average of
+  the two ratios**, so its margin is exactly `(ec_margin - pv_margin) / 2` — and the shipped
+  `hybrid_summary` gives `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp`, `hybrid_margin =
+  0.2090 pp`, which is that identity to five decimals. Bush's EC margin is simply wider than
+  Gore's popular-vote margin. Gore's popular-vote margin would have to **exceed 0.9294 pp** to
+  flip the hybrid, and no renormalization of the denominator gets it there: dropping *every*
+  third-party vote raises both candidates' shares and moves the popular-vote margin only to
+  0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854. The original bullet is left
+  above as written; this correction is what is authoritative on the cause.
 
 ---
 

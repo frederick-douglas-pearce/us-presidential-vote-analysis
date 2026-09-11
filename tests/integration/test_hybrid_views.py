@@ -402,9 +402,11 @@ def test_hybrid_views_over_a_real_full_warehouse(
 
     **2000's hybrid answer is expected to differ from #123's unit fixture, and that is
     the point of this test rather than a regression.** #123's fixture uses two-way state
-    totals (third parties omitted); on the real national figures Nader's votes sit in the
-    denominator and dilute Gore's popular-vote share, so the hybrid does **not** go to
-    Gore (Bush 0.4908 to Gore 0.4887) even though the popular vote does.
+    totals over a six-state subset; on the real national figures the hybrid does **not**
+    go to Gore (Bush 0.4908 to Gore 0.4887) even though the popular vote does. The reason
+    is not third parties: the hybrid averages the two ratios, so its margin is exactly
+    ``(ec_margin - pv_margin) / 2``, and Bush's EC margin (0.9294 pp) is wider than Gore's
+    popular-vote margin (0.5113 pp).
     """
     from usvote.warehouse import run_warehouse
 
@@ -458,9 +460,9 @@ def test_hybrid_views_over_a_real_full_warehouse(
         assert non_null_flag(
             summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip"
         ) is False, (
-            "Nader's votes dilute Gore's PV share on the real national denominator — "
-            "the two-way unit fixture points the other way, which is why this test "
-            "exists"
+            "Bush's EC margin (0.9294 pp) is wider than Gore's PV margin (0.5113 pp), "
+            "so the average of the two ratios stays with Bush — the two-way unit "
+            "fixture points the other way, which is why this test exists"
         )
 
         # --- C3: the twelve partial-coverage years, exactly ------------------
