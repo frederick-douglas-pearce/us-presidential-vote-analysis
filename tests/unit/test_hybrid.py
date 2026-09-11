@@ -1358,9 +1358,11 @@ class TestKnownFlips:
           votes back into these six states' denominators and the hybrid still goes to
           Gore, 0.4931 to 0.4865 (against 0.5036 to 0.4964 two-way).
         - **The six-state selection is what flips it.** These six split 90-87 in electoral
-          votes but 18,400,507-17,279,431 in popular votes — a 1.6949 pp electoral margin
-          against a 3.1420 pp popular-vote one, where the real national figures are
-          0.9294 pp against 0.5113 pp. The subset reverses which of the two is wider.
+          votes but 18,400,507-17,279,431 in popular votes: a 1.6949 pp electoral margin
+          against a popular-vote margin of 3.1420 pp two-way — or 3.0138 pp with third
+          parties restored, which is the like-for-like comparison. Either way it is the
+          wider of the two, where nationally the electoral margin is the wider (0.9294 pp
+          against 0.5113 pp). The subset reverses which measure leads.
 
         That ordering of the two margins is the whole mechanism. The hybrid averages the
         two ratios, so in a year like 2000 — where the EC leader and the popular-vote
@@ -1368,11 +1370,15 @@ class TestKnownFlips:
         measure, under the shipped coverage policy — the gap between them comes out at half
         the gap between the two margins, and **the hybrid follows whichever margin is the
         wider**. Here that is the popular vote's, by 0.7236 pp to Gore; nationally it is
-        the electoral vote's, by 0.2090 pp to Bush. Nader is not in that story at all:
-        Gore's national margin would have to *exceed* Bush's 0.9294 pp EC margin, and
-        dropping every third-party vote moves it only from 0.5113 pp to 0.5322 pp. D050's
-        correction in ``.claude/specs/decisions.md`` states that relation generally, with
-        all three conditions it needs.
+        the electoral vote's, by 0.2090 pp to Bush. Nader is not in that story at all,
+        and structurally cannot be: the hybrid has **no threshold** to fall short of, so
+        third parties reach it only through the popular-vote denominator, which scales
+        both majors' shares alike. Gore's national margin would have to *exceed* Bush's
+        0.9294 pp EC margin, and dropping every third-party vote moves it only from
+        0.5113 pp to 0.5322 pp — third parties would have needed some 45% of the popular
+        vote. D050's correction in ``.claude/specs/decisions.md`` sets out both that
+        relation, with all three conditions it needs, and why no third-party story is
+        available here at all.
 
         The live-warehouse hybrid pin belongs to #124; what *is* real and asserted here is
         the ordering.

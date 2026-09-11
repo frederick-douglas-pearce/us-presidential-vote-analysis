@@ -2671,23 +2671,38 @@ separable from the tie check because a view cannot `raise`.
   **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
   is false.** Nader's votes are not why the hybrid stays with Bush. **Bush's electoral margin is
   simply wider than Gore's popular-vote margin**, and the hybrid — an average of the two ratios —
-  follows the wider of the two. The shipped `hybrid_summary` gives 2000 as
-  `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp` and `hybrid_margin = 0.2090 pp` — the hybrid
-  margin being half the gap between the other two. Gore's margin would have to **exceed
-  0.9294 pp** to take the hybrid, and no renormalization of the denominator gets it there: dropping *every*
-  third-party vote raises both candidates' shares and moves the popular-vote margin only to
-  0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
+  follows the wider of the two (under the conditions set out below). The shipped `hybrid_summary`
+  gives 2000 as `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp` and `hybrid_margin = 0.2090 pp` —
+  the hybrid margin being half the gap between the other two. Gore's margin would have to
+  **exceed 0.9294 pp** to take the hybrid, and no renormalization of the denominator gets it
+  there: dropping *every* third-party vote raises both candidates' shares and moves the
+  popular-vote margin only to 0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
+
+  **Why no third-party story is available here at all — the structural reason, not just the 2000
+  arithmetic** (Fred, 2026-09-11). The hybrid has **no threshold**: no majority of the appointed
+  electors to fall short of, no contingent election, nothing but the highest average of the two
+  shares. The Electoral College's spoiler logic needs a threshold *and* winner-take-all states — a
+  small transfer crossing a discrete boundary — and the hybrid has neither, so there is no boundary
+  for a third party to tip. What third parties do reach is the popular-vote denominator, and there
+  they scale **both** majors' shares by the same `1 - t`, where `t` is their combined share. That
+  is order-preserving: it can never change *who* leads the popular vote, only by how much. Removing
+  them multiplies the margin by `1 / (1 - t)` — in 2000, `t = 3.92%`, taking 0.5113 pp to
+  0.5322 pp. To reach Bush's 0.9294 pp electoral margin they would have needed about **45%** of the
+  popular vote. The one route by which a third party genuinely moves a hybrid outcome is by winning
+  electoral votes off a major — Thurmond took 39 of 531 in 1948, Wallace 46 in 1968 — which shows
+  up in `ec_share` and is the opposite of a dilution story.
 
   **The relation, and the three conditions it actually needs.** Write it as
   `hybrid_margin = |ec_margin - pv_margin| / 2`. It holds when **all three** of the following are
   true, and it is worth stating them because the obvious reading of the first is that it is the
-  only one. (Every figure below is rounded for reading. The relation holds to full double
-  precision in the shipped data; it will not always reproduce digit-for-digit from rounded
-  values, so `->` below is "gives", not decimal equality.)
+  only one. (Every figure below is rounded for reading. The relation holds in the shipped data to
+  within floating-point rounding — the 2000 and 2016 residuals are ~1e-15 — and will not always
+  reproduce digit-for-digit from rounded values, so `->` below is "gives", not decimal equality.)
 
   1. **The two leaders differ** — an EC/PV flip. All three margins are **unsigned** top-2 gaps
-     (`hybrid._margin`, `src/usvote/hybrid.py:913`, returns `top1 - top2` over scores sorted
-     descending), so the *subtraction* arises only because the leaders differ. Where one candidate
+     (`hybrid._margin`, `src/usvote/hybrid.py:913`, returns the top-2 gap in percentage points,
+     `(top1 - top2) * 100`, over scores sorted descending), so the *subtraction* arises only
+     because the leaders differ. Where one candidate
      leads both measures the margins **add**: 2020 is `(13.7546 + 4.4489) / 2 -> 9.1018`,
      1984 `(95.1673 + 18.2256) / 2 -> 56.6965`.
   2. **The same two candidates are the top two on all three measures.** A flip fixes only rank 1

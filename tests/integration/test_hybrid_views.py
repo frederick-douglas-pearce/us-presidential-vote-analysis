@@ -459,7 +459,7 @@ def test_hybrid_views_over_a_real_full_warehouse(
         ) is True
         assert summary.loc[2000, "pv_winner"] != summary.loc[2000, "ec_winner"]
         # The trap #123 documented and deliberately did not assert: on the real
-        # national denominators the hybrid does NOT follow the popular vote in 2000.
+        # national figures the hybrid does NOT follow the popular vote in 2000.
         assert non_null_flag(
             summary.loc[2000, "hybrid_flip"], label="2000 hybrid_flip"
         ) is False, (
