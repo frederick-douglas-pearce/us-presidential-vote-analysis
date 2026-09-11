@@ -1352,12 +1352,13 @@ class TestKnownFlips:
         (Bush (271/538 + 50456169/105593982) / 2 = 0.4908 against Gore's 0.4887).
 
         **Third parties are not the reason**, tempting as that reading is. The hybrid
-        averages the two ratios, so its margin is exactly ``(ec_margin - pv_margin) / 2``
-        — and Bush's EC margin (0.9294 pp) is wider than Gore's popular-vote margin
-        (0.5113 pp), which is what leaves the average with Bush. Gore's popular-vote
-        margin would have to *exceed* the EC margin to flip it, and no renormalization of
-        the denominator gets it there: dropping every third-party vote moves it only to
-        0.5322 pp, since it raises both candidates' shares and barely widens the gap.
+        averages the two ratios, so where one pair leads both measures — as Bush and Gore
+        do here — its margin is exactly ``(ec_margin - pv_margin) / 2``. Bush's EC margin
+        (0.9294 pp) is wider than Gore's popular-vote margin (0.5113 pp), which is what
+        leaves the average with Bush. Gore's margin would have to *exceed* the EC margin
+        to flip it, and no renormalization of the denominator gets it there: dropping
+        every third-party vote moves it only to 0.5322 pp, since it raises both
+        candidates' shares and barely widens the gap.
         Pinning a hybrid flip here would teach the opposite of the real result. The
         live-warehouse hybrid pin belongs to #124; what *is* real and asserted here is
         the ordering.

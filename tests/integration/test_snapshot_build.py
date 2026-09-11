@@ -396,10 +396,11 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 "2000 must NOT flip on the hybrid — asserted because the two-way unit "
                 "fixture points the other way"
             )
-            # Why it does not flip: the hybrid averages the two ratios, so its margin is
-            # (ec_margin - pv_margin) / 2, and Bush's EC margin (0.9294 pp) is wider than
-            # Gore's PV margin (0.5113 pp). Third parties are not the reason -- the repo
-            # said they were until #191 corrected it (see D050's correction).
+            # Why it does not flip: the hybrid averages the two ratios, so with one pair
+            # leading both measures its margin is (ec_margin - pv_margin) / 2 -- and Bush's
+            # EC margin (0.9294 pp) is wider than Gore's PV margin (0.5113 pp). Third
+            # parties are not the reason; the repo said they were until #191 corrected it
+            # (see D050's correction).
 
             # The divergence itself, which is the whole of D048's action item for #102:
             # BEFORE the popular-vote window the view has no roster row and reads NULL,

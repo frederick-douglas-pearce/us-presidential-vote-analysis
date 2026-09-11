@@ -2670,11 +2670,14 @@ separable from the tie check because a view cannot `raise`.
 
   **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
   is false.** Nader's votes are not why the hybrid stays with Bush. The hybrid is the **average of
-  the two ratios**, so its margin is exactly `(ec_margin - pv_margin) / 2` — and the shipped
-  `hybrid_summary` gives `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp`, `hybrid_margin =
-  0.2090 pp`, which is that identity to five decimals. Bush's EC margin is simply wider than
-  Gore's popular-vote margin. Gore's popular-vote margin would have to **exceed 0.9294 pp** to
-  flip the hybrid, and no renormalization of the denominator gets it there: dropping *every*
+  the two ratios**, so wherever one pair leads both measures — as Bush and Gore do in 2000, and
+  Trump and Clinton do in 2016 — the hybrid margin is exactly `(ec_margin - pv_margin) / 2`. The
+  shipped `hybrid_summary` gives 2000 as `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp`,
+  `hybrid_margin = 0.2090 pp`, which is that identity to five decimals. Bush's EC margin is simply
+  wider than Gore's popular-vote margin. (The identity is not a universal law of the measure: the
+  three top-2 sets can differ within a year, which is why the three margins are each taken over
+  their own method's non-NULL scores.) Gore's margin would have to **exceed 0.9294 pp** to flip
+  the hybrid, and no renormalization of the denominator gets it there: dropping *every*
   third-party vote raises both candidates' shares and moves the popular-vote margin only to
   0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854. The original bullet is left
   above as written; this correction is what is authoritative on the cause.
