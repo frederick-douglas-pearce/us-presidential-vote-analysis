@@ -2678,19 +2678,33 @@ separable from the tie check because a view cannot `raise`.
   there: dropping *every* third-party vote raises both candidates' shares and moves the
   popular-vote margin only to 0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
 
-  **Why no third-party story is available here at all — the structural reason, not just the 2000
-  arithmetic** (Fred, 2026-09-11). The hybrid has **no threshold**: no majority of the appointed
-  electors to fall short of, no contingent election, nothing but the highest average of the two
-  shares. The Electoral College's spoiler logic needs a threshold *and* winner-take-all states — a
-  small transfer crossing a discrete boundary — and the hybrid has neither, so there is no boundary
-  for a third party to tip. What third parties do reach is the popular-vote denominator, and there
-  they scale **both** majors' shares by the same `1 - t`, where `t` is their combined share. That
-  is order-preserving: it can never change *who* leads the popular vote, only by how much. Removing
-  them multiplies the margin by `1 / (1 - t)` — in 2000, `t = 3.92%`, taking 0.5113 pp to
-  0.5322 pp. To reach Bush's 0.9294 pp electoral margin they would have needed about **45%** of the
-  popular vote. The one route by which a third party genuinely moves a hybrid outcome is by winning
-  electoral votes off a major — Thurmond took 39 of 531 in 1948, Wallace 46 in 1968 — which shows
-  up in `ec_share` and is the opposite of a dilution story.
+  **Why the dilution story in particular is structurally unavailable** (Fred, 2026-09-11). A third
+  party can reach a presidential outcome by three channels, and the hybrid closes two of them:
+
+  1. **The threshold channel — closed.** The hybrid has no majority of the appointed electors to
+     fall short of and no contingent election behind it; winning is simply holding the highest
+     average of the two shares. So the classic spoiler move of *denying* someone a majority has no
+     analogue, because there is no boundary to hold anyone below.
+  2. **The dilution channel — inert, and this is the one D050 got wrong.** Third-party votes reach
+     the popular-vote half only by sitting in its denominator, where they scale **both** majors'
+     shares by the same `1 - t` (their combined share). Scaling is order-preserving, so it can
+     never change *who* leads the popular vote, only by how much: removing them multiplies the
+     margin by `1 / (1 - t)`. In 2000, `t = 3.92%`, taking 0.5113 pp to 0.5322 pp — and reaching
+     Bush's 0.9294 pp electoral margin would have needed third parties at roughly **45%** of the
+     popular vote.
+  3. **The winner-take-all channel — inherited, not closed.** `ec_share` is built from electoral
+     votes, which states award winner-take-all, so a third party that changes *which* candidate
+     takes a state's electors does move the hybrid. That covers a third party winning electors
+     outright (Thurmond took 39 of 531 in 1948, Wallace 46 in 1968) and equally the counterfactual
+     usually meant by "spoiler": had Florida's 25 gone the other way in 2000, the hybrid would have
+     gone to Gore, 0.5119 to 0.4675.
+
+  Channel 3 is worth stating precisely because it is what makes the correction a real distinction
+  rather than a blanket denial. It is a claim about **where votes would otherwise have gone** — a
+  counterfactual about voters, which this project's data cannot settle — and it moves the outcome
+  through the *electoral* half. The claim corrected above is channel 2: that Nader's votes, by
+  sitting in the national popular-vote denominator, are what kept the hybrid with Bush. That one is
+  arithmetically false, and channel 3 does not rescue it.
 
   **The relation, and the three conditions it actually needs.** Write it as
   `hybrid_margin = |ec_margin - pv_margin| / 2`. It holds when **all three** of the following are
