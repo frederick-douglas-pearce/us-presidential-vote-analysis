@@ -2669,18 +2669,26 @@ separable from the tie check because a view cannot `raise`.
   two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
 
   **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
-  is false.** Nader's votes are not why the hybrid stays with Bush. The hybrid is the **average of
-  the two ratios**, so wherever one pair leads both measures — as Bush and Gore do in 2000, and
-  Trump and Clinton do in 2016 — the hybrid margin is exactly `(ec_margin - pv_margin) / 2`. The
-  shipped `hybrid_summary` gives 2000 as `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp`,
-  `hybrid_margin = 0.2090 pp`, which is that identity to five decimals. Bush's EC margin is simply
-  wider than Gore's popular-vote margin. (The identity is not a universal law of the measure: the
-  three top-2 sets can differ within a year, which is why the three margins are each taken over
-  their own method's non-NULL scores.) Gore's margin would have to **exceed 0.9294 pp** to flip
-  the hybrid, and no renormalization of the denominator gets it there: dropping *every*
+  is false.** Nader's votes are not why the hybrid stays with Bush. In a **flip year** the EC
+  leader and the popular-vote leader are different people, so averaging the two ratios makes the
+  hybrid margin exactly `|ec_margin - pv_margin| / 2` — and **the hybrid follows whichever measure
+  has the wider margin.** The shipped `hybrid_summary` gives 2000 as `ec_margin = 0.9294 pp`,
+  `pv_margin = 0.5113 pp`, `hybrid_margin = 0.2090 pp`, which is that identity to five decimals;
+  Bush's EC margin is simply wider than Gore's popular-vote margin. 2016 is the same shape
+  (`14.3123` and `2.0971` giving `6.1076`). Gore's margin would have to **exceed 0.9294 pp** to
+  flip the hybrid, and no renormalization of the denominator gets it there: dropping *every*
   third-party vote raises both candidates' shares and moves the popular-vote margin only to
-  0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854. The original bullet is left
-  above as written; this correction is what is authoritative on the cause.
+  0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
+
+  **The sign is the flip condition, not a convention.** All three margins are **unsigned** top-2
+  gaps (`hybrid._margin` returns `top1 - top2` over scores sorted descending), so the subtraction
+  arises only because the two leaders differ. Where one candidate leads *both* measures the margins
+  **add**: 2020 is `(13.7546 + 4.4489) / 2 = 9.1018`, 1984 `(95.1673 + 18.2256) / 2 = 56.6965`.
+  Neither form is a law of the measure — the three top-2 sets can differ within one year, which is
+  why the three margins are each taken over their own method's non-NULL scores.
+
+  The original bullet is left above as written; this correction is what is authoritative on the
+  cause.
 
 ---
 

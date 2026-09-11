@@ -1351,14 +1351,21 @@ class TestKnownFlips:
         hybrid goes to Gore; on the **real national** figures it does not
         (Bush (271/538 + 50456169/105593982) / 2 = 0.4908 against Gore's 0.4887).
 
-        **Third parties are not the reason**, tempting as that reading is. The hybrid
-        averages the two ratios, so where one pair leads both measures — as Bush and Gore
-        do here — its margin is exactly ``(ec_margin - pv_margin) / 2``. Bush's EC margin
-        (0.9294 pp) is wider than Gore's popular-vote margin (0.5113 pp), which is what
-        leaves the average with Bush. Gore's margin would have to *exceed* the EC margin
-        to flip it, and no renormalization of the denominator gets it there: dropping
-        every third-party vote moves it only to 0.5322 pp, since it raises both
-        candidates' shares and barely widens the gap.
+        **Third parties are not the reason**, tempting as that reading is. In a year
+        where the EC leader and the popular-vote leader are different people — which is
+        what a flip *is* — averaging the two ratios makes the hybrid margin exactly
+        ``|ec_margin - pv_margin| / 2``, so **the hybrid follows whichever measure has the
+        wider margin.** That, and not third parties, is what separates this fixture from
+        the real thing: on this six-state two-way subset the popular-vote margin is the
+        wider one (3.1420 pp against an EC margin of 1.6949 pp, giving Gore the hybrid by
+        0.7236 pp), while on real national figures the EC margin is the wider one
+        (0.9294 pp against 0.5113 pp, giving Bush the hybrid by 0.2090 pp). Gore's
+        popular-vote margin would have to *exceed* the EC margin to flip it, and no
+        renormalization of the denominator gets it there: dropping every third-party vote
+        moves it only to 0.5322 pp, since it raises both candidates' shares and barely
+        widens the gap. (Where one candidate leads *both* measures the two margins add
+        instead — 2020 is ``(13.7546 + 4.4489) / 2 = 9.1018`` — so this is a property of
+        flip years, not a law of the measure.)
         Pinning a hybrid flip here would teach the opposite of the real result. The
         live-warehouse hybrid pin belongs to #124; what *is* real and asserted here is
         the ordering.
