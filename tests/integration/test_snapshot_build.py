@@ -396,12 +396,11 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 "2000 must NOT flip on the hybrid — asserted because the two-way unit "
                 "fixture points the other way"
             )
-            # Why it does not flip: in a flip year the EC and PV leaders are different
-            # people, so averaging the two ratios makes the hybrid margin exactly
-            # |ec_margin - pv_margin| / 2 -- the hybrid follows whichever measure has the
-            # wider margin, and here that is the EC's 0.9294 pp against the PV's
-            # 0.5113 pp. Third parties are not the reason; the repo said they were until
-            # #191 corrected it (see D050's correction).
+            # Why it does not flip: the hybrid averages the two ratios, and in 2000 the EC
+            # and PV leaders are different people, so it follows whichever of the two margins
+            # is wider -- the EC's 0.9294 pp against the PV's 0.5113 pp. Third parties are
+            # not the reason; the repo said they were until #191 corrected it (D050's
+            # correction states the general relation and the three conditions it needs).
 
             # The divergence itself, which is the whole of D048's action item for #102:
             # BEFORE the popular-vote window the view has no roster row and reads NULL,

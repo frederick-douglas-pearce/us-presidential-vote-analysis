@@ -2669,23 +2669,45 @@ separable from the tie check because a view cannot `raise`.
   two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
 
   **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
-  is false.** Nader's votes are not why the hybrid stays with Bush. In a **flip year** the EC
-  leader and the popular-vote leader are different people, so averaging the two ratios makes the
-  hybrid margin exactly `|ec_margin - pv_margin| / 2` — and **the hybrid follows whichever measure
-  has the wider margin.** The shipped `hybrid_summary` gives 2000 as `ec_margin = 0.9294 pp`,
-  `pv_margin = 0.5113 pp`, `hybrid_margin = 0.2090 pp`, which is that identity to five decimals;
-  Bush's EC margin is simply wider than Gore's popular-vote margin. 2016 is the same shape
-  (`14.3123` and `2.0971` giving `6.1076`). Gore's margin would have to **exceed 0.9294 pp** to
-  flip the hybrid, and no renormalization of the denominator gets it there: dropping *every*
+  is false.** Nader's votes are not why the hybrid stays with Bush. **Bush's electoral margin is
+  simply wider than Gore's popular-vote margin**, and the hybrid — an average of the two ratios —
+  follows the wider of the two. The shipped `hybrid_summary` gives 2000 as
+  `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp` and `hybrid_margin = 0.2090 pp` — the hybrid
+  margin being half the gap between the other two. Gore's margin would have to **exceed
+  0.9294 pp** to take the hybrid, and no renormalization of the denominator gets it there: dropping *every*
   third-party vote raises both candidates' shares and moves the popular-vote margin only to
   0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
 
-  **The sign is the flip condition, not a convention.** All three margins are **unsigned** top-2
-  gaps (`hybrid._margin` returns `top1 - top2` over scores sorted descending), so the subtraction
-  arises only because the two leaders differ. Where one candidate leads *both* measures the margins
-  **add**: 2020 is `(13.7546 + 4.4489) / 2 = 9.1018`, 1984 `(95.1673 + 18.2256) / 2 = 56.6965`.
-  Neither form is a law of the measure — the three top-2 sets can differ within one year, which is
-  why the three margins are each taken over their own method's non-NULL scores.
+  **The relation, and the three conditions it actually needs.** Write it as
+  `hybrid_margin = |ec_margin - pv_margin| / 2`. It holds when **all three** of the following are
+  true, and it is worth stating them because the obvious reading of the first is that it is the
+  only one. (Every figure below is rounded for reading. The relation holds to full double
+  precision in the shipped data; it will not always reproduce digit-for-digit from rounded
+  values, so `->` below is "gives", not decimal equality.)
+
+  1. **The two leaders differ** — an EC/PV flip. All three margins are **unsigned** top-2 gaps
+     (`hybrid._margin`, `src/usvote/hybrid.py:913`, returns `top1 - top2` over scores sorted
+     descending), so the *subtraction* arises only because the leaders differ. Where one candidate
+     leads both measures the margins **add**: 2020 is `(13.7546 + 4.4489) / 2 -> 9.1018`,
+     1984 `(95.1673 + 18.2256) / 2 -> 56.6965`.
+  2. **The same two candidates are the top two on all three measures.** A flip fixes only rank 1
+     on two of them. Where a third candidate takes rank 2 on one measure the arithmetic no longer
+     closes: A (ec .50, pv .30), B (ec .10, pv .40), C (ec .40, pv .30) is a flip with both margins
+     at 10 pp, so the relation predicts 0, while the hybrid's own top two are A and C at 5 pp.
+     2016 satisfies this despite five faithless-elector rows carrying electoral votes and no
+     popular vote, because those rows never reach rank 2 on either measure: `14.3123` against
+     `2.0971` -> `6.1076`.
+  3. **Coverage policy (b).** `hybrid_score` reads the policy-selected `ec_share_hybrid` while
+     `ec_margin` reads the policy-invariant `ec_share_full`, and under (b) — the shipped default,
+     and all these views materialize — the two are equal (`apply_coverage_policy`,
+     `src/usvote/hybrid.py:680`, whose docstring states it). Under (c) they part, so the hybrid
+     margin moves while the other two stay pinned: on real 1824 figures, **8.09 pp** under (b)
+     against **14.69 pp** under (c) (`docs/pv-coverage.md`). The same divergence is pinned on the
+     unit fixture — whose numbers are its own, 0.0828 against 0.1488 as ratios — by
+     `tests/unit/test_hybrid.py::TestCoveragePolicySwitch::test_1824_same_winner_but_the_margin_nearly_doubles`.
+
+  Condition 3 is why this is a note on *this* decision rather than a general property of the
+  measure. None of it changes a number above: 2000 satisfies all three.
 
   The original bullet is left above as written; this correction is what is authoritative on the
   cause.

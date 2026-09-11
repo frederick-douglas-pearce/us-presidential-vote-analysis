@@ -404,10 +404,12 @@ def test_hybrid_views_over_a_real_full_warehouse(
     the point of this test rather than a regression.** #123's fixture uses two-way state
     totals over a six-state subset; on the real national figures the hybrid does **not**
     go to Gore (Bush 0.4908 to Gore 0.4887) even though the popular vote does. The reason
-    is not third parties: in a flip year the EC leader and the popular-vote leader are
-    different people, so averaging the two ratios makes the hybrid margin exactly
-    ``|ec_margin - pv_margin| / 2`` and the hybrid follows whichever measure has the wider
-    margin — here the EC's 0.9294 pp against the popular vote's 0.5113 pp.
+    is not third parties: the hybrid averages the two ratios, and in 2000 the EC leader and
+    the popular-vote leader are different people, so the hybrid follows whichever of the two
+    margins is the wider — the EC's 0.9294 pp against the popular vote's 0.5113 pp, giving
+    `hybrid_margin` 0.2090 pp, half the gap between them. D050's correction in
+    ``.claude/specs/decisions.md`` states that relation generally, with the three conditions
+    it needs.
     """
     from usvote.warehouse import run_warehouse
 
