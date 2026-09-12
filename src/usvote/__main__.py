@@ -325,14 +325,26 @@ def _run_all(args: argparse.Namespace) -> int:
         # thing the operator needs told, and without this arm they got a bare traceback
         # after a multi-minute build instead. The sibling arms exist for the same
         # reason -- which half is built is the operator's next-move information.
+        # Name only the sources that actually ran: UCSB is skipped whenever no
+        # snapshot is present, which is the ordinary path for a public clone, so an
+        # unconditional "EC, MIT and UCSB committed" names a source that never started.
+        # The sibling MIT arm below is careful about exactly this.
+        committed = "EC, MIT and UCSB" if ucsb_html_dir is not None else "EC and MIT"
+        # The remedy differs by which guard fired. Only a corpus problem is fixed by
+        # snapshotting; a parse or transform failure means the published layout or the
+        # jurisdiction set moved, and re-downloading the same files changes nothing.
+        remedy = (
+            "Complete the corpus with `python -m usvote.census snapshot`"
+            if isinstance(e, CensusScrapeError)
+            else "Fix the cause above (the published layout or jurisdiction set moved)"
+        )
         print(f"Census ingestion failed: {e}", file=sys.stderr)
         print(
-            "The EC, MIT and UCSB loads COMMITTED before this point, but the join "
-            "and hybrid views were NOT rebuilt — the warehouse holds facts and no "
-            "views. Complete the corpus with `python -m usvote.census snapshot`, "
-            "then re-run `python -m usvote all --replace` to rebuild cleanly. A bare "
-            "re-run without --replace will hit a unique violation on the "
-            "already-loaded sources.",
+            f"The {committed} loads COMMITTED before this point, but the join and "
+            f"hybrid views were NOT rebuilt — the warehouse holds facts and no views. "
+            f"{remedy}, then re-run `python -m usvote all --replace` to rebuild "
+            f"cleanly. A bare re-run without --replace will hit a unique violation on "
+            f"the already-loaded sources.",
             file=sys.stderr,
         )
         return 1

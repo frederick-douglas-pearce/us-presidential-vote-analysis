@@ -60,7 +60,7 @@ STITCH_YEAR = 2000
 #: **92,228,531** where the original publication gives **92,228,496**, and for 1970
 #: **203,211,926** against **203,302,031** (S1 §7). Differences of that size will never
 #: trip an assert, so the only defence is to record which tabulation a figure came from
-#: — exactly as the EC pipeline pins its Archives corpus. The stitch below means this
+#: — exactly as the EC pipeline pins its Archives corpus. The stitch above means this
 #: project takes 1910-1990 from the working paper, so those particular disagreements do
 #: not arise in the loaded data; the pin is what makes that statement checkable rather
 #: than merely true today.

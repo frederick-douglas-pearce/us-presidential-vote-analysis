@@ -971,6 +971,8 @@ def test_all_reports_a_census_failure_as_a_half_built_warehouse(
     assert "COMMITTED" in err, "the operator is not told the sources landed"
     assert "NOT rebuilt" in err, "the operator is not told the views are missing"
     assert "--replace" in err, "no recovery path given"
+    # A corpus problem IS fixed by snapshotting, so this arm names that remedy...
+    assert "usvote.census snapshot" in err
 
 
 def test_all_catches_every_census_error_type_not_just_the_scrape_one(
@@ -996,3 +998,52 @@ def test_all_catches_every_census_error_type_not_just_the_scrape_one(
 
         monkeypatch.setattr(top, "run_warehouse", boom)
         assert top.main(["all"]) == 1, f"{type(error).__name__} escaped the arm"
+
+
+def test_the_census_failure_message_names_only_the_sources_that_ran(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, N4. UCSB is skipped whenever no snapshot is present — the ordinary
+    path for a public clone — so an unconditional "EC, MIT and UCSB committed" names a
+    source that never started, in the message the operator reads to decide what to do."""
+    from usvote.census.scrape import CensusScrapeError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusScrapeError("corpus incomplete")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    monkeypatch.delenv("USVOTE_UCSB_HTML_DIR", raising=False)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "EC and MIT loads COMMITTED" in err
+    assert "UCSB" not in err.split("Census ingestion failed")[1]
+
+
+def test_a_parse_failure_is_not_told_to_re_download_the_same_files(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, N4, second half.
+
+    Only a corpus problem is fixed by snapshotting. A CensusParseError means the
+    published layout moved and a CensusTransformError means the jurisdiction set did —
+    re-downloading the identical files changes nothing, so sending the operator to the
+    network is advice that cannot work.
+    """
+    from usvote.census.parse import CensusParseError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusParseError("the population-change table has no 'Area' column")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "usvote.census snapshot" not in err
+    assert "layout or jurisdiction set moved" in err

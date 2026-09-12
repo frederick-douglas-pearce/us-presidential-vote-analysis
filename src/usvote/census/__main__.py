@@ -79,27 +79,36 @@ def _run_load(replace: bool) -> int:
         print(e, file=sys.stderr)
         return 1
 
+    # ``close=False``: this function owns the close, in the ``finally`` below.
+    # ``run_census_pipeline`` has no ``try/finally`` of its own, so its ``close=True``
+    # never fires on a raise — and a DB error this function does not *name* would then
+    # leak the connection just as surely as one it fails to catch. One owner, one exit.
     try:
-        loaded = run_census_pipeline(dbc, corpus_dir, replace=replace, close=True)
-    except (
-        CensusScrapeError,
-        CensusTransformError,
-        CensusParseError,
-        psycopg2.Error,
-    ) as e:
-        # ``run_census_pipeline`` has no try/finally, so its ``close=True`` never fires
-        # on a raise — close here rather than leaking the connection. Nothing was
-        # written: both guards run before the transaction opens.
+        loaded = run_census_pipeline(dbc, corpus_dir, replace=replace)
+    except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
         print(f"Census load failed: {e}", file=sys.stderr)
         print(
-            "The corpus, parse and jurisdiction guards all run before any write, so a "
-            "failure from one of those loaded nothing. A UniqueViolation instead means "
-            "the table already holds these rows — that is the documented "
-            "non-destructive guard; pass --replace to rebuild.",
+            "Nothing was loaded — the corpus, parse and jurisdiction guards all run "
+            "before the transaction opens.",
             file=sys.stderr,
         )
-        dbc.close_connection()
         return 1
+    except psycopg2.errors.UniqueViolation:
+        # The one DB error with a *documented* meaning here: the table already holds
+        # these rows, which is the non-destructive guard working as designed rather
+        # than a failure. Deliberately narrow — an earlier version caught the whole
+        # ``psycopg2.Error`` tree while printing advice that only fits this case, so a
+        # ForeignKeyViolation or a dropped connection got told to pass ``--replace``.
+        print(
+            "Census load refused: dwh.census_population already holds these rows. "
+            "That is the documented non-destructive guard, not a crash — pass "
+            "--replace to rebuild the table.",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        dbc.close_connection()
+
     print(
         f"Census ingestion complete — {len(loaded)} dwh.census_population rows, "
         f"{loaded['census_year'].min()}-{loaded['census_year'].max()}, "

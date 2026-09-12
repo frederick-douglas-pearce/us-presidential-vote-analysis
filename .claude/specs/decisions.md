@@ -3477,7 +3477,9 @@ loudly:
 **Decision.**
 
 1. **A new source-namespaced subpackage `usvote/census/`** (D015), with `scrape` (the D023 corpus
-   stage) / `parse` / `transform` / `schema` / `load` / `pipeline` / `config` / `__main__`. It reads
+   stage) / `parse` / `transform` / `schema` / `load` / `pipeline` / `config` / `sources` /
+   `__main__`. (`sources.py` is the dependency-free source catalog — the single authority
+   for each file's URL, filename and vintage, which §5's pin below resolves against.) It reads
    the EC spine and is read back only by the `warehouse.py` composition root. Census is **not** a
    popular-vote source: it conforms to no `usvote/pv/` contract, writes no `dwh.pv_votes`, and takes
    no part in the D017 resolution views.

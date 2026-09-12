@@ -10,11 +10,12 @@ the point — the same reasoning that puts :mod:`usvote.count_status` and
 :mod:`usvote.years` at the top level rather than inside a stage.
 
 **Why this module exists at all** (#181 review, F10/F2): the filename and the vintage
-were previously spelled *twice* — authoritatively here-in-`scrape.py`, and again as
-literal maps in ``transform.py`` — with nothing tying the two. A rename would have
-updated the fetch and silently falsified every loaded row's ``source_file`` provenance,
-and the vintage had no authority at all. Both are now single-sourced on
-:data:`CENSUS_SOURCES`, so the duplication cannot be reintroduced without deleting a
+were previously spelled *twice* — once in :mod:`usvote.census.scrape`, which owned
+them, and again as literal maps in :mod:`usvote.census.transform` — with nothing tying
+the two. A rename would have updated the fetch and silently falsified every loaded
+row's ``source_file`` provenance, and the vintage had no authority at all. Both are
+now single-sourced on :data:`CENSUS_SOURCES`, so the duplication cannot be
+reintroduced without deleting a
 field.
 """
 

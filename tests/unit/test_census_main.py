@@ -89,17 +89,30 @@ class TestDispatch:
         assert census_main.main(["load", "--replace"]) == 0
         assert census_env["calls"][0]["replace"] is True
 
-    def test_the_connection_is_closed_by_the_pipeline_on_the_happy_path(
+    def test_the_cli_owns_the_close_not_the_pipeline(
         self, census_env: dict[str, Any]
     ) -> None:
+        """One owner, one exit.
+
+        The CLI no longer passes ``close=True`` — it closes in a ``finally``. That is
+        the stronger arrangement: ``run_census_pipeline`` has no ``try/finally``, so its
+        own ``close=True`` never fires on a raise, and a DB error the CLI does not
+        *name* would leak the connection just as surely as one it fails to catch.
+        """
         assert census_main.main([]) == 0
-        assert census_env["calls"][0]["close"] is True
+        assert census_env["calls"][0].get("close") is not True
+        assert census_env["dbc"].closed
 
 
 class TestErrorArm:
-    """`run_census_pipeline` has no try/finally, so its `close=True` never fires on a
-    raise. Every error the CLI can meet must therefore be caught *here* or the
-    connection leaks — which is what the arm's own comment claims it prevents."""
+    """Two separable properties, and the split is the point.
+
+    ``run_census_pipeline`` has no ``try/finally``, so its own ``close=True`` never fires
+    on a raise. **Closing** is therefore the CLI's job on every path — which a ``finally``
+    does, without the catch having to be wide. **Reporting** is a separate question: each
+    error the CLI names gets advice that fits it, and an error it does not name simply
+    propagates with the connection already closed.
+    """
 
     @pytest.mark.parametrize(
         "error",
@@ -107,11 +120,10 @@ class TestErrorArm:
             census_main.CensusScrapeError("corpus incomplete"),
             census_main.CensusTransformError("unknown jurisdiction"),
             census_main.CensusParseError("layout changed"),
-            psycopg2.errors.UniqueViolation("already loaded"),
         ],
-        ids=["scrape", "transform", "parse", "unique-violation"],
+        ids=["scrape", "transform", "parse"],
     )
-    def test_every_reachable_error_is_caught_and_closes_the_connection(
+    def test_each_ingest_error_is_caught_and_reported_as_nothing_loaded(
         self,
         census_env: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
@@ -124,7 +136,41 @@ class TestErrorArm:
         monkeypatch.setattr(census_main, "run_census_pipeline", boom)
         assert census_main.main([]) == 1
         assert census_env["dbc"].closed, "the connection leaked"
-        assert "Census load failed" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "Census load failed" in err
+        assert "Nothing was loaded" in err
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            psycopg2.errors.ForeignKeyViolation("orphan state"),
+            psycopg2.OperationalError("server closed the connection"),
+            RuntimeError("something nobody anticipated"),
+        ],
+        ids=["fk-violation", "operational", "unanticipated"],
+    )
+    def test_an_unnamed_error_still_closes_the_connection(
+        self,
+        census_env: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+    ) -> None:
+        """The property the ``finally`` exists for, and the reason the catch is narrow.
+
+        An earlier version caught the whole ``psycopg2.Error`` tree *in order to* close
+        the connection, and paid for it by printing UniqueViolation advice at a
+        ForeignKeyViolation. Closing in a ``finally`` instead means the catch can be
+        narrow and honest while the connection is still safe on paths nobody named —
+        including a non-psycopg2 error, which the broad catch never covered either.
+        """
+
+        def boom(*a: Any, **k: Any) -> None:
+            raise error
+
+        monkeypatch.setattr(census_main, "run_census_pipeline", boom)
+        with pytest.raises(type(error)):
+            census_main.main([])
+        assert census_env["dbc"].closed, "the connection leaked on an unnamed error"
 
     def test_a_unique_violation_is_explained_as_the_non_destructive_guard(
         self,
@@ -134,13 +180,18 @@ class TestErrorArm:
     ) -> None:
         # A second bare run hitting the natural-key UNIQUE is the *documented* behaviour,
         # not a crash — so the message has to say so and name --replace, or the operator
-        # reads a working guard as a bug.
+        # reads a working guard as a bug. It must NOT say "nothing was loaded": rows are
+        # exactly what is already there.
         def boom(*a: Any, **k: Any) -> None:
             raise psycopg2.errors.UniqueViolation("duplicate key")
 
         monkeypatch.setattr(census_main, "run_census_pipeline", boom)
-        census_main.main([])
-        assert "--replace" in capsys.readouterr().err
+        assert census_main.main([]) == 1
+        err = capsys.readouterr().err
+        assert "--replace" in err
+        assert "already holds these rows" in err
+        assert "Nothing was loaded" not in err
+        assert census_env["dbc"].closed
 
 
 class TestConfigErrors:
