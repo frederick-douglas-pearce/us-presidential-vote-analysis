@@ -1345,14 +1345,41 @@ class TestKnownFlips:
         appointed subtotal; Gore 18,400,507 popular votes to Bush's 17,279,431.
 
         **``hybrid_flip`` is deliberately NOT asserted here, and the omission is the
-        point.** ``state_total_votes`` is the two-way total (the fixture omits third
-        parties), which inflates both shares — and 2000 is the year where that changes
-        the hybrid's answer rather than just its precision. On this two-way subset the
-        hybrid goes to Gore; on the **real national** figures it does not, because Nader's
-        votes sit in the denominator and dilute Gore's popular-vote share
-        (Bush (271/538 + 50456169/105593982) / 2 = 0.4908 against Gore's 0.4887). Pinning
-        a hybrid flip here would teach the opposite of the real result. The live-warehouse
-        hybrid pin belongs to #124; what *is* real and asserted here is the ordering.
+        point.** On this subset the hybrid goes to Gore; on the **real national** figures
+        it does not (Bush (271/538 + 50456169/105593982) / 2 = 0.4908 against Gore's
+        0.4887). Pinning a hybrid flip here would teach the opposite of the real result.
+
+        **Which of the fixture's two simplifications flips it — and it is not the one you
+        would guess.** The fixture differs from the real election twice over: six states
+        instead of 51, and ``state_total_votes`` as the two-way total (third parties
+        omitted), which inflates both shares. Only the first changes the answer:
+
+        - **Third parties are a precision difference, not a directional one.** Put their
+          votes back into these six states' denominators and the hybrid still goes to
+          Gore, 0.4931 to 0.4865 (against 0.5036 to 0.4964 two-way).
+        - **The six-state selection is what flips it.** These six split 90-87 in electoral
+          votes but 18,400,507-17,279,431 in popular votes: a 1.6949 pp electoral margin
+          against a popular-vote margin of 3.1420 pp two-way — or 3.0138 pp with third
+          parties restored, which is the like-for-like comparison. Either way it is the
+          wider of the two, where nationally the electoral margin is the wider (0.9294 pp
+          against 0.5113 pp). The subset reverses which measure leads.
+
+        That ordering of the two margins is the whole mechanism. The hybrid averages the
+        two ratios, so in a year like 2000 — where the EC leader and the popular-vote
+        leader are different people and the same two candidates are the top two on every
+        measure, under the shipped coverage policy — the gap between them comes out at half
+        the gap between the two margins, and **the hybrid follows whichever margin is the
+        wider**. Here that is the popular vote's, by 0.7236 pp to Gore; nationally it is
+        the electoral vote's, by 0.2090 pp to Bush. The dilution story fails on
+        magnitude: Nader's votes reach the popular-vote half only through its denominator,
+        which scales both majors' shares alike, and dropping every third-party vote lifts
+        Gore's margin from 0.5113 pp to just 0.5322 pp — still well short of Bush's
+        0.9294 pp. D050's correction in ``.claude/specs/decisions.md`` sets out that
+        relation with all three conditions it needs, and bounds what it does and does not
+        rule out.
+
+        The live-warehouse hybrid pin belongs to #124; what *is* real and asserted here is
+        the ordering.
         """
         real_2000 = {
             #             EV  winner  Bush pv    Gore pv

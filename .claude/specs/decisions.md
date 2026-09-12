@@ -2568,7 +2568,7 @@ the next change that lands in `scripts/`.
 
 ## D050: the hybrid views materialize policy (b) only, with the pandas builders kept as the tested oracle
 
-**Date:** 2026-08-22
+**Date:** 2026-08-22 (corrected 2026-09-11 — see the correction under the third consequence)
 
 **Context:** #124 (E7-S5) had to expose `usvote/hybrid.py`'s computation as warehouse views —
 the read seam D039 settled for #102. The module had shipped **no SQL by design** (D037 note,
@@ -2667,6 +2667,72 @@ separable from the tie check because a view cannot `raise`.
   denominators Nader's votes dilute Gore's PV share (Bush 0.4908 to Gore 0.4887), so
   `hybrid_flip` is `false` in 2000 even though `pv_flip` is `true` — the opposite of what #123's
   two-way unit fixture shows, which is why that fixture deliberately declined to assert it.
+
+  **Correction (2026-09-11, #191): the outcome and the figures above are right; the stated cause
+  is false.** Nader's votes are not why the hybrid stays with Bush. **Bush's electoral margin is
+  simply wider than Gore's popular-vote margin**, and the hybrid — an average of the two ratios —
+  follows the wider of the two (under the conditions set out below). The shipped `hybrid_summary`
+  gives 2000 as `ec_margin = 0.9294 pp`, `pv_margin = 0.5113 pp` and `hybrid_margin = 0.2090 pp` —
+  the hybrid margin being half the gap between the other two. Gore's margin would have to
+  **exceed 0.9294 pp** to take the hybrid, and no renormalization of the denominator gets it
+  there: dropping *every* third-party vote raises both candidates' shares and moves the
+  popular-vote margin only to 0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
+
+  **Why the dilution story fails, and what that does not prove** (Fred, 2026-09-11). It fails on
+  **magnitude**, and not narrowly. A popular-vote-only third party — Nader in 2000, who won no
+  electors and so carries no candidate row under D007 — reaches the popular-vote half only through
+  its denominator, where it scales **both** majors' shares by the same `1 - t` (its share of the
+  vote). That much *is* structural: scaling is order-preserving, so it can never change **who**
+  leads the popular vote, only by how much. Removing every third-party vote multiplies the margin
+  by `1 / (1 - t)`, lifting Gore's 0.5113 pp to just 0.5322 pp — short of Bush's 0.9294 pp
+  electoral margin by a factor of about 1.75. Closing that gap would have taken third parties at
+  something like **45%** of the popular vote, at which point they would not be third parties. And
+  the spoiler move of *denying* a majority has no analogue here: the hybrid has no majority to
+  deny, only a highest average.
+
+  **What this does not say is that no third-party counterfactual could move 2000's hybrid.** Two
+  would. Had Nader's voters chosen Gore instead, 441,464 of them suffice — the hybrid goes to Gore
+  with the Electoral College **untouched**, because that moves the popular-vote *numerator* rather
+  than the denominator. And had a third party taken electors, or had Florida's 25 gone the other
+  way, `ec_share` moves and the hybrid goes to Gore 0.5119 to 0.4675. Both are claims about **where
+  votes would otherwise have gone** — counterfactuals about voters, which this project's data
+  cannot settle. D050 claimed something narrower, and false: that Nader's votes, *by sitting in the
+  national denominator*, are what kept the hybrid with Bush.
+
+  **The relation, and the three conditions it actually needs.** Write it as
+  `hybrid_margin = |ec_margin - pv_margin| / 2`. It holds when **all three** of the following are
+  true, and it is worth stating them because the obvious reading of the first is that it is the
+  only one. (Every figure below is rounded for reading. The relation holds in the shipped data to
+  within floating-point rounding — the 2000 and 2016 residuals are ~1e-15 — and will not always
+  reproduce digit-for-digit from rounded values, so `->` below is "gives", not decimal equality.)
+
+  1. **The two leaders differ** — an EC/PV flip. All three margins are **unsigned** top-2 gaps
+     (`hybrid._margin`, `src/usvote/hybrid.py:913`, returns the top-2 gap in percentage points,
+     `(top1 - top2) * 100`, over scores sorted descending), so the *subtraction* arises only
+     because the leaders differ. Where one candidate
+     leads both measures the margins **add**: 2020 is `(13.7546 + 4.4489) / 2 -> 9.1018`,
+     1984 `(95.1673 + 18.2256) / 2 -> 56.6965`.
+  2. **The same two candidates are the top two on all three measures.** A flip fixes only rank 1
+     on two of them. Where a third candidate takes rank 2 on one measure the arithmetic no longer
+     closes: A (ec .50, pv .30), B (ec .10, pv .40), C (ec .40, pv .30) is a flip with both margins
+     at 10 pp, so the relation predicts 0, while the hybrid's own top two are A and C at 5 pp.
+     2016 satisfies this despite five faithless-elector rows carrying electoral votes and no
+     popular vote, because those rows never reach rank 2 on either measure: `14.3123` against
+     `2.0971` -> `6.1076`.
+  3. **Coverage policy (b).** `hybrid_score` reads the policy-selected `ec_share_hybrid` while
+     `ec_margin` reads the policy-invariant `ec_share_full`, and under (b) — the shipped default,
+     and all these views materialize — the two are equal (`apply_coverage_policy`,
+     `src/usvote/hybrid.py:680`, whose docstring states it). Under (c) they part, so the hybrid
+     margin moves while the other two stay pinned: on real 1824 figures, **8.09 pp** under (b)
+     against **14.69 pp** under (c) (`docs/pv-coverage.md`). The same divergence is pinned on the
+     unit fixture — whose numbers are its own, 0.0828 against 0.1488 as ratios — by
+     `tests/unit/test_hybrid.py::TestCoveragePolicySwitch::test_1824_same_winner_but_the_margin_nearly_doubles`.
+
+  Condition 3 is why this is a note on *this* decision rather than a general property of the
+  measure. None of it changes a number above: 2000 satisfies all three.
+
+  The original bullet is left above as written; this correction is what is authoritative on the
+  cause.
 
 ---
 
