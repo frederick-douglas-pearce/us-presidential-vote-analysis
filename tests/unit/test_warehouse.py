@@ -2,10 +2,11 @@
 
 Drives :func:`run_warehouse` with the five wired steps (EC / MIT / UCSB / census
 pipelines + :func:`rebuild_views`) monkeypatched to recorders, so the test asserts the
-*composition* — call order, the ``replace`` mapping (EC destructive, every other source
-additive), the explicit UCSB and census skips, and the :class:`WarehouseResult` receipt — without touching a real DB or the stage
+*composition* — call order, the ``replace`` mapping (EC destructive, every other
+source additive), the explicit UCSB and census skips, and the :class:`WarehouseResult`
+receipt — without touching a real DB or the stage
 internals (those have their own tests). Also enforces the D015/D027 composition-root
-invariant: nothing under ``usvote/{mit,ucsb,pv}/`` imports ``usvote.warehouse``.
+invariant: nothing under ``usvote/{mit,ucsb,pv,census}/`` imports ``usvote.warehouse``.
 """
 
 from __future__ import annotations
@@ -292,10 +293,10 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
 def test_no_pv_source_imports_the_warehouse_composition_root() -> None:
     """D015/D027: ``warehouse`` imports from every source; a back-import inverts D015.
 
-    ``warehouse.py`` is a composition root (allowed to import EC + both PV subpackages),
-    but the exemption only stays honest if the dependency never runs the other way. Mirror
-    the greppable ``dwh.votes`` invariant with an enforced test: no module under
-    ``usvote/{mit,ucsb,pv}/`` may import ``usvote.warehouse``.
+    ``warehouse.py`` is a composition root (allowed to import EC, both PV subpackages
+    and census), but the exemption only stays honest if the dependency never runs the
+    other way. Mirror the greppable ``dwh.votes`` invariant with an enforced test: no
+    module under ``usvote/{mit,ucsb,pv,census}/`` may import ``usvote.warehouse``.
 
     **Parsed, not grepped** — via ``test_layering.imports``, whose own docstring makes
     the argument: a regex over ``import usvote.warehouse|from usvote.warehouse`` misses

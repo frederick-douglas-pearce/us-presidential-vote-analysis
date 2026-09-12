@@ -8,8 +8,8 @@ constant with a test rather than an inline condition:
   came from, recorded per row because the two disagree by amounts no assert can catch;
 * **scope** (:data:`NON_STATE_AREAS`) — which published rows are aggregates rather than
   jurisdictions;
-* **the boundary correction** (:data:`VIRGINIA_CORRECTION_CENSUSES`) — the one hazard in
-  this source that produces plausible wrong numbers instead of a load error.
+* **the boundary correction** (:data:`VIRGINIA_CORRECTION_CENSUSES`) — a hazard in this
+  source that produces plausible wrong numbers instead of a load error.
 
 The EC spine is read for the jurisdiction check, injected as a frame the way
 :mod:`usvote.ucsb.transform` takes ``ec_participation`` — the D006-allowed direction

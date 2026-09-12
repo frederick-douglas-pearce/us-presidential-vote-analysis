@@ -23,6 +23,6 @@ D059 and the acceptance criteria on #181 for the three reasons.
 Two source files, overlapping on 1910–1990 at different vintages, are stitched by an
 explicit rule so each census comes from exactly one of them — see
 :mod:`usvote.census.transform`, which also carries the Virginia 1824–1860 boundary
-correction, the one hazard in this source that produces plausible wrong numbers rather
-than a load error.
+correction, a hazard in this source that produces plausible wrong numbers rather than
+a load error.
 """

@@ -329,9 +329,7 @@ def _run_all(args: argparse.Namespace) -> int:
         # Which sources ran is not fixed: UCSB is skipped whenever no snapshot is
         # present, the ordinary path for a public clone, so the message is built from
         # the same ``ucsb_html_dir`` that decided it rather than naming UCSB
-        # unconditionally. The remedy varies too -- only a corpus problem is fixed by
-        # snapshotting, while a parse or transform failure means the published layout or
-        # the jurisdiction set moved and re-downloading identical files changes nothing.
+        # unconditionally.
         committed = "EC, MIT and UCSB" if ucsb_html_dir is not None else "EC and MIT"
         # The remedy differs by which guard fired. Only a corpus problem is fixed by
         # snapshotting; a parse or transform failure means the published layout or the

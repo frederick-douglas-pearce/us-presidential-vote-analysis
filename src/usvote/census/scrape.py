@@ -63,8 +63,7 @@ __all__ = [
 #: string lives in the source-neutral top-level config).
 USER_AGENT = config.USER_AGENT
 
-#: Seconds to wait on a fetch before giving up. These are multi-hundred-KB spreadsheets
-#: rather than HTML pages, so the EC timeout is generous enough but not ample.
+#: Seconds to wait on a fetch before giving up.
 FETCH_TIMEOUT_SECONDS = 60
 
 #: Seconds between fetches. census.gov publishes no ``Crawl-delay`` for ``*``, so this

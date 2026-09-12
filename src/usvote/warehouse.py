@@ -14,9 +14,9 @@ every source (EC, both PV subpackages, and census) to wire them together. That i
 allowed for the same reason :mod:`usvote.__main__` is: a composition root sits
 **above** both EC and PV, so it is exempt from the D015 source-to-source prohibition
 exactly as ``__main__`` is (D027). The invariant that keeps the exemption honest is
-the reverse one — nothing
-under ``usvote/{mit,ucsb,pv}/`` may import :mod:`usvote.warehouse` (a back-import would
-invert D015 into a cycle); a unit test enforces it.
+the reverse one — nothing under ``usvote/{mit,ucsb,pv,census}/`` may import
+:mod:`usvote.warehouse` (a back-import would invert D015 into a cycle); a unit test
+enforces it.
 
 **Transactions: per-source atomic, not globally atomic (#84a).** ``run_warehouse`` opens
 **no** transaction of its own. Each pipeline it calls already wraps its own DB writes in
@@ -232,7 +232,7 @@ def run_warehouse(
     across the whole build, so the individual pipelines are called with their default
     ``close=False``.
 
-    ``validate_overlap`` gates step 5 **explicitly, in the same spirit as**
+    ``validate_overlap`` gates step 6 **explicitly, in the same spirit as**
     ``ucsb_html_dir`` — no environment magic, and the default is on, so the shipped
     ``python -m usvote all`` always validates. Two things make the flag necessary rather
     than convenient:
