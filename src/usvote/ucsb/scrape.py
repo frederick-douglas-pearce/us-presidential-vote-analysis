@@ -59,18 +59,16 @@ spine must never depend on a PV source.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import time
 from collections.abc import Callable, Collection, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from usvote import config as _config
+from usvote import corpus
 from usvote.ucsb.config import ucsb_html_dir_from_env
 
 #: The American Presidency Project's origin and its election-statistics index path.
@@ -99,7 +97,15 @@ BLOCKED_STATUSES = frozenset({403, 429})
 #: The saved index page enumeration reads, and the sha256 manifest describing the
 #: snapshot. Both sit alongside the ``{year}.html`` pages in the snapshot directory.
 INDEX_FILENAME = "_index_elections.html"
-MANIFEST_FILENAME = "manifest.json"
+MANIFEST_FILENAME = corpus.MANIFEST_FILENAME
+
+#: The remedy quoted when this snapshot's manifest will not parse. Removing it forces
+#: a full re-scrape, because the manifest is what records which pages are already
+#: saved — which is exactly why the message says so rather than just "delete it".
+_MANIFEST_REMEDY = (
+    "Inspect or remove it and re-run — note that removing it forces a full "
+    "re-scrape, since the manifest is what records which pages are already saved."
+)
 
 # Election-page links as they appear in the index's markup, e.g.
 # `<a href="/statistics/elections/1824">`.
@@ -188,18 +194,9 @@ def read_manifest(html_dir: str | Path) -> dict[str, Any]:
     recoverable, message-worthy state (see :func:`write_manifest` on why it should be
     rare), not a stack trace.
     """
-    path = Path(html_dir) / MANIFEST_FILENAME
-    if not path.exists():
-        return {}
-    try:
-        manifest: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise UCSBScrapeError(
-            f"The manifest at {path} is not valid JSON: {exc}. Inspect or remove it "
-            f"and re-run — note that removing it forces a full re-scrape, since the "
-            f"manifest is what records which pages are already saved."
-        ) from exc
-    return manifest
+    return corpus.read_manifest(
+        html_dir, error_cls=UCSBScrapeError, remedy=_MANIFEST_REMEDY
+    )
 
 
 def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
@@ -217,13 +214,7 @@ def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
     always either the old complete version or the new complete version, never a partial
     one.
     """
-    directory = Path(html_dir)
-    path = directory / MANIFEST_FILENAME
-    tmp = directory / f"{MANIFEST_FILENAME}.tmp"
-    tmp.write_text(
-        json.dumps(dict(manifest), indent=2, sort_keys=True), encoding="utf-8"
-    )
-    tmp.replace(path)
+    corpus.write_manifest(html_dir, manifest)
 
 
 def read_snapshot_html(
@@ -343,15 +334,26 @@ def snapshot_elections(
 
         # Any other status (200, or an oddity like 404) is saved verbatim: the manifest
         # records what the server actually said, and parse decides what is usable.
+        status = result.status
+        if status is None:
+            # Unreachable through the shipped fetch_url, whose contract coupling is
+            # "status is None <=> error is not None" (FetchResult) — and the error
+            # branch above already continued. The coupling is a docstring, not a type,
+            # so narrow it here rather than widening corpus.provenance_entry, whose
+            # `int` is right: a page that was SAVED always has a real status.
+            #
+            # Not purely defensive. Without it a malformed result falls through both
+            # branches above (`None in BLOCKED_STATUSES` is False) and records a saved
+            # page carrying "http_status": None — an entry in neither the saved nor the
+            # failed shape, which every completeness guard then reads as merely not-200.
+            raise UCSBScrapeError(
+                f"{url} returned neither an HTTP status nor a transport error. "
+                f"Refusing to record a saved page with no status."
+            )
         page.write_bytes(result.body)
-        manifest[year] = {
-            "url": url,
-            "file": page.name,
-            "http_status": result.status,
-            "bytes": len(result.body),
-            "sha256": hashlib.sha256(result.body).hexdigest(),
-            "timestamp": _now(),
-        }
+        manifest[year] = corpus.provenance_entry(
+            url=url, file=page.name, status=status, body=result.body
+        )
         fetched += 1
         print(f"{progress}: {result.status} {len(result.body)}b saved")
         write_manifest(directory, manifest)
@@ -398,9 +400,9 @@ def _read_index(directory: Path) -> str:
 
 def _error_entry(url: str, status: int | None, error: str) -> dict[str, Any]:
     """Build a manifest entry for a page that was not saved."""
-    return {"url": url, "http_status": status, "timestamp": _now(), "error": error}
+    return corpus.error_entry(url=url, status=status, error=error)
 
 
 def _now() -> str:
     """Return an ISO-8601 UTC timestamp for manifest provenance."""
-    return datetime.now(UTC).isoformat()
+    return corpus.utc_timestamp()

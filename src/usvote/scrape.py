@@ -25,11 +25,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 import time
 from collections.abc import Callable, Collection, Container, Iterable, Mapping
-from datetime import UTC, datetime
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, overload
 
@@ -37,7 +34,7 @@ import requests
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-from usvote import config
+from usvote import config, corpus
 from usvote.years import ec_ingest_years
 
 # Archives site parameters (notebook Section 1.3). Exposed as defaults so callers
@@ -245,14 +242,21 @@ def fetch_from_dir(source_dir: str | Path) -> Fetch:
 # (their committed files and tests depend on it), the corpus uses UCSB's. The two
 # readers coexist exactly as they do on the UCSB side.
 #
-# The manifest helpers below duplicate ~40 lines of usvote/ucsb/scrape.py rather than
-# importing them. Importing usvote.ucsb here would invert D006/D015 (the spine must not
-# depend on a source), which a test enforces. A source-neutral third home (usvote/pv/,
-# or a new shared module) WOULD satisfy D015 and was available; ~40 lines of JSON
-# read/write did not seem worth a new shared module, so the cost is paid instead by
-# test_ec_and_ucsb_manifest_entries_have_the_same_shape, which drives both writers and
-# compares the results. If a third consumer ever appears, extract rather than duplicate
-# again.
+# The manifest helpers below USED to duplicate ~40 lines of usvote/ucsb/scrape.py,
+# because importing usvote.ucsb here would invert D006/D015 (the spine must not depend
+# on a source), which a test enforces. That comment closed with a standing instruction:
+# "If a third consumer ever appears, extract rather than duplicate again." The Census
+# corpus (#181) is that third consumer, so the mechanical half now lives in the
+# source-neutral usvote/corpus.py and the dependency runs spine -> shared, which no
+# guard objects to (corpus.py is a top-level module, not a source subpackage).
+#
+# What stays here is what is genuinely EC's: the key derivation (year pages vs. the
+# index), the typed error and its remedy text, and the politeness policy. write_manifest
+# also stays as a three-line wrapper rather than delegating outright — it calls the
+# module-global _atomic_write_bytes so that the mechanism test which monkeypatches that
+# name keeps observing the real call site. Pinning the writer *used* is the whole point
+# of that test (an outcome-only version passed a plain write_bytes), so the wrapper is
+# deliberate, not leftover.
 
 #: Identify truthfully, as the UCSB scraper does — one shared string (D015-legal:
 #: ``source -> shared``). archives.gov's robots.txt sets ``Crawl-delay: 10`` for
@@ -271,7 +275,17 @@ CRAWL_DELAY_SECONDS = 10
 EC_INDEX_FILENAME = "_index_results.html"
 
 #: Provenance record for the corpus: per-year sha256 + byte count + fetch timestamp.
-MANIFEST_FILENAME = "manifest.json"
+#: Re-exported from :mod:`usvote.corpus` so the three corpora cannot drift apart on the
+#: filename, and so existing importers of ``scrape.MANIFEST_FILENAME`` keep working.
+MANIFEST_FILENAME = corpus.MANIFEST_FILENAME
+
+#: The remedy quoted when this corpus's manifest will not parse — the command that
+#: rebuilds *this* corpus, which is why :func:`usvote.corpus.read_manifest` takes it
+#: from the caller rather than inventing a generic one.
+_MANIFEST_REMEDY = (
+    "Delete it and re-run `python -m usvote corpus` to rebuild the record from the "
+    "saved pages."
+)
 
 
 def corpus_filename(url: str) -> str:
@@ -302,68 +316,39 @@ def read_manifest(html_dir: str | Path) -> dict[str, Any]:
 
     An absent manifest is the expected first-run state, not an error.
     """
-    path = Path(html_dir) / MANIFEST_FILENAME
-    if not path.exists():
-        return {}
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        # Recoverable and message-worthy, not a stack trace (UCSB's wording).
-        raise ScrapeError(
-            f"{path} is not valid JSON ({exc}). Delete it and re-run "
-            f"`python -m usvote corpus` to rebuild the record from the saved pages."
-        ) from exc
-    if not isinstance(loaded, dict):
-        raise ScrapeError(
-            f"{path} must contain a JSON object, got {type(loaded).__name__}."
-        )
-    return loaded
+    return corpus.read_manifest(
+        html_dir, error_cls=ScrapeError, remedy=_MANIFEST_REMEDY
+    )
 
 
-def _atomic_write_bytes(path: Path, body: bytes) -> None:
-    """Write ``body`` to ``path`` atomically (temp file in the same dir, then replace).
-
-    Used for **both** the pages and the manifest. An earlier version wrote pages with a
-    plain ``write_bytes`` while going to real trouble for the manifest, which left the
-    more valuable artifact less protected: two concurrent ``corpus`` runs interleaved
-    into one ``<year>.html``, and the winner then recorded a sha256 of what it *sent*
-    rather than what landed — a corrupt page that passes the completeness guard forever.
-    A rebuild reading the directory mid-run could likewise see a half-written page.
-
-    ``mkstemp`` gives a **unique** temp name, not a fixed ``<name>.tmp``: two concurrent
-    runs sharing one temp path would interleave writes into it and then *atomically
-    install* the corrupt result — atomicity that faithfully publishes garbage. This
-    rationale was recorded on ``write_manifest`` before it delegated here; it is kept
-    because nothing tests it (a fixed name behaves correctly single-threaded, so the
-    comment is the only thing standing between a future edit and the bug).
-    """
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(body)
-            fh.flush()
-            os.fsync(fh.fileno())
-        Path(tmp_name).replace(path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+#: The atomic writer, now shared (:func:`usvote.corpus.atomic_write_bytes`) — see that
+#: function for why the temp name must be unique rather than a fixed ``<name>.tmp``.
+#:
+#: Bound to a module-level name here rather than called through ``corpus.`` at each use
+#: site on purpose: two tests monkeypatch ``scrape._atomic_write_bytes`` to observe
+#: *which* writer the page and manifest writes route through, and an outcome-only
+#: version of those tests passed a plain ``write_bytes``. Keeping the name keeps the
+#: seam those tests pin.
+_atomic_write_bytes = corpus.atomic_write_bytes
 
 
 def write_manifest(html_dir: str | Path, manifest: Mapping[str, Any]) -> None:
     """Write ``manifest`` sorted, indented, and **atomically**.
 
-    Mirrors :func:`usvote.ucsb.scrape.write_manifest`, including the reason for the
-    atomicity: the manifest is rewritten after *every* page precisely so an interrupted
-    run still leaves an accurate record, and a plain truncate-then-write would defeat
-    that by leaving an unparseable half-file behind on a crash. The temp-file swap
-    guarantees readers see either the old complete version or the new one.
+    Serialization matches :func:`usvote.corpus.write_manifest` exactly, including the
+    reason for the atomicity: the manifest is rewritten after *every* page precisely so
+    an interrupted run still leaves an accurate record, and a plain truncate-then-write
+    would defeat that by leaving an unparseable half-file behind on a crash. The
+    temp-file swap guarantees readers see either the old complete version or the new
+    one.
     """
-    # Delegated to _atomic_write_bytes rather than repeating its mkstemp/fsync/replace
-    # dance, which is what this function used to do. Its docstring already claimed it
-    # was "used for both the pages and the manifest" — it was not, and the copy was the
-    # weaker of the two: the page writer had a test observing which writer runs, while
-    # this one had only an outcome test that a plain write_text passes identically.
-    # One writer, one mechanism test, one place for the atomicity to be true.
+    # Kept as a local three-liner instead of delegating to corpus.write_manifest, which
+    # is otherwise identical: the mechanism test monkeypatches the module-global
+    # _atomic_write_bytes and asserts the manifest write routes through it, and a
+    # delegated call would bypass that name and observe nothing. Pinning the writer
+    # *used* is the entire point of that test — an outcome-only version of it passed a
+    # plain write_text — so the seam is worth three lines. UCSB and Census, which carry
+    # no such test, delegate to the shared writer directly.
     path = Path(html_dir) / MANIFEST_FILENAME
     body = json.dumps(dict(manifest), indent=2, sort_keys=True)
     _atomic_write_bytes(path, body.encode("utf-8"))
@@ -489,14 +474,9 @@ def snapshot_election_years(
             sleep(CRAWL_DELAY_SECONDS)
         status, body = fetch(url)
         fetched_any = True
-        manifest[key] = {
-            "bytes": len(body),
-            "file": name,
-            "http_status": status,
-            "sha256": sha256(body).hexdigest(),
-            "timestamp": datetime.now(UTC).isoformat(),
-            "url": url,
-        }
+        manifest[key] = corpus.provenance_entry(
+            url=url, file=name, status=status, body=body
+        )
         if status != 200:
             write_manifest(directory, manifest)
             raise ScrapeError(
