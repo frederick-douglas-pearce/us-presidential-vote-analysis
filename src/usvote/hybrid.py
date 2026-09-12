@@ -9,9 +9,10 @@ election have gone differently under the popular vote, or under the hybrid?
 A **top-level EC-domain module**, in the ``spine.py``/``years.py``/``join.py``/
 ``snapshot.py``/``warehouse.py`` family: it names ``dwh.ec_pv_preferred`` and
 ``dwh.pv_state_status``, so the same greppable invariant that keeps ``join.py`` out of
-``usvote/pv/`` keeps this here (D006/D015). Nothing under ``usvote/{mit,ucsb,pv}/`` may
-import it, and ``usvote/api/`` must never reach it — it imports pandas, which the D028
-serve-time boundary forbids (both enforced by tests).
+``usvote/pv/`` keeps this here (D006/D015). Nothing under
+``usvote/{mit,ucsb,pv,census}/`` may import it, and ``usvote/api/`` must never reach
+it — it imports pandas, which the D028 serve-time boundary forbids (both enforced by
+tests).
 
 **Two grains, two builders.** :func:`build_hybrid_frame` is per ``(year, candidate)`` —
 the scores; :func:`build_hybrid_summary` is per ``(year)`` — the winners, the D041

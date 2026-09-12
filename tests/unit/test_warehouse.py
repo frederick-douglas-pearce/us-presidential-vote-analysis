@@ -44,10 +44,11 @@ _CLEAN_REPORT = OverlapReport(cells=2, exact=2, exact_pct=100.0)
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
-    """Patch the four steps to record ``(name, kwargs)`` in call order.
+    """Patch the five steps to record ``(name, kwargs)`` in call order.
 
     Return values match each real step's shape so ``run_warehouse`` can measure row
-    counts: EC -> ``(candidates, state, votes)``, MIT -> loaded frame, UCSB ->
+    counts: EC -> ``(candidates, state, votes)``, MIT -> loaded frame, census ->
+    loaded frame, UCSB ->
     ``(pv_votes, roster)``. Lists stand in for frames (only ``len`` is read).
     """
     calls: list[tuple[str, dict[str, Any]]] = []

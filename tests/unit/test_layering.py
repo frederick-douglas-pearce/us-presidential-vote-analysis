@@ -9,7 +9,7 @@ reverse must never happen. Two greppable invariants express it:
   (``spine.py``, ``years.py``, ``join.py``, ``snapshot.py``, ``hybrid.py``,
   ``warehouse.py``). A ``dwh.votes`` reference in a ``usvote/pv/`` **query** means EC
   knowledge has leaked into the shared layer.
-- **Nothing under ``usvote/{mit,ucsb,pv}/`` imports a module that sits above it** — the
+- **Nothing under ``usvote/{mit,ucsb,pv,census}/`` imports a module that sits above it** — the
   ``warehouse.py`` composition root, or ``hybrid.py``. A back-import inverts D015 into a
   cycle.
 

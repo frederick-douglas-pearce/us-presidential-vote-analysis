@@ -8,7 +8,8 @@ for backward compatibility (it is the most common command and the only one needi
   ``dwh`` (the historical default; ``--replace`` still works bare, before or without
   the subcommand).
 - ``python -m usvote all`` — build the **whole** warehouse: EC spine, MIT PV,
-  optionally UCSB PV, then the resolved-PV + EC<->PV join views
+  optionally UCSB PV, optionally census population, then the resolved-PV + EC<->PV
+  join views
   (:func:`usvote.warehouse.run_warehouse`).
 
 Bare is kept on EC rather than re-pointed at ``all`` deliberately: ``all`` additionally
