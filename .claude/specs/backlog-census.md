@@ -11,7 +11,8 @@
 > S2 and S5 in particular. Each of #181–#184 carries a banner saying so.
 >
 > **Decision numbering drifted:** the candidate decisions below were written as **D053–D057**
-> and all five slots are now taken. They record as **D058–D062** (+5) — see the renumber note in
+> and all five slots are now taken — as is **D058**, taken since. They record as **D059–D063**
+> (+6) — see the renumber note in
 > [Proposed decisions](#proposed-decisions-candidates-for-fred--architect--not-yet-in-decisionsmd).
 >
 > **Prior status: FILED, REVIEW STILL PENDING (2026-08-25).**  This backlog sharpens **E10
@@ -201,8 +202,10 @@ suite. Budget it to run **well ahead** of S2–S5.
 - **Both population series are addressed** (D054): whether each source publishes the
   **apportionment population** (the input to seat allocation) and the **resident population** (the
   per-capita denominator), and where they diverge historically (three-fifths clause pre-1868;
-  "Indians not taxed" excluded through 1940; modern overseas-federal-personnel movements). A source
-  that offers only one is a partial source and the finding must say so.
+  "Indians not taxed" excluded 1790–1930, ending at the 1940 census — see §7 of
+  `research-census-source.md`, which corrects this note's earlier "through 1940"; modern
+  overseas-federal-personnel movements). A source that offers only one is a partial source and the
+  finding must say so.
 - **The candidates named in #129 are each verified, not assumed:** the **US Census Bureau**
   published apportionment tables + historical population volumes (the strongly-preferred
   public-domain option); **`api.census.gov`** (expected to cover only recent decennials — *verify
@@ -529,18 +532,20 @@ _Story of epic #129 (E10 — census / apportionment analysis)._
 
 ## Proposed decisions (candidates for Fred + architect — NOT yet in `decisions.md`)
 
-Record in [`decisions.md`](decisions.md) as **D058–D062** only once approved (append-only; the
-highest recorded is **D057**). Summaries here for backlog readability.
+Record in [`decisions.md`](decisions.md) as **D059–D063** only once approved (append-only; the
+highest recorded is **D058**). Summaries here for backlog readability.
 
-> **Renumbered 2026-08-31.** This section originally proposed **D053–D057**, written when D052
-> was the highest recorded. All five of those slots were taken while the backlog sat pre-review —
+> **Renumbered 2026-08-31; re-checked 2026-09-11.** This section originally proposed **D053–D057**,
+> written when D052 was the highest recorded. All five of those slots were taken while the backlog
+> sat pre-review —
 > D053 (public hybrid recomputed from the catalog, #102), D054 (Bot Fight Mode off the API zone),
 > D055 (deploy gate asserts the serving snapshot), D056 (cross-repo Pages ownership), D057
-> (`create_hybrid_views` derives through `build_hybrid_from_frames`). The candidates below keep
-> their **D05N (proposed)** labels for continuity with the story bodies in #181–#184, but the
-> mapping when they are recorded is **+5**: proposed D053 → **D058**, D054 → **D059**, D055 →
-> **D060**, D056 → **D061**, D057 → **D062**. Confirm the next free slot at recording time rather
-> than trusting this note — the same drift can happen again.
+> (`create_hybrid_views` derives through `build_hybrid_from_frames`). **It happened again:**
+> **D058** (Pages provenance reads two signals, #223) was recorded on 2026-09-11, so the offset is
+> now **+6**. The candidates below keep their **D05N (proposed)** labels for continuity with the
+> story bodies in #181–#184, but the mapping when they are recorded is: proposed D053 → **D059**,
+> D054 → **D060**, D055 → **D061**, D056 → **D062**, D057 → **D063**. Confirm the next free slot at
+> recording time rather than trusting this note — the drift has now happened twice.
 
 - **D053 (proposed) — The population dimension conforms to the EC spine and lands as
   `usvote/census/`, a source-namespaced subpackage (D006/D015).** It reads the state roster and
@@ -552,11 +557,12 @@ highest recorded is **D057**). Summaries here for backlog readability.
 - **D054 (proposed) — Carry two population series, apportionment and resident, labeled, never
   blended.** The census analogue of D041's `ec_share_full` / `ec_share_hybrid` split: two numbers
   equal in the easy modern years and divergent exactly where it matters (three-fifths clause
-  pre-1868; "Indians not taxed" excluded through 1940). Apportionment population answers *"why this
-  many electoral votes?"* (the S4 reconciliation input); resident population answers *"how many
-  people per electoral vote?"* (the per-capita denominator). Carrying only one is the failure mode;
-  any derived figure states which it used. This is material with historical weight — a definition of
-  "population" that counted some people as fractions of a person is not a column-naming wrinkle.
+  pre-1868; "Indians not taxed" excluded 1790–1930, ending at the 1940 census — §7). Apportionment
+  population answers *"why this many electoral votes?"* (the S4 reconciliation input); resident
+  population answers *"how many people per electoral vote?"* (the per-capita denominator). Carrying
+  only one is the failure mode; any derived figure states which it used. This is material with
+  historical weight — a definition of "population" that counted some people as fractions of a
+  person is not a column-naming wrinkle.
 - **D055 (proposed) — The election→census join is an explicit `election_year →
   governing_census_year` lookup; no interpolated population, ever (D005).** The census that governs
   an election is the one whose apportionment was *in force*, not the nearest decade — `2020 → 2010`,
