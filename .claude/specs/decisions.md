@@ -2678,33 +2678,26 @@ separable from the tie check because a view cannot `raise`.
   there: dropping *every* third-party vote raises both candidates' shares and moves the
   popular-vote margin only to 0.5322 pp, leaving the hybrid with Bush at 0.50053 to 0.49854.
 
-  **Why the dilution story in particular is structurally unavailable** (Fred, 2026-09-11). A third
-  party can reach a presidential outcome by three channels, and the hybrid closes two of them:
+  **Why the dilution story fails, and what that does not prove** (Fred, 2026-09-11). It fails on
+  **magnitude**, and not narrowly. A popular-vote-only third party — Nader in 2000, who won no
+  electors and so carries no candidate row under D007 — reaches the popular-vote half only through
+  its denominator, where it scales **both** majors' shares by the same `1 - t` (its share of the
+  vote). That much *is* structural: scaling is order-preserving, so it can never change **who**
+  leads the popular vote, only by how much. Removing every third-party vote multiplies the margin
+  by `1 / (1 - t)`, lifting Gore's 0.5113 pp to just 0.5322 pp — short of Bush's 0.9294 pp
+  electoral margin by a factor of about 1.75. Closing that gap would have taken third parties at
+  something like **45%** of the popular vote, at which point they would not be third parties. And
+  the spoiler move of *denying* a majority has no analogue here: the hybrid has no majority to
+  deny, only a highest average.
 
-  1. **The threshold channel — closed.** The hybrid has no majority of the appointed electors to
-     fall short of and no contingent election behind it; winning is simply holding the highest
-     average of the two shares. So the classic spoiler move of *denying* someone a majority has no
-     analogue, because there is no boundary to hold anyone below.
-  2. **The dilution channel — inert, and this is the one D050 got wrong.** Third-party votes reach
-     the popular-vote half only by sitting in its denominator, where they scale **both** majors'
-     shares by the same `1 - t` (their combined share). Scaling is order-preserving, so it can
-     never change *who* leads the popular vote, only by how much: removing them multiplies the
-     margin by `1 / (1 - t)`. In 2000, `t = 3.92%`, taking 0.5113 pp to 0.5322 pp — and reaching
-     Bush's 0.9294 pp electoral margin would have needed third parties at roughly **45%** of the
-     popular vote.
-  3. **The winner-take-all channel — inherited, not closed.** `ec_share` is built from electoral
-     votes, which states award winner-take-all, so a third party that changes *which* candidate
-     takes a state's electors does move the hybrid. That covers a third party winning electors
-     outright (Thurmond took 39 of 531 in 1948, Wallace 46 in 1968) and equally the counterfactual
-     usually meant by "spoiler": had Florida's 25 gone the other way in 2000, the hybrid would have
-     gone to Gore, 0.5119 to 0.4675.
-
-  Channel 3 is worth stating precisely because it is what makes the correction a real distinction
-  rather than a blanket denial. It is a claim about **where votes would otherwise have gone** — a
-  counterfactual about voters, which this project's data cannot settle — and it moves the outcome
-  through the *electoral* half. The claim corrected above is channel 2: that Nader's votes, by
-  sitting in the national popular-vote denominator, are what kept the hybrid with Bush. That one is
-  arithmetically false, and channel 3 does not rescue it.
+  **What this does not say is that no third-party counterfactual could move 2000's hybrid.** Two
+  would. Had Nader's voters chosen Gore instead, 441,464 of them suffice — the hybrid goes to Gore
+  with the Electoral College **untouched**, because that moves the popular-vote *numerator* rather
+  than the denominator. And had a third party taken electors, or had Florida's 25 gone the other
+  way, `ec_share` moves and the hybrid goes to Gore 0.5119 to 0.4675. Both are claims about **where
+  votes would otherwise have gone** — counterfactuals about voters, which this project's data
+  cannot settle. D050 claimed something narrower, and false: that Nader's votes, *by sitting in the
+  national denominator*, are what kept the hybrid with Bush.
 
   **The relation, and the three conditions it actually needs.** Write it as
   `hybrid_margin = |ec_margin - pv_margin| / 2`. It holds when **all three** of the following are
