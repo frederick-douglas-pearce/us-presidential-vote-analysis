@@ -60,6 +60,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         mit_csv_path: Any,
         *,
         ucsb_html_dir: Any,
+        census_corpus_dir: Any,
         replace: bool,
         validate_overlap: bool,
         validate_coverage: bool,
@@ -72,6 +73,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         calls["warehouse"].append(
             {
                 "ucsb_html_dir": ucsb_html_dir,
+                "census_corpus_dir": census_corpus_dir,
                 "replace": replace,
                 "validate_overlap": validate_overlap,
                 "validate_coverage": validate_coverage,
@@ -87,6 +89,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
             mit_roster_rows=6,
             ucsb_pv_rows=None,
             ucsb_roster_rows=None,
+            census_rows=None,
             sources_loaded=frozenset(loaded),
             views_built=True,
         )
@@ -118,6 +121,7 @@ def test_all_autodetects_ucsb_when_snapshot_present(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": "snap/",
+            "census_corpus_dir": None,
             "replace": True,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -127,7 +131,9 @@ def test_all_autodetects_ucsb_when_snapshot_present(
 
 
 def test_all_skips_ucsb_loudly_when_snapshot_absent(
-    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     def absent(*a: Any, **k: Any) -> str:
         raise ConfigError("USVOTE_UCSB_HTML_DIR unset")
@@ -137,6 +143,7 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": None,
+            "census_corpus_dir": None,
             "replace": False,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -161,6 +168,7 @@ def test_all_no_ucsb_skips_without_probing_env(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": None,
+            "census_corpus_dir": None,
             "replace": False,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -205,8 +213,12 @@ def test_config_error_returns_2(
 @pytest.fixture
 def ucsb_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     calls: dict[str, list] = {"snapshot": [], "load": []}
-    monkeypatch.setattr(ucsb_main, "snapshot_elections", lambda: calls["snapshot"].append({}))
-    monkeypatch.setattr(ucsb_main.config, "db_config_from_env", lambda *a, **k: dict(_DB))
+    monkeypatch.setattr(
+        ucsb_main, "snapshot_elections", lambda: calls["snapshot"].append({})
+    )
+    monkeypatch.setattr(
+        ucsb_main.config, "db_config_from_env", lambda *a, **k: dict(_DB)
+    )
     monkeypatch.setattr(ucsb_main, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     monkeypatch.setattr(ucsb_main, "DBC", lambda cfg: "DBC")
     monkeypatch.setattr(
@@ -229,7 +241,9 @@ def test_ucsb_bare_and_snapshot_snapshot(
     assert ucsb_env["load"] == []
 
 
-@pytest.mark.parametrize("argv,replace", [(["load"], False), (["load", "--replace"], True)])
+@pytest.mark.parametrize(
+    "argv,replace", [(["load"], False), (["load", "--replace"], True)]
+)
 def test_ucsb_load_runs_pipeline(
     ucsb_env: dict[str, list], argv: list[str], replace: bool
 ) -> None:
@@ -271,7 +285,9 @@ def _recording_mit_pipeline(calls: list[dict]) -> Any:
 @pytest.fixture
 def mit_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     calls: list[dict] = []
-    monkeypatch.setattr(mit_main.config, "db_config_from_env", lambda *a, **k: dict(_DB))
+    monkeypatch.setattr(
+        mit_main.config, "db_config_from_env", lambda *a, **k: dict(_DB)
+    )
     monkeypatch.setattr(mit_main, "mit_csv_path_from_env", lambda *a, **k: "mit.csv")
     monkeypatch.setattr(mit_main, "DBC", lambda cfg: "DBC")
     monkeypatch.setattr(
@@ -319,9 +335,7 @@ def _valid_corpus(tmp_path: Any) -> str:
 
     def fetch(url: str) -> tuple[int, bytes]:
         if url.endswith("/results"):
-            links = "".join(
-                f'<a href="/electoral-college/{y}">{y}</a>' for y in years
-            )
+            links = "".join(f'<a href="/electoral-college/{y}">{y}</a>' for y in years)
             return 200, f'<div id="main-col"><table>{links}</table></div>'.encode()
         return 200, b'<div id="main-col"><table><tr><td>x</td></tr></table></div>'
 
@@ -373,7 +387,7 @@ def test_a_stale_corpus_exits_cleanly_without_running_the_pipeline(
 
 
 def test_corpus_subcommand_dispatches_to_the_corpus_runner(
-    monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called: list[str] = []
 
@@ -458,7 +472,9 @@ def test_corpus_runner_reports_progress_on_interrupt(
 
 
 def test_corpus_banner_reports_the_corpus_age(
-    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
     capsys: pytest.CaptureFixture,
 ) -> None:
     # The cheapest mitigation for the D036 content-divergence residual: a stale corpus
@@ -499,7 +515,9 @@ def recording_dbc(monkeypatch: pytest.MonkeyPatch) -> list[_RecordingDBC]:
 
 
 def _raise_incomplete(*a: Any, **k: Any) -> None:
-    raise top.PipelineError("Scrape returned no tables for 1 requested year(s): [2024].")
+    raise top.PipelineError(
+        "Scrape returned no tables for 1 requested year(s): [2024]."
+    )
 
 
 def test_ec_reports_an_incomplete_scrape_without_a_traceback(
@@ -880,7 +898,9 @@ def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
             closed.append(True)
 
     def boom(*_a: Any, **_k: Any) -> None:
-        raise MITCoverageError("assert_mit_year_coverage: MIT's covered years are wrong")
+        raise MITCoverageError(
+            "assert_mit_year_coverage: MIT's covered years are wrong"
+        )
 
     monkeypatch.setattr(mit_main, "DBC", lambda cfg: _DBC())
     monkeypatch.setattr(mit_main, "run_mit_pipeline", boom)
@@ -890,3 +910,30 @@ def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
     assert "MIT year-coverage check failed" in err
     assert "Nothing was loaded" in err
     assert closed == [True], "the arm closes the connection run_mit_pipeline could not"
+
+
+def test_all_autodetects_the_census_corpus_when_present(
+    top_env: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``usvote all`` must actually reach the census stage, not merely be able to.
+
+    ``run_warehouse`` grew a ``census_corpus_dir`` parameter in #181; wiring the
+    orchestrator without wiring the front door would leave the whole stage unreachable
+    from the shipped command while every warehouse-level test passed.
+    """
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["census_corpus_dir"] == "/tmp"
+
+
+def test_all_skips_census_loudly_when_the_corpus_is_absent(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A build missing a source is never silent (the D016/D024 principle the UCSB notice
+    # already follows), even where — as here — nothing downstream reads it yet.
+    monkeypatch.delenv("USVOTE_CENSUS_CORPUS_DIR", raising=False)
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["census_corpus_dir"] is None
+    assert "WITHOUT census population" in capsys.readouterr().err

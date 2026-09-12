@@ -502,7 +502,7 @@ def test_no_top_level_module_imports_a_source_subpackage() -> None:
         if module.name in exempt:
             continue
         source = module.read_text(encoding="utf-8")
-        for pv in ("usvote.mit", "usvote.ucsb"):
+        for pv in ("usvote.mit", "usvote.ucsb", "usvote.census"):
             for line in source.splitlines():
                 stripped = line.strip()
                 if stripped.startswith(("import ", "from ")) and pv in stripped:

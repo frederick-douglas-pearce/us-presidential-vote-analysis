@@ -54,7 +54,11 @@ import usvote
 PKG_ROOT = Path(usvote.__file__).parent
 
 #: The subpackages that sit *below* the EC-domain top-level modules.
-_LOWER_SUBPACKAGES = ("mit", "ucsb", "pv")
+#:
+#: **Every source subpackage must be listed here**, or the guards that scan it are
+#: silently vacuous for it — this tuple is not derived from the filesystem, so a new
+#: subpackage is unguarded until it is named. ``census`` joined in #181.
+_LOWER_SUBPACKAGES = ("mit", "ucsb", "pv", "census")
 
 
 def code_only(source: str) -> str:

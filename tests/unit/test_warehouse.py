@@ -1,9 +1,9 @@
 """Unit tests for the whole-warehouse orchestrator (``usvote.warehouse``).
 
-Drives :func:`run_warehouse` with the four wired steps (EC / MIT / UCSB pipelines +
-:func:`rebuild_views`) monkeypatched to recorders, so the test asserts the *composition*
-— call order, the ``replace`` mapping (EC destructive, PV additive), the explicit UCSB
-skip, and the :class:`WarehouseResult` receipt — without touching a real DB or the stage
+Drives :func:`run_warehouse` with the five wired steps (EC / MIT / UCSB / census
+pipelines + :func:`rebuild_views`) monkeypatched to recorders, so the test asserts the
+*composition* — call order, the ``replace`` mapping (EC destructive, every other source
+additive), the explicit UCSB and census skips, and the :class:`WarehouseResult` receipt — without touching a real DB or the stage
 internals (those have their own tests). Also enforces the D015/D027 composition-root
 invariant: nothing under ``usvote/{mit,ucsb,pv}/`` imports ``usvote.warehouse``.
 """
@@ -21,6 +21,7 @@ from tests.unit.test_layering import imports
 from usvote.db import DBC
 from usvote.pv.overlap import OverlapKey, OverlapReport
 from usvote.warehouse import (
+    SOURCE_CENSUS,
     SOURCE_EC,
     SOURCE_MIT,
     SOURCE_UCSB,
@@ -51,16 +52,25 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def ec(
-        dbc: object, shapefile_path: str, *, replace: bool = False,
-        years: Any = None, **_: Any,
+        dbc: object,
+        shapefile_path: str,
+        *,
+        replace: bool = False,
+        years: Any = None,
+        **_: Any,
     ) -> tuple[list[int], list[int], list[int]]:
         calls.append(("ec", {"replace": replace, "years": years}))
         return ([], [], [0] * 5)  # 5 votes rows
 
     def mit(
-        dbc: object, path: Any = None, *, years: Any = None,
-        environ: Any = None, replace: bool = False,
-        validate_coverage: bool = False, **_: Any,
+        dbc: object,
+        path: Any = None,
+        *,
+        years: Any = None,
+        environ: Any = None,
+        replace: bool = False,
+        validate_coverage: bool = False,
+        **_: Any,
     ) -> tuple[list[int], list[int]]:
         record = {
             "path": path,
@@ -72,13 +82,29 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
         return ([0] * 3, [0] * 6)  # 3 pv_votes, 6 roster (#127)
 
     def ucsb(
-        dbc: object, html_dir: Any = None, *, years: Any = None,
-        environ: Any = None, replace: bool = False, **_: Any,
+        dbc: object,
+        html_dir: Any = None,
+        *,
+        years: Any = None,
+        environ: Any = None,
+        replace: bool = False,
+        **_: Any,
     ) -> tuple[list[int], list[int]]:
         calls.append(
             ("ucsb", {"html_dir": html_dir, "replace": replace, "years": years})
         )
         return ([0] * 2, [0] * 4)  # 2 pv_votes, 4 roster
+
+    def census(
+        dbc: object,
+        corpus_dir: Any = None,
+        *,
+        environ: Any = None,
+        replace: bool = False,
+        **_: Any,
+    ) -> list[int]:
+        calls.append(("census", {"corpus_dir": corpus_dir, "replace": replace}))
+        return [0] * 7  # 7 census_population rows
 
     def views(dbc: object) -> None:
         calls.append(("views", {}))
@@ -86,6 +112,7 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", mit)
     monkeypatch.setattr(warehouse, "run_ucsb_pipeline", ucsb)
+    monkeypatch.setattr(warehouse, "run_census_pipeline", census)
     monkeypatch.setattr(warehouse, "rebuild_views", views)
     # The two #167 gates read the live views, so they are stubbed clean here rather
     # than recorded -- every test using this fixture drives the default
@@ -112,12 +139,82 @@ def test_full_build_sequences_ec_mit_ucsb_views(
         mit_roster_rows=6,
         ucsb_pv_rows=2,
         ucsb_roster_rows=4,
+        census_rows=None,
         sources_loaded=frozenset({SOURCE_EC, SOURCE_MIT, SOURCE_UCSB}),
         views_built=True,
         # The #167 gates ran and found nothing. A populated report and ``None`` are
         # distinct on the receipt: "ran" versus "did not run".
         overlap=_CLEAN_REPORT,
     )
+
+
+def test_census_runs_after_ec_and_before_the_views_when_a_corpus_is_given(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """Census is a warehouse stage, and its position is not arbitrary.
+
+    It must run **after** the EC spine — its ``state`` FK targets ``dwh.state`` and its
+    jurisdiction guard reads the spine — and **before** ``rebuild_views``, which is the
+    step a caller relies on to leave a complete warehouse behind. It is independent of
+    both PV sources, which is why it sits after them rather than among them.
+    """
+    result = run_warehouse(
+        dbc,
+        "states.shp",
+        "mit.csv",
+        ucsb_html_dir="snap/",
+        census_corpus_dir="census/",
+        years={2016, 2020},
+    )
+
+    names = [name for name, _ in recorder]
+    assert names == ["ec", "mit", "ucsb", "census", "views"]
+    assert names.index("census") > names.index("ec")
+    assert names.index("census") < names.index("views")
+    assert result.census_rows == 7
+    assert SOURCE_CENSUS in result.sources_loaded
+
+
+def test_census_is_skipped_when_no_corpus_directory_is_given(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """Skipping is UCSB-style and deliberate, not an oversight.
+
+    Census needs a pre-built local corpus, so requiring it would stop a fresh public
+    clone building a warehouse at all. ``None`` on the receipt and absence from
+    ``sources_loaded`` are what say "not loaded" — distinct from a zero count, which
+    would mean the stage ran and found nothing.
+    """
+    result = run_warehouse(dbc, "states.shp", "mit.csv", years={2016, 2020})
+
+    assert "census" not in [name for name, _ in recorder]
+    assert result.census_rows is None
+    assert SOURCE_CENSUS not in result.sources_loaded
+
+
+def test_census_is_loaded_additively_never_destructively(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """``replace=True`` is the EC-schema rebuild; every other source is additive.
+
+    The EC drop cascades ``dwh``, so the census table goes with it and is rebuilt by
+    this same run. Forwarding ``replace`` to the census stage as well would drop and
+    recreate a table that no longer exists, and would be the one way this stage could
+    destroy data a caller did not ask it to.
+    """
+    run_warehouse(
+        dbc,
+        "states.shp",
+        "mit.csv",
+        census_corpus_dir="census/",
+        replace=True,
+        years={2016, 2020},
+    )
+
+    census_call = next(record for name, record in recorder if name == "census")
+    assert census_call["replace"] is False
+    ec_call = next(record for name, record in recorder if name == "ec")
+    assert ec_call["replace"] is True
 
 
 def test_replace_maps_destructive_to_ec_additive_to_pv(
@@ -176,6 +273,7 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", lambda *a, **k: ([], []))
     monkeypatch.setattr(warehouse, "rebuild_views", views)
+
     # The #167 gates read the live views, which a RecordingConnection cannot serve.
     def overlap(_dbc: object) -> OverlapReport:
         order.append("overlap")
@@ -210,7 +308,7 @@ def test_no_pv_source_imports_the_warehouse_composition_root() -> None:
     pkg_root = Path(warehouse.__file__).parent
     offenders = [
         py.relative_to(pkg_root).as_posix()
-        for sub in ("mit", "ucsb", "pv")
+        for sub in ("mit", "ucsb", "pv", "census")
         for py in (pkg_root / sub).rglob("*.py")
         if imports(py.read_text(), "usvote.warehouse")
     ]
@@ -231,9 +329,7 @@ def test_rebuild_views_sequences_union_then_join_then_hybrid(
     exist from a previous build, which is the case a presence-only assert would miss.
     """
     calls: list[str] = []
-    monkeypatch.setattr(
-        warehouse, "build_pv_union", lambda _dbc: calls.append("union")
-    )
+    monkeypatch.setattr(warehouse, "build_pv_union", lambda _dbc: calls.append("union"))
     monkeypatch.setattr(
         warehouse, "create_ec_pv_views", lambda _dbc: calls.append("join")
     )
@@ -250,6 +346,7 @@ def _also_record_the_gates(
     monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, dict[str, Any]]]
 ) -> None:
     """Re-patch the two #167 gates so they append to the ``recorder`` call log."""
+
     def cells(_dbc: object) -> OverlapReport:
         calls.append(("overlap-cells", {}))
         return _CLEAN_REPORT

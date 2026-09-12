@@ -3442,3 +3442,128 @@ is where that pointer resolves.
 `tests/unit/test_publish_to_pages.py::test_a_drifted_sibling_sync_is_refused_not_walked_past`,
 `::test_a_non_sync_bot_is_skipped_not_read_as_an_unattributable_sync`,
 `::test_the_workflow_subject_template_still_parses`, `claude-code-sessions#216`.
+
+## D059: Census resident population ingests as a labeled-basis dimension in `dwh`
+
+**Date:** 2026-09-11
+**Issue:** #181 (E10-S2) · **Builds on:** #180 (E10-S1, the source verdict), D006/D015 (source
+namespacing), D021 (PV co-locates with the EC spine), D014 (per-row licensing posture), D005 (no
+fabricated values), D023 (local corpus snapshots), D027 (entry-point conventions)
+
+**Context.**
+
+E10 needs a population denominator to express an electoral vote in people. S1 (#180) settled the
+source: the Census Bureau's own published tables, resident population by state, 1790–2020, genuinely
+machine-readable XLSX with **no OCR stage**, and public domain under 17 U.S.C. §105 — so unlike UCSB
+this source may reach the snapshot and the public API (D030), and real source bytes may be committed
+as test fixtures (D022).
+
+Four things about the data shaped everything below, and three of them fail *silently* rather than
+loudly:
+
+1. The series spans **two files** that overlap on 1910–1990 at **different vintages** — the
+   population-change table gives 1910 = 92,228,531 where the original publication gives 92,228,496
+   (§7). No assert will ever catch a disagreement that size.
+2. `tabs15-65.xlsx` reports every census on **present-day** state footprints, so pre-1863 Virginia
+   omits the counties that became West Virginia — understating its per-capita denominator by
+   **12.7%–21.3%** across the ten elections 1824–1860, and giving West Virginia a population for
+   censuses in which it held no electoral votes (§4).
+3. The source **backfills** states to their modern footprint's first countable census (West Virginia
+   at 1790, Alabama and Michigan at 1800, Wisconsin at 1820, Arizona and Nevada at 1860; Alaska and
+   Hawaii are *not* backfilled and start at 1960).
+4. The second file publishes **57 area rows, not 51** — four Census regions, a national total and
+   Puerto Rico alongside the jurisdictions.
+
+**Decision.**
+
+1. **A new source-namespaced subpackage `usvote/census/`** (D015), with `scrape` (the D023 corpus
+   stage) / `parse` / `transform` / `schema` / `load` / `pipeline` / `config` / `__main__`. It reads
+   the EC spine and is read back only by the `warehouse.py` composition root. Census is **not** a
+   popular-vote source: it conforms to no `usvote/pv/` contract, writes no `dwh.pv_votes`, and takes
+   no part in the D017 resolution views.
+
+2. **The table lives in `dwh`** (OQ3, which S1 deliberately left open as an architect call). The
+   `state` FK targets `dwh.state`, which is the point of conforming at all; a separate schema would
+   buy isolation this data does not need and cost a cross-schema FK. This is D021's reasoning
+   applied to a second non-EC-star table.
+
+3. **The grain is `(source, census_year, state, series)` and the boundary `basis` is a label, not
+   part of the key.** Putting `basis` in the key would let a published and a corrected Virginia row
+   coexist, which recreates the D017 fan-out hazard for population: every consumer joining this
+   table to the EC spine (#184 first) would have to remember to filter `basis` or silently
+   double-count Virginia. Instead the correction is applied **in place** with a provenance-carrying
+   constant and a `docs/corrections.md` row — the pattern this repo already runs for every
+   historical anomaly — and the published figure stays recoverable from the correction constant.
+
+4. **The Virginia 1790–1860 figures are restated onto the borders then in force**, the corrected
+   value being the file's own Virginia + West Virginia. It needs no external source: at 1790, 1850
+   and 1860 that sum reproduces the separately-published enumerated Virginia **exactly**. The other
+   censuses in the window are the same arithmetic *without* an independent cross-check, and the row
+   note says which is which rather than implying evidence the correction does not have. West
+   Virginia's own rows are left untouched at `present_day` basis — they are a real population for
+   that territory, and #182 is what removes them from a per-capita join. The fifty-state residual
+   sweep is **#208**, referenced and not absorbed.
+
+5. **The stitch is explicit and each census comes from exactly one file** — 1790–1990 from
+   `tabs15-65.xlsx`, 2000–2020 from the population-change table — so the overlap is never resolved
+   by accident, or differently on two runs. The **vintage is pinned and recorded per row**, the way
+   the EC pipeline pins its Archives corpus.
+
+6. **The loader validates jurisdiction *names*, never participation.** A name that is neither a
+   known jurisdiction nor a member of an explicit `NON_STATE_AREAS` constant raises. Backfilled
+   pre-participation rows **survive the load** — filtering them here would destroy #182's input.
+
+7. **`series` is labeled at one value (`resident`).** The by-state apportionment series is out of
+   scope (the human's 2026-09-11 narrowing, which #181's acceptance criteria record in full): it is
+   never a published column, nothing in E10 reads it, and the question it exists to answer is
+   unanswerable at state grain. The label is the seam a second series would enter through, so
+   admitting one later is a data addition rather than a schema migration. **This narrows #129's
+   "carry both series, labeled"**, which #129 itself names as its failure mode, so it is recorded
+   here rather than dropped quietly.
+
+8. **`population` is `integer`, never `smallint`.** The EC fact types its electoral-vote measures
+   `smallint`; copying that reflex overflows at 32,767 against state populations reaching ~39
+   million, and it would not fail on a small fixture.
+
+9. **The corpus manifest is keyed by a logical source id** (`resident_1790_1990`), not by year as
+   the EC and UCSB manifests are, because this corpus holds a few named files spanning many censuses
+   each. The per-*entry* shape is unchanged. #183 adds the seats sources as new keys with no rework.
+
+10. **`python -m usvote.census` defaults to `load`**, with `snapshot` explicit. UCSB's `snapshot`
+    default is backward compatibility for a command that predates its subcommands, not a principle;
+    census inherits no history and so aligns with `usvote.mit` and the bare top-level (D027).
+
+11. **Census is a `run_warehouse` stage**, after the EC spine and before `rebuild_views`, gated
+    UCSB-style: skipped when no corpus directory is given, so a fresh public clone still builds.
+
+**Rationale.**
+
+The through-line is that three of this source's four hazards produce *plausible wrong numbers*
+rather than errors, so each is answered by something a reader can see rather than by care: the
+stitch is a constant, the vintage is a column, and the boundary is a label. The `basis` column in
+particular is the D005 problem in a new place — without it a present-day-footprint Virginia and an
+as-enumerated one are indistinguishable, and the difference decides whether a per-capita claim about
+the 1850s is right or 27% wrong.
+
+**One consequence recorded rather than smoothed over: `redistributable` is a per-row column here,
+which sits in tension with D017.** D017 moved that flag *off* the per-row PV fact into the
+`pv_source` reference table, on the reasoning that a per-source constant should not repeat per row.
+This table keeps it per-row because #181's acceptance criteria require the S1 licensing verdict to
+be carried as data rather than as a comment (the D014 discipline), and a `census_source` reference
+table for a single source whose flag is uniformly `true` would over-engineer in the other direction.
+The tension is real; it is resolved by acceptance criterion rather than by principle, and a future
+second population source is the moment to revisit it.
+
+**Also worth knowing: the `note` column's constraint is the opposite of the PV one.**
+`pv_state_status.note` holds UCSB-derived prose that must be kept off the public surface (D022/D030).
+Census `note` is public-domain or repo-authored provenance and **may** reach it. Stated because the
+pattern-match from the PV note points the wrong way.
+
+**Action required.** #182 conforms these rows to the EC participation roster and builds the
+`election_year -> governing_census_year` mapping; #184 reads the **resident** series (§7 forbids the
+apportionment base as a per-capita denominator) and depends on the basis label being in place, or it
+will silently publish present-day-footprint Virginia.
+
+**Related:** #181, #180, #182, #183, #184, #208, #129, D005, D006, D014, D015, D017, D021, D022,
+D023, D027, D030, `.claude/specs/research-census-source.md` (§3/§4/§7/§10),
+`src/usvote/census/`, `src/usvote/corpus.py`, `docs/corrections.md`.

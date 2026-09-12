@@ -3,10 +3,12 @@
 Each ingest patches or tolerates a handful of real historical anomalies in its source
 data. The **Electoral College** catalog comes first, then the **UCSB popular-vote**
 catalog; each source's constants live in that source's own module, per the
-source-namespacing convention (D006/D015). A third section follows them and is a
+source-namespacing convention (D006/D015). Two further sections follow them and are a
 different kind of thing — the **in-repo popular-vote absence catalog** (#140), which
 corrects nobody's data and is instead an original compilation of historical facts this
-project asserts on its own public-domain evidence.
+project asserts on its own public-domain evidence, and the **census population boundary
+basis** (#181), which likewise corrects nobody's data: the published figure is right on
+its own terms and simply sits on a different basis than a per-capita denominator needs.
 
 The Electoral College pipeline patches a handful of real historical anomalies in the
 National Archives source data. Each is **hard-won correctness** — a value confirmed
@@ -141,6 +143,33 @@ bookkeeping: without it, "the catalog is silent about 1868" and "1868 was review
 no further absences" are indistinguishable — the same failure mode D024 §3 rejects for the
 roster itself, one level up. `build_curated_roster` therefore **raises** for any year
 outside it rather than quietly returning an all-`popular_vote` roster.
+
+## Census population boundary basis (#181)
+
+**This is not a correction to the Census Bureau's data.** The fourth section here is the
+same kind of thing as the third: the published figure is not wrong, it is on a
+**different basis** than this project needs. `tabs15-65.xlsx` reports every census on
+**present-day** state footprints — which is exactly right for comparing a state with
+itself over time, and exactly wrong for dividing an electoral vote by the people it
+represented at the time.
+
+The distinction is carried in the data rather than in this file: every row in
+`dwh.census_population` has a `basis` label, `present_day` for the figure as published
+and `as_enumerated` for one this project has restated onto the borders in force at that
+census. A figure whose basis is unstated cannot masquerade as as-enumerated — the D005
+problem in a new place.
+
+| Census(es) | Basis difference | Restatement applied | `transform.py` constant | Source / provenance |
+|---|---|---|---|---|
+| 1790–1860 | Virginia is reported on its present-day footprint, so it omits the counties that became West Virginia in 1863. The understatement runs 7.5% (1790) to 23.6% (1860); across the ten elections 1824–1860 it is **12.7%** (1820 census) to **21.3%** (1850), overstating Virginia's per-capita electoral weight by ~27% at the worst point that governs an election. West Virginia meanwhile carries a population for censuses in which it held no electoral votes. | Virginia's figure is restated in place as the file's own **Virginia + West Virginia**, and the row relabelled `as_enumerated`. West Virginia's own rows are **left untouched** at `present_day` — the population is real; what it is not is a state yet, and #182 is what removes it from a per-capita join. | `VIRGINIA_CORRECTION_CENSUSES`, `VIRGINIA_VERIFIED_CENSUSES` (applied by `apply_virginia_boundary_correction`) | The file proves the arithmetic on its own: at **1790**, **1850** and **1860** the VA + WV sum reproduces the separately-published enumerated Virginia exactly (747,610 / 1,421,661 / 1,596,318 — [`research-census-source.md`](../.claude/specs/research-census-source.md) §4). The other censuses in the window are the same arithmetic **without** an independent cross-check, and each row's note says so. |
+
+**Two things this entry deliberately does not do.** It does not claim uniform
+confidence: `VIRGINIA_VERIFIED_CENSUSES` separates the three censuses with an
+independent cross-check from the five computed by the same arithmetic, and the per-row
+note carries that distinction into the database rather than leaving it here. And it does
+not sweep the other forty-nine states — whether Virginia is the only *material* boundary
+discrepancy in the 1824–2024 span is an open question, tracked as **#208** and
+referenced rather than absorbed.
 
 ## Notes
 

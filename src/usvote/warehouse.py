@@ -60,6 +60,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from usvote.census.pipeline import run_census_pipeline
 from usvote.db import DBC
 from usvote.hybrid import assert_db_margin_agreement, create_hybrid_views
 from usvote.join import create_ec_pv_views
@@ -75,14 +76,16 @@ from usvote.ucsb.pipeline import run_ucsb_pipeline
 SOURCE_EC = "ec"
 SOURCE_MIT = "mit"
 SOURCE_UCSB = "ucsb"
+SOURCE_CENSUS = "census"
 
 
 @dataclass(frozen=True, kw_only=True)
 class WarehouseResult:
     """What a :func:`run_warehouse` build loaded — the structured build receipt.
 
-    ``sources_loaded`` names which of ``{"ec", "mit", "ucsb"}`` were ingested (UCSB is
-    absent when ``ucsb_html_dir`` was ``None``). The ``*_rows`` counts are the loaded
+    ``sources_loaded`` names which of ``{"ec", "mit", "ucsb", "census"}`` were ingested
+    (UCSB is absent when ``ucsb_html_dir`` was ``None``, census when
+    ``census_corpus_dir`` was). The ``*_rows`` counts are the loaded
     frame lengths; both PV sources now report a fact **and** a roster count, since #127
     gave MIT its D024 ``pv_state_status`` rows too. The two UCSB counts are ``None``
     exactly when UCSB was skipped.
@@ -107,6 +110,11 @@ class WarehouseResult:
     mit_roster_rows: int
     ucsb_pv_rows: int | None
     ucsb_roster_rows: int | None
+    #: Rows loaded into ``dwh.census_population`` (#181), or ``None`` when the census
+    #: stage was skipped because no corpus directory was given. Nullable for the same
+    #: reason the UCSB counts are: census needs a pre-built local corpus, so a fresh
+    #: public clone must still be able to build a warehouse without one.
+    census_rows: int | None
     sources_loaded: frozenset[str]
     views_built: bool
     #: What the D017 layer-3 cell-grain gates measured (#167) — including gate 2's D005
@@ -170,6 +178,7 @@ def run_warehouse(
     mit_csv_path: str | Path | None = None,
     *,
     ucsb_html_dir: str | Path | None = None,
+    census_corpus_dir: str | Path | None = None,
     years: Collection[int] | None = None,
     replace: bool = False,
     validate_overlap: bool = True,
@@ -287,6 +296,19 @@ def run_warehouse(
             ucsb_roster_rows = len(roster)
             sources.add(SOURCE_UCSB)
 
+        # Census sits here rather than beside the PV sources because it is not one: it
+        # depends only on dwh.state, contributes nothing to the D017 resolution views,
+        # and is read by nothing the gates below measure. Gated UCSB-style (skip when
+        # no corpus was given) so a clone without a census snapshot still builds.
+        census_rows: int | None = None
+        if census_corpus_dir is not None:
+            census_rows = len(
+                run_census_pipeline(
+                    dbc, census_corpus_dir, environ=environ, replace=False
+                )
+            )
+            sources.add(SOURCE_CENSUS)
+
         rebuild_views(dbc)
 
         # The D017 layer-3 gates, last -- after every view exists, and only on a build
@@ -302,6 +324,7 @@ def run_warehouse(
             mit_roster_rows=mit_roster_rows,
             ucsb_pv_rows=ucsb_pv_rows,
             ucsb_roster_rows=ucsb_roster_rows,
+            census_rows=census_rows,
             sources_loaded=frozenset(sources),
             views_built=True,
             overlap=overlap,
