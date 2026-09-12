@@ -133,7 +133,30 @@ class TestShapeGuard:
     def test_a_duplicated_natural_key_is_refused_before_the_database_sees_it(
         self,
     ) -> None:
-        frame = pd.concat([_frame(), _frame()], ignore_index=True)
+        """The duplicate differs OUTSIDE the key, which is the whole point.
+
+        A Class B mutation pass killed the previous version by broadening the check from
+        `CENSUS_NATURAL_KEY` to `CENSUS_COLUMNS`: that version built its duplicate as two
+        **wholly identical** rows, on which the two subsets are indistinguishable, so the
+        broadened check still flagged them and the test stayed green.
+
+        The pair below is the one that actually matters, and it is the case
+        `schema.py` excludes `basis` from the key *for*: a published and a corrected
+        Virginia row share `(source, census_year, state, series)` and differ in `basis`,
+        `population` and `note`. Under the broadened check they pass this guard and only
+        the database's UNIQUE stops them — as the opaque mid-insert psycopg2 error this
+        guard exists to pre-empt.
+        """
+        published, corrected = _frame(), _frame()
+        corrected.loc[0, "basis"] = "as_enumerated"
+        corrected.loc[0, "population"] = 1_421_661
+        corrected.loc[0, "note"] = "Restated onto the borders then in force."
+        frame = pd.concat([published, corrected], ignore_index=True)
+
+        # Precondition: they really do differ outside the key, or this is the old test.
+        assert frame["basis"].nunique() == 2
+        assert frame.duplicated(subset=list(CENSUS_COLUMNS)).sum() == 0
+
         with pytest.raises(CensusShapeError, match="duplicate natural keys"):
             assert_census_shape(frame)
 

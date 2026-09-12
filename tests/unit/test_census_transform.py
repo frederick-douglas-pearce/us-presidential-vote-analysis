@@ -174,9 +174,60 @@ class TestJurisdictionScope:
         )
 
     def test_known_states_ignores_the_totals_rows(self) -> None:
-        # "Totals" is an aggregate in the EC fact, not a jurisdiction; letting it into
-        # the recognized set would make the guard accept a literal "Totals" area.
-        assert "Totals" not in known_states(_SPINE)
+        """The `is_total` filter is exercised directly, not through `dropna()`.
+
+        A Class B mutation pass killed the previous version of this test by deleting the
+        filter entirely: the real spine's totals rows carry `state` NULL, so
+        `known_states`' trailing `.dropna()` removes them whether or not the filter runs,
+        and `assert "Totals" not in ...` was **vacuously true** — the string was never a
+        value in that column at all.
+
+        So the frame below gives its totals row a **non-null** state. That is not the
+        shape `dwh.votes` actually stores (CLAUDE.md: `state` is "null for totals rows"),
+        which makes the filter defence-in-depth rather than load-bearing — but a guard
+        worth keeping is a guard worth exercising, and this is the only input that tells
+        the two implementations apart.
+        """
+        spine = pd.DataFrame(
+            [
+                {
+                    "year": 2020,
+                    "state": "Virginia",
+                    "is_total": False,
+                    "total_electoral_votes": 13,
+                },
+                {
+                    "year": 2020,
+                    "state": "Totals",
+                    "is_total": True,
+                    "total_electoral_votes": 538,
+                },
+            ]
+        )
+        recognized = known_states(spine)
+        assert recognized == {"Virginia"}
+        assert "Totals" not in recognized
+
+    def test_known_states_still_drops_a_null_state_totals_row(self) -> None:
+        # The shape the spine really stores, kept alongside the one above so neither
+        # mechanism can be removed silently: here `dropna()` is what does the work.
+        spine = pd.DataFrame(
+            [
+                {
+                    "year": 2020,
+                    "state": "Virginia",
+                    "is_total": False,
+                    "total_electoral_votes": 13,
+                },
+                {
+                    "year": 2020,
+                    "state": None,
+                    "is_total": True,
+                    "total_electoral_votes": 538,
+                },
+            ]
+        )
+        assert known_states(spine) == {"Virginia"}
 
 
 class TestVirginiaBoundaryCorrection:
