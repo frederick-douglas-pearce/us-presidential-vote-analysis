@@ -31,6 +31,7 @@ _A = SourceFile(
     url="https://example.test/alpha.xlsx",
     filename="alpha.xlsx",
     span="1790-1990",
+    vintage="alpha-vintage",
     description="alpha",
 )
 _B = SourceFile(
@@ -38,6 +39,7 @@ _B = SourceFile(
     url="https://example.test/beta.xlsx",
     filename="beta.xlsx",
     span="2000-2020",
+    vintage="beta-vintage",
     description="beta",
 )
 
@@ -214,6 +216,7 @@ class TestCorpusShapeAndExtensibility:
             url="https://example.test/seats.pdf",
             filename="seats.pdf",
             span="1789-2010",
+            vintage="census-bureau-apportionment-2020",
             description="seats per state",
         )
         snapshot_census_sources(

@@ -47,6 +47,9 @@ from typing import Any
 
 from usvote import config, scrape
 from usvote.census.config import census_corpus_dir_from_env
+from usvote.census.parse import CensusParseError
+from usvote.census.scrape import CensusScrapeError
+from usvote.census.transform import CensusTransformError
 from usvote.db import DBC, DBConnectionError
 from usvote.hybrid import HybridError
 from usvote.mit.config import mit_csv_path_from_env
@@ -314,6 +317,25 @@ def _run_all(args: argparse.Namespace) -> int:
             environ=environ,
             close=True,
         )
+    except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
+        # Census runs AFTER the three source loads and BEFORE rebuild_views
+        # (warehouse.py), and every pipeline owns its own transaction (#84a). So a
+        # census failure here leaves a genuinely odd warehouse: EC, MIT and UCSB are
+        # committed, and there are **no join or hybrid views at all**. That is the one
+        # thing the operator needs told, and without this arm they got a bare traceback
+        # after a multi-minute build instead. The sibling arms exist for the same
+        # reason -- which half is built is the operator's next-move information.
+        print(f"Census ingestion failed: {e}", file=sys.stderr)
+        print(
+            "The EC, MIT and UCSB loads COMMITTED before this point, but the join "
+            "and hybrid views were NOT rebuilt — the warehouse holds facts and no "
+            "views. Complete the corpus with `python -m usvote.census snapshot`, "
+            "then re-run `python -m usvote all --replace` to rebuild cleanly. A bare "
+            "re-run without --replace will hit a unique violation on the "
+            "already-loaded sources.",
+            file=sys.stderr,
+        )
+        return 1
     except PipelineError as e:
         return _report_incomplete_scrape(e, dbc)
     except MITCoverageError as e:

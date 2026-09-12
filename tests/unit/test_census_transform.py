@@ -15,12 +15,14 @@ from tests._helpers import (
     CENSUS_TABS_TRIMMED_XLSX,
     ec_participation_frame,
 )
+from usvote.census import transform
 from usvote.census.parse import PopulationRow, parse_population_change
 from usvote.census.schema import (
     BASIS_AS_ENUMERATED,
     BASIS_PRESENT_DAY,
     CENSUS_COLUMNS,
     SERIES_RESIDENT,
+    SOURCE_CENSUS_BUREAU,
 )
 from usvote.census.transform import (
     NON_STATE_AREAS,
@@ -370,3 +372,57 @@ class TestFrameShape:
         assert frame[frame.census_year >= 2000]["state"].nunique() == 51
         virginia = frame[(frame.state == "Virginia") & (frame.census_year == 1850)]
         assert virginia["population"].iloc[0] == 1_421_661
+
+
+class TestProvenanceIsSingleSourced:
+    """#181 review, F2/F10: a constant documented as authoritative, bound to nothing.
+
+    ``SOURCE_FILENAMES`` and ``SOURCE_VINTAGES`` used to be literal maps restating
+    values that the fetch stage owns. Nothing tied them, so a rename would have updated
+    the download and silently falsified every loaded row's provenance while the suite
+    stayed green — and the vintage, which the module calls "the only defence" against
+    two tabulations that differ by amounts no assert can catch, had no authority to be
+    checked against at all.
+    """
+
+    def test_the_filename_and_vintage_maps_derive_from_the_source_catalog(self) -> None:
+        # Derivation, not duplication: these must BE the catalog's values, so a rename
+        # cannot update one and leave the other behind.
+        from usvote.census.sources import CENSUS_SOURCES
+
+        for source in CENSUS_SOURCES:
+            assert transform.SOURCE_FILENAMES[source.source_id] == source.filename
+            assert transform.SOURCE_VINTAGES[source.source_id] == source.vintage
+
+    def test_the_shipped_vintage_values_are_pinned(self) -> None:
+        """The pin D059 §5 claims exists.
+
+        Swapping the two vintage strings is a change no other test notices: both files
+        parse, every number is right, and the only casualty is that each row now claims
+        the wrong published tabulation. That is precisely the class of error the vintage
+        column exists to make visible, so the values are pinned to literals here rather
+        than compared against the constant they come from.
+        """
+        assert transform.SOURCE_VINTAGES == {
+            "resident_1790_1990": "census-bureau-pop-twps0056-2002",
+            "resident_1910_2020": "census-bureau-apportionment-2020",
+        }
+
+    def test_every_loaded_row_carries_its_own_files_vintage(self) -> None:
+        # The end-to-end version: a row's vintage must match the file the stitch
+        # actually took it from, not merely be non-null.
+        rows = _minimal_rows()
+        frame = transform.transform_census(rows, _SPINE)
+        for _, row in frame.iterrows():
+            expected = {
+                "tabs15-65.xlsx": "census-bureau-pop-twps0056-2002",
+                "population-change-data-table.xlsx": "census-bureau-apportionment-2020",
+            }[row["source_file"]]
+            assert row["vintage"] == expected
+
+    def test_the_source_token_value_is_asserted_not_merely_non_null(self) -> None:
+        # REQUIRED_NON_NULL rejects nulls, not empty strings — verified: a frame with
+        # source="" passes assert_census_shape. So the value needs its own pin.
+        frame = transform.transform_census(_minimal_rows(), _SPINE)
+        assert (frame["source"] == SOURCE_CENSUS_BUREAU).all()
+        assert frame["source"].str.len().gt(0).all()

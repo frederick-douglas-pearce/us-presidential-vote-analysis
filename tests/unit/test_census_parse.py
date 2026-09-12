@@ -67,9 +67,18 @@ class TestResident1790To1990:
 
         The ``PERCENT`` block repeats **every** year label the ``NUMBER`` block uses, in
         the same column. A parser keying on the year alone reads each year twice and the
-        second — a percentage — wins. The check that catches it is not "no duplicates":
-        it is that every value is a population-sized count, since a percentage is a
-        small number that looks perfectly plausible on its own.
+        second — a percentage — wins.
+
+        **What this test does and does not establish.** It pins the *outcome* on the
+        committed fixture: no year appears twice, and Virginia's values are all
+        population-sized rather than percentages. It does **not** pin the
+        ``NUMBER``/``PERCENT`` marker itself. On this fixture the marker is redundant —
+        ``NUMBER`` always precedes ``PERCENT``, so the parser's ``seen`` set already
+        drops the repeat — and deleting the marker handling entirely leaves the output
+        byte-identical and this test green. An earlier version of this docstring claimed
+        the opposite. Pinning the marker needs a sheet where ``PERCENT`` comes first or
+        carries a year ``NUMBER`` does not; that fixture is deferred test-hardening work,
+        and until it exists the marker is documented behaviour, not guarded behaviour.
         """
         rows = _tabs()
         keys = [(row.area, row.census_year) for row in rows]

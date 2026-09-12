@@ -937,3 +937,62 @@ def test_all_skips_census_loudly_when_the_corpus_is_absent(
     assert top.main(["all"]) == 0
     assert top_env["warehouse"][0]["census_corpus_dir"] is None
     assert "WITHOUT census population" in capsys.readouterr().err
+
+
+def test_all_reports_a_census_failure_as_a_half_built_warehouse(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, B1: the arm that was missing, and why it matters.
+
+    Census runs after the three source loads and **before** `rebuild_views`, and every
+    pipeline owns its own transaction (#84a). So a census failure — a corpus directory
+    that exists but is empty or half-snapshotted, which `_resolve_census_dir` accepts —
+    leaves EC, MIT and UCSB committed with **no join or hybrid views at all**, after a
+    multi-minute build. Without this arm the operator got a bare traceback and no way to
+    tell which half of the warehouse exists.
+
+    The message must say both things: that the sources committed, and that the views did
+    not. Asserting only the exit code would pass on a bare `return 1`, which is the
+    version of this fix that helps nobody.
+    """
+    from usvote.census.scrape import CensusScrapeError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusScrapeError("The Census corpus at /tmp/x is incomplete: ...")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "Census ingestion failed" in err
+    assert "COMMITTED" in err, "the operator is not told the sources landed"
+    assert "NOT rebuilt" in err, "the operator is not told the views are missing"
+    assert "--replace" in err, "no recovery path given"
+
+
+def test_all_catches_every_census_error_type_not_just_the_scrape_one(
+    top_env: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The three are plain RuntimeError siblings matching neither PipelineError,
+    # MITCoverageError nor (PVOverlapError, HybridError) — so each escapes separately if
+    # the arm names only some of them. CensusParseError is the one a layout change
+    # raises, i.e. the likeliest of the three in practice.
+    from usvote.census.parse import CensusParseError
+    from usvote.census.scrape import CensusScrapeError
+    from usvote.census.transform import CensusTransformError
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    for error in (
+        CensusScrapeError("a"),
+        CensusTransformError("b"),
+        CensusParseError("c"),
+    ):
+
+        def boom(*a: Any, _e: Exception = error, **k: Any) -> None:
+            raise _e
+
+        monkeypatch.setattr(top, "run_warehouse", boom)
+        assert top.main(["all"]) == 1, f"{type(error).__name__} escaped the arm"

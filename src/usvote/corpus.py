@@ -69,21 +69,28 @@ def utc_timestamp() -> str:
 def atomic_write_bytes(path: Path, body: bytes) -> None:
     """Write ``body`` to ``path`` atomically (unique temp file, fsync, then replace).
 
-    Used for **both** saved pages and the manifest. An earlier version of the EC corpus
-    wrote pages with a plain ``write_bytes`` while going to real trouble for the
-    manifest, which left the more valuable artifact less protected: two concurrent
-    snapshot runs interleaved into one saved page, and the winner then recorded a
-    sha256 of what it *sent* rather than what landed — a corrupt page that passes the
-    completeness guard forever. A rebuild reading the directory mid-run could likewise
-    see a half-written page.
+    Used for **both** saved files and the manifest, in all three corpora. An earlier
+    version of the EC corpus wrote pages with a plain ``write_bytes`` while going to
+    real trouble for the manifest, which left the more valuable artifact less
+    protected: two concurrent snapshot runs interleaved into one saved page, and the
+    winner then recorded a sha256 of what it *sent* rather than what landed — a corrupt
+    page that passes the completeness guard forever. A rebuild reading the directory
+    mid-run could likewise see a half-written page.
+
+    UCSB's *page* write was the last holdout — it stayed a plain ``write_bytes`` when
+    its manifest writer moved here, so this sentence was briefly untrue of it. It was
+    switched over in the same review that caught the discrepancy (#181), which is what
+    makes "all three" a claim rather than an aspiration.
 
     ``mkstemp`` gives a **unique** temp name, not a fixed ``<name>.tmp``: two concurrent
     runs sharing one temp path would interleave writes into it and then *atomically
-    install* the corrupt result — atomicity that faithfully publishes garbage. Nothing
-    tests that distinction (a fixed name behaves correctly single-threaded), so this
-    note is the only thing standing between a future edit and the bug. The UCSB writer
-    used the fixed-name spelling until it moved here; adopting the stricter one is part
-    of what the extraction buys.
+    install* the corrupt result — atomicity that faithfully publishes garbage. A fixed
+    name behaves correctly single-threaded, so no outcome-based test can tell the two
+    apart; the guard is
+    ``tests/unit/test_corpus.py::TestAtomicWriteBytes::test_the_temp_name_is_unique_per_call_not_a_fixed_suffix``,
+    which observes that the unique-name allocator is what supplied the path. UCSB's
+    manifest writer used the fixed-name spelling until it moved here; adopting the
+    stricter one is part of what the extraction buys.
     """
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
     try:

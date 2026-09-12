@@ -25,12 +25,39 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 import requests
 
 from usvote import config, corpus
 from usvote.census.config import CENSUS_CORPUS_DIR_VAR, census_corpus_dir_from_env
+from usvote.census.sources import (
+    CENSUS_SOURCES,
+    RESIDENT_1790_1990,
+    RESIDENT_1910_2020,
+    RESIDENT_SOURCE_IDS,
+    SourceFile,
+)
+
+# Re-exported so existing importers keep working and the catalog has ONE home: the
+# definitions moved to usvote.census.sources in the #181 review (F10), because the pure
+# transform needs the filename/vintage provenance and must not import this module's
+# `requests` dependency to get it.
+__all__ = [
+    "CENSUS_SOURCES",
+    "RESIDENT_1790_1990",
+    "RESIDENT_1910_2020",
+    "RESIDENT_SOURCE_IDS",
+    "CensusScrapeError",
+    "SourceFile",
+    "assert_corpus_covers_sources",
+    "describe_corpus",
+    "fetch_file",
+    "read_manifest",
+    "read_snapshot_sources",
+    "snapshot_census_sources",
+    "write_manifest",
+]
 
 #: Identify truthfully, exactly as the EC and UCSB snapshots do (D015-legal: the shared
 #: string lives in the source-neutral top-level config).
@@ -49,66 +76,6 @@ CRAWL_DELAY_SECONDS = 2
 class CensusScrapeError(RuntimeError):
     """Raised when the corpus cannot be built or is incomplete."""
 
-
-class SourceFile(NamedTuple):
-    """One published file in the corpus.
-
-    ``source_id`` is the manifest key and the stable name every other stage refers to;
-    ``filename`` is what lands on disk, kept as the Bureau's own filename so a human
-    browsing the directory can match it against the published page.
-    """
-
-    source_id: str
-    url: str
-    filename: str
-    span: str
-    description: str
-
-
-#: Table 15-65 of POP-twps0056: one sheet per state (50 + DC), resident population by
-#: census 1790-1990. S1 verified the bytes (329,123 B) and read values out of it.
-RESIDENT_1790_1990 = SourceFile(
-    source_id="resident_1790_1990",
-    url=(
-        "https://www2.census.gov/library/working-papers/2002/demo/"
-        "pop-twps0056/tabs15-65.xlsx"
-    ),
-    filename="tabs15-65.xlsx",
-    span="1790-1990",
-    description=(
-        "Census Bureau working paper POP-twps0056, tables 15-65 — resident population "
-        "by state and census year, one sheet per state (50 states + DC)."
-    ),
-)
-
-#: The 2020 population-change table: resident population by state for 1910-2020, laid
-#: out as side-by-side decade blocks. Only its 2000/2010/2020 columns are read (the
-#: stitch rule in :mod:`usvote.census.transform` gives 1910-1990 to the file above).
-RESIDENT_1910_2020 = SourceFile(
-    source_id="resident_1910_2020",
-    url=(
-        "https://www2.census.gov/programs-surveys/decennial/2020/data/"
-        "apportionment/population-change-data-table.xlsx"
-    ),
-    filename="population-change-data-table.xlsx",
-    span="1910-2020",
-    description=(
-        "Change in Resident Population of the 50 States, the District of Columbia, "
-        "and Puerto Rico: 1910 to 2020 — the 2020 apportionment release."
-    ),
-)
-
-#: Every file this corpus holds. #183 appends the seats sources here; nothing else
-#: needs to change for them to be snapshotted, guarded and read.
-CENSUS_SOURCES: tuple[SourceFile, ...] = (RESIDENT_1790_1990, RESIDENT_1910_2020)
-
-#: The sources the population load requires. Kept separate from
-#: :data:`CENSUS_SOURCES` so a corpus that has grown #183's seats files is not
-#: *required* to have them before this pipeline will run, and vice versa.
-RESIDENT_SOURCE_IDS: tuple[str, ...] = (
-    RESIDENT_1790_1990.source_id,
-    RESIDENT_1910_2020.source_id,
-)
 
 _MANIFEST_REMEDY = (
     "Delete it and re-run `python -m usvote.census snapshot` to rebuild the record "

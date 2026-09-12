@@ -29,8 +29,11 @@ import os
 import sys
 from typing import Any
 
+import psycopg2
+
 from usvote import config
 from usvote.census.config import census_corpus_dir_from_env
+from usvote.census.parse import CensusParseError
 from usvote.census.pipeline import run_census_pipeline
 from usvote.census.scrape import (
     CensusScrapeError,
@@ -78,14 +81,21 @@ def _run_load(replace: bool) -> int:
 
     try:
         loaded = run_census_pipeline(dbc, corpus_dir, replace=replace, close=True)
-    except (CensusScrapeError, CensusTransformError) as e:
+    except (
+        CensusScrapeError,
+        CensusTransformError,
+        CensusParseError,
+        psycopg2.Error,
+    ) as e:
         # ``run_census_pipeline`` has no try/finally, so its ``close=True`` never fires
         # on a raise — close here rather than leaking the connection. Nothing was
         # written: both guards run before the transaction opens.
         print(f"Census load failed: {e}", file=sys.stderr)
         print(
-            "Nothing was loaded — the corpus and jurisdiction guards both run before "
-            "any write.",
+            "The corpus, parse and jurisdiction guards all run before any write, so a "
+            "failure from one of those loaded nothing. A UniqueViolation instead means "
+            "the table already holds these rows — that is the documented "
+            "non-destructive guard; pass --replace to rebuild.",
             file=sys.stderr,
         )
         dbc.close_connection()

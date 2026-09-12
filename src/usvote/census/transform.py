@@ -30,6 +30,8 @@ from usvote.census.schema import (
     SERIES_RESIDENT,
     SOURCE_CENSUS_BUREAU,
 )
+from usvote.census.sources import SOURCE_FILENAMES as _SOURCE_FILENAMES
+from usvote.census.sources import SOURCE_VINTAGES as _SOURCE_VINTAGES
 
 #: Which source file supplies which censuses — **the stitch rule, written down** (S1
 #: §4, an explicit acceptance criterion).
@@ -46,27 +48,24 @@ SOURCE_SPANS: dict[str, range] = {
 #: The first census taken from the second file — the stitch year, pinned.
 STITCH_YEAR = 2000
 
-#: The published tabulation each file represents, recorded **per row**.
+#: The published tabulation each file represents, and the filename it came from — both
+#: **derived** from the one source catalog (:mod:`usvote.census.sources`) rather than
+#: restated here. They were literal maps until the #181 review: nothing tied them to the
+#: authoritative values in the fetch stage, so a rename would have updated the download
+#: and silently falsified every row's provenance while the suite stayed green (F10), and
+#: the vintage had no authority to be checked against at all (F2).
 #:
-#: This is not bookkeeping. census.gov publishes more than one vintage of resident
-#: population and they disagree: for 1910 the population-change table gives
+#: The vintage pin is not bookkeeping. census.gov publishes more than one vintage of
+#: resident population and they disagree: for 1910 the population-change table gives
 #: **92,228,531** where the original publication gives **92,228,496**, and for 1970
 #: **203,211,926** against **203,302,031** (S1 §7). Differences of that size will never
 #: trip an assert, so the only defence is to record which tabulation a figure came from
-#: — exactly as the EC pipeline pins its Archives corpus. The stitch above means this
+#: — exactly as the EC pipeline pins its Archives corpus. The stitch below means this
 #: project takes 1910-1990 from the working paper, so those particular disagreements do
 #: not arise in the loaded data; the pin is what makes that statement checkable rather
 #: than merely true today.
-SOURCE_VINTAGES: dict[str, str] = {
-    "resident_1790_1990": "census-bureau-pop-twps0056-2002",
-    "resident_1910_2020": "census-bureau-apportionment-2020",
-}
-
-#: The filename each source id lands as, for the per-row ``source_file`` provenance.
-SOURCE_FILENAMES: dict[str, str] = {
-    "resident_1790_1990": "tabs15-65.xlsx",
-    "resident_1910_2020": "population-change-data-table.xlsx",
-}
+SOURCE_VINTAGES = _SOURCE_VINTAGES
+SOURCE_FILENAMES = _SOURCE_FILENAMES
 
 #: Published rows that are **not** jurisdictions, excluded by name.
 #:

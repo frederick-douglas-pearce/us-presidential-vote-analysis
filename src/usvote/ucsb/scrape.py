@@ -350,7 +350,12 @@ def snapshot_elections(
                 f"{url} returned neither an HTTP status nor a transport error. "
                 f"Refusing to record a saved page with no status."
             )
-        page.write_bytes(result.body)
+        # Atomic, like every other write in the three corpora: a plain write_bytes
+        # leaves a truncated page on a crash, and the manifest then records a sha256 of
+        # what was *sent* rather than what landed — a corrupt page that passes the
+        # completeness guard forever. This was the last non-atomic write left after the
+        # #181 extraction moved the manifest writers here.
+        corpus.atomic_write_bytes(page, result.body)
         manifest[year] = corpus.provenance_entry(
             url=url, file=page.name, status=status, body=result.body
         )
