@@ -21,7 +21,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 |-----------|-------|-------|
 | `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). **Current active epic: `epic:tech-debt` (E12) — run order #186 → #215 → #191 → #214, then `RUN PARKED`; the five remaining members are `parked` past E10 (Fred, 2026-09-07). #186 is `blocked: human-only` — its diff is this file, which the engine forbids the orchestrator editing. Next epic: `epic:census` (E10, #129), entering at #181 — its gating research #180 closed 2026-08-31.** Standing queue: `epic:tech-debt` (E12, #179) never closes, so this run parks rather than completes | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
-| `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation) | inferred from available agent roster |
+| `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation, the architect gate in §2; **and rules on scope, stopping with that ruling attached, when a BLOCKING code-review finding raises a design question**) | inferred from available agent roster. The scope ruling is a **second gate the engine makes due, not this file** (dev-loop 0.3.0, #114): `ARCHITECT_TRIGGERS` does not bound it, it fires on every route at whatever round the finding arises, and no value here switches it off — absent, `—` or `TODO`, the stop still fires with no ruling attached. The engine's Gate table is the authoritative list of every gate this binding staffs. **Never delete this row.** |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
 | `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching the API serve surface (`usvote/api/`), the DB write path, or scraping/network code | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
@@ -63,6 +63,11 @@ Corrected 2026-07-26 after the #82 iteration ran `/review 115` in this slot. The
 invocation, not this binding — the row above already said `/code-review`.
 
 ## 2. `ARCHITECT_TRIGGERS`
+
+**These triggers govern the plan-informing use only, and the list below does not bound
+`DESIGN_AGENT`.** The engine consults that agent for a scope ruling whenever a BLOCKING code-review
+finding raises a design question — on every route, at whatever round it arises, and stopping with
+that ruling. Nothing in this file turns that off.
 
 Fire `DESIGN_AGENT` (`architect`) when a plan touches any of the following; bias toward calling it.
 
