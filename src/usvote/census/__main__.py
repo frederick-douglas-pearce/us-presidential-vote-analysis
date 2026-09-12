@@ -79,7 +79,8 @@ def _run_load(replace: bool) -> int:
         print(e, file=sys.stderr)
         return 1
 
-    # ``close=False``: this function owns the close, in the ``finally`` below.
+    # The close is NOT delegated to the pipeline: this function owns it, in the
+    # ``finally`` below.
     # ``run_census_pipeline`` has no ``try/finally`` of its own, so its ``close=True``
     # never fires on a raise — and a DB error this function does not *name* would then
     # leak the connection just as surely as one it fails to catch. One owner, one exit.

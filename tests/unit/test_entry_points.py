@@ -949,8 +949,9 @@ def test_all_reports_a_census_failure_as_a_half_built_warehouse(
     Census runs after the three source loads and **before** `rebuild_views`, and every
     pipeline owns its own transaction (#84a). So a census failure — a corpus directory
     that exists but is empty or half-snapshotted, which `_resolve_census_dir` accepts —
-    leaves EC, MIT and UCSB committed with **no join or hybrid views at all**, after a
-    multi-minute build. Without this arm the operator got a bare traceback and no way to
+    leaves whichever sources ran committed with **no join or hybrid views at all**, after
+    a multi-minute build. (Here that is EC and MIT: this fixture sets no UCSB snapshot,
+    so UCSB is skipped, which is the same path a public clone takes.) Without this arm the operator got a bare traceback and no way to
     tell which half of the warehouse exists.
 
     The message must say both things: that the sources committed, and that the views did

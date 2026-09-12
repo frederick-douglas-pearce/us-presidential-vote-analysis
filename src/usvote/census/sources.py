@@ -9,14 +9,19 @@ from the scrape module would drag ``requests`` into a transform whose offline-ne
 the point — the same reasoning that puts :mod:`usvote.count_status` and
 :mod:`usvote.years` at the top level rather than inside a stage.
 
-**Why this module exists at all** (#181 review, F10/F2): the filename and the vintage
-were previously spelled *twice* — once in :mod:`usvote.census.scrape`, which owned
-them, and again as literal maps in :mod:`usvote.census.transform` — with nothing tying
-the two. A rename would have updated the fetch and silently falsified every loaded
-row's ``source_file`` provenance, and the vintage had no authority at all. Both are
-now single-sourced on :data:`CENSUS_SOURCES`, so the duplication cannot be
-reintroduced without deleting a
-field.
+**Why this module exists at all** (#181 review, F10/F2). Two different defects, one
+cause — a value used in two stages with no single owner:
+
+* the **filename** was spelled twice, once in :mod:`usvote.census.scrape` (which owned
+  it) and again as a literal map in :mod:`usvote.census.transform`, with nothing tying
+  them. A rename would have updated the download and silently falsified every loaded
+  row's ``source_file`` provenance while the suite stayed green.
+* the **vintage** was not duplicated at all — it existed *only* as a literal map in the
+  transform, and :class:`SourceFile` had no such field. So it had no authority to be
+  checked against, which is why swapping its two values passed every test.
+
+Both are now fields of :data:`CENSUS_SOURCES`, and both maps below derive from it, so
+neither defect can be reintroduced without deleting a field.
 """
 
 from __future__ import annotations

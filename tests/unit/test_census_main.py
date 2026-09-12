@@ -5,10 +5,15 @@ The census `__main__` shipped with **no tests at all** — a `main()` dispatchin
 and the acceptance criterion is specifically "a `__main__.py` dispatching a `load`
 subcommand (the D027 convention)".
 
-The `except` arm gets the most attention here, because an untested arm is exactly how it
-came to be too narrow: it caught only two of the three sibling error types its own module
-defines, so a `CensusParseError` — the one a layout change raises — escaped uncaught and
-leaked the connection the arm exists to close.
+The error handling gets the most attention here, because an untested arm is exactly how
+it came to be wrong twice: first it caught only two of the three sibling error types its
+own module defines, so a `CensusParseError` — the one a layout change raises — escaped
+uncaught; then the fix for *that* widened it to the whole `psycopg2.Error` tree in order
+to close the connection, and printed advice fitting only one of them.
+
+The arrangement those two rounds arrived at separates the concerns: the arm **reports**,
+naming each error it can give useful advice about, and a `finally` **closes** on every
+path including the ones nobody named.
 """
 
 from __future__ import annotations

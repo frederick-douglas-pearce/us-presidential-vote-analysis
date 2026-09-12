@@ -1,18 +1,20 @@
 """Whole-warehouse composition root — build the entire ``dwh`` from every source.
 
-:func:`run_warehouse` sequences the four source/join steps into one runnable build:
+:func:`run_warehouse` sequences the five source/join steps into one runnable build:
 the EC spine (:func:`usvote.pipeline.run_ec_pipeline`), the MIT PV source
 (:func:`usvote.mit.pipeline.run_mit_pipeline`), optionally the UCSB PV source
-(:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`), then the resolved-PV, EC<->PV join
-and hybrid views (:func:`rebuild_views`). It is the programmatic entry point behind
-``python -m usvote all`` (#84b).
+(:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`), optionally the census population
+source (:func:`usvote.census.pipeline.run_census_pipeline`), then the resolved-PV,
+EC<->PV join and hybrid views (:func:`rebuild_views`). It is the programmatic entry
+point behind ``python -m usvote all`` (#84b).
 
 **This is a composition root, not part of the EC spine.** It lives at the top level
 alongside the source-namespaced ``usvote/`` modules, but unlike them it imports *from*
-every source (EC + both PV subpackages) to wire them together. That is allowed for the
-same reason :mod:`usvote.__main__` is: a composition root sits **above** both EC and
-PV, so it is exempt from the D015 source-to-source prohibition exactly as ``__main__``
-is (D027). The invariant that keeps the exemption honest is the reverse one — nothing
+every source (EC, both PV subpackages, and census) to wire them together. That is
+allowed for the same reason :mod:`usvote.__main__` is: a composition root sits
+**above** both EC and PV, so it is exempt from the D015 source-to-source prohibition
+exactly as ``__main__`` is (D027). The invariant that keeps the exemption honest is
+the reverse one — nothing
 under ``usvote/{mit,ucsb,pv}/`` may import :mod:`usvote.warehouse` (a back-import would
 invert D015 into a cycle); a unit test enforces it.
 
@@ -190,7 +192,8 @@ def run_warehouse(
 ) -> WarehouseResult:
     """Build the whole ``dwh`` warehouse from every source and return a build receipt.
 
-    Sequences EC -> MIT -> (optional) UCSB -> views on a single ``dbc``:
+    Sequences EC -> MIT -> (optional) UCSB -> (optional) census -> views on a single
+    ``dbc``:
 
     1. :func:`usvote.pipeline.run_ec_pipeline` — the EC spine. ``replace`` is
        forwarded here (and here only): ``replace=True`` drops and recreates the ``dwh``
@@ -203,9 +206,15 @@ def run_warehouse(
     3. :func:`usvote.ucsb.pipeline.run_ucsb_pipeline` — the UCSB PV source, only when
        ``ucsb_html_dir`` is not ``None`` (else UCSB is skipped, explicitly — no env
        magic). Also ``replace=False``.
-    4. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
+    4. :func:`usvote.census.pipeline.run_census_pipeline` — the census population
+       source (#181, D059), only when ``census_corpus_dir`` is not ``None`` (else it is
+       skipped, the same explicit no-env-magic posture as UCSB). Also ``replace=False``.
+       It sits here rather than among the PV sources because it is **not** one: it
+       depends only on ``dwh.state``, contributes nothing to the D017 resolution views,
+       and is read by none of the gates below.
+    5. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
        rebuilt.
-    5. the **D017 layer-3 overlap gates** (#167, D051), when ``validate_overlap`` — MIT
+    6. the **D017 layer-3 overlap gates** (#167, D051), when ``validate_overlap`` — MIT
        vs. UCSB agreement at the cell grain
        (:func:`usvote.pv.overlap.assert_db_overlap_within_tolerance`) and at the
        national margin grain (:func:`usvote.hybrid.assert_db_margin_agreement`).

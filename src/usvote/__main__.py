@@ -318,17 +318,20 @@ def _run_all(args: argparse.Namespace) -> int:
             close=True,
         )
     except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
-        # Census runs AFTER the three source loads and BEFORE rebuild_views
+        # Census runs after the other source loads and BEFORE rebuild_views
         # (warehouse.py), and every pipeline owns its own transaction (#84a). So a
-        # census failure here leaves a genuinely odd warehouse: EC, MIT and UCSB are
+        # census failure here leaves a genuinely odd warehouse: the sources that ran are
         # committed, and there are **no join or hybrid views at all**. That is the one
         # thing the operator needs told, and without this arm they got a bare traceback
         # after a multi-minute build instead. The sibling arms exist for the same
         # reason -- which half is built is the operator's next-move information.
-        # Name only the sources that actually ran: UCSB is skipped whenever no
-        # snapshot is present, which is the ordinary path for a public clone, so an
-        # unconditional "EC, MIT and UCSB committed" names a source that never started.
-        # The sibling MIT arm below is careful about exactly this.
+        #
+        # Which sources ran is not fixed: UCSB is skipped whenever no snapshot is
+        # present, the ordinary path for a public clone, so the message is built from
+        # the same ``ucsb_html_dir`` that decided it rather than naming UCSB
+        # unconditionally. The remedy varies too -- only a corpus problem is fixed by
+        # snapshotting, while a parse or transform failure means the published layout or
+        # the jurisdiction set moved and re-downloading identical files changes nothing.
         committed = "EC, MIT and UCSB" if ucsb_html_dir is not None else "EC and MIT"
         # The remedy differs by which guard fired. Only a corpus problem is fixed by
         # snapshotting; a parse or transform failure means the published layout or the
