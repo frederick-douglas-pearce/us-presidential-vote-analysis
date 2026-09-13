@@ -669,11 +669,48 @@ class TestParticipationFrameGuards:
     def test_a_null_is_total_is_rejected(self) -> None:
         # A null cannot be excluded as a totals row, and a totals row carries a NULL state,
         # which would enter the frame as a phantom jurisdiction.
+        # Cast first: a bool-dtype column refuses a None outright, so a null only ever
+        # arrives in a column that can hold one.
         frame = _SUCCESSION_SPINE.copy()
-        # Cast first: a bool-dtype column refuses a None outright, so the only way a null
-        # reaches this guard in the wild is an object or nullable-boolean column.
         frame["is_total"] = frame["is_total"].astype(object)
         frame.loc[0, "is_total"] = None
+        with pytest.raises(CensusConformError, match="null value"):
+            spine_participation(frame)
+
+    @pytest.mark.parametrize(
+        ("dtype", "null"),
+        [
+            ("object", None),
+            ("boolean", pd.NA),
+            ("Int64", pd.NA),
+            ("float64", float("nan")),
+        ],
+        ids=["object", "boolean", "Int64", "float64"],
+    )
+    def test_a_null_is_rejected_in_every_dtype_that_can_hold_one(
+        self, dtype: str, null: object
+    ) -> None:
+        """#182 review, F-1 — the null check must not be reachable only for some dtypes.
+
+        The first version of this guard ordered the **integer** early-return above the null
+        check, so a nullable ``Int64`` carrying ``pd.NA`` slipped past it and died at
+        ``.astype(bool)`` with a bare ``ValueError`` — the nullable-column failure the null
+        branch exists to report. The comment above this test also claimed object and
+        nullable-boolean were the only columns a null could arrive in, which was true of the
+        live path and false for an injected frame — and an injected frame is exactly how
+        #184 will call this function.
+
+        Parameterised rather than written for ``Int64`` alone, because the defect was an
+        *ordering* one: any future early-return placed above the null check reintroduces it
+        for whichever dtype that branch covers.
+        """
+        # The null sentinel is per-dtype: float64 holds `nan`, not `pd.NA`, and object
+        # holds `None`. Hard-coding one makes the *test* fail to construct rather than the
+        # guard fail to fire, which is a different thing and would have hidden this.
+        frame = _SUCCESSION_SPINE.copy()
+        frame["is_total"] = pd.Series(
+            [null] + [False] * (len(frame) - 1), dtype=dtype, index=frame.index
+        )
         with pytest.raises(CensusConformError, match="null value"):
             spine_participation(frame)
 

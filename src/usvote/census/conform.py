@@ -269,19 +269,26 @@ def _assert_is_total_is_boolean(column: pd.Series) -> None:
     One **deliberate** divergence from UCSB: 0/1 integers are accepted here and rejected
     there. ``read_ec_participation`` coerces an integer ``is_total`` to ``bool`` itself,
     so on the live path it cannot arrive — and a consumer refusing what its own reader
-    normalizes buys nothing.
+    normalizes buys nothing. Note what is accepted is integer *values*, never nulls: the
+    null check below runs **before** that early return, so a nullable ``Int64`` carrying
+    ``pd.NA`` is rejected like any other null instead of slipping through it.
     """
     if column.empty:
         # Not a dtype problem. `spine_participation` reports the real one.
         return
-    if pd.api.types.is_integer_dtype(column):
-        return
+    # The null check goes FIRST, above the integer early-return (#182 review, F-1).
+    # Reversed, an `Int64` column carrying `pd.NA` takes the integer return and dies
+    # later at `.astype(bool)` with a bare `ValueError` -- the nullable-column failure
+    # this branch exists to report. Reachable only through an injected frame, which is
+    # how #184 will call this, so it is a live path rather than a hypothetical one.
     if column.isna().any():
         raise CensusConformError(
             "EC participation 'is_total' has null value(s), so totals rows cannot be "
             "excluded — and a totals row carries a NULL state, which would enter the "
             "frame as a phantom jurisdiction."
         )
+    if pd.api.types.is_integer_dtype(column):
+        return
     non_bool = column.map(lambda value: not isinstance(value, bool | np.bool_))
     if non_bool.any():
         offenders = sorted({repr(value) for value in column[non_bool]})[:5]
