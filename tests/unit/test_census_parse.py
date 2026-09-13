@@ -42,6 +42,54 @@ def _lookup(rows: list) -> dict[tuple[str, int], int | None]:
     return {(row.area, row.census_year): row.population for row in rows}
 
 
+def _state_sheet_workbook(name: str, rows: list[list[str]]) -> bytes:
+    """Return a minimal OOXML workbook holding one state sheet of ``rows``.
+
+    Real published bytes are the right fixture for a *layout* (``CENSUS_TABS_TRIMMED_XLSX``
+    is exactly that, and is what the rest of this class reads). This builder exists for the
+    narrower job of pinning one **label form** whose sheet is not in that fixture, and the
+    label strings the callers pass are copied verbatim from the published file — so what is
+    synthetic here is the container, never the thing under test. Cells are written as
+    ``inlineStr``/``n`` so no shared-string table is needed.
+    """
+    main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    pkg = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+    def cell(ref: str, text: str) -> str:
+        if text == "":
+            return ""
+        if text.lstrip("-").isdigit():
+            return f'<c r="{ref}"><v>{text}</v></c>'
+        escaped = text.replace("&", "&amp;").replace("<", "&lt;")
+        return f'<c r="{ref}" t="inlineStr"><is><t>{escaped}</t></is></c>'
+
+    body = "".join(
+        f'<row r="{i}">'
+        + "".join(cell(f"{chr(ord('A') + j)}{i}", value) for j, value in enumerate(row))
+        + "</row>"
+        for i, row in enumerate(rows, start=1)
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr(
+            "xl/workbook.xml",
+            f'<workbook xmlns="{main}" xmlns:r="{rel}"><sheets>'
+            f'<sheet name="{name}" sheetId="1" r:id="rId1"/>'
+            f"</sheets></workbook>",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            f'<Relationships xmlns="{pkg}"><Relationship Id="rId1" '
+            f'Target="worksheets/sheet1.xml"/></Relationships>',
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            f'<worksheet xmlns="{main}"><sheetData>{body}</sheetData></worksheet>',
+        )
+    return buf.getvalue()
+
+
 class TestResident1790To1990:
     def test_the_sheet_name_is_the_state_and_every_sheet_is_read(self) -> None:
         assert {row.area for row in _tabs()} == {
@@ -102,11 +150,81 @@ class TestResident1790To1990:
         # carry footnotes, so the absence of 1940 would be the symptom.
         assert _lookup(_tabs())[("Virginia", 1940)] == 2_677_773
 
-    def test_a_state_that_is_not_backfilled_simply_starts_later(self) -> None:
-        # Alaska is not backfilled to 1790 the way West Virginia is; it starts at 1960.
-        # The rows are absent, NOT present-with-null — #182 conforms what exists.
+    def test_the_number_block_of_alaskas_sheet_starts_at_1960(self) -> None:
+        # **Read what this does and does not say** (corrected in #182). It says the
+        # *parsed* Alaska series starts at 1960. It does NOT say the file lacks earlier
+        # Alaska data — it has it, back to 1880, in a **second, transposed table** on the
+        # same sheet (race per row, census year across columns) that this parser never
+        # reads, because that table carries neither a ``NUMBER`` nor a ``PERCENT`` marker.
+        # Alaska 1950 = 128,643 and Hawaii 1950 = 499,794 are both in there.
+        #
+        # The earlier wording here ("Alaska is not backfilled the way West Virginia is")
+        # was false and sat directly on top of that gap. The rows are absent rather than
+        # present-with-null, so #182 conforms what exists and records 1960 Alaska/Hawaii
+        # as a `present_but_unparsed` coverage exception; recovering the series is the
+        # follow-up issue.
         alaska = sorted(r.census_year for r in _tabs() if r.area == "Alaska")
         assert min(alaska) == 1960
+
+    def test_a_year_label_with_unicode_ellipsis_leaders_is_read(self) -> None:
+        # The regression for the one figure this parser used to drop silently (#182):
+        # South Carolina's 1790 row uses U+2026 ellipsis leaders where every other sheet
+        # in the workbook uses ASCII dots, so ``[\s.]*$`` failed its anchor and the row
+        # was skipped ENTIRELY — no row at all, not a NULL — losing
+        # South Carolina 1790 = 249,073.
+        #
+        # Both labels below are copied verbatim from the published workbook, including
+        # the trailing ASCII dot after the ellipses and the ASCII-leader PERCENT twin
+        # that must NOT be read as a count.
+        workbook = _state_sheet_workbook(
+            "South Carolina",
+            [
+                ["NUMBER", ""],
+                ["1800  ...........", "345591"],
+                ["1790  …………………………………….", "249073"],
+                ["PERCENT", ""],
+                ["1790  .....................", "100"],
+            ],
+        )
+        rows = parse_resident_1790_1990(workbook, source_id="x")
+        figures = {row.census_year: row.population for row in rows}
+        assert figures == {1800: 345_591, 1790: 249_073}
+        # 100 is the PERCENT-block twin; reading it would be the other half of the bug.
+        assert 100 not in figures.values()
+
+    def test_a_label_that_merely_starts_with_four_digits_is_not_a_year_label(
+        self,
+    ) -> None:
+        """Survivor 4 (#182 Class B): dropping `_YEAR_LABEL`'s `$` anchor survived the suite.
+
+        Unanchored, any cell beginning with four digits reads as a year label and column B is
+        taken as that year's population — and because the first match for a year wins, a
+        heading placed above the real row silently displaces it.
+
+        Every existing assertion around this regex is an **acceptance** one: the ellipsis
+        regression, the `1940/2` footnote marker, the PERCENT block, the `.  Sample` sub-rows.
+        Each checks that the right figures come *out*. Not one asserted a label is **rejected**,
+        so loosening only the reject half left every output byte-identical. #182 widened this
+        regex's accept side and added a regression for that; the reject side had nothing.
+
+        The three labels below are real shapes this workbook family contains.
+        """
+        workbook = _state_sheet_workbook(
+            "Ohio",
+            [
+                ["NUMBER", ""],
+                ["1960 to 1970 change", "999999"],
+                ["1960 ...........", "9706397"],
+                ["1890 census of population", "888888"],
+                ["1890/3 .........", "3672329"],
+            ],
+        )
+        rows = parse_resident_1790_1990(workbook, source_id="x")
+        figures = {row.census_year: row.population for row in rows}
+        # The published rows win; neither heading is read as a year at all.
+        assert figures == {1960: 9_706_397, 1890: 3_672_329}
+        assert 999_999 not in figures.values()
+        assert 888_888 not in figures.values()
 
     def test_a_workbook_with_no_sheets_raises_rather_than_returning_nothing(
         self,

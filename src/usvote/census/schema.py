@@ -95,7 +95,17 @@ CENSUS_COLUMNS: tuple[str, ...] = (
 #: (#184 first) would have to remember to filter ``basis`` or silently double-count
 #: Virginia. Patching in place with a provenance-carrying constant and a
 #: ``docs/corrections.md`` row is also what this repo already does for every historical
-#: anomaly; the published figure stays recoverable from the correction constant.
+#: anomaly.
+#:
+#: **The published figure is NOT recoverable from this module** (corrected in #182; the
+#: sentence here previously claimed it was, and D059 says the same). No structured
+#: constant holds it: :func:`usvote.census.transform.apply_virginia_boundary_correction`
+#: computes it and embeds it in the row's ``note`` prose. The recovery path that does
+#: work is arithmetic on two clean rows, ``Virginia - West Virginia`` for the same
+#: census, and :data:`usvote.census.conform.BOUNDARY_SUCCESSIONS` pins the 1860 answer
+#: as an independent literal precisely because it cannot be read back from here. The
+#: rejection of ``basis`` in the key stands on the fan-out argument above, which is
+#: untouched by this.
 CENSUS_NATURAL_KEY: tuple[str, ...] = ("source", "census_year", "state", "series")
 
 #: Columns that must never be null. ``population`` is **not** among them: a state/census

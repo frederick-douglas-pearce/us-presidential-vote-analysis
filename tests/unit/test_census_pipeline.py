@@ -19,6 +19,7 @@ from usvote.census.config import (
     CENSUS_CORPUS_DIR_VAR,
     census_corpus_dir_from_env,
 )
+from usvote.census.conform import CensusConformError
 from usvote.census.pipeline import run_census_pipeline
 from usvote.config import ConfigError
 
@@ -40,6 +41,9 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append("transform")
         return pd.DataFrame({"x": [1, 2, 3]})
 
+    def conform(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+        calls.append("conform")
+
     def load(dbc: Any, frame: pd.DataFrame, *, replace: bool = False) -> pd.DataFrame:
         calls.append(f"load(replace={replace})")
         return frame
@@ -47,6 +51,7 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(census_pipeline, "read_snapshot_sources", read)
     monkeypatch.setattr(census_pipeline, "read_ec_participation", spine)
     monkeypatch.setattr(census_pipeline, "transform_census", transform)
+    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", conform)
     monkeypatch.setattr(census_pipeline, "load_census_population", load)
     monkeypatch.setattr(
         census_pipeline,
@@ -61,7 +66,15 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def test_the_stages_run_in_order(stages: list[str]) -> None:
     run_census_pipeline(make_dbc(RecordingConnection()), "corpus/")
-    assert stages == ["read", "spine", "transform", "load(replace=False)"]
+    # `conform` sits between transform and load on purpose (#182): it is a guard over the
+    # frame about to be written, so it must run while "nothing was loaded" is still true.
+    assert stages == [
+        "read",
+        "spine",
+        "transform",
+        "conform",
+        "load(replace=False)",
+    ]
 
 
 def test_the_corpus_is_read_before_the_database_is_touched(stages: list[str]) -> None:
@@ -82,6 +95,31 @@ def test_the_write_happens_in_exactly_one_transaction(stages: list[str]) -> None
     run_census_pipeline(make_dbc(conn), "corpus/")
     assert conn.commits == 1
     assert conn.rollbacks == 0
+
+
+def test_a_conformance_failure_blocks_the_write_entirely(
+    monkeypatch: pytest.MonkeyPatch, stages: list[str]
+) -> None:
+    """The guard's whole value: it must fail with nothing written (#182).
+
+    Ordering alone does not establish that. If the conform call ran but the load happened
+    anyway — or ran inside the transaction and left a partial write — the warehouse would
+    end up short a state with a caller who has to know to re-run with ``replace=True``.
+    So this asserts the *consequence*: the loader is never reached and the transaction
+    never commits.
+    """
+
+    def refuse(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+        stages.append("conform")
+        raise CensusConformError("a participating state has no governing-census figure")
+
+    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", refuse)
+    conn = RecordingConnection()
+    with pytest.raises(CensusConformError):
+        run_census_pipeline(make_dbc(conn), "corpus/")
+    assert "conform" in stages
+    assert not any(stage.startswith("load") for stage in stages)
+    assert conn.commits == 0
 
 
 def test_the_spine_read_happens_outside_the_transaction(

@@ -3569,3 +3569,175 @@ will silently publish present-day-footprint Virginia.
 **Related:** #181, #180, #182, #183, #184, #208, #129, D005, D006, D014, D015, D017, D021, D022,
 D023, D027, D030, `.claude/specs/research-census-source.md` (§3/§4/§7/§10),
 `src/usvote/census/`, `src/usvote/corpus.py`, `docs/corrections.md`.
+
+---
+
+## D060: The election→census bridge is a lookup with one exception, and conformance is a separate election-grain layer
+
+**Date:** 2026-09-12
+**Issue:** #182 (E10-S3) · **Builds on:** D059 (the census dimension), D005 (no fabricated values),
+D006/D015/D027 (source namespacing and the spine's authority), D024 (the two-way roster assert
+pattern), D026 (spine-left joins), D041/D046 (the appointed allotment)
+
+**Context.**
+
+#181 loaded `dwh.census_population` keyed on `(census_year, state)`. Every E10 consumer — #183's seat
+reconciliation, #184's persons-per-electoral-vote — is keyed on `(election_year, state)`. Nothing
+bridged the two, and the bridge turns out to carry three classes of silent wrongness, none of which
+produces a load error:
+
+1. **Which census governed an election is not arithmetic.** Congress failed to pass an apportionment
+   act after the **1920** census — the only such failure — so the 1910 apportionment held for a second
+   decade and elections **1924 and 1928 are governed by 1910**. This repo's own fact is the evidence:
+   per-state `total_electoral_votes` is identical across 1912/1916/1920/1924/1928 and 32 states move
+   at 1932. A bare decade lag gets those two years wrong; nearest-decade rounding additionally gets
+   wrong every election held *in* a census year, 12 of 51 in total.
+2. **A boundary restatement correct for one era is wrong for the next.** #181 restated Virginia's
+   pre-1863 censuses in place as Virginia + West Virginia. That is right for elections 1824–1860 and
+   wrong for **1864 and 1868**, which are still governed by the 1860 census but in which West Virginia
+   is a separate state holding 5 electoral votes — so the restated figure double-counts its 376,688
+   people.
+3. **The source cannot cover every participating state, and not for one reason.** Tested over all
+   **2,204** participating pairs across the 51 elections — 1,898 of them against
+   ``tabs15-65.xlsx`` and the other 306 (elections 2004-2024) against the population-change table,
+   because the stitch reads two files: three have no governing-census figure, and they split into a
+   fact about history and a defect in this repo.
+
+**Decision.**
+
+**(a) `usvote/apportionment.py` is top-level, not a census stage.** It is keyed on the election year
+and imports only `usvote.years`; nothing in it knows about census population, file layouts, or the
+Bureau. That makes it a member of the `years.py` / `count_status.py` family — the dependency-free
+EC-domain modules that sit *underneath* their consumers. Inside `usvote/census/` the first non-census
+consumer (a warehouse query, or #183 written as an EC-side reconciliation) would have to import *up*
+from a source subpackage, which is the D015 inversion. This **deviates from #182's own Implementation
+Notes**, which suggested a `usvote/census/` module; the note's spirit — dependency-free, read by
+import, never re-deriving the lag — is preserved and only the directory changes. Approved by the human
+at the plan gate. The dependency-free property is now **enforced** rather than claimed, by an import
+scan plus a subprocess that imports the module with pandas/psycopg2/requests/geopandas made
+unimportable — with a non-vacuity twin, because the first version of that guard used `find_module`,
+which Python 3.12 removed, and was silently inert.
+
+**(b) The mapping is a derivation plus a named exception set, with a hand-written literal as its
+oracle.** `governing_census_year` takes the most recent census at or before
+`election_year - APPORTIONMENT_LAG_YEARS` (2) that is not in `NO_APPORTIONMENT_CENSUSES` (`{1920}`).
+The 51-year map is materialized over `ec_ingest_years()` so a year admitted later needs no edit. The
+test oracle is a **hand-written literal** of all 51 elections, never a re-derivation — the
+`HYBRID_SUMMARY_COLUMNS` lesson. The independent cross-check against real allotments is an
+**integration** test, because `total_electoral_votes` exists only in `dwh.votes`: the committed EC
+roster fixture carries no counts by design (D024 §5), so no offline fixture can establish it.
+
+**(c) `governing_census_year` carries *apportionment* semantics, and is deliberately not the
+freshest-enumeration year.** At 1924/1928 the two diverge — the apportionment in force is 1910 while
+the most recently enumerated census is 1920 — so #184's per-capita denominator for those two elections
+is 14-year-old population, and that is the issue's specified behaviour rather than an oversight. One
+field ships now; a `most_recent_census_year` would be an **additive** second field, not a break. Named
+here so #184 chooses deliberately instead of inheriting staleness by accident.
+
+**(d) Conformance is its own module at its own grain.** `usvote/census/conform.py` works at
+`(election_year, state)`; `transform.py` works at `(census_year, state)` and its
+`assert_known_jurisdictions` is explicitly *name* validity, which must stay that way because a
+load-time participation filter would delete this layer's input. The EC spine arrives by injection, as
+`transform_census` already takes it, so the layer is pure and offline and nothing under
+`usvote/census/` names `dwh.votes`. It is **spine-left**: the row set is exactly what participated, so
+the population source never votes on statehood. Zero-EV states are kept — the Archives print an
+explicit `0` (D026's dense fact), and dropping them would hide the Virginia case entirely, since
+Virginia is zero-EV in both affected years.
+
+**(e) The frame contract is append-only and pinned to a literal.** `ELECTION_POPULATION_COLUMNS` is
+`(election_year, state, governing_census_year, total_electoral_votes, population, boundary_basis,
+coverage)`. It carries `total_electoral_votes` because #183 reconciles against the appointed allotment
+and it is already in the injected participation frame — free here, a second spine read there. Both
+label columns are **closed vocabularies**, as `basis`/`pv_status`/`count_status` are. #182 persists
+nothing: no table, no view, no `years` parameter on the pipeline. The guards are the deliverable, and
+they run as one seam (`assert_conforms_to_spine`) **before** the write, so a failure leaves nothing
+written.
+
+**(f) `boundary_basis` is an election-grain vocabulary, not the census `basis`.** The census label
+answers "borders at census time vs modern"; this answers "borders in force at *this election*". They
+disagree precisely where this work happens: for 1824–1860 Virginia the restated (`as_enumerated`)
+figure is borders-at-election, while for 1864/1868 the **published** (`present_day`) figure is. Reusing
+the census label would stamp an honesty warning on the figure that is correct for that election.
+`present_day` stays the honest default; only Virginia's twelve elections 1824–1868 carry
+`at_election`, since asserting it for all fifty states is the unverified claim **#208** exists to
+settle.
+
+**(g) The boundary succession is corrected at election grain, and D059 is not revisited.**
+`BOUNDARY_SUCCESSIONS` holds one entry (Virginia → West Virginia, effective 1863) with the
+predecessor's published 1860 figure as an **independently pinned literal**, `1,219,630`. The literal
+is load-bearing twice over: it *checks* `apply_virginia_boundary_correction`'s arithmetic rather than
+inheriting it (`restated − successor == published`, raising on drift — #208 is the story that could
+cause that), and it has to be stated because **the published figure is not recoverable from the
+table** at all. That last point **corrects a factual error in D059**, which says the published figure
+"stays recoverable from the correction constant": no structured constant holds it — `transform.py`
+embeds it only in note prose — and the real recovery path is `VA_row − WV_row`. Pushing the correction
+down into the census dimension (a second column, or `basis` in the natural key) was rejected for
+D059's own reason: it would drag an election-grain concern into the census grain and reopen the D017
+fan-out.
+
+**(h) Coverage exceptions carry their *kind*, and the guard is two-way.** Three entries, in two kinds:
+`(1848, Texas)` is `absent_from_source` — the Republic of Texas was not enumerated by the US in 1840,
+the figure does not exist, and **4 electoral votes** ride on it; `(1960, Alaska)` and `(1960, Hawaii)`
+are `present_but_unparsed` — the figures exist (128,643 / 499,794) in a transposed second table the
+parser does not read. Recording the second kind as the first would be a false catalog entry;
+recording the first as the second would promise a fix that cannot exist. Population is an honest NULL
+either way (D005). `assert_spine_states_covered` raises on an undeclared gap **and** on a stale
+declaration, the second being the direction with teeth — a declared exception for a covered cell is a
+false published claim nothing else would notice. Completeness is provable only over all 51 sheets, so
+`TestRealCorpus` skips unless `USVOTE_CENSUS_CORPUS_DIR` is set and running it is a merge
+precondition.
+
+**(i) The Alaska "not backfilled" claim was false in four places.** `tests/_helpers.py`,
+`tests/unit/test_census_parse.py`, **D059 point 3**, and `research-census-source.md` §4 all state or
+imply that the source does not carry Alaska before 1960. The file carries it back to **1880**; what
+starts at 1960 is the block the parser reads. A parser gap, not absent data — and that distinction is
+the whole of decision (h)'s two kinds.
+
+Three of the four are corrected **in place**: both test surfaces, and the research file (dated, with
+the recovered figures). **D059 point 3 is not edited**, because this log is append-only — *this entry
+is its correction*, on the same discipline a retraction follows: the earlier statement stands in the
+record and is superseded here rather than quietly rewritten. Read D059 point 3 with this paragraph
+attached.
+
+**(j) One parse-level loss fixed in passing.** `_YEAR_LABEL`'s trailing class admitted only whitespace
+and ASCII `.`, so South Carolina's 1790 row — whose leaders are U+2026 ellipses — failed its anchor and
+was skipped entirely, losing **249,073** with no row at all. One figure in 51 sheets. Immaterial to the
+electoral analysis (1790 governs only 1792/1796, below `EC_SPINE_FLOOR`) and fixed because a silent
+single-cell loss is exactly what this source's guards are for. Format robustness, so it lives with the
+parser rather than in the corrections catalog.
+
+**(k) DC is considered and deliberately needs no correction, which is recorded rather than left
+implicit.** #182's acceptance criteria name DC as a hard case alongside West Virginia and
+mid-series statehood. For the *conformance* layer the answer is that it needs nothing: DC is not a
+state and holds no census-apportioned House seats, but the Bureau publishes its resident population
+from 1800, so every governing census from 1960 on (its first election under the 23rd Amendment is
+1964) has a figure and the spine-left construction attaches it. No boundary restatement, no coverage
+exception, no catalog row. This is recorded because "considered, and needed nothing" and "never
+considered" are indistinguishable from a silent absence — and a test asserts DC appears in neither
+correction catalog, so the source dropping it, or the spine changing its participation, would surface
+as a finding. What *is* special about DC belongs to **#183**: its 3 votes are not apportioned, so the
+`seats + 2` identity does not hold for it and it is `(X)` in every apportionment table.
+
+**Rationale.**
+
+Every decision above answers a failure that is **plausible rather than loud**. A wrong governing
+census yields a per-capita figure that looks fine; a restatement on the wrong side of a state split
+yields a population that looks fine; a missing figure yields a NULL that reads as "no data" rather
+than "we know exactly why". So each is a named constant with a guard that fails on the wrong-but-
+passing input, and each guard was checked against that standard by running it on bad input rather than
+only on good.
+
+The split between (a) and (d) is the load-bearing structural call. A single module would have been
+smaller and would have put election-domain law inside a source subpackage, which is the one thing
+D015 exists to prevent; and it would have conflated two grains in a package whose own pipeline
+docstring warns that this story is where that conflation happens.
+
+**Action required.** A follow-up issue for the transposed second table, recovering Alaska's and
+Hawaii's pre-1960 series (**Alaska back to 1880, Hawaii to 1900** — the two tables differ in extent
+as well as in column offset) and removing their two `present_but_unparsed` entries. Until it lands, 1960
+Alaska and 1960 Hawaii persons-per-electoral-vote are NULL. #184 must also decide, explicitly, whether
+it wants the apportionment denominator at 1924/1928 or a freshest-enumeration second field per (c).
+
+**Related:** #182, #181, #183, #184, #208, #129, D005, D006, D015, D017, D024, D026, D027, D041,
+D046, D059, `.claude/specs/research-census-source.md` (§4/§7/§10), `src/usvote/apportionment.py`,
+`src/usvote/census/conform.py`, `docs/corrections.md`.

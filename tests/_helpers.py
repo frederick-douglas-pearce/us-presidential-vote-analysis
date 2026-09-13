@@ -44,9 +44,16 @@ MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 #: this project invented rather than the one the Bureau publishes.
 #:
 #: ``CENSUS_TABS_TRIMMED_XLSX`` is the 1790-1990 workbook reduced from 51 sheets to four
-#: (Virginia and West Virginia for the boundary correction, Connecticut as an
-#: untouched control, Alaska because it is *not* backfilled and starts at 1960). Only
-#: sheets were dropped; every kept sheet is byte-identical to the published file.
+#: (Virginia and West Virginia for the boundary correction, Connecticut as an untouched
+#: control, and Alaska because its sheet carries a **second, transposed table** — race per
+#: row, census year across columns — that ``parse_resident_1790_1990`` does not read, so its
+#: *parsed* series starts at 1960 while the file itself goes back to 1880). Only sheets were
+#: dropped; every kept sheet is byte-identical to the published file.
+#:
+#: **The earlier wording here said Alaska "is not backfilled", which was false** (#182): the
+#: data is published, just in a layout the parser skips. 1960 Alaska and Hawaii are recorded
+#: as ``present_but_unparsed`` coverage exceptions for that reason, and the sentence was
+#: sitting directly on top of the gap.
 #: ``CENSUS_POPCHANGE_XLSX`` is the 2020 population-change table committed **whole** —
 #: at 24 KB there was nothing to trim, and it carries the side-by-side block layout,
 #: both spellings of the national row, and the aggregate rows the scope rule excludes.
