@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from usvote.census.conform import assert_conforms_to_spine
 from usvote.census.load import load_census_population
 from usvote.census.parse import parse_population_change, parse_resident_1790_1990
 from usvote.census.scrape import (
@@ -47,8 +48,16 @@ def run_census_pipeline(
 
     Reads the local corpus (``corpus_dir`` explicit, or resolved from
     ``USVOTE_CENSUS_CORPUS_DIR``), parses both published workbooks, stitches them into
-    one resident series, applies the Virginia boundary correction, and loads
-    ``dwh.census_population``.
+    one resident series, applies the Virginia boundary correction, **conforms the result
+    to the EC participation roster** (#182) and loads ``dwh.census_population``.
+
+    The conformance step (:func:`usvote.census.conform.assert_conforms_to_spine`) runs
+    **before** the write and raises rather than warning: it crosses to ``(election_year,
+    state)`` grain — the grain every E10 consumer joins on — and every failure it looks
+    for produces a plausible wrong number instead of an error. A corpus short a state, a
+    governing-census mapping that has drifted, a boundary restatement left on the wrong
+    side of a state split, or a synthesized between-census value all fail here with
+    nothing written.
 
     **Zero network requests.** Everything comes from the snapshotted corpus, whose
     completeness is asserted before a byte is parsed — a corpus missing a file fails
@@ -75,6 +84,7 @@ def run_census_pipeline(
     }
     ec_participation = read_ec_participation(dbc)
     frame = transform_census(rows_by_source, ec_participation)
+    assert_conforms_to_spine(frame, ec_participation)
 
     with dbc.transaction():
         loaded = load_census_population(dbc, frame, replace=replace)

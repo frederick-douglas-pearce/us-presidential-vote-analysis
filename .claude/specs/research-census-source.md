@@ -330,9 +330,15 @@ population for many `(census, state)` pairs where the state held no electoral vo
 reaches a per-capita figure, because **E10 conforms to the EC participation roster (D006/D015)**
 rather than to the population file's own state list: a state with no roster entry has no row to
 divide into. Worth stating explicitly because it looks like a second defect and is in fact the
-conformance requirement already doing its job. (Alaska and Hawaii are *not* backfilled — both start
-at 1960 — so the file is not uniformly retroactive, which is one more reason not to infer its
-behavior rather than read it.)
+conformance requirement already doing its job. (Alaska and Hawaii are **not backfilled in the block
+this project parses** — their *parsed* series start at 1960 — so the file is not uniformly
+retroactive, which is one more reason not to infer its behavior rather than read it.
+**Corrected 2026-09-12 by #182:** the file itself does carry both states back to 1880, in a second,
+transposed table on each sheet — race per row, census year across columns, carrying neither the
+``NUMBER`` nor the ``PERCENT`` marker the parser keys on. Alaska 1950 = 128,643 and
+Hawaii 1950 = 499,794 are in there, which matters because the 1960 election's governing census is
+1950 and both states cast electoral votes. So this is a **parser gap, not absent data** — see D060(h)
+and the two ``present_but_unparsed`` rows in ``docs/corrections.md``.)
 
 **So the correction is a `docs/corrections.md`-shaped entry, not a re-parse** — one state, ten
 elections, one documented adjustment with provenance, exactly the pattern the repo already runs for

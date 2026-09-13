@@ -171,6 +171,102 @@ not sweep the other forty-nine states — whether Virginia is the only *material
 discrepancy in the 1824–2024 span is an open question, tracked as **#208** and
 referenced rather than absorbed.
 
+## Census conformance to the electoral record (#182)
+
+**Also not a correction to anybody's data.** Like the two sections above it, this records
+places where a published figure is *right* but does not answer the question this project
+asks. Here the question is new: which census governed a given **election**, and is that
+census's figure on the right borders and available at all?
+
+The bridge is `usvote/apportionment.py` — `election_year → governing_census_year`, a lookup
+and never a formula. A census taken in year *C* is apportioned into the House elected in
+*C+2*, so it governs presidential elections from *C+2* on. Two plausible formulas are
+wrong, and both are pinned as regressions: nearest-decade rounding maps 2020 → 2020 (the
+2020 census first governed **2024**), and a bare decade lag maps 1924 → 1920.
+
+### Why 1920 is not a governing census
+
+Congress failed to pass an apportionment act after the **1920** census — the only such
+failure in US history — so the 1910 apportionment stayed in force for a second decade, and
+the Reapportionment Act of 1929 (ch. 28, 46 Stat. 21) then made apportionment automatic
+from the 1930 census, first governing 1932.
+
+So **elections 1924 and 1928 are governed by the 1910 census**, and the 1910 apportionment
+governs five elections — the longest run in the series. This repo's own fact table is the
+evidence: per-state `total_electoral_votes` is identical across 1912, 1916, 1920, 1924 and
+1928, and 32 states move at 1932. That cross-check is
+`tests/integration/test_census_conform.py::test_the_allotment_change_years_match_this_mapping`,
+and it is an integration test because the counts exist only in `dwh.votes`.
+
+### Boundary succession — a restatement that is right for one era and wrong for the next
+
+| Elections | Basis difference | Restatement applied | `conform.py` constant | Source / provenance |
+|---|---|---|---|---|
+| 1864, 1868 | Both are governed by the **1860** census, which precedes West Virginia's 1863 separation — but by 1864 West Virginia is a separate state holding 5 electoral votes. #181 restated Virginia's pre-1863 censuses in place as Virginia + West Virginia, which is correct for 1824–1860 and **double-counts** West Virginia's 376,688 people here. | Virginia takes its **published** 1860 figure, `1,219,630`, and the row is labelled `at_election`. West Virginia's own rows are untouched. | `BOUNDARY_SUCCESSIONS` (applied by `apply_boundary_successions`, guarded by `assert_no_double_count`) | West Virginia was admitted 20 June 1863 under the Act of 31 December 1862 (12 Stat. 633) and Lincoln's proclamation of 20 April 1863. 1,219,630 + 376,688 = 1,596,318, the separately published enumerated Virginia total for 1860. |
+
+**The pinned figure is an independent literal, not a recomputation**, and that is the point:
+it *checks* `apply_virginia_boundary_correction`'s arithmetic rather than inheriting it, so a
+future refinement (#208 is the candidate) fails loudly instead of silently shipping one of
+two numbers. It has to be a literal for a second reason — because `basis` is deliberately
+not in the census natural key (D059), the published figure is **not recoverable from the
+table**, which holds only the restated row.
+
+**What bounds the blast radius, stated because it is the reason this is a guard rather than
+a hotfix:** Virginia holds **zero** electoral votes in both 1864 and 1868 (Reconstruction),
+so no per-state persons-per-electoral-vote is affected today. The defect is live the moment
+anything **aggregates** population by election year.
+
+**At election grain the basis label is its own vocabulary**, `boundary_basis`
+(`at_election` / `present_day`), and not the census `basis`. The two disagree exactly here:
+for 1824–1860 Virginia the *restated* figure is borders-at-election, while for 1864/1868 the
+*published* one is. Carrying the census label through would stamp an honesty warning on the
+figure that is in fact correct for that election. `present_day` remains the honest default
+for everything else — today only Virginia's twelve elections 1824–1868 carry `at_election`.
+
+### Coverage exceptions — participating states with no governing-census figure
+
+Measured against the full published workbook: all **1,898** participating
+`(election_year, state)` pairs in the 1824–2024 span were tested against their governing
+census. **Three** have no figure, and they are **two different kinds of thing** — a
+distinction carried as data, because collapsing it would make one of these rows a false
+claim.
+
+| Election | Governing census | State | EV | Kind | Why |
+|---|---|---|---|---|---|
+| 1848 | 1840 | Texas | **4** | `absent_from_source` | Texas was the independent **Republic of Texas** in 1840 and was not enumerated by the United States. Annexed by joint resolution of 1 March 1845 (5 Stat. 797), admitted 29 December 1845 (9 Stat. 108); first US census 1850. **The figure does not exist and no code change can produce it.** |
+| 1960 | 1950 | Alaska | 3 | `present_but_unparsed` | Alaska's 1950 resident population (**128,643**) *is* published in `tabs15-65.xlsx`, on the sheet's transposed second table, which carries neither the `NUMBER` nor the `PERCENT` marker `parse_resident_1790_1990` keys on. Admitted 3 January 1959 (Pub. L. 85-508). |
+| 1960 | 1950 | Hawaii | 3 | `present_but_unparsed` | As Alaska — 1950 population **499,794**, same unread table. Its year header sits in a different column than Alaska's, so a fix must locate it by content, not index. Admitted 21 August 1959 (Pub. L. 86-3). |
+
+Population for these rows is an honest **NULL** with provenance — never a zero, never an
+interpolation (D005). The `absent_from_source` row is permanent; the two
+`present_but_unparsed` rows are a defect in *this repo* and their entries come out when the
+parser learns that layout.
+
+**`assert_spine_states_covered` is two-way, and the second direction is the one with
+teeth.** An undeclared gap raises, which is obvious. A *declared* exception that turns out to
+be covered also raises: an exception claims the source cannot supply a figure, so a stale
+one is a false claim in this file and nothing else would notice it.
+
+**Two things this entry does not do.** It does not claim the catalog is complete on CI's
+authority — proving it needs all 51 sheets, so `TestRealCorpus` in
+`tests/unit/test_census_conform.py` skips unless `USVOTE_CENSUS_CORPUS_DIR` is set, and
+running it is a merge precondition. And it does not cover states that *did not* participate:
+which states existed when is the EC spine's answer (D006), and the conform layer is
+spine-left so the population source never votes on statehood.
+
+### One parse-level loss, fixed rather than catalogued
+
+**South Carolina 1790 = 249,073** was being dropped entirely, which is why it is mentioned
+here at all. Its row label uses Unicode ellipsis leaders
+(`1790  ……………`, U+2026) where every other sheet in the workbook uses ASCII dots, and
+`_YEAR_LABEL`'s trailing class admitted only whitespace and `.`, so the anchor failed and the
+row was skipped — **no row at all, not a NULL**. Exactly one figure in 51 sheets, which is
+what made it invisible. Immaterial to the electoral analysis (the 1790 census governs only
+1792 and 1796, below `EC_SPINE_FLOOR`) and fixed in `usvote/census/parse.py` because a silent
+single-cell loss is the class of defect this source's guards exist for. It is format
+robustness, not a data correction, so it lives with the parser like the other two entries in
+**Notes** below.
+
 ## Notes
 
 - **The `ELECTORAL_VOTE_SHORTFALLS` map is keyed on per-state anomalies only.** The

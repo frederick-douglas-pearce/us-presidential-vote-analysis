@@ -54,14 +54,25 @@ _PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 #: marker, then dot-leaders. The footnote marker is why this is a regex and not
 #: ``int(cell)`` — ``1940/2`` is a real label and the naive read raises on exactly the
 #: rows that carry footnotes.
-_YEAR_LABEL = re.compile(r"^(\d{4})(?:/\d+)?[\s.]*$")
+#:
+#: **The leader class must include U+2026, and the reason is a real data loss** (#182).
+#: The workbook is not consistent about its leaders: almost every sheet uses runs of
+#: ASCII ``.``, but South Carolina's 1790 row uses Unicode horizontal ellipses (``1790
+#: ……………``). With the class written ``[\s.]*$`` the anchor failed on that one label, the
+#: row was skipped, and **South Carolina 1790 = 249,073 was dropped entirely** — not
+#: loaded as NULL, absent. Exactly one figure in the whole 51-sheet workbook, which is
+#: what made it invisible: the sheet parsed, the suite passed, and the series was
+#: silently one census short. Immaterial to the electoral analysis (the 1790 census
+#: governs only the 1792 and 1796 elections, below ``EC_SPINE_FLOOR``) and fixed because
+#: a silent single-cell loss is the class of defect this source's guards exist for.
+_YEAR_LABEL = re.compile(r"^(\d{4})(?:/\d+)?[\s.…]*$")
 
 #: A resident-population column header in the population-change table.
 _RESIDENT_HEADER = re.compile(r"^Resident Population\s+(\d{4})\s+Census$")
 
 #: Cell values that mean "no published figure". ``(NA)`` and ``(X)`` are the Bureau's
-#: own sentinels; the filler string is literal text in the population-change table.
-#: They become NULL with provenance downstream (D005) — never zero, never interpolated.
+#: own sentinels; the filler string is literal text in the population-change table. They
+#: become NULL with provenance downstream (D005) — never zero, never interpolated.
 _NULL_SENTINELS = frozenset(
     {"(NA)", "(X)", "(D)", "(S)", "-", "--", "This cell is intentionally blank."}
 )

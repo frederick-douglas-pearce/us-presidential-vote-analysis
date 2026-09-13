@@ -389,3 +389,163 @@ def test_the_ucsb_blocker_in_that_program_actually_blocks() -> None:
     )
     assert result.returncode != 0
     assert "unimportable in this process" in result.stderr
+
+
+# --- usvote/apportionment.py: the dependency-free EC-domain family (#182) ---
+
+#: What :mod:`usvote.apportionment` is allowed to import from inside the package.
+#:
+#: Exactly one module, and that is the point: its placement at the top level (architect
+#: review C1) rests on it being pure election-domain, so the first import of a source
+#: subpackage — or of the DB/pandas stack — would falsify the reason it lives there.
+_APPORTIONMENT_ALLOWED_USVOTE_IMPORTS = frozenset({"usvote.years"})
+
+#: Third-party names whose presence would make the module non-importable from a pure,
+#: offline context. Deliberately the heavy stack rather than an allow-list: a new stdlib
+#: import is fine and should not need this tuple edited.
+_HEAVY_IMPORTS = ("pandas", "psycopg2", "requests", "geopandas", "bs4", "matplotlib")
+
+
+def _imported_names(source: str) -> set[str]:
+    """Every module name ``source`` imports, in any spelling."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return names
+
+
+def test_the_apportionment_module_is_dependency_free() -> None:
+    """Its docstring claims stdlib + ``usvote.years`` only; this is what checks it.
+
+    An unenforced claim about a module's dependencies is the defect class this repo keeps
+    finding: the sentence stays true-looking while an import quietly makes it false, and
+    the reader who trusts it stops looking. #183 and #184 will both import this module, so
+    the property has to hold for them rather than only today.
+    """
+    source = (PKG_ROOT / "apportionment.py").read_text(encoding="utf-8")
+    imported = _imported_names(source)
+    usvote_imports = {name for name in imported if name.split(".")[0] == "usvote"}
+    # `from usvote.years import ec_ingest_years` contributes both the module and the name.
+    offenders = {
+        name
+        for name in usvote_imports
+        if not any(
+            name == allowed or name.startswith(f"{allowed}.")
+            for allowed in _APPORTIONMENT_ALLOWED_USVOTE_IMPORTS
+        )
+    }
+    assert not offenders, (
+        f"usvote.apportionment must import only "
+        f"{sorted(_APPORTIONMENT_ALLOWED_USVOTE_IMPORTS)} from the package; found "
+        f"{sorted(offenders)}"
+    )
+    heavy = sorted(
+        name
+        for name in imported
+        if name.split(".")[0] in _HEAVY_IMPORTS
+    )
+    assert not heavy, (
+        f"usvote.apportionment must stay importable without the heavy stack; found "
+        f"{heavy}"
+    )
+
+
+#: Makes the heavy stack unimportable, then imports the module and uses it.
+#:
+#: ``find_spec`` is the **only** working spelling: ``find_module`` was removed in Python
+#: 3.12, so a blocker written that way is silently inert and the guard proves nothing. The
+#: companion non-vacuity test below is what catches that, and it caught exactly this while
+#: #182 was being written.
+_HEAVY_BLOCK_PREAMBLE = """
+import sys
+
+_BLOCKED = {"pandas", "psycopg2", "requests", "geopandas", "matplotlib", "bs4"}
+
+
+class _BlockHeavy:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in _BLOCKED:
+            raise ImportError(f"{fullname} is unimportable in this process")
+        return None
+
+
+sys.meta_path.insert(0, _BlockHeavy())
+"""
+
+_APPORTIONMENT_PROGRAM = _HEAVY_BLOCK_PREAMBLE + """
+from usvote.apportionment import GOVERNING_CENSUS_BY_ELECTION, governing_census_year
+
+assert governing_census_year(1924) == 1910, "the 1920 gap is not applied"
+assert len(GOVERNING_CENSUS_BY_ELECTION) == 51, len(GOVERNING_CENSUS_BY_ELECTION)
+assert not _BLOCKED & set(sys.modules), sorted(_BLOCKED & set(sys.modules))
+print("OK")
+"""
+
+# The non-vacuity twin: a module that genuinely needs pandas must FAIL under the same
+# preamble. Without this, a blocker that stopped blocking would leave every assertion above
+# passing by inspecting nothing.
+_HEAVY_CONSUMER_PROGRAM = _HEAVY_BLOCK_PREAMBLE + """
+import usvote.census.conform  # needs pandas
+print("IMPORTED")
+"""
+
+
+def test_the_apportionment_module_imports_with_the_heavy_stack_blocked() -> None:
+    """The structural proof, not a re-reading of the import list.
+
+    A scan over import statements cannot see a **transitive** dependency, and
+    ``usvote.years`` could grow one. Importing in a fresh interpreter with pandas, psycopg2
+    and the rest made unimportable proves the property — the technique the D030 firewall
+    guards above use for ``usvote.ucsb``.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _APPORTIONMENT_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode == 0, (
+        f"usvote.apportionment could not be imported without the heavy stack.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "OK" in result.stdout
+
+
+def test_the_heavy_stack_blocker_is_not_inert() -> None:
+    """Non-vacuity: the blocker must actually block.
+
+    ``usvote.census.conform`` imports pandas, so under the same preamble it must fail. This
+    exists because the first version of the guard above used ``find_module``, which Python
+    3.12 removed — the subprocess happily imported pandas and the guard passed while
+    proving nothing.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _HEAVY_CONSUMER_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode != 0, (
+        "the import blocker is inert — a pandas-importing module loaded under it, so the "
+        f"guard above proves nothing. stdout: {result.stdout}"
+    )
+    assert "unimportable in this process" in result.stderr
+
+
+def test_the_apportionment_module_is_top_level_not_under_a_source_subpackage() -> None:
+    """Architect review C1: it is election-domain, so it sits beside ``years.py``.
+
+    Under ``usvote/census/`` the first non-census consumer — a warehouse query, or #183 as
+    an EC-side reconciliation — would have to import *up* from a source subpackage, which
+    is the D015 inversion.
+    """
+    assert (PKG_ROOT / "apportionment.py").is_file()
+    for sub in _LOWER_SUBPACKAGES:
+        assert not (PKG_ROOT / sub / "apportionment.py").exists(), (
+            f"usvote/{sub}/apportionment.py would invert D015 — the module is "
+            f"election-domain and belongs at the top level"
+        )
