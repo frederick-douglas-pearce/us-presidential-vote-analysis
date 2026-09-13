@@ -8,7 +8,8 @@ for backward compatibility (it is the most common command and the only one needi
   ``dwh`` (the historical default; ``--replace`` still works bare, before or without
   the subcommand).
 - ``python -m usvote all`` — build the **whole** warehouse: EC spine, MIT PV,
-  optionally UCSB PV, then the resolved-PV + EC<->PV join views
+  optionally UCSB PV, optionally census population, then the resolved-PV + EC<->PV
+  join views
   (:func:`usvote.warehouse.run_warehouse`).
 
 Bare is kept on EC rather than re-pointed at ``all`` deliberately: ``all`` additionally
@@ -46,6 +47,10 @@ from pathlib import Path
 from typing import Any
 
 from usvote import config, scrape
+from usvote.census.config import census_corpus_dir_from_env
+from usvote.census.parse import CensusParseError
+from usvote.census.scrape import CensusScrapeError
+from usvote.census.transform import CensusTransformError
 from usvote.db import DBC, DBConnectionError
 from usvote.hybrid import HybridError
 from usvote.mit.config import mit_csv_path_from_env
@@ -122,6 +127,24 @@ def _resolve_ucsb_dir(
         # Absent snapshot: a hard failure only under --require-ucsb; otherwise skip.
         if args.require_ucsb:
             raise
+        return None
+
+
+def _resolve_census_dir(environ: Mapping[str, str]) -> str | None:
+    """Resolve the census corpus dir for ``all`` — auto-detect, skip when absent.
+
+    Deliberately **simpler** than :func:`_resolve_ucsb_dir`, which carries
+    ``--require-ucsb``/``--no-ucsb``. Those flags exist because UCSB is the analysis
+    consistency control, so its absence changes what a hybrid number *means* and the
+    human needs a way to demand it. Census population feeds no current analysis — #184
+    is the first consumer and has not landed — so an absent corpus has no silent
+    downstream effect to guard against. It is still reported, on the D016/D024 principle
+    that a build missing a source is never silent; it simply needs no flags yet. When
+    #184 ships, this is the place to revisit that.
+    """
+    try:
+        return census_corpus_dir_from_env(environ)
+    except config.ConfigError:
         return None
 
 
@@ -236,6 +259,7 @@ def _run_all(args: argparse.Namespace) -> int:
         shapefile_path = config.shapefile_path_from_env(environ)
         mit_csv_path = mit_csv_path_from_env(environ)
         ucsb_html_dir = _resolve_ucsb_dir(args, environ)
+        census_corpus_dir = _resolve_census_dir(environ)
         db_config = config.db_config_from_env(environ)
         # Resolved BEFORE _connect: a stale corpus must not abort after the user has
         # typed a DB password, leaving an open connection that close=True never reaches.
@@ -268,6 +292,14 @@ def _run_all(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    if census_corpus_dir is None:
+        print(
+            "NOTICE: building WITHOUT census population — dwh.census_population will "
+            "not be created. Set USVOTE_CENSUS_CORPUS_DIR and run "
+            "`python -m usvote.census snapshot` to include it.",
+            file=sys.stderr,
+        )
+
     dbc = _connect(db_config)
     if dbc is None:
         return 1
@@ -278,6 +310,7 @@ def _run_all(args: argparse.Namespace) -> int:
             shapefile_path,
             mit_csv_path,
             ucsb_html_dir=ucsb_html_dir,
+            census_corpus_dir=census_corpus_dir,
             replace=args.replace,
             validate_overlap=not getattr(args, "no_validate_overlap", False),
             validate_coverage=not getattr(args, "no_validate_coverage", False),
@@ -285,6 +318,38 @@ def _run_all(args: argparse.Namespace) -> int:
             environ=environ,
             close=True,
         )
+    except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
+        # Census runs after the other source loads and BEFORE rebuild_views
+        # (warehouse.py), and every pipeline owns its own transaction (#84a). So a
+        # census failure here leaves a genuinely odd warehouse: the sources that ran are
+        # committed, and there are **no join or hybrid views at all**. That is the one
+        # thing the operator needs told, and without this arm they got a bare traceback
+        # after a multi-minute build instead. The sibling arms exist for the same
+        # reason -- which half is built is the operator's next-move information.
+        #
+        # Which sources ran is not fixed: UCSB is skipped whenever no snapshot is
+        # present, the ordinary path for a public clone, so the message is built from
+        # the same ``ucsb_html_dir`` that decided it rather than naming UCSB
+        # unconditionally.
+        committed = "EC, MIT and UCSB" if ucsb_html_dir is not None else "EC and MIT"
+        # The remedy differs by which guard fired. Only a corpus problem is fixed by
+        # snapshotting; a parse or transform failure means the published layout or the
+        # jurisdiction set moved, and re-downloading the same files changes nothing.
+        remedy = (
+            "Complete the corpus with `python -m usvote.census snapshot`"
+            if isinstance(e, CensusScrapeError)
+            else "Fix the cause above (the published layout or jurisdiction set moved)"
+        )
+        print(f"Census ingestion failed: {e}", file=sys.stderr)
+        print(
+            f"The {committed} loads COMMITTED before this point, but the join and "
+            f"hybrid views were NOT rebuilt — the warehouse holds facts and no views. "
+            f"{remedy}, then re-run `python -m usvote all --replace` to rebuild "
+            f"cleanly. A bare re-run without --replace will hit a unique violation on "
+            f"the already-loaded sources.",
+            file=sys.stderr,
+        )
+        return 1
     except PipelineError as e:
         return _report_incomplete_scrape(e, dbc)
     except MITCoverageError as e:
@@ -327,11 +392,16 @@ def _run_all(args: argparse.Namespace) -> int:
         if SOURCE_UCSB in result.sources_loaded
         else ""
     )
+    census_note = (
+        f", census {result.census_rows} population rows"
+        if result.census_rows is not None
+        else ""
+    )
     print(
         f"Warehouse build complete — sources: {sources}; "
         f"EC {result.ec_rows} rows, "
         f"MIT {result.mit_rows} PV / {result.mit_roster_rows} roster rows"
-        f"{ucsb_note}; join views rebuilt."
+        f"{ucsb_note}{census_note}; join views rebuilt."
     )
     print(_overlap_note(result.overlap))
     return 0

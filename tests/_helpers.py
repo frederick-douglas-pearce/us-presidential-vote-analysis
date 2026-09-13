@@ -37,6 +37,22 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # party — enough to seed the MIT read (#64) and later transform tests offline.
 MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 
+#: Census fixtures (#181). **Real Census Bureau bytes**, which is permitted here and is
+#: the opposite of the UCSB posture: Census-authored works are public domain under
+#: 17 U.S.C. 105 (S1 §3), so there is no licensing reason to hand-write an imitation and
+#: every reason not to — a synthetic workbook would test the parser against a layout
+#: this project invented rather than the one the Bureau publishes.
+#:
+#: ``CENSUS_TABS_TRIMMED_XLSX`` is the 1790-1990 workbook reduced from 51 sheets to four
+#: (Virginia and West Virginia for the boundary correction, Connecticut as an
+#: untouched control, Alaska because it is *not* backfilled and starts at 1960). Only
+#: sheets were dropped; every kept sheet is byte-identical to the published file.
+#: ``CENSUS_POPCHANGE_XLSX`` is the 2020 population-change table committed **whole** —
+#: at 24 KB there was nothing to trim, and it carries the side-by-side block layout,
+#: both spellings of the national row, and the aggregate rows the scope rule excludes.
+CENSUS_TABS_TRIMMED_XLSX = FIXTURES_DIR / "census_tabs15-65_trimmed.xlsx"
+CENSUS_POPCHANGE_XLSX = FIXTURES_DIR / "census_population-change-data-table.xlsx"
+
 # A small, deliberately *self-consistent* MIT sample for the transform tests
 # (#65): unlike ``MIT_SAMPLE_CSV`` (a candidate-subset, so its per-state votes do
 # not sum to ``totalvotes``), every (year, state) here carries its complete

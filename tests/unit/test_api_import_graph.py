@@ -28,7 +28,19 @@ import usvote.api as api
 #: DB modules because importing any of them would transitively pull the whole build/DB stack
 #: across the serve-time boundary D028 draws — and the slim D033 container installs the
 #: serve dependency group only, so such an import fails at *runtime*, not at test time.
-_FORBIDDEN = ("usvote.db", "psycopg2", "usvote.snapshot", "usvote.hybrid", "pandas")
+#: ``usvote.census`` joined in #181 for exactly the stated reason: it is a source
+#: subpackage whose stages import pandas and :mod:`usvote.db`, so reaching it from the
+#: serve layer drags the build stack across D028's boundary. This list is a **deny**
+#: list, not an allow-list, so a new subpackage is permitted by default until it is
+#: named here.
+_FORBIDDEN = (
+    "usvote.db",
+    "psycopg2",
+    "usvote.snapshot",
+    "usvote.hybrid",
+    "usvote.census",
+    "pandas",
+)
 
 
 def test_api_imports_no_db_or_build_stack() -> None:

@@ -60,6 +60,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         mit_csv_path: Any,
         *,
         ucsb_html_dir: Any,
+        census_corpus_dir: Any,
         replace: bool,
         validate_overlap: bool,
         validate_coverage: bool,
@@ -72,6 +73,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         calls["warehouse"].append(
             {
                 "ucsb_html_dir": ucsb_html_dir,
+                "census_corpus_dir": census_corpus_dir,
                 "replace": replace,
                 "validate_overlap": validate_overlap,
                 "validate_coverage": validate_coverage,
@@ -87,6 +89,7 @@ def top_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
             mit_roster_rows=6,
             ucsb_pv_rows=None,
             ucsb_roster_rows=None,
+            census_rows=None,
             sources_loaded=frozenset(loaded),
             views_built=True,
         )
@@ -118,6 +121,7 @@ def test_all_autodetects_ucsb_when_snapshot_present(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": "snap/",
+            "census_corpus_dir": None,
             "replace": True,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -127,7 +131,9 @@ def test_all_autodetects_ucsb_when_snapshot_present(
 
 
 def test_all_skips_ucsb_loudly_when_snapshot_absent(
-    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     def absent(*a: Any, **k: Any) -> str:
         raise ConfigError("USVOTE_UCSB_HTML_DIR unset")
@@ -137,6 +143,7 @@ def test_all_skips_ucsb_loudly_when_snapshot_absent(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": None,
+            "census_corpus_dir": None,
             "replace": False,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -161,6 +168,7 @@ def test_all_no_ucsb_skips_without_probing_env(
     assert top_env["warehouse"] == [
         {
             "ucsb_html_dir": None,
+            "census_corpus_dir": None,
             "replace": False,
             "validate_overlap": True,
             "validate_coverage": True,
@@ -205,8 +213,12 @@ def test_config_error_returns_2(
 @pytest.fixture
 def ucsb_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     calls: dict[str, list] = {"snapshot": [], "load": []}
-    monkeypatch.setattr(ucsb_main, "snapshot_elections", lambda: calls["snapshot"].append({}))
-    monkeypatch.setattr(ucsb_main.config, "db_config_from_env", lambda *a, **k: dict(_DB))
+    monkeypatch.setattr(
+        ucsb_main, "snapshot_elections", lambda: calls["snapshot"].append({})
+    )
+    monkeypatch.setattr(
+        ucsb_main.config, "db_config_from_env", lambda *a, **k: dict(_DB)
+    )
     monkeypatch.setattr(ucsb_main, "ucsb_html_dir_from_env", lambda *a, **k: "snap/")
     monkeypatch.setattr(ucsb_main, "DBC", lambda cfg: "DBC")
     monkeypatch.setattr(
@@ -229,7 +241,9 @@ def test_ucsb_bare_and_snapshot_snapshot(
     assert ucsb_env["load"] == []
 
 
-@pytest.mark.parametrize("argv,replace", [(["load"], False), (["load", "--replace"], True)])
+@pytest.mark.parametrize(
+    "argv,replace", [(["load"], False), (["load", "--replace"], True)]
+)
 def test_ucsb_load_runs_pipeline(
     ucsb_env: dict[str, list], argv: list[str], replace: bool
 ) -> None:
@@ -271,7 +285,9 @@ def _recording_mit_pipeline(calls: list[dict]) -> Any:
 @pytest.fixture
 def mit_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     calls: list[dict] = []
-    monkeypatch.setattr(mit_main.config, "db_config_from_env", lambda *a, **k: dict(_DB))
+    monkeypatch.setattr(
+        mit_main.config, "db_config_from_env", lambda *a, **k: dict(_DB)
+    )
     monkeypatch.setattr(mit_main, "mit_csv_path_from_env", lambda *a, **k: "mit.csv")
     monkeypatch.setattr(mit_main, "DBC", lambda cfg: "DBC")
     monkeypatch.setattr(
@@ -319,9 +335,7 @@ def _valid_corpus(tmp_path: Any) -> str:
 
     def fetch(url: str) -> tuple[int, bytes]:
         if url.endswith("/results"):
-            links = "".join(
-                f'<a href="/electoral-college/{y}">{y}</a>' for y in years
-            )
+            links = "".join(f'<a href="/electoral-college/{y}">{y}</a>' for y in years)
             return 200, f'<div id="main-col"><table>{links}</table></div>'.encode()
         return 200, b'<div id="main-col"><table><tr><td>x</td></tr></table></div>'
 
@@ -373,7 +387,7 @@ def test_a_stale_corpus_exits_cleanly_without_running_the_pipeline(
 
 
 def test_corpus_subcommand_dispatches_to_the_corpus_runner(
-    monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called: list[str] = []
 
@@ -458,7 +472,9 @@ def test_corpus_runner_reports_progress_on_interrupt(
 
 
 def test_corpus_banner_reports_the_corpus_age(
-    top_env: dict[str, list], monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+    top_env: dict[str, list],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
     capsys: pytest.CaptureFixture,
 ) -> None:
     # The cheapest mitigation for the D036 content-divergence residual: a stale corpus
@@ -499,7 +515,9 @@ def recording_dbc(monkeypatch: pytest.MonkeyPatch) -> list[_RecordingDBC]:
 
 
 def _raise_incomplete(*a: Any, **k: Any) -> None:
-    raise top.PipelineError("Scrape returned no tables for 1 requested year(s): [2024].")
+    raise top.PipelineError(
+        "Scrape returned no tables for 1 requested year(s): [2024]."
+    )
 
 
 def test_ec_reports_an_incomplete_scrape_without_a_traceback(
@@ -880,7 +898,9 @@ def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
             closed.append(True)
 
     def boom(*_a: Any, **_k: Any) -> None:
-        raise MITCoverageError("assert_mit_year_coverage: MIT's covered years are wrong")
+        raise MITCoverageError(
+            "assert_mit_year_coverage: MIT's covered years are wrong"
+        )
 
     monkeypatch.setattr(mit_main, "DBC", lambda cfg: _DBC())
     monkeypatch.setattr(mit_main, "run_mit_pipeline", boom)
@@ -890,3 +910,142 @@ def test_the_mit_cli_reports_a_failed_coverage_guard_and_closes_the_connection(
     assert "MIT year-coverage check failed" in err
     assert "Nothing was loaded" in err
     assert closed == [True], "the arm closes the connection run_mit_pipeline could not"
+
+
+def test_all_autodetects_the_census_corpus_when_present(
+    top_env: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``usvote all`` must actually reach the census stage, not merely be able to.
+
+    ``run_warehouse`` grew a ``census_corpus_dir`` parameter in #181; wiring the
+    orchestrator without wiring the front door would leave the whole stage unreachable
+    from the shipped command while every warehouse-level test passed.
+    """
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["census_corpus_dir"] == "/tmp"
+
+
+def test_all_skips_census_loudly_when_the_corpus_is_absent(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A build missing a source is never silent (the D016/D024 principle the UCSB notice
+    # already follows), even where — as here — nothing downstream reads it yet.
+    monkeypatch.delenv("USVOTE_CENSUS_CORPUS_DIR", raising=False)
+    assert top.main(["all"]) == 0
+    assert top_env["warehouse"][0]["census_corpus_dir"] is None
+    assert "WITHOUT census population" in capsys.readouterr().err
+
+
+def test_all_reports_a_census_failure_as_a_half_built_warehouse(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, B1: the arm that was missing, and why it matters.
+
+    Census runs after the other source loads and **before** `rebuild_views`, and every
+    pipeline owns its own transaction (#84a). So a census failure — a corpus directory
+    that exists but is empty or half-snapshotted, which `_resolve_census_dir` accepts
+    — leaves whichever sources ran committed with **no join or hybrid views at all**,
+    after a multi-minute build. (Here that is EC and MIT: this fixture sets no UCSB
+    snapshot, so UCSB is skipped, which is the same path a public clone takes.)
+    Without this arm the operator got a bare traceback and no way to
+    tell which half of the warehouse exists.
+
+    The message must say both things: that the sources committed, and that the views did
+    not. Asserting only the exit code would pass on a bare `return 1`, which is the
+    version of this fix that helps nobody.
+    """
+    from usvote.census.scrape import CensusScrapeError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusScrapeError("The Census corpus at /tmp/x is incomplete: ...")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "Census ingestion failed" in err
+    assert "COMMITTED" in err, "the operator is not told the sources landed"
+    assert "NOT rebuilt" in err, "the operator is not told the views are missing"
+    assert "--replace" in err, "no recovery path given"
+    # A corpus problem IS fixed by snapshotting, so this arm names that remedy...
+    assert "usvote.census snapshot" in err
+
+
+def test_all_catches_every_census_error_type_not_just_the_scrape_one(
+    top_env: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The three are plain RuntimeError siblings matching neither PipelineError,
+    # MITCoverageError nor (PVOverlapError, HybridError) — so each escapes separately if
+    # the arm names only some of them. CensusParseError is the one a layout change
+    # raises, i.e. the likeliest of the three in practice.
+    from usvote.census.parse import CensusParseError
+    from usvote.census.scrape import CensusScrapeError
+    from usvote.census.transform import CensusTransformError
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    for error in (
+        CensusScrapeError("a"),
+        CensusTransformError("b"),
+        CensusParseError("c"),
+    ):
+
+        def boom(*a: Any, _e: Exception = error, **k: Any) -> None:
+            raise _e
+
+        monkeypatch.setattr(top, "run_warehouse", boom)
+        assert top.main(["all"]) == 1, f"{type(error).__name__} escaped the arm"
+
+
+def test_the_census_failure_message_names_only_the_sources_that_ran(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, N4. UCSB is skipped whenever no snapshot is present — the ordinary
+    path for a public clone — so an unconditional "EC, MIT and UCSB committed" names a
+    source that never started, in the message the operator reads to decide what to do."""
+    from usvote.census.scrape import CensusScrapeError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusScrapeError("corpus incomplete")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    monkeypatch.delenv("USVOTE_UCSB_HTML_DIR", raising=False)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "EC and MIT loads COMMITTED" in err
+    assert "UCSB" not in err.split("Census ingestion failed")[1]
+
+
+def test_a_parse_failure_is_not_told_to_re_download_the_same_files(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#181 review, N4, second half.
+
+    Only a corpus problem is fixed by snapshotting. A CensusParseError means the
+    published layout moved and a CensusTransformError means the jurisdiction set did —
+    re-downloading the identical files changes nothing, so sending the operator to the
+    network is advice that cannot work.
+    """
+    from usvote.census.parse import CensusParseError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise CensusParseError("the population-change table has no 'Area' column")
+
+    monkeypatch.setenv("USVOTE_CENSUS_CORPUS_DIR", "/tmp")
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "usvote.census snapshot" not in err
+    assert "layout or jurisdiction set moved" in err

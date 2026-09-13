@@ -48,7 +48,7 @@ $ python -m usvote all --replace    # clean full rebuild (drops the schema, then
 $ python -m usvote all --no-ucsb    # EC + MIT only (the redistributable public core)
 ```
 
-  `all` also needs `USVOTE_MIT_CSV_PATH` (and, for UCSB, `USVOTE_UCSB_HTML_DIR`); it prints a loud notice and builds without UCSB when that snapshot is absent (pass `--require-ucsb` to fail instead). A single popular-vote source can also be loaded on its own with `python -m usvote.mit load` or `python -m usvote.ucsb load` (both require the EC spine already loaded); `python -m usvote.ucsb` (bare) still *snapshots* the raw UCSB pages.
+  `all` also needs `USVOTE_MIT_CSV_PATH` (and, for UCSB, `USVOTE_UCSB_HTML_DIR`; for census population, `USVOTE_CENSUS_CORPUS_DIR` — skipped with a notice when absent, like UCSB); it prints a loud notice and builds without UCSB when that snapshot is absent (pass `--require-ucsb` to fail instead). A single popular-vote source can also be loaded on its own with `python -m usvote.mit load` or `python -m usvote.ucsb load` (both require the EC spine already loaded); `python -m usvote.ucsb` (bare) still *snapshots* the raw UCSB pages. Census population loads with `python -m usvote.census` (bare defaults to `load`; `python -m usvote.census snapshot` downloads the published Census tables into the corpus first, and is the only census command that touches the network).
 
 ### The internal API (E8)
 
@@ -174,6 +174,7 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
 | `USVOTE_UCSB_HTML_DIR` | path to the local UCSB raw-HTML snapshot directory | *(required for the UCSB popular-vote scrape)* |
 | `USVOTE_EC_HTML_DIR` | path to the local Archives raw-HTML corpus (`python -m usvote corpus`) | *(optional — set it to rebuild without scraping)* |
+| `USVOTE_CENSUS_CORPUS_DIR` | path to the local Census population corpus (`python -m usvote.census snapshot`) | *(required for the census pipeline)* |
 | `USVOTE_API_SNAPSHOT_PATH` | path to the read-only SQLite API snapshot — written by `python -m usvote.snapshot`, read by `python -m usvote.api` | *(required for the snapshot build and the API)* |
 | `USVOTE_API_CORS_ORIGINS` | comma-separated CORS allow-list for the API | *(unset &rarr; localhost dev origins; never a silent `*`)* |
 
