@@ -3741,3 +3741,94 @@ it wants the apportionment denominator at 1924/1928 or a freshest-enumeration se
 **Related:** #182, #181, #183, #184, #208, #129, D005, D006, D015, D017, D024, D026, D027, D041,
 D046, D059, `.claude/specs/research-census-source.md` (§4/§7/§10), `src/usvote/apportionment.py`,
 `src/usvote/census/conform.py`, `docs/corrections.md`.
+
+## D061: The transposed table is read faithfully; scope stays in the transform, and one coverage kind outlives its last member
+
+**Date:** 2026-09-13
+**Issue:** #234 (E10, follow-up owed by D060's Action-required section) · **Builds on:** D005 (no
+fabricated values), D059 (the census dimension and its natural key), D060 (the election-grain
+conformance layer and the coverage-exception kinds)
+
+**Context.**
+
+D060 shipped with three declared coverage exceptions, two of them `present_but_unparsed`: 1960
+Alaska and 1960 Hawaii. Their 1950 resident populations — **128,643** and **499,794** — were
+published all along in `tabs15-65.xlsx`, on a **second, transposed table** (race per row, census year
+across columns) carrying neither the `NUMBER` nor the `PERCENT` marker `parse_resident_1790_1990`
+keys on. Both states cast 3 electoral votes in 1960 and the 1960 election is governed by the 1950
+census, so both persons-per-electoral-vote cells were NULL — on a series #184 exposes publicly.
+
+Three things had to be decided, and each has a wrong answer that produces plausible output rather
+than an error.
+
+**Decision.**
+
+**(a) The table is detected by its label column, and the anchor is measured rather than argued.**
+The header row is the row whose column A reads exactly `Race`. Across all 51 published sheets that
+selects **exactly two** — Alaska and Hawaii. The obvious alternative, "a row carrying several
+year-shaped cells", fires on **26 of the 51**, because a four-digit *population* is indistinguishable
+from a four-digit *year* in isolation and the race-breakdown columns are full of the former. The
+label column is therefore the only sound discriminator, which is the same reason `_parse_state_sheet`
+already keys on `NUMBER`/`PERCENT` rather than on cell shapes.
+
+The column→year map is read off that header row and applied positionally to the `Total` row.
+**Alaska's year header begins in column B, Hawaii's in column C with column B empty**, so one code
+path handles both only because the mapping comes from the header; Hawaii's empty column falls out
+for free, since an empty header cell yields no year.
+
+**(b) Off-cycle censuses are emitted faithfully by the parser; the transform decides scope.** Alaska
+was enumerated in **1939 and 1929** "instead of" 1940 and 1930 — the sheet's own footnote says so.
+Relabelling them to the decennial years would file figures under censuses that never happened (D005),
+and `census_year` is in the natural key (D059). But *excluding* them is a which-censuses-are-in-scope
+decision, which `parse.py`'s own docstring assigns to `transform.py` — and which
+`SOURCE_SPANS["resident_1790_1990"] = range(1790, 2000, 10)` **already makes**, with no new code. So
+the parser emits them and the span drops them.
+
+The parser does one thing more: it **raises** on any *other* non-decennial header. A silent skip
+would drop a re-issued column without a word — the same shape as the U+2026 leaders that silently
+dropped South Carolina 1790 (D060/#182). Absent is silent (49 sheets have no such table); a table
+that is **present but unreadable** is loud.
+
+**(c) The two `present_but_unparsed` entries are retired; the kind stays defined with no members.**
+`assert_spine_states_covered`'s stale-declaration direction forces the first half — an exception
+claims the source cannot supply a figure, so keeping one after the figure is in hand is a false claim
+in `docs/corrections.md`. The catalog is now exactly one row, `(1848, Texas)`, `absent_from_source`.
+
+`KIND_PRESENT_BUT_UNPARSED` and `EXCEPTION_KINDS` keep it anyway. **"No instance today" is not "the
+concept does not exist"**: the kind is the vocabulary that keeps a defect in *this repo* from ever
+being filed as a fact about history, which is the distinction D060 turns on. With no member
+referencing it, nothing else in the suite would fail if a "remove the unused constant" cleanup
+deleted it, so that is pinned by its own test.
+
+**Rationale.**
+
+The (b) split is the one worth defending, because the smaller version — skip them in the parser —
+passes every test and ships identical data. It fails two other ways. It duplicates scope logic the
+transform already owns, leaving the module's two readers inconsistent: one faithful, one selective.
+And it makes the property **unfalsifiable**: a single "1939 is absent from the frame" assertion
+cannot distinguish a parser that skipped it from one that relabelled it to 1940 and then
+deduplicated — and the second would put 72,524 people in the wrong census with the suite green.
+Split across the layers, each half is checkable: the parser proves 1939 is emitted and 1940 is never
+invented, the transform proves 1939 never reaches the frame.
+
+(a)'s `Total` anchor carries the same shape of risk and was nearly missed. On **both** real sheets
+`Total` happens to be the first data row under the header, so replacing the label anchor with "the
+first row after the header" is **byte-identical** across every published byte — unkillable by any
+test that reads only the fixture or the corpus. It is pinned by a synthetic sheet that puts the race
+rows *first*. This is #182's surviving-mutant lesson applied before the fact rather than after: there,
+every assertion around a regex was an acceptance one, so loosening its reject half changed no output.
+For the same reason the NUMBER-block-wins precedence is pinned by a constructed overlap — no year is
+published in both tables on either real sheet, so that guard is otherwise dead-tested.
+
+**Consequence.** Alaska's series now reaches **1880** and Hawaii's **1900** (the extents genuinely
+differ — Hawaii was an independent kingdom in 1880 — so neither is derived from the other). The
+coverage catalog drops to one permanent row, and D060's Action-required item is **discharged** except
+for its second clause, which belongs to #184: whether that story wants the apportionment denominator
+at 1924/1928 or a freshest-enumeration second field per D060(c). Hawaii's sheet joins the committed
+trimmed fixture, because it is the only offline witness to the column-C case — without it, a
+"hardcode column B" reading is correct for Alaska, wrong for Hawaii, and green in CI, since the only
+other check that sees Hawaii is the corpus-gated `TestRealCorpus`.
+
+**Related:** #234, #182, #184, #129, D005, D059, D060, `src/usvote/census/parse.py`,
+`src/usvote/census/transform.py` (`SOURCE_SPANS`), `src/usvote/census/conform.py`,
+`docs/corrections.md`, `tests/fixtures/census_tabs15-65_trimmed.xlsx`.

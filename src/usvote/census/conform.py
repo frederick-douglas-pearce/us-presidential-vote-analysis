@@ -184,7 +184,20 @@ class CoverageException(NamedTuple):
 #: against ``tabs15-65.xlsx`` parsed in full, and the remaining **306** — the six
 #: elections 2004-2024, governed by the 2000/2010/2020 censuses — against the
 #: population-change table, which publishes all 51 jurisdictions for each. These three
-#: are the complete set — every mid-decade admission the epic
+#: **Two of those three were retired by #234**, which taught
+#: :func:`usvote.census.parse.parse_resident_1790_1990` to read the transposed second
+#: table on Alaska's and Hawaii's sheets. Their 1950 figures (128,643 and 499,794) are
+#: now parsed, so ``(1960, Alaska)`` and ``(1960, Hawaii)`` are covered and their
+#: entries had to go: :func:`assert_spine_states_covered`'s stale-declaration direction
+#: raises on a declared exception that turns out covered, precisely so a corrections
+#: catalog cannot keep claiming a figure is unreachable after someone reaches it.
+#:
+#: **The remaining entry is the one no code change can ever retire**, which is the
+#: distinction :data:`KIND_PRESENT_BUT_UNPARSED` exists to draw — and that kind stays
+#: defined with no current member, because "no instance today" is not "the concept does
+#: not exist".
+#:
+#: The measured set — every mid-decade admission the epic
 #: worried about is covered (1864 Kansas/Nevada/West Virginia from 1860, 1876 Colorado
 #: from 1870, the 1892 six and 1896 Utah from 1890, 1908 Oklahoma from 1900, 1912
 #: Arizona/New Mexico from 1910), and so is DC, whose series runs from 1800. Population
@@ -203,33 +216,6 @@ CENSUS_COVERAGE_EXCEPTIONS: tuple[CoverageException, ...] = (
             "is 1850. The figure does not exist and no parser change can produce it. "
             "Texas cast 4 electoral votes in 1848, so this is a real gap in any "
             "per-capita series, not a technicality."
-        ),
-    ),
-    CoverageException(
-        election_year=1960,
-        state="Alaska",
-        kind=KIND_PRESENT_BUT_UNPARSED,
-        reason=(
-            "The 1960 election is governed by the 1950 census. Alaska's 1950 resident "
-            "population (128,643) IS published in tabs15-65.xlsx, but on the sheet's "
-            "second table, which is transposed — race per row, census year across "
-            "columns — and carries neither the NUMBER nor the PERCENT marker that "
-            "parse_resident_1790_1990 keys on, so it is never read. Alaska was "
-            "admitted 3 January 1959 (Pub. L. 85-508) and cast 3 electoral votes in "
-            "1960. Fixable; tracked as the #182 follow-up."
-        ),
-    ),
-    CoverageException(
-        election_year=1960,
-        state="Hawaii",
-        kind=KIND_PRESENT_BUT_UNPARSED,
-        reason=(
-            "As Alaska: Hawaii's 1950 resident population (499,794) is published in "
-            "the same transposed second table and is unread for the same reason. Note "
-            "the year header sits in a different column than Alaska's (C29 against "
-            "B29), so a fix must locate it by content rather than by index. Hawaii was "
-            "admitted 21 August 1959 (Pub. L. 86-3) and cast 3 electoral votes in "
-            "1960."
         ),
     ),
 )

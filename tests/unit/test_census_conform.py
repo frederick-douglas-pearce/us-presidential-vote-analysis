@@ -412,19 +412,33 @@ class TestDoubleCount:
 
 
 class TestCoverage:
-    def test_the_catalog_holds_three_exceptions_in_two_kinds(self) -> None:
-        assert len(CENSUS_COVERAGE_EXCEPTIONS) == 3
+    def test_the_catalog_holds_one_exception_and_it_is_the_permanent_kind(self) -> None:
+        # Was three entries in two kinds until #234. Alaska's and Hawaii's 1950 figures
+        # are published in a transposed second table the parser now reads, so their
+        # `present_but_unparsed` entries became false claims and were retired.
+        # This is the CI-visible half of that cleanup: `assert_spine_states_covered`
+        # enforces it too, but only when the corpus is present, and TestRealCorpus
+        # skips without it. Re-adding either state turns this red with no corpus.
+        assert len(CENSUS_COVERAGE_EXCEPTIONS) == 1
         assert {(e.election_year, e.state) for e in CENSUS_COVERAGE_EXCEPTIONS} == {
             (1848, "Texas"),
-            (1960, "Alaska"),
-            (1960, "Hawaii"),
         }
         by_kind = {e.state: e.kind for e in CENSUS_COVERAGE_EXCEPTIONS}
-        # Texas's figure cannot exist; Alaska's and Hawaii's do and are merely unread.
-        # Collapsing the two kinds would make one of the catalog rows a false claim.
+        # Texas's figure cannot exist — the Republic was not enumerated by the US in
+        # 1840 — so this one is permanent in a way the retired two never were.
         assert by_kind["Texas"] == KIND_ABSENT_FROM_SOURCE
-        assert by_kind["Alaska"] == KIND_PRESENT_BUT_UNPARSED
-        assert by_kind["Hawaii"] == KIND_PRESENT_BUT_UNPARSED
+
+    def test_the_present_but_unparsed_kind_survives_having_no_members(self) -> None:
+        """The vocabulary outlives its last instance, deliberately (#234).
+
+        With Alaska and Hawaii retired, no entry references KIND_PRESENT_BUT_UNPARSED,
+        so nothing else in the suite would fail if a "remove the unused constant"
+        cleanup deleted it — and deleting it would collapse the distinction D060 turns
+        on, between a figure history never recorded and one this repo cannot yet reach.
+        "No instance today" is not "the concept does not exist".
+        """
+        assert KIND_PRESENT_BUT_UNPARSED in EXCEPTION_KINDS
+        assert KIND_ABSENT_FROM_SOURCE in EXCEPTION_KINDS
 
     def test_every_exception_has_a_known_kind_and_a_reason(self) -> None:
         for exception in CENSUS_COVERAGE_EXCEPTIONS:
@@ -888,7 +902,13 @@ class TestRealCorpus:
             for row in frame.itertuples()
             if row.coverage == COVERAGE_NO_GOVERNING_FIGURE
         }
-        assert gaps == {(1848, "Texas"), (1960, "Alaska"), (1960, "Hawaii")}
+        # ONE gap across all 2,204 participating pairs. It was three until #234 taught
+        # the parser to read Alaska's and Hawaii's transposed second table; those two
+        # were `present_but_unparsed` — the figure was published and unreachable — and
+        # reaching it is what retired them. Texas 1848 is `absent_from_source`: the
+        # Republic of Texas was not enumerated by the United States in 1840, so no
+        # parser change can ever produce that figure and this entry is permanent.
+        assert gaps == {(1848, "Texas")}
         # Both directions at once: no undeclared gap, and no stale entry.
         assert_spine_states_covered(frame)
 

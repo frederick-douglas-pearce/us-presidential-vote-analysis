@@ -43,17 +43,27 @@ MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 #: every reason not to — a synthetic workbook would test the parser against a layout
 #: this project invented rather than the one the Bureau publishes.
 #:
-#: ``CENSUS_TABS_TRIMMED_XLSX`` is the 1790-1990 workbook reduced from 51 sheets to four
-#: (Virginia and West Virginia for the boundary correction, Connecticut as an untouched
-#: control, and Alaska because its sheet carries a **second, transposed table** — race per
-#: row, census year across columns — that ``parse_resident_1790_1990`` does not read, so its
-#: *parsed* series starts at 1960 while the file itself goes back to 1880). Only sheets were
-#: dropped; every kept sheet is byte-identical to the published file.
+#: ``CENSUS_TABS_TRIMMED_XLSX`` is the 1790-1990 workbook reduced from 51 sheets to
+#: **five**: Virginia and West Virginia for the boundary correction, Connecticut as an
+#: untouched control, and **Alaska and Hawaii** — the only two sheets in the published
+#: workbook carrying a **second, transposed table** (race per row, census year across
+#: columns). Only sheets were dropped; every kept sheet is byte-identical to the
+#: published file.
 #:
-#: **The earlier wording here said Alaska "is not backfilled", which was false** (#182): the
-#: data is published, just in a layout the parser skips. 1960 Alaska and Hawaii are recorded
-#: as ``present_but_unparsed`` coverage exceptions for that reason, and the sentence was
-#: sitting directly on top of the gap.
+#: **Hawaii was added in #234, and it is not redundant with Alaska.** The two sheets put
+#: that table's year header in *different columns* — Alaska's in B, Hawaii's in C with B
+#: empty — so Hawaii is the only offline witness that the reader maps column to year from
+#: the header rather than hardcoding column B. Without it that mutation is correct for
+#: Alaska, wrong for Hawaii, and green in CI, since the only other check that sees Hawaii
+#: is the corpus-gated ``TestRealCorpus``, which skips when ``USVOTE_CENSUS_CORPUS_DIR``
+#: is unset.
+#:
+#: **This note has been wrong twice, in opposite directions, which is worth keeping.** It
+#: first said Alaska "is not backfilled" — false (#182): the data is published, merely in
+#: a layout the parser skipped. It was corrected to say the *parsed* series starts at
+#: 1960 — true when written, false since #234 taught the parser to read that table.
+#: Alaska now parses back to 1880 and Hawaii to 1900, and the two
+#: ``present_but_unparsed`` coverage exceptions those sentences sat on top of are retired.
 #: ``CENSUS_POPCHANGE_XLSX`` is the 2020 population-change table committed **whole** —
 #: at 24 KB there was nothing to trim, and it carries the side-by-side block layout,
 #: both spellings of the national row, and the aggregate rows the scope rule excludes.

@@ -97,6 +97,11 @@ class TestResident1790To1990:
             "West Virginia",
             "Connecticut",
             "Alaska",
+            # Added in #234. Hawaii is the ONLY offline witness to the transposed
+            # table's year header sitting somewhere other than column B (its is column
+            # C, with B empty), so without this sheet a "hardcode column B" reading is
+            # correct for Alaska, wrong for Hawaii, and green in CI.
+            "Hawaii",
         }
 
     def test_it_reads_the_published_totals_verified_by_the_research_pass(self) -> None:
@@ -150,21 +155,181 @@ class TestResident1790To1990:
         # carry footnotes, so the absence of 1940 would be the symptom.
         assert _lookup(_tabs())[("Virginia", 1940)] == 2_677_773
 
-    def test_the_number_block_of_alaskas_sheet_starts_at_1960(self) -> None:
-        # **Read what this does and does not say** (corrected in #182). It says the
-        # *parsed* Alaska series starts at 1960. It does NOT say the file lacks earlier
-        # Alaska data — it has it, back to 1880, in a **second, transposed table** on the
-        # same sheet (race per row, census year across columns) that this parser never
-        # reads, because that table carries neither a ``NUMBER`` nor a ``PERCENT`` marker.
-        # Alaska 1950 = 128,643 and Hawaii 1950 = 499,794 are both in there.
-        #
-        # The earlier wording here ("Alaska is not backfilled the way West Virginia is")
-        # was false and sat directly on top of that gap. The rows are absent rather than
-        # present-with-null, so #182 conforms what exists and records 1960 Alaska/Hawaii
-        # as a `present_but_unparsed` coverage exception; recovering the series is the
-        # follow-up issue.
-        alaska = sorted(r.census_year for r in _tabs() if r.area == "Alaska")
-        assert min(alaska) == 1960
+    def test_the_transposed_second_table_is_read_for_both_sheets_that_have_one(
+        self,
+    ) -> None:
+        """#234. Alaska and Hawaii publish their pre-1960 population here and nowhere else.
+
+        Before this, the parsed series for both started at 1960 while the file itself went
+        back to 1880/1900, because the second table carries neither the ``NUMBER`` nor the
+        ``PERCENT`` marker the first reader keys on. 1960 Alaska and Hawaii
+        persons-per-electoral-vote were NULL as a direct result.
+
+        **Exact year-sets, not `min()`.** The extent alone would pass under a reading that
+        dropped an interior column, mapped every column to the wrong year by a constant
+        offset, or invented a year; the full set catches all three. Both figures below are
+        measured from the published workbook.
+        """
+        figures = _lookup(_tabs())
+        assert figures[("Alaska", 1950)] == 128_643
+        assert figures[("Hawaii", 1950)] == 499_794
+
+        alaska = {year for area, year in figures if area == "Alaska"}
+        hawaii = {year for area, year in figures if area == "Hawaii"}
+        # Alaska reaches 1880 and carries two off-cycle censuses; Hawaii reaches only
+        # 1900 and is entirely on-cycle. Asserted separately because the two extents
+        # genuinely differ -- Hawaii was an independent kingdom in 1880 -- so deriving
+        # either from the other would be an assumption the source does not support.
+        assert alaska == {
+            1880, 1890, 1900, 1910, 1920, 1929, 1939, 1950, 1960, 1970, 1980, 1990,
+        }
+        assert hawaii == {1900, 1910, 1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990}
+
+    def test_alaskas_off_cycle_censuses_are_emitted_never_relabelled(self) -> None:
+        """AC-3, the half that lives at this layer.
+
+        Alaska's censuses were taken in 1939 and 1929 "instead of" 1940 and 1930 -- the
+        sheet's own footnote says so. ``census_year`` is part of the natural key and is
+        decennial, so relabelling 1939 to 1940 would be D005 fabrication: a figure filed
+        under a census that never happened.
+
+        The parser is **faithful** and emits them as published. Dropping them is a
+        which-censuses-are-in-scope decision, which belongs to ``transform.SOURCE_SPANS``
+        and is asserted there -- the split is what makes "skipped" and
+        "relabelled-then-deduped" distinguishable, which asserting absence here could
+        never be.
+        """
+        alaska = {
+            year: population
+            for (area, year), population in _lookup(_tabs()).items()
+            if area == "Alaska"
+        }
+        assert alaska[1939] == 72_524
+        assert alaska[1929] == 59_278
+        # The decennial years they are NOT to be filed under. Hawaii genuinely has 1940
+        # and 1930; Alaska must not acquire them by relabelling.
+        assert 1940 not in alaska
+        assert 1930 not in alaska
+
+    def test_the_total_row_is_found_by_label_not_by_position(self) -> None:
+        """The reject side of the `Total` anchor -- and it needs a synthetic sheet.
+
+        On BOTH real sheets ``Total`` happens to be the first data row under the header,
+        so replacing the label anchor with "the first row after the header" is
+        **byte-identical** over the whole fixture and over the real 51-sheet corpus. A
+        test that only reads published bytes cannot tell the two apart, and a reject-side
+        test that puts the race rows *after* ``Total`` cannot either.
+
+        This is #182's surviving-mutant lesson applied before the fact: there, every
+        assertion around a regex was an acceptance one, so loosening the reject half left
+        every output byte-identical. Here the race rows come FIRST.
+        """
+        workbook = _state_sheet_workbook(
+            "Alaska",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "550043"],
+                ["Race", "1950", "1940"],
+                ["White................", "92808", "39170"],
+                [".   Japanese.........", "1000", "263"],
+                ["            Total....", "128643", "72524"],
+            ],
+        )
+        figures = {
+            row.census_year: row.population
+            for row in parse_resident_1790_1990(workbook, source_id="x")
+        }
+        assert figures == {1990: 550_043, 1950: 128_643, 1940: 72_524}
+        # The race rows sit between the header and the total; reading either as the
+        # total is the mutation this test exists to kill.
+        assert 92_808 not in figures.values()
+        assert 1_000 not in figures.values()
+
+    def test_the_number_block_wins_a_year_both_tables_publish(self) -> None:
+        """The reject side of the NUMBER-first precedence.
+
+        No year is published in both tables on either real sheet, so the ``seen`` guard
+        can be deleted with byte-identical output over every published byte -- an
+        untestable safety property unless the overlap is constructed. The two values
+        differ so the assertion names which table won.
+        """
+        workbook = _state_sheet_workbook(
+            "Alaska",
+            [
+                ["NUMBER", ""],
+                ["1950 ................", "999999"],
+                ["Race", "1950"],
+                ["            Total....", "111111"],
+            ],
+        )
+        figures = {
+            row.census_year: row.population
+            for row in parse_resident_1790_1990(workbook, source_id="x")
+        }
+        assert figures == {1950: 999_999}
+        assert 111_111 not in figures.values()
+
+    def test_an_unknown_off_cycle_census_raises_rather_than_being_dropped(self) -> None:
+        """The reject side of the off-cycle rule -- the rule, not its outcome.
+
+        On the real data, ``year % 10 == 0``, ``year % 5 == 0`` and
+        ``year not in {1939, 1929}`` are indistinguishable: only 1939 and 1929 are
+        off-cycle and all three reject exactly those. So an outcome test pins nothing
+        about the rule.
+
+        What separates them is a year nobody has seen. A silent skip would drop a
+        re-issued column without a word -- the same shape as the U+2026 leaders dropping
+        South Carolina 1790. Refusing is the reflex ``_to_population`` already applies to
+        a cell it does not recognize.
+        """
+        workbook = _state_sheet_workbook(
+            "Alaska",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "550043"],
+                ["Race", "1935"],
+                ["            Total....", "50000"],
+            ],
+        )
+        with pytest.raises(CensusParseError, match="1935"):
+            parse_resident_1790_1990(workbook, source_id="x")
+
+    def test_a_sheet_with_no_transposed_table_gains_nothing(self) -> None:
+        """Absent is silent: 49 of the 51 sheets have no second table.
+
+        Connecticut is the untouched control in the fixture -- its whole series comes
+        from the ``NUMBER`` block, and a detector that over-fired would show up here as
+        a phantom year or a changed figure.
+        """
+        connecticut = {
+            year: population
+            for (area, year), population in _lookup(_tabs()).items()
+            if area == "Connecticut"
+        }
+        assert min(connecticut) == 1790
+        assert connecticut[1790] == 237_946
+        # Every year is decennial: no off-cycle column leaked in from anywhere.
+        assert all(year % 10 == 0 for year in connecticut)
+
+    def test_a_header_with_no_readable_total_row_raises(self) -> None:
+        """...but present-but-unreadable is LOUD, which is the other half of the design.
+
+        A sheet that presents the anchor and then offers nothing readable beneath it
+        means the published layout moved. Returning a short series there is exactly the
+        silent truncation this module refuses; the answer to a re-issued file is to fail
+        loudly, never to loosen the anchor until it matches something again.
+        """
+        workbook = _state_sheet_workbook(
+            "Alaska",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "550043"],
+                ["Race", "1950"],
+                ["White................", "92808"],
+            ],
+        )
+        with pytest.raises(CensusParseError, match="Total"):
+            parse_resident_1790_1990(workbook, source_id="x")
 
     def test_a_year_label_with_unicode_ellipsis_leaders_is_read(self) -> None:
         # The regression for the one figure this parser used to drop silently (#182):

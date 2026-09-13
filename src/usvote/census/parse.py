@@ -67,6 +67,43 @@ _PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 #: a silent single-cell loss is the class of defect this source's guards exist for.
 _YEAR_LABEL = re.compile(r"^(\d{4})(?:/\d+)?[\s.…]*$")
 
+#: The label column of the **transposed second table** that Alaska's and Hawaii's
+#: sheets carry, and nothing else in this workbook does. Their pre-1960 population
+#: lives there — race per row, census year across columns — in a block carrying neither
+#: the ``NUMBER`` nor the ``PERCENT`` marker :func:`_parse_state_sheet` keys on, so it
+#: was unread until #234 and 1960 Alaska/Hawaii persons-per-electoral-vote were NULL.
+#:
+#: **Measured, not assumed:** across all 51 published sheets, a column-A cell reading
+#: exactly ``Race`` selects **exactly two** — Alaska and Hawaii. The obvious
+#: alternative, "a row with several year-shaped cells", fires on **26 of the 51**,
+#: because :data:`_YEAR_LABEL` matches any bare four-digit string and the
+#: race-breakdown columns are full of four-digit *counts*. A population is
+#: indistinguishable from a year in isolation, so the label column is the only sound
+#: anchor — the same reason
+#: :func:`_parse_state_sheet` keys on its own label column rather than on cell shapes.
+_TRANSPOSED_HEADER_LABEL = "Race"
+
+#: The row within that table carrying the published total. Anchored on its label,
+#: never on its position: on both real sheets ``Total`` happens to be the **first** data
+#: row, so "the first row after the header" is byte-identically wrong and no test over
+#: the real fixture could tell the two apart (#234, from #182's surviving-mutant
+#: lesson).
+_TRANSPOSED_TOTAL_LABEL = "Total"
+
+#: Alaska's two off-cycle censuses, from the sheet's own footnote: *"Censuses of
+#: population were taken in 1939 (instead of 1940) and in 1929 (instead of 1930)."*
+#:
+#: They are **parsed faithfully and emitted**, never relabelled to a decennial year —
+#: relabelling would be D005 fabrication, and ``census_year`` is part of the natural
+#: key. Excluding them from the warehouse is **not this module's job**: that is a
+#: which-censuses-are-in-scope decision, and
+#: :data:`usvote.census.transform.SOURCE_SPANS` (``range(1790, 2000, 10)``) already
+#: makes it. Keeping the decision there rather than here is what keeps this parser
+#: "faithful, not selective" like its sibling, and splits the property into two testable
+#: halves: this layer proves 1939 is never read as 1940, and the transform proves 1939
+#: never reaches the frame.
+_OFF_CYCLE_CENSUSES = frozenset({1929, 1939})
+
 #: A resident-population column header in the population-change table.
 _RESIDENT_HEADER = re.compile(r"^Resident Population\s+(\d{4})\s+Census$")
 
@@ -252,10 +289,17 @@ def _parse_state_sheet(
     area: str,
     source: str,
 ) -> Iterator[PopulationRow]:
-    """Yield the ``NUMBER``-block rows of one state sheet."""
+    """Yield the ``NUMBER``-block rows of one state sheet, then its transposed table.
+
+    The sheet rows are materialized once and read twice: the ``NUMBER`` walk first, then
+    :func:`_parse_transposed_table` for the two sheets that carry one. Order is the
+    mechanism — the second pass receives a fully-populated ``seen``, so the ``NUMBER``
+    block wins any year both tables publish.
+    """
+    rows = list(_rows(archive, path, strings))
     in_number_block = False
     seen: set[int] = set()
-    for cells in _rows(archive, path, strings):
+    for cells in rows:
         if not cells:
             continue
         label = cells[0].strip()
@@ -286,6 +330,111 @@ def _parse_state_sheet(
             population=_to_population(value),
             source_id=source,
         )
+
+    yield from _parse_transposed_table(rows, area=area, source=source, seen=seen)
+
+
+def _parse_transposed_table(
+    rows: list[list[str]],
+    *,
+    area: str,
+    source: str,
+    seen: set[int],
+) -> Iterator[PopulationRow]:
+    """Yield the rows of a sheet's transposed second table, if it has one.
+
+    Alaska and Hawaii publish their pre-1960 population here and nowhere else. The table
+    is laid out the other way up from the ``NUMBER`` block — race per row, census year
+    across columns — and the two sheets do not agree on where it starts: **Alaska's year
+    header begins in column B, Hawaii's in column C with column B empty.** So the
+    column-to-year map is read off the header row and applied positionally to the
+    ``Total`` row, which handles both from one path and handles Hawaii's empty column
+    for free: an empty header cell yields no year, so nothing is read beneath it.
+
+    **Absent is silent; present-but-unreadable is loud.** The other 49 sheets have no
+    such table and yield nothing, quietly. But a sheet that presents the header anchor
+    and offers no readable ``Total`` row raises, as :func:`parse_population_change`
+    raises when its own headers move. The answer to a re-issued file is to fail loudly,
+    never to loosen the anchor until it matches something.
+    """
+    header_index = next(
+        (
+            i
+            for i, cells in enumerate(rows)
+            if cells and cells[0].strip() == _TRANSPOSED_HEADER_LABEL
+        ),
+        None,
+    )
+    if header_index is None:
+        return
+
+    header = rows[header_index]
+    columns: list[tuple[int, int]] = []
+    for column, text in enumerate(header):
+        if column == 0:
+            continue
+        match = _YEAR_LABEL.match(text.strip())
+        if match is None:
+            continue
+        year = int(match.group(1))
+        if year % 10 and year not in _OFF_CYCLE_CENSUSES:
+            # A non-decennial column this parser has not been told about means the
+            # published layout moved. Refusing is the same reflex as _to_population's:
+            # a silent skip here would drop a real census exactly as the U+2026 leaders
+            # once dropped South Carolina 1790.
+            raise CensusParseError(
+                f"{area}: the transposed table carries an unexpected non-decennial "
+                f"census year {year!r}. The known off-cycle censuses are "
+                f"{sorted(_OFF_CYCLE_CENSUSES)} (Alaska, per its own footnote); "
+                f"anything else means the layout changed and the column-to-year "
+                f"mapping can no longer be trusted."
+            )
+        columns.append((column, year))
+
+    total = next(
+        (
+            cells
+            for cells in rows[header_index + 1 :]
+            if cells and _strip_leaders(cells[0]) == _TRANSPOSED_TOTAL_LABEL
+        ),
+        None,
+    )
+    if not columns or total is None:
+        raise CensusParseError(
+            f"{area}: the sheet has a transposed second table (a "
+            f"{_TRANSPOSED_HEADER_LABEL!r} label column) but "
+            + (
+                "no year columns could be read from its header."
+                if not columns
+                else f"no {_TRANSPOSED_TOTAL_LABEL!r} row beneath it."
+            )
+            + " The published layout may have changed; refusing to return a short "
+            + "series."
+        )
+
+    for column, year in columns:
+        if year in seen:
+            # The NUMBER block is read first and wins. No year is published in both
+            # tables today, so this is a safety property rather than a live path.
+            continue
+        seen.add(year)
+        value = total[column] if column < len(total) else ""
+        yield PopulationRow(
+            census_year=year,
+            area=area,
+            population=_to_population(value),
+            source_id=source,
+        )
+
+
+def _strip_leaders(label: str) -> str:
+    """Return a row label without its surrounding space or dot/ellipsis leaders.
+
+    The workbook is not consistent about leaders — ASCII runs on most rows, U+2026 on
+    some — and the transposed table indents its ``Total`` row, so both ends need
+    trimming before the label can be compared.
+    """
+    return label.strip().rstrip(".…").strip()
 
 
 def parse_population_change(data: bytes, *, source_id: str) -> list[PopulationRow]:

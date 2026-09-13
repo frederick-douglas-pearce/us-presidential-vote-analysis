@@ -229,21 +229,29 @@ Measured, not estimated: every one of the **2,204** participating
 `(election_year, state)` pairs across the 51 elections 1824–2024 was tested against its
 governing census — **1,898** of them against `tabs15-65.xlsx` (governing census ≤ 1990,
 parsed in full) and the remaining **306**, the six elections 2004–2024, against the
-population-change table, which publishes all 51 jurisdictions per census. **Three** have
-no figure, and they are **two different kinds of thing** — a
-distinction carried as data, because collapsing it would make one of these rows a false
-claim.
+population-change table, which publishes all 51 jurisdictions per census. Three had no
+figure when that measurement was taken. **One does now** — and the difference between
+those two statements is the whole reason this catalog carries a `Kind` column.
 
 | Election | Governing census | State | EV | Kind | Why |
 |---|---|---|---|---|---|
 | 1848 | 1840 | Texas | **4** | `absent_from_source` | Texas was the independent **Republic of Texas** in 1840 and was not enumerated by the United States. Annexed by joint resolution of 1 March 1845 (5 Stat. 797), admitted 29 December 1845 (9 Stat. 108); first US census 1850. **The figure does not exist and no code change can produce it.** |
-| 1960 | 1950 | Alaska | 3 | `present_but_unparsed` | Alaska's 1950 resident population (**128,643**) *is* published in `tabs15-65.xlsx`, on the sheet's transposed second table, which carries neither the `NUMBER` nor the `PERCENT` marker `parse_resident_1790_1990` keys on. Admitted 3 January 1959 (Pub. L. 85-508). |
-| 1960 | 1950 | Hawaii | 3 | `present_but_unparsed` | As Alaska — 1950 population **499,794**, same unread table. Its year header sits in a different column than Alaska's, so a fix must locate it by content, not index. Admitted 21 August 1959 (Pub. L. 86-3). |
 
-Population for these rows is an honest **NULL** with provenance — never a zero, never an
-interpolation (D005). The `absent_from_source` row is permanent; the two
-`present_but_unparsed` rows are a defect in *this repo* and their entries come out when the
-parser learns that layout.
+**Retired 2026-09-13 by #234** — `(1960, Alaska)` and `(1960, Hawaii)`, both
+`present_but_unparsed`. Their 1950 figures (**128,643** and **499,794**) were published
+all along in `tabs15-65.xlsx`, on a transposed second table carrying neither the `NUMBER`
+nor the `PERCENT` marker the parser keyed on. `parse_resident_1790_1990` now reads it, so
+both are covered and **their rows had to come out of this table**: an exception claims the
+source cannot supply a figure, and leaving one here after the figure is in hand would be a
+false claim in a corrections catalog. Alaska's series now reaches 1880 and Hawaii's 1900.
+
+That leaves a catalog of exactly **one** row, and it is the permanent kind. The
+`present_but_unparsed` *kind* stays defined with no current member — "no instance today"
+is not "the concept does not exist", and the distinction is what keeps a defect in this
+repo from ever being filed as a fact about history.
+
+Population for the remaining row is an honest **NULL** with provenance — never a zero,
+never an interpolation (D005).
 
 **`assert_spine_states_covered` is two-way, and the second direction is the one with
 teeth.** An undeclared gap raises, which is obvious. A *declared* exception that turns out to
