@@ -41,6 +41,7 @@ from usvote.census.conform import (
     BoundarySuccession,
     CensusConformError,
     CoverageException,
+    apply_boundary_successions,
     assert_conforms_to_spine,
     assert_election_population_shape,
     assert_no_double_count,
@@ -294,6 +295,58 @@ class TestBoundarySuccession:
         )
         assert frame.loc[(1864, "West Virginia"), "population"] == WV_1860_PUBLISHED
 
+    def test_the_corrector_writes_the_label_itself(self) -> None:
+        """Survivor 2 (#182 Class B): deleting the corrector's `boundary_basis` write survived.
+
+        Every assertion that mentions the label was satisfied by a **different, upstream**
+        mechanism: `build_election_population` already sets `at_election` for any row whose
+        census basis is `as_enumerated`, and Virginia's 1860 row *is* the restated one. So on
+        every input the suite supplied, a corrector that labels and one that does not are
+        indistinguishable — the outcome is reached either way.
+
+        It bites for real the moment a predecessor's census row is **not** already
+        `as_enumerated` — a restatement #208 relabels, or a source that publishes
+        as-enumerated without this repo restating. Then a corrected at-election figure would
+        ship stamped `present_day`, the exact mislabel `BOUNDARY_AT_ELECTION` exists to
+        prevent.
+
+        Driving `apply_boundary_successions` directly is what isolates the two writers; going
+        through the builder would re-introduce the upstream one.
+        """
+        frame = pd.DataFrame(
+            [
+                {
+                    "election_year": 1864,
+                    "state": "Virginia",
+                    "governing_census_year": 1860,
+                    "total_electoral_votes": 0,
+                    "population": VA_1860_RESTATED,
+                    # The point of the test: NOT already at_election.
+                    "boundary_basis": BOUNDARY_PRESENT_DAY,
+                },
+                {
+                    "election_year": 1864,
+                    "state": "West Virginia",
+                    "governing_census_year": 1860,
+                    "total_electoral_votes": 5,
+                    "population": WV_1860_PUBLISHED,
+                    "boundary_basis": BOUNDARY_PRESENT_DAY,
+                },
+            ]
+        )
+        corrected = apply_boundary_successions(frame).set_index(
+            ["election_year", "state"]
+        )
+        assert corrected.loc[(1864, "Virginia"), "population"] == VA_1860_PUBLISHED
+        assert (
+            corrected.loc[(1864, "Virginia"), "boundary_basis"] == BOUNDARY_AT_ELECTION
+        )
+        # The successor is untouched in both value and label.
+        assert (
+            corrected.loc[(1864, "West Virginia"), "boundary_basis"]
+            == BOUNDARY_PRESENT_DAY
+        )
+
     def test_drift_between_the_pin_and_the_census_correction_raises(self) -> None:
         # If `apply_virginia_boundary_correction` ever computes something else (#208 is the
         # story that might), this must fail rather than silently shipping one of the two.
@@ -491,6 +544,33 @@ class TestNoInterpolation:
         frame.loc[0, "population"] = 950_000
         with pytest.raises(CensusConformError, match="synthesized"):
             assert_no_interpolated_population(frame, census)
+
+    def test_a_wrong_value_on_a_restated_cell_raises(self) -> None:
+        """Survivor 3 (#182 Class B), and the sharpest of the four.
+
+        Turning the restatement branch from a **value** check into a **key-membership** check
+        survived the whole suite — i.e. any number at all on a
+        `(governing_census_year, predecessor)` cell passed the D005 "never synthesized" guard,
+        which is precisely the loophole its docstring says it is not.
+
+        No test supplied the one input that separates the two implementations: a *wrong value*
+        on a restated cell. The synthesized-value test perturbs an Ohio cell, which is not in
+        `allowed_restatements` and so exercises only the first branch; the undeclared-restatement
+        test passes `successions=()`, which empties the map so the second branch is never
+        reached; and the positive test asserts an outcome both implementations reach.
+
+        These are the rows this module hand-writes a literal into — the highest-risk cells in
+        the frame — and this is the guard meant to catch a wrong one.
+        """
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        target = frame.index[
+            (frame.election_year == 1864) & (frame.state == "Virginia")
+        ][0]
+        # Neither the pinned published figure nor the table's restated one.
+        assert VA_1860_PUBLISHED != 1_300_000 != VA_1860_RESTATED
+        frame.loc[target, "population"] = 1_300_000
+        with pytest.raises(CensusConformError, match="synthesized"):
+            assert_no_interpolated_population(frame, _SUCCESSION_CENSUS)
 
     def test_an_undeclared_restatement_raises(self) -> None:
         frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)

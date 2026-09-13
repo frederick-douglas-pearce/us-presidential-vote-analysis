@@ -257,6 +257,28 @@ running it is a merge precondition. And it does not cover states that *did not* 
 which states existed when is the EC spine's answer (D006), and the conform layer is
 spine-left so the population source never votes on statehood.
 
+### The District of Columbia — considered, and deliberately not a correction
+
+DC is the third hard case #182's acceptance criteria name, and it is recorded here **because it
+needed nothing**, which is exactly the outcome a reader of this file would otherwise have no way
+to distinguish from an oversight.
+
+DC is not a state, holds **no census-apportioned House seats**, and has cast **3 electoral votes
+since the 23rd Amendment** took effect for the 1964 election. For the conformance layer that
+combination turns out to be unremarkable: the Bureau publishes DC's resident population from
+**1800** onward, so every governing census from 1960 on has a figure, and the spine-left
+construction attaches it for precisely the elections DC participated in. No boundary restatement,
+no coverage exception, no catalog row. `assert_spine_states_covered` confirms it the same way it
+confirms the fifty states, and a test asserts DC appears in neither correction catalog — so if the
+source ever stopped publishing it, or the spine changed its participation, that would surface as a
+finding rather than as a silent gap.
+
+**What is special about DC belongs to #183, not here.** Its 3 votes are not apportioned, so the
+`seats + 2` identity that story reconciles against does not hold for it at all — DC is `(X)` in
+every apportionment table. That is one of the five exceptions the seat reconciliation has to carry,
+and it is listed there rather than in this section, because it is a fact about *seats* and this
+section is about *population*.
+
 ### One parse-level loss, fixed rather than catalogued
 
 **South Carolina 1790 = 249,073** was being dropped entirely, which is why it is mentioned

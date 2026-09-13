@@ -184,6 +184,36 @@ class TestTheNineteenTwentyException:
         assert changed == {1924, 1928}
 
 
+class TestTheLagConstant:
+    """Survivor 1 (#182 Class B): `APPORTIONMENT_LAG_YEARS = 2 -> 1` survived the suite.
+
+    Four tests mentioned the lag and **three were circular** — they asserted
+    `census + APPORTIONMENT_LAG_YEARS <= election`, computed `first = FIRST + LAG`, or defined
+    their "naive" formula in terms of the constant, so the expectation moved with the mutation
+    and the assertion stayed true. The fourth, the 51-year oracle, is genuinely independent and
+    does kill a wrong lag in general (it kills `lag = 4`) — but it is arithmetically blind to
+    this one perturbation: floor-to-decade makes lags 1 and 2 identical on every year
+    congruent to 0, 2, 4, 6 or 8 mod 10, which is every presidential election year.
+
+    So the lag needs a pin that does not go through the mapping at all, plus the boundary case
+    the mapping cannot reach.
+    """
+
+    def test_the_lag_is_pinned_to_a_literal(self) -> None:
+        # Hand-written, not derived. The `HYBRID_SUMMARY_COLUMNS` discipline: an assertion
+        # written in terms of the constant cannot detect a change to it.
+        assert APPORTIONMENT_LAG_YEARS == 2
+        assert FIRST_APPORTIONMENT_CENSUS == 1790
+
+    def test_the_raise_boundary_is_pinned_without_reference_to_the_constant(self) -> None:
+        # The one place the lag is observable outside the 4-yearly grid. With lag 1,
+        # governing_census_year(1791) returns 1790 instead of raising -- the mapping over
+        # election years is unchanged, so only a literal year catches it.
+        assert governing_census_year(1792) == 1790
+        with pytest.raises(ApportionmentError):
+            governing_census_year(1791)
+
+
 class TestOutOfRange:
     def test_1789_raises_rather_than_returning_a_floor(self) -> None:
         # The 1789 allotment came from Art. I, section 2 -- not from an enumeration. A

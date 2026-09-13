@@ -192,6 +192,40 @@ class TestResident1790To1990:
         # 100 is the PERCENT-block twin; reading it would be the other half of the bug.
         assert 100 not in figures.values()
 
+    def test_a_label_that_merely_starts_with_four_digits_is_not_a_year_label(
+        self,
+    ) -> None:
+        """Survivor 4 (#182 Class B): dropping `_YEAR_LABEL`'s `$` anchor survived the suite.
+
+        Unanchored, any cell beginning with four digits reads as a year label and column B is
+        taken as that year's population — and because the first match for a year wins, a
+        heading placed above the real row silently displaces it.
+
+        Every existing assertion around this regex is an **acceptance** one: the ellipsis
+        regression, the `1940/2` footnote marker, the PERCENT block, the `.  Sample` sub-rows.
+        Each checks that the right figures come *out*. Not one asserted a label is **rejected**,
+        so loosening only the reject half left every output byte-identical. #182 widened this
+        regex's accept side and added a regression for that; the reject side had nothing.
+
+        The three labels below are real shapes this workbook family contains.
+        """
+        workbook = _state_sheet_workbook(
+            "Ohio",
+            [
+                ["NUMBER", ""],
+                ["1960 to 1970 change", "999999"],
+                ["1960 ...........", "9706397"],
+                ["1890 census of population", "888888"],
+                ["1890/3 .........", "3672329"],
+            ],
+        )
+        rows = parse_resident_1790_1990(workbook, source_id="x")
+        figures = {row.census_year: row.population for row in rows}
+        # The published rows win; neither heading is read as a year at all.
+        assert figures == {1960: 9_706_397, 1890: 3_672_329}
+        assert 999_999 not in figures.values()
+        assert 888_888 not in figures.values()
+
     def test_a_workbook_with_no_sheets_raises_rather_than_returning_nothing(
         self,
     ) -> None:

@@ -3706,6 +3706,18 @@ electoral analysis (1790 governs only 1792/1796, below `EC_SPINE_FLOOR`) and fix
 single-cell loss is exactly what this source's guards are for. Format robustness, so it lives with the
 parser rather than in the corrections catalog.
 
+**(k) DC is considered and deliberately needs no correction, which is recorded rather than left
+implicit.** #182's acceptance criteria name DC as a hard case alongside West Virginia and
+mid-series statehood. For the *conformance* layer the answer is that it needs nothing: DC is not a
+state and holds no census-apportioned House seats, but the Bureau publishes its resident population
+from 1800, so every governing census from 1960 on (its first election under the 23rd Amendment is
+1964) has a figure and the spine-left construction attaches it. No boundary restatement, no coverage
+exception, no catalog row. This is recorded because "considered, and needed nothing" and "never
+considered" are indistinguishable from a silent absence — and a test asserts DC appears in neither
+correction catalog, so the source dropping it, or the spine changing its participation, would surface
+as a finding. What *is* special about DC belongs to **#183**: its 3 votes are not apportioned, so the
+`seats + 2` identity does not hold for it and it is `(X)` in every apportionment table.
+
 **Rationale.**
 
 Every decision above answers a failure that is **plausible rather than loud**. A wrong governing
