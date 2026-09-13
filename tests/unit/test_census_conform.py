@@ -19,6 +19,7 @@ something CI proves.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -499,6 +500,22 @@ class TestNoInterpolation:
             )
 
 
+def _seam_missing_the_coverage_guard(
+    census: pd.DataFrame, ec_participation: pd.DataFrame
+) -> None:
+    """A copy of ``assert_conforms_to_spine``'s body with one guard call removed.
+
+    Stands in for the state of the tree if that line were deleted from the real seam. Its
+    only job is to be a seam with a call missing, so drift from the real body is harmless —
+    what matters is that it calls three of the four.
+    """
+    frame = conform_module.build_election_population(census, ec_participation)
+    conform_module.assert_election_population_shape(frame)
+    # assert_spine_states_covered deliberately omitted
+    conform_module.assert_no_double_count(frame)
+    conform_module.assert_no_interpolated_population(frame, census)
+
+
 class TestTheSeam:
     """`assert_conforms_to_spine` is the only thing the load path calls, so its
     *composition* is a contract — and nothing pinned it before (#182 review, GE-F1).
@@ -522,45 +539,68 @@ class TestTheSeam:
         "assert_no_interpolated_population",
     )
 
+    @staticmethod
+    def _record_guard_calls(
+        monkeypatch: pytest.MonkeyPatch,
+        seam: Callable[[pd.DataFrame, pd.DataFrame], None],
+    ) -> tuple[str, ...]:
+        """Run ``seam`` with all four guards replaced by recorders; return the call order.
+
+        The seam resolves each guard as a module global at call time, so patching
+        ``conform_module`` observes exactly the calls its body makes. ``monkeypatch.setattr``
+        also raises if a name is absent, so a guard moving out of this namespace fails
+        loudly at collection rather than quietly reducing what is recorded.
+        """
+        called: list[str] = []
+        for name in TestTheSeam.EXPECTED_CALLS:
+
+            def record(*_args: object, _name: str = name, **_kwargs: object) -> None:
+                called.append(_name)
+
+            monkeypatch.setattr(conform_module, name, record)
+        seam(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        return tuple(called)
+
+    @classmethod
+    def _assert_ran_every_guard(cls, calls: tuple[str, ...]) -> None:
+        """The single assertion both tests below exercise.
+
+        Shared deliberately: the non-vacuity test's whole job is to show that **this**
+        assertion fails for a seam missing a call, and it can only show that if it runs the
+        same one.
+        """
+        assert calls == cls.EXPECTED_CALLS
+
     def test_the_seam_runs_every_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The test that actually closes the hole: it observes *which* guards run.
+        """The test that closes the hole: it observes *which* guards run.
 
         A negative-data test can only reach the guards that can fail on data, and two of
         the four cannot by construction (the seam docstring says which and why). So the
         only way to catch a deleted call is to record the calls.
         """
-        called: list[str] = []
+        self._assert_ran_every_guard(
+            self._record_guard_calls(monkeypatch, assert_conforms_to_spine)
+        )
 
-        for name in self.EXPECTED_CALLS:
-            def record(*_args: object, _name: str = name, **_kwargs: object) -> None:
-                called.append(_name)
-
-            monkeypatch.setattr(conform_module, name, record)
-
-        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
-        assert tuple(called) == self.EXPECTED_CALLS
-
-    def test_the_call_recorder_is_not_vacuous(
+    def test_the_same_assertion_fails_for_a_seam_missing_a_guard(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Non-vacuity: a seam missing a guard must fail the test above.
+        """Non-vacuity, done properly this time (#182 review, D-2).
 
-        Simulated by patching one guard to a recorder the seam never reaches -- i.e. the
-        state the suite would be in if that line were deleted from the seam body.
+        The first version of this test compared a 3-tuple against a 4-tuple and was
+        therefore unequal **by arity** — it passed even with all four guard calls deleted
+        from the seam, so it could not tell a seam running three guards from one running
+        none. A test that advertises itself as a non-vacuity proof while proving nothing is
+        the exact defect class this story is about, so it is worth replacing rather than
+        deleting.
+
+        The falsifiable form runs :meth:`_assert_ran_every_guard` — the *same* assertion the
+        test above relies on — against a seam known to be missing a call, and requires it to
+        raise.
         """
-        called: list[str] = []
-        for name in self.EXPECTED_CALLS:
-            if name == "assert_spine_states_covered":
-                continue  # stands in for the deleted call
-            def record(*_args: object, _name: str = name, **_kwargs: object) -> None:
-                called.append(_name)
-
-            monkeypatch.setattr(conform_module, name, record)
-        monkeypatch.setattr(
-            conform_module, "assert_spine_states_covered", lambda *a, **k: None
-        )
-        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
-        assert tuple(called) != self.EXPECTED_CALLS
+        calls = self._record_guard_calls(monkeypatch, _seam_missing_the_coverage_guard)
+        with pytest.raises(AssertionError):
+            self._assert_ran_every_guard(calls)
 
     def test_the_seam_raises_on_a_corpus_short_a_state(self) -> None:
         """The one guard that fires on a real corpus defect, reached through the seam.
@@ -597,6 +637,45 @@ class TestParticipationFrameGuards:
         frame = _SUCCESSION_SPINE.copy()
         frame["is_total"] = frame["is_total"].astype(int)
         assert len(spine_participation(frame)) == 7
+
+    def test_an_empty_spine_reports_the_spine_not_the_dtype(self) -> None:
+        """#182 review, D-1 — the guard must not misfire on the case it looks like.
+
+        A zero-row frame has ``object`` dtype for every column, because nothing was
+        inferred from no rows. A dtype-based check therefore raised a complaint about types
+        on a genuinely unloaded spine, making the truthful message unreachable — the mirror
+        image of the defect the guard was added to prevent.
+        """
+        empty = pd.DataFrame(
+            {
+                "year": pd.Series(dtype=object),
+                "state": pd.Series(dtype=object),
+                "is_total": pd.Series(dtype=object),
+                "total_electoral_votes": pd.Series(dtype=object),
+            }
+        )
+        with pytest.raises(CensusConformError, match="spine must be loaded"):
+            spine_participation(empty)
+
+    def test_an_object_column_of_real_bools_is_accepted(self) -> None:
+        # The other direction a dtype check gets wrong: psycopg2 can hand back an object
+        # column of genuine bools, which UCSB accepts for exactly this reason. Rejecting it
+        # would refuse a perfectly good spine.
+        frame = _SUCCESSION_SPINE.copy()
+        frame["is_total"] = frame["is_total"].astype(object)
+        assert frame["is_total"].dtype == object
+        assert len(spine_participation(frame)) == 7
+
+    def test_a_null_is_total_is_rejected(self) -> None:
+        # A null cannot be excluded as a totals row, and a totals row carries a NULL state,
+        # which would enter the frame as a phantom jurisdiction.
+        frame = _SUCCESSION_SPINE.copy()
+        # Cast first: a bool-dtype column refuses a None outright, so the only way a null
+        # reaches this guard in the wild is an object or nullable-boolean column.
+        frame["is_total"] = frame["is_total"].astype(object)
+        frame.loc[0, "is_total"] = None
+        with pytest.raises(CensusConformError, match="null value"):
+            spine_participation(frame)
 
     def test_disagreeing_allotments_for_one_pair_raise(self) -> None:
         # The frame is per (year, state, candidate); de-duplication keeps one row, so

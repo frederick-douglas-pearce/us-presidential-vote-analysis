@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import NamedTuple
 
+import numpy as np
 import pandas as pd
 
 from usvote.apportionment import governing_census_year
@@ -254,15 +255,43 @@ def _assert_is_total_is_boolean(column: pd.Series) -> None:
 
     Census gets its own check rather than sharing UCSB's: a census module importing from
     ``usvote/ucsb/`` is the source-to-source dependency D015 forbids.
+
+    **Checked by value, not by dtype** (#182 review, D-1). A dtype test gets this wrong
+    in both directions. It **under**-accepts: psycopg2 can hand back an ``object``
+    column of real ``bool`` values, which UCSB accepts for that exact reason, and
+    rejecting it would refuse a perfectly good spine. And it **over**-rejects the empty
+    case: a zero-row frame has ``object`` dtype for every column because nothing was
+    inferred, so a dtype test turns "the spine has not been loaded" — which the caller
+    reports precisely and truthfully a few lines later — into a spurious complaint about
+    types. That is the mirror image of the defect this guard exists to prevent, so the
+    empty frame returns early and is left to the caller's own message.
+
+    One **deliberate** divergence from UCSB: 0/1 integers are accepted here and rejected
+    there. ``read_ec_participation`` coerces an integer ``is_total`` to ``bool`` itself,
+    so on the live path it cannot arrive — and a consumer refusing what its own reader
+    normalizes buys nothing.
     """
-    if pd.api.types.is_bool_dtype(column) or pd.api.types.is_integer_dtype(column):
+    if column.empty:
+        # Not a dtype problem. `spine_participation` reports the real one.
         return
-    raise CensusConformError(
-        f"EC participation 'is_total' has dtype {column.dtype}, which "
-        f"astype(bool) would misread — a 't'/'f' string column becomes all-True, "
-        f"marking every row a totals row and dropping the whole spine. Expected bool "
-        f"or 0/1 int (what usvote.spine.read_ec_participation returns from psycopg2)."
-    )
+    if pd.api.types.is_integer_dtype(column):
+        return
+    if column.isna().any():
+        raise CensusConformError(
+            "EC participation 'is_total' has null value(s), so totals rows cannot be "
+            "excluded — and a totals row carries a NULL state, which would enter the "
+            "frame as a phantom jurisdiction."
+        )
+    non_bool = column.map(lambda value: not isinstance(value, bool | np.bool_))
+    if non_bool.any():
+        offenders = sorted({repr(value) for value in column[non_bool]})[:5]
+        raise CensusConformError(
+            f"EC participation 'is_total' holds non-boolean value(s) {offenders} "
+            f"(dtype {column.dtype}). astype(bool) would misread them — a 't'/'f' "
+            f"string column becomes all-True, marking every row a totals row and "
+            f"dropping the whole spine. Expected genuine booleans, as "
+            f"usvote.spine.read_ec_participation returns."
+        )
 
 
 def _assert_one_allotment_per_pair(frame: pd.DataFrame) -> None:
@@ -680,8 +709,14 @@ def assert_conforms_to_spine(
       against a future change to :func:`build_election_population`, and they are the
       guards #184 needs when it builds this frame itself. Keeping them in the seam is
       deliberate; believing they watch the corpus would not be.
-    * :func:`assert_election_population_shape` is mostly the same kind of regression
-      guard, with two branches that would catch a real dtype or vocabulary slip.
+    * :func:`assert_election_population_shape` is **split**, and calling it a regression
+      guard understates it (#182 review, D-3). Its **non-null branch is a data check
+      with the same standing as** :func:`assert_spine_states_covered`: a NULL
+      ``total_electoral_votes`` arriving from ``dwh.votes`` travels through the merge
+      untouched and fires it, which is an upstream EC-load defect rather than a builder
+      slip — UCSB carries a dedicated guard for exactly that case. Its other checks —
+      the column set, the ``population`` dtype, and the two closed vocabularies — are
+      regression guards on the builder.
 
     All four are called here so that the load path cannot drift into a subset, and
     ``test_the_seam_runs_every_guard`` pins exactly that.
