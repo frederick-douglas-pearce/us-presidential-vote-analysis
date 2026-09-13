@@ -3598,8 +3598,10 @@ produces a load error:
    is a separate state holding 5 electoral votes — so the restated figure double-counts its 376,688
    people.
 3. **The source cannot cover every participating state, and not for one reason.** Tested over all
-   **1,898** participating pairs: three have no governing-census figure, and they split into a fact
-   about history and a defect in this repo.
+   **2,204** participating pairs across the 51 elections — 1,898 of them against
+   ``tabs15-65.xlsx`` and the other 306 (elections 2004-2024) against the population-change table,
+   because the stitch reads two files: three have no governing-census figure, and they split into a
+   fact about history and a defect in this repo.
 
 **Decision.**
 
@@ -3719,7 +3721,8 @@ D015 exists to prevent; and it would have conflated two grains in a package whos
 docstring warns that this story is where that conflation happens.
 
 **Action required.** A follow-up issue for the transposed second table, recovering Alaska's and
-Hawaii's 1880–1950 series and removing their two `present_but_unparsed` entries. Until it lands, 1960
+Hawaii's pre-1960 series (**Alaska back to 1880, Hawaii to 1900** — the two tables differ in extent
+as well as in column offset) and removing their two `present_but_unparsed` entries. Until it lands, 1960
 Alaska and 1960 Hawaii persons-per-electoral-vote are NULL. #184 must also decide, explicitly, whether
 it wants the apportionment denominator at 1924/1928 or a freshest-enumeration second field per (c).
 

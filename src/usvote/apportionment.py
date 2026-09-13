@@ -95,8 +95,7 @@ def governing_census_year(election_year: int) -> int:
     candidate = ((election_year - APPORTIONMENT_LAG_YEARS) // 10) * 10
     while candidate in NO_APPORTIONMENT_CENSUSES:
         candidate -= 10
-        # pragma: no cover - unreachable while 1920 is the only member
-        if candidate < FIRST_APPORTIONMENT_CENSUS:
+        if candidate < FIRST_APPORTIONMENT_CENSUS:  # pragma: no cover
             raise ApportionmentError(
                 f"Every census at or before {election_year - APPORTIONMENT_LAG_YEARS} "
                 f"is in NO_APPORTIONMENT_CENSUSES; no apportionment governed "

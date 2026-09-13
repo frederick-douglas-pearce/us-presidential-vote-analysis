@@ -121,8 +121,17 @@ def test_the_allotment_change_years_match_this_mapping(
                 f"through it — NO_APPORTIONMENT_CENSUSES is wrong"
             )
 
-        # And it did end: the 1930 apportionment moved states at 1932.
-        assert allotment[1932] != baseline
+        # And it did end: the 1930 apportionment moved states at 1932. The COUNT is
+        # asserted, not just the inequality, because "32 states move at 1932" is quoted as
+        # evidence in `apportionment.py`, `docs/corrections.md`, `CLAUDE.md` and D060 — and
+        # a named test that does not actually check the number it is offered for is a
+        # citation the reader is less likely to verify (#182 review, GE-F8).
+        moved = [
+            state
+            for state in set(allotment[1928]) & set(allotment[1932])
+            if allotment[1928][state] != allotment[1932][state]
+        ]
+        assert len(moved) == 32, sorted(moved)
         assert allotment[1908] != baseline  # the 1900 apportionment, before the span
 
         # Now the direct comparison. An allotment change among *existing* states is the

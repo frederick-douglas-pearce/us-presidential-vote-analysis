@@ -22,7 +22,7 @@ because doing so at load time would delete this module's input. This module work
 per module.
 
 **The EC spine arrives as an injected frame**, exactly as
-:func:`~usvote.census.transform. transform_census` takes ``ec_participation`` — the
+:func:`usvote.census.transform.transform_census` takes ``ec_participation`` — the
 D006-allowed direction (a source reads the spine; the spine never reads a source). So
 everything here is pure and offline, and the DB read stays in
 :mod:`usvote.census.pipeline`. Nothing in this module names ``dwh.votes``.
@@ -40,8 +40,9 @@ from usvote.census.schema import BASIS_AS_ENUMERATED, SERIES_RESIDENT
 
 #: The frame contract #183 and #184 both inherit — **append-only**.
 #:
-#: Pinned to a hand-written literal in the tests (``test_the_column_order_is_pinned_to_a
-#: _literal``), on the ``EC_PV_COLUMNS`` / ``HYBRID_SUMMARY_COLUMNS`` precedent: the
+#: Pinned to a hand-written literal in
+#: ``tests/unit/test_census_conform.py::TestTheFrameContract``, on the ``EC_PV_COLUMNS``
+#: / ``HYBRID_SUMMARY_COLUMNS`` precedent: the
 #: frame is built with ``columns=list(ELECTION_POPULATION_COLUMNS)``, so any assert
 #: comparing the frame against this tuple is circular and passes under a reorder or a
 #: mid-list insert alike. If #184 later materializes this as a view, ``CREATE OR
@@ -112,7 +113,7 @@ class BoundarySuccession(NamedTuple):
 
     ``published_population`` maps a census year to the predecessor's figure **as the
     source published it**, before
-    :func:`~usvote.census.transform.apply_virginia_boundary_ correction` restated it. It
+    :func:`usvote.census.transform.apply_virginia_boundary_correction` restated it. It
     is an **independently pinned literal**, not a recomputation of ``restated -
     successor``, for two reasons (#182 architect review, C3): the recomputation is what
     this constant is used to *check*, so deriving it would be circular; and because
@@ -175,9 +176,14 @@ class CoverageException(NamedTuple):
 #: Every ``(election_year, state)`` that participates but has no governing-census
 #: figure.
 #:
-#: **Measured, not estimated** (#182): the published workbook was parsed in full and all
-#: 1,898 participating pairs in the 1824-2024 span were tested against their governing
-#: census. These three are the complete set — every mid-decade admission the epic
+#: **Measured, not estimated** (#182): every one of the **2,204** participating
+#: ``(election_year, state)`` pairs across the 51 elections 1824-2024 was tested against
+#: its governing census. The measurement reads two files, because the stitch does:
+#: **1,898** pairs resolve to a governing census of 1990 or earlier and were checked
+#: against ``tabs15-65.xlsx`` parsed in full, and the remaining **306** — the six
+#: elections 2004-2024, governed by the 2000/2010/2020 censuses — against the
+#: population-change table, which publishes all 51 jurisdictions for each. These three
+#: are the complete set — every mid-decade admission the epic
 #: worried about is covered (1864 Kansas/Nevada/West Virginia from 1860, 1876 Colorado
 #: from 1870, the 1892 six and 1896 Utah from 1890, 1908 Oklahoma from 1900, 1912
 #: Arizona/New Mexico from 1910), and so is DC, whose series runs from 1800. Population
@@ -227,17 +233,58 @@ CENSUS_COVERAGE_EXCEPTIONS: tuple[CoverageException, ...] = (
     ),
 )
 
-_EXCEPTION_KEYS: frozenset[tuple[int, str]] = frozenset(
-    (exception.election_year, exception.state)
-    for exception in CENSUS_COVERAGE_EXCEPTIONS
-)
-
 _PARTICIPATION_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
     "is_total",
     "total_electoral_votes",
 )
+
+
+def _assert_is_total_is_boolean(column: pd.Series) -> None:
+    """Raise unless ``is_total`` is a representation ``.astype(bool)`` reads correctly.
+
+    :func:`usvote.spine.read_ec_participation` **deliberately does not coerce** a
+    non-int ``is_total``: its docstring says a blanket ``.astype(bool)`` "would
+    silently map every non-empty ``'t'``/``'f'`` string to ``True`` — treating every row
+    as a totals row", and leaves the rejection to its consumer. UCSB does that in
+    ``_assert_participation_shape``; this is census's equivalent. Without it the
+    coercion below would drop **every** row and then report "the spine must be loaded",
+    which is the opposite of the truth on a fully-loaded spine.
+
+    Census gets its own check rather than sharing UCSB's: a census module importing from
+    ``usvote/ucsb/`` is the source-to-source dependency D015 forbids.
+    """
+    if pd.api.types.is_bool_dtype(column) or pd.api.types.is_integer_dtype(column):
+        return
+    raise CensusConformError(
+        f"EC participation 'is_total' has dtype {column.dtype}, which "
+        f"astype(bool) would misread — a 't'/'f' string column becomes all-True, "
+        f"marking every row a totals row and dropping the whole spine. Expected bool "
+        f"or 0/1 int (what usvote.spine.read_ec_participation returns from psycopg2)."
+    )
+
+
+def _assert_one_allotment_per_pair(frame: pd.DataFrame) -> None:
+    """Raise if a ``(year, state)`` carries more than one ``total_electoral_votes``.
+
+    The participation frame is per ``(year, state, candidate)``, so the de-duplication
+    below keeps one row per pair — and would keep an **arbitrary** allotment if the
+    candidate rows ever disagreed. That column is carried specifically so #183 can
+    reconcile seats against the appointed allotment, so an arbitrary value there would
+    propagate into the reconciliation base rather than failing. This is what makes the
+    "free here, a second spine read there" trade safe.
+    """
+    counts = frame.groupby(["year", "state"])["total_electoral_votes"].nunique()
+    offenders = counts[counts > 1]
+    if not offenders.empty:
+        raise CensusConformError(
+            f"{len(offenders)} (year, state) pair(s) carry more than one "
+            f"total_electoral_votes, so de-duplicating would keep an arbitrary "
+            f"allotment: {offenders.index.tolist()[:5]}. The appointed allotment is "
+            f"per (year, state); a disagreement means a partial load, or a "
+            f"per-candidate correction this frame cannot hold."
+        )
 
 
 def spine_participation(ec_participation: pd.DataFrame) -> pd.DataFrame:
@@ -258,8 +305,10 @@ def spine_participation(ec_participation: pd.DataFrame) -> pd.DataFrame:
             f"EC participation frame is missing column(s) {missing}; got "
             f"{list(ec_participation.columns)}"
         )
+    _assert_is_total_is_boolean(ec_participation["is_total"])
     frame = ec_participation.loc[~ec_participation["is_total"].astype(bool)]
     frame = frame.loc[frame["state"].notna()]
+    _assert_one_allotment_per_pair(frame)
     participation = (
         frame[["year", "state", "total_electoral_votes"]]
         .drop_duplicates(subset=["year", "state"])
@@ -347,6 +396,15 @@ def build_election_population(
     )[list(ELECTION_POPULATION_COLUMNS)]
 
 
+def _describe(value: object) -> str:
+    """Render a possibly-absent population for an error message."""
+    if value is None:
+        return "absent"
+    if pd.isna(value):
+        return "null"
+    return f"{int(value):,}"  # type: ignore[call-overload]
+
+
 def apply_boundary_successions(
     frame: pd.DataFrame,
     *,
@@ -359,11 +417,18 @@ def apply_boundary_successions(
     territory but the successor is already a separate participating state.
 
     The corrected value is the independently pinned published figure, and the pin is
-    **checked, not trusted**: where the successor also has a row for that election, this
-    asserts ``restated - successor == published``. A mismatch means
+    **checked, not trusted**: this asserts ``restated - successor == published``. A
+    mismatch means
     :func:`~usvote.census.transform.apply_virginia_boundary_correction` no longer
     computes what this constant records — the drift #208 could introduce — and raises
     rather than silently shipping one of the two.
+
+    **The pin is never written where it cannot be checked.** If the predecessor's cell
+    is NULL, or the successor has no row or a NULL one, this raises instead of filling
+    the value in. An earlier form skipped the check in those cases and wrote the literal
+    anyway, putting a plausible number in the frame with its own validation bypassed —
+    the failure this module exists to refuse, and the one place it was not holding its
+    own thesis.
     """
     corrected = frame.copy()
     for succession in successions:
@@ -388,25 +453,48 @@ def apply_boundary_successions(
                     f"cannot be recovered from the table, which holds only the "
                     f"restated row (D059)."
                 )
+            election_year = int(corrected.at[index, "election_year"])
             restated = corrected.at[index, "population"]
             successor_rows = corrected.loc[
-                (corrected["election_year"] == corrected.at[index, "election_year"])
+                (corrected["election_year"] == election_year)
                 & (corrected["state"] == succession.successor),
                 "population",
             ]
-            if not pd.isna(restated) and not successor_rows.empty:
-                successor_population = successor_rows.iloc[0]
-                if not pd.isna(successor_population):
-                    implied = int(restated) - int(successor_population)
-                    if implied != published:
-                        raise CensusConformError(
-                            f"{succession.predecessor}'s restated {census_year} figure "
-                            f"({int(restated):,}) minus {succession.successor} "
-                            f"({int(successor_population):,}) is {implied:,}, but "
-                            f"BOUNDARY_SUCCESSIONS pins the published figure at "
-                            f"{published:,}. The census correction and this constant "
-                            f"disagree; one of them has drifted."
-                        )
+            successor_population = (
+                None if successor_rows.empty else successor_rows.iloc[0]
+            )
+            # The pin is only ever written where it can be CHECKED. Filling a NULL, or
+            # an unverifiable cell, from the literal would put a plausible number in
+            # the frame with the check that validates it silently bypassed — the one
+            # thing this module claims never to do (#182 review, CR-F3 / GE-F5).
+            unverifiable = (
+                pd.isna(restated)
+                or successor_population is None
+                or pd.isna(successor_population)
+            )
+            if unverifiable:
+                raise CensusConformError(
+                    f"{succession.predecessor} in election {election_year} needs its "
+                    f"published {census_year} figure, but the pin cannot be verified: "
+                    f"{succession.predecessor} is "
+                    f"{_describe(restated)} and {succession.successor} is "
+                    f"{_describe(successor_population)}. Refusing to write "
+                    f"BOUNDARY_SUCCESSIONS' {published:,} unchecked: a corpus that "
+                    f"has lost either cell is a defect to fix, not a gap to paper "
+                    f"over with a literal."
+                )
+            restated_value = int(restated)
+            successor_value = int(successor_population)  # type: ignore[arg-type]
+            implied = restated_value - successor_value
+            if implied != published:
+                raise CensusConformError(
+                    f"{succession.predecessor}'s restated {census_year} figure "
+                    f"({restated_value:,}) minus {succession.successor} "
+                    f"({successor_value:,}) is {implied:,}, but "
+                    f"BOUNDARY_SUCCESSIONS pins the published figure at "
+                    f"{published:,}. The census correction and this constant "
+                    f"disagree; one of them has drifted."
+                )
             corrected.at[index, "population"] = published
             corrected.at[index, "boundary_basis"] = BOUNDARY_AT_ELECTION
     return corrected
@@ -469,6 +557,16 @@ def assert_no_double_count(
     figure equals it, which is what a restated figure left in place looks like.
     Asserting only that the number "looks reasonable" would pass on exactly the
     uncorrected input this exists to catch.
+
+    **It cannot fire on the path that calls it today, and that is worth stating rather
+    than hiding** (#182 review, GE-F5). Inside :func:`assert_conforms_to_spine`,
+    :func:`build_election_population` has already run :func:`apply_boundary_successions`
+    over the *same* constant and the *same* window predicate, so where the window is
+    non-empty the corrector wrote ``published`` and this equality is false by
+    construction. The load path's real protection against a wrong-side restatement is
+    that function's **drift assert**, which is independent. This one earns its place as
+    a standalone guard — its unit test runs it on an uncorrected frame, and #184 will
+    build the frame separately — not as detection in the seam.
     """
     for succession in successions:
         window = frame.loc[
@@ -564,6 +662,29 @@ def assert_conforms_to_spine(
     Placed **before** the load rather than after, so a corpus that has lost a state or
     changed layout fails with nothing written, rather than leaving a warehouse that is
     short a state and a caller who has to know to re-run with ``replace=True``.
+
+    **Which of the four can fail on data, and which are regression guards on the
+    builder** — worth writing down, because "four guards" invites the reading that all
+    four are watching the corpus (#182 review, GE-F1/GE-F5):
+
+    * :func:`assert_spine_states_covered` is the one that genuinely fires on a
+      **corpus** defect — a state whose governing-census figure has gone missing, or a
+      declared exception that has gone stale. On the load path this is the data check.
+    * :func:`apply_boundary_successions`' **drift assert**, inside the builder rather
+      than listed here, is the other real data check: it is what catches a wrong-side
+      restatement.
+    * :func:`assert_no_double_count` and :func:`assert_no_interpolated_population`
+      cannot fail here **by construction**: the builder has already applied the same
+      succession constant, and it sources every value from the census frame or a pinned
+      restatement, so both assertions are true of anything it produces. They are guards
+      against a future change to :func:`build_election_population`, and they are the
+      guards #184 needs when it builds this frame itself. Keeping them in the seam is
+      deliberate; believing they watch the corpus would not be.
+    * :func:`assert_election_population_shape` is mostly the same kind of regression
+      guard, with two branches that would catch a real dtype or vocabulary slip.
+
+    All four are called here so that the load path cannot drift into a subset, and
+    ``test_the_seam_runs_every_guard`` pins exactly that.
     """
     frame = build_election_population(census, ec_participation)
     assert_election_population_shape(frame)

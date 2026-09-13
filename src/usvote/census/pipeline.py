@@ -55,9 +55,18 @@ def run_census_pipeline(
     **before** the write and raises rather than warning: it crosses to ``(election_year,
     state)`` grain — the grain every E10 consumer joins on — and every failure it looks
     for produces a plausible wrong number instead of an error. A corpus short a state, a
-    governing-census mapping that has drifted, a boundary restatement left on the wrong
-    side of a state split, or a synthesized between-census value all fail here with
-    nothing written.
+    boundary restatement it cannot verify against its pin, or a synthesized
+    between-census value all fail here with nothing written.
+
+    **What it does NOT catch, stated because the obvious guess is wrong** (#182 review,
+    GE-F3): a drifted ``election_year -> governing_census_year`` mapping passes every
+    one of these guards. Each row is checked against *its own* governing census, so a
+    wrongly mapped row is compared with the wrongly mapped census's published figure and
+    matches. The mapping's own guards are ``TestTheFullSeries`` in
+    ``tests/unit/test_apportionment.py`` (a hand-written 51-year oracle) and, against
+    real allotments, ``test_the_allotment_change_years_match_this_mapping`` in
+    ``tests/integration/test_census_conform.py``. Both sit outside this seam, and the
+    second needs a corpus and a database.
 
     **Zero network requests.** Everything comes from the snapshotted corpus, whose
     completeness is asserted before a byte is parsed — a corpus missing a file fails

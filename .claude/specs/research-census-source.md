@@ -333,7 +333,7 @@ divide into. Worth stating explicitly because it looks like a second defect and 
 conformance requirement already doing its job. (Alaska and Hawaii are **not backfilled in the block
 this project parses** — their *parsed* series start at 1960 — so the file is not uniformly
 retroactive, which is one more reason not to infer its behavior rather than read it.
-**Corrected 2026-09-12 by #182:** the file itself does carry both states back to 1880, in a second,
+**Corrected 2026-09-12 by #182:** the file itself does carry both states well before 1960, in a second,
 transposed table on each sheet — race per row, census year across columns, carrying neither the
 ``NUMBER`` nor the ``PERCENT`` marker the parser keys on. Alaska 1950 = 128,643 and
 Hawaii 1950 = 499,794 are in there, which matters because the 1960 election's governing census is

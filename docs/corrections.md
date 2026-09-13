@@ -225,9 +225,12 @@ for everything else — today only Virginia's twelve elections 1824–1868 carry
 
 ### Coverage exceptions — participating states with no governing-census figure
 
-Measured against the full published workbook: all **1,898** participating
-`(election_year, state)` pairs in the 1824–2024 span were tested against their governing
-census. **Three** have no figure, and they are **two different kinds of thing** — a
+Measured, not estimated: every one of the **2,204** participating
+`(election_year, state)` pairs across the 51 elections 1824–2024 was tested against its
+governing census — **1,898** of them against `tabs15-65.xlsx` (governing census ≤ 1990,
+parsed in full) and the remaining **306**, the six elections 2004–2024, against the
+population-change table, which publishes all 51 jurisdictions per census. **Three** have
+no figure, and they are **two different kinds of thing** — a
 distinction carried as data, because collapsing it would make one of these rows a false
 claim.
 

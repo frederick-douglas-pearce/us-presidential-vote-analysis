@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 
 from tests._helpers import CENSUS_POPCHANGE_XLSX, ec_participation_frame
+from usvote.census import conform as conform_module
 from usvote.census.conform import (
     BOUNDARY_AT_ELECTION,
     BOUNDARY_PRESENT_DAY,
@@ -39,6 +40,7 @@ from usvote.census.conform import (
     BoundarySuccession,
     CensusConformError,
     CoverageException,
+    assert_conforms_to_spine,
     assert_election_population_shape,
     assert_no_double_count,
     assert_no_interpolated_population,
@@ -308,6 +310,27 @@ class TestBoundarySuccession:
                 _SUCCESSION_CENSUS, _SUCCESSION_SPINE, successions=drifted
             )
 
+    def test_a_null_predecessor_cell_raises_rather_than_filling_from_the_pin(
+        self,
+    ) -> None:
+        # The pin is only written where it can be CHECKED (#182 review, CR-F3/GE-F5).
+        # Filling a NULL from the literal would put 1,219,630 in the frame with
+        # `coverage == 'covered'` while the drift assert that validates it never ran --
+        # a plausible number with its own guard bypassed, which is the one thing this
+        # module claims never to do.
+        census = _SUCCESSION_CENSUS.copy()
+        va_1860 = (census.census_year == 1860) & (census.state == "Virginia")
+        census.loc[va_1860, "population"] = pd.NA
+        with pytest.raises(CensusConformError, match="cannot be verified"):
+            build_election_population(census, _SUCCESSION_SPINE)
+
+    def test_a_missing_successor_row_raises_for_the_same_reason(self) -> None:
+        # Same hazard reached the other way: with no West Virginia row the drift check has
+        # nothing to compare against, so the pin must not be applied.
+        spine = _spine([(1864, "Virginia", 0)])
+        with pytest.raises(CensusConformError, match="cannot be verified"):
+            build_election_population(_SUCCESSION_CENSUS, spine)
+
     def test_a_succession_with_no_pinned_figure_raises(self) -> None:
         unpinned = (
             BoundarySuccession("Virginia", "West Virginia", 1863, {}, "x"),
@@ -474,6 +497,152 @@ class TestNoInterpolation:
             assert_no_interpolated_population(
                 frame, _SUCCESSION_CENSUS, successions=()
             )
+
+
+class TestTheSeam:
+    """`assert_conforms_to_spine` is the only thing the load path calls, so its
+    *composition* is a contract — and nothing pinned it before (#182 review, GE-F1).
+
+    Its own docstring says the reason it exists is that "the load path gets all four
+    checks or none — an individually-wired subset is how one of them quietly stops
+    running". Deleting any one of the four from its body used to leave the whole suite
+    green: the unit tests call the four guards directly, the pipeline tests stub the seam,
+    and the integration test only ever hands it good data. That is the
+    outcome-versus-mechanism failure exactly — a working seam and a crippled one produce
+    an identical result on the only input any test gave it.
+    """
+
+    #: The guard names `assert_conforms_to_spine` must invoke, in the order it invokes
+    #: them. Hand-written, so removing a call from the seam fails here rather than
+    #: silently passing; deriving it from the function's source would be circular.
+    EXPECTED_CALLS = (
+        "assert_election_population_shape",
+        "assert_spine_states_covered",
+        "assert_no_double_count",
+        "assert_no_interpolated_population",
+    )
+
+    def test_the_seam_runs_every_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The test that actually closes the hole: it observes *which* guards run.
+
+        A negative-data test can only reach the guards that can fail on data, and two of
+        the four cannot by construction (the seam docstring says which and why). So the
+        only way to catch a deleted call is to record the calls.
+        """
+        called: list[str] = []
+
+        for name in self.EXPECTED_CALLS:
+            def record(*_args: object, _name: str = name, **_kwargs: object) -> None:
+                called.append(_name)
+
+            monkeypatch.setattr(conform_module, name, record)
+
+        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        assert tuple(called) == self.EXPECTED_CALLS
+
+    def test_the_call_recorder_is_not_vacuous(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity: a seam missing a guard must fail the test above.
+
+        Simulated by patching one guard to a recorder the seam never reaches -- i.e. the
+        state the suite would be in if that line were deleted from the seam body.
+        """
+        called: list[str] = []
+        for name in self.EXPECTED_CALLS:
+            if name == "assert_spine_states_covered":
+                continue  # stands in for the deleted call
+            def record(*_args: object, _name: str = name, **_kwargs: object) -> None:
+                called.append(_name)
+
+            monkeypatch.setattr(conform_module, name, record)
+        monkeypatch.setattr(
+            conform_module, "assert_spine_states_covered", lambda *a, **k: None
+        )
+        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        assert tuple(called) != self.EXPECTED_CALLS
+
+    def test_the_seam_raises_on_a_corpus_short_a_state(self) -> None:
+        """The one guard that fires on a real corpus defect, reached through the seam.
+
+        An undeclared gap is what a corpus that lost a state actually looks like, and this
+        is the assertion the pipeline's "fails here with nothing written" claim rests on.
+        """
+        spine = _spine([(1848, "Ohio", 23)])
+        with pytest.raises(CensusConformError, match="not declared"):
+            assert_conforms_to_spine(_census([]), spine)
+
+    def test_the_seam_passes_on_good_data(self) -> None:
+        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+
+
+class TestParticipationFrameGuards:
+    """The two guards added after review (#182, CR-F2 and CR-F5)."""
+
+    def test_a_string_is_total_column_is_rejected_not_coerced(self) -> None:
+        # `read_ec_participation` deliberately passes a non-int `is_total` through so its
+        # consumer can reject it. A blanket .astype(bool) maps 't' AND 'f' to True,
+        # marking every row a totals row, dropping the whole spine, and then reporting
+        # "the spine must be loaded" on a fully-loaded spine.
+        frame = _SUCCESSION_SPINE.copy()
+        frame["is_total"] = frame["is_total"].map({True: "t", False: "f"})
+        with pytest.raises(CensusConformError, match="astype\\(bool\\) would misread"):
+            spine_participation(frame)
+
+    def test_a_bool_is_total_column_is_accepted(self) -> None:
+        assert len(spine_participation(_SUCCESSION_SPINE)) == 7
+
+    def test_an_int_is_total_column_is_accepted(self) -> None:
+        # psycopg2 yields real bools, but `read_ec_participation` also tolerates 0/1 ints.
+        frame = _SUCCESSION_SPINE.copy()
+        frame["is_total"] = frame["is_total"].astype(int)
+        assert len(spine_participation(frame)) == 7
+
+    def test_disagreeing_allotments_for_one_pair_raise(self) -> None:
+        # The frame is per (year, state, candidate); de-duplication keeps one row, so
+        # disagreeing candidate rows would silently hand #183's reconciliation an
+        # arbitrary appointed allotment.
+        frame = pd.concat(
+            [
+                _SUCCESSION_SPINE,
+                pd.DataFrame(
+                    [{
+                        "year": 1872,
+                        "state": "Virginia",
+                        "is_total": False,
+                        "total_electoral_votes": 99,
+                    }]
+                ),
+            ],
+            ignore_index=True,
+        )
+        with pytest.raises(CensusConformError, match="more than one"):
+            spine_participation(frame)
+
+    def test_agreeing_duplicate_candidate_rows_are_fine(self) -> None:
+        frame = pd.concat(
+            [_SUCCESSION_SPINE, _SUCCESSION_SPINE], ignore_index=True
+        )
+        assert len(spine_participation(frame)) == 7
+
+
+class TestTheShapeGuardNegatives:
+    """The two `assert_election_population_shape` branches that had no negative test."""
+
+    def test_a_null_in_a_required_column_is_rejected(self) -> None:
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        frame.loc[0, "coverage"] = None
+        with pytest.raises(CensusConformError, match="required non-null"):
+            assert_election_population_shape(frame)
+
+    def test_a_float_population_dtype_is_rejected(self) -> None:
+        # A float dtype is what happens if the nullable-integer discipline lapses: the
+        # NULLs become NaN and the counts become floats, so "no figure" and 0 stop being
+        # distinguishable on the way to the database.
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        frame["population"] = frame["population"].astype("float64")
+        with pytest.raises(CensusConformError, match="nullable integer dtype"):
+            assert_election_population_shape(frame)
 
 
 class TestRealCorpus:
