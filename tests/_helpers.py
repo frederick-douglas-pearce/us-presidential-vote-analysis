@@ -47,8 +47,23 @@ MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 #: **five**: Virginia and West Virginia for the boundary correction, Connecticut as an
 #: untouched control, and **Alaska and Hawaii** — the only two sheets in the published
 #: workbook carrying a **second, transposed table** (race per row, census year across
-#: columns). Only sheets were dropped; every kept sheet is byte-identical to the
-#: published file.
+#: columns). Sheets were dropped, and with them ``docProps/``, ``calcChain.xml``,
+#: ``customXml/``, all 51 per-sheet ``worksheets/_rels`` parts and all 51
+#: ``printerSettings`` blobs; ``[Content_Types].xml``, ``xl/workbook.xml`` and
+#: ``xl/_rels/workbook.xml.rels`` were rewritten to match. **Every kept sheet — and
+#: ``sharedStrings.xml``, ``styles.xml`` and ``theme1.xml`` — is byte-identical to the
+#: published file**, which is the whole property this fixture exists to provide.
+#:
+#: What that leaves is **not a conformant OPC package**: ``[Content_Types].xml``
+#: declares no worksheet Overrides, each sheet's ``pageSetup r:id`` resolves to nothing,
+#: and four relationship targets name parts absent from the zip. It parses here because
+#: :func:`usvote.census.parse.parse_resident_1790_1990` resolves sheets through
+#: ``xl/workbook.xml`` and its rels and never opens ``[Content_Types].xml``.
+#: **Pre-existing rather than introduced by #234** — that change added one sheet and
+#: left those parts byte-identical — and deliberately deferred rather than fixed there.
+#: Recorded here because a spreadsheet editor offers to *repair* such a file, and a
+#: repair-and-save would silently destroy the byte-identity asserted above while every
+#: test stayed green.
 #:
 #: **Hawaii was added in #234, and it is not redundant with Alaska.** The two sheets put
 #: that table's year header in *different columns* — Alaska's in B, Hawaii's in C with B

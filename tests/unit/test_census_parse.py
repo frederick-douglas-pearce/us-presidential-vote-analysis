@@ -14,16 +14,54 @@ footer rows that sit inside the data columns of the population-change table.
 from __future__ import annotations
 
 import io
+import os
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from tests._helpers import CENSUS_POPCHANGE_XLSX, CENSUS_TABS_TRIMMED_XLSX
+
+# The private names are imported deliberately rather than reimplemented: the anchor's
+# selectivity is a property of the 46 sheets the committed fixture leaves out, so
+# TestRealCorpus has to walk the real workbook exactly the way the parser does, and a
+# local copy of that walk could agree with itself while disagreeing with the code under
+# test.
 from usvote.census.parse import (
+    _TRANSPOSED_HEADER_LABEL,
+    _YEAR_LABEL,
     CensusParseError,
+    _rows,
+    _shared_strings,
+    _sheet_paths,
     parse_population_change,
     parse_resident_1790_1990,
 )
+
+
+def _real_corpus_tabs() -> bytes:
+    """The published 51-sheet workbook, or a skip.
+
+    Not committed -- at 329 KB with 51 sheets it is the acceptance corpus, and
+    ``CENSUS_TABS_TRIMMED_XLSX`` is the five-sheet offline stand-in. Same gate the
+    conform suite's ``TestRealCorpus`` uses, so CI never needs the corpus.
+    """
+    corpus = os.environ.get("USVOTE_CENSUS_CORPUS_DIR")
+    if not corpus:
+        pytest.skip("USVOTE_CENSUS_CORPUS_DIR is unset")
+    tabs = Path(corpus) / "tabs15-65.xlsx"
+    if not tabs.is_file():
+        pytest.skip(f"{tabs} is not present in the corpus")
+    return tabs.read_bytes()
+
+
+def _sheets_by_name(data: bytes) -> dict[str, list[list[str]]]:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        strings = _shared_strings(archive)
+        return {
+            name: list(_rows(archive, path, strings))
+            for name, path in _sheet_paths(archive)
+        }
 
 
 def _tabs() -> list:
@@ -214,11 +252,18 @@ class TestResident1790To1990:
     def test_the_total_row_is_found_by_label_not_by_position(self) -> None:
         """The reject side of the `Total` anchor -- and it needs a synthetic sheet.
 
-        On BOTH real sheets ``Total`` happens to be the first data row under the header,
-        so replacing the label anchor with "the first row after the header" is
-        **byte-identical** over the whole fixture and over the real 51-sheet corpus. A
-        test that only reads published bytes cannot tell the two apart, and a reject-side
-        test that puts the race rows *after* ``Total`` cannot either.
+        The mutant this kills is **narrower** than "the first row after the header". On
+        both real sheets a caption row -- ``(leading dots indicate sub-parts)`` -- sits
+        between the header and ``Total``, and its cells are EMPTY, so that naive
+        substitution reads blanks, every population comes back NULL, and the accept-side
+        assertion on Alaska 1950 kills it without any help from here.
+
+        What the published bytes **cannot** distinguish is "the first row after the header
+        that carries a parseable number", which lands on ``Total`` on both sheets
+        precisely because that caption carries none. Only a sheet whose race rows come
+        BEFORE the total separates that reading from the label anchor -- hence the
+        synthetic sheet below. (An earlier version of this docstring claimed the wider
+        mutant was byte-identical; it is not. #234 review.)
 
         This is #182's surviving-mutant lesson applied before the fact: there, every
         assertion around a regex was an acceptance one, so loosening the reject half left
@@ -329,6 +374,29 @@ class TestResident1790To1990:
             ],
         )
         with pytest.raises(CensusParseError, match="Total"):
+            parse_resident_1790_1990(workbook, source_id="x")
+
+    def test_a_declared_year_column_with_no_cell_in_the_total_row_raises(self) -> None:
+        """A header year whose total cell is ABSENT is loud, not an honest-looking NULL.
+
+        Here the year label and its value sit on **different rows**, unlike the
+        ``NUMBER`` block where they share one. So a short ``Total`` row does not mean
+        "this census was never published" -- the header says it was -- and emitting NULL
+        would make ``transform_census`` stamp the row *"No published figure in
+        tabs15-65.xlsx for this census"*, a provenance claim the header itself
+        contradicts. A blank cell that exists stays an honest NULL; an absent one means
+        the header and the total row no longer line up. #234 review.
+        """
+        workbook = _state_sheet_workbook(
+            "Alaska",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "550043"],
+                ["Race", "1950", "1940", "1930"],
+                ["            Total....", "128643"],
+            ],
+        )
+        with pytest.raises(CensusParseError, match="1940"):
             parse_resident_1790_1990(workbook, source_id="x")
 
     def test_a_year_label_with_unicode_ellipsis_leaders_is_read(self) -> None:
@@ -470,3 +538,70 @@ class TestPopulationChange:
             "South Region",
             "West Region",
         } <= (areas)
+
+
+class TestRealCorpus:
+    """The published 51-sheet workbook; skips when the corpus is absent.
+
+    These are the only checks that can establish a property about the 46 sheets the
+    committed fixture leaves out, which is exactly where the transposed-table anchor's
+    justification lives. They skip in CI by design, so running them locally is a merge
+    precondition rather than something the pipeline proves (#234 review).
+    """
+
+    def test_exactly_two_sheets_carry_a_column_a_race_label(self) -> None:
+        """The measurement ``_TRANSPOSED_HEADER_LABEL``'s comment rests on.
+
+        The anchor's whole justification is that it selects Alaska and Hawaii and nothing
+        else. The committed fixture holds five of the 51 sheets, so offline it can only
+        show the anchor does not over-fire on three controls. A re-issued file in which a
+        51st sheet acquired a column-A ``Race`` cell would **silently** load that sheet's
+        transposed totals as population: coverage would not shrink, so
+        ``assert_spine_states_covered`` would stay green and nothing else would object.
+        """
+        carriers = {
+            name
+            for name, rows in _sheets_by_name(_real_corpus_tabs()).items()
+            if any(cells and cells[0].strip() == _TRANSPOSED_HEADER_LABEL
+                   for cells in rows)
+        }
+        assert carriers == {"Alaska", "Hawaii"}
+
+    def test_the_shape_based_alternative_over_fires_as_the_comment_says(self) -> None:
+        """The comparative figures in that same comment, which nothing used to witness.
+
+        An earlier version claimed the shape rule "fires on 26 of the 51". It reproduces
+        under no reading, and the counts below are the re-measured ones. Pinning them is
+        what stops a corrected number decaying back into unwitnessed prose -- the root
+        cause behind most of #234's review findings.
+
+        The last assertion is the honest qualifier on the anchor choice: a STRICTER shape
+        rule does select exactly the two sheets, so the label column is the more stable
+        anchor rather than the only possible one.
+        """
+        sheets = _sheets_by_name(_real_corpus_tabs())
+        assert len(sheets) == 51
+
+        def yearish(cell: str) -> bool:
+            return _YEAR_LABEL.match(cell.strip()) is not None
+
+        def fires_with_at_least(count: int) -> set[str]:
+            return {
+                name
+                for name, rows in sheets.items()
+                if any(sum(1 for c in r[1:] if yearish(c)) >= count for r in rows)
+            }
+
+        assert len(fires_with_at_least(2)) == 51
+        assert len(fires_with_at_least(3)) == 46
+
+        strictly_year_shaped = {
+            name
+            for name, rows in sheets.items()
+            if any(
+                len([c for c in r[1:] if c.strip()]) >= 2
+                and all(yearish(c) for c in r[1:] if c.strip())
+                for r in rows
+            )
+        }
+        assert strictly_year_shaped == {"Alaska", "Hawaii"}

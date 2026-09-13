@@ -439,6 +439,12 @@ class TestCoverage:
         """
         assert KIND_PRESENT_BUT_UNPARSED in EXCEPTION_KINDS
         assert KIND_ABSENT_FROM_SOURCE in EXCEPTION_KINDS
+        # And the VALUES, not just the names. With no member left, nothing else in the
+        # suite reaches these strings -- yet they are what `docs/corrections.md`'s Kind
+        # column prints and what `assert_spine_states_covered` interpolates into its
+        # stale-exception message, so a rename would desync both in silence (#234 review).
+        assert KIND_PRESENT_BUT_UNPARSED == "present_but_unparsed"
+        assert KIND_ABSENT_FROM_SOURCE == "absent_from_source"
 
     def test_every_exception_has_a_known_kind_and_a_reason(self) -> None:
         for exception in CENSUS_COVERAGE_EXCEPTIONS:

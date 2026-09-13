@@ -74,20 +74,37 @@ _YEAR_LABEL = re.compile(r"^(\d{4})(?:/\d+)?[\s.…]*$")
 #: was unread until #234 and 1960 Alaska/Hawaii persons-per-electoral-vote were NULL.
 #:
 #: **Measured, not assumed:** across all 51 published sheets, a column-A cell reading
-#: exactly ``Race`` selects **exactly two** — Alaska and Hawaii. The obvious
-#: alternative, "a row with several year-shaped cells", fires on **26 of the 51**,
-#: because :data:`_YEAR_LABEL` matches any bare four-digit string and the
-#: race-breakdown columns are full of four-digit *counts*. A population is
-#: indistinguishable from a year in isolation, so the label column is the only sound
-#: anchor — the same reason
+#: exactly ``Race`` selects **exactly two** — Alaska and Hawaii. That measurement is
+#: pinned by ``TestRealCorpus.test_exactly_two_sheets_carry_a_column_a_race_label`` in
+#: ``tests/unit/test_census_parse.py``, which needs the corpus and skips without it — so
+#: it is a merge precondition rather than something CI proves.
+#:
+#: Shape-based alternatives are far weaker: "a row with two or more year-shaped cells
+#: beyond column A" fires on **all 51** sheets, and "three or more" on **46**, because
+#: :data:`_YEAR_LABEL` matches any bare four-digit string and the race-breakdown
+#: columns are full of four-digit *counts* — a population is indistinguishable from a
+#: year in isolation. A *stricter* shape rule (every non-empty cell beyond column A is
+#: year-shaped) does select exactly these two, so the label column is the **more
+#: stable** anchor rather than the only possible one: it is the name the Bureau chose,
+#: where the shape is a property of this printing. Same reason
 #: :func:`_parse_state_sheet` keys on its own label column rather than on cell shapes.
+#:
+#: An earlier version of this comment said the shape rule "fires on 26 of the 51". That
+#: figure reproduces under no reading of it; the counts above were re-measured against
+#: the published workbook (#234 review).
 _TRANSPOSED_HEADER_LABEL = "Race"
 
-#: The row within that table carrying the published total. Anchored on its label,
-#: never on its position: on both real sheets ``Total`` happens to be the **first** data
-#: row, so "the first row after the header" is byte-identically wrong and no test over
-#: the real fixture could tell the two apart (#234, from #182's surviving-mutant
-#: lesson).
+#: The row within that table carrying the published total. Anchored on its label, never
+#: on its position — and the mutant that anchor defeats is narrower than it first looks.
+#: On both real sheets a caption row, ``(leading dots indicate sub-parts)``, sits
+#: between the header and ``Total``, and its cells are **empty**. So a naive "the row
+#: after the header" reads blanks, every population comes back NULL, and the
+#: accept-side assertions over the real fixture already kill it. What the real bytes
+#: **cannot** catch is "the first row after the header that carries a parseable number"
+#: — byte-identical on both sheets, precisely because that caption carries none. That
+#: mutant is why ``test_the_total_row_is_found_by_label_not_by_position`` builds a
+#: synthetic sheet with the race rows **before** ``Total`` (#234, from #182's
+#: surviving-mutant lesson).
 _TRANSPOSED_TOTAL_LABEL = "Total"
 
 #: Alaska's two off-cycle censuses, from the sheet's own footnote: *"Censuses of
@@ -384,10 +401,12 @@ def _parse_transposed_table(
             # once dropped South Carolina 1790.
             raise CensusParseError(
                 f"{area}: the transposed table carries an unexpected non-decennial "
-                f"census year {year!r}. The known off-cycle censuses are "
-                f"{sorted(_OFF_CYCLE_CENSUSES)} (Alaska, per its own footnote); "
-                f"anything else means the layout changed and the column-to-year "
-                f"mapping can no longer be trusted."
+                f"census year {year!r}. The allowed off-cycle years are "
+                f"{sorted(_OFF_CYCLE_CENSUSES)}, which Alaska took per its own "
+                f"footnote; the allow-list is deliberately not scoped by state, so "
+                f"another sheet printing one of them would pass here too. Anything "
+                f"else means the layout changed and the column-to-year mapping can no "
+                f"longer be trusted."
             )
         columns.append((column, year))
 
@@ -418,7 +437,17 @@ def _parse_transposed_table(
             # tables today, so this is a safety property rather than a live path.
             continue
         seen.add(year)
-        value = total[column] if column < len(total) else ""
+        if column >= len(total):
+            raise CensusParseError(
+                f"{area}: the transposed table's header declares a {year} column "
+                f"(index {column}) but its {_TRANSPOSED_TOTAL_LABEL!r} row holds only "
+                f"{len(total)} cells, so that census has no cell there at all. A blank "
+                f"cell is an honest NULL; an absent one means the header and the total "
+                f"row no longer line up. Refusing rather than returning a short series "
+                f"— the transform would otherwise stamp the row 'No published figure "
+                f"in tabs15-65.xlsx for this census', which this header contradicts."
+            )
+        value = total[column]
         yield PopulationRow(
             census_year=year,
             area=area,

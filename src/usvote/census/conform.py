@@ -183,7 +183,9 @@ class CoverageException(NamedTuple):
 #: **1,898** pairs resolve to a governing census of 1990 or earlier and were checked
 #: against ``tabs15-65.xlsx`` parsed in full, and the remaining **306** — the six
 #: elections 2004-2024, governed by the 2000/2010/2020 censuses — against the
-#: population-change table, which publishes all 51 jurisdictions for each. These three
+#: population-change table, which publishes all 51 jurisdictions for each. Three pairs
+#: had no governing-census figure when that measurement was taken.
+#:
 #: **Two of those three were retired by #234**, which taught
 #: :func:`usvote.census.parse.parse_resident_1790_1990` to read the transposed second
 #: table on Alaska's and Hawaii's sheets. Their 1950 figures (128,643 and 499,794) are
@@ -197,11 +199,11 @@ class CoverageException(NamedTuple):
 #: defined with no current member, because "no instance today" is not "the concept does
 #: not exist".
 #:
-#: The measured set — every mid-decade admission the epic
+#: The measurement found nothing else: every mid-decade admission the epic
 #: worried about is covered (1864 Kansas/Nevada/West Virginia from 1860, 1876 Colorado
 #: from 1870, the 1892 six and 1896 Utah from 1890, 1908 Oklahoma from 1900, 1912
 #: Arizona/New Mexico from 1910), and so is DC, whose series runs from 1800. Population
-#: for these rows is an honest **NULL** with provenance — never a zero, never an
+#: for the remaining row is an honest **NULL** with provenance — never a zero, never an
 #: interpolation (D005).
 CENSUS_COVERAGE_EXCEPTIONS: tuple[CoverageException, ...] = (
     CoverageException(
@@ -563,7 +565,7 @@ def assert_spine_states_covered(
             f"{stale}. A coverage exception claims the source cannot supply a "
             f"figure, so "
             f"a stale one is a false claim in docs/corrections.md — remove the entry "
-            f"(and, for a 'present_but_unparsed' kind, close its follow-up)."
+            f"(and, for a {KIND_PRESENT_BUT_UNPARSED!r} kind, close its follow-up)."
         )
 
 

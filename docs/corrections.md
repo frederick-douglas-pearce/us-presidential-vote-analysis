@@ -230,8 +230,8 @@ Measured, not estimated: every one of the **2,204** participating
 governing census — **1,898** of them against `tabs15-65.xlsx` (governing census ≤ 1990,
 parsed in full) and the remaining **306**, the six elections 2004–2024, against the
 population-change table, which publishes all 51 jurisdictions per census. Three had no
-figure when that measurement was taken. **One does now** — and the difference between
-those two statements is the whole reason this catalog carries a `Kind` column.
+figure when that measurement was taken; **one still has none** — and the difference
+between those two statements is the whole reason this catalog carries a `Kind` column.
 
 | Election | Governing census | State | EV | Kind | Why |
 |---|---|---|---|---|---|
