@@ -276,12 +276,22 @@ class TestResident1790To1990:
         ``if area not in ("Alaska", "Hawaii"): return`` spliced into the reader -- the
         hardcoded-state shortcut the whole detect-by-content design exists to avoid. Found
         by #234's Class B mutation pass, which the Alaska spelling survived.
+
+        The ``NUMBER`` figure is Connecticut's **own** published 1990 population. The
+        transposed values below cannot be: Connecticut has no such table, so no real
+        Connecticut figure for one exists. They are Alaska's real transposed ``Total``
+        row, borrowed because recognizable numbers read better here than sentinels --
+        with one caveat worth stating, since this module forbids exactly it: 72,524 is
+        Alaska's **1939** total and sits under a ``1940`` header on this synthetic sheet.
+        That is invented test data on a sheet the Bureau never printed, not a relabelling
+        of anyone's census -- the real off-cycle years are pinned as 1939/1929 in
+        ``test_alaskas_off_cycle_censuses_are_emitted_never_relabelled``.
         """
         workbook = _state_sheet_workbook(
             "Connecticut",
             [
                 ["NUMBER", ""],
-                ["1990 ................", "550043"],
+                ["1990 ................", "3287116"],
                 ["Race", "1950", "1940"],
                 ["White................", "92808", "39170"],
                 [".   Japanese.........", "1000", "263"],
@@ -292,7 +302,7 @@ class TestResident1790To1990:
             row.census_year: row.population
             for row in parse_resident_1790_1990(workbook, source_id="x")
         }
-        assert figures == {1990: 550_043, 1950: 128_643, 1940: 72_524}
+        assert figures == {1990: 3_287_116, 1950: 128_643, 1940: 72_524}
         # The race rows sit between the header and the total; reading either as the
         # total is the mutation this test exists to kill.
         assert 92_808 not in figures.values()
