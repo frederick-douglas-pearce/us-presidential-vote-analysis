@@ -87,12 +87,9 @@ def _state_sheet_workbook(name: str, rows: list[list[str]]) -> bytes:
     is exactly that, and is what the rest of this class reads). This builder exists for the
     narrower job of pinning one **label form** whose sheet is not in that fixture.
 
-    **Not every caller's labels are published ones.** A reject-side guard needs an input
-    the Bureau never printed — a year nobody has seen, race names where the year header
-    belongs, a ``Total`` leader form no published row carries — so those callers invent what
-    they pass. Do not read a value here as published without checking the test that supplies
-    it. Cells are
-    written as ``inlineStr``/``n`` so no shared-string table is needed.
+    **Not every caller's labels are published ones.** Do not read a value here as published
+    without checking the test that supplies it. Cells are written as ``inlineStr``/``n`` so no
+    shared-string table is needed.
     """
     main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -443,9 +440,10 @@ class TestResident1790To1990:
         """Both arms of ``_strip_leaders``, one synthetic label each.
 
         Until this test the U+2026 arm of the ``rstrip`` class and the trailing ``.strip()``
-        were both unfalsifiable: every ``Total`` label the suite passed was
-        ``"            Total...."``, which ``rstrip(".")`` reduces to ``"Total"`` just as
-        well, and which leaves the trailing ``.strip()`` nothing to remove.
+        were both unfalsifiable: every ``Total`` label the suite reached was of one form --
+        leading whitespace, then ``Total``, then ASCII dots and nothing else -- which
+        ``rstrip(".")`` reduces to ``"Total"`` just as well, and which leaves the trailing
+        ``.strip()`` nothing to remove.
 
         **Both labels below are invented.** The mutation survival is what established that:
         a published ``Total`` row carrying either form would have killed these mutants
