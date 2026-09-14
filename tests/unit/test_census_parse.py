@@ -268,9 +268,17 @@ class TestResident1790To1990:
         This is #182's surviving-mutant lesson applied before the fact: there, every
         assertion around a regex was an acceptance one, so loosening the reject half left
         every output byte-identical. Here the race rows come FIRST.
+
+        **The sheet is Connecticut, and that is load-bearing too -- do not rename it to a
+        carrier.** Connecticut carries no transposed table in the real workbook, so this
+        synthetic one exercises the reader on a sheet the detector reaches only by
+        CONTENT. Named "Alaska", the test could not see
+        ``if area not in ("Alaska", "Hawaii"): return`` spliced into the reader -- the
+        hardcoded-state shortcut the whole detect-by-content design exists to avoid. Found
+        by #234's Class B mutation pass, which the Alaska spelling survived.
         """
         workbook = _state_sheet_workbook(
-            "Alaska",
+            "Connecticut",
             [
                 ["NUMBER", ""],
                 ["1990 ................", "550043"],
@@ -326,12 +334,21 @@ class TestResident1790To1990:
         re-issued column without a word -- the same shape as the U+2026 leaders dropping
         South Carolina 1790. Refusing is the reflex ``_to_population`` already applies to
         a cell it does not recognize.
+
+        **The sheet is Hawaii, and that is load-bearing -- do not rename it to Alaska.**
+        The allow-list carries no ``area`` term, so the gate applies to every sheet; the
+        error message says so in as many words. On an Alaska sheet that claim is
+        unfalsifiable, because ``year % 10 and year not in _OFF_CYCLE_CENSUSES`` and the
+        same condition with ``and area == "Alaska"`` spliced in behave identically. Hawaii
+        is a real carrier of the transposed table whose censuses are all on-cycle, so an
+        off-cycle column there IS the layout-moved scenario the raise exists for. Found by
+        #234's Class B mutation pass, which the Alaska spelling survived.
         """
         workbook = _state_sheet_workbook(
-            "Alaska",
+            "Hawaii",
             [
                 ["NUMBER", ""],
-                ["1990 ................", "550043"],
+                ["1990 ................", "1108229"],
                 ["Race", "1935"],
                 ["            Total....", "50000"],
             ],
