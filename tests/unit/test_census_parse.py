@@ -384,8 +384,9 @@ class TestResident1790To1990:
         "this census was never published" -- the header says it was -- and emitting NULL
         would make ``transform_census`` stamp the row *"No published figure in
         tabs15-65.xlsx for this census"*, a provenance claim the header itself
-        contradicts. A blank cell that exists stays an honest NULL; an absent one means
-        the header and the total row no longer line up. #234 review.
+        contradicts. A cell written empty stays an honest NULL; a ``Total`` row too short
+        to reach a declared column is a layout change -- this workbook writes its data rows
+        to full width, so a short one is not an unpublished figure. #234 review.
         """
         workbook = _state_sheet_workbook(
             "Alaska",
@@ -567,17 +568,20 @@ class TestRealCorpus:
         }
         assert carriers == {"Alaska", "Hawaii"}
 
-    def test_the_shape_based_alternative_over_fires_as_the_comment_says(self) -> None:
-        """The comparative figures in that same comment, which nothing used to witness.
+    def test_shape_based_alternatives_do_not_isolate_the_two_sheets(self) -> None:
+        """Why the anchor is a label column and not a cell-shape rule.
 
-        An earlier version claimed the shape rule "fires on 26 of the 51". It reproduces
-        under no reading, and the counts below are the re-measured ones. Pinning them is
-        what stops a corrected number decaying back into unwitnessed prose -- the root
-        cause behind most of #234's review findings.
+        **This test is the only statement of these counts.** ``parse.py``, ``CLAUDE.md``
+        and D061 deliberately no longer paraphrase them: two attempts to do so in prose
+        each stated them wrongly (#234, then its own review), so the assertions below are
+        the statement and nothing restates them.
 
-        The last assertion is the honest qualifier on the anchor choice: a STRICTER shape
-        rule does select exactly the two sheets, so the label column is the more stable
-        anchor rather than the only possible one.
+        Read the rules off the code, not off a summary. In particular note the ``>= 2``
+        clause in the last one: without it, "every non-empty cell beyond column A is
+        year-shaped" is **vacuously true** of any sheet whose title row has nothing beyond
+        column A, and selects all 51 rather than two. That vacuity is exactly the error the
+        deleted prose made, which is why the clause is spelled out here rather than
+        described.
         """
         sheets = _sheets_by_name(_real_corpus_tabs())
         assert len(sheets) == 51

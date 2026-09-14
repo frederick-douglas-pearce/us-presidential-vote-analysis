@@ -3765,20 +3765,26 @@ than an error.
 
 **(a) The table is detected by its label column, and the anchor is measured rather than argued.**
 The header row is the row whose column A reads exactly `Race`. Across all 51 published sheets that
-selects **exactly two** — Alaska and Hawaii. Shape-based alternatives are far weaker: "a row
-carrying two or more year-shaped cells" fires on **all 51** sheets and "three or more" on **46**,
-because a four-digit *population* is indistinguishable from a four-digit *year* in isolation and the
-race-breakdown columns are full of the former. A **stricter** shape rule — every non-empty cell
-beyond column A is year-shaped — does select exactly these two, so the label column is the **more
-stable** discriminator rather than the only possible one: it is the name the Bureau chose, where the
-shape is a property of this printing. That is the same reason `_parse_state_sheet` already keys on
-`NUMBER`/`PERCENT` rather than on cell shapes.
+selects **exactly two** — Alaska and Hawaii, pinned by
+`TestRealCorpus.test_exactly_two_sheets_carry_a_column_a_race_label`. The label column is preferred
+over any rule keyed on *cell shape* because a four-digit *population* is indistinguishable from a
+four-digit *year* in isolation and the race-breakdown columns are full of the former — the same
+reason `_parse_state_sheet` already keys on `NUMBER`/`PERCENT` rather than on cell shapes.
 
-**Corrected before merge (#234 review).** This paragraph first asserted that the shape alternative
-"fires on **26 of the 51**". That figure reproduces under no reading of it. The counts above were
-re-measured against the published workbook and are now pinned by
-`TestRealCorpus.test_the_shape_based_alternative_over_fires_as_the_comment_says`, because a
-measurement that lives only in prose is the root cause behind most of this review's findings.
+**Corrected twice before merge (#234 review), and the second correction is why no comparative
+figures appear above.** This paragraph first asserted that the shape alternative "fires on **26 of
+the 51**" — a figure reproducing under no reading of it. The re-measured counts that replaced it were
+then found wrong too, in a subtler way: the rule they described, *"every non-empty cell beyond column
+A is year-shaped"*, is **vacuously true** of any sheet whose title row has nothing beyond column A,
+so it selects all 51 — while the test cited as its pin quietly required *at least two* such cells,
+and therefore pinned a different, stronger rule than the prose stated. Two attempts, two false
+statements of one measurement, the second inside the fix for the first.
+
+So the comparative counts are **deleted rather than corrected a third time** (maintainer's call at
+the review's second escalation). `TestRealCorpus` in `tests/unit/test_census_parse.py` is now their
+only statement, and the claim that survives here — the `Race` column selects exactly two sheets — is
+the one whose test pins exactly it. The general lesson is the one this entry keeps re-learning: a
+measurement restated in prose beside its test acquires an error the test does not have.
 
 The column→year map is read off that header row and applied positionally to the `Total` row.
 **Alaska's year header begins in column B, Hawaii's in column C with column B empty**, so one code

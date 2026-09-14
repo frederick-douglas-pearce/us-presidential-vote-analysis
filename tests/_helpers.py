@@ -59,8 +59,10 @@ MIT_SAMPLE_CSV = FIXTURES_DIR / "mit_1976-2024-president_sample.csv"
 #: and four relationship targets name parts absent from the zip. It parses here because
 #: :func:`usvote.census.parse.parse_resident_1790_1990` resolves sheets through
 #: ``xl/workbook.xml`` and its rels and never opens ``[Content_Types].xml``.
-#: **Pre-existing rather than introduced by #234** — that change added one sheet and
-#: left those parts byte-identical — and deliberately deferred rather than fixed there.
+#: **Pre-existing rather than introduced by #234** — that change added one sheet, which
+#: rewrote ``xl/workbook.xml`` and its rels to register it but changed none of the defects
+#: above: ``[Content_Types].xml`` is byte-identical to its pre-#234 state, and all four
+#: dangling targets predate it — and deliberately deferred rather than fixed there.
 #: Recorded here because a spreadsheet editor offers to *repair* such a file, and a
 #: repair-and-save would silently destroy the byte-identity asserted above while every
 #: test stayed green.

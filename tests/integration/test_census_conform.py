@@ -241,8 +241,9 @@ def test_the_conformance_guards_pass_over_a_live_warehouse(
         # The one coverage gap, against a real spine rather than the roster fixture.
         # Was three until #234 taught the parser to read Alaska's and Hawaii's
         # transposed second table. This is the twin of the unit-side TestRealCorpus
-        # assertion and has to move with it: both are double-gated (integration marker
-        # plus USVOTE_CENSUS_CORPUS_DIR), so a stale literal here goes unnoticed by CI.
+        # assertion and has to move with it: both need USVOTE_CENSUS_CORPUS_DIR, and
+        # this one also needs the integration marker, so a stale literal here goes
+        # unnoticed by CI.
         gaps = {
             (int(row.election_year), str(row.state))
             for row in frame.itertuples()

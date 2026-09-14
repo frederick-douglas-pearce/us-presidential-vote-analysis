@@ -79,19 +79,16 @@ _YEAR_LABEL = re.compile(r"^(\d{4})(?:/\d+)?[\s.…]*$")
 #: ``tests/unit/test_census_parse.py``, which needs the corpus and skips without it — so
 #: it is a merge precondition rather than something CI proves.
 #:
-#: Shape-based alternatives are far weaker: "a row with two or more year-shaped cells
-#: beyond column A" fires on **all 51** sheets, and "three or more" on **46**, because
-#: :data:`_YEAR_LABEL` matches any bare four-digit string and the race-breakdown
-#: columns are full of four-digit *counts* — a population is indistinguishable from a
-#: year in isolation. A *stricter* shape rule (every non-empty cell beyond column A is
-#: year-shaped) does select exactly these two, so the label column is the **more
-#: stable** anchor rather than the only possible one: it is the name the Bureau chose,
-#: where the shape is a property of this printing. Same reason
-#: :func:`_parse_state_sheet` keys on its own label column rather than on cell shapes.
+#: The label column is preferred over any rule keyed on *cell shape* because
+#: :data:`_YEAR_LABEL` matches any bare four-digit string and the race-breakdown columns
+#: are full of four-digit *counts* — a population is indistinguishable from a year in
+#: isolation. Same reason :func:`_parse_state_sheet` keys on its own label column rather
+#: than on cell shapes.
 #:
-#: An earlier version of this comment said the shape rule "fires on 26 of the 51". That
-#: figure reproduces under no reading of it; the counts above were re-measured against
-#: the published workbook (#234 review).
+#: **How much weaker the shape rules are is stated by that test and deliberately not
+#: paraphrased here.** Two successive attempts to put those counts in prose stated them
+#: wrongly — #234 and then its own review — so the test is the statement and this
+#: comment does not restate it. See D061 for what each attempt got wrong.
 _TRANSPOSED_HEADER_LABEL = "Race"
 
 #: The row within that table carrying the published total. Anchored on its label, never
@@ -441,9 +438,12 @@ def _parse_transposed_table(
             raise CensusParseError(
                 f"{area}: the transposed table's header declares a {year} column "
                 f"(index {column}) but its {_TRANSPOSED_TOTAL_LABEL!r} row holds only "
-                f"{len(total)} cells, so that census has no cell there at all. A blank "
-                f"cell is an honest NULL; an absent one means the header and the total "
-                f"row no longer line up. Refusing rather than returning a short series "
+                f"{len(total)} cells, so that census has no cell there at all. A cell "
+                f"written empty is an honest NULL; a {_TRANSPOSED_TOTAL_LABEL!r} row "
+                f"too short to reach a declared column is a layout change — this "
+                f"workbook "
+                f"writes its data rows to full width, so a short one is not an "
+                f"unpublished figure. Refusing rather than returning a short series "
                 f"— the transform would otherwise stamp the row 'No published figure "
                 f"in tabs15-65.xlsx for this census', which this header contradicts."
             )
