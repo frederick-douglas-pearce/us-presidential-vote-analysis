@@ -300,6 +300,92 @@ single-cell loss is the class of defect this source's guards exist for. It is fo
 robustness, not a data correction, so it lives with the parser like the other two entries in
 **Notes** below.
 
+## Census seat reconciliation (#183)
+
+**Not a correction to anybody's data either** — and here the phrase does real work, because
+this section catalogues sixteen places where two *correct* federal records disagree. The
+Census Bureau's published apportionment says a state held seats; the National Archives'
+electoral record says it cast no votes, or cast votes with no seats behind them. Both are
+right about different questions.
+
+**The recorded electoral votes win** (D006). Where they disagree the census figure is
+annotated and the reason stated; an **undeclared** disagreement fails the build rather than
+being rounded away.
+
+The rule is `seats + 2` — a state's apportioned House seats plus its two senatorial
+electors — with the District of Columbia handled separately, since its three votes come from
+the Twenty-third Amendment and are apportioned from no census at all. **Reconciling raw
+seats against `total_electoral_votes` is off by exactly two for every state in every year**,
+which reads as a data problem rather than an arithmetic one; that is the wrong-easy-answer
+the story was filed to name.
+
+### The seat series is curated, not parsed
+
+The published full-span source (CPH-2-1 Table 3, 1789–2010) is a **text-layer PDF**, and
+every parser this package ships is stdlib-only. Putting a PDF reader on the runtime path
+would mean `poppler-utils` — a system binary, unpinnable in `uv.lock` — on the CI critical
+path. So the seats are curated into [`src/usvote/census/seats.py`](../src/usvote/census/seats.py)
+as a provenance-carrying constant, which the source's public-domain status permits, and
+`scripts/extract_census_seats.py` regenerates them.
+`tests/unit/test_census_seats.py::TestRealCorpus` re-extracts the published file and
+compares all 969 PDF-sourced cells, **skipping when `USVOTE_CENSUS_CORPUS_DIR` is unset**.
+The consequence worth stating: the reconciliation runs on **every** warehouse build with no
+corpus present, rather than only when someone has snapshotted one.
+
+### The sixteen disagreements, in two kinds
+
+| Kind | Rows | What the record says |
+|---|---|---|
+| `electoral_votes_withheld` | 14 | Seats apportioned, **zero** electoral votes cast |
+| `seats_not_apportioned` | 2 | Electoral votes cast with **no** apportioned seats |
+
+**`electoral_votes_withheld` — 1864 and 1868 only.** Eleven states in 1864 and three in 1868
+(Mississippi, Texas, Virginia) held apportioned seats under the governing 1860 census and
+cast nothing. For 1864 the Joint Resolution (H.R. 126, 38th Cong.), adopted before the 8
+February 1865 count, declared the states in rebellion ineligible. For 1868 the three were
+simply not readmitted in time — the Omnibus Act, 15 Stat. 73 (25 June 1868), readmitted
+other reconstructed states but not these, which followed in 1870.
+
+**`seats_not_apportioned` — West Virginia, 1864 and 1868.** Admitted 20 June 1863 under the
+Act of 31 December 1862 (12 Stat. 633), *after* the 1860 apportionment was enacted (Act of 4
+March 1862, 12 Stat. 353). Its representation came from the admission statute, so the
+apportionment table records `(X)` while the state demonstrably appointed electors. **This is
+the case a one-sided guard passes in silence**, which is why the reconciliation is two-way.
+
+**1872 has none, and that is a finding rather than a silence.** By then every state was
+readmitted. Arkansas's and Louisiana's refused votes are a `count_status` matter (D046), not
+an allotment one — their allotments are restored to reach the 366 denominator Congress
+announced, and the year reconciles exactly. **Georgia 1868 is likewise absent**: its nine
+votes were counted as `disputed` (D044), not withheld, and its allotment is intact. Whether
+votes counted and how many a state was allotted are different questions, and only the second
+is this reconciliation's business.
+
+### Three source characteristics that look like defects and are not
+
+- **The 1950 column totals 437, not the 435 Congress apportioned.** Alaska and Hawaii are
+  included retroactively at one seat each. That is load-bearing: the 1950 census governs the
+  **1960** election, in which both cast electoral votes, and it is what makes that year's 537
+  electors reconcile. A different published Bureau file (`apportionment.csv`) reports the same
+  year as 435 with both blank — also correct, of the apportionment *as enacted*. **Only Table
+  3's basis reconciles against the electoral record**, which is why there is one seat authority
+  rather than two stitched together.
+- **Mid-decade admissions are filled in inconsistently.** Nevada and Nebraska carry one seat in
+  the 1860 column; West Virginia, admitted in the same decade, carries `(X)`. The table cannot
+  be read as a uniform statement of "seats as of that census".
+- **One cell is corrupt in the published PDF.** Michigan's 1980 cell renders as `l8` —
+  lowercase L, then 8. The hazard runs opposite to the obvious one: a strict `int()` raises,
+  while a permissive digit scavenge silently yields **8**, an 11-seat error wearing a plausible
+  number. The extractor rejects any cell that is not wholly `(X)` or digits, and resolves this
+  one only through a declared defect entry whose value (18) is confirmed from a *different*
+  published Bureau file. A corpus-gated test asserts the defect is still present, so the
+  declaration cannot outlive the thing it describes.
+
+### 1920 is excluded by scope, not by a guard
+
+The seats table's 1920 column is **fully populated** — it repeats 1910 verbatim. A guard
+written for a *missing* 1920 row would never fire. Since `NO_APPORTIONMENT_CENSUSES` routes
+1924 and 1928 to 1910 (see the section above), the column is simply never read.
+
 ## Notes
 
 - **The `ELECTORAL_VOTE_SHORTFALLS` map is keyed on per-state anomalies only.** The

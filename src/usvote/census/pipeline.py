@@ -18,6 +18,7 @@ import pandas as pd
 from usvote.census.conform import assert_conforms_to_spine
 from usvote.census.load import load_census_population
 from usvote.census.parse import parse_population_change, parse_resident_1790_1990
+from usvote.census.reconcile import assert_seats_reconcile
 from usvote.census.scrape import (
     RESIDENT_1790_1990,
     RESIDENT_1910_2020,
@@ -68,6 +69,15 @@ def run_census_pipeline(
     ``tests/integration/test_census_conform.py``. Both sit outside this seam, and the
     second needs a corpus and a database.
 
+    The **seat reconciliation** (:func:`usvote.census.reconcile.assert_seats_reconcile`)
+    runs beside it, and also before the write, for the same reason. It reads no census
+    *population* at all — only the injected spine and the curated seat series — so it is
+    deliberately not folded into the conformance seam above: a population-side failure
+    and a seat-side failure are different findings and must be able to fire
+    independently. It needs no corpus, because the seats are curated in
+    :mod:`usvote.census.seats` rather than parsed at runtime (#183), which is what makes
+    it an always-on gate rather than one that fires only when a corpus is present.
+
     **Zero network requests.** Everything comes from the snapshotted corpus, whose
     completeness is asserted before a byte is parsed — a corpus missing a file fails
     loudly rather than building a warehouse short that century. Populate it first with
@@ -94,6 +104,7 @@ def run_census_pipeline(
     ec_participation = read_ec_participation(dbc)
     frame = transform_census(rows_by_source, ec_participation)
     assert_conforms_to_spine(frame, ec_participation)
+    assert_seats_reconcile(ec_participation)
 
     with dbc.transaction():
         loaded = load_census_population(dbc, frame, replace=replace)

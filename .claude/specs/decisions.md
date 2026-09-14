@@ -3907,3 +3907,83 @@ scope gate; the criterion's wording was amended on the issue to say so.
 
 **Related:** #234, #184, D035, D059, D060, D061, `docs/corrections.md`,
 `src/usvote/census/conform.py`.
+
+---
+
+## D063: The published seat series is curated in-repo, not parsed at runtime
+
+**Date:** 2026-09-14
+**Issue:** #183 (E10-S4) · **Builds on:** D059, D060 · **Architect ruling:** #183 plan gate, Q1
+
+**Context.**
+
+#183 reconciles the census-derived electoral allotment against the recorded
+`total_electoral_votes`. It needs published House seats per state for the **20** censuses that
+govern an in-scope election (1820–1910 and 1930–2020; 1920 governs none, per D060). The Census
+Bureau publishes that full span in exactly one place: **CPH-2-1 Table 3, a two-page text-layer
+PDF** covering 1789–2010, plus a separate 2020 release.
+
+This repo ships no PDF reader, and that is deliberate rather than incidental: `census/parse.py`
+reads XLSX with stdlib `zipfile` + `xml.etree` specifically to avoid adding `openpyxl`. Reading
+the PDF at runtime would mean **`poppler-utils`** — a *system* binary, unpinnable in `uv.lock` —
+on the CI critical path of the one package built to avoid exactly that.
+
+Three shapes were considered. A fourth-looking option, **mixing sources** (the machine-readable
+`apportionment.csv` for 1910–2020, the PDF only for the older years), was **falsified at plan
+time** and is recorded here because it is the one a later reader will re-propose: the two
+published Bureau tables **disagree on 1950 by construction**. Table 3 gives Alaska and Hawaii one
+seat each and totals **437**; `apportionment.csv` leaves both blank and totals **435**. Both are
+correct — 435 as enacted, 437 as the House stood once both states were admitted — but the 1950
+census governs the **1960** election, in which both cast electoral votes, so **only Table 3's
+basis reconciles**. A mixed design disagrees with itself at exactly one year and produces a false
+mismatch at another.
+
+**Decision.**
+
+**The seats are curated into `usvote/census/seats.py`** as a provenance-carrying constant, on the
+`PV_ABSENCE_CATALOG` precedent — available here because the source is a US government work in the
+public domain, unlike UCSB under D022. `scripts/extract_census_seats.py` generates it;
+`tests/unit/test_census_seats.py::TestRealCorpus` re-extracts the published PDF and compares all
+**969** PDF-sourced cells, skipping when `USVOTE_CENSUS_CORPUS_DIR` is unset. **One authority for
+the whole span**: the 2020 column is folded in rather than stitched from a second live source.
+
+**Rationale.**
+
+- **No new dependency, and no PDF reader in `src/`.** The four extraction hazards — the mirrored
+  page 2, the header-driven column→year map, the strict-cell rule, the 1920 exclusion — move to
+  the local tool and its corpus-gated test, where CI never meets them.
+- **The reconciliation becomes always-on and offline.** With the seats in-repo it runs on *every*
+  warehouse build with no corpus present, which is strictly stronger than a gate that fires only
+  when someone has snapshotted one. Under a runtime-parse design the gate would have had to either
+  skip silently when the seats corpus was absent or couple every build to that corpus.
+- **The trade is a transcription surface**, discharged by the same cross-check that any curated
+  catalog gets.
+
+**One published cell is corrupt, and the hazard runs opposite to the obvious one.** Michigan's
+1980 cell renders as `l8` — lowercase L, then `8`. A strict `int()` **raises**, which is safe; a
+permissive `\d+` scavenge silently yields **8**, an 11-seat error wearing a plausible number. So
+`_read_cell` rejects any cell that is not wholly `(X)` or digits, and resolves this one only
+through a declared `PUBLISHED_CELL_DEFECTS` entry whose value (18) is confirmed from a *different*
+published Bureau file. A corpus-gated test asserts the defect is **still present**, so the
+declaration cannot outlive the thing it describes.
+
+**Three states per cell, not two.** A digit, an explicit `(X)` (*the source says no apportioned
+seats*), and **a key that is absent** (*a curation omission*). The last must fail unconditionally:
+collapsed into `(X)`, a forgotten cell needs only a plausible exception declaration to pass, and
+the acceptance criterion that an **unexplained** gap fails the build stops being true.
+`assert_seats_series_complete` is that guard, spine-left so the census never votes on which states
+existed (D006).
+
+**Which direction catches what — stated because the obvious reading is backwards.** The EC fact is
+**dense** (D026): a state that cast nothing is an explicit `0`-vote row. So *both* exception kinds
+— the 14 Reconstruction rows with seats and no votes, and West Virginia 1864/1868 with votes and
+no seats — are caught by the direction that **iterates the electoral record**. The reverse
+direction cannot fire on a dense spine at all; it is kept as a **density-regression backstop**, and
+an earlier draft of #183's plan wrongly advertised it as the West Virginia catcher. The check with
+real teeth is the **stale-declaration reciprocal**: a declared exception that starts reconciling
+must fail, since nothing else reads that claim.
+
+**Scope note.** `SEAT_RECONCILIATION_EXCEPTIONS` holds **16** rows in two kinds. 1872 has **none**
+— a finding, not a silence: every state was readmitted, and Arkansas's and Louisiana's refused
+votes are a `count_status` matter (D046), not an allotment one. Georgia 1868 is likewise absent:
+its nine votes were `disputed` (D044) and its allotment intact.

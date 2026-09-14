@@ -36,6 +36,9 @@ from usvote.census.sources import (
     RESIDENT_1790_1990,
     RESIDENT_1910_2020,
     RESIDENT_SOURCE_IDS,
+    SEATS_1789_2010,
+    SEATS_2020,
+    SEATS_SOURCE_IDS,
     SourceFile,
 )
 
@@ -48,6 +51,9 @@ __all__ = [
     "RESIDENT_1790_1990",
     "RESIDENT_1910_2020",
     "RESIDENT_SOURCE_IDS",
+    "SEATS_1789_2010",
+    "SEATS_2020",
+    "SEATS_SOURCE_IDS",
     "CensusScrapeError",
     "SourceFile",
     "assert_corpus_covers_sources",

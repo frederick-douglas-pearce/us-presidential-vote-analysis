@@ -81,9 +81,56 @@ RESIDENT_1910_2020 = SourceFile(
     ),
 )
 
-#: Every file this corpus holds. #183 appends the seats sources here; nothing else needs
-#: to change for them to be snapshotted, guarded, read, and attributed.
-CENSUS_SOURCES: tuple[SourceFile, ...] = (RESIDENT_1790_1990, RESIDENT_1910_2020)
+#: CPH-2-1 Table 3: apportioned House seats per state for every census 1789-2010.
+#:
+#: **A text-layer PDF, and it is deliberately NOT on the runtime path** (#183, D063).
+#: :mod:`usvote.census.seats` curates its contents into the repo instead, so the
+#: warehouse build needs no PDF reader; this entry exists so the file can be snapshotted
+#: and the curated constant re-verified against it by the corpus-gated cross-check in
+#: ``tests/unit/test_census_seats.py``. See that module for why.
+SEATS_1789_2010 = SourceFile(
+    source_id="seats_1789_2010",
+    url=(
+        "https://www2.census.gov/programs-surveys/decennial/1990/data/"
+        "apportionment/cph-2-1-1-table-3.pdf"
+    ),
+    filename="cph-2-1-1-table-3.pdf",
+    span="1789-2010",
+    vintage="census-bureau-cph-2-1-table-3",
+    description=(
+        "Census Bureau CPH-2-1 Table 3 — Apportionment of Membership of the U.S. House "
+        "of Representatives: 1789 to 2010, by state. Two pages, mirrored layouts."
+    ),
+)
+
+#: The 2020 apportionment release, which closes the gap past Table 3's 2010 ceiling.
+#: A CSV, so it needs no PDF reader — but its seats are curated alongside Table 3's in
+#: :mod:`usvote.census.seats` so there is exactly **one** seat authority rather than two
+#: stitched together. That matters here more than it looks: this file and Table 3
+#: disagree on 1950 by construction (435 against 437, over Alaska and Hawaii), and only
+#: Table 3's basis reconciles against the 1960 election's electors.
+SEATS_2020 = SourceFile(
+    source_id="seats_2020",
+    url=(
+        "https://www2.census.gov/programs-surveys/decennial/2020/data/"
+        "apportionment/apportionment.csv"
+    ),
+    filename="apportionment.csv",
+    span="1910-2020",
+    vintage="census-bureau-apportionment-2020",
+    description=(
+        "Apportionment of Seats in the U.S. House of Representatives and Average "
+        "Population Per Seat: 1910 to 2020 — only the 2020 column is used."
+    ),
+)
+
+#: Every file this corpus holds.
+CENSUS_SOURCES: tuple[SourceFile, ...] = (
+    RESIDENT_1790_1990,
+    RESIDENT_1910_2020,
+    SEATS_1789_2010,
+    SEATS_2020,
+)
 
 #: The sources the population load requires. Kept separate from :data:`CENSUS_SOURCES`
 #: so a corpus that has grown #183's seats files is not *required* to have them before
@@ -91,6 +138,16 @@ CENSUS_SOURCES: tuple[SourceFile, ...] = (RESIDENT_1790_1990, RESIDENT_1910_2020
 RESIDENT_SOURCE_IDS: tuple[str, ...] = (
     RESIDENT_1790_1990.source_id,
     RESIDENT_1910_2020.source_id,
+)
+
+#: The seats sources. **Nothing on the runtime path reads these** — the seat counts are
+#: curated in :mod:`usvote.census.seats`. They are the input to the corpus-gated
+#: cross-check that keeps that constant honest, which is why they are a separate tuple:
+#: a warehouse build must never require them, and the cross-check must never silently
+#: skip because a *population* file is missing.
+SEATS_SOURCE_IDS: tuple[str, ...] = (
+    SEATS_1789_2010.source_id,
+    SEATS_2020.source_id,
 )
 
 #: ``{source_id: filename}`` and ``{source_id: vintage}``, **derived** rather than
