@@ -85,10 +85,11 @@ def _state_sheet_workbook(name: str, rows: list[list[str]]) -> bytes:
 
     Real published bytes are the right fixture for a *layout* (``CENSUS_TABS_TRIMMED_XLSX``
     is exactly that, and is what the rest of this class reads). This builder exists for the
-    narrower job of pinning one **label form** whose sheet is not in that fixture, and the
-    label strings the callers pass are copied verbatim from the published file — so what is
-    synthetic here is the container, never the thing under test. Cells are written as
-    ``inlineStr``/``n`` so no shared-string table is needed.
+    narrower job of pinning one **label form** whose sheet is not in that fixture.
+
+    **Not every caller's labels are published ones.** Do not read a value here as published
+    without checking the test that supplies it. Cells are written as ``inlineStr``/``n`` so no
+    shared-string table is needed.
     """
     main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -353,6 +354,12 @@ class TestResident1790To1990:
         is a real carrier of the transposed table whose censuses are all on-cycle, so an
         off-cycle column there IS the layout-moved scenario the raise exists for. Found by
         #234's Class B mutation pass, which the Alaska spelling survived.
+
+        **But Hawaii/1935 does not make the error message's own sentence testable (#239).**
+        There are two ways to scope this line by state and this test reaches only one: it kills
+        the **gate**-scoped splice. Scoping only the **exemption** survives here, and is pinned
+        by ``test_the_off_cycle_allow_list_is_not_scoped_by_state``. Neither pins the claim
+        alone.
         """
         workbook = _state_sheet_workbook(
             "Hawaii",
@@ -426,6 +433,114 @@ class TestResident1790To1990:
         )
         with pytest.raises(CensusParseError, match="1940"):
             parse_resident_1790_1990(workbook, source_id="x")
+
+    def test_a_total_label_with_unicode_leaders_or_interior_space_is_still_the_total(
+        self,
+    ) -> None:
+        """Both arms of ``_strip_leaders``, one synthetic label each.
+
+        Until this test the U+2026 arm of the ``rstrip`` class and the trailing ``.strip()``
+        were both unfalsifiable: every ``Total`` label the suite reached was of one form --
+        leading whitespace, then ``Total``, then ASCII dots and nothing else -- which
+        ``rstrip(".")`` reduces to ``"Total"`` just as well, and which leaves the trailing
+        ``.strip()`` nothing to remove.
+
+        **Both labels below are invented.** The mutation survival is what established that:
+        a published ``Total`` row carrying either form would have killed these mutants
+        already.
+
+        **One label per arm**, because a single label carrying both properties kills both
+        mutants and leaves one arm without its own witness. ``Total\u2026\u2026`` has nothing left
+        to trim once the leaders are stripped, so it isolates the U+2026 class;
+        ``Total ....`` reduces to ``"Total "`` under an ASCII-only ``rstrip``, so it isolates
+        the trailing ``.strip()``.
+
+        The sheet is **Connecticut** because it is a non-carrier: the transposed detector
+        reaches it only by CONTENT, so an ``area``-conditioned shortcut cannot hide behind the
+        sheet name. Its ``NUMBER`` figure is Connecticut's own published 1990 population; the
+        transposed total is Alaska's real 1950 ``Total``, borrowed because Connecticut has no
+        such table.
+        """
+        for label in ("            Total\u2026\u2026\u2026\u2026", "            Total ...."):
+            workbook = _state_sheet_workbook(
+                "Connecticut",
+                [
+                    ["NUMBER", ""],
+                    ["1990 ................", "3287116"],
+                    ["Race", "1950"],
+                    [label, "128643"],
+                ],
+            )
+            figures = {
+                row.census_year: row.population
+                for row in parse_resident_1790_1990(workbook, source_id="x")
+            }
+            assert figures == {1990: 3_287_116, 1950: 128_643}, label
+
+    def test_a_race_header_with_no_readable_year_columns_raises(self) -> None:
+        """The other arm of the same ``if`` -- the one that fails silently when dropped.
+
+        ``if not columns or total is None:`` has two arms and the suite reached only one.
+        ``test_a_header_with_no_readable_total_row_raises`` supplies a readable ``1950``
+        column and no ``Total`` row, so it exercises ``total is None``. Nothing supplied the
+        mirror image: a header whose cells are all unreadable as years, with a ``Total`` row
+        present beneath it.
+
+        Dropping ``not columns`` raises nothing at all. The column list is empty, the loop
+        over it yields nothing, and the sheet returns its ``NUMBER`` block alone -- a silently
+        short series, which is the outcome this module refuses. *Absent is silent;
+        present-but-unreadable is loud* is the stated design, and this is the half that had no
+        witness.
+
+        The header cells are **invented**: the Bureau prints census years across that row,
+        never race names. Hawaii is a real carrier, so this is a sheet that does publish the
+        table and whose header has moved to something the parser cannot read.
+        """
+        workbook = _state_sheet_workbook(
+            "Hawaii",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "1108229"],
+                ["Race", "White", "Japanese"],
+                ["            Total....", "499794"],
+            ],
+        )
+        with pytest.raises(CensusParseError, match="no year columns"):
+            parse_resident_1790_1990(workbook, source_id="x")
+
+    def test_the_off_cycle_allow_list_is_not_scoped_by_state(self) -> None:
+        """The raise text claims the allow-list is not state-scoped. This makes it testable.
+
+        ``_OFF_CYCLE_CENSUSES`` is ``{1929, 1939}`` and the gate reads
+        ``if year % 10 and year not in _OFF_CYCLE_CENSUSES``. It carries no ``area`` term, and
+        the error message says so in as many words.
+
+        **Hawaii/1939 is what separates two different state-scoped mutants.** ``412632b``
+        closed the one scoping the whole **gate**, using Hawaii/1935 -- see
+        ``test_an_unknown_off_cycle_census_raises_rather_than_being_dropped``. Scoping only the
+        **exemption** survived every input the suite had until this one.
+
+        Hawaii/1939 is invented, Hawaii's censuses all being on-cycle, and is not a relabelling
+        of anyone's census: the real off-cycle years stay pinned against the real fixture in
+        ``test_alaskas_off_cycle_censuses_are_emitted_never_relabelled``. Reading the row here
+        is correct behaviour rather than a scope decision -- keeping 1939 out of the warehouse
+        belongs to ``transform.SOURCE_SPANS``, which is what makes this parser "faithful, not
+        selective" (D005).
+        """
+        workbook = _state_sheet_workbook(
+            "Hawaii",
+            [
+                ["NUMBER", ""],
+                ["1990 ................", "1108229"],
+                ["Race", "1939"],
+                ["            Total....", "50000"],
+            ],
+        )
+        figures = {
+            row.census_year: row.population
+            for row in parse_resident_1790_1990(workbook, source_id="x")
+        }
+        assert figures == {1990: 1_108_229, 1939: 50_000}
 
     def test_a_year_label_with_unicode_ellipsis_leaders_is_read(self) -> None:
         # The regression for the one figure this parser used to drop silently (#182):
