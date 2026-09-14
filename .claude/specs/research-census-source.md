@@ -338,7 +338,13 @@ transposed table on each sheet — race per row, census year across columns, car
 ``NUMBER`` nor the ``PERCENT`` marker the parser keys on. Alaska 1950 = 128,643 and
 Hawaii 1950 = 499,794 are in there, which matters because the 1960 election's governing census is
 1950 and both states cast electoral votes. So this is a **parser gap, not absent data** — see D060(h)
-and the two ``present_but_unparsed`` rows in ``docs/corrections.md``.)
+and the two ``present_but_unparsed`` rows in ``docs/corrections.md``.
+**Closed 2026-09-13 by #234:** the parser now reads that transposed table, so Alaska's series runs
+back to **1880** and Hawaii's to **1900**, both 1950 figures are loaded, and those two
+``docs/corrections.md`` rows are retired — leaving ``(1848, Texas)`` as the only coverage exception.
+The sentence this parenthetical opens with — that the two states are "not backfilled in the block
+this project parses" — remains true **of that block** and is now the whole of what it claims: the
+second table is where they are backfilled, and it is read. See D061.)
 
 **So the correction is a `docs/corrections.md`-shaped entry, not a re-parse** — one state, ten
 elections, one documented adjustment with provenance, exactly the pattern the repo already runs for

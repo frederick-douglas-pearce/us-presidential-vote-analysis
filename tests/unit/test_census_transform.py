@@ -417,12 +417,57 @@ class TestFrameShape:
         frame = transform_census(rows, _SPINE)
         assert frame["census_year"].min() == 1790
         assert frame["census_year"].max() == 2020
-        # The four trimmed sheets supply 1790-1990; the whole popchange file supplies
-        # 2000-2020 for all 51, so the state count is the union rather than four.
-        assert frame[frame.census_year <= 1990]["state"].nunique() == 4
+        # The five trimmed sheets supply 1790-1990 (Hawaii joined them in #234); the
+        # whole popchange file supplies 2000-2020 for all 51, so the state count is the
+        # union rather than five.
+        assert frame[frame.census_year <= 1990]["state"].nunique() == 5
         assert frame[frame.census_year >= 2000]["state"].nunique() == 51
         virginia = frame[(frame.state == "Virginia") & (frame.census_year == 1850)]
         assert virginia["population"].iloc[0] == 1_421_661
+
+    def test_the_span_drops_alaskas_off_cycle_censuses(self) -> None:
+        """AC-3, the half that lives at THIS layer (#234).
+
+        The parser emits Alaska's 1939 and 1929 faithfully, because relabelling them to
+        1940/1930 would file a figure under a census that never happened (D005) and
+        ``census_year`` is part of the natural key. Excluding them is a
+        which-censuses-are-in-scope decision, which this module owns via
+        :data:`SOURCE_SPANS` -- and it needs no new code, since that span is already
+        ``range(1790, 2000, 10)``.
+
+        Splitting the property across the two layers is what makes it falsifiable. A
+        single "1939 is absent" assertion cannot distinguish a parser that skipped it
+        from one that relabelled it to 1940 and then deduplicated -- and the second
+        would put 72,524 people in the wrong census while every test stayed green.
+        """
+        from usvote.census.parse import parse_resident_1790_1990
+
+        parsed = parse_resident_1790_1990(
+            CENSUS_TABS_TRIMMED_XLSX.read_bytes(), source_id="resident_1790_1990"
+        )
+        # The parser is faithful: the off-cycle years ARE in its output.
+        assert {row.census_year for row in parsed if row.area == "Alaska"} >= {1929, 1939}
+
+        frame = transform_census(
+            {
+                "resident_1790_1990": parsed,
+                "resident_1910_2020": parse_population_change(
+                    CENSUS_POPCHANGE_XLSX.read_bytes(), source_id="resident_1910_2020"
+                ),
+            },
+            _SPINE,
+        )
+        alaska = set(frame[frame.state == "Alaska"]["census_year"])
+        # ...and the span drops them here, without inventing the decennial years they
+        # were taken "instead of".
+        assert 1929 not in alaska
+        assert 1939 not in alaska
+        assert 1940 not in alaska
+        assert 1930 not in alaska
+        assert alaska == {y for y in alaska if y % 10 == 0}
+        # The figure the whole story is about survives the span untouched.
+        hawaii = frame[(frame.state == "Hawaii") & (frame.census_year == 1950)]
+        assert hawaii["population"].iloc[0] == 499_794
 
 
 class TestProvenanceIsSingleSourced:

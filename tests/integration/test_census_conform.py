@@ -238,13 +238,18 @@ def test_the_conformance_guards_pass_over_a_live_warehouse(
         # The single seam the pipeline calls, so the wiring is exercised too.
         assert_conforms_to_spine(census, participation)
 
-        # The three coverage gaps, against a real spine rather than the roster fixture.
+        # The one coverage gap, against a real spine rather than the roster fixture.
+        # Was three until #234 taught the parser to read Alaska's and Hawaii's
+        # transposed second table. This is the twin of the unit-side TestRealCorpus
+        # assertion and has to move with it: both need USVOTE_CENSUS_CORPUS_DIR, and
+        # this one also needs the integration marker, so a stale literal here goes
+        # unnoticed by CI.
         gaps = {
             (int(row.election_year), str(row.state))
             for row in frame.itertuples()
             if row.coverage == COVERAGE_NO_GOVERNING_FIGURE
         }
-        assert gaps == {(1848, "Texas"), (1960, "Alaska"), (1960, "Hawaii")}
+        assert gaps == {(1848, "Texas")}
 
         # Virginia 1864/1868 carry the published figure, not the restated one -- the
         # double-count fix, checked against the real 0-EV Reconstruction rows.
