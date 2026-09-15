@@ -59,8 +59,9 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 #:
 #: **1864 was added under review, and its absence is why this suite was green while the
 #: real gate failed.** The first revision reconciled ten elections, none of them 1864 —
-#: the year carrying twelve of the seventeen catalogued disagreements *and* the one
-#: undeclared row (Nevada) that made ``assert_seats_reconcile`` raise on the full spine.
+#: the year carrying **thirteen** of the seventeen catalogued disagreements, and the one
+#: that was then undeclared (Nevada) made ``assert_seats_reconcile`` raise on the full
+#: spine.
 #: A proof over a convenient subset is not a proof; the full 51-election run lives in the
 #: integration suite and could not be reached offline.
 ARCHIVES_FIXTURE_YEARS: tuple[int, ...] = (
@@ -82,6 +83,14 @@ ARCHIVES_FIXTURE_YEARS: tuple[int, ...] = (
 #: reads would pass under any consistent error; these are independent literals, pinned
 #: so a parser change that shifted an allotment could not slide through. 1872's 366 and
 #: 1868's 294 are the two the repo's own corrections catalog turns on (D045/D046).
+#:
+#: **1864 is the exception to this constant's own name, and it is pinned deliberately.**
+#: Its 233 is what the Archives record *currently* says, and that is a count of votes
+#: **cast**: Nevada appointed three electors and two voted, so the appointed total is
+#: **234**. The pin tracks the record rather than the truth precisely so the transition
+#: is visible — when **#243** lands and restores Nevada's allotment to 3, this literal
+#: must become 234 and the ``(1864, Nevada)`` catalog entry must go. Pinning 234 today
+#: would fail against the warehouse this repo actually builds.
 EXPECTED_APPOINTED_TOTALS: dict[int, int] = {
     1824: 261,
     1832: 288,

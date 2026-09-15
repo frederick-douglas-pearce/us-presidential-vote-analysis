@@ -15,17 +15,20 @@ package whose parse stage exists to avoid exactly that.
 
 So the seats are **curated into the repo** as a provenance-carrying constant -- the
 :data:`usvote.pv.absences.PV_ABSENCE_CATALOG` precedent, available here because the
-source is public domain (a US government work), unlike UCSB under D022. This script is
-how that constant is produced and how it is re-verified:
+source is public domain (a US government work), unlike UCSB under D022. This script
+**renders the published table so the constant can be checked against it** -- it does not
+produce the constant, and the curation step is a human one:
 
 * ``python3 scripts/extract_census_seats.py <pdf>`` prints the rendered literal to
   stdout; ``--show`` prints a per-census summary instead. **It writes no file**, and
   there is deliberately no ``--generate``: its output is **not** the committed constant
-  and must not be pasted over it wholesale. Two gaps make that a rule rather than a
-  caution -- the PDF's 1920 column is populated, so a bare render emits a census
-  :data:`usvote.census.seats.SEATS_BY_CENSUS` deliberately omits, and 2020 comes from a
-  different published file this script never reads. Curating means selecting; the render
-  is an aid to that, not a replacement for it.
+  and must not be pasted over it wholesale. The render covers **24** census columns
+  against the constant's **20**, and the difference runs both ways: it emits **1789,
+  1790, 1800 and 1810**, which precede the first election in scope, and **1920**, whose
+  census produced no apportionment and governs nothing -- five years
+  :data:`usvote.census.seats.SEATS_BY_CENSUS` deliberately omits -- while **2020** comes
+  from a different published file this script never reads and so cannot appear at all.
+  Curating means selecting; the render is an aid to that, not a replacement for it.
 * **The verification path is the one that matters, and it does exist.**
   ``tests/unit/test_census_seats.py::TestRealCorpus`` imports :func:`parse_seats_text`
   and :func:`extract_seats_text` and compares the committed constant against a fresh
@@ -209,7 +212,7 @@ def parse_seats_text(text: str) -> dict[int, dict[str, int | None]]:
     if parsed_pages != 2:
         raise SeatsExtractionError(
             f"Expected 2 pages of Table 3, parsed {parsed_pages}. The published layout "
-            f"has changed; do not regenerate from it without re-reading it."
+            f"has changed; re-read it before trusting any render of it."
         )
     return seats
 

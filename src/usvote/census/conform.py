@@ -25,7 +25,11 @@ per module.
 :func:`usvote.census.transform.transform_census` takes ``ec_participation`` — the
 D006-allowed direction (a source reads the spine; the spine never reads a source). So
 everything here is pure and offline, and the DB read stays in
-:mod:`usvote.census.pipeline`. Nothing in this module names ``dwh.votes``.
+:mod:`usvote.census.pipeline`. **No code in this module names ``dwh.votes``** — the
+prose below does, where it explains where a NULL allotment comes from, and that is the
+distinction the guard draws: ``code_only`` strips docstrings and comments precisely so
+accurate documentation is not punished (``test_no_lower_subpackage_names_the_ec_votes_
+fact_in_code``, which covers ``census`` as of #183).
 """
 
 from __future__ import annotations

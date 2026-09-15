@@ -446,8 +446,7 @@ def _assert_no_stale_exception(frame: pd.DataFrame) -> None:
     condition is precisely what makes :func:`_assert_every_allotment_is_explained`
     refuse the exception and raise, and that guard runs first, so the branch was
     unreachable through the seam. The pinning it was meant to provide is real and still
-    holds; it is
-    enforced *there*, where the exception is matched, not here.
+    holds; it is enforced *there*, where the exception is matched, not here.
     """
     reconciling = {
         (int(row.election_year), str(row.state)): bool(row.reconciles)

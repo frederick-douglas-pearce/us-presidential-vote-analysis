@@ -155,21 +155,19 @@ def test_no_lower_subpackage_names_the_ec_votes_fact_in_code(subpackage: str) ->
     without naming the fact table itself.
 
     **``census`` was added in #183 review.** Two census modules already asserted the
-    invariant in their docstrings — ``conform.py`` ("Nothing in this module names
-    ``dwh.votes``") since #182, and ``reconcile.py`` since #183 — while this scan covered
+    invariant in their docstrings — ``conform.py`` since #182 and ``reconcile.py`` since
+    #183, both now stating it in the narrower **"no code names it"** form this scan
+    actually enforces — while this scan covered
     ``pv`` only, so for that subpackage the claim was convention presenting itself as
-    enforcement: the precise gap this file's own docstring says it exists to close. It
-    earned its keep immediately, catching a ``dwh.votes`` mention in a #183 error-message
-    string literal on its first run.
+    enforcement: the precise gap this file's own docstring says it exists to close.
 
     **``mit`` is absent for a different reason than ``ucsb``, and neither is an
     oversight.** ``mit`` scans clean today, so it could be added; it is left out only
     because no module under it makes the claim, and a guard should follow a claim rather
-    than be sprayed across directories. ``ucsb`` *cannot* be added:
-
-    two modules there name ``dwh.votes`` inside f-string error messages today, so adding it
-    would fail. That is a pre-existing question about UCSB, deferred rather than silently
-    widened into this guard.
+    than be sprayed across directories. ``ucsb`` *cannot* be added: two modules there name
+    ``dwh.votes`` inside f-string error messages today, so adding it would fail. That is a
+    pre-existing question about UCSB, deferred rather than silently widened into this
+    guard.
     """
     modules = _modules_under(subpackage)
     assert modules, (

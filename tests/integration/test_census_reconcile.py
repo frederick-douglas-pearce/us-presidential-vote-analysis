@@ -170,9 +170,10 @@ def test_each_exception_kind_behaves_as_its_definition_says(
                 )
             else:  # pragma: no cover - a new kind must not pass unchecked
                 pytest.fail(
-                    f"{exception.kind!r} has no behavioural assertion here; a kind "
-                    f"added to SEAT_EXCEPTION_KINDS without one would be verified by "
-                    f"nothing."
+                    f"{exception.kind!r} has no behavioural assertion here. This loop "
+                    f"iterates the catalog, so it closes 'a catalog ROW carrying a new "
+                    f"kind'; a kind added to SEAT_EXCEPTION_KINDS with no row is still "
+                    f"checked by nothing."
                 )
     finally:
         dbc.close_connection()

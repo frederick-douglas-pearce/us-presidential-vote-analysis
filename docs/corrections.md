@@ -302,13 +302,17 @@ robustness, not a data correction, so it lives with the parser like the other tw
 
 ## Census seat reconciliation (#183)
 
-**Not a correction to anybody's data either** — and here the phrase does real work, because
-this section catalogues seventeen places where two federal
-records disagree. Sixteen are places where **both** are correct about different
-questions; the seventeenth is the one where the electoral record is not. The
-Census Bureau's published apportionment says a state held seats; the National Archives'
-electoral record says it cast no votes, or cast votes with no seats behind them. Both are
-right about different questions.
+**Mostly not a correction to anybody's data — and the exception is the point.** This
+section catalogues seventeen places where two federal records disagree. **Sixteen are
+places where both are right about different questions**: the Census Bureau's published
+apportionment says a state held seats, and the National Archives' electoral record says it
+cast no votes, or cast votes with no seats behind them. Both statements are true.
+
+**The seventeenth is not like that.** There the electoral record is simply wrong by this
+repo's own D041 contract — it holds a count of votes *cast* in a column defined as the
+*appointed* allotment. It is catalogued here rather than fixed because correcting it
+reaches the public API surface; see **#243** and the `electoral_record_understates_allotment`
+kind below.
 
 **The recorded electoral votes win** (D006). Where they disagree the census figure is
 annotated and the reason stated; an **undeclared** disagreement fails the build rather than
