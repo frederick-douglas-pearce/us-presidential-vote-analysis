@@ -185,15 +185,45 @@ class TestTheRule:
             assert expected - seats == SENATORIAL_ELECTORAL_VOTES
 
     def test_dc_is_three_from_1964_and_is_not_census_apportioned(self) -> None:
-        """DC's votes come from the 23rd Amendment, not from an apportionment."""
+        """DC's votes come from the 23rd Amendment, not from an apportionment.
+
+        **The years here are literals on purpose.** An earlier version passed
+        ``DC_FIRST_ELECTION`` and ``DC_FIRST_ELECTION - 4`` as the inputs, which is
+        circular: moving the constant moves the test's own input with it, so the
+        assertion holds for *any* boundary. The acceptance gate's mutation pass proved
+        it — ``DC_FIRST_ELECTION = 1964 -> 1968`` **survived** the whole suite. Asserting
+        the outcome is not asserting the mechanism, and the mechanism here is *which
+        election year* the Amendment first reached.
+        """
         assert SEATS_BY_CENSUS[1960][DC_STATE_NAME] is None
-        assert expected_electoral_votes(DC_FIRST_ELECTION, DC_STATE_NAME) == (
-            DC_ELECTORAL_VOTES
-        )
+        assert expected_electoral_votes(1964, DC_STATE_NAME) == DC_ELECTORAL_VOTES
         assert expected_electoral_votes(2024, DC_STATE_NAME) == DC_ELECTORAL_VOTES
 
     def test_dc_has_no_electoral_votes_before_1964(self) -> None:
-        assert expected_electoral_votes(DC_FIRST_ELECTION - 4, DC_STATE_NAME) == 0
+        """1960 is the last election before the Twenty-third Amendment applied.
+
+        A literal again, for the reason above: ``DC_FIRST_ELECTION - 4`` tracks the
+        constant and so cannot detect it moving.
+        """
+        assert expected_electoral_votes(1960, DC_STATE_NAME) == 0
+        assert expected_electoral_votes(1956, DC_STATE_NAME) == 0
+
+    def test_the_dc_constants_are_pinned_to_literals(self) -> None:
+        """The constants themselves, pinned independently of every use of them.
+
+        The Twenty-third Amendment was ratified 29 March 1961 and first applied to the
+        **1964** election. The two tests above assert the same boundary *behaviourally*,
+        through the function; this asserts the constants directly, so a use site that
+        stopped consulting one would still be caught here.
+
+        **The year is doubly covered; the vote count is not.** Moving
+        ``DC_FIRST_ELECTION`` fails this test *and* the behavioural one above — verified
+        by the acceptance gate's mutation pass. But ``DC_ELECTORAL_VOTES`` is compared
+        against itself up there (both sides move together) and the pre-1964 test asserts
+        ``== 0``, so for the vote count **this line is the only defence**.
+        """
+        assert DC_FIRST_ELECTION == 1964
+        assert DC_ELECTORAL_VOTES == 3
 
     def test_a_state_with_no_apportioned_seats_expects_none_not_two(self) -> None:
         """``(X)`` must not become ``0 + 2``.
