@@ -303,7 +303,9 @@ robustness, not a data correction, so it lives with the parser like the other tw
 ## Census seat reconciliation (#183)
 
 **Not a correction to anybody's data either** — and here the phrase does real work, because
-this section catalogues sixteen places where two *correct* federal records disagree. The
+this section catalogues seventeen places where two federal
+records disagree. Sixteen are places where **both** are correct about different
+questions; the seventeenth is the one where the electoral record is not. The
 Census Bureau's published apportionment says a state held seats; the National Archives'
 electoral record says it cast no votes, or cast votes with no seats behind them. Both are
 right about different questions.
@@ -381,7 +383,7 @@ that ever looked.
 **Why it is catalogued rather than fixed here, and why it gets its own kind.** Correcting the spine
 moves 1864's `ec_denominator` from 233 to 234, which changes `ec_share_full` for that year and
 therefore the **public API snapshot content hash** — an EC-domain change with a D034 cutover,
-deferred to its own issue rather than made inside a census validation story. It is a separate kind
+deferred to **#243** rather than made inside a census validation story. It is a separate kind
 because the other two record facts about history while this records a **known defect in the
 record**; filing it under either of those would file a defect as a fact, and declaring it under a
 bare "the record is authoritative" framing would enter, in a corrections catalog, the claim that a

@@ -9,8 +9,8 @@ Offline throughout. Two kinds of input, and the difference matters:
 * **Real allotments parsed from the committed Archives fixtures**
   (``TestRealAllotments``).
   This is the check with actual evidential weight: it runs the reconciliation against
-  the electoral record as the National Archives published it, for ten elections
-  including the two hardest (1868 and 1872), with no database.
+  the electoral record as the National Archives published it, for eleven elections
+  including the three hardest (1864, 1868 and 1872), with no database.
 
 **Why deriving allotments from those fixtures is not a second source of EV truth.**
 D024 §5 keeps electoral-vote counts out of ``ec_state_roster_by_year.json`` so that
@@ -409,7 +409,7 @@ class TestTheCatalog:
 class TestRealAllotments:
     """The reconciliation against the electoral record as the Archives published it.
 
-    Ten elections, parsed offline from committed fixtures. This is the test that would
+    Eleven elections, parsed offline from committed fixtures. This is the test that would
     fail if the curated seat series were wrong anywhere it is exercised, and it covers
     both Reconstruction years the epic was gated on.
     """

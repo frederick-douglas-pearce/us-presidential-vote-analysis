@@ -4005,7 +4005,7 @@ Maryland and 2000 DC, differing only in which figure the Archives printed in the
 so `total_electoral_votes` carries a cast figure in a slot D041 defines as appointed, and this
 reconciliation is the first thing that ever looked. `KIND_RECORD_UNDERSTATES_ALLOTMENT` names that
 honestly rather than recording the register as correct there, which would enter the D046 inversion
-into a corrections catalog. **The spine correction is deferred to its own EC-domain issue**: it
+into a corrections catalog. **The spine correction is deferred to its own EC-domain issue, #243**: it
 moves 1864's `ec_denominator` 233 → 234, changing `ec_share_full` and the public API snapshot
 content hash. The entry is **self-cleaning** — when that lands, the row reconciles and the
 stale-declaration guard requires its removal.

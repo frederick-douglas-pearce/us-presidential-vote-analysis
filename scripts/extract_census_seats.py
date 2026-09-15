@@ -1,5 +1,8 @@
-"""Extract published House seats per state from Census Table 3, and regenerate the
-curated authority in :mod:`usvote.census.seats`.
+"""Render published House seats per state from Census Table 3, for comparison against
+the curated authority in :mod:`usvote.census.seats`.
+
+**It writes no file.** This docstring is the ``--help`` text, so it must not promise a
+regeneration the script does not perform; see the bullets below for what it does.
 
 **This is a local tool, not shipped code, and that placement is the whole design** (#183
 architect review, Q1). The full-span published seats source

@@ -2,8 +2,8 @@
 
 Excluded by default via the ``integration`` marker; run with ``pytest -m integration``.
 
-**What only this can establish.** The offline suite reconciles ten elections, because
-ten Archives pages are committed as fixtures. It cannot reconcile the other forty-one,
+**What only this can establish.** The offline suite reconciles eleven elections, because
+eleven Archives pages are committed as fixtures. It cannot reconcile the other forty,
 and it cannot check the *membership* claim the exception catalog makes — that every
 declared disagreement names a state which actually participated in that election —
 because that claim is only meaningful against a complete spine.
@@ -129,14 +129,19 @@ def test_every_declared_exception_names_a_participating_state(
 
 
 @pytest.mark.integration
-def test_the_two_exception_kinds_behave_oppositely_in_the_record(
+def test_each_exception_kind_behaves_as_its_definition_says(
     integration_db_config: dict[str, Any],
 ) -> None:
-    """The asymmetry the catalog's two kinds exist to name.
+    """The asymmetry the catalog's three kinds exist to name.
 
     ``electoral_votes_withheld`` rows hold seats and cast nothing;
     ``seats_not_apportioned`` rows cast votes with no seats. A one-sided rule passes the
     second in silence, which is why both are catalogued rather than lumped together.
+
+    ``electoral_record_understates_allotment`` is the odd one out and the reason this
+    test enumerates rather than pairs: it has a zero on **neither** side — seats exist
+    and votes were cast, just fewer than the apportionment implies. A rule written from
+    the first two would not have caught it, which is exactly what happened.
     """
     dbc = DBC(integration_db_config)
     try:
@@ -162,6 +167,12 @@ def test_the_two_exception_kinds_behave_oppositely_in_the_record(
                 assert not pd.isna(row.seats) and int(row.seats) > 0
                 assert 0 < int(row.total_electoral_votes) < int(
                     row.expected_electoral_votes
+                )
+            else:  # pragma: no cover - a new kind must not pass unchecked
+                pytest.fail(
+                    f"{exception.kind!r} has no behavioural assertion here; a kind "
+                    f"added to SEAT_EXCEPTION_KINDS without one would be verified by "
+                    f"nothing."
                 )
     finally:
         dbc.close_connection()

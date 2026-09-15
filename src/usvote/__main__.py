@@ -319,11 +319,35 @@ def _run_all(args: argparse.Namespace) -> int:
             environ=environ,
             close=True,
         )
+    except SeatReconciliationError as e:
+        # Its OWN arm, not the census one, and the distinction is the whole point of
+        # where this guard is wired (D063). The seat reconciliation reads the EC spine
+        # and a curated in-repo constant -- no census population, no corpus -- so it
+        # runs on builds that skip census entirely, the default for a public clone.
+        # Folding it into the census arm printed "Census ingestion failed" two lines
+        # after "building WITHOUT census population", and offered a census remedy (the
+        # published layout, the jurisdiction set) that can never cause a seat breach.
+        # #183 review caught exactly that, on the very path the placement protects.
+        committed = "EC, MIT and UCSB" if ucsb_html_dir is not None else "EC and MIT"
+        print(f"Seat reconciliation failed: {e}", file=sys.stderr)
+        print(
+            f"The {committed} loads COMMITTED before this point, but the join and "
+            f"hybrid views were NOT rebuilt — the warehouse holds facts and no views. "
+            f"This is not a corpus problem and re-snapshotting changes nothing: the "
+            f"published apportionment and the recorded electoral allotment disagree "
+            f"somewhere the catalog does not explain. Either declare the row in "
+            f"SEAT_RECONCILIATION_EXCEPTIONS with a public-domain citation and a "
+            f"docs/corrections.md entry, or correct the seat series in "
+            f"usvote/census/seats.py — then re-run `python -m usvote all --replace` to "
+            f"rebuild cleanly. A bare re-run without --replace will hit a unique "
+            f"violation on the already-loaded sources.",
+            file=sys.stderr,
+        )
+        return 1
     except (
         CensusScrapeError,
         CensusTransformError,
         CensusParseError,
-        SeatReconciliationError,
     ) as e:
         # Census runs after the other source loads and BEFORE rebuild_views
         # (warehouse.py), and every pipeline owns its own transaction (#84a). So a

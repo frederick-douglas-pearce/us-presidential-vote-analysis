@@ -27,8 +27,11 @@ Two properties follow, and the second is the one that matters:
   itself achieve it, and #183 shipped a first version that claimed the property while
   wiring the gate only inside the census pipeline.
 
-**How it stays honest.** ``scripts/extract_census_seats.py`` regenerates this constant
-from the published file, and ``tests/unit/test_census_seats.py::TestRealCorpus``
+**How it stays honest.** ``scripts/extract_census_seats.py`` **renders the published
+table for comparison** -- it writes no file, and its raw output is deliberately not this
+constant (it would emit 1920, which governs no election, and cannot emit 2020, which
+comes from a different published file). Curating means selecting. The check that matters
+is ``tests/unit/test_census_seats.py::TestRealCorpus``, which
 re-extracts and compares cell by cell, **skipping when ``USVOTE_CENSUS_CORPUS_DIR`` is
 unset** (the #234 pattern, so CI never needs ``pdftotext``). Running it is a merge
 precondition, exactly as the UCSB cross-source control test is.

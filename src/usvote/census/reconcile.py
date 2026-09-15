@@ -104,9 +104,8 @@ KIND_SEATS_NOT_APPORTIONED = "seats_not_apportioned"
 #: spine** that this repo has not yet corrected. Folding it into either of the others
 #: would file a defect as a fact. Declaring it under a bare "the record is
 #: authoritative" framing would be worse still: it would enter, in a corrections
-#: catalog, the claim that
-#: a cast figure *is* the allotment — the exact inversion of D041/D046's
-#: ``appointed >= cast >= counted`` ladder.
+#: catalog, the claim that a cast figure *is* the allotment — the exact inversion of
+#: D041/D046's ``appointed >= cast >= counted`` ladder.
 #:
 #: **It is self-cleaning.** When the spine correction lands, the row reconciles, and
 #: :func:`_assert_no_stale_exception`'s first branch fires and forces this entry's
@@ -266,8 +265,8 @@ SEAT_RECONCILIATION_EXCEPTIONS: tuple[SeatException, ...] = (
             "moves the 1864 denominator from 233 to 234 and so changes ec_share_full "
             "and the public API snapshot content hash, which is an EC-domain change "
             "deferred to its own issue rather than made inside a census validation "
-            "story. When it lands this row will reconcile and the stale-declaration "
-            "guard will require this entry's removal."
+            "story — it is tracked as #243. When it lands this row will reconcile and "
+            "the stale-declaration guard will require this entry's removal."
         ),
     ),
 )
@@ -446,8 +445,8 @@ def _assert_no_stale_exception(frame: pd.DataFrame) -> None:
     declaration's ``recorded_electoral_votes`` still matched the record — but that
     condition is precisely what makes :func:`_assert_every_allotment_is_explained`
     refuse the exception and raise, and that guard runs first, so the branch was
-    unreachable
-    through the seam. The pinning it was meant to provide is real and still holds; it is
+    unreachable through the seam. The pinning it was meant to provide is real and still
+    holds; it is
     enforced *there*, where the exception is matched, not here.
     """
     reconciling = {
@@ -493,9 +492,17 @@ def assert_seats_reconcile(ec_participation: pd.DataFrame) -> None:
     for *this* seam, which matters because a guard call **was** silently droppable until
     that test existed: the suite stayed green with one removed.
 
-    Called **before** any write, so a disagreement leaves nothing written. It reads only
-    the injected spine, so :func:`usvote.warehouse.run_warehouse` can call it with no
-    census corpus present.
+    It reads only the injected spine, so :func:`usvote.warehouse.run_warehouse` can call
+    it with no census corpus present — which is the call site that matters (D063).
+
+    **What "before the write" does and does not mean here, because the two call sites
+    differ.** From :func:`usvote.census.pipeline.run_census_pipeline` it runs before
+    that pipeline's own transaction, so a breach leaves ``dwh.census_population``
+    unwritten. From ``run_warehouse`` it runs **after** every source pipeline has
+    committed its own transaction (the per-source atomicity of #84a) and **before**
+    ``rebuild_views``, so a breach there leaves the loaded facts in place and no join or
+    hybrid views — the same recovery shape a census failure already has. Saying it
+    "leaves nothing written" would be true of the first and false of the second.
     """
     frame = build_seat_reconciliation(ec_participation)
     _assert_every_allotment_is_explained(frame)
