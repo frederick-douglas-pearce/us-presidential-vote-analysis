@@ -111,11 +111,16 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     def views(dbc: object) -> None:
         calls.append(("views", {}))
 
+    def seats(ec_participation: object) -> None:
+        calls.append(("seats", {}))
+
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", mit)
     monkeypatch.setattr(warehouse, "run_ucsb_pipeline", ucsb)
     monkeypatch.setattr(warehouse, "run_census_pipeline", census)
     monkeypatch.setattr(warehouse, "rebuild_views", views)
+    monkeypatch.setattr(warehouse, "assert_seats_reconcile", seats)
+    monkeypatch.setattr(warehouse, "read_ec_participation", lambda _dbc: object())
     # The two #167 gates read the live views, so they are stubbed clean here rather
     # than recorded -- every test using this fixture drives the default
     # ``validate_overlap=True``
@@ -134,7 +139,7 @@ def test_full_build_sequences_ec_mit_ucsb_views(
         dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", years={2016, 2020}
     )
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "views"]
     assert result == WarehouseResult(
         ec_rows=5,
         mit_rows=3,
@@ -170,7 +175,7 @@ def test_census_runs_after_ec_and_before_the_views_when_a_corpus_is_given(
     )
 
     names = [name for name, _ in recorder]
-    assert names == ["ec", "mit", "ucsb", "census", "views"]
+    assert names == ["ec", "mit", "ucsb", "census", "seats", "views"]
     assert names.index("census") > names.index("ec")
     assert names.index("census") < names.index("views")
     assert result.census_rows == 7
@@ -192,6 +197,48 @@ def test_census_is_skipped_when_no_corpus_directory_is_given(
     assert "census" not in [name for name, _ in recorder]
     assert result.census_rows is None
     assert SOURCE_CENSUS not in result.sources_loaded
+
+
+def test_the_seat_reconciliation_runs_even_with_no_census_corpus(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """#183/D063's headline property, wired here rather than merely claimed.
+
+    The seat reconciliation reads the **EC spine and a curated in-repo constant** — no
+    census population, no corpus. So it must fire on a build that skips census entirely,
+    which is the default for a fresh public clone.
+
+    **This is a regression test for a real defect.** #183's first revision called the
+    guard only from ``run_census_pipeline``, which reads the population corpus before
+    reaching it, while four prose sites (D063's own rationale among them) claimed it ran
+    on every build with no corpus present. It fired exactly when a corpus happened to
+    exist — the posture curating the seat series was meant to remove.
+    """
+    names = [name for name, _ in recorder]
+    assert "census" not in names  # no corpus given
+
+    result = run_warehouse(dbc, "states.shp", "mit.csv", years={2016, 2020})
+
+    names = [name for name, _ in recorder]
+    assert "census" not in names, "this test is only meaningful on a census-free build"
+    assert "seats" in names, (
+        "the seat reconciliation must run without a census corpus — that is the whole "
+        "property D063 claims for curating the seats"
+    )
+    assert result.census_rows is None
+
+
+def test_the_seat_reconciliation_runs_before_the_views_are_rebuilt(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """A breach must not leave views built over facts the reconciliation rejects."""
+    run_warehouse(dbc, "states.shp", "mit.csv", years={2016, 2020})
+
+    names = [name for name, _ in recorder]
+    assert names.index("seats") < names.index("views")
+    assert names.index("ec") < names.index("seats"), (
+        "it reads the EC spine, so the EC stage must have loaded first"
+    )
 
 
 def test_census_is_loaded_additively_never_destructively(
@@ -242,7 +289,7 @@ def test_ucsb_skipped_when_dir_is_none(
     # while the views still build over the EC + MIT core.
     result = run_warehouse(dbc, "states.shp", "mit.csv")
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "seats", "views"]
     assert result.ucsb_pv_rows is None
     assert result.ucsb_roster_rows is None
     assert result.sources_loaded == frozenset({SOURCE_EC, SOURCE_MIT})
@@ -255,6 +302,11 @@ def test_years_threads_to_every_source(
     run_warehouse(dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", years={1976})
 
     for name, kwargs in recorder:
+        if name == "seats":
+            # The seat reconciliation deliberately takes no `years`: it reconciles the
+            # whole spine the build just loaded, and a year-scoped reconciliation would
+            # be a narrower claim than the one #183 makes.
+            continue
         if name != "views":
             assert kwargs["years"] == {1976}, f"{name} did not receive years"
 
@@ -275,6 +327,10 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", lambda *a, **k: ([], []))
     monkeypatch.setattr(warehouse, "rebuild_views", views)
+    # The #183 seat reconciliation reads the spine, which a RecordingConnection cannot
+    # serve either -- same reason as the gates below.
+    monkeypatch.setattr(warehouse, "read_ec_participation", lambda _dbc: object())
+    monkeypatch.setattr(warehouse, "assert_seats_reconcile", lambda _frame: None)
 
     # The #167 gates read the live views, which a RecordingConnection cannot serve.
     def overlap(_dbc: object) -> OverlapReport:
@@ -389,6 +445,7 @@ def test_run_warehouse_validates_the_overlap_after_the_views_are_built(
         "ec",
         "mit",
         "ucsb",
+        "seats",
         "views",
         "overlap-cells",
         "margin",
@@ -415,7 +472,7 @@ def test_validate_overlap_false_skips_both_gates(
         dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", validate_overlap=False
     )
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "views"]
     assert result.overlap is None
 
 

@@ -502,7 +502,28 @@ class TestProvenanceIsSingleSourced:
         assert transform.SOURCE_VINTAGES == {
             "resident_1790_1990": "census-bureau-pop-twps0056-2002",
             "resident_1910_2020": "census-bureau-apportionment-2020",
+            "seats_1789_2010": "census-bureau-cph-2-1-table-3",
+            "seats_2020": "census-bureau-apportionment-2020",
         }
+
+    def test_the_two_2020_release_files_share_a_vintage_on_purpose(self) -> None:
+        """Not a copy-paste slip, and worth pinning so nobody "fixes" it.
+
+        ``population-change-data-table.xlsx`` and ``apportionment.csv`` are two files
+        from the *same* 2020 apportionment release, so they genuinely carry the same
+        published tabulation. The consequence is that the pin above cannot catch a swap
+        between **those two** by value — ``SOURCE_FILENAMES`` is what separates them, and
+        the swap that pin exists for (the two *resident* files, whose vintages differ)
+        is still caught.
+        """
+        assert (
+            transform.SOURCE_VINTAGES["resident_1910_2020"]
+            == transform.SOURCE_VINTAGES["seats_2020"]
+        )
+        assert (
+            transform.SOURCE_FILENAMES["resident_1910_2020"]
+            != transform.SOURCE_FILENAMES["seats_2020"]
+        )
 
     def test_every_loaded_row_carries_its_own_files_vintage(self) -> None:
         # The end-to-end version: a row's vintage must match the file the stitch

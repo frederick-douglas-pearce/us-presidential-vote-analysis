@@ -21,6 +21,7 @@ from usvote.census.config import (
 )
 from usvote.census.conform import CensusConformError
 from usvote.census.pipeline import run_census_pipeline
+from usvote.census.reconcile import SeatReconciliationError
 from usvote.config import ConfigError
 
 
@@ -44,6 +45,9 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def conform(census: pd.DataFrame, ec: pd.DataFrame) -> None:
         calls.append("conform")
 
+    def reconcile(ec: pd.DataFrame) -> None:
+        calls.append("reconcile")
+
     def load(dbc: Any, frame: pd.DataFrame, *, replace: bool = False) -> pd.DataFrame:
         calls.append(f"load(replace={replace})")
         return frame
@@ -52,6 +56,7 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(census_pipeline, "read_ec_participation", spine)
     monkeypatch.setattr(census_pipeline, "transform_census", transform)
     monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", conform)
+    monkeypatch.setattr(census_pipeline, "assert_seats_reconcile", reconcile)
     monkeypatch.setattr(census_pipeline, "load_census_population", load)
     monkeypatch.setattr(
         census_pipeline,
@@ -73,6 +78,7 @@ def test_the_stages_run_in_order(stages: list[str]) -> None:
         "spine",
         "transform",
         "conform",
+        "reconcile",
         "load(replace=False)",
     ]
 
@@ -118,6 +124,30 @@ def test_a_conformance_failure_blocks_the_write_entirely(
     with pytest.raises(CensusConformError):
         run_census_pipeline(make_dbc(conn), "corpus/")
     assert "conform" in stages
+    assert not any(stage.startswith("load") for stage in stages)
+    assert conn.commits == 0
+
+
+def test_a_seat_reconciliation_failure_blocks_the_write_entirely(
+    monkeypatch: pytest.MonkeyPatch, stages: list[str]
+) -> None:
+    """The #183 guard gets the same consequence test as the #182 one.
+
+    Ordering alone does not establish it. The seat reconciliation reads no census
+    population at all, so it is easy to assume it is advisory; it is not — an
+    undeclared disagreement between the published apportionment and the electoral
+    record must leave the warehouse untouched.
+    """
+
+    def refuse(ec: pd.DataFrame) -> None:
+        stages.append("reconcile")
+        raise SeatReconciliationError("an allotment the apportionment does not explain")
+
+    monkeypatch.setattr(census_pipeline, "assert_seats_reconcile", refuse)
+    conn = RecordingConnection()
+    with pytest.raises(SeatReconciliationError):
+        run_census_pipeline(make_dbc(conn), "corpus/")
+    assert "reconcile" in stages
     assert not any(stage.startswith("load") for stage in stages)
     assert conn.commits == 0
 

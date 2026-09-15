@@ -5,7 +5,7 @@ that structural, not incidental: nothing under ``usvote/api/`` may import
 :mod:`usvote.db`, psycopg2, :mod:`usvote.snapshot` (the build module, which drags pandas
 + the DB stack), :mod:`usvote.hybrid` (E7's computation core — pandas again), or pandas
 itself. This mirrors the project's other greppable layering guards
-(``test_layering.test_no_pv_module_names_the_ec_votes_fact``;
+(``test_layering.test_no_lower_subpackage_names_the_ec_votes_fact_in_code``;
 ``test_warehouse.test_no_pv_source_imports_the_warehouse_composition_root``) — a violation
 fails this test, not review.
 

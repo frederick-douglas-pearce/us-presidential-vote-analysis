@@ -18,6 +18,7 @@ import pandas as pd
 from usvote.census.conform import assert_conforms_to_spine
 from usvote.census.load import load_census_population
 from usvote.census.parse import parse_population_change, parse_resident_1790_1990
+from usvote.census.reconcile import assert_seats_reconcile
 from usvote.census.scrape import (
     RESIDENT_1790_1990,
     RESIDENT_1910_2020,
@@ -68,6 +69,20 @@ def run_census_pipeline(
     ``tests/integration/test_census_conform.py``. Both sit outside this seam, and the
     second needs a corpus and a database.
 
+    The **seat reconciliation** (:func:`usvote.census.reconcile.assert_seats_reconcile`)
+    runs beside it, and also before the write, for the same reason. It reads no census
+    *population* at all — only the injected spine and the curated seat series — so it is
+    deliberately not folded into the conformance seam above: a population-side failure
+    and a seat-side failure are different findings and must be able to fire
+    independently.
+
+    **It is also called from** :func:`usvote.warehouse.run_warehouse`, **and that call
+    is the load-bearing one.** This one is reachable only on a build that has a census
+    corpus, because the lines above it read that corpus first — so if this were the only
+    call site, the gate would fire exactly when a corpus happened to be present. Since
+    it needs neither, the composition root calls it unconditionally, and this call is
+    the narrower belt-and-braces one for a direct ``python -m usvote.census`` load.
+
     **Zero network requests.** Everything comes from the snapshotted corpus, whose
     completeness is asserted before a byte is parsed — a corpus missing a file fails
     loudly rather than building a warehouse short that century. Populate it first with
@@ -94,6 +109,7 @@ def run_census_pipeline(
     ec_participation = read_ec_participation(dbc)
     frame = transform_census(rows_by_source, ec_participation)
     assert_conforms_to_spine(frame, ec_participation)
+    assert_seats_reconcile(ec_participation)
 
     with dbc.transaction():
         loaded = load_census_population(dbc, frame, replace=replace)

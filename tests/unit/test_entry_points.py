@@ -977,6 +977,54 @@ def test_all_reports_a_census_failure_as_a_half_built_warehouse(
     assert "usvote.census snapshot" in err
 
 
+def test_a_seat_breach_is_not_reported_as_a_census_failure(
+    top_env: dict[str, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#183 review, N2: the seat gate gets its own arm and its own remedy.
+
+    The seat reconciliation reads the EC spine and a curated in-repo constant — no census
+    population, no corpus — so it runs on builds that skip census entirely, which is the
+    default for a public clone and the path this fixture takes. Folding it into the
+    census arm printed **"Census ingestion failed"** two lines after the NOTICE saying
+    census was not being ingested, and offered a census remedy (the published layout, the
+    jurisdiction set) that can never be the cause of a seat breach.
+
+    So this asserts the message is *right*, not merely that one exists: the wrong remedy
+    must be absent, which is the half a bare "it printed something" check would miss.
+    """
+    from usvote.census.reconcile import SeatReconciliationError
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise SeatReconciliationError(
+            "1 electoral allotment(s) the published apportionment does not explain"
+        )
+
+    monkeypatch.delenv("USVOTE_CENSUS_CORPUS_DIR", raising=False)
+    monkeypatch.setattr(top, "run_warehouse", boom)
+    assert top.main(["all"]) == 1
+
+    err = capsys.readouterr().err
+    assert "Seat reconciliation failed" in err
+    assert "Census ingestion failed" not in err, (
+        "a seat breach reported as a census failure, on a build carrying no census"
+    )
+
+    # Scope the remedy assertions to the failure report. The stderr stream also carries
+    # the earlier NOTICE that census is being skipped, which legitimately names
+    # `usvote.census snapshot` as how to populate a corpus — asserting over the whole
+    # stream would confuse that correct message with this arm's remedy.
+    report = err.split("Seat reconciliation failed", 1)[1]
+    assert "jurisdiction set moved" not in report, "offered the census remedy"
+    assert "usvote.census snapshot" not in report, "re-snapshotting fixes nothing here"
+    assert "SEAT_RECONCILIATION_EXCEPTIONS" in report, "no actionable remedy given"
+    assert "COMMITTED" in report and "NOT rebuilt" in report, (
+        "the operator is not told which half of the warehouse exists"
+    )
+    assert "--replace" in report, "no recovery path given"
+
+
 def test_all_catches_every_census_error_type_not_just_the_scrape_one(
     top_env: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
