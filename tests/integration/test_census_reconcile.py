@@ -28,6 +28,7 @@ import pytest
 from tests._helpers import fake_state_geo
 from usvote.census.reconcile import (
     KIND_ELECTORAL_VOTES_WITHHELD,
+    KIND_RECORD_UNDERSTATES_ALLOTMENT,
     KIND_SEATS_NOT_APPORTIONED,
     SEAT_RECONCILIATION_EXCEPTIONS,
     assert_seats_reconcile,
@@ -153,5 +154,14 @@ def test_the_two_exception_kinds_behave_oppositely_in_the_record(
             elif exception.kind == KIND_SEATS_NOT_APPORTIONED:
                 assert pd.isna(row.seats)
                 assert int(row.total_electoral_votes) > 0
+            elif exception.kind == KIND_RECORD_UNDERSTATES_ALLOTMENT:
+                # The third kind is the asymmetry's odd one out: seats exist AND votes
+                # were cast, but fewer than the apportionment implies. Both other kinds
+                # have a zero on one side; this one has neither, which is why a rule
+                # written from those two would not have caught it.
+                assert not pd.isna(row.seats) and int(row.seats) > 0
+                assert 0 < int(row.total_electoral_votes) < int(
+                    row.expected_electoral_votes
+                )
     finally:
         dbc.close_connection()

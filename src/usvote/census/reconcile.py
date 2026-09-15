@@ -3,14 +3,22 @@
 The allotment implied by an apportionment is already in
 ``dwh.votes.total_electoral_votes``, so the census-derived seat count can be checked
 against it across the whole series. This is the epic's strongest validation (#129) and
-it has the two-way shape :func:`usvote.pv.status.assert_catalog_matches_spine` and
+it has the two-way shape :func:`usvote.pv.absences.assert_catalog_matches_spine` and
 :func:`usvote.census.conform.assert_spine_states_covered` already use.
 
-**Where the disagreements win.** The recorded electoral votes are authoritative (D006:
-the Archives are the spine). A disagreement is therefore a **documented correction**,
-never a silent adjustment of the fact — :data:`SEAT_RECONCILIATION_EXCEPTIONS` is that
-document, catalogued in ``docs/corrections.md``, and an **undeclared** disagreement
-fails the build.
+**Where the disagreements win, and the one place that is not the whole story.** The
+recorded electoral votes are authoritative (D006: the Archives are the spine), so a
+disagreement is a **documented correction**, never a silent adjustment of the fact —
+:data:`SEAT_RECONCILIATION_EXCEPTIONS` is that document, catalogued in
+``docs/corrections.md``, and an **undeclared** disagreement fails the build.
+
+**But "the record wins" is a rule about precedence, not a claim that every recorded
+value is right.** One catalogued row — ``(1864, Nevada)`` — is a case where the record
+is *known* to disagree with the repo's own D041 contract, and the catalog says so in as
+many words rather than recording the register as correct there. That is what
+:data:`KIND_RECORD_UNDERSTATES_ALLOTMENT` exists for, and why it is a separate kind:
+laundering a known defect into "the record is authoritative here" is exactly the
+inversion D046 warns about.
 
 **The rule, and the wrong-easy-answer it is not.** A state's electoral allotment is its
 apportioned House seats **plus two** for its senators::
@@ -29,9 +37,12 @@ print an explicit ``0`` for a state that cast no electoral votes rather than omi
 So a Reconstruction state excluded from the count, and West Virginia holding votes the
 1860 apportionment never gave it, are **both** rows that exist and disagree — both
 caught by :func:`_assert_every_allotment_is_explained`, iterating the electoral record.
-The reverse direction cannot fire on a dense spine at all, which is exactly why it is
-kept: it is a **density-regression backstop**, and describing it as the West Virginia
-catcher (as an earlier draft of this story's plan did) gets the mechanism backwards.
+Describing the *reverse* direction as the West Virginia catcher (as an earlier draft of
+this story's plan did) gets the mechanism backwards, and a reverse guard was written and
+then **removed**: on a dense spine it could not fire at all, because both of its inputs
+derived from one call to :func:`spine_participation` over one frame. A guard whose
+difference is empty for every possible input is not a backstop; it is a comment that
+raises.
 
 **The check with real teeth is the stale-declaration reciprocal**
 (:func:`_assert_no_stale_exception`): a declared exception that starts *reconciling*
@@ -41,7 +52,9 @@ on asserting a discrepancy that no longer exists.
 **Layering.** The EC spine arrives as an **injected frame**, exactly as
 :func:`usvote.census.transform.transform_census` and
 :func:`usvote.census.conform.assert_conforms_to_spine` take it — the D006-allowed
-direction. Nothing here names ``dwh.votes``, so the greppable D015 invariant holds, and
+direction. No **code** here names the EC fact table — the invariant is enforced by
+``test_no_lower_subpackage_names_the_ec_votes_fact_in_code[census]``, which #183 added
+``census`` to after finding the claim was convention rather than enforcement — and
 the DB read stays in :mod:`usvote.census.pipeline`.
 
 It consumes :func:`usvote.census.conform.spine_participation` rather than the fuller
@@ -83,11 +96,29 @@ KIND_ELECTORAL_VOTES_WITHHELD = "electoral_votes_withheld"
 #: "missing state" guard silently passes.
 KIND_SEATS_NOT_APPORTIONED = "seats_not_apportioned"
 
+#: A row where the **recorded allotment is a cast figure**, not the appointed one — so
+#: the electoral record, not the census, is the side that is wrong.
+#:
+#: **This kind is deliberately uncomfortable, and it is separate for that reason.** The
+#: other two record a real historical fact; this one records a **known defect in the
+#: spine** that this repo has not yet corrected. Folding it into either of the others
+#: would file a defect as a fact. Declaring it under a bare "the record is
+#: authoritative" framing would be worse still: it would enter, in a corrections
+#: catalog, the claim that
+#: a cast figure *is* the allotment — the exact inversion of D041/D046's
+#: ``appointed >= cast >= counted`` ladder.
+#:
+#: **It is self-cleaning.** When the spine correction lands, the row reconciles, and
+#: :func:`_assert_no_stale_exception`'s first branch fires and forces this entry's
+#: removal. The catalog cannot quietly outlive the defect it describes.
+KIND_RECORD_UNDERSTATES_ALLOTMENT = "electoral_record_understates_allotment"
+
 #: The closed vocabulary, on the :data:`usvote.census.conform.EXCEPTION_KINDS`
 #: precedent.
 SEAT_EXCEPTION_KINDS: tuple[str, ...] = (
     KIND_ELECTORAL_VOTES_WITHHELD,
     KIND_SEATS_NOT_APPORTIONED,
+    KIND_RECORD_UNDERSTATES_ALLOTMENT,
 )
 
 
@@ -138,10 +169,19 @@ _WEST_VIRGINIA_ADMISSION = (
     "electors in 1864 and 1868."
 )
 
+_NEVADA_1864_ADMISSION = (
+    "Nevada was admitted 31 October 1864 by presidential proclamation (13 Stat. 749) "
+    "under the Enabling Act of 21 March 1864 (13 Stat. 30), eight days before the "
+    "election, and was apportioned one representative under the 1860 census. One "
+    "representative plus two senators is an appointed allotment of three; the National "
+    "Archives table prints two in its allotment column, and its 1864 national total of "
+    "233 is likewise a count of votes cast."
+)
+
 #: Every ``(election_year, state)`` where the published seats and the recorded allotment
-#: disagree, with the cause. **Sixteen rows, in two kinds**, and the split is the one
-#: :data:`SEAT_EXCEPTION_KINDS` draws: seats without electoral votes, and electoral
-#: votes without seats.
+#: disagree, with the cause. **Seventeen rows, in three kinds.** Two of them are facts
+#: about history — seats without electoral votes, and electoral votes without seats —
+#: and the third records a known defect in the electoral record itself.
 #:
 #: The 14 withheld rows are **1864 and 1868 only** — 11 states in 1864, three in 1868.
 #: 1872 has none: by then every state was readmitted, and Arkansas's and Louisiana's
@@ -208,6 +248,27 @@ SEAT_RECONCILIATION_EXCEPTIONS: tuple[SeatException, ...] = (
             ),
         )
         for year in (1864, 1868)
+    ),
+    SeatException(
+        election_year=1864,
+        state="Nevada",
+        kind=KIND_RECORD_UNDERSTATES_ALLOTMENT,
+        recorded_electoral_votes=2,
+        citation=_NEVADA_1864_ADMISSION,
+        note=(
+            "The recorded 2 is a count of votes CAST; the appointed allotment is 3 "
+            "(one representative under the 1860 census, plus two senators). This is "
+            "the same appointed-exceeds-cast situation as 1832 Maryland and 2000 DC, "
+            "which this repo records in ELECTORAL_VOTE_SHORTFALLS; it differs only in "
+            "which figure the Archives printed in the allotment column — the appointed "
+            "one there, the cast one here. So the recorded allotment carries a cast "
+            "figure in a column D041 defines as appointed. Correcting the spine "
+            "moves the 1864 denominator from 233 to 234 and so changes ec_share_full "
+            "and the public API snapshot content hash, which is an EC-domain change "
+            "deferred to its own issue rather than made inside a census validation "
+            "story. When it lands this row will reconcile and the stale-declaration "
+            "guard will require this entry's removal."
+        ),
     ),
 )
 
@@ -287,9 +348,10 @@ def assert_seats_series_complete(participation: pd.DataFrame) -> None:
             f"The curated seat series is missing {len(unique)} "
             f"(census_year, state) cell(s) that the electoral record needs: "
             f"{unique[:10]}{' …' if len(unique) > 10 else ''}. An absent key is a "
-            f"curation omission, not the source's (X) — regenerate "
-            f"usvote/census/seats.py with scripts/extract_census_seats.py rather than "
-            f"declaring an exception for it."
+            f"curation omission, not the source's (X) — add the cell to "
+            f"usvote/census/seats.py (scripts/extract_census_seats.py renders the "
+            f"published table to compare against) rather than declaring an exception "
+            f"for it."
         )
 
 
@@ -374,66 +436,39 @@ def _assert_every_allotment_is_explained(frame: pd.DataFrame) -> None:
         )
 
 
-def _assert_no_unrecorded_seats(
-    frame: pd.DataFrame, participation: pd.DataFrame
-) -> None:
-    """Direction 2 — a density-regression backstop, and deliberately not more.
-
-    On a dense spine every state that existed in an election year has a row, so a seat
-    count with **no** electoral record cannot arise. That is precisely why this is worth
-    keeping and worth describing honestly: if it ever fires, the spine has stopped being
-    rectangular and ``transform.assert_rectangular_state_grain`` has stopped holding —
-    which would silently narrow every downstream per-capita figure.
-    """
-    recorded = {
-        (int(row.election_year), str(row.state))
-        for row in participation.itertuples(index=False)
-    }
-    built = {
-        (int(row.election_year), str(row.state))
-        for row in frame.itertuples(index=False)
-    }
-    dropped = sorted(recorded - built)
-    if dropped:
-        raise SeatReconciliationError(
-            f"{len(dropped)} participating (election_year, state) pair(s) reached the "
-            f"seat reconciliation and did not come out of it: {dropped[:10]}. The EC "
-            f"fact should be dense (D026); this means it is not."
-        )
-
-
 def _assert_no_stale_exception(frame: pd.DataFrame) -> None:
     """The reciprocal, and the one with real teeth.
 
     A declared exception whose ``(year, state)`` now **reconciles** is a false claim in
     ``docs/corrections.md``, and nothing else in the pipeline reads that claim — exactly
     the direction :func:`usvote.census.conform.assert_spine_states_covered` exists for.
-    Also fires when the declared allotment no longer matches the record, so the catalog
-    cannot silently widen into a blanket waiver for a ``(year, state)``.
+    It checks **one** thing, deliberately. An earlier version also re-checked that a
+    declaration's ``recorded_electoral_votes`` still matched the record — but that
+    condition is precisely what makes :func:`_assert_every_allotment_is_explained`
+    refuse the exception and raise, and that guard runs first, so the branch was
+    unreachable
+    through the seam. The pinning it was meant to provide is real and still holds; it is
+    enforced *there*, where the exception is matched, not here.
     """
     reconciling = {
         (int(row.election_year), str(row.state)): bool(row.reconciles)
         for row in frame.itertuples(index=False)
     }
-    recorded_votes = {
-        (int(row.election_year), str(row.state)): int(row.total_electoral_votes)
-        for row in frame.itertuples(index=False)
-    }
-    #: **Scoped to the pairs the frame actually carries, and that bound is load-bearing
-    #: rather than lazy.** This guard runs on whatever frame it is handed, and a frame
-    #: can legitimately be partial — a spine loaded for a subset of years, a test over
-    #: one state. So an *absent* pair is genuinely ambiguous here: it may mean the state
-    #: did not participate (stale) or merely that the frame does not reach it (fine),
-    #: and nothing in the frame distinguishes them. An earlier version of this guard
-    #: read absence as stale and duly reported twelve 1864 declarations as false the
-    #: first time it met a ten-election frame.
-    #:
-    #: **The membership claim is therefore asserted where completeness is guaranteed
-    #: instead of guessed**: offline against the committed EC roster in
-    #: ``tests/unit/test_census_reconcile.py::TestTheRosterFixtureAgrees``, and against
-    #: the live spine in ``tests/integration/test_census_reconcile.py``. What is checked
-    #: *here* is what a partial frame can soundly answer — that no declared disagreement
-    #: has quietly become an agreement.
+    # **Scoped to the pairs the frame actually carries, and that bound is load-bearing
+    # rather than lazy.** This guard runs on whatever frame it is handed, and a frame
+    # can legitimately be partial — a spine loaded for a subset of years, a test over
+    # one state. So an *absent* pair is genuinely ambiguous here: it may mean the state
+    # did not participate (stale) or merely that the frame does not reach it (fine),
+    # and nothing in the frame distinguishes them. An earlier version of this guard
+    # read absence as stale and duly reported twelve 1864 declarations as false the
+    # first time it met a ten-election frame.
+    #
+    # **The membership claim is therefore asserted where completeness is guaranteed
+    # instead of guessed**: offline against the committed EC roster in
+    # ``tests/unit/test_census_reconcile.py::TestTheRosterFixtureAgrees``, and against
+    # the live spine in ``tests/integration/test_census_reconcile.py``. What is checked
+    # *here* is what a partial frame can soundly answer — that no declared disagreement
+    # has quietly become an agreement.
     stale = []
     for exception in SEAT_RECONCILIATION_EXCEPTIONS:
         key = (exception.election_year, exception.state)
@@ -441,12 +476,6 @@ def _assert_no_stale_exception(frame: pd.DataFrame) -> None:
             continue
         if reconciling[key]:
             stale.append(f"{key[1]} in {key[0]} now reconciles without an exception")
-        elif recorded_votes[key] != exception.recorded_electoral_votes:
-            stale.append(
-                f"{key[1]} in {key[0]} is declared against "
-                f"{exception.recorded_electoral_votes} electoral vote(s) but the "
-                f"record says {recorded_votes[key]}"
-            )
     if stale:
         raise SeatReconciliationError(
             f"{len(stale)} stale SEAT_RECONCILIATION_EXCEPTIONS entr(ies): {stale}. A "
@@ -456,16 +485,18 @@ def _assert_no_stale_exception(frame: pd.DataFrame) -> None:
 
 
 def assert_seats_reconcile(ec_participation: pd.DataFrame) -> None:
-    """Run every seat-reconciliation guard. The one seam the pipeline calls.
+    """Run every seat-reconciliation guard. The one seam its callers use.
 
-    All three directions or none, so an individually-wired subset cannot quietly stop
+    Both guards or neither, so an individually-wired subset cannot quietly stop
     running — the reasoning :func:`usvote.census.conform.assert_conforms_to_spine`
-    already applies, and ``test_the_seam_runs_every_guard`` pins it there.
+    already applies. ``TestTheSeam`` in ``tests/unit/test_census_reconcile.py`` pins it
+    for *this* seam, which matters because a guard call **was** silently droppable until
+    that test existed: the suite stayed green with one removed.
 
-    Called **before** the load, so a disagreement leaves nothing written.
+    Called **before** any write, so a disagreement leaves nothing written. It reads only
+    the injected spine, so :func:`usvote.warehouse.run_warehouse` can call it with no
+    census corpus present.
     """
-    participation = spine_participation(ec_participation)
     frame = build_seat_reconciliation(ec_participation)
     _assert_every_allotment_is_explained(frame)
-    _assert_no_unrecorded_seats(frame, participation)
     _assert_no_stale_exception(frame)

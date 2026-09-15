@@ -15,12 +15,19 @@ So the seats are **curated into the repo** as a provenance-carrying constant -- 
 source is public domain (a US government work), unlike UCSB under D022. This script is
 how that constant is produced and how it is re-verified:
 
-* ``python3 scripts/extract_census_seats.py --generate`` rewrites
-  ``src/usvote/census/seats.py`` from the corpus PDF.
-* ``tests/unit/test_census_seats.py::TestRealCorpus`` imports :func:`parse_seats_text`
+* ``python3 scripts/extract_census_seats.py <pdf>`` prints the rendered literal to
+  stdout; ``--show`` prints a per-census summary instead. **It writes no file**, and
+  there is deliberately no ``--generate``: its output is **not** the committed constant
+  and must not be pasted over it wholesale. Two gaps make that a rule rather than a
+  caution -- the PDF's 1920 column is populated, so a bare render emits a census
+  :data:`usvote.census.seats.SEATS_BY_CENSUS` deliberately omits, and 2020 comes from a
+  different published file this script never reads. Curating means selecting; the render
+  is an aid to that, not a replacement for it.
+* **The verification path is the one that matters, and it does exist.**
+  ``tests/unit/test_census_seats.py::TestRealCorpus`` imports :func:`parse_seats_text`
   and :func:`extract_seats_text` and compares the committed constant against a fresh
-  extraction, **skipping when ``USVOTE_CENSUS_CORPUS_DIR`` is unset** -- the #234
-  pattern, so CI never needs ``pdftotext``.
+  extraction, cell by cell, **skipping when ``USVOTE_CENSUS_CORPUS_DIR`` is unset** --
+  the #234 pattern, so CI never needs ``pdftotext``.
 
 **Two published-source hazards live here rather than in ``src/``**, because they are
 properties of the extraction and not of anything the warehouse runs:

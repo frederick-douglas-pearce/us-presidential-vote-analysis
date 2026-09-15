@@ -74,9 +74,14 @@ def run_census_pipeline(
     *population* at all — only the injected spine and the curated seat series — so it is
     deliberately not folded into the conformance seam above: a population-side failure
     and a seat-side failure are different findings and must be able to fire
-    independently. It needs no corpus, because the seats are curated in
-    :mod:`usvote.census.seats` rather than parsed at runtime (#183), which is what makes
-    it an always-on gate rather than one that fires only when a corpus is present.
+    independently.
+
+    **It is also called from** :func:`usvote.warehouse.run_warehouse`, **and that call
+    is the load-bearing one.** This one is reachable only on a build that has a census
+    corpus, because the lines above it read that corpus first — so if this were the only
+    call site, the gate would fire exactly when a corpus happened to be present. Since
+    it needs neither, the composition root calls it unconditionally, and this call is
+    the narrower belt-and-braces one for a direct ``python -m usvote.census`` load.
 
     **Zero network requests.** Everything comes from the snapshotted corpus, whose
     completeness is asserted before a byte is parsed — a corpus missing a file fails

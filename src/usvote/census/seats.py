@@ -20,7 +20,12 @@ Two properties follow, and the second is the one that matters:
 
 * **No new dependency, and the reconciliation is offline.**
 * **It runs on every warehouse build**, with no corpus present -- strictly stronger than
-  a gate that fires only when someone has snapshotted a corpus first.
+  a gate that fires only when someone has snapshotted a corpus first. That property is
+  the wiring's, not this module's: :func:`usvote.warehouse.run_warehouse` calls
+  :func:`usvote.census.reconcile.assert_seats_reconcile` **outside** its
+  ``census_corpus_dir`` branch. Curating the seats is what *allows* that; it does not by
+  itself achieve it, and #183 shipped a first version that claimed the property while
+  wiring the gate only inside the census pipeline.
 
 **How it stays honest.** ``scripts/extract_census_seats.py`` regenerates this constant
 from the published file, and ``tests/unit/test_census_seats.py::TestRealCorpus``
@@ -71,9 +76,6 @@ Sources, both US government works in the public domain:
 """
 
 from __future__ import annotations
-
-#: The published source's ``(X)`` for a state with no apportioned seats under a census.
-NOT_APPORTIONED = None
 
 #: ``{census_year: {state: seats | None}}`` for the **20** censuses that govern an
 #: in-scope election (1820-1910 and 1930-2020; 1920 governs none).

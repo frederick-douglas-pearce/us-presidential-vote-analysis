@@ -63,6 +63,7 @@ from pathlib import Path
 import pandas as pd
 
 from usvote.census.pipeline import run_census_pipeline
+from usvote.census.reconcile import assert_seats_reconcile
 from usvote.db import DBC
 from usvote.hybrid import assert_db_margin_agreement, create_hybrid_views
 from usvote.join import create_ec_pv_views
@@ -71,6 +72,7 @@ from usvote.pipeline import run_ec_pipeline
 from usvote.pv.load import build_pv_union
 from usvote.pv.overlap import OverlapReport, assert_db_overlap_within_tolerance
 from usvote.scrape import Fetch, fetch_url
+from usvote.spine import read_ec_participation
 from usvote.transform import load_state_geo
 from usvote.ucsb.pipeline import run_ucsb_pipeline
 
@@ -317,6 +319,19 @@ def run_warehouse(
                 )
             )
             sources.add(SOURCE_CENSUS)
+
+        # The #183 seat reconciliation is called HERE, not only from the census
+        # pipeline, and the distinction is the whole point of it (D063). It reads the
+        # **EC spine and a curated in-repo constant** -- no census population, no corpus
+        # -- so gating it behind `census_corpus_dir` would have made it fire only for
+        # builds that happen to carry a census snapshot. That is precisely the posture
+        # curating the seat series was meant to avoid, and the first version of #183
+        # shipped claiming otherwise while wiring exactly that.
+        #
+        # It runs BEFORE rebuild_views for the reason every other guard here does: a
+        # breach should not leave a warehouse whose views are built over facts the
+        # reconciliation rejects.
+        assert_seats_reconcile(read_ec_participation(dbc))
 
         rebuild_views(dbc)
 

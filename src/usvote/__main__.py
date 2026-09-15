@@ -49,6 +49,7 @@ from typing import Any
 from usvote import config, scrape
 from usvote.census.config import census_corpus_dir_from_env
 from usvote.census.parse import CensusParseError
+from usvote.census.reconcile import SeatReconciliationError
 from usvote.census.scrape import CensusScrapeError
 from usvote.census.transform import CensusTransformError
 from usvote.db import DBC, DBConnectionError
@@ -318,7 +319,12 @@ def _run_all(args: argparse.Namespace) -> int:
             environ=environ,
             close=True,
         )
-    except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
+    except (
+        CensusScrapeError,
+        CensusTransformError,
+        CensusParseError,
+        SeatReconciliationError,
+    ) as e:
         # Census runs after the other source loads and BEFORE rebuild_views
         # (warehouse.py), and every pipeline owns its own transaction (#84a). So a
         # census failure here leaves a genuinely odd warehouse: the sources that ran are

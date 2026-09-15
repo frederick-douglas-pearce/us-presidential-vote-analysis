@@ -3942,9 +3942,12 @@ mismatch at another.
 
 **The seats are curated into `usvote/census/seats.py`** as a provenance-carrying constant, on the
 `PV_ABSENCE_CATALOG` precedent — available here because the source is a US government work in the
-public domain, unlike UCSB under D022. `scripts/extract_census_seats.py` generates it;
-`tests/unit/test_census_seats.py::TestRealCorpus` re-extracts the published PDF and compares all
-**969** PDF-sourced cells, skipping when `USVOTE_CENSUS_CORPUS_DIR` is unset. **One authority for
+public domain, unlike UCSB under D022. `scripts/extract_census_seats.py` **renders the published table for comparison** — it writes no
+file, and its raw output is deliberately not the committed constant: it would emit 1920 (which
+governs no election and is omitted) and cannot emit 2020 (which comes from a different published
+file). Curating means selecting. The verification path is
+`tests/unit/test_census_seats.py::TestRealCorpus`, which re-extracts the published PDF and compares
+all **969** PDF-sourced cells, skipping when `USVOTE_CENSUS_CORPUS_DIR` is unset. **One authority for
 the whole span**: the 2020 column is folded in rather than stitched from a second live source.
 
 **Rationale.**
@@ -3956,6 +3959,13 @@ the whole span**: the 2020 column is folded in rather than stitched from a secon
   warehouse build with no corpus present, which is strictly stronger than a gate that fires only
   when someone has snapshotted one. Under a runtime-parse design the gate would have had to either
   skip silently when the seats corpus was absent or couple every build to that corpus.
+  **Curating the seats permits this property; the wiring is what delivers it, and #183's first
+  revision claimed it while wiring the opposite.** `assert_seats_reconcile` was reachable only from
+  `run_census_pipeline`, which reads the population corpus first, and `warehouse.py` gates the whole
+  census stage on `census_corpus_dir is not None` — so the gate fired exactly when a corpus was
+  present. Code review caught it. `run_warehouse` now calls the guard **outside** that branch, and
+  `usvote/__main__.py` catches `SeatReconciliationError` so a breach is a message rather than a bare
+  traceback after a multi-minute build.
 - **The trade is a transcription surface**, discharged by the same cross-check that any curated
   catalog gets.
 
@@ -3975,15 +3985,32 @@ the acceptance criterion that an **unexplained** gap fails the build stops being
 existed (D006).
 
 **Which direction catches what — stated because the obvious reading is backwards.** The EC fact is
-**dense** (D026): a state that cast nothing is an explicit `0`-vote row. So *both* exception kinds
-— the 14 Reconstruction rows with seats and no votes, and West Virginia 1864/1868 with votes and
-no seats — are caught by the direction that **iterates the electoral record**. The reverse
-direction cannot fire on a dense spine at all; it is kept as a **density-regression backstop**, and
-an earlier draft of #183's plan wrongly advertised it as the West Virginia catcher. The check with
-real teeth is the **stale-declaration reciprocal**: a declared exception that starts reconciling
-must fail, since nothing else reads that claim.
+**dense** (D026): a state that cast nothing is an explicit `0`-vote row. So *both* historical
+exception kinds — the 14 Reconstruction rows with seats and no votes, and West Virginia 1864/1868
+with votes and no seats — are caught by the direction that **iterates the electoral record**, and
+an earlier draft of #183's plan wrongly advertised the reverse direction as the West Virginia
+catcher. **A reverse guard was written and then removed**: both of its inputs derived from one call
+to `spine_participation` over one frame, so its difference was empty for every possible input, and
+review demonstrated the whole suite stayed green with its call deleted. It had been documented in
+three places as a density-regression backstop it could not be. A guard that cannot fail is the
+defect class this repo names as Class B; shipping one *with prose asserting it guards* is worse
+than not having it. The check with real teeth is the **stale-declaration reciprocal**: a declared
+exception that starts reconciling must fail, since nothing else reads that claim.
 
-**Scope note.** `SEAT_RECONCILIATION_EXCEPTIONS` holds **16** rows in two kinds. 1872 has **none**
+**A third exception kind, added under review, for the one row where the *record* is wrong.**
+`(1864, Nevada)` reconciles to 3 (one seat under the 1860 census + two senators) and the record says
+**2**. Nevada was admitted eight days before the election; the recorded 2 is a count of votes
+**cast**, as is that year's national 233. This is the same appointed-exceeds-cast case as 1832
+Maryland and 2000 DC, differing only in which figure the Archives printed in the allotment column —
+so `total_electoral_votes` carries a cast figure in a slot D041 defines as appointed, and this
+reconciliation is the first thing that ever looked. `KIND_RECORD_UNDERSTATES_ALLOTMENT` names that
+honestly rather than recording the register as correct there, which would enter the D046 inversion
+into a corrections catalog. **The spine correction is deferred to its own EC-domain issue**: it
+moves 1864's `ec_denominator` 233 → 234, changing `ec_share_full` and the public API snapshot
+content hash. The entry is **self-cleaning** — when that lands, the row reconciles and the
+stale-declaration guard requires its removal.
+
+**Scope note.** `SEAT_RECONCILIATION_EXCEPTIONS` holds **17** rows in three kinds. 1872 has **none**
 — a finding, not a silence: every state was readmitted, and Arkansas's and Louisiana's refused
 votes are a `count_status` matter (D046), not an allotment one. Georgia 1868 is likewise absent:
 its nine votes were `disputed` (D044) and its allotment intact.

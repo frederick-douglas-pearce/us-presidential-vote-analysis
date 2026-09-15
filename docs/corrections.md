@@ -325,19 +325,23 @@ The published full-span source (CPH-2-1 Table 3, 1789–2010) is a **text-layer 
 every parser this package ships is stdlib-only. Putting a PDF reader on the runtime path
 would mean `poppler-utils` — a system binary, unpinnable in `uv.lock` — on the CI critical
 path. So the seats are curated into [`src/usvote/census/seats.py`](../src/usvote/census/seats.py)
-as a provenance-carrying constant, which the source's public-domain status permits, and
-`scripts/extract_census_seats.py` regenerates them.
+as a provenance-carrying constant, which the source's public-domain status permits.
+`scripts/extract_census_seats.py` renders the published table for comparison — it writes
+no file, and its raw output is not the committed constant (it would emit 1920, which is
+deliberately omitted, and cannot emit 2020, which comes from a different file).
 `tests/unit/test_census_seats.py::TestRealCorpus` re-extracts the published file and
 compares all 969 PDF-sourced cells, **skipping when `USVOTE_CENSUS_CORPUS_DIR` is unset**.
-The consequence worth stating: the reconciliation runs on **every** warehouse build with no
-corpus present, rather than only when someone has snapshotted one.
+The consequence worth stating: because the reconciliation needs no corpus,
+`usvote/warehouse.py` calls it **outside** its census branch, so it runs on every
+warehouse build rather than only when someone has snapshotted a corpus.
 
-### The sixteen disagreements, in two kinds
+### The seventeen disagreements, in three kinds
 
 | Kind | Rows | What the record says |
 |---|---|---|
 | `electoral_votes_withheld` | 14 | Seats apportioned, **zero** electoral votes cast |
 | `seats_not_apportioned` | 2 | Electoral votes cast with **no** apportioned seats |
+| `electoral_record_understates_allotment` | 1 | The recorded allotment is a **cast** figure |
 
 **`electoral_votes_withheld` — 1864 and 1868 only.** Eleven states in 1864 and three in 1868
 (Mississippi, Texas, Virginia) held apportioned seats under the governing 1860 census and
@@ -359,6 +363,31 @@ announced, and the year reconciles exactly. **Georgia 1868 is likewise absent**:
 votes were counted as `disputed` (D044), not withheld, and its allotment is intact. Whether
 votes counted and how many a state was allotted are different questions, and only the second
 is this reconciliation's business.
+
+**`electoral_record_understates_allotment` — Nevada, 1864. The one row where the *record*
+is the side that is wrong.** Nevada was admitted 31 October 1864 (proclamation, 13 Stat. 749,
+under the Enabling Act of 21 March 1864, 13 Stat. 30), eight days before the election, with one
+apportioned representative. One representative plus two senators is an appointed allotment of
+**3**; the Archives table prints **2**, and its 1864 national total of 233 is likewise a count of
+votes *cast*.
+
+This is the same appointed-exceeds-cast situation as **1832 Maryland** (appointed 10, cast 8) and
+**2000 DC** (appointed 3, cast 2), both already recorded in `ELECTORAL_VOTE_SHORTFALLS`. It differs
+in one respect only — **which figure the Archives printed in the allotment column**: the appointed
+one for those two, the cast one here. So `dwh.votes.total_electoral_votes` carries a cast figure in
+a slot D041 defines as *appointed*, and the seat reconciliation is the first thing in this repo
+that ever looked.
+
+**Why it is catalogued rather than fixed here, and why it gets its own kind.** Correcting the spine
+moves 1864's `ec_denominator` from 233 to 234, which changes `ec_share_full` for that year and
+therefore the **public API snapshot content hash** — an EC-domain change with a D034 cutover,
+deferred to its own issue rather than made inside a census validation story. It is a separate kind
+because the other two record facts about history while this records a **known defect in the
+record**; filing it under either of those would file a defect as a fact, and declaring it under a
+bare "the record is authoritative" framing would enter, in a corrections catalog, the claim that a
+cast figure *is* the allotment — the exact inversion of D046's ladder. **The entry is
+self-cleaning**: when the spine correction lands the row reconciles, and the stale-declaration
+guard then requires this entry's removal.
 
 ### Three source characteristics that look like defects and are not
 

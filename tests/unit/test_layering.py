@@ -147,14 +147,28 @@ def test_the_scan_still_sees_sql_in_a_string_literal() -> None:
 # --- the invariants ---------------------------------------------------------
 
 
-def test_no_pv_module_names_the_ec_votes_fact_in_code() -> None:
-    """D006/D015: EC-star-schema knowledge stays out of the shared PV layer.
+@pytest.mark.parametrize("subpackage", ["pv", "census"])
+def test_no_lower_subpackage_names_the_ec_votes_fact_in_code(subpackage: str) -> None:
+    """D006/D015: EC-star-schema knowledge stays out of the shared and source layers.
 
-    ``usvote/spine.py`` exists precisely so a PV stage can read EC facts across a DI seam
+    ``usvote/spine.py`` exists precisely so a stage can read EC facts across a DI seam
     without naming the fact table itself.
+
+    **``census`` was added in #183 review.** Two census modules already asserted in their
+    docstrings that "the greppable D015 invariant holds" (``conform.py`` since #182,
+    ``reconcile.py`` since #183) while this scan covered ``pv`` only — so for that
+    subpackage the invariant was convention claiming to be enforcement, which is the
+    precise gap this file's own docstring says it exists to close.
+
+    **``ucsb`` is deliberately absent and that is not an oversight**: two modules there
+    name ``dwh.votes`` inside f-string error messages today, so adding it would fail. That
+    is a pre-existing question about UCSB, deferred rather than silently widened into this
+    guard.
     """
-    modules = _modules_under("pv")
-    assert modules, "found no modules under usvote/pv/ — the guard would pass vacuously"
+    modules = _modules_under(subpackage)
+    assert modules, (
+        f"found no modules under usvote/{subpackage}/ — the guard would pass vacuously"
+    )
     offenders = [
         py.relative_to(PKG_ROOT).as_posix()
         for py in modules

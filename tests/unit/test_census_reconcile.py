@@ -37,6 +37,7 @@ from usvote.census.reconcile import (
     DC_FIRST_ELECTION,
     DC_STATE_NAME,
     KIND_ELECTORAL_VOTES_WITHHELD,
+    KIND_RECORD_UNDERSTATES_ALLOTMENT,
     KIND_SEATS_NOT_APPORTIONED,
     SEAT_EXCEPTION_KINDS,
     SEAT_RECONCILIATION_EXCEPTIONS,
@@ -55,12 +56,20 @@ from usvote.transform import APPOINTED_ELECTORS_NOT_IN_TABLE
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 #: The election years whose Archives page is committed as a fixture.
+#:
+#: **1864 was added under review, and its absence is why this suite was green while the
+#: real gate failed.** The first revision reconciled ten elections, none of them 1864 —
+#: the year carrying twelve of the seventeen catalogued disagreements *and* the one
+#: undeclared row (Nevada) that made ``assert_seats_reconcile`` raise on the full spine.
+#: A proof over a convenient subset is not a proof; the full 51-election run lives in the
+#: integration suite and could not be reached offline.
 ARCHIVES_FIXTURE_YEARS: tuple[int, ...] = (
     1824,
     1832,
     1836,
     1856,
     1860,
+    1864,
     1868,
     1872,
     2016,
@@ -79,6 +88,7 @@ EXPECTED_APPOINTED_TOTALS: dict[int, int] = {
     1836: 294,
     1856: 296,
     1860: 303,
+    1864: 233,
     1868: 294,
     1872: 366,
     2016: 538,
@@ -264,7 +274,7 @@ class TestUnexplainedDisagreements:
         the declaration must stop covering it rather than absorb a new number.
         """
         frame = _participation([_row(1868, "Virginia", 7)])
-        with pytest.raises(SeatReconciliationError):
+        with pytest.raises(SeatReconciliationError, match="does not explain"):
             assert_seats_reconcile(frame)
 
 
@@ -301,8 +311,8 @@ class TestStaleDeclarations:
 class TestTheCatalog:
     """Shape of :data:`SEAT_RECONCILIATION_EXCEPTIONS`."""
 
-    def test_sixteen_entries_in_two_kinds(self) -> None:
-        assert len(SEAT_RECONCILIATION_EXCEPTIONS) == 16
+    def test_seventeen_entries_in_three_kinds(self) -> None:
+        assert len(SEAT_RECONCILIATION_EXCEPTIONS) == 17
         withheld = [
             e
             for e in SEAT_RECONCILIATION_EXCEPTIONS
@@ -313,8 +323,34 @@ class TestTheCatalog:
             for e in SEAT_RECONCILIATION_EXCEPTIONS
             if e.kind == KIND_SEATS_NOT_APPORTIONED
         ]
+        understated = [
+            e
+            for e in SEAT_RECONCILIATION_EXCEPTIONS
+            if e.kind == KIND_RECORD_UNDERSTATES_ALLOTMENT
+        ]
         assert len(withheld) == 14
         assert len(unapportioned) == 2
+        assert len(understated) == 1
+
+    def test_the_one_understated_row_is_nevada_1864_and_pins_the_cast_figure(
+        self,
+    ) -> None:
+        """The row where the *record* is wrong, not the census.
+
+        The declaration pins **2** — what the Archives prints — while the note states the
+        appointed allotment is 3. Pinning the record's own value is what makes the entry
+        self-cleaning: when the deferred spine correction restores 3, the row reconciles
+        and the stale-declaration guard demands this entry's removal.
+        """
+        entry = next(
+            e
+            for e in SEAT_RECONCILIATION_EXCEPTIONS
+            if e.kind == KIND_RECORD_UNDERSTATES_ALLOTMENT
+        )
+        assert (entry.election_year, entry.state) == (1864, "Nevada")
+        assert entry.recorded_electoral_votes == 2
+        assert expected_electoral_votes(1864, "Nevada") == 3
+        assert "cast" in entry.note.lower()
 
     def test_the_withheld_rows_are_1864_and_1868_only(self) -> None:
         """Not 'every Reconstruction year' — 1872 has none, and that is a finding."""
@@ -387,8 +423,14 @@ class TestRealAllotments:
     def test_the_whole_series_reconciles(self) -> None:
         assert_seats_reconcile(archives_allotments())
 
-    def test_exactly_four_rows_disagree_and_they_are_the_catalogued_ones(self) -> None:
-        """The disagreements are not merely few — they are the *predicted* ones."""
+    def test_the_disagreeing_rows_are_exactly_the_catalogued_ones(self) -> None:
+        """The disagreements are not merely few — they are the *declared* ones.
+
+        Pinning the whole set rather than a count is what makes a new undeclared row fail
+        here. The first revision asserted four rows over a fixture set that excluded 1864,
+        so thirteen real disagreements — including the undeclared Nevada one — were
+        outside what this test could see.
+        """
         built = build_seat_reconciliation(archives_allotments())
         disagreeing = {
             (int(row.election_year), str(row.state))
@@ -396,6 +438,19 @@ class TestRealAllotments:
             if not row.reconciles
         }
         assert disagreeing == {
+            (1864, "Alabama"),
+            (1864, "Arkansas"),
+            (1864, "Florida"),
+            (1864, "Georgia"),
+            (1864, "Louisiana"),
+            (1864, "Mississippi"),
+            (1864, "Nevada"),
+            (1864, "North Carolina"),
+            (1864, "South Carolina"),
+            (1864, "Tennessee"),
+            (1864, "Texas"),
+            (1864, "Virginia"),
+            (1864, "West Virginia"),
             (1868, "Mississippi"),
             (1868, "Texas"),
             (1868, "Virginia"),
@@ -438,25 +493,68 @@ class TestRealAllotments:
         """Guards the harness: a fixture that stopped parsing would go unnoticed."""
         frame = archives_allotments()
         assert set(frame["year"].unique()) == set(ARCHIVES_FIXTURE_YEARS)
-        assert len(frame.loc[~frame["is_total"]]) == 365
+        assert len(frame.loc[~frame["is_total"]]) == 401
 
 
-class TestDensityBackstop:
-    """Direction 2 — it cannot fire on a dense spine, which is why it is kept.
+class TestTheSeam:
+    """Every guard the seam claims to run, actually runs.
 
-    If it ever does fire, ``transform.assert_rectangular_state_grain`` has stopped
-    holding and every downstream per-capita figure is silently narrowed.
+    This exists because a guard call **was** silently droppable: the first revision wired
+    three guards, one of which could not fire, and review demonstrated that deleting its
+    call left all 1640 unit tests green. That is the shape this pins — not that the guards
+    are correct, but that the seam has not quietly stopped calling one.
     """
 
-    def test_it_fires_when_a_participating_pair_is_dropped(self) -> None:
+    def test_the_seam_runs_every_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from usvote.census import reconcile as module
 
-        frame = _participation([_row(2016, "Texas", 38), _row(2016, "Ohio", 18)])
-        built = build_seat_reconciliation(frame)
-        participation = module.spine_participation(frame)
-        truncated = built[built["state"] != "Ohio"]
-        with pytest.raises(SeatReconciliationError, match="should be dense"):
-            module._assert_no_unrecorded_seats(truncated, participation)
+        called: list[str] = []
+        for name in ("_assert_every_allotment_is_explained", "_assert_no_stale_exception"):
+            monkeypatch.setattr(
+                module,
+                name,
+                lambda *_a, _n=name, **_k: called.append(_n),
+                raising=True,
+            )
+        module.assert_seats_reconcile(_participation([_row(2016, "Texas", 38)]))
+        assert called == [
+            "_assert_every_allotment_is_explained",
+            "_assert_no_stale_exception",
+        ]
+
+    def test_the_recorder_would_catch_a_seam_that_dropped_a_guard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The twin, and it has to do real work to be worth anything.
+
+        A recorder test passes just as well against a seam that calls everything as
+        against one that calls nothing extra — what it must show is that it **fails** when
+        a call goes missing. So this builds the exact defect under review (a seam wired
+        with one guard dropped) and asserts the recorded list no longer matches. Without
+        this, the test above is satisfied by any seam whose body happens to call both
+        names, including by accident.
+        """
+        from usvote.census import reconcile as module
+
+        called: list[str] = []
+        for name in ("_assert_every_allotment_is_explained", "_assert_no_stale_exception"):
+            monkeypatch.setattr(
+                module,
+                name,
+                lambda *_a, _n=name, **_k: called.append(_n),
+                raising=True,
+            )
+
+        def seam_missing_a_guard(ec_participation: pd.DataFrame) -> None:
+            frame = module.build_seat_reconciliation(ec_participation)
+            module._assert_every_allotment_is_explained(frame)
+
+        seam_missing_a_guard(_participation([_row(2016, "Texas", 38)]))
+        assert called == ["_assert_every_allotment_is_explained"]
+        assert called != [
+            "_assert_every_allotment_is_explained",
+            "_assert_no_stale_exception",
+        ]
 
 
 class TestTheRosterFixtureAgrees:
