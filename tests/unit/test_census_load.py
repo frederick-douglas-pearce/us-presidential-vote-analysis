@@ -12,7 +12,21 @@ import pandas as pd
 import pytest
 
 from tests._helpers import RecordingConnection, make_dbc, record_inserts
-from usvote.census.load import load_census_population
+from usvote.census.conform import (
+    BOUNDARY_BASIS_VALUES,
+    BOUNDARY_PRESENT_DAY,
+    COVERAGE_COVERED,
+    COVERAGE_NO_GOVERNING_FIGURE,
+    COVERAGE_VALUES,
+    ELECTION_POPULATION_COLUMNS,
+    ELECTION_POPULATION_TABLE,
+    NULLABLE_ELECTION_POPULATION_COLUMNS,
+    CensusConformError,
+    build_boundary_basis_check,
+    build_coverage_check,
+    build_election_population_column_defs,
+)
+from usvote.census.load import load_census_population, load_election_population
 from usvote.census.schema import (
     BASIS_PRESENT_DAY,
     BASIS_VALUES,
@@ -224,3 +238,174 @@ class TestLoad:
         record_inserts(monkeypatch)
         loaded = load_census_population(make_dbc(RecordingConnection()), _frame())
         assert "population_id" not in loaded.columns
+
+
+# --- the election-grain table (#184 / D064) ---------------------------------
+
+
+def _election_frame(
+    rows: list[tuple[int, str, int | None, int]] | None = None,
+) -> pd.DataFrame:
+    rows = rows or [(2020, "Wyoming", 576_851, 3)]
+    records = [
+        {
+            "election_year": year,
+            "state": state,
+            "governing_census_year": 2010,
+            "total_electoral_votes": tev,
+            "population": population,
+            "boundary_basis": BOUNDARY_PRESENT_DAY,
+            "coverage": (
+                COVERAGE_NO_GOVERNING_FIGURE
+                if population is None
+                else COVERAGE_COVERED
+            ),
+            "population_series": None if population is None else SERIES_RESIDENT,
+        }
+        for year, state, population, tev in rows
+    ]
+    frame = pd.DataFrame(records, columns=list(ELECTION_POPULATION_COLUMNS))
+    frame["population"] = frame["population"].astype("Int64")
+    return frame
+
+
+def _election_defs() -> dict[str, tuple[str, ...]]:
+    return {d[0]: d for d in build_election_population_column_defs()}
+
+
+class TestElectionPopulationDDL:
+    def test_population_is_integer_never_smallint(self) -> None:
+        # The same overflow the census dimension's own DDL note explains, one table
+        # over: a state population reaches ~39M and smallint tops out at 32,767. The
+        # reflex to copy the EC fact's vote-measure type is what this pins against.
+        assert _election_defs()["population"][1] == "integer"
+
+    def test_the_allotment_is_smallint_because_it_really_is_a_vote_count(self) -> None:
+        assert _election_defs()["total_electoral_votes"][1] == "smallint"
+
+    def test_only_the_two_nullable_columns_are_nullable(self) -> None:
+        """D005 at the database boundary, and the *direction* is what matters.
+
+        A NOT NULL on ``population`` would make a participating state with no
+        governing-census figure unloadable, forcing a zero or an interpolation — the
+        one substitution this whole epic refuses. A missing NOT NULL anywhere else lets
+        a half-built row land.
+        """
+        defs = _election_defs()
+        nullable = {
+            name
+            for name, spec in defs.items()
+            if name != "CONSTRAINT"
+            and "not null" not in spec
+            and "primary key" not in spec
+        }
+        assert nullable == set(NULLABLE_ELECTION_POPULATION_COLUMNS)
+
+    def test_the_state_fk_embeds_the_schema_it_was_built_for(self) -> None:
+        defs = {d[0]: d for d in build_election_population_column_defs("other")}
+        assert "REFERENCES other.state" in defs["state"]
+
+    def test_the_checks_are_built_from_the_value_tuples(self) -> None:
+        # Built from the constants, never hand-written: a value added to a vocabulary
+        # and not to its CHECK is a row the transform emits and the database refuses.
+        defs = _election_defs()
+        assert build_boundary_basis_check() in defs["boundary_basis"]
+        assert build_coverage_check() in defs["coverage"]
+        assert build_series_check("population_series") in defs["population_series"]
+
+    def test_every_vocabulary_member_appears_in_its_check(self) -> None:
+        # Non-vacuity for the test above: it compares two calls of the same builder, so
+        # it would pass on a builder that emitted an empty IN list.
+        for value in BOUNDARY_BASIS_VALUES:
+            assert f"'{value}'" in build_boundary_basis_check()
+        for value in COVERAGE_VALUES:
+            assert f"'{value}'" in build_coverage_check()
+
+    def test_the_natural_key_is_a_table_constraint(self) -> None:
+        constraint = next(
+            d for d in build_election_population_column_defs() if d[0] == "CONSTRAINT"
+        )
+        assert constraint[2] == "UNIQUE"
+        assert "(election_year, state)" in constraint[3]
+
+    def test_the_identity_column_is_database_assigned(self) -> None:
+        assert "generated always as identity" in _election_defs()[
+            "election_population_id"
+        ]
+
+
+class TestElectionPopulationLoad:
+    def test_it_creates_the_schema_non_destructively(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_inserts(monkeypatch)
+        conn = RecordingConnection()
+        load_election_population(make_dbc(conn), _election_frame(), replace=True)
+        assert any("CREATE SCHEMA" in q.upper() for q in conn.executed)
+        assert not any("DROP SCHEMA" in q.upper() for q in conn.executed), (
+            "replace must never cascade a schema drop — that would wipe the EC spine"
+        )
+
+    def test_replace_drops_only_the_election_population_table(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_inserts(monkeypatch)
+        conn = RecordingConnection()
+        load_election_population(make_dbc(conn), _election_frame(), replace=True)
+        drops = [q for q in conn.executed if "DROP TABLE" in q.upper()]
+        assert drops and all(ELECTION_POPULATION_TABLE in q for q in drops)
+        assert not any(CENSUS_TABLE in q for q in drops)
+
+    def test_the_default_is_additive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        record_inserts(monkeypatch)
+        conn = RecordingConnection()
+        load_election_population(make_dbc(conn), _election_frame())
+        assert not any("DROP TABLE" in q.upper() for q in conn.executed)
+
+    def test_rows_are_inserted_in_natural_key_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_inserts(monkeypatch)
+        frame = _election_frame(
+            [(2020, "Wyoming", 576_851, 3), (1824, "Ohio", 581_434, 16)]
+        )
+        loaded = load_election_population(make_dbc(RecordingConnection()), frame)
+        assert list(zip(loaded.election_year, loaded.state, strict=True)) == [
+            (1824, "Ohio"),
+            (2020, "Wyoming"),
+        ]
+
+    def test_the_returned_frame_omits_the_database_assigned_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_inserts(monkeypatch)
+        loaded = load_election_population(
+            make_dbc(RecordingConnection()), _election_frame()
+        )
+        assert "election_population_id" not in loaded.columns
+
+    def test_the_write_boundary_re_runs_the_shape_guard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The loader does not trust its caller, and this is the falsifiable statement.
+
+        The pipeline validates before calling, so the guard here is redundant *today*;
+        it stops being redundant the moment a second caller appears, which is how a
+        write boundary quietly loses its check.
+        """
+        record_inserts(monkeypatch)
+        broken = _election_frame().drop(columns=["coverage"])
+        with pytest.raises(CensusConformError, match="!="):
+            load_election_population(make_dbc(RecordingConnection()), broken)
+
+    def test_a_null_population_reaches_the_database(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (1848, Texas) is this row in production: the Republic of Texas was not
+        # enumerated by the US in 1840, and it cast 4 electoral votes.
+        record_inserts(monkeypatch)
+        loaded = load_election_population(
+            make_dbc(RecordingConnection()),
+            _election_frame([(1848, "Texas", None, 4)]),
+        )
+        assert loaded["population"].isna().all()

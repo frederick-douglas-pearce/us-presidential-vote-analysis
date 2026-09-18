@@ -4014,3 +4014,121 @@ stale-declaration guard requires its removal.
 — a finding, not a silence: every state was readmitted, and Arkansas's and Louisiana's refused
 votes are a `count_status` matter (D046), not an allotment one. Georgia 1868 is likewise absent:
 its nine votes were `disputed` (D044) and its allotment intact.
+
+---
+
+## D064: Persons-per-electoral-vote is a view over a persisted election-grain table
+
+**Date:** 2026-09-18
+**Issue:** #184 (E10-S5) · **Builds on:** D059, D060, D063 · **Architect ruling:** #184 plan gate, Q1–Q4 (Q3 overridden by the human)
+
+**Context.**
+
+#184 exposes **persons per electoral vote by `(election_year, state)`** — the derived series E10
+exists to produce. The numerator is the governing-census resident population; the denominator is
+the **appointed** allotment the EC fact records (`total_electoral_votes`, D041's appointed measure).
+Public exposure on `/v1` is **not** in this story: it was split out as **#245**, sequenced after
+#243 so one D034 content-hash cutover serves both.
+
+The question the story opens with is where the ratio's *input* comes from. #182 built exactly the
+right frame — `build_election_population`, returning `ELECTION_POPULATION_COLUMNS` at
+`(election_year, state)` grain behind four guards — and then **threw it away**: #182 persisted
+nothing, so there was no relation for a view to read.
+
+**Decision.**
+
+**(a) The election-grain frame is persisted as `dwh.election_population`, and the view is a thin
+ratio over it.** The pure-SQL alternative — a view joining `dwh.census_population` against the EC
+fact, with the governing-census calendar rendered as a `VALUES` CTE — is rejected as a blocking
+design error, and the decisive argument is not duplication in general but one specific
+irrecoverability: **D059 keeps `basis` out of the census natural key**, so `dwh.census_population`
+holds only the *restated* Virginia row. The published 1860 figure exists nowhere in the warehouse;
+it survives solely as the pinned literal in `BOUNDARY_SUCCESSIONS`. A SQL view would therefore
+either surface the wrong Virginia population for 1864 and 1868, or copy that literal into a query —
+a second copy of a constant whose entire purpose is to *check* the first. One derivation, in
+pandas, run once.
+
+The pipeline now writes both census tables in **one transaction**, from **one build** of the frame:
+`build_and_validate_election_population` runs the four guards and returns what it validated, so the
+object the guards certified is the object that reaches the database. `assert_conforms_to_spine`
+remains as the discarding wrapper, and both spellings are pinned by the guard-coverage test —
+otherwise the seam that actually runs before a write would be the unpinned one.
+
+**(b) `population_series` is appended to `ELECTION_POPULATION_COLUMNS`, carried as a column rather
+than asserted as a literal.** The acceptance criteria require the view to state which series its
+denominator came from. Emitting `'resident'` as a SQL literal would keep saying `resident` on the
+day a second series is admitted as data — which is the one thing D059 created the census `series`
+column to allow. The label is **NULL exactly where the population is NULL**, and the coupling is
+asserted in both directions: writing `'resident'` beside an absent figure asserts the provenance of
+a value that does not exist, and a figure whose label went missing is what a merge that dropped the
+column looks like while every other check still passes.
+
+**(c) There is no `per_capita_status` column; a NULL ratio is explained by its own operands.** The
+design gate proposed a third vocabulary (`no_population_figure` / `electoral_votes_withheld` /
+`computed`); **the human overrode it, and the override is correct** — though not by the route
+originally offered. It is *not* true that the reasons sit in `dwh.votes`: `COUNT_STATUS_OVERRIDES`
+holds four entries and `ELECTORAL_VOTE_SHORTFALLS` two, and **none of the fourteen zero-allotment
+cells is in either**, because `count_status` asks whether *cast* votes were counted and these
+states cast nothing. The reasons are in `census/reconcile.py`'s `SEAT_RECONCILIATION_EXCEPTIONS`
+(#183), catalogued in `docs/corrections.md` with statutory citations. The conclusion stands anyway:
+the view carries `population`, `total_electoral_votes`, `coverage` and the ratio, so the two null
+causes — no governing-census figure, or a zero allotment — are readable off the row. A status
+column would be derived from two of its own neighbours and carry nothing beyond them.
+`assert_ratio_null_only_where_explained` is what keeps that claim true, and it is **two-sided**: an
+unexplained NULL breaks the honest-gap promise, and a figure with no operands to compute it from
+means something synthesized a number.
+
+**(d) The division guard is `NULLIF`, and it is necessary by measurement rather than inference.**
+Settled in a throwaway `postgres:16` container at plan time: `1.0::double precision / 0` **raises**
+`division by zero` — Postgres does not yield infinity — and, the part that decides the shape,
+**`CREATE VIEW` over a zero row succeeds while the `SELECT` is what fails.** An unguarded view
+therefore builds green and breaks latently at read time. Fourteen `(election_year, state)` cells
+are exactly that case: eleven states in 1864 and three in 1868, whose votes were withheld. The
+numerator's `::double precision` cast is separately mandatory — Postgres integer-divides two
+integers and would emit a plausible-looking floor-divided count. The pandas oracle **explicitly
+masks a zero denominator**, because numpy divides `x/0` to `inf`, a *number* where the view
+produces an absence; without the mask the two expressions would disagree on precisely the fourteen
+cells the guard exists for. The differential integration test's year subset therefore **must**
+include a zero-allotment year, or neither half is exercised.
+
+**(e) The view builder skips when its input is absent, where every other view builder raises.**
+`create_per_capita_view` probes `dwh.election_population` and returns `False` rather than raising.
+The asymmetry is the decision: PV is **not optional** — every warehouse has it, so a missing
+resolved view is a broken build — while census **is** (`python -m usvote all` auto-detects
+`USVOTE_CENSUS_CORPUS_DIR` and skips census with a NOTICE when unset), so on a public EC + MIT
+clone the input legitimately does not exist and `rebuild_views`' own contract is to make views
+consistent with *whatever facts are present*. **D063's argument for calling a guard unconditionally
+does not transfer**, and the discriminator is what the thing reads: `assert_seats_reconcile` moved
+out of the census branch because it reads always-present inputs, so gating it made it fire only
+when a corpus happened to exist. A *view* reads a relation that exists only when census loaded.
+
+**(f) The module lives at `usvote/census/per_capita.py`, not at the top level — and the plan said
+otherwise.** #184's approved plan placed it beside `join.py` and `hybrid.py` on cohesion grounds,
+the design gate having established that census placement was *permitted* rather than forced.
+Implementation found the top-level placement is **not available**: the view must name
+`dwh.election_population` and its column contract, both of which are census's, and
+`test_no_top_level_module_imports_a_source_subpackage` forbids exactly that import from every
+top-level module but the two composition roots (D006/D015). The alternatives were to copy the
+contract into a second place or to exempt a module from a layering invariant to keep a filename.
+This is recorded rather than quietly done because the plan's own text says the opposite. What makes
+census placement legal is that the layering guard is a literal scan for **`dwh.votes`**, and nothing
+here names it: the appointed allotment arrives as a *column* on `election_population`.
+`usvote/warehouse.py` composes the builder beside the join and hybrid ones as planned — a
+composition root sits above every source and imports from all of them (D027).
+
+**Rationale.**
+
+- **The Virginia irrecoverability is the durable half of (a).** Duplication arguments are
+  aesthetic until one of the duplicated things cannot be recovered; this one cannot, and it is the
+  same fact D059 chose deliberately and D060 then had to correct a claim about.
+- **Each of (b), (c) and (d) answers a failure that produces a plausible wrong number rather than
+  an error** — a stale series label, an unexplained absence, a floor-divided ratio — which is the
+  standard this epic has held to throughout.
+- **(e) is the one place this story loosens something**, and it loosens it toward the public clone,
+  which is the population D022 makes the default.
+
+**Scope note.** The per-capita series reaches **no public surface** in this story: no snapshot
+table, no `SNAPSHOT_SCHEMA_VERSION` bump, no `/v1` route, no `usvote/api/` change. #245 owns all of
+it, and carries the architect's C8 finding with it — a new snapshot table's values sit **outside**
+the content hash, which covers only the `ec_pv` rows, so a census reload that changes a population
+figure would move per-capita numbers without firing the D034 edge-cache cutover.

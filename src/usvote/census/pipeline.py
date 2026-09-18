@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from usvote.census.conform import assert_conforms_to_spine
-from usvote.census.load import load_census_population
+from usvote.census.conform import build_and_validate_election_population
+from usvote.census.load import load_census_population, load_election_population
 from usvote.census.parse import parse_population_change, parse_resident_1790_1990
 from usvote.census.reconcile import assert_seats_reconcile
 from usvote.census.scrape import (
@@ -50,14 +50,25 @@ def run_census_pipeline(
     Reads the local corpus (``corpus_dir`` explicit, or resolved from
     ``USVOTE_CENSUS_CORPUS_DIR``), parses both published workbooks, stitches them into
     one resident series, applies the Virginia boundary correction, **conforms the result
-    to the EC participation roster** (#182) and loads ``dwh.census_population``.
+    to the EC participation roster** (#182) and loads ``dwh.census_population`` and
+    ``dwh.election_population``.
 
-    The conformance step (:func:`usvote.census.conform.assert_conforms_to_spine`) runs
+    **The return value is the census dimension, not the election-grain frame.** Both are
+    written; this returns the first because its row count is what
+    :class:`~usvote.warehouse.WarehouseResult.census_rows` has always reported, and
+    changing what that number counts would silently re-point every existing reader of
+    the build receipt.
+
+    The conformance step
+    (:func:`usvote.census.conform.build_and_validate_election_population`) runs
     **before** the write and raises rather than warning: it crosses to ``(election_year,
     state)`` grain — the grain every E10 consumer joins on — and every failure it looks
     for produces a plausible wrong number instead of an error. A corpus short a state, a
     boundary restatement it cannot verify against its pin, or a synthesized
-    between-census value all fail here with nothing written.
+    between-census value all fail here with nothing written. Since #184 it also
+    **returns** the frame it validated, which is then loaded, so the derivation the
+    guards ran over and the rows that reach the database are the same object rather than
+    two builds that happen to agree.
 
     **What it does NOT catch, stated because the obvious guess is wrong** (#182 review,
     GE-F3): a drifted ``election_year -> governing_census_year`` mapping passes every
@@ -108,11 +119,14 @@ def run_census_pipeline(
     }
     ec_participation = read_ec_participation(dbc)
     frame = transform_census(rows_by_source, ec_participation)
-    assert_conforms_to_spine(frame, ec_participation)
+    election_population = build_and_validate_election_population(
+        frame, ec_participation
+    )
     assert_seats_reconcile(ec_participation)
 
     with dbc.transaction():
         loaded = load_census_population(dbc, frame, replace=replace)
+        load_election_population(dbc, election_population, replace=replace)
     if close:
         dbc.close_connection()
     return loaded

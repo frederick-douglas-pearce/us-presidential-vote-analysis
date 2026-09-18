@@ -5,8 +5,8 @@ the EC spine (:func:`usvote.pipeline.run_ec_pipeline`), the MIT PV source
 (:func:`usvote.mit.pipeline.run_mit_pipeline`), optionally the UCSB PV source
 (:func:`usvote.ucsb.pipeline.run_ucsb_pipeline`), optionally the census population
 source (:func:`usvote.census.pipeline.run_census_pipeline`), then the resolved-PV,
-EC<->PV join and hybrid views (:func:`rebuild_views`). It is the programmatic entry
-point behind ``python -m usvote all`` (#84b).
+EC<->PV join, hybrid and per-capita views (:func:`rebuild_views`). It is the
+programmatic entry point behind ``python -m usvote all`` (#84b).
 
 **This is a composition root, not part of the EC spine.** It lives at the top level
 alongside the source-namespaced ``usvote/`` modules, but unlike them it imports *from*
@@ -62,6 +62,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from usvote.census.per_capita import create_per_capita_view
 from usvote.census.pipeline import run_census_pipeline
 from usvote.census.reconcile import assert_seats_reconcile
 from usvote.db import DBC
@@ -152,7 +153,17 @@ def rebuild_views(dbc: DBC) -> None:
        and creates ``hybrid_preferred`` / ``hybrid_redistributable`` plus their
        ``hybrid_summary_*`` companions over *those*.
 
-    All three are idempotent (``CREATE OR REPLACE VIEW``) and open no transaction of
+    A fourth step follows, and it is **not** part of that chain:
+    :func:`usvote.census.per_capita.create_per_capita_view` (#184) creates
+    ``election_per_capita`` over ``dwh.election_population``, which none of the three
+    above touches. It goes last because it depends on nothing here, not because
+    anything here depends on it — and it **skips, returning False, when its input table
+    is absent**, which is every build without a census corpus. That skip is the one
+    behavioural difference from steps 1-3, which raise on a missing input; the
+    asymmetry is deliberate and :func:`~usvote.census.per_capita.create_per_capita_view`
+    carries the argument for it.
+
+    All four are idempotent (``CREATE OR REPLACE VIEW``) and open no transaction of
     their own, so this is safe to call after any PV load and never nests over a
     pipeline's transaction (#84a).
 
@@ -174,6 +185,7 @@ def rebuild_views(dbc: DBC) -> None:
     build_pv_union(dbc)
     create_ec_pv_views(dbc)
     create_hybrid_views(dbc)
+    create_per_capita_view(dbc)
 
 
 def run_warehouse(
@@ -215,7 +227,7 @@ def run_warehouse(
        depends only on ``dwh.state``, contributes nothing to the D017 resolution views,
        and is read by none of the gates below.
     5. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
-       rebuilt.
+       rebuilt, plus the per-capita view (#184) when a census corpus loaded in step 4.
     6. the **D017 layer-3 overlap gates** (#167, D051), when ``validate_overlap`` — MIT
        vs. UCSB agreement at the cell grain
        (:func:`usvote.pv.overlap.assert_db_overlap_within_tolerance`) and at the

@@ -150,6 +150,10 @@ class TestTheFrameContract:
             "population",
             "boundary_basis",
             "coverage",
+            # #184 APPENDED this; it does not read `population_series` into the middle
+            # beside `population` where it belongs semantically, because the tuple is now
+            # the column order of a table and of the view over it.
+            "population_series",
         )
 
     def test_the_frame_is_on_the_contract(self) -> None:
@@ -702,6 +706,55 @@ class TestTheSeam:
         with pytest.raises(AssertionError):
             self._assert_ran_every_guard(calls)
 
+    def test_the_returning_seam_runs_every_guard_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#184 made ``build_and_validate_election_population`` the load path's seam.
+
+        The pipeline calls **that** function now, so pinning only the discarding wrapper
+        would leave the composition that actually runs before a write unpinned — the
+        precise hole this class was written to close, reopened one refactor later.
+        """
+        self._assert_ran_every_guard(
+            self._record_guard_calls(
+                monkeypatch, conform_module.build_and_validate_election_population
+            )
+        )
+
+    def test_the_wrapper_delegates_rather_than_repeating_the_guard_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two seams must not become two guard lists.
+
+        If ``assert_conforms_to_spine`` kept its own copy of the four calls, a guard
+        added to one would be missing from the other and both tests above would still
+        pass. This pins the delegation itself.
+        """
+        called: list[str] = []
+
+        def record(*_args: object, **_kwargs: object) -> pd.DataFrame:
+            called.append("delegated")
+            return pd.DataFrame()
+
+        monkeypatch.setattr(
+            conform_module, "build_and_validate_election_population", record
+        )
+        assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        assert called == ["delegated"]
+
+    def test_the_returning_seam_hands_back_the_frame_it_validated(self) -> None:
+        """The frame the guards ran over is the frame that gets written (#184).
+
+        Returning a *fresh* build would satisfy every other test here while
+        reintroducing the two-derivations gap: the guards would certify one object and
+        the loader would write another built from the same inputs.
+        """
+        frame = conform_module.build_and_validate_election_population(
+            _SUCCESSION_CENSUS, _SUCCESSION_SPINE
+        )
+        assert list(frame.columns) == list(ELECTION_POPULATION_COLUMNS)
+        assert not frame.empty
+
     def test_the_seam_raises_on_a_corpus_short_a_state(self) -> None:
         """The one guard that fires on a real corpus defect, reached through the seam.
 
@@ -947,3 +1000,66 @@ class TestRealCorpus:
         assert set(at_election.state) == {"Virginia"}
         assert sorted(at_election.election_year) == list(range(1824, 1872, 4))
         assert len(at_election) == 12
+
+
+class TestThePopulationSeriesLabel:
+    """AC-2: the view must say which population series its denominator came from.
+
+    The label is carried as a **column on the row** rather than asserted as a literal by
+    the view, so it cannot keep saying ``resident`` on the day a second series is
+    admitted as data — which D059 built the census ``series`` column to allow.
+    """
+
+    def test_a_row_with_a_population_carries_the_series_it_came_from(self) -> None:
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        populated = frame.loc[frame["population"].notna()]
+        assert not populated.empty
+        assert set(populated["population_series"]) == {SERIES_RESIDENT}
+
+    def test_a_row_with_no_population_carries_no_series(self) -> None:
+        # Writing 'resident' here would assert the provenance of a value that does not
+        # exist -- the D005 discipline applied to a label instead of to a number.
+        spine = _spine([(1848, "Texas", 4), (1848, "Ohio", 23)])
+        census = _census([(1840, "Ohio", 1_519_467, BASIS_PRESENT_DAY)])
+        frame = build_election_population(census, spine)
+        texas = frame.loc[frame["state"] == "Texas"]
+        assert texas["population"].isna().all()
+        assert texas["population_series"].isna().all()
+
+    def test_a_figure_whose_label_went_missing_is_refused(self) -> None:
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        frame.loc[frame["population"].notna(), "population_series"] = None
+        with pytest.raises(CensusConformError, match="without a series label"):
+            assert_election_population_shape(frame)
+
+    def test_a_label_with_no_figure_behind_it_is_refused(self) -> None:
+        spine = _spine([(1848, "Texas", 4), (1848, "Ohio", 23)])
+        census = _census([(1840, "Ohio", 1_519_467, BASIS_PRESENT_DAY)])
+        frame = build_election_population(census, spine)
+        frame.loc[frame["population"].isna(), "population_series"] = SERIES_RESIDENT
+        with pytest.raises(CensusConformError, match="without a population"):
+            assert_election_population_shape(frame)
+
+    def test_a_series_outside_the_closed_vocabulary_is_refused(self) -> None:
+        frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
+        frame.loc[0, "population_series"] = "apportionment"
+        with pytest.raises(CensusConformError, match="closed vocabulary"):
+            assert_election_population_shape(frame)
+
+    def test_only_the_resident_series_reaches_the_election_grain(self) -> None:
+        """The narrowing is in ``_resident_population``, and this is what it buys.
+
+        Without it a second series would fan every election row out silently; with it,
+        an apportionment row in the census frame simply does not appear here.
+        """
+        census = _census([(1840, "Ohio", 1_519_467, BASIS_PRESENT_DAY)])
+        other = census.copy()
+        other["series"] = "apportionment"
+        other["population"] = pd.array([999_999], dtype="Int64")
+        frame = build_election_population(
+            pd.concat([census, other], ignore_index=True),
+            _spine([(1848, "Ohio", 23)]),
+        )
+        assert len(frame) == 1
+        assert int(frame.loc[0, "population"]) == 1_519_467
+        assert frame.loc[0, "population_series"] == SERIES_RESIDENT

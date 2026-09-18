@@ -42,8 +42,9 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append("transform")
         return pd.DataFrame({"x": [1, 2, 3]})
 
-    def conform(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+    def conform(census: pd.DataFrame, ec: pd.DataFrame) -> pd.DataFrame:
         calls.append("conform")
+        return pd.DataFrame({"y": [1, 2]})
 
     def reconcile(ec: pd.DataFrame) -> None:
         calls.append("reconcile")
@@ -52,12 +53,21 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(f"load(replace={replace})")
         return frame
 
+    def load_election(
+        dbc: Any, frame: pd.DataFrame, *, replace: bool = False
+    ) -> pd.DataFrame:
+        calls.append(f"load_election(replace={replace})")
+        return frame
+
     monkeypatch.setattr(census_pipeline, "read_snapshot_sources", read)
     monkeypatch.setattr(census_pipeline, "read_ec_participation", spine)
     monkeypatch.setattr(census_pipeline, "transform_census", transform)
-    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", conform)
+    monkeypatch.setattr(
+        census_pipeline, "build_and_validate_election_population", conform
+    )
     monkeypatch.setattr(census_pipeline, "assert_seats_reconcile", reconcile)
     monkeypatch.setattr(census_pipeline, "load_census_population", load)
+    monkeypatch.setattr(census_pipeline, "load_election_population", load_election)
     monkeypatch.setattr(
         census_pipeline,
         "_PARSERS",
@@ -80,6 +90,7 @@ def test_the_stages_run_in_order(stages: list[str]) -> None:
         "conform",
         "reconcile",
         "load(replace=False)",
+        "load_election(replace=False)",
     ]
 
 
@@ -115,11 +126,13 @@ def test_a_conformance_failure_blocks_the_write_entirely(
     never commits.
     """
 
-    def refuse(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+    def refuse(census: pd.DataFrame, ec: pd.DataFrame) -> pd.DataFrame:
         stages.append("conform")
         raise CensusConformError("a participating state has no governing-census figure")
 
-    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", refuse)
+    monkeypatch.setattr(
+        census_pipeline, "build_and_validate_election_population", refuse
+    )
     conn = RecordingConnection()
     with pytest.raises(CensusConformError):
         run_census_pipeline(make_dbc(conn), "corpus/")
@@ -173,7 +186,10 @@ def test_the_spine_read_happens_outside_the_transaction(
 
 def test_replace_is_forwarded_to_the_loader(stages: list[str]) -> None:
     run_census_pipeline(make_dbc(RecordingConnection()), "corpus/", replace=True)
+    # Both tables, or a `--replace` rebuild silently appends the election-grain rows a
+    # second time and dies on its natural key.
     assert "load(replace=True)" in stages
+    assert "load_election(replace=True)" in stages
 
 
 def test_the_connection_is_left_open_by_default(stages: list[str]) -> None:

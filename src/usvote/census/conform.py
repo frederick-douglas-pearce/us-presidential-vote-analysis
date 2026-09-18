@@ -41,7 +41,13 @@ import numpy as np
 import pandas as pd
 
 from usvote.apportionment import governing_census_year
-from usvote.census.schema import BASIS_AS_ENUMERATED, SERIES_RESIDENT
+from usvote.census.schema import (
+    BASIS_AS_ENUMERATED,
+    CENSUS_SCHEMA,
+    SERIES_RESIDENT,
+    SERIES_VALUES,
+    build_series_check,
+)
 
 #: The frame contract #183 and #184 both inherit — **append-only**.
 #:
@@ -57,6 +63,15 @@ from usvote.census.schema import BASIS_AS_ENUMERATED, SERIES_RESIDENT
 #: ``total_electoral_votes`` is carried because #183 reconciles seats against the
 #: **appointed** allotment and it is already in the injected participation frame — free
 #: here, a second spine read there (#182 architect review, C2a).
+#:
+#: ``population_series`` was **appended** by #184, which is what "append-only" is for.
+#: It reads better beside ``population`` and is deliberately not put there: this tuple
+#: is now the column order of :data:`ELECTION_POPULATION_TABLE` *and* of the view over
+#: it, where ``CREATE OR REPLACE VIEW`` can only add trailing columns. Cosmetic order is
+#: not worth a migration. It is spelled ``population_series`` rather than ``series``
+#: because at election grain a bare ``series`` sits next to ``boundary_basis`` and
+#: ``coverage`` and reads as if it might label either of them; the census dimension has
+#: no such neighbours and keeps the short name.
 ELECTION_POPULATION_COLUMNS: tuple[str, ...] = (
     "election_year",
     "state",
@@ -65,7 +80,37 @@ ELECTION_POPULATION_COLUMNS: tuple[str, ...] = (
     "population",
     "boundary_basis",
     "coverage",
+    # Appended, never inserted -- see the ordering note above.
+    "population_series",
 )
+
+#: The two columns that carry genuine NULLs. Both describe the *same* absence — a
+#: participating state with no governing-census figure — so they are nullable together
+#: and :func:`assert_election_population_shape` asserts they are null in the same rows.
+NULLABLE_ELECTION_POPULATION_COLUMNS: tuple[str, ...] = (
+    "population",
+    "population_series",
+)
+
+#: The election-grain table #184 persists (D064).
+#:
+#: **Why this frame is a table and not a view over** ``dwh.census_population`` **×**
+#: ``dwh.votes``. Expressed as SQL, the derivation below would become a *second*
+#: expression of policy this module already assembles behind four guards — and one of
+#: the two things it would have to re-express is not recoverable from the warehouse at
+#: all. D059 keeps ``basis`` out of the census natural key, so ``dwh.census_population``
+#: holds only the **restated** Virginia row; the published 1860 figure survives solely
+#: as the pinned literal in :data:`BOUNDARY_SUCCESSIONS`. A SQL view would therefore
+#: either surface the wrong Virginia population for 1864 and 1868, or copy that literal
+#: into a query — a second copy of a constant whose entire purpose is to *check* the
+#: first. Persisting the frame keeps one derivation, in pandas, run once.
+ELECTION_POPULATION_TABLE = "election_population"
+
+#: One row per participating ``(election_year, state)`` — the grain, and the whole key.
+#: Unlike the census dimension there is no ``source`` component: this frame is built
+#: from the EC spine plus the one resident series, not assembled from several sources.
+ELECTION_POPULATION_NATURAL_KEY: tuple[str, ...] = ("election_year", "state")
+
 
 #: Whether a figure is on the borders **in force at the election**.
 #:
@@ -375,8 +420,13 @@ def _resident_population(census: pd.DataFrame) -> pd.DataFrame:
             f"(census_year, state) cells in the resident series; a join on them would "
             f"fan out every election row. First few:\n{offenders}"
         )
-    return resident[["census_year", "state", "population", "basis"]].rename(
-        columns={"census_year": "governing_census_year"}
+    # ``series`` travels with the figure rather than being re-asserted downstream. It
+    # is constant today -- this function narrows to `resident` two lines up -- and
+    # carrying it anyway is what makes #184's series label a **fact about the row**
+    # instead of a literal in a view that would keep saying "resident" on the day a
+    # second series is admitted as data (D059's whole reason for the column).
+    return resident[["census_year", "state", "population", "basis", "series"]].rename(
+        columns={"census_year": "governing_census_year", "series": "population_series"}
     )
 
 
@@ -395,8 +445,10 @@ def build_election_population(
     census row for a state that did not participate that year simply has no election row
     to attach to.
 
-    Returns :data:`ELECTION_POPULATION_COLUMNS`. This is #184's input; it is **not**
-    persisted — #182 adds no table and no view.
+    Returns :data:`ELECTION_POPULATION_COLUMNS`. Since #184 this frame **is** persisted,
+    as :data:`ELECTION_POPULATION_TABLE`, and a view over that table is what exposes
+    persons-per-electoral-vote (:mod:`usvote.per_capita`). #182, which wrote this
+    function, built it only to assert over it and threw it away.
     """
     participation = spine_participation(ec_participation)
     resident = _resident_population(census)
@@ -683,9 +735,12 @@ def assert_conforms_to_spine(
     checks or none — an individually-wired subset is how one of them quietly stops
     running.
 
-    It builds the election-grain frame and throws it away: #182 persists nothing, and
-    the guards are the deliverable. #184 will build the same frame for real via
-    :func:`build_election_population`.
+    It builds the election-grain frame and throws it away. **That is now the wrapper's
+    only job**: since #184 the frame *is* persisted, and the pipeline calls
+    :func:`build_and_validate_election_population` — this function is the same seam with
+    the return value dropped, kept because a caller that only wants the assertion
+    should not have to hold a frame to get it, and because its guard-coverage test is
+    the one that proves the seam cannot drift into a subset.
 
     Placed **before** the load rather than after, so a corpus that has lost a state or
     changed layout fails with nothing written, rather than leaving a warehouse that is
@@ -718,22 +773,29 @@ def assert_conforms_to_spine(
       regression guards on the builder.
 
     All four are called here so that the load path cannot drift into a subset, and
-    ``test_the_seam_runs_every_guard`` pins exactly that.
+    ``test_the_seam_runs_every_guard`` pins exactly that — against **both** spellings,
+    since the guard list now lives in the function below and this one would otherwise be
+    pinned by nothing.
     """
-    frame = build_election_population(census, ec_participation)
-    assert_election_population_shape(frame)
-    assert_spine_states_covered(frame)
-    assert_no_double_count(frame)
-    assert_no_interpolated_population(frame, census)
+    build_and_validate_election_population(census, ec_participation)
 
 
 def assert_election_population_shape(frame: pd.DataFrame) -> None:
     """Assert the frame is on the contract #183 and #184 inherit.
 
-    Column set and order, both closed vocabularies, and non-null on everything except
-    ``population`` — which carries genuine NULLs by design, and must stay a **nullable
-    integer** dtype so "no published figure" and "zero" remain distinguishable (the same
-    reason :func:`usvote.census.schema.assert_census_shape` checks it).
+    Column set and order, all three closed vocabularies, and non-null on everything
+    except the two columns that carry genuine NULLs by design — ``population``, which
+    must stay a **nullable integer** dtype so "no published figure" and "zero" remain
+    distinguishable (the same reason :func:`usvote.census.schema.assert_census_shape`
+    checks it), and ``population_series``, which is NULL in exactly the same rows.
+
+    **The series label is coupled to the figure, and the coupling is asserted in both
+    directions.** A row with a population must say which series it came from; a row with
+    none must not claim one. Writing ``'resident'`` beside a NULL would assert the
+    provenance of a value that does not exist — the D005 discipline applied to a label
+    rather than to a number — and the reverse, a figure whose label went missing, is
+    what a merge that dropped the column looks like while every other check still
+    passes.
     """
     if list(frame.columns) != list(ELECTION_POPULATION_COLUMNS):
         raise CensusConformError(
@@ -741,7 +803,7 @@ def assert_election_population_shape(frame: pd.DataFrame) -> None:
             f"{list(ELECTION_POPULATION_COLUMNS)}"
         )
     for column in ELECTION_POPULATION_COLUMNS:
-        if column == "population":
+        if column in NULLABLE_ELECTION_POPULATION_COLUMNS:
             continue
         if frame[column].isna().any():
             raise CensusConformError(
@@ -754,9 +816,20 @@ def assert_election_population_shape(frame: pd.DataFrame) -> None:
             f"Int64), got {frame['population'].dtype}. A float dtype means the NULLs "
             f"became NaN and the counts became floats."
         )
+    mismatched = frame["population"].isna() != frame["population_series"].isna()
+    if mismatched.any():
+        offenders = frame.loc[
+            mismatched, ["election_year", "state", "population", "population_series"]
+        ].head(5)
+        raise CensusConformError(
+            f"{int(mismatched.sum())} row(s) have a population without a series label "
+            f"or a series label without a population; the label describes the figure, "
+            f"so one cannot exist without the other. First few:\n{offenders}"
+        )
     for column, vocabulary in (
         ("boundary_basis", BOUNDARY_BASIS_VALUES),
         ("coverage", COVERAGE_VALUES),
+        ("population_series", SERIES_VALUES),
     ):
         unknown = sorted(set(frame[column].dropna().unique()) - set(vocabulary))
         if unknown:
@@ -764,3 +837,93 @@ def assert_election_population_shape(frame: pd.DataFrame) -> None:
                 f"Election-population column {column!r} carries value(s) {unknown} "
                 f"outside its closed vocabulary {list(vocabulary)}"
             )
+
+
+# --- the persisted election-grain table (#184 / D064) -----------------------
+#
+# **Why the DDL for this table lives here and not in** :mod:`usvote.census.schema`,
+# which owns every other census DDL. That module is imported *by* this one, for
+# ``SERIES_RESIDENT`` and the ``basis`` vocabulary; the CHECK constraints below are
+# built from ``BOUNDARY_BASIS_VALUES`` and ``COVERAGE_VALUES``, which are defined
+# **here** because they are election-grain vocabularies deliberately distinct from the
+# census ones (see ``BOUNDARY_BASIS_VALUES``' own note). Putting the builders in
+# ``schema.py`` would make it import this module back, and the cycle is real rather
+# than stylistic. The convention that module states — a closed vocabulary lives where
+# neither of its two callers has to depend on the other — is honoured, not abandoned:
+# here that place is this module, which assigns the values, while
+# :mod:`usvote.census.load` builds the CHECKs from them.
+
+
+def build_boundary_basis_check(column: str = "boundary_basis") -> str:
+    """Return the ``boundary_basis`` CHECK built from :data:`BOUNDARY_BASIS_VALUES`."""
+    values = ", ".join(f"'{value}'" for value in BOUNDARY_BASIS_VALUES)
+    return f"CHECK ({column} IN ({values}))"
+
+
+def build_coverage_check(column: str = "coverage") -> str:
+    """Return the ``coverage`` CHECK built from :data:`COVERAGE_VALUES`."""
+    values = ", ".join(f"'{value}'" for value in COVERAGE_VALUES)
+    return f"CHECK ({column} IN ({values}))"
+
+
+def build_election_population_column_defs(
+    schema: str = CENSUS_SCHEMA,
+) -> list[tuple[str, ...]]:
+    """Return the ``election_population`` column defs as ``DBC.create_table`` tuples.
+
+    A function rather than a constant because the ``state`` FK embeds ``schema``, the
+    same reason :func:`usvote.census.schema.build_census_column_defs` is one.
+
+    Three column types carry an argument:
+
+    * ``population`` is ``integer``, never ``smallint`` — the same overflow the census
+      dimension's own DDL note explains, one table over.
+    * ``total_electoral_votes`` is ``smallint`` because it really is an electoral-vote
+      count, matching the EC fact it was read from.
+    * ``population`` and ``population_series`` are the only nullable columns
+      (:data:`NULLABLE_ELECTION_POPULATION_COLUMNS`). Their NULLs are the honest gap a
+      participating state with no governing-census figure leaves (D005), and the
+      database is where that guarantee stops being a pandas dtype and starts being a
+      constraint.
+    """
+    return [
+        ("election_population_id", "integer", "generated always as identity",
+         "primary key"),
+        ("election_year", "smallint", "not null"),
+        ("state", "varchar", "not null", f"REFERENCES {schema}.state"),
+        ("governing_census_year", "smallint", "not null"),
+        ("total_electoral_votes", "smallint", "not null"),
+        ("population", "integer"),
+        ("boundary_basis", "varchar", "not null", build_boundary_basis_check()),
+        ("coverage", "varchar", "not null", build_coverage_check()),
+        ("population_series", "varchar", build_series_check("population_series")),
+        (
+            "CONSTRAINT",
+            f"{ELECTION_POPULATION_TABLE}_natural_key",
+            "UNIQUE",
+            f"({', '.join(ELECTION_POPULATION_NATURAL_KEY)})",
+        ),
+    ]
+
+
+def build_and_validate_election_population(
+    census: pd.DataFrame, ec_participation: pd.DataFrame
+) -> pd.DataFrame:
+    """Build the election-grain frame, run every conformance guard, and return it.
+
+    The seam :func:`assert_conforms_to_spine` is the discarding wrapper around — and the
+    one :mod:`usvote.census.pipeline` calls now that the frame is persisted (#184). The
+    guards it runs, and which of them can fail on data, are documented on that function;
+    they are not repeated here, because one statement of that is the point.
+
+    **One derivation, one read.** Before #184 the pipeline called the seam, which built
+    this frame and threw it away, and #184 would then have built it again to load it.
+    Two builds of the same frame from the same inputs is the shape a divergence hides
+    in, and it costs a second pass over the whole 2,204-row conformance for nothing.
+    """
+    frame = build_election_population(census, ec_participation)
+    assert_election_population_shape(frame)
+    assert_spine_states_covered(frame)
+    assert_no_double_count(frame)
+    assert_no_interpolated_population(frame, census)
+    return frame
