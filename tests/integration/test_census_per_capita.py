@@ -365,8 +365,12 @@ def test_the_view_over_a_real_full_warehouse(
         computed = live.loc[ratio.notna()]
         assert set(computed["population_series"]) == {SERIES_RESIDENT}
 
-        # And the view really is the table's own rows, not a re-derivation: the
-        # election-grain frame the pipeline validated is what it holds.
+        # A cardinality check, and stated as one: the view returns exactly as many
+        # rows as a fresh build of the election-grain frame, so nothing fanned out
+        # or went missing between what the pipeline validated and what the view
+        # reads. Row *identity* is carried elsewhere — the per-cell asserts above
+        # (Texas 1848, Virginia 1864) and the differential test against the pandas
+        # oracle in this module — not by the length comparison below.
         expected = build_and_validate_election_population(
             dbc.select_query_to_df(
                 f"SELECT * FROM {CENSUS_SCHEMA}.census_population"

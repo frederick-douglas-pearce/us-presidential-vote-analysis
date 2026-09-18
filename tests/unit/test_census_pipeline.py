@@ -130,7 +130,8 @@ def test_both_tables_are_written_inside_that_one_transaction(
 
     This observes the **mechanism**: each loader records the commit count *at the moment
     it runs*, the same trick ``test_the_spine_read_happens_outside_the_transaction``
-    uses one test down. Inside the block both see 0; a loader moved after it sees 1.
+    uses further down this module. Inside the block both see 0; a loader moved after
+    it sees 1.
     """
     conn = RecordingConnection()
     commits_when_each_loader_ran: dict[str, int] = {}

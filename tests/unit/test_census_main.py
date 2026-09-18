@@ -270,3 +270,38 @@ class TestTheViewRebuild:
     ) -> None:
         assert census_main.main(["snapshot"]) == 0
         assert census_env["view_rebuilds"] == []
+
+    def test_the_completion_line_reports_the_rebuild(
+        self, census_env: dict[str, Any], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert census_main.main(["load"]) == 0
+        out = capsys.readouterr().out
+        assert "dwh.election_per_capita view is rebuilt" in out
+        assert "SKIPPED" not in out
+
+    def test_the_completion_line_reports_a_skip_rather_than_claiming_a_rebuild(
+        self,
+        census_env: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """`create_per_capita_view` returns False when its input table is absent.
+
+        That branch is unreachable from `_run_load` today — the load immediately above
+        writes `dwh.election_population`, so the probe always finds it. The message was
+        still asserting the rebuild while discarding the one value that exists to report
+        a skip, which is a claim that cannot be wrong today and would quietly become
+        wrong the first time the two are decoupled. Found by #184's round-2 re-check.
+        """
+
+        def skipped(dbc: Any) -> bool:
+            census_env["view_rebuilds"].append(dbc)
+            return False
+
+        monkeypatch.setattr(census_main, "create_per_capita_view", skipped)
+        assert census_main.main(["load"]) == 0
+        out = capsys.readouterr().out
+        assert "SKIPPED" in out
+        assert "view is rebuilt" not in out
+        # The census half of the line is unaffected -- only the view clause branches.
+        assert "dwh.election_population is rebuilt" in out

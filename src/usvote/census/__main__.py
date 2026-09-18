@@ -93,7 +93,8 @@ def _run_load(replace: bool) -> int:
     try:
         loaded = run_census_pipeline(dbc, corpus_dir, replace=replace)
         # The view is rebuilt HERE, not inside the pipeline, and both halves of that
-        # matter (#184 / D064(e)).
+        # matter (#184 / D064(c-bis) — the record of this repair locus; D064(e) is
+        # the separate skip-vs-raise ruling, which governs the closing line below).
         #
         # **Why it must happen at all.** `create_table(replace=True)` issues
         # `DROP TABLE ... CASCADE` (``usvote.db``), and ``dwh.election_per_capita``
@@ -112,9 +113,9 @@ def _run_load(replace: bool) -> int:
         # to the other entry point: each composition layer owns view creation, and
         # ``run_census_pipeline`` stays view-free like its MIT and UCSB siblings.
         #
-        # Safe unconditionally: it is `CREATE OR REPLACE` and skips when its input table
-        # is absent.
-        create_per_capita_view(dbc)
+        # Safe unconditionally: it is `CREATE OR REPLACE` and skips when its input
+        # table is absent (D064(e) — it returns False rather than raising).
+        view_created = create_per_capita_view(dbc)
     except (CensusScrapeError, CensusTransformError, CensusParseError) as e:
         print(f"Census load failed: {e}", file=sys.stderr)
         print(
@@ -139,11 +140,23 @@ def _run_load(replace: bool) -> int:
     finally:
         dbc.close_connection()
 
+    # The view half of this line reports what the call *returned* rather than
+    # asserting the happy path. That skip branch is unreachable from here today —
+    # the load above writes dwh.election_population, so the probe always finds it —
+    # but the return value exists precisely to report a skip, and discarding it is
+    # how a message that cannot be wrong today becomes one that lies after the next
+    # change (#184 round-2 review).
+    view_line = (
+        "the dwh.election_per_capita view is rebuilt."
+        if view_created
+        else "the dwh.election_per_capita view was SKIPPED — its input table is "
+        "absent."
+    )
     print(
         f"Census ingestion complete — {len(loaded)} dwh.census_population rows, "
         f"{loaded['census_year'].min()}-{loaded['census_year'].max()}, "
         f"{loaded['state'].nunique()} jurisdictions. "
-        f"dwh.election_population and the dwh.election_per_capita view are rebuilt."
+        f"dwh.election_population is rebuilt and {view_line}"
     )
     return 0
 

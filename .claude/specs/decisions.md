@@ -4078,7 +4078,13 @@ column would be derived from two of its own neighbours and carry nothing beyond 
 **What enforces that on the live view is the SQL, not a Python guard — corrected under review, where
 the first version of this paragraph said otherwise.** `NULLIF` plus SQL's NULL semantics make the
 ratio's NULL set exactly `population IS NULL OR total_electoral_votes = 0`, in both directions, so
-the property holds by construction. `assert_ratio_null_only_where_explained` and `assert_no_fan_out`
+the property holds by construction. **That argument has one premise, and it is worth stating
+because it is invisible at the call site**: `total_electoral_votes` is `not null` in the
+`dwh.election_population` DDL. Widen that column to accept NULL and `NULLIF` passes the NULL
+straight through — the ratio goes NULL for a reason the row cannot explain, breaking the
+honest-gap promise without a line of `per_capita.py` changing. Surfaced by #184's round-2
+re-check, which declined to accept the by-construction claim without it.
+`assert_ratio_null_only_where_explained` and `assert_no_fan_out`
 are **offline oracles**, called by tests and deliberately **not** by `create_per_capita_view`; the
 shipped fan-out guarantee is the table's `UNIQUE (election_year, state)` constraint. That is a real
 departure from `create_ec_pv_views` and `create_hybrid_views`, which *do* run guards as
