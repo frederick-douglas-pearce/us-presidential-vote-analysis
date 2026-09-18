@@ -7,6 +7,7 @@ database or the network.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,46 @@ def test_the_write_happens_in_exactly_one_transaction(stages: list[str]) -> None
     run_census_pipeline(make_dbc(conn), "corpus/")
     assert conn.commits == 1
     assert conn.rollbacks == 0
+
+
+def test_both_tables_are_written_inside_that_one_transaction(
+    monkeypatch: pytest.MonkeyPatch, stages: list[str]
+) -> None:
+    """#184 added a second loader, and the count above cannot see where it ran.
+
+    ``conn.commits == 1`` stays true if ``load_election_population`` is moved *outside*
+    the ``with dbc.transaction():`` block — the block still commits once for the first
+    loader, and the stubbed loaders execute no SQL of their own. So the count asserts
+    that a transaction happened, not that both writes were in it, and the promise in
+    ``usvote/census/load.py`` ("written in one transaction … a warehouse holding one
+    without the other is a state no consumer should have to reason about") had nothing
+    behind it. Found by the #184 review's guard-efficacy lens.
+
+    This observes the **mechanism**: each loader records the commit count *at the moment
+    it runs*, the same trick ``test_the_spine_read_happens_outside_the_transaction``
+    uses one test down. Inside the block both see 0; a loader moved after it sees 1.
+    """
+    conn = RecordingConnection()
+    commits_when_each_loader_ran: dict[str, int] = {}
+
+    def watch(name: str) -> Callable[..., pd.DataFrame]:
+        def loader(
+            dbc: Any, frame: pd.DataFrame, *, replace: bool = False
+        ) -> pd.DataFrame:
+            commits_when_each_loader_ran[name] = conn.commits
+            return frame
+
+        return loader
+
+    monkeypatch.setattr(census_pipeline, "load_census_population", watch("census"))
+    monkeypatch.setattr(census_pipeline, "load_election_population", watch("election"))
+
+    run_census_pipeline(make_dbc(conn), "corpus/")
+
+    assert commits_when_each_loader_ran == {"census": 0, "election": 0}, (
+        "a loader ran after a commit, so the two tables are not written atomically"
+    )
+    assert conn.commits == 1
 
 
 def test_a_conformance_failure_blocks_the_write_entirely(

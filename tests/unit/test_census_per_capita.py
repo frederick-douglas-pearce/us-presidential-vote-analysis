@@ -11,9 +11,10 @@ the builder still names ``NULLIF`` and still casts; it cannot prove Postgres doe
 that string what the oracle does with pandas. The check that closes it is
 ``tests/integration/test_census_per_capita.py``'s
 ``test_the_live_view_matches_the_pandas_oracle``,
-which reads the view back and compares it row-for-row — and whose year subset must
-include a zero-allotment year, or the branch both halves are written for is never
-exercised on either side.
+which reads the view back and compares it row-for-row. Its fixture **must keep a
+zero-allotment row**, or the branch both halves are written for is never exercised on
+either side; that row is a hand-written literal there, not a consequence of which
+election years the fixture seeds.
 """
 
 from __future__ import annotations

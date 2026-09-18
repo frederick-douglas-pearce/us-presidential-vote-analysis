@@ -37,7 +37,7 @@ keeps ``basis`` out of the census natural key). See that table's own note.
 
 **The ratio is the only thing this module computes**, which is what keeps the SQL/oracle
 pair small enough to trust — and it still has two ways to go quietly wrong, both
-guarded here:
+answered in the SQL itself:
 
 * **integer division.** Postgres integer-divides two integers, so
   ``population / total_electoral_votes`` would return a floor-divided count rather than
@@ -52,6 +52,24 @@ guarded here:
   *succeeds* while the ``SELECT`` is what fails. An unguarded view therefore builds
   green and breaks at read time, in the snapshot build or in any consumer's query.
   ``NULLIF`` is what makes the ratio NULL instead.
+
+**What enforces the two guarantees, stated precisely — because the obvious reading is
+wrong.** :func:`assert_no_fan_out` and :func:`assert_ratio_null_only_where_explained`
+below are **offline oracles for the test suite, not preconditions this builder runs**,
+and that is deliberate rather than an omission (#184 review; the human's call, recorded
+in D064(c)). On the live view both properties hold *structurally*: the view is a
+projection of a table carrying ``UNIQUE (election_year, state)``, so a fan-out is not
+expressible; and the ratio's NULL set is exactly ``population IS NULL OR
+total_electoral_votes = 0`` by SQL's own NULL semantics plus ``NULLIF``, so
+"null only where the row explains it" is true by construction in both directions.
+
+That is the opposite of the cases :func:`usvote.join.create_ec_pv_views` and
+:func:`usvote.hybrid.create_hybrid_views` run preconditions for —
+``assert_db_pv_matches_ec`` and ``assert_no_winner_tie`` guard *data-dependent* facts
+that genuinely can fail and cannot be expressed in a view. Wiring these two in would
+cost a full 2,204-row read on every ``rebuild_views`` to check something the schema has
+already made impossible. Where they earn their place is the dual-expression oracle: a
+hand-built frame in a test, where nothing enforces the key.
 
 **Two kinds of NULL ratio, and neither carries a status column.** A NULL here means
 either no governing-census population (one cell today: ``(1848, Texas)``, the Republic
@@ -99,11 +117,11 @@ PER_CAPITA_COLUMN = "persons_per_electoral_vote"
 #: against any warehouse whose view already exists (the rule
 #: :data:`usvote.join.EC_PV_COLUMNS` carries, one view over).
 #:
-#: Pinned to a hand-written literal in ``tests/unit/test_census_per_capita.py``, and
-#: **not** derived from
-#: :data:`~usvote.census.conform.ELECTION_POPULATION_COLUMNS`: it is built
-#: from that one below, so an assert comparing the two is circular and would pass under
-#: a reorder of either.
+#: This tuple *is* built from
+#: :data:`~usvote.census.conform.ELECTION_POPULATION_COLUMNS` below — so **the pin must
+#: not be**. ``tests/unit/test_census_per_capita.py`` spells the whole order out as a
+#: hand-written literal, because an assert comparing this tuple against the constant it
+#: is built from is circular: it passes under a reorder of either.
 PER_CAPITA_COLUMNS: tuple[str, ...] = (
     *ELECTION_POPULATION_COLUMNS,
     PER_CAPITA_COLUMN,
@@ -266,9 +284,16 @@ def assert_ratio_null_only_where_explained(
 
     The acceptance criterion says a state with no computable figure must read NULL
     rather than zero, **paired with enough metadata to say why**. There is no status
-    column (see the module docstring), so this is the check that the claim holds: a NULL
-    ratio must come with either a NULL population or a zero allotment, and a row with
-    both a population and a non-zero allotment must have a ratio.
+    column, so the property is: a NULL ratio must come with either a NULL population or
+    a zero allotment, and a row with both a population and a non-zero allotment must
+    have a ratio.
+
+    **On the live view that holds by construction, so this is an oracle and not a
+    precondition** — ``NULLIF`` plus SQL's NULL semantics make the ratio's NULL set
+    exactly those two cases, in both directions. What it is *for* is a frame nothing
+    else constrains: a hand-built fixture in a test, or a future second producer of the
+    election-grain frame. :func:`create_per_capita_view` deliberately does not call it;
+    the module docstring carries the argument.
 
     Both directions matter and they fail differently. A NULL nobody can explain is the
     honest-gap promise broken. A **non**-NULL where an operand is missing is worse: it

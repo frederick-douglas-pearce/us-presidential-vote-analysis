@@ -742,18 +742,47 @@ class TestTheSeam:
         assert_conforms_to_spine(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
         assert called == ["delegated"]
 
-    def test_the_returning_seam_hands_back_the_frame_it_validated(self) -> None:
-        """The frame the guards ran over is the frame that gets written (#184).
+    def test_the_returning_seam_hands_back_the_frame_it_validated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The frame the guards ran over is **the same object** that gets written.
 
-        Returning a *fresh* build would satisfy every other test here while
-        reintroducing the two-derivations gap: the guards would certify one object and
-        the loader would write another built from the same inputs.
+        D064(a) makes that load-bearing: two builds of the same frame from the same
+        inputs is the shape a divergence hides in.
+
+        **Asserts identity, not shape — and the difference is the whole test.** The
+        first version compared columns and non-emptiness, which the mutation its own
+        docstring named (`return build_election_population(census, ec_participation)`
+        instead of `return frame`) passes cleanly: a fresh build has identical columns
+        and is equally non-empty. Found by the #184 review's guard-efficacy lens as the
+        textbook case of asserting the outcome instead of the mechanism.
+
+        The builder is patched to hand back a marked object, so the assertion observes
+        *which* frame came back rather than what it looks like.
         """
-        frame = conform_module.build_and_validate_election_population(
+        real = conform_module.build_election_population
+        built: list[pd.DataFrame] = []
+
+        def marking(
+            census: pd.DataFrame, ec: pd.DataFrame, **kwargs: object
+        ) -> pd.DataFrame:
+            frame = real(census, ec, **kwargs)  # type: ignore[arg-type]
+            built.append(frame)
+            return frame
+
+        monkeypatch.setattr(conform_module, "build_election_population", marking)
+        returned = conform_module.build_and_validate_election_population(
             _SUCCESSION_CENSUS, _SUCCESSION_SPINE
         )
-        assert list(frame.columns) == list(ELECTION_POPULATION_COLUMNS)
-        assert not frame.empty
+        assert len(built) == 1, (
+            f"the seam built the frame {len(built)} times; D064(a) says once"
+        )
+        assert returned is built[0], (
+            "the seam returned a different object than the one it validated — a second "
+            "build from the same inputs is exactly the two-derivations gap D064(a) "
+            "exists to close"
+        )
+        assert list(returned.columns) == list(ELECTION_POPULATION_COLUMNS)
 
     def test_the_seam_raises_on_a_corpus_short_a_state(self) -> None:
         """The one guard that fires on a real corpus defect, reached through the seam.

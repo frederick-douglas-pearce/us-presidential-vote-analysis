@@ -4074,9 +4074,21 @@ states cast nothing. The reasons are in `census/reconcile.py`'s `SEAT_RECONCILIA
 the view carries `population`, `total_electoral_votes`, `coverage` and the ratio, so the two null
 causes — no governing-census figure, or a zero allotment — are readable off the row. A status
 column would be derived from two of its own neighbours and carry nothing beyond them.
-`assert_ratio_null_only_where_explained` is what keeps that claim true, and it is **two-sided**: an
-unexplained NULL breaks the honest-gap promise, and a figure with no operands to compute it from
-means something synthesized a number.
+
+**What enforces that on the live view is the SQL, not a Python guard — corrected under review, where
+the first version of this paragraph said otherwise.** `NULLIF` plus SQL's NULL semantics make the
+ratio's NULL set exactly `population IS NULL OR total_electoral_votes = 0`, in both directions, so
+the property holds by construction. `assert_ratio_null_only_where_explained` and `assert_no_fan_out`
+are **offline oracles**, called by tests and deliberately **not** by `create_per_capita_view`; the
+shipped fan-out guarantee is the table's `UNIQUE (election_year, state)` constraint. That is a real
+departure from `create_ec_pv_views` and `create_hybrid_views`, which *do* run guards as
+preconditions, and the discriminator is whether the property can fail: `assert_db_pv_matches_ec` and
+`assert_no_winner_tie` guard data-dependent facts a view cannot express, while these two check
+something the schema has already made impossible — at a cost of one full 2,204-row read per
+`rebuild_views`. The human's ruling at the review stop was YAGNI: keep them as oracles, correct the
+prose. Both directions still matter *as an oracle contract* — an unexplained NULL would break the
+honest-gap promise, and a figure with no operands to compute it from would mean something
+synthesized a number.
 
 **(d) The division guard is `NULLIF`, and it is necessary by measurement rather than inference.**
 Settled in a throwaway `postgres:16` container at plan time: `1.0::double precision / 0` **raises**
@@ -4090,6 +4102,18 @@ masks a zero denominator**, because numpy divides `x/0` to `inf`, a *number* whe
 produces an absence; without the mask the two expressions would disagree on precisely the fourteen
 cells the guard exists for. The differential integration test's year subset therefore **must**
 include a zero-allotment year, or neither half is exercised.
+
+**(c-bis) The view rebuild lives in each entry point's composition layer, not in the shared
+pipeline.** Found under review, by reproduction against a live database: `create_table(replace=True)`
+issues `DROP TABLE ... CASCADE`, so a `python -m usvote.census load --replace` took the dependent
+view with it and left it dropped while exiting 0 — and a *plain* `census load` never created the view
+at all, which only `python -m usvote all` did. The repair goes in `usvote/census/__main__.py::
+_run_load`, **not** in `run_census_pipeline`. A per-package `__main__` is a composition root under
+D027 exactly as `warehouse.py` is, so each entry point's composition layer owns view creation
+(`all` → `rebuild_views`; `census load` → `_run_load`) while the shared pipeline stays view-free like
+its MIT and UCSB siblings. Putting it in the pipeline would have built the view twice on an `all`
+build and split view-ordering knowledge across two modules, undercutting `rebuild_views`' documented
+role as the one place it is expressed.
 
 **(e) The view builder skips when its input is absent, where every other view builder raises.**
 `create_per_capita_view` probes `dwh.election_population` and returns `False` rather than raising.

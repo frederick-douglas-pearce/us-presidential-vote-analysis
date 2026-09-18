@@ -67,9 +67,16 @@ from usvote.census.schema import CENSUS_SCHEMA, SERIES_RESIDENT
 from usvote.db import DBC
 from usvote.spine import read_ec_participation
 
-#: Years with committed page fixtures that carry **zero-electoral-vote states** — the
-#: branch this view's guard exists for. 1864 and 1868 are the only two elections in the
-#: whole span that have any, so a fixture set without them cannot exercise it at all.
+#: The two elections that carry **zero-electoral-vote states** in the real record, and
+#: the only two in the whole span that do.
+#:
+#: **They are seeded for realism, not for the mechanism** — say so plainly, because the
+#: obvious reading is wrong and would survive a "cleanup" that broke the test. The
+#: zero-allotment row this test actually divides by is a hand-written literal in
+#: :func:`_hand_built_frame`; seeding these years only populates ``dwh.state`` for the
+#: foreign key, and ``fake_state_geo`` fills that with all 50 states + DC whatever years
+#: are loaded. What must not be removed is the zero row in that frame — which is why it
+#: is asserted directly below rather than left to the fixture set.
 _ZERO_EV_FIXTURE_YEARS = (1864, 1868)
 
 #: The three counts #184 measured over the real series, asserted together because they
@@ -238,6 +245,46 @@ def test_the_view_is_skipped_rather_than_failing_without_a_census_load(
         dbc.close_connection()
 
 
+def _view_exists(dbc: DBC) -> bool:
+    got = dbc.select_query_to_df(
+        f"SELECT to_regclass('{CENSUS_SCHEMA}.{PER_CAPITA_VIEW}') AS relation"
+    )
+    return got["relation"].iloc[0] is not None
+
+
+def _run_load_against(
+    dbc: DBC, census_corpus: Path, config: dict[str, Any], *, replace: bool
+) -> None:
+    """Run `python -m usvote.census load`'s body against the test connection.
+
+    **Calls `_run_load`, not `run_census_pipeline`** — the repair for the CASCADE
+    regression lives in the entry point (D064(c-bis)), so a test that called the
+    pipeline would exercise everything except the fix.
+
+    Three seams are pointed at the test database, and the third is the one that bites:
+    `_run_load` builds its own `DBC` (stubbed to the caller's), closes it when done
+    (neutered, so the assertions afterwards still have a connection), and resolves
+    credentials from the standard libpq `PG*` variables — **not** the `USVOTE_TEST_DB_*`
+    ones the integration fixture uses. Without `PGPASSWORD` set it falls through to
+    `getpass` and blocks on stdin, which is exactly how this helper failed first time.
+    """
+    from usvote.census import __main__ as census_main
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(census_main, "DBC", lambda _config: dbc)
+        monkey.setattr(type(dbc), "close_connection", lambda _self: None)
+        monkey.setenv("USVOTE_CENSUS_CORPUS_DIR", str(census_corpus))
+        monkey.setenv("PGHOST", str(config["host"]))
+        monkey.setenv("PGPORT", str(config["port"]))
+        monkey.setenv("PGDATABASE", str(config["dbname"]))
+        monkey.setenv("PGUSER", str(config["user"]))
+        monkey.setenv("PGPASSWORD", str(config["password"]))
+        assert census_main._run_load(replace) == 0
+    finally:
+        monkey.undo()
+
+
 def _corpus(variable: str, description: str) -> Path:
     value = os.environ.get(variable)
     if not value:
@@ -332,19 +379,29 @@ def test_the_view_over_a_real_full_warehouse(
 
 
 @pytest.mark.integration
-def test_the_table_and_the_view_are_rebuilt_by_a_replace_build(
+def test_a_replace_refresh_does_not_leave_the_view_dropped(
     integration_db_config: dict[str, Any],
 ) -> None:
-    """``--replace`` must leave both populated, not just the first.
+    """The regression `--replace` introduced, and the order here is the whole test.
 
-    A ``replace=True`` census load that rebuilt only ``census_population`` would append
-    the election-grain rows a second time and die on the natural key, and a rebuild that
-    dropped the view without recreating it would leave AC-1 false on exactly the command
-    the AC names.
+    `DBC.create_table(replace=True)` issues `DROP TABLE ... CASCADE`, and the view
+    depends on the table, so a `--replace` refresh takes the view with it. The repair is
+    in `usvote/census/__main__.py::_run_load`, which rebuilds the view after the
+    pipeline returns (D064(c-bis)).
+
+    **The view must already exist when the replace runs, or this test proves nothing.**
+    Its first version created the view only *after* both replace loads, so no
+    pre-existing view was ever exposed to the CASCADE — it asserted the state it had
+    just constructed, while its docstring claimed to catch a rebuild that dropped the
+    view. The #184 review caught that; the reordering below is the fix.
+
+    It drives the **entry point**, not the pipeline, because that is where the repair
+    lives and where a real operator's `python -m usvote.census load --replace` goes.
     """
-    _corpus("USVOTE_CENSUS_CORPUS_DIR", "the census workbooks are not fixtures")
     ec_corpus = _corpus("USVOTE_EC_HTML_DIR", "the 51-year EC corpus is not fixtures")
-    census_corpus = Path(os.environ["USVOTE_CENSUS_CORPUS_DIR"])
+    census_corpus = _corpus(
+        "USVOTE_CENSUS_CORPUS_DIR", "the census workbooks are not fixtures"
+    )
     dbc = DBC(integration_db_config)
     try:
         from usvote.pipeline import run_ec_pipeline
@@ -358,13 +415,65 @@ def test_the_table_and_the_view_are_rebuilt_by_a_replace_build(
             load_geo=lambda _p: fake_state_geo(),
         )
         run_census_pipeline(dbc, census_corpus, replace=True)
-        run_census_pipeline(dbc, census_corpus, replace=True)
-        assert create_per_capita_view(dbc) is True
 
+        # The view EXISTS before the refresh. This line is the test.
+        assert create_per_capita_view(dbc) is True
+        assert _view_exists(dbc), "precondition: the view should be in place"
+
+        _run_load_against(dbc, census_corpus, integration_db_config, replace=True)
+
+        assert _view_exists(dbc), (
+            "a --replace refresh dropped dwh.election_per_capita via CASCADE and left "
+            "it dropped — the command exits 0, so nothing else would notice"
+        )
+        # And the rebuilt view reads, which a view over a re-created table only does if
+        # it was genuinely recreated rather than merely still catalogued.
+        assert len(read_per_capita(dbc)) == _PARTICIPATING_PAIRS
+
+        # The other half: `replace` really is forwarded to the second loader, or the
+        # refresh would append 2,204 rows again and die on the natural key.
         rows = dbc.select_query_to_df(
             f"SELECT count(*) AS n FROM {CENSUS_SCHEMA}.{ELECTION_POPULATION_TABLE}"
         )
         assert int(rows["n"].iloc[0]) == _PARTICIPATING_PAIRS
+    finally:
+        dbc.close_connection()
+
+
+@pytest.mark.integration
+def test_a_plain_load_creates_the_view_without_usvote_all(
+    integration_db_config: dict[str, Any],
+) -> None:
+    """The second half of the same defect: a plain `census load` never built the view.
+
+    Before the repair the view existed only after `python -m usvote all`, so an operator
+    who loaded census on its own got `election_population` with nothing over it and no
+    error saying so.
+    """
+    ec_corpus = _corpus("USVOTE_EC_HTML_DIR", "the 51-year EC corpus is not fixtures")
+    census_corpus = _corpus(
+        "USVOTE_CENSUS_CORPUS_DIR", "the census workbooks are not fixtures"
+    )
+    dbc = DBC(integration_db_config)
+    try:
+        from usvote.pipeline import run_ec_pipeline
+        from usvote.scrape import fetch_from_corpus
+
+        run_ec_pipeline(
+            dbc,
+            "unused.shp",
+            replace=True,
+            fetch=fetch_from_corpus(ec_corpus),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+        assert not _view_exists(dbc), "precondition: no view before the census load"
+
+        _run_load_against(dbc, census_corpus, integration_db_config, replace=False)
+
+        assert _view_exists(dbc), (
+            "a standalone census load left no per-capita view; it should not take a "
+            "whole `python -m usvote all` build to get one"
+        )
         assert len(read_per_capita(dbc)) == _PARTICIPATING_PAIRS
     finally:
         dbc.close_connection()

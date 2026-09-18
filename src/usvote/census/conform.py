@@ -447,7 +447,7 @@ def build_election_population(
 
     Returns :data:`ELECTION_POPULATION_COLUMNS`. Since #184 this frame **is** persisted,
     as :data:`ELECTION_POPULATION_TABLE`, and a view over that table is what exposes
-    persons-per-electoral-vote (:mod:`usvote.per_capita`). #182, which wrote this
+    persons-per-electoral-vote (:mod:`usvote.census.per_capita`). #182, which wrote this
     function, built it only to assert over it and threw it away.
     """
     participation = spine_participation(ec_participation)

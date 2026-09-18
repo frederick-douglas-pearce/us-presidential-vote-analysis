@@ -39,7 +39,12 @@ class _FakeDBC:
 @pytest.fixture
 def census_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Patch the CLI's seams; record what `run_census_pipeline` was called with."""
-    state: dict[str, Any] = {"calls": [], "dbc": _FakeDBC(), "snapshots": []}
+    state: dict[str, Any] = {
+        "calls": [],
+        "dbc": _FakeDBC(),
+        "snapshots": [],
+        "view_rebuilds": [],
+    }
 
     monkeypatch.setattr(
         census_main.config, "db_config_from_env", lambda *a, **k: dict(_DB)
@@ -58,6 +63,16 @@ def census_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         )
 
     monkeypatch.setattr(census_main, "run_census_pipeline", pipeline)
+
+    # #184: `_run_load` rebuilds the per-capita view after the pipeline returns. Record
+    # it rather than letting it reach the fake connection -- the CASCADE regression it
+    # repairs is what `tests/integration/test_census_per_capita.py` proves against a
+    # real database; here we only need to know the CLI still calls it.
+    def rebuild_view(dbc: Any) -> bool:
+        state["view_rebuilds"].append(dbc)
+        return True
+
+    monkeypatch.setattr(census_main, "create_per_capita_view", rebuild_view)
     monkeypatch.setattr(
         census_main,
         "snapshot_census_sources",
@@ -213,3 +228,45 @@ class TestConfigErrors:
         # entry points use the same code for it.
         assert census_main.main([]) == 2
         assert census_env["calls"] == []
+
+
+class TestTheViewRebuild:
+    """#184: a `census load` rebuilds `dwh.election_per_capita` after the pipeline.
+
+    Without it, `--replace` drops the view via `DROP TABLE ... CASCADE` and leaves it
+    dropped while exiting 0, and a plain load never creates it at all — both reproduced
+    against a live database during #184's review. The behaviour is proved end-to-end in
+    `tests/integration/test_census_per_capita.py`; these pin that the CLI still makes
+    the call, on both spellings and after the load rather than before it.
+    """
+
+    def test_a_plain_load_rebuilds_the_view(self, census_env: dict[str, Any]) -> None:
+        assert census_main.main(["load"]) == 0
+        assert census_env["view_rebuilds"] == [census_env["dbc"]]
+
+    def test_a_replace_load_rebuilds_the_view(self, census_env: dict[str, Any]) -> None:
+        assert census_main.main(["load", "--replace"]) == 0
+        assert census_env["view_rebuilds"] == [census_env["dbc"]]
+
+    def test_the_rebuild_is_not_attempted_when_the_load_failed(
+        self, census_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed load leaves nothing written, so there is nothing to build a view over.
+
+        It shares the pipeline's `try`, so this is really a statement about the ordering:
+        rebuilding after a raise would either fail again or build a view over a table the
+        failed load did not touch.
+        """
+
+        def boom(dbc: Any, corpus_dir: Any, **kwargs: Any) -> Any:
+            raise census_main.CensusParseError("a sheet the parser cannot read")
+
+        monkeypatch.setattr(census_main, "run_census_pipeline", boom)
+        assert census_main.main(["load"]) == 1
+        assert census_env["view_rebuilds"] == []
+
+    def test_a_snapshot_does_not_touch_the_view(
+        self, census_env: dict[str, Any]
+    ) -> None:
+        assert census_main.main(["snapshot"]) == 0
+        assert census_env["view_rebuilds"] == []
