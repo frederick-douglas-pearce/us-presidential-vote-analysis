@@ -82,6 +82,20 @@ _ZERO_ALLOTMENT = 14
 _COMPUTED = 2_189
 
 
+def _cells(series: pd.Series) -> list[object]:
+    """Return ``series`` as plain Python values with every missing value as ``None``.
+
+    Needed on **both** sides of the comparison, and the reason is not cosmetic:
+    ``Series.where(cond, None)`` on a nullable dtype substitutes ``pd.NA``, not ``None``,
+    so a list-to-list ``==`` then evaluates ``pd.NA == pd.NA`` and raises
+    ``TypeError: boolean value of NA is ambiguous`` rather than comparing anything. The
+    first version of this test did exactly that and CI caught it. Normalizing to ``None``
+    also makes the two sides comparable across their genuinely different dtypes — psycopg2
+    hands back ints and ``str``, the oracle holds ``Int64`` and ``object``.
+    """
+    return [None if pd.isna(value) else value for value in series]
+
+
 def _seed_spine_from_fixtures(dbc: DBC, years: set[int]) -> None:
     """Load the EC spine for ``years`` from the committed page fixtures.
 
@@ -177,9 +191,7 @@ def test_the_live_view_matches_the_pandas_oracle(
         # And the carried columns agree cell for cell, so a view that computed the right
         # ratio beside the wrong row still fails.
         for column in ELECTION_POPULATION_COLUMNS:
-            got = live[column].where(live[column].notna(), None).tolist()
-            want = oracle[column].where(oracle[column].notna(), None).tolist()
-            assert got == want, column
+            assert _cells(live[column]) == _cells(oracle[column]), column
 
         # The named rows, so a failure says which branch broke rather than "frames
         # differ".
