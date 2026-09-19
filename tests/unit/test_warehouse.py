@@ -385,6 +385,13 @@ def test_rebuild_views_sequences_union_then_join_then_hybrid(
     the join views, so a rebuild that ran them in any other order would fail against a
     fresh schema — and would fail *silently* against a warehouse whose views already
     exist from a previous build, which is the case a presence-only assert would miss.
+
+    **The fourth call is in the list but not in the chain.**
+    ``create_per_capita_view`` (#184) reads ``dwh.election_population``, which none of
+    the three before it touches, so its position is free. It is asserted anyway: a
+    rebuild that stopped calling it would leave a census-carrying warehouse without the
+    per-capita view and nothing else would notice, which is the presence half this test
+    otherwise leaves to the chain argument.
     """
     calls: list[str] = []
     monkeypatch.setattr(warehouse, "build_pv_union", lambda _dbc: calls.append("union"))
@@ -394,10 +401,13 @@ def test_rebuild_views_sequences_union_then_join_then_hybrid(
     monkeypatch.setattr(
         warehouse, "create_hybrid_views", lambda _dbc: calls.append("hybrid")
     )
+    monkeypatch.setattr(
+        warehouse, "create_per_capita_view", lambda _dbc: calls.append("per-capita")
+    )
 
     warehouse.rebuild_views(dbc)
 
-    assert calls == ["union", "join", "hybrid"]
+    assert calls == ["union", "join", "hybrid", "per-capita"]
 
 
 def _also_record_the_gates(

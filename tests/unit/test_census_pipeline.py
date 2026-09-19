@@ -7,6 +7,7 @@ database or the network.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -42,8 +43,9 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append("transform")
         return pd.DataFrame({"x": [1, 2, 3]})
 
-    def conform(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+    def conform(census: pd.DataFrame, ec: pd.DataFrame) -> pd.DataFrame:
         calls.append("conform")
+        return pd.DataFrame({"y": [1, 2]})
 
     def reconcile(ec: pd.DataFrame) -> None:
         calls.append("reconcile")
@@ -52,12 +54,21 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(f"load(replace={replace})")
         return frame
 
+    def load_election(
+        dbc: Any, frame: pd.DataFrame, *, replace: bool = False
+    ) -> pd.DataFrame:
+        calls.append(f"load_election(replace={replace})")
+        return frame
+
     monkeypatch.setattr(census_pipeline, "read_snapshot_sources", read)
     monkeypatch.setattr(census_pipeline, "read_ec_participation", spine)
     monkeypatch.setattr(census_pipeline, "transform_census", transform)
-    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", conform)
+    monkeypatch.setattr(
+        census_pipeline, "build_and_validate_election_population", conform
+    )
     monkeypatch.setattr(census_pipeline, "assert_seats_reconcile", reconcile)
     monkeypatch.setattr(census_pipeline, "load_census_population", load)
+    monkeypatch.setattr(census_pipeline, "load_election_population", load_election)
     monkeypatch.setattr(
         census_pipeline,
         "_PARSERS",
@@ -80,6 +91,7 @@ def test_the_stages_run_in_order(stages: list[str]) -> None:
         "conform",
         "reconcile",
         "load(replace=False)",
+        "load_election(replace=False)",
     ]
 
 
@@ -103,6 +115,47 @@ def test_the_write_happens_in_exactly_one_transaction(stages: list[str]) -> None
     assert conn.rollbacks == 0
 
 
+def test_both_tables_are_written_inside_that_one_transaction(
+    monkeypatch: pytest.MonkeyPatch, stages: list[str]
+) -> None:
+    """#184 added a second loader, and the count above cannot see where it ran.
+
+    ``conn.commits == 1`` stays true if ``load_election_population`` is moved *outside*
+    the ``with dbc.transaction():`` block — the block still commits once for the first
+    loader, and the stubbed loaders execute no SQL of their own. So the count asserts
+    that a transaction happened, not that both writes were in it, and the promise in
+    ``usvote/census/load.py`` ("written in one transaction … a warehouse holding one
+    without the other is a state no consumer should have to reason about") had nothing
+    behind it. Found by the #184 review's guard-efficacy lens.
+
+    This observes the **mechanism**: each loader records the commit count *at the moment
+    it runs*, the same trick ``test_the_spine_read_happens_outside_the_transaction``
+    uses further down this module. Inside the block both see 0; a loader moved after
+    it sees 1.
+    """
+    conn = RecordingConnection()
+    commits_when_each_loader_ran: dict[str, int] = {}
+
+    def watch(name: str) -> Callable[..., pd.DataFrame]:
+        def loader(
+            dbc: Any, frame: pd.DataFrame, *, replace: bool = False
+        ) -> pd.DataFrame:
+            commits_when_each_loader_ran[name] = conn.commits
+            return frame
+
+        return loader
+
+    monkeypatch.setattr(census_pipeline, "load_census_population", watch("census"))
+    monkeypatch.setattr(census_pipeline, "load_election_population", watch("election"))
+
+    run_census_pipeline(make_dbc(conn), "corpus/")
+
+    assert commits_when_each_loader_ran == {"census": 0, "election": 0}, (
+        "a loader ran after a commit, so the two tables are not written atomically"
+    )
+    assert conn.commits == 1
+
+
 def test_a_conformance_failure_blocks_the_write_entirely(
     monkeypatch: pytest.MonkeyPatch, stages: list[str]
 ) -> None:
@@ -115,11 +168,13 @@ def test_a_conformance_failure_blocks_the_write_entirely(
     never commits.
     """
 
-    def refuse(census: pd.DataFrame, ec: pd.DataFrame) -> None:
+    def refuse(census: pd.DataFrame, ec: pd.DataFrame) -> pd.DataFrame:
         stages.append("conform")
         raise CensusConformError("a participating state has no governing-census figure")
 
-    monkeypatch.setattr(census_pipeline, "assert_conforms_to_spine", refuse)
+    monkeypatch.setattr(
+        census_pipeline, "build_and_validate_election_population", refuse
+    )
     conn = RecordingConnection()
     with pytest.raises(CensusConformError):
         run_census_pipeline(make_dbc(conn), "corpus/")
@@ -173,7 +228,10 @@ def test_the_spine_read_happens_outside_the_transaction(
 
 def test_replace_is_forwarded_to_the_loader(stages: list[str]) -> None:
     run_census_pipeline(make_dbc(RecordingConnection()), "corpus/", replace=True)
+    # Both tables, or a `--replace` rebuild silently appends the election-grain rows a
+    # second time and dies on its natural key.
     assert "load(replace=True)" in stages
+    assert "load_election(replace=True)" in stages
 
 
 def test_the_connection_is_left_open_by_default(stages: list[str]) -> None:
