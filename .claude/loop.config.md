@@ -23,7 +23,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation, the architect gate in §2; **and rules on scope, stopping with that ruling attached, when a BLOCKING code-review finding raises a design question**) | inferred from available agent roster. The scope ruling is a **second gate the engine makes due, not this file** (dev-loop 0.3.0, #114): `ARCHITECT_TRIGGERS` does not bound it, it fires on every route at whatever round the finding arises, and no value here switches it off — absent, `—` or `TODO`, the stop still fires with no ruling attached. The engine's Gate table is the authoritative list of every gate this binding staffs. **Never delete this row.** |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
-| `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching the API serve surface (`usvote/api/`), the DB write path, or scraping/network code | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
+| `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching a **sensitive surface as §4 defines it**. §4 is the single authoritative list; this row deliberately does **not** restate it, because the two copies are what drifted apart before #247 | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
 | `PRIORITY_LABELS` | `priority:high` > `priority:medium` > `priority:low`; tiebreak issue number ascending | inferred from `gh label list` (`priority:high`=Must have, `medium`=Should have, `low`=Nice to have) |
 | `ARCHITECT_TRIGGERS` | see §2 | **project-specific — edit when porting** |
@@ -125,9 +125,36 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
 > exists yet (only `.github/workflows/ci.yml`) — routing is via the built-in `/security-review`.
 
 - **`.claude/`-only change** → run local `/security-review` (no CI security workflow to trigger).
-- **Sensitive surface** — the API serve layer (`usvote/api/`), the DB write/connection path
-  (`usvote/db.py`, `usvote/load.py`, `usvote/pv/load.py`), or scraping/network code
-  (`usvote/scrape.py`, `usvote/ucsb/` network stage) → run `/security-review` when dev-complete.
+- **Sensitive surface** → run `/security-review` when dev-complete. Three path surfaces, plus
+  one change-shaped trigger:
+  - **API serve layer** — `usvote/api/`.
+  - **DB write/connection path** — `usvote/db.py`, plus **any `load.py` anywhere under
+    `usvote/`** (`usvote/**/load.py`, the `**` matching zero directories too; today that is
+    `usvote/load.py`, `usvote/pv/load.py`, `usvote/census/load.py` — MIT and UCSB have none,
+    they write through `usvote/pv/load.py`).
+  - **Scraping/network** — **any `scrape.py` anywhere under `usvote/`** (`usvote/**/scrape.py`;
+    today `usvote/scrape.py`, `usvote/ucsb/scrape.py`, `usvote/census/scrape.py`).
+  - **Also fires** when a change introduces a *new* module that builds SQL/DDL by string
+    interpolation, or a new interpolated identifier or value in an existing one. Keyed on the
+    change rather than on a path, deliberately: a path list here would name `join.py`,
+    `hybrid.py` and `census/per_capita.py` and then gate every ordinary edit to them, which is
+    over-gating, not routing.
+
+  **Enumerated paths or a pattern? Both, on a stated rule — pattern where a stage name repeats
+  across subpackages, enumeration where it does not.** Decided 2026-09-19 (#247). The previous
+  list was all-enumerated and went stale by omission: `usvote/census/` was created with a
+  `load.py` (new DDL + an insert path) and a `scrape.py` (a real network stage,
+  `python -m usvote.census snapshot`), and **#184's delta matched none of the list** — the gate
+  ran on that PR because the orchestrator applied the engine's over-gating default, not because
+  a rule selected it. A rule that depends on someone choosing to over-gate is not a rule.
+  Enumeration is more precise and more auditable, and it stays for the surfaces that have no
+  repeating axis (`usvote/api/`, `usvote/db.py`) — nothing there is self-maintaining to be, and
+  a pattern would only blur it. But `load.py` / `scrape.py` are **per-source stage names the
+  source-namespacing convention (D015/D027) grows a fresh copy of with every new subpackage**,
+  so that is exactly the axis enumeration cannot keep up with; a pattern there would have
+  covered `usvote/census/` on the day it was created, and covers the next subpackage on its.
+  The next subpackage is the test of this choice either way.
+
   Note the repo's own guardrails: no UCSB bytes ever committed (public repo, D022), snapshot is
   redistributable-only at the source (D030), and the wheel uses `packages=` not `force-include`
   (avoids bundling secrets — see `pyproject.toml`).
