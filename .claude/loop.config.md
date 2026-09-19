@@ -23,7 +23,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation, the architect gate in §2; **and rules on scope, stopping with that ruling attached, when a BLOCKING code-review finding raises a design question**) | inferred from available agent roster. The scope ruling is a **second gate the engine makes due, not this file** (dev-loop 0.3.0, #114): `ARCHITECT_TRIGGERS` does not bound it, it fires on every route at whatever round the finding arises, and no value here switches it off — absent, `—` or `TODO`, the stop still fires with no ruling attached. The engine's Gate table is the authoritative list of every gate this binding staffs. **Never delete this row.** |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
-| `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching a **sensitive surface as §4 defines it**. §4 is the single authoritative list; this row deliberately does **not** restate it, because the two copies are what drifted apart before #247 | Confirmed local-only: no labeled security workflow (only `ci.yml`); review runs locally via `/security-review`, no CI security job to trigger |
+| `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching a **sensitive surface as §4 defines it**. §4 is the single authoritative list; this row deliberately does **not** restate it, because the two copies are what drifted apart before #247 | Confirmed local-only: none of the six workflows in `.github/workflows/` is a security workflow; review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
 | `PRIORITY_LABELS` | `priority:high` > `priority:medium` > `priority:low`; tiebreak issue number ascending | inferred from `gh label list` (`priority:high`=Must have, `medium`=Should have, `low`=Nice to have) |
 | `ARCHITECT_TRIGGERS` | see §2 | **project-specific — edit when porting** |
@@ -122,12 +122,29 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
 ## 4. Security routing
 
 > All rules here are GitHub/host-specific. Host **is** GitHub. No dedicated security workflow
-> exists yet (only `.github/workflows/ci.yml`) — routing is via the built-in `/security-review`.
+> exists yet — none of the six in `.github/workflows/` is one — so routing is via the built-in
+> `/security-review`.
 
 - **`.claude/`-only change** → run local `/security-review` (no CI security workflow to trigger).
-- **Sensitive surface** → run `/security-review` when dev-complete. Three path surfaces, plus
+  **This rule wins over the "Skip for docs / no-surface changes" bullet below**, which it would
+  otherwise tie with on every such change — `.claude/` carries hook and permission config, so a
+  no-surface *diff* is not a no-consequence one.
+- **Sensitive surface** → run `/security-review` when dev-complete. **Five** path surfaces, plus
   one change-shaped trigger:
-  - **API serve layer** — `usvote/api/`.
+  - **API serve layer** — `usvote/api/`, plus `usvote/snapshot.py`: it builds the artifact that
+    layer serves, and its `assert_redistributable_only` is the single gate keeping
+    non-redistributable UCSB-derived rows (D022/D030) off the public surface. A path rule, not
+    the interpolation trigger below, because that trigger fires on *new* interpolation and this
+    module already interpolates.
+  - **Deploy / CI automation** — `.github/workflows/**`, `deploy/`, `Dockerfile`. This is the
+    most privileged code in the repo and, until #247, it matched no rule at all: `deploy.yml`
+    holds `id-token: write` and the Cloudflare token/zone secrets, and `deploy/killswitch/`
+    is authorized to change the live service's `max_instance_count`. Enumerated, and found by
+    #248's review one axis over from the omission #247 was filed about.
+  - **Corpus integrity** — `usvote/corpus.py`: the sha256/manifest provenance code all three
+    snapshot stages share. It was extracted *out from under* the `scrape.py` name, so the
+    pattern below no longer reaches it — the same migration-out-from-under-a-rule failure this
+    section diagnoses.
   - **DB write/connection path** — `usvote/db.py`, plus **any `load.py` anywhere under
     `usvote/`** (`usvote/**/load.py`, the `**` matching zero directories too; today that is
     `usvote/load.py`, `usvote/pv/load.py`, `usvote/census/load.py` — MIT and UCSB have none,
@@ -136,9 +153,11 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
     today `usvote/scrape.py`, `usvote/ucsb/scrape.py`, `usvote/census/scrape.py`).
   - **Also fires** when a change introduces a *new* module that builds SQL/DDL by string
     interpolation, or a new interpolated identifier or value in an existing one. Keyed on the
-    change rather than on a path, deliberately: a path list here would name `join.py`,
-    `hybrid.py` and `census/per_capita.py` and then gate every ordinary edit to them, which is
-    over-gating, not routing.
+    change rather than on a path, deliberately: the modules this would otherwise enumerate are
+    the **view builders** (`join.py`, `hybrid.py`, `census/per_capita.py`), which read rather
+    than write and whose ordinary edits are column and ordering work — gating every one of those
+    is over-gating. `load.py` is *also* interpolating DDL and *is* gated on every touch, and that
+    is not an inconsistency: it is gated for being a write path, which a view builder is not.
 
   **Enumerated paths or a pattern? Both, on a stated rule — pattern where a stage name repeats
   across subpackages, enumeration where it does not.** Decided 2026-09-19 (#247). The previous
