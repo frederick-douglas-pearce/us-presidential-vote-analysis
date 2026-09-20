@@ -4204,18 +4204,41 @@ committed under `posts/` and `docs/`, whatever its format, … except third-part
 within it"*, and everything after that sentence is explicitly explanatory. Scoping **by path rather
 than by content type** is part of the same choice: a content-type definition ("markdown text,
 images, diagrams") leaves every `.csv`, `.json` or `.sql` asset beside a post unlicensed, which in
-a data project is most of the interesting material.
+a data project is most of the interesting material. **`LICENSE`'s exception is worded to the same
+axis** — "everything committed under `posts/` and `docs/`, whatever its format" in both files — so
+the pair cannot leave a file claimed by both or by neither. An earlier draft excepted "the prose
+content under" those directories, which would have handed the first `.csv` added beside a post to
+MIT and CC-BY at once: the exact over-inclusion this clause exists to prevent, reintroduced by the
+*other* file.
 
 **(c) `docs/ucsb-html-formats.md`'s verbatim UCSB markup is rewritten schematically rather than
 carved out.** Three fenced blocks held real UCSB bytes — the Case 1 legislature-chosen `<tr>`, the
 Case 2 non-participation footnote, and the Case 4 `0.0`-percent decoy row with its Alabama total.
 A blanket CC-BY over `docs/` would have purported to grant redistribution and adaptation rights
 over content D022 says this repo holds none for, which is the exact overclaim D022 and D030 exist
-to prevent. All three now use the placeholder style Case 3 already used, keeping the sentinel
-substrings the parser actually matches on (`electors chosen by state legislature`, `did not
-participate`, `--`, `0.0`) and replacing everything else with `[placeholder]`. **The ambiguity is
-removed rather than documented** — there is no carve-out left to get wrong. The file's own header
-already claimed every snippet was structural; that claim is now true.
+to prevent. All now carry only the sentinel substrings the parser actually matches on
+(`electors chosen by state legislature`, `did not participate`, `--`, `0.0`), with everything else
+a `[placeholder]`. **Four blocks, not three:** Case 3 was held up as the model the others were
+rewritten toward, and on inspection it still opened `<td>Connecticut</td>`, so it was schematized
+with them — a reminder that the exemplar is the last thing anyone re-reads.
+
+**What this does and does not achieve.** No fenced block in that file now reproduces UCSB
+expression, which is the form that made a CC-BY grant over `docs/` untenable. Short verbatim
+strings remain outside the blocks, where **the exact token is the finding** and a placeholder would
+erase it: the source typos `HORACE GREEFLEY` and `New jersey`, two UI prose fragments in the
+row-classification catalog, and the published percents in §4 and §9. Those are covered by the
+exclusion in (b)'s grant sentence, not by their size — D022's own rejected option 1 says an excerpt
+"reduces the volume redistributed but not the fact of it; the licensing question is unchanged by
+size", and that reasoning is not weakened by being inconvenient here.
+
+**The same is true of `posts/`, and the asymmetry is deliberate.** The 1864 post quotes the Case 2
+footnote verbatim — the identical sentence removed from `docs/` — to make a point about how two
+sources record the same absence, and it is left in place. Quoting a sentence in an essay for
+commentary is the ordinary case the exclusion is written for; reproducing a source's markup in a
+reference file is not, because there the bytes are the artifact rather than the subject. So `docs/`
+gets the strong treatment (the ambiguity removed) and `posts/` relies on the exclusion (the
+ambiguity documented). Preferring the first where it is available does not mean the second is
+unsound — it means (b)'s exclusion has to be operative, which is why it sits inside the grant.
 
 **(d) The attribution term names the license, because CC BY 4.0 requires it.** §3(a)(1)(C) obliges a
 reuser to indicate the material is licensed under the Public License and to include its text, URI,
@@ -4260,7 +4283,12 @@ separates three tiers: `ci.yml` has no path filter and its `ruff`/`mypy`/unit, l
 integration, and container-boot jobs run on **every** PR and push to `main`; the architect pass
 (`loop.config.md` §2) and `/security-review` (§4) fire **by route and trigger**, and are skipped for
 docs-only changes like this one; and the UCSB and census `TestRealCorpus` tiers plus the #167
-overlap gates **cannot run in CI at all** (D022 keeps the corpora out of the repo), so they are
-local-only merge preconditions no green checkmark proves. The file also records that the 2021–2022
+overlap gates **cannot run in CI at all**, so they are local-only merge preconditions no green
+checkmark proves. That third tier is three mechanisms, not one, and the file says so rather than
+collapsing them: the UCSB corpus is absent because D022 forbids committing it; the census corpus is
+absent for reproducibility and size, its publications being public domain and its bytes already
+committed as fixtures; and the overlap gates are warehouse-build gates that stand down on an empty
+`pv_ucsb` table, with unit tests over synthetic frames that do run every build. Collapsing them
+would have attributed a licensing motive to a public-domain source. The file also records that the 2021–2022
 notebook and `db_tools.py` predate any AI involvement, rather than letting "built with Claude Code"
 read as covering the whole history.

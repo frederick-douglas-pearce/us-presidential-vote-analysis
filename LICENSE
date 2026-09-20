@@ -23,10 +23,11 @@ SOFTWARE.
 ---
 
 **Scope:** This MIT license applies to everything committed to this repository
-**except** (a) the prose content under `posts/` and `docs/`, which is licensed under
-CC-BY-4.0 instead — see [LICENSE-prose.md](LICENSE-prose.md) — and (b) third-party
-material quoted anywhere in this repository, which is not the licensor's to license
-onward. What it does cover is the code and the material that documents it: `src/`,
+**except** (a) everything committed under `posts/` and `docs/`, whatever its format,
+which is licensed under CC-BY-4.0 instead — see [LICENSE-prose.md](LICENSE-prose.md) —
+and (b) third-party material quoted anywhere in this repository, which is not the
+licensor's to license onward. The two exceptions are worded to match that file's grant
+exactly, so no file can fall under both or under neither. What it does cover is the code and the material that documents it: `src/`,
 `tests/`, `tooling/`, `scripts/`, `deploy/`, `.claude/specs/`, the step-1 notebook,
 `db_tools.py`, the `Dockerfile`, the CI workflows under `.github/`, and the root
 `README.md` and `CLAUDE.md`.

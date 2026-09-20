@@ -11,11 +11,16 @@ The corpus itself lives **outside this repository** at the path named by
 established that committing UCSB bytes to this public repo would itself constitute
 redistribution. **Every markup snippet below is schematic, not quoted** — tag shapes,
 attribute names, and the sentinel tokens the parser matches on, with everything else
-written as a `[placeholder]`. Vote numbers appear only where a specific numeric value
-*is* the finding (the `0.0`-percent decoy in §4). That is not house style: this file is
-under `docs/`, which [LICENSE-prose.md](../LICENSE-prose.md) licenses CC-BY-4.0, and a
-verbatim UCSB `<tr>` inside it would purport to grant redistribution rights D022 says
-this repo does not hold (D065).
+written as a `[placeholder]`. That is not house style: this file is under `docs/`, which
+[LICENSE-prose.md](../LICENSE-prose.md) licenses CC-BY-4.0, and a verbatim UCSB `<tr>`
+inside it would purport to grant redistribution rights D022 says this repo does not hold
+(D065).
+
+Short verbatim strings do survive outside the markup blocks, and deliberately: a source
+typo (`HORACE GREEFLEY`, `New jersey`), a label the parser matches on, and the specific
+numbers in §4 and §9 are each cases where **the exact token is the finding** and a
+placeholder would erase it. They are quoted here, not licensed onward — the exclusion in
+`LICENSE-prose.md`'s grant sentence is what covers them.
 
 ---
 
@@ -170,7 +175,7 @@ Both the `Votes` cell and its paired `%` cell hold a lone U+00A0. Structural sha
 an 1824 row with one real candidate and three absent:
 
 ```html
-<td>Connecticut</td>
+<td>[state]</td>
 <td>[total]</td>
 <td>[votes]</td><td>[pct]</td><td>[ev]</td>
 <td> </td><td> </td><td> </td>

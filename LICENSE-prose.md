@@ -36,10 +36,12 @@ This repository is a data project, and both directories it licenses quote from s
 
 `docs/` holds browsable catalogs written for a reader rather than for a parser — [`corrections.md`](docs/corrections.md) is a per-anomaly catalog with statutory citations, [`pv-coverage.md`](docs/pv-coverage.md) explains what a column measures and why. Two of them ([`canonical-keys.md`](docs/canonical-keys.md), [`api-snapshot.md`](docs/api-snapshot.md)) read partly as API contracts, and they are licensed as prose anyway: the contract that binds is the code in `src/`, which the MIT license covers.
 
+[`posts/README.md`](posts/README.md) sits inside `posts/`, so the grant reaches it like anything else in that directory.
+
 ## What this license does not cover
 
 Pointers, not carve-outs — the grant above is closed, so nothing here needs to subtract from it.
 
 - Code and the material that documents it — `src/`, `tests/`, `tooling/`, `scripts/`, `deploy/`, the step-1 notebook, `db_tools.py`, the `Dockerfile`, the CI workflows, and the root `README.md` and `CLAUDE.md` — are under [MIT](LICENSE).
 - `.claude/specs/` — the decision log, research files, and backlogs — is also under MIT. It documents the codebase, and adding a third licensing surface for it would buy nothing.
-- [`posts/README.md`](posts/README.md) sits inside `posts/` and follows `posts/`, so it is CC-BY like the posts it describes.
+- `social/images/` holds the tracked Open Graph share cards and the TOML briefs they render from. They sit outside `posts/` and stay under MIT with the `tooling/` script that produces them, even though each card publishes alongside a CC-BY post.

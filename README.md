@@ -266,11 +266,13 @@ one. It is one person's derived dataset, assembled from published sources, with 
 standing, no certifying role, and no relationship to any election authority. Nothing served
 here is a canvass, a certification, or a legal record of any election.
 
-**No source endorses this.** The project ingests and republishes data from the National
-Archives, the MIT Election Lab, and the UCSB American Presidency Project, and
-[`docs/corrections.md`](docs/corrections.md) publishes places where this repo's reading
-**differs from what a source prints**. None of those institutions has reviewed, approved, or
-endorsed any of it, and the differences are this project's readings, not theirs.
+**No source endorses this.** The project ingests data from the National Archives, the MIT
+Election Lab, and the UCSB American Presidency Project, and republishes from the first two
+&mdash; UCSB grants no reuse rights, so no UCSB-derived value reaches the API or any other
+published surface. [`docs/corrections.md`](docs/corrections.md) records places where this
+repo's reading **differs from what a source prints**. None of those institutions has
+reviewed, approved, or endorsed any of it, and the differences are this project's readings,
+not theirs.
 
 **Not affiliated with Anthropic.** Built with Claude Code; not affiliated with, or endorsed
 by, Anthropic.
