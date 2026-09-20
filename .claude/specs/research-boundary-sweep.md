@@ -1,6 +1,6 @@
 # Boundary-discrepancy sweep: is Virginia the only material case in the 1824–2024 EC span?
 
-**Issue:** #208 (E10-S?, carved out of #180 at the owner's direction) · **Status:** COMPLETE
+**Issue:** #208 (carved out of #180 at the owner's direction) · **Status:** **Analysis complete — AC-5 deferred to #251** (see *Deferrals*)
 **Date:** 2026-09-19 · **Deliverable shape:** written recommendation, per `research-census-source.md`
 
 ---
@@ -28,7 +28,8 @@ upward**:
 | 1 | **West Virginia separation** | VA → WV | 1863 | 1824–1860 (ten) | **12.7%–21.3%** understatement of Virginia's denominator | **MATERIAL** — already corrected (#181) |
 | 2 | **Alexandria retrocession** | DC → VA | 1846 | **1824, 1828, 1832, 1836, 1840, 1844, 1848** (seven) | **0.79%–0.91%** *overstatement* of Virginia's denominator, *after* correction 1 is applied | **MATERIAL** — **not corrected; this is the new finding** |
 
-Every other post-1824 boundary change is ruled **immaterial**, and §6 gives each one its reason.
+Every other post-1824 boundary change is ruled **immaterial**, and §6 gives each one its reason — including the **Toledo Strip**, which §6.5 classifies but which also leaves the sweep's one
+**unquantified residual**, on Michigan rather than Ohio. Read §6.5 before quoting this row.
 Two of those reasons are structural rather than magnitude-based, and the distinction matters:
 Berkeley/Jefferson washes out of the arithmetic, and the territory-to-state cases move no
 population *between states* at all.
@@ -50,14 +51,19 @@ and left an honest hedge on the affected rows naming this issue by number.
 **The residual is real, it is in five censuses rather than three, and it is exactly explained.**
 
 The mechanism is the **retrocession of Alexandria County from the District of Columbia to Virginia
-in 1846**. Alexandria County was part of Virginia until 1801, part of the District from 1801 to
-1846, and part of Virginia again from 1846. On a **present-day** footprint it is Virginia
+in 1846**. The land was ceded by Virginia in **1791**, Congress assumed jurisdiction in 1801 and
+the county was organised as Alexandria County that year, and it returned to Virginia in 1846 — so
+the 1800 census already returned it as *"District of Columbia, in Virginia"*. (Three dates, all
+real; §5.2 and §6.6 use the 1791 cession, this paragraph the 1801 organisation.) On a
+**present-day** footprint it is Virginia
 throughout — so for the censuses of **1800–1840**, when it was enumerated as part of the District,
 `tabs15-65.xlsx` assigns its people to Virginia.
 
-That predicts two things at once, and **both hold to the person** (VERIFIED, §4): Virginia's file
-figure runs *above* the enumerated Virginia by the Alexandria population, and the District's file
-figure runs *below* the enumerated District by the same amount. 1790 is clean because the District
+That predicts two things at once, and **both hold to the person** — each against a *separately
+published* series, not against the other (VERIFIED, §4.1 and §5.2): Virginia's file figure runs
+*above* the enumerated Virginia by the Alexandria population, and the District's file figure runs
+*below* the enumerated District by the same amount. The second identity is what keeps the first
+from being circular, and it needs the Bureau's own District series (§5.2) to be a test at all. 1790 is clean because the District
 did not yet exist; 1850 and 1860 are clean because retrocession had already happened.
 
 **Why this was worth finding.** #180's reasoning about the other candidates was *"sparsely
@@ -134,7 +140,8 @@ Electoral College.** The swap partner is **South Carolina** every time, and the 
 with Alexandria, Virginia reads 53,086 against South Carolina's 52,835 and takes last place; as
 enumerated it reads 52,670 and sits ahead of it. **9,573 people decide it.**
 
-So the case is material under the adopted test *and* under the architect's own rank test in half
+So the case is material under the adopted test *and* under the architect's own rank test in **3 of
+the 7**
 the affected elections — which is the value of having computed it. The lesson is the one the
 architect itself stated: for a question this close, a prediction about a rank is not evidence.
 
@@ -151,7 +158,7 @@ All three checks below run with **no network and no database**, against the two 
 |---|---|---|---|---|---|---|---|
 | 1790 | 691,737 | 55,873 | **747,610** | — | — | — | **747,610** ✓ |
 | 1800 | 807,557 | 78,592 | 886,149 | 8,144 | 5,949 | **880,200** | **880,200** ✓ |
-| 1810 | 877,683 | 105,469 | 983,152 | 15,471 | 8,552 | **974,600** | **974,600** ✓ |
+| 1810 | 877,683 | 105,469 | 983,152 | 15,471 | 8,552 | **974,600** | **974,600** ✓ *(§5.3)* |
 | 1820 | 938,261 | 136,808 | 1,075,069 | 23,336 | 9,703 | **1,065,366** | **1,065,366** ✓ |
 | 1830 | 1,044,054 | 176,924 | 1,220,978 | 30,261 | 9,573 | **1,211,405** | **1,211,405** ✓ |
 | 1840 | 1,025,227 | 224,537 | 1,249,764 | 33,745 | 9,967 | **1,239,797** | **1,239,797** ✓ |
@@ -162,7 +169,7 @@ File columns: **VERIFIED**. Enumerated and Alexandria columns: see §5 for each 
 
 ### 4.2 National-total reconciliation — what it does and does not establish
 
-**All 21 census years 1790–1990 reconcile EXACTLY** against a published US total (VERIFIED —
+**All 21 census years 1790–1990 reconcile EXACTLY** against a published US total, and the script now **asserts** it rather than printing it (VERIFIED —
 census.gov CPH-2 *Table 4. Population: 1790 to 1990* for 1790–1900, and the census.gov
 population-change table for 1910–1990).
 
@@ -192,6 +199,10 @@ The parent/child technique applies only where the file contains **both** jurisdi
 question "which cases could this technique have caught?" has an exact answer, obtained by asking
 which states carry population in the file **before they first appear in the EC record**, and then
 asking what they were carved out of:
+
+(Read the criterion as *"states whose **first** EC appearance falls after the span opens"* — every
+1824-era state trivially carries 1790 population, so the literal wording would select all 51. Of
+the 26 states that qualify, exactly two have a **state** predecessor.)
 
 - **West Virginia** carries population from 1790 and first holds electoral votes in 1864. Its
   predecessor is **Virginia — a state.** ✓ caught
@@ -279,23 +290,30 @@ boundary changes the file restates and which it leaves alone. §6 applies it.
 
 ### 5.3 The figures, and how they compare to the derivation
 
-| census | Bureau's published Alexandria figure | derived here as `enumerated_DC − file_DC` | agree? |
-|---|---|---|---|
-| 1800 | **5,949** | 5,949 | ✓ exact |
-| 1810 | **8,852** *(see caveat)* | 8,552 | **CONTRADICTED** — see below |
-| 1820 | **9,703** | 9,703 | ✓ exact |
-| 1830 | **9,573** | 9,573 | ✓ exact |
-| 1840 | **9,967** | 9,967 | ✓ exact |
+| census | Virginia Note 2 | District note − file DC | `Arlington` county row | original enumeration | agree? |
+|---|---|---|---|---|---|
+| 1800 | **5,949** | 5,949 | 5,949 | **5,949** — 1800 Return p. 52, *"Total number of souls, 5,949"* | ✓ four ways |
+| 1810 | **8,852** | **8,552** | **8,552** | *volume not digitised* | **CONTRADICTED — resolves to 8,552** |
+| 1820 | **9,703** | 9,703 | 9,703 | **9,703** — Census for 1820, printed p. 102 | ✓ four ways |
+| 1830 | **9,573** | 9,573 | 9,573 | **9,573** — Fifth Census *Abstract* p. 45, sub-totalled outright | ✓ four ways |
+| 1840 | **9,967** | 9,967 | 9,967 | **9,967** — *Compendium of the Sixth Census* | ✓ four ways |
 
-**The 1810 cell is CONTRADICTED and is deliberately not resolved here.** The volume's text layer is
-OCR (Acrobat Paper Capture), and the glyph reads `8.852` where the derivation gives `8,552` — a
-5/8 confusion is the single commonest OCR error on this kind of scan, so the disagreement may be
-in the OCR rather than in either figure. **It does not matter for this repo and must not be
-quietly resolved to make the table tidy**: the 1810 census governs the elections of 1812–1820, all
-of which are **outside the EC span**, so no correction depends on it. Anyone widening the span
-below 1824 must re-read that cell off the page image first.
+**The 1810 disagreement is a typo in the Bureau's volume, not an OCR artifact, and it resolves to
+8,552.** An earlier draft of this report guessed OCR — the text layer *is* Acrobat Paper Capture and
+a 5/8 confusion is the commonest error on such a scan, so the guess was plausible. It was wrong.
+Three independent readings inside the same volume give **8,552**: the District note's series minus
+the file's DC figure, the `Arlington` county row read at 500 dpi, and the arithmetic itself — 8,552
+is the **only** value satisfying *both* `15,471 + x = 24,023` **and** `877,683 + 105,469 − x =
+974,600`. So Virginia Note 2's `8.852` is a defect in the printed note.
 
-**The four cells that do matter agree exactly**, and they are the only ones a correction would use.
+**It still governs no in-span election** — the 1810 census governs 1812–1820 — so nothing here
+depends on it. It is recorded because the earlier draft asserted that re-reading the page image was
+the only way to settle it, and that was false: the same volume settles it two pages away.
+
+**A naming trap worth carrying into #251:** in 1820 the row printed *"County of Alexandria"* is the
+**rural remainder only** (1,485); the county total is that plus *"Alexandria"* (8,218) = 9,703. And
+the correct continuation of pre-1846 Alexandria County is the volume's **`Arlington`** row — its
+`Alexandria` row is the modern independent city and is not comparable.
 
 ### 5.4 Enumerated Virginia, 1790–1860, established from primary Bureau figures
 
@@ -325,8 +343,23 @@ rows**, a third independent cross-check on the file's provenance. The same note 
 
 **1790, 1850 and 1860 reproduce the three totals #180 verified independently** — so the composition
 is confirmed against a known answer at all three points where one exists, which is what licenses
-reading the other rows off it. **1810 inherits §5.3's unresolved OCR cell** and is shown with both
-candidate values; it governs no in-span election.
+reading the other rows off it. **1810 resolves to 8,552 per §5.3**, so the composed total is
+974,600.
+
+**CONTRADICTED — 1810 and 1820 each have two published Bureau totals, and only one pair closes the
+identity.** The original returns give **974,600** and **1,065,366** (as reprinted in *A Century of
+Population Growth*, 1909, Table 11); the **1850 Seventh Census restatement** gives **974,622** and
+**1,065,379**, internally consistent there. They differ by **22** and **13**. The file's component
+series reproduce the **original-return** pair exactly, so that is the pair used throughout this
+report and in the script — pick the restatement and the identity misses by those amounts. This is
+recorded because a later reader sourcing "the enumerated Virginia" from the 1850 volume will get a
+different number and conclude the reconciliation is broken when it is not.
+
+**Retrocession, dated** (for #251's provenance): Act of **9 July 1846**, ch. XXXV, **9 Stat. 35**,
+whose §4 made it conditional on a referendum of the county; the poll ran **1–2 September 1846**
+(763 for, 222 against) and President Polk proclaimed it in force on **7 September 1846** (9 Stat.
+Appendix p. 1000). So the 1850 census counted Alexandria in Virginia, which is why 1850 and 1860
+need no Alexandria term.
 
 ### 5.5 A caveat the Bureau raises that #180 did not (VERIFIED, verbatim)
 
@@ -373,7 +406,7 @@ Per §5.1, the file restates a transfer **only if one or more whole counties mov
 | **Alexandria retrocession** | DC → VA | 1846 | **yes** | **MATERIAL** — §1 case 2, **uncorrected** |
 | **Berkeley & Jefferson Counties** | VA → WV | 1863/66, upheld *Virginia v. West Virginia*, 78 U.S. 39 (1871) | yes | **IMMATERIAL BY CONSTRUCTION** — see 6.3 |
 | **Massachusetts ↔ Rhode Island** | both ways | SCOTUS decree 1861, effective 1 Mar 1862 | **no** (towns) | **IMMATERIAL** — see 6.4 |
-| **Toledo Strip** | Michigan Terr. → Ohio | 1836/37 | no (part-counties) | **NOT QUANTIFIABLE** — see 6.5 |
+| **Toledo Strip** | Michigan Terr. → Ohio | 1836/37 | **not restated** (§6.5) | **IMMATERIAL** for Ohio; **unquantified residual on Michigan** — see 6.5 |
 | **Boston Corner** | MA → NY | 10 Stat. 602, 1855 | no (a hamlet) | immaterial — sub-county, not restated |
 | **Delaware Wedge** | PA → DE | compact ratified 1921 | no (684 acres) | immaterial — sub-county, not restated |
 | **Fair Haven strip** | VT → NY | 21 Stat. 72, 1880 | no | immaterial — sub-county |
@@ -413,25 +446,47 @@ also the apportionment basis for the 1864 and 1868 elections. **No correction is
 Note the direction of the luck: had the transfer been whole-county, this would have been a third
 material case affecting two elections at roughly 2–3% of Rhode Island.
 
-### 6.5 The Toledo Strip — disclosed, not corrected, and this is what condition 3 is for
+### 6.5 The Toledo Strip — classified, and the residual is on Michigan, not Ohio
 
-The strip was governed by Michigan Territory and ceded to Ohio in 1836, taking effect at Michigan's
-statehood on 26 January 1837 — between the 1830 and 1840 censuses. On a present-day footprint its
-1830 people belong to **Ohio**; as enumerated in 1830 they may have been counted under Michigan
-Territory. That is the same error class as Alexandria.
+**An earlier draft of this report got this case backwards** and left it unclassified. It said the
+strip's 1830 people "belong to **Ohio**" on a present-day footprint, and declined to rule. Both
+halves were wrong, and the volume settles it.
 
-**It fails condition 3 of the §3 threshold: no source gives its population.** The best figure found
-is Toledo *city* at roughly 1,205 in 1835 (ATTRIBUTED, and a city is not the strip). Against Ohio's
-1830 population of 937,903 even a few thousand people is under 0.3%, but that is an argument from an
-absent number, which is precisely the kind of reasoning this issue exists to stop.
+**The strip was never restated.** The Bureau's Michigan note says its pre-statehood coverage
+*"included population in the strip that was ceded to Ohio in 1836"* — and the tell is the very next
+clause, which says the 1820 and 1830 censuses also covered settlements in present-day Wisconsin,
+*"**shown under that State**."* The Wisconsin population was moved; the strip's was not, and the
+note distinguishes them in consecutive sentences. That is exactly what §5.1's whole-county rule
+predicts for a sliver cut across Monroe County.
 
-**So it is disclosed rather than ruled either way**, per §3: *a change nobody can quantify cannot be
-corrected, only disclosed.* Two things would close it, and neither is in this repo: the 1830 census
-enumeration for Monroe County (Michigan Territory) and Wood County (Ohio), and a determination of
-which jurisdiction the 1830 census actually used for the strip. **It is also probably sub-county**
-(the strip cut across counties rather than moving whole ones), in which case §5.1 says the file
-never restated it and there is no error at all — but "probably" is not a ruling, and it is recorded
-here as the sweep's one open residual.
+Corroborated arithmetically within the file: **Michigan (28,004) + Wisconsin (3,635) = 31,639**, the
+enumerated Michigan Territory total for 1830 (ATTRIBUTED — I did not source that total from a
+primary table; the two file figures are VERIFIED). Nothing left Michigan Territory's total for Ohio.
+
+**So the classification is:**
+
+- **Ohio: no error, definitively.** Ohio's 1830 figure of 937,903 *is* the enumerated Ohio, which is
+  the basis its 21 electoral votes were apportioned on. **IMMATERIAL**, on the same structural
+  ground as Massachusetts ↔ Rhode Island (§6.4) — not on a magnitude argument.
+- **Michigan: an unquantified residual.** Michigan's 1830 figure **includes** a strip that was Ohio's
+  from January 1837, and Michigan held **3 electoral votes in both 1836 and 1840**, both governed by
+  that census. The direction is known — the denominator is too high, so Michigan's persons-per-
+  electoral-vote is overstated — and the magnitude is not.
+
+**Under the §3 threshold this is IMMATERIAL, because condition 3 fails: no source gives the strip's
+population.** The best figure located is Toledo *city* at roughly 1,205 in 1835 (ATTRIBUTED, and a
+city is not a strip). That satisfies AC-1 — the case is classified — but the honest reading of the
+classification is *"cannot be corrected,"* **not** *"is small."*
+
+**And here the threshold's own limit shows, so it is stated rather than buried.** Michigan's 1830
+base is only 28,004, so a strip of even 1,000 people is **3.6%** of its denominator — several times
+Alexandria's 0.79%–0.91%, and comfortably past the ≥1% screen §3 rejected as a primary test. A
+threshold keyed on quantifiability rules this immaterial while a magnitude threshold might not.
+That is a real cost of the adopted rule, and it lands on the one case where the two disagree.
+
+**What would close it** — and it is a clean, bounded question for a follow-up: the 1830 census
+enumeration for the strip's territory within Monroe County, Michigan Territory. One figure decides
+whether Michigan's 1836 and 1840 denominators need a correction of their own.
 
 ### 6.6 Explicitly out of scope, stated rather than omitted (AC-3)
 
@@ -486,9 +541,14 @@ here as the sweep's one open residual.
    borders at those censuses. Both become true once recommendation 1 lands, and not before.
 
 4. **`VIRGINIA_VERIFIED_CENSUSES` needs a third state, not a wider membership.** It is currently a
-   binary set (`{1790, 1850, 1860}`, `transform.py:124`) meaning "cross-checked by file arithmetic
-   alone." After this sweep, 1800–1840 are *verified, but by an external source* — a third category
-   the set cannot express. Widening it would assert the wrong thing.
+   binary set (`{1790, 1850, 1860}`, `transform.py:124`). **Its own docstring says the check is that
+   the file's Virginia + West Virginia sum "reproduces the **separately-published** enumerated
+   Virginia exactly"** — so it already depends on an external total, and describing it as
+   "file arithmetic alone" (as an earlier draft of this report did, and as #251 inherited) is a
+   misdescription of the thing being changed. The real distinction is *which* external check:
+   1790/1850/1860 are confirmed against a published **Virginia total**, whereas 1800–1840 are
+   composed from two published **component** series. That is still a third category the binary set
+   cannot express, so the recommendation stands; the characterisation does not.
 
    **And the function's docstring overstates what the exact sums prove** (§5.5). The Bureau states
    that before 1860 the Virginia/West Virginia split "cannot be done exactly, because the present
@@ -515,6 +575,21 @@ here as the sweep's one open residual.
 
 ---
 
+## Deferrals and open items
+
+Stated in one place so nothing here reads as delivered.
+
+| Item | Disposition | Why |
+|---|---|---|
+| **AC-5** — `docs/corrections.md` row + provenance-carrying constant + test | **Deferred to #251** | `src/` work with a test gate, inside a `research`-routed row that carries none. The catalog row lands **with** the constant, never ahead of it: a row describing a constant that does not exist would be a false claim about the tree. Owner-approved at the plan gate; #183 → #243 precedent. |
+| **#208 itself** | **Stays open until #251 lands** | AC-5 is dispositioned, not discharged, so this PR does not close the issue. |
+| **Toledo Strip, Michigan side** (§6.5) | **Classified immaterial; residual unquantified** | Condition 3 of the §3 threshold fails. Closing it needs one figure — the 1830 enumeration for the strip within Monroe County, Michigan Territory — and that is a bounded follow-up, not a gap in this sweep. |
+| **1810 Alexandria cell** (§5.3) | **Resolved to 8,552**, Virginia Note 2's `8.852` recorded as a defect in the printed note | Governs no in-span election. |
+| **1810 / 1820 enumerated Virginia** (§5.4) | **CONTRADICTED between two Bureau publications**; original-return pair used | The file's components close only on that pair. |
+| **§6's citations** | **ATTRIBUTED (relayed)**, not reproduced | The documentary sweep leaned on USGS Professional Paper 909, which this report's author did not read. §4 and §5 were run or read directly. |
+
+---
+
 ## Appendix A — reproducing §4
 
 The script is committed beside this document as
@@ -529,3 +604,11 @@ uv run python .claude/specs/research-boundary-sweep.py
 It reads `USVOTE_CENSUS_CORPUS_DIR` and `USVOTE_EC_HTML_DIR` when set, and otherwise falls back to
 this developer's corpus paths. Check C is the one that needs the Archives corpus (for each
 election's `total_electoral_votes`); checks A and B need only the census workbook.
+
+**Every check asserts its headline and the script exits non-zero on failure.** An earlier revision
+printed its results and asserted nothing — a degraded input would have produced a plausible table
+rather than an error, which is the failure mode this whole report is about. The asserts were
+checked for non-vacuity by mutation: perturbing `ENUMERATED_DC`, `ENUMERATED_VA`, `NATIONAL` or the
+expected census set by one each turns the run red. Check C additionally **names every state
+excluded from a ranking** with its reason and its electoral votes — `(1848, Texas)` at 4 EV is the
+one live exclusion, and it is why that year's denominator reads 29 rather than 30.
