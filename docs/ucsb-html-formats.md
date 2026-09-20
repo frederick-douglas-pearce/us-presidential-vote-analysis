@@ -9,9 +9,13 @@ equivalent).
 The corpus itself lives **outside this repository** at the path named by
 `USVOTE_UCSB_HTML_DIR` — UCSB content is non-redistributable (D014/D016), and D022
 established that committing UCSB bytes to this public repo would itself constitute
-redistribution. **Every markup snippet quoted below is structural** — tag shapes,
-attribute names, and sentinel tokens. Vote numbers appear only where a specific numeric
-value *is* the finding (the `0.0`-percent decoy in §4).
+redistribution. **Every markup snippet below is schematic, not quoted** — tag shapes,
+attribute names, and the sentinel tokens the parser matches on, with everything else
+written as a `[placeholder]`. Vote numbers appear only where a specific numeric value
+*is* the finding (the `0.0`-percent decoy in §4). That is not house style: this file is
+under `docs/`, which [LICENSE-prose.md](../LICENSE-prose.md) licenses CC-BY-4.0, and a
+verbatim UCSB `<tr>` inside it would purport to grant redistribution rights D022 says
+this repo does not hold (D065).
 
 ---
 
@@ -106,9 +110,9 @@ The four absence cases are cleanly distinguishable:
 A 2-cell row whose second cell spans the remaining width:
 
 ```html
-<tr bgcolor="#F7FAFD">
-<td bgcolor="#FFFFFF">Colorado</td>
-<td bgcolor="#FFFFFF" colspan="7">3 electors chosen by state legislature and awarded to Rutherford B. Hayes</td>
+<tr bgcolor="[color]">
+<td bgcolor="[color]">[state]</td>
+<td bgcolor="[color]" colspan="7">[n] electors chosen by state legislature[ …allocation]</td>
 </tr>
 ```
 
@@ -144,8 +148,12 @@ The row is simply **absent**. No placeholder, no blank row. Only a prose footnot
 elsewhere on the page attests to it:
 
 ```html
-<td colspan="8">Eleven Confederate states did not participate in the election because of the Civil War.</td>
+<td colspan="8">[prose footnote containing "did not participate"]</td>
 ```
+
+The substring is a sentinel and nothing more: `parse.py` matches `did not participate`
+in `BENIGN_PROSE_PATTERNS` to classify the row as skippable, never to detect the
+absence. The footnote also names the states, but the parser does not read them.
 
 - **1864** omits 11 states: Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi,
   North Carolina, South Carolina, Tennessee, Texas, Virginia.
@@ -177,16 +185,17 @@ Occurs in 1824, 1832, 1836, 1848 only.
 The `Votes` cell holds `--`, paired with a percent cell:
 
 ```html
-<td>Alabama</td>
-<td>214,980</td>
+<td>[state]</td>
+<td>[total]</td>
 <td>--</td>
 <td>0.0</td>
 <td> </td>
 …
 ```
 
-**⚠️ The `0.0` percent is a decoy.** In the 1948 page, two rows below the snippet above,
-California's corresponding column reads `1,228` votes at `0.0` percent — a real,
+**⚠️ The `0.0` percent is a decoy.** The snippet above is Alabama's row in the 1948
+page; two rows below it, California's corresponding column reads `1,228` votes at
+`0.0` percent — a real,
 non-zero count. **Percent `0.0` means "rounds to zero", not "zero".** Only the `--` in
 the *Votes* cell carries absence meaning. Three paired-percent variants exist: `0.0`
 (most years), `--` (1860, 16 cells), and bare `0` (1924 Louisiana).

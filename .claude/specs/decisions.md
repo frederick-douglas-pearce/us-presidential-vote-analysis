@@ -4162,3 +4162,105 @@ table, no `SNAPSHOT_SCHEMA_VERSION` bump, no `/v1` route, no `usvote/api/` chang
 it, and carries the architect's C8 finding with it — a new snapshot table's values sit **outside**
 the content hash, which covers only the `ec_pv` rows, so a census reload that changes a population
 figure would move per-capita numbers without firing the D034 edge-cache cutover.
+
+---
+
+## D065: The repo is MIT + CC-BY-4.0, and the prose grant is closed rather than carved
+
+**Date:** 2026-09-19
+**Issue:** #249 · **Relates to:** D014, D016, D022, D030 · **Supersedes:** nothing (Apache-2.0 was never decided)
+
+**Context.**
+
+`LICENSE` was Apache-2.0 from the first commit — `e38e448`, 2021-12-07, in which it is the *only*
+file. That is the signature of GitHub's "add a license" dropdown at repo creation, and nothing in
+this log, no source header, and no SPDX tag ever recorded a rationale for it. `git shortlog` shows
+one human under two identities, both the maintainer's, so no contributor's grant was made under
+Apache terms. Every other project in the account is MIT. This entry exists so the question is not
+re-litigated on the assumption that a deliberate choice is being reversed: **there was no choice to
+reverse.**
+
+What Apache-2.0 buys over MIT is an express patent grant with retaliation (§3), a trademark
+disclaimer (§6), and NOTICE / state-changes obligations (§4). This repo is a scraper, a star
+schema, and a read-only API: no patentable subject matter, no marks, and NOTICE machinery that is
+pure overhead for a solo project. Anyone who pulled an earlier commit keeps Apache rights to *that*
+commit, which costs nothing.
+
+**Decision.**
+
+**(a) Code is MIT; prose under `posts/` and `docs/` is CC-BY-4.0.** MIT is a software license and
+says nothing sensible about an essay; `posts/` is a published blog series and `docs/` is a set of
+browsable catalogs. CC-BY says the thing actually wanted — reuse freely, with attribution. The
+MIT `LICENSE` carries a trailing **Scope** block naming the split, which is the half that makes the
+dual license bind: without it an unscoped MIT grant sits over the same prose and a recipient may
+simply take that instead, owing no attribution.
+
+**(b) The prose grant is a closed positive sentence with its exclusions *inside* it**, not a grant
+beside a not-covered list. A license is a grant, so **over-inclusion is the dangerous direction and
+under-inclusion is cheap**. An exclusion that lives in a Scope section or a bulleted list next to
+the operative sentence does not carve anything out — the sibling `claude-code-loop` port shipped
+exactly that shape and three review lenses caught it. `LICENSE-prose.md` therefore reads *"everything
+committed under `posts/` and `docs/`, whatever its format, … except third-party material quoted
+within it"*, and everything after that sentence is explicitly explanatory. Scoping **by path rather
+than by content type** is part of the same choice: a content-type definition ("markdown text,
+images, diagrams") leaves every `.csv`, `.json` or `.sql` asset beside a post unlicensed, which in
+a data project is most of the interesting material.
+
+**(c) `docs/ucsb-html-formats.md`'s verbatim UCSB markup is rewritten schematically rather than
+carved out.** Three fenced blocks held real UCSB bytes — the Case 1 legislature-chosen `<tr>`, the
+Case 2 non-participation footnote, and the Case 4 `0.0`-percent decoy row with its Alabama total.
+A blanket CC-BY over `docs/` would have purported to grant redistribution and adaptation rights
+over content D022 says this repo holds none for, which is the exact overclaim D022 and D030 exist
+to prevent. All three now use the placeholder style Case 3 already used, keeping the sentinel
+substrings the parser actually matches on (`electors chosen by state legislature`, `did not
+participate`, `--`, `0.0`) and replacing everything else with `[placeholder]`. **The ambiguity is
+removed rather than documented** — there is no carve-out left to get wrong. The file's own header
+already claimed every snippet was structural; that claim is now true.
+
+**(d) The attribution term names the license, because CC BY 4.0 requires it.** §3(a)(1)(C) obliges a
+reuser to indicate the material is licensed under the Public License and to include its text, URI,
+or hyperlink — a **different** duty from §3(a)(1)(A)'s retention of supplied notices. The template
+this port was taken from asks for creator credit, a repository link, and an indication of changes,
+and never for the license link, so a reuser following it exactly produces a non-compliant
+attribution.
+
+**(e) `.claude/specs/` stays MIT and the root `README.md`/`CLAUDE.md` stay MIT.** Both document the
+codebase; a third licensing surface would buy nothing. `posts/README.md` sits inside `posts/` and
+follows it. `license-files` in `pyproject.toml` keeps `LICENSE` alone — the sdist and wheel contain
+no prose, so shipping the prose license with them would assert coverage over nothing.
+
+**(f) "MIT" is now overloaded on this repo's provenance surface, and the fix is prose, not code.**
+`usvote/api/provenance.py` maps `SourceDisplay(code="MIT", name="MIT Election Lab")`; `MIT` is a
+**source** code there and in `meta.provenance`, `docs/api-snapshot.md`, and D016. Writing
+`license = "MIT"` into `pyproject.toml` puts a second, unrelated meaning of that token into exactly
+the surface that exists to keep provenance unambiguous. The README License section disambiguates in
+one paragraph. **No code changes**: the snapshot's source/license codes are untouched, `ec_license`
+still emits `US-PD`, and `CC-BY-4.0` **remains an unknown license code** that
+`provenance.license_display` rejects — `tests/unit/test_api_provenance.py::test_unknown_license_fails_loud`
+uses it as its sentinel and passes unmodified. Adding it to `_LICENSES` would be a real regression,
+letting a nonexistent *data* license through the D005 fail-loud guard. The repo's prose being CC-BY
+and no served row being CC-BY are simply different facts.
+
+**(g) The affiliation disclaimer ships on the API surface as well as the README, and does not bump
+`API_VERSION`.** The README is read by developers browsing GitHub; the domain-confusion risk lives
+with whoever curls `api.us-presidential-election-center.org` or opens `/docs`, and that domain reads
+like an authority it is not. The home is `_DESCRIPTION_TEMPLATE` in `usvote/api/app.py` — one
+literal that both `_install_live_openapi` and the static `API_DESCRIPTION` render from, so the two
+cannot drift. The paragraph carries no tokens, so `_render_description` is unchanged. The bump rule
+in `API_VERSION`'s docstring is *the served contract changed* (0.2.0→0.3.0 for pre-1976 years going
+404→200; 0.3.0→0.4.0 for the five hybrid fields); a description string is not the contract, so
+**0.4.0 stands**. The snapshot content hash is unaffected — the OpenAPI description is served, never
+snapshotted — and no `/v1` response body or model changes. The disclaimer deliberately does *not*
+go in `meta.provenance` or `/v1/meta`: that would change a public response model, bloat every
+response with a constant string, and turn a documentation statement into a data field.
+
+**(h) `AI-DISCLOSURE.md` names only gates this repo actually runs, and says which are conditional.**
+The failure mode a diligence statement exists to prevent is over-claiming review rigor, so the file
+separates three tiers: `ci.yml` has no path filter and its `ruff`/`mypy`/unit, live-Postgres
+integration, and container-boot jobs run on **every** PR and push to `main`; the architect pass
+(`loop.config.md` §2) and `/security-review` (§4) fire **by route and trigger**, and are skipped for
+docs-only changes like this one; and the UCSB and census `TestRealCorpus` tiers plus the #167
+overlap gates **cannot run in CI at all** (D022 keeps the corpora out of the repo), so they are
+local-only merge preconditions no green checkmark proves. The file also records that the 2021–2022
+notebook and `db_tools.py` predate any AI involvement, rather than letting "built with Claude Code"
+read as covering the whole history.

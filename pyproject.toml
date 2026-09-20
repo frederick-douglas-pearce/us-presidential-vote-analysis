@@ -3,7 +3,7 @@ name = "usvote"
 version = "0.1.0"
 description = "Historical US Presidential Election analysis: Electoral College vs. Popular Vote (and a hybrid)"
 readme = "README.md"
-license = "Apache-2.0"
+license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "Fred Pearce", email = "fpearce@gmail.com" }

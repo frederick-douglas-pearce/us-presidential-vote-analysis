@@ -52,6 +52,11 @@ thing to get wrong here.
 _Drafted with Claude Code. The ideas, claims, and any errors are mine._
 ```
 
+That line is the short form of [`AI-DISCLOSURE.md`](../AI-DISCLOSURE.md), which states the same
+thing at length: what the tool did on each surface, which gates ran on what, and where the
+judgment is mine. The post carries the one-liner because a reader arriving at a single post
+should not have to leave it to find out; the repository file is where the detail lives.
+
 ## Share cards
 
 Every post needs an OG card before it can publish. Cards are built from a committable
