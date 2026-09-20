@@ -119,6 +119,12 @@ not depend on a consumer re-deriving it from the raw totals.
 source, license, coverage window, and snapshot version under `meta.provenance`; the same
 block, with build details, is at `GET /v1/meta`.
 
+**Not an official source.** This is a derived dataset, assembled from published
+sources by an independent project. It has no official standing and is not affiliated
+with, or endorsed by, the National Archives, the MIT Election Lab, the UCSB American
+Presidency Project, or any election authority. Nothing served here is a canvass, a
+certification, or a legal record of an election.
+
 **Getting started.** Browse the interactive docs at `/docs` (Swagger UI) or `/redoc`
 (ReDoc). Every response is JSON in a `{data, meta}` envelope and carries an `ETag` and
 `Cache-Control` for conditional requests.

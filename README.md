@@ -246,10 +246,55 @@ is ever published (findings about the National Archives, MIT Election Lab, or UC
 them privately), and every historical claim is checkable and gets checked before it ships.
 
 
+## AI assistance
+
+The original 2021&ndash;2022 notebook and `db_tools.py` were written by hand. Everything
+added since &mdash; the `usvote` package, the API, the docs, the blog series &mdash; was
+built in collaboration with **Claude Code**, mostly through a supervised loop that stops for
+human approval of every plan and every merge. [`AI-DISCLOSURE.md`](AI-DISCLOSURE.md) is the
+full statement: what the tool did on each surface, which gates actually ran on what, and
+where the judgment is mine. It exists because this project publishes historical claims and
+serves numbers that sometimes disagree with what a source prints, and a reader is entitled
+to know who checked them.
+
+
+## Disclaimer
+
+**This is not an official source.** The public API answers at
+`api.us-presidential-election-center.org`, a domain that reads like an authority. It is not
+one. It is one person's derived dataset, assembled from published sources, with no official
+standing, no certifying role, and no relationship to any election authority. Nothing served
+here is a canvass, a certification, or a legal record of any election.
+
+**No source endorses this.** The project ingests data from the National Archives, the MIT
+Election Lab, and the UCSB American Presidency Project, and republishes from the first two
+&mdash; UCSB grants no reuse rights, so no UCSB-derived value reaches the API or any other
+published surface. [`docs/corrections.md`](docs/corrections.md) records places where this
+repo's reading **differs from what a source prints**. None of those institutions has
+reviewed, approved, or endorsed any of it, and the differences are this project's readings,
+not theirs.
+
+**Not affiliated with Anthropic.** Built with Claude Code; not affiliated with, or endorsed
+by, Anthropic.
+
+
 ## License
-* Copyright 2021 Frederick D. Pearce
-* Licensed under the Apache License, Version 2.0 (the "License")
-* You may obtain a copy of the License from
-[LICENSE](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/blob/main/LICENSE) or
-[here](http://www.apache.org/licenses/LICENSE-2.0)
- 
+
+Dual-licensed:
+
+* **Code** (`src/`, `tests/`, `tooling/`, `scripts/`, `deploy/`, `.claude/specs/`, the
+  notebook, `db_tools.py`, CI workflows) &mdash; [MIT](LICENSE)
+* **Prose** (`posts/`, `docs/`) &mdash; [CC-BY-4.0](LICENSE-prose.md)
+
+Copyright &copy; 2021-2026 Frederick Douglas Pearce.
+
+Neither license covers third-party material quoted in this repository; `LICENSE-prose.md`
+says which sources those are and on what footing each is quoted.
+
+**"MIT" is overloaded here, and only one of the two meanings is a license.** The *code* is
+MIT-licensed. Everywhere else in this repository &mdash; in the API's `meta.provenance`, in
+`docs/api-snapshot.md`, in the decision log &mdash; **`MIT` is a data-source code standing
+for the MIT Election Lab**, whose popular-vote data is CC0 1.0. The Electoral College data is
+a work of the U.S. Government (`US-PD`). No served row carries a CC-BY license, and the API
+still rejects that code as unknown.
+

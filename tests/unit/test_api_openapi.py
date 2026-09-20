@@ -92,6 +92,38 @@ def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None
     assert "Electoral College" in desc
 
 
+def test_openapi_description_carries_the_disclaimer(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The affiliation disclaimer ships on **both** rendered descriptions (#249).
+
+    The domain this API answers on reads like an authority, so the "not an official
+    source" statement is the one piece of the description that is actively misleading by
+    its absence. Both paths are asserted because they are rendered separately —
+    ``_install_live_openapi`` re-renders from the loaded snapshot while
+    ``API_DESCRIPTION`` is the module-level fallback — and a template edit that dropped
+    the paragraph would otherwise be caught by neither.
+    """
+    out = str(tmp_path / "snapshot.sqlite")
+    build_snapshot(
+        synthetic_ec_pv_frame(),
+        out,
+        pv_status_df=synthetic_pv_status_frame(),
+        build_timestamp=SNAPSHOT_TS,
+    )
+    settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
+    fallback = create_app(settings).openapi()["info"]["description"]
+    served = client.get("/openapi.json").json()["info"]["description"]
+
+    for label, desc in (("served", served), ("fallback", fallback)):
+        assert "Not an official source" in desc, label
+        assert "no official standing" in desc, label
+        # Naming the sources is the substance: a bare "unofficial" line would not tell a
+        # reader that the institutions whose data this serves have not endorsed it.
+        assert "National Archives" in desc, label
+        assert "election authority" in desc, label
+
+
 # --- tags -------------------------------------------------------------------
 
 
