@@ -593,8 +593,11 @@ correction it implements is six elections or seven depending on the answer.
    **The 1810 cell is the one exception and it is now resolved, not ambiguous** (§5.3): use
    **8,552**, and comment that Virginia Note 2's `8,852` is a defect in the printed note, corrected
    by the same volume's District note and `Arlington` row. An earlier revision of this report called
-   it an OCR artifact and told #251 to carry the ambiguity forward; both were wrong, and #251 has
-   been corrected on the issue. It governs no in-span election either way.
+   it an OCR artifact and told #251 to carry the ambiguity forward; both were wrong. #251 carries a
+   correction comment covering the 8,552 value — but **that comment predates this report's final
+   narrowing**, so it still reflects the retracted "three readings" count and the retracted "Ohio is
+   clean" ruling. A second comment re-syncs it; read §5.3 and §6.5 here as authoritative over
+   either. It governs no in-span election either way.
 
 2. **Rewrite, do not retire, the `(see #208)` hedge** in `usvote/census/transform.py`. It currently
    reads *"computed by the same arithmetic, but not re-verified against a primary source for this
@@ -674,9 +677,12 @@ It reads `USVOTE_CENSUS_CORPUS_DIR` and `USVOTE_EC_HTML_DIR` when set, and other
 this developer's corpus paths. Check C is the one that needs the Archives corpus (for each
 election's `total_electoral_votes`); checks A and B need only the census workbook.
 
-**Every check asserts its headline and the script exits non-zero on failure.** An earlier revision
-printed its results and asserted nothing — a degraded input would have produced a plausible table
-rather than an error, which is the failure mode this whole report is about. The asserts were
+**Checks A and B assert their headlines and the script exits non-zero on failure.** An earlier
+revision printed its results and asserted nothing — a degraded input would have produced a plausible
+table rather than an error, which is the failure mode this whole report is about. **Check C is the
+exception and it is deliberate:** it computes and prints the rank table, raising only on missing
+input, because §3 designates rank as a *diagnostic* rather than as the gate. An earlier wording of
+this appendix said "every check", which over-claimed for exactly that one. The asserts were
 checked for non-vacuity by mutation: perturbing `ENUMERATED_DC`, `ENUMERATED_VA`, `NATIONAL` or the
 expected census set by one each turns the run red. Check C additionally **names every state
 excluded from a ranking** with its reason and its electoral votes — `(1848, Texas)` at 4 EV is the
