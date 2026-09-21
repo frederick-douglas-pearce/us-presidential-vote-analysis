@@ -148,8 +148,8 @@ ELECTION_POPULATION_NATURAL_KEY: tuple[str, ...] = ("election_year", "state")
 #: quantifiably. Downgrading
 #: those six to ``present_day`` in the interim would assert the weaker *"not checked"*
 #: about rows that were checked, so they keep ``at_election`` until #251 makes it true.
-#: No third value is minted for a state #251 removes — it would put a transient
-#: condition into a CHECK-constrained column and carry it to the public API.
+#: No third value is minted for a state #251 removes — it would be a migration on a
+#: CHECK-constrained column for a transient condition.
 #:
 #: Today the only rows carrying ``at_election`` are Virginia 1824-1868.
 BOUNDARY_AT_ELECTION = "at_election"
