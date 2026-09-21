@@ -168,8 +168,15 @@ confidence: `VIRGINIA_VERIFIED_CENSUSES` separates the three censuses with an
 independent cross-check from the five computed by the same arithmetic, and the per-row
 note carries that distinction into the database rather than leaving it here. And it does
 not sweep the other forty-nine states — whether Virginia is the only *material* boundary
-discrepancy in the 1824–2024 span is an open question, tracked as **#208** and
+discrepancy in the 1824–2024 span was an open question, tracked as **#208** and
 referenced rather than absorbed.
+
+**#208 has since answered it (2026-09-20), and the answer is no.** Virginia is not the only
+material case — **and the second case is also Virginia**: the file credits it with Alexandria
+County for 1800–1840, overstating the denominator 0.79%–0.91% across six elections (1824–1844,
+per #253/D066). Every other post-1824 boundary change is ruled immaterial, with a reason each, in
+`.claude/specs/research-boundary-sweep.md`. The Alexandria correction itself is **#251**, and #208
+stays open until it lands.
 
 ## Census conformance to the electoral record (#182)
 
@@ -202,7 +209,7 @@ and it is an integration test because the counts exist only in `dwh.votes`.
 
 | Elections | Basis difference | Restatement applied | `conform.py` constant | Source / provenance |
 |---|---|---|---|---|
-| 1864, 1868 | Both are governed by the **1860** census, which precedes West Virginia's 1863 separation — but by 1864 West Virginia is a separate state holding 5 electoral votes. #181 restated Virginia's pre-1863 censuses in place as Virginia + West Virginia, which is correct for 1824–1860 and **double-counts** West Virginia's 376,688 people here. | Virginia takes its **published** 1860 figure, `1,219,630`, and the row is labelled `at_election`. West Virginia's own rows are untouched. | `BOUNDARY_SUCCESSIONS` (applied by `apply_boundary_successions`, guarded by `assert_no_double_count`) | West Virginia was admitted 20 June 1863 under the Act of 31 December 1862 (12 Stat. 633) and Lincoln's proclamation of 20 April 1863. 1,219,630 + 376,688 = 1,596,318, the separately published enumerated Virginia total for 1860. |
+| 1864, 1868 | Both are governed by the **1860** census, which precedes West Virginia's 1863 separation — but by 1864 West Virginia is a separate state holding 5 electoral votes. #181 restated Virginia's pre-1863 censuses in place as Virginia + West Virginia, which is correct for 1824–1860 **as to the West Virginia counties** and **double-counts** them here. (*Qualifier added 2026-09-21 per #253/D066: correct on the West Virginia axis only. Those same figures also carry **Alexandria County** for 1824–1844 — a separate mechanism, corrected by #251.*) | Virginia takes its **published** 1860 figure, `1,219,630`, and the row is labelled `at_election`. West Virginia's own rows are untouched. | `BOUNDARY_SUCCESSIONS` (applied by `apply_boundary_successions`, guarded by `assert_no_double_count`) | West Virginia was admitted 20 June 1863 under the Act of 31 December 1862 (12 Stat. 633) and Lincoln's proclamation of 20 April 1863. 1,219,630 + 376,688 = 1,596,318, the separately published enumerated Virginia total for 1860. |
 
 **The pinned figure is an independent literal, not a recomputation**, and that is the point:
 it *checks* `apply_virginia_boundary_correction`'s arithmetic rather than inheriting it, so a

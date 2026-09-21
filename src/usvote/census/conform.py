@@ -212,7 +212,17 @@ class BoundarySuccession(NamedTuple):
 #: by the 1860 census, which precedes the 1863 separation, and in both West Virginia is
 #: a separate state holding electoral votes. 1872 onward is governed by the 1870 census,
 #: which is post-separation, so it needs nothing; 1824-1860 precede the separation
-#: entirely, so Virginia's restated figure is correct there and is left alone.
+#: entirely, so Virginia's restated figure is correct there **as to the West Virginia
+#: counties** and is left alone *by this constant*.
+#:
+#: **Read that qualifier as load-bearing, not hedging** (#253/D066). It is correct only
+#: on the West Virginia axis, which is this constant's whole subject. On a *second*
+#: axis the same figure is wrong for part of that span: it also carries **Alexandria
+#: County**, District of Columbia until its retrocession to Virginia on 7 September
+#: 1846, so for the six elections **1824-1844** the restated figure is 0.79%-0.91% high
+#: and is not the borders-at-election one. That is a different mechanism (1846, DC->VA)
+#: from this constant's job (1863, VA->WV), it is corrected elsewhere by #251, and
+#: nothing here should be read as saying those six rows need no correction at all.
 #:
 #: Without the correction, an election-year total counts West Virginia's population
 #: twice — once inside restated Virginia and once as West Virginia. Virginia holds
