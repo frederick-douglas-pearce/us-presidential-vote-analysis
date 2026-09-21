@@ -4295,7 +4295,7 @@ read as covering the whole history.
 
 ---
 
-## D066: A per-capita denominator uses borders at the election — and vintage, footprint and denominator provenance are three separate axes
+## D066: A per-capita denominator uses borders at the election — vintage, footprint and provenance are three separate axes
 
 **Date:** 2026-09-21
 **Issue:** #253 (E10) · **Raised by:** #208 §6.6 · **Consumed by:** #251 ·
@@ -4314,8 +4314,9 @@ on — the borders in force at the **election**, or the basis the state's **appo
 computed on — and deliberately did not answer it. The two differ exactly when a boundary moved
 between a census and an election, which is every case #208 examined.
 
-It decides live numbers: whether the Alexandria correction #251 ships covers six elections or
-seven, and whether the **criterion** clears Ohio of a Toledo Strip residual for 1840. (Whether such
+It decides a live number and a criterion question: whether the Alexandria correction #251 ships
+covers six elections or seven, and whether the **criterion** clears Ohio of a Toledo Strip
+residual for 1840. (Whether such
 a residual *exists* is a separate question this entry does **not** settle — see (i).)
 
 One premise in #253 is imprecise and is corrected rather than inherited. The issue says
@@ -4387,8 +4388,9 @@ Both are derived over `ec_ingest_years()`; for Alexandria the effective date is 
 - **The correction set** — elections whose figure must have Alexandria subtracted: those **held
   before the effective date** whose governing census carries an Alexandria cell. Executed, that is
   the six in (g).
-- **The reversal set** — elections where a census-grain subtraction must be undone, because the
-  election was held *after* the effective date while its governing census precedes it:
+- **The reversal set** — under a census-grain correction, elections where that subtraction must be
+  undone, because the election was held *after* the effective date while its governing census
+  precedes it:
   `governing_census_year(Y) < effective < Y`. Executed, that is **{1848}**, and it is the
   **complement** of the correction set within the seven elections those censuses govern.
 
@@ -4425,7 +4427,8 @@ established by **executing** the code, not by reading it:
   literal entry raises `Virginia in election 1848 needs its published 1840 figure, but the pin
   cannot be verified: … District of Columbia is absent.`
 
-**That is the whole of what this entry asserts about mechanism.** Both bullets are records of what
+**Those two bullets are the whole of what this entry asserts about #251's mechanism
+constraints.** Both are records of what
 was run and what came back. This entry deliberately does **not** go on to say what they imply for
 #251 — whether an election-grain key is necessary or merely prudent, and what shape a working
 applier takes, are #251's to determine against whatever it builds. Earlier drafts of this section
@@ -4438,13 +4441,15 @@ single source of truth it exists to be (maintainer's ruling, 2026-09-21). The re
 correcting at census grain in `transform.py`, which is what raises the question of an election-grain
 reversal at all; or correcting purely at **election** grain, leaving the census row as published.
 Which constraints bite, and how hard, depends on that choice — which is precisely why this entry
-records the constraints and leaves the choice. The census-grain route carries a real argument — it is what finally makes
+records the constraints and leaves the choice. The census-grain route carries a real argument —
+it is what finally makes
 `basis = as_enumerated` **true** for those rows (#208 recommendation 1) — but that is for #251 to
 weigh, not for #253 to rule.
 
 **The count is consumable as a specification, not as a licence to implement it a particular way.**
 Six is (f)'s **correction** set — elections held before 1846-09-07 whose governing census carries an
-Alexandria cell — and nothing above disturbs it, since none of it touches the guard.
+Alexandria cell — and neither the effective date nor `governing_census_year` touches the guard or
+the applier, so nothing in (h) disturbs it.
 
 **(i) The criterion no longer clears Ohio for 1840; whether a residual exists is CONDITIONAL.**
 Under (a) the apportionment-basis reading that cleared Ohio is superseded. **Whether Ohio in fact
@@ -4457,10 +4462,9 @@ effect 26 January 1837, *after* the 1836 election, so 1836 is unaffected on eith
 **(j) `usvote/census/reconcile.py` is untouched, and why is the cleanest illustration of (b).**
 #183's seat reconciliation reads `governing_census_year` as a pure vintage selector — three call
 sites, all choosing which apportionment's seats to load — and compares published seats against the
-recorded allotment. That is an
-**apportionment question end to end** — both sides of its equality are apportionment artifacts — so
-it is correctly on the apportionment basis. Two surfaces in one repo legitimately sit on different
-bases because they ask different questions.
+recorded allotment. That is an **apportionment question end to end** — both sides of its equality
+are apportionment artifacts — so it is correctly on the apportionment basis. Two surfaces in one
+repo legitimately sit on different bases because they ask different questions.
 
 **(k) No figure moves — but shipped statements become false or partial, in TWO families needing
 OPPOSITE treatments.**
