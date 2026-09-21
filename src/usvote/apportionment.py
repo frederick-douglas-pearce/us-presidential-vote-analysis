@@ -23,6 +23,17 @@ dependency-free spirit of ``usvote/years.py``". This keeps the spirit — depend
 read by import, never re-deriving the lag — and changes only the directory. Recorded as
 a deliberate deviation, approved by the human at the #182 plan gate.
 
+**This module answers VINTAGE, never FOOTPRINT** (#253/D066). It says which census
+supplies a figure; it says nothing about which *territory* that figure describes. Those
+are two of the three axes a per-capita denominator sits on — the third being where
+``total_electoral_votes`` itself came from, which is an apportionment artifact like this
+module. Footprint is :data:`usvote.census.conform.BOUNDARY_AT_ELECTION`'s question, and
+D066 rules it **borders at the election**. The axes are independent on purpose: a
+surface may legitimately read this module while sitting on a different footprint basis,
+and :mod:`usvote.census.reconcile` is the worked case — seat reconciliation is an
+apportionment question on both sides of its equality, so it is on the apportionment
+basis throughout, while :mod:`usvote.census.conform` is not.
+
 **This module must stay dependency-free** (stdlib + :mod:`usvote.years`, which is itself
 dependency-free): no pandas, no DB, no network. That property is what lets any consumer
 import it.
