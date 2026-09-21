@@ -4292,3 +4292,243 @@ committed as fixtures; and the overlap gates are warehouse-build gates that stan
 would have attributed a licensing motive to a public-domain source. The file also records that the 2021–2022
 notebook and `db_tools.py` predate any AI involvement, rather than letting "built with Claude Code"
 read as covering the whole history.
+
+---
+
+## D066: A per-capita denominator uses borders at the election — vintage, footprint and provenance are three separate axes
+
+**Date:** 2026-09-21
+**Issue:** #253 (E10) · **Raised by:** #208 §6.6 · **Consumed by:** #251 ·
+**Builds on:** D059, D060, D064 ·
+**Supersedes:** three statements of a span this entry makes false or partial, and the spans differ
+because the statements sit at different grains — **D059 point 4**, census-grain, false for the
+**1800–1840 censuses**; **D060 §(f)**, election-grain, false for **elections 1824–1844** (both
+Family A below); and **D060's Context item 2**, true on the West Virginia axis only (Family B
+below).
+
+**Context.**
+
+`dwh.election_population` and the `dwh.election_per_capita` view divide a census population by an
+electoral-vote allotment. #208's boundary sweep asked which **footprint** that population is stated
+on — the borders in force at the **election**, or the basis the state's **apportionment** was
+computed on — and deliberately did not answer it. The two differ exactly when a boundary moved
+between a census and an election, which is every case #208 examined.
+
+It decides a live number and a criterion question: whether the Alexandria correction #251 ships
+covers six elections or seven, and whether the **criterion** clears Ohio of a Toledo Strip
+residual for 1840. (Whether such
+a residual *exists* is a separate question this entry does **not** settle — see (i).)
+
+One premise in #253 is imprecise and is corrected rather than inherited. The issue says
+`conform.py` and `apportionment.py` "encode different answers". In `src/`,
+`governing_census_year` is only ever a **vintage** selector — `build_election_population` picks
+which census year's population to merge, and `usvote/census/reconcile.py` picks which
+apportionment's seats to read — and never selects a footprint. `apportionment.py` encodes no
+footprint answer at all. The contradiction was between #208's **report**, which used the
+apportionment basis throughout and said so, and `conform.py`, which both states and implements
+borders-at-election.
+
+**Decision.**
+
+**(a) Borders at the election governs `dwh.election_population` and `dwh.election_per_capita`.**
+
+**(b) Three axes, not two.** Naming only two deflects the opposing case instead of answering it:
+
+1. **Vintage** — which census supplies the figure. `governing_census_year`. An apportionment fact.
+2. **Footprint** — which territory the figure describes. `boundary_basis`. **The axis (a) rules on.**
+3. **Denominator provenance** — where `total_electoral_votes` came from. An apportionment artifact.
+
+The apportionment-basis case is that axis 3 is apportionment-derived so axis 2 should be. Answered:
+axes 1 and 3 are apportionment facts and axis 2 is not, because they answer different questions —
+*whose allotment is this* versus *whose people are these*. So both modules are already right, and
+#253's AC-2 resolves on its third branch.
+
+**(c) Why — the deciding argument is structural.** Apportionment basis is **not consistently
+implementable at election grain**, and the shipped code had to violate it to be correct.
+`build_election_population` is spine-left: its rows are the states that participated *in that
+election*. For 1864 the governing census is 1860, and Virginia's apportionment-basis footprint
+includes the West Virginia counties — but West Virginia is its own row in the same frame with its
+own 376,688 people, so those people sit in two rows of one frame. That is the defect D060 found and
+`BOUNDARY_SUCCESSIONS` fixes, restoring the published 1,219,630 and labelling it `at_election`.
+
+Two precision notes, because overstating this would be its own false claim:
+
+- **The blast radius is aggregates only.** Virginia holds zero electoral votes in 1864 and 1868, so
+  no per-state figure is affected; the defect is live for any **aggregate**.
+- **Stronger, and free.** Under apportionment basis West Virginia's own 1864 footprint is
+  **undefined** — its 5 electoral votes came from the admission act, not the 1860 apportionment, so
+  there is no apportionment footprint to name. A criterion that cannot assign a value to a
+  participating state is not a criterion.
+
+**(d) The counter-argument, and why it loses.** Axis 3 is apportionment-derived: 1848 Virginia's 17
+electoral votes were apportioned from the 1840 *enumerated* Virginia, which excluded Alexandria,
+while (a) divides them into a population that includes it — a real within-row incoherence of about
+0.8%. It loses because (c)'s failure is a cross-row double count of an entire state, and for West
+Virginia an undefined value. The bounded, nameable error is preferred to the unbounded one.
+
+**(e) The criterion is not the label, and `boundary_basis` has three states in practice.** The
+criterion is what the column tries to be; the label reports whether a row is established to achieve
+it. **(a) relabels nothing.**
+
+D060 gave the label two readings — achieved (`at_election`) and unverified (`present_day`). #208
+created a third: **established NOT to achieve it.** Six rows are in it: `(1824, 1828, 1832, 1836,
+1840, 1844) × Virginia` carry `at_election` — `build_election_population` maps `as_enumerated` to
+`at_election`, and `VIRGINIA_CORRECTION_CENSUSES` makes every 1790–1860 Virginia census row
+`as_enumerated` — on figures #208 §5.2 proves include Alexandria County.
+
+**Those six keep `at_election` until #251 makes it true.** `present_day` asserts *"we have not
+established this is the as-at-election figure"*, which is false — the defect is established and
+quantified at 0.79%–0.91%. And no third value is minted for a condition #251 deletes: that would be
+a migration on a CHECK-constrained column for a transient state.
+
+**(f) The span is a RULE, never a year list — and it is TWO sets, which must not be conflated.**
+Both are derived over `ec_ingest_years()`; for Alexandria the effective date is **7 September
+1846**.
+
+- **The correction set** — elections whose figure must have Alexandria subtracted: those **held
+  before the effective date** whose governing census carries an Alexandria cell. Executed, that is
+  the six in (g).
+- **The reversal set** — under a census-grain correction, elections where that subtraction must be
+  undone, because the election was held *after* the effective date while its governing census
+  precedes it:
+  `governing_census_year(Y) < effective < Y`. Executed, that is **{1848}**, and it is the
+  **complement** of the correction set within the seven elections those censuses govern.
+
+The two are complements, not synonyms, and only the second is a *reversal*. Stating the rule as a
+derivation rather than a list follows `usvote/pv/absences.py`'s `CURATED_YEARS` pattern, and
+`governing_census_by_election` already defaults over the spine the same way. A frozen list
+under-corrects **silently** if D010 widens the spine below 1824: the **correction** set grows to
+take in 1804–1820, where the 1800 (5,949) and 1810 (8,552) Alexandria cells become live, while the
+reversal set stays `{1848}`.
+
+**(g) Alexandria is SIX elections: 1824, 1828, 1832, 1836, 1840, 1844.** `governing_census_year`
+maps both 1844 and 1848 to the 1840 census, and retrocession on 1846-09-07 put Alexandria inside
+Virginia for November 1848 — so the file's Alexandria-inclusive figure is **correct** for 1848.
+In-span Bureau figures: 1820: 9,703 · 1830: 9,573 · 1840: 9,967. #208 §1's "seven" is the
+apportionment-basis count and is superseded by (a). The rank flip §3.1 reports for 1832/1836/1840 is
+untouched — all three are inside the six.
+
+**(h) Two verified constraints on #251's mechanism — findings, NOT a prescription.** Both were
+established by **executing** the code, not by reading it:
+
+- **H1 — the census-grain key is over-permissive.** `assert_no_interpolated_population` admits a row
+  on **either** of two branches: it matches the census table's figure, or it matches a declared
+  restatement. Because `allowed_restatements` is keyed on the census year, a pin motivated by one
+  election licenses that value for *every* election that census governs. **Executed:** with
+  `(1840, "Virginia")` pinned, a **wrong** 1844 carrying that value is accepted. The key shape
+  therefore does not *block* the six-election answer; what it loses is the ability to tell the two
+  elections apart.
+- **H2 — the `BOUNDARY_SUCCESSIONS` idiom can neither express nor verify this correction.**
+  `apply_boundary_successions` verifies `restated − successor == published` and **raises** when the
+  successor has no row; Alexandria's counterparty is the District of Columbia, which does not
+  participate in 1848 (DC first participates in 1964). And the idiom is semantically inverted: it
+  models a predecessor **losing** territory to a **participating successor state row**, whereas
+  Alexandria is Virginia **gaining** from a non-participating jurisdiction. **Executed:** a
+  literal entry raises `Virginia in election 1848 needs its published 1840 figure, but the pin
+  cannot be verified: … District of Columbia is absent.`
+
+**Those two bullets are the whole of what this entry asserts about #251's mechanism
+constraints.** Both are records of what
+was run and what came back. This entry deliberately does **not** go on to say what they imply for
+#251 — whether an election-grain key is necessary or merely prudent, and what shape a working
+applier takes, are #251's to determine against whatever it builds. Earlier drafts of this section
+did characterise them, and every such characterisation was found false on execution.
+
+**Why this stops at constraints.** Not because a decision log may not carry implementation-shaped
+content — it may, and splitting decisions across documents to keep the log "pure" would forfeit the
+single source of truth it exists to be (maintainer's ruling, 2026-09-21). The reason is specific:
+**the design space is open.** At least two routes exist and they have different consequences:
+correcting at census grain in `transform.py`, which is what raises the question of an election-grain
+reversal at all; or correcting purely at **election** grain, leaving the census row as published.
+Which constraints bite, and how hard, depends on that choice — which is precisely why this entry
+records the constraints and leaves the choice. The census-grain route carries a real argument —
+it is what finally makes
+`basis = as_enumerated` **true** for those rows (#208 recommendation 1) — but that is for #251 to
+weigh, not for #253 to rule.
+
+**The count is consumable as a specification, not as a licence to implement it a particular way.**
+Six is (f)'s **correction** set — elections held before 1846-09-07 whose governing census carries an
+Alexandria cell — and neither the effective date nor `governing_census_year` touches the guard or
+the applier, so nothing in (h) disturbs it.
+
+**(i) The criterion no longer clears Ohio for 1840; whether a residual exists is CONDITIONAL.**
+Under (a) the apportionment-basis reading that cleared Ohio is superseded. **Whether Ohio in fact
+carries a residual depends on #208 §6.5's ATTRIBUTED premise** that the strip was never restated out
+of Michigan's column; *if* that premise holds, Ohio is short by exactly what Michigan is long.
+Immaterial on either branch: condition 3 of #208's §3 threshold fails — no source gives the strip's
+population. **This entry settles the criterion and upgrades no evidence label.** The cession took
+effect 26 January 1837, *after* the 1836 election, so 1836 is unaffected on either criterion.
+
+**(j) `usvote/census/reconcile.py` is untouched, and why is the cleanest illustration of (b).**
+#183's seat reconciliation reads `governing_census_year` as a pure vintage selector — three call
+sites, all choosing which apportionment's seats to load — and compares published seats against the
+recorded allotment. That is an **apportionment question end to end** — both sides of its equality
+are apportionment artifacts — so it is correctly on the apportionment basis. Two surfaces in one
+repo legitimately sit on different bases because they ask different questions.
+
+**(k) No figure moves — but shipped statements become false or partial, in TWO families needing
+OPPOSITE treatments.**
+
+**Family A — flatly false, corrected.** The sentence reads that for **1824–1860** Virginia's
+restated figure **is borders-at-election**. False for 1824–1844, whose figures include Alexandria —
+borders-at-election is exactly what Alexandria breaks. **Four sites:** `conform.py`'s
+`BOUNDARY_AT_ELECTION` doc-comment and the `docs/corrections.md` sentence under "Census conformance
+to the electoral record (#182)" → "Boundary succession…", both repaired in place to
+**1848–1860**; and **D059 point 4** and **D060 §(f)**, both superseded above rather than edited, on
+the **D062** precedent.
+
+**Family B — narrowly TRUE, qualified.** The sentence reads that the #181 restatement **is correct**
+for 1824–1860. It *is* — **on the West Virginia axis**, which is what it contrasts. It is not false;
+it is silent about a second axis, and after (a) that silence reads as a licence to leave 1824–1844
+alone. Four sites: `conform.py`'s `BOUNDARY_SUCCESSIONS` doc-comment and the 1864/1868 row in
+`docs/corrections.md`, both qualified to the West Virginia axis; **D060's Context item 2**,
+superseded above; and **`CLAUDE.md`**, deferred to **#255** — outside this change's file scope, and
+this project batches `CLAUDE.md` edits into a dedicated pass with the causing change already merged.
+
+**Correcting a false sentence and qualifying a true-but-partial one are different acts**, and the
+two families are listed separately so neither is mistaken for the other. **The correct span is
+1848–1860, with 1824–1844 pending #251.** Nothing in D059 or D060 is rewritten; the superseded text
+stands in the record as what the project believed when it shipped.
+
+**Rationale.**
+
+The choice had to be made somewhere, and #251 was the alternative — the wrong place: a `src/`
+constant would have encoded six-or-seven by implication, with no argument attached and nothing to
+point a later reader at. #208 filed #253 rather than answer it because the sweep's remit was *which
+cases are material*, not *what a denominator means*.
+
+Recording the span as a rule (f) rather than as a list follows this repo's preference for
+derivations where scope can widen — `pv/absences.py`'s `CURATED_YEARS` and
+`GOVERNING_CENSUS_BY_ELECTION` are the precedents. The failure mode a list invites is silent
+under-correction, not a loud error.
+
+**One process note, because it shaped (h).** An earlier draft of this entry ruled a four-item
+mechanism for #251 and justified it by claiming the guard would *refuse* the six-election answer.
+That claim was derived by **reading** the guard; executing it inverts the conclusion, and the
+prescription it produced raises in `apply_boundary_successions` — the **applier**, not the guard
+it named. Both are gone from the decision
+above. The lesson is not that a decision may not be implementation-shaped — it may — but that
+**a decision-grade claim about what code will do must be executed before it is recorded.**
+
+**Action required.**
+
+**#251 inherits (f) and (g)** — the span as a rule, and six elections — **plus (h) as two verified
+constraints, not a mechanism.** Its body is amended for three things: "seven" → six, a stale
+Toledo line, and a withdrawn refusal claim that a correction banner there now records.
+**#208 stays open until #251 lands.**
+
+**`CLAUDE.md` is deferred to #255**, covering its Family B sentence and the absent D066 entry.
+
+**#245's sequencing was restated on 2026-09-21** (issue comment) with the corrected count — done,
+not owed. D064's scope record still stands: a **new** snapshot table sits outside the content hash,
+so folding per-capita rows into that hash remains #245's own acceptance criterion.
+
+**The Toledo Strip stays open as a magnitude**, not as a criterion. One figure closes it: the 1830
+census enumeration for the strip's territory within Monroe County, Michigan Territory. Filing that
+is not owed here.
+
+**Related:** #253, #251, #208, #245, #255, #183, D059, D060, D062, D063, D064,
+`.claude/specs/research-boundary-sweep.md`, `src/usvote/census/conform.py`,
+`src/usvote/apportionment.py`, `docs/corrections.md`.
+
+---

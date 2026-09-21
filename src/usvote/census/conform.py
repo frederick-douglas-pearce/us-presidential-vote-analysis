@@ -114,20 +114,44 @@ ELECTION_POPULATION_NATURAL_KEY: tuple[str, ...] = ("election_year", "state")
 
 #: Whether a figure is on the borders **in force at the election**.
 #:
-#: **This is not the census ``basis`` and must not be conflated with it** (#182
-#: architect review, C2d). ``census_population.basis`` answers "borders at census time
-#: vs modern". At election grain the question is "borders at *this election*", and the
-#: two disagree exactly where this module works: for the elections 1824-1860 Virginia's
-#: **restated** (``as_enumerated``) figure is borders-at-election, but for 1864 and 1868
-#: the **published** (``present_day``) figure is *also* borders-at-election, because
-#: West Virginia is a separate state by then. Carrying the census label through would
-#: stamp 1864 Virginia ``present_day`` — an honesty warning — on the figure that is in
-#: fact correct for that election.
+#: **Borders-at-the-election is the governing criterion** for this frame and for
+#: ``dwh.election_per_capita`` (D066). It is one of **three** axes a per-capita
+#: denominator sits on, and conflating any two of them is the standing hazard:
+#: *vintage* — which census supplies the figure — is
+#: :func:`usvote.apportionment.governing_census_year`; *footprint* — which territory the
+#: figure describes — is this column; and *denominator provenance* — where
+#: ``total_electoral_votes`` came from — is an apportionment artifact. Axes 1 and 3 are
+#: apportionment facts and this one is not, because they answer different questions:
+#: whose allotment is this, versus whose people are these.
 #:
-#: ``present_day`` is the honest default and says only "this is the published figure; we
-#: have not asserted it is the as-at-election one". Asserting ``at_election`` for all
-#: fifty states is precisely the unverified claim **#208** exists to settle, so today
-#: the only rows carrying it are Virginia 1824-1868.
+#: **This is also not the census ``basis``** (#182 architect review, C2d).
+#: ``census_population.basis`` answers "borders at census time vs modern". At election
+#: grain the question is "borders at *this election*", and the two disagree exactly
+#: where this module works: for the elections **1848-1860** Virginia's **restated**
+#: (``as_enumerated``) figure is borders-at-election, while for 1864 and 1868 the
+#: **published** (``present_day``) figure is *also* borders-at-election, because West
+#: Virginia is a separate state by then. Carrying the census label through would stamp
+#: 1864 Virginia ``present_day`` — an honesty warning — on the figure that is in fact
+#: correct for that election.
+#:
+#: **The span above reads 1848-1860 and not 1824-1860, which is the correction D066
+#: makes to D060 §(f).** #208 established that the restated figure also includes
+#: **Alexandria County**, District of Columbia until its retrocession to Virginia on
+#: 7 September 1846 — so for the six elections **1824-1844** the restated figure is
+#: 0.79%-0.91% high and is *not* the as-at-election one. #251 corrects it.
+#:
+#: **So this label has three states in practice, not two**, and the third is why the six
+#: rows above are deliberately left alone. ``present_day`` is the honest default and
+#: says only "this is the published figure; we have not asserted it is the
+#: as-at-election one". ``at_election`` says we have. Virginia 1824-1844 is neither:
+#: the figure is established **not** to be as-at-election, precisely and
+#: quantifiably. Downgrading
+#: those six to ``present_day`` in the interim would assert the weaker *"not checked"*
+#: about rows that were checked, so they keep ``at_election`` until #251 makes it true.
+#: No third value is minted for a state #251 removes — it would be a migration on a
+#: CHECK-constrained column for a transient condition.
+#:
+#: Today the only rows carrying ``at_election`` are Virginia 1824-1868.
 BOUNDARY_AT_ELECTION = "at_election"
 BOUNDARY_PRESENT_DAY = "present_day"
 BOUNDARY_BASIS_VALUES: tuple[str, ...] = (BOUNDARY_AT_ELECTION, BOUNDARY_PRESENT_DAY)
@@ -188,7 +212,17 @@ class BoundarySuccession(NamedTuple):
 #: by the 1860 census, which precedes the 1863 separation, and in both West Virginia is
 #: a separate state holding electoral votes. 1872 onward is governed by the 1870 census,
 #: which is post-separation, so it needs nothing; 1824-1860 precede the separation
-#: entirely, so Virginia's restated figure is correct there and is left alone.
+#: entirely, so Virginia's restated figure is correct there **as to the West Virginia
+#: counties** and is left alone *by this constant*.
+#:
+#: **Read that qualifier as load-bearing, not hedging** (#253/D066). It is correct only
+#: on the West Virginia axis, which is this constant's whole subject. On a *second*
+#: axis the same figure is wrong for part of that span: it also carries **Alexandria
+#: County**, District of Columbia until its retrocession to Virginia on 7 September
+#: 1846, so for the six elections **1824-1844** the restated figure is 0.79%-0.91% high
+#: and is not the borders-at-election one. That is a different mechanism (1846, DC->VA)
+#: from this constant's job (1863, VA->WV), it is corrected elsewhere by #251, and
+#: nothing here should be read as saying those six rows need no correction at all.
 #:
 #: Without the correction, an election-year total counts West Virginia's population
 #: twice — once inside restated Virginia and once as West Virginia. Virginia holds

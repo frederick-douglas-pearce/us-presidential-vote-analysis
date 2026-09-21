@@ -108,6 +108,13 @@ OFF_CYCLE = {1930: 1929, 1940: 1939}
 #: The elections the Alexandria-affected censuses govern. Derived rather than
 #: asserted, so it cannot drift from ``ALEXANDRIA`` (an earlier revision hardcoded
 #: six and the constant held seven).
+#:
+#: **This is seven, and it is still correct — it is not the correction set.** These are
+#: the elections those censuses *govern*, which is what the rank diagnostic needs. Since
+#: #253/D066 the elections that actually need the Alexandria subtraction are the **six**
+#: preceding the 7 September 1846 retrocession (1824-1844): 1848 was held on
+#: post-retrocession borders, so the file's Alexandria-inclusive Virginia is correct for
+#: it. Only 1848's *disposition* changed; every row this script computes is unaffected.
 ELECTIONS = tuple(
     y for y in range(1824, 1861, 4) if governing_census_year(y) in ALEXANDRIA
 )

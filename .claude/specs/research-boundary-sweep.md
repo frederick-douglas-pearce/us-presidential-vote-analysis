@@ -26,17 +26,23 @@ upward**:
 | # | Case | Jurisdictions | Effective | Affected elections | Magnitude | Ruling |
 |---|---|---|---|---|---|---|
 | 1 | **West Virginia separation** | VA → WV | 1863 | 1824–1860 (ten) | **12.7%–21.3%** understatement of Virginia's denominator | **MATERIAL** — already corrected (#181) |
-| 2 | **Alexandria retrocession** | DC → VA | 1846 | **1824–1848** (seven on the apportionment basis; **six** under borders-at-election — §6.6) | **0.79%–0.91%** *overstatement* of Virginia's denominator, *after* correction 1 is applied | **MATERIAL** — **not corrected; this is the new finding** |
+| 2 | **Alexandria retrocession** | DC → VA | 1846 | **1824–1844** (**six** — resolved by #253/D066, which rules borders-at-election; the **seven** this report used throughout is the apportionment-basis count and is superseded) | **0.79%–0.91%** *overstatement* of Virginia's denominator, *after* correction 1 is applied | **MATERIAL** — **not corrected; this is the new finding** |
 
 Every other post-1824 boundary change is ruled **immaterial**, and §6 gives each one its reason — including the **Toledo Strip**, which §6.5 classifies but which also leaves the sweep's one
-**unquantified residual**, on Michigan rather than Ohio. Read §6.5 before quoting this row.
+**unquantified residual**. #253/D066 rules borders-at-election, so the **criterion** no longer clears Ohio for 1840 — but whether Ohio in fact carries a residual depends on §6.5's **ATTRIBUTED** premise that the strip was never restated out of Michigan's column; if that premise holds, Ohio is short by exactly what Michigan is long. Immaterial either way. *(Corrected 2026-09-21: an earlier revision of this line said §6.5 had "always" declined to clear Ohio. It had not — §6.5 records that a previous revision cleared Ohio outright, and the section was once titled "the residual is on Michigan, not Ohio". §6.5 **as it now stands** declines to clear it.)* Read §6.5 before quoting this row.
 Two of those reasons are structural rather than magnitude-based, and the distinction matters:
 Berkeley/Jefferson washes out of the arithmetic, and the territory-to-state cases move no
 population *between states* at all.
 
 **The two corrections run in opposite directions and do not cancel.** Correction 1 adds West
-Virginia's counties (large); correction 2 removes Alexandria County (small). Applied together, the
-1820/1830/1840-governed elections need `file_VA + file_WV − Alexandria`.
+Virginia's counties (large); correction 2 removes Alexandria County (small). Applied together,
+**the six elections 1824–1844** need `file_VA + file_WV − Alexandria`.
+
+*Corrected 2026-09-21 (#253/D066).* This read "the 1820/1830/1840-governed elections", which is
+**seven** — the 1840 census governs 1844 **and** 1848. Under borders-at-election 1848 was held
+after the 7 September 1846 retrocession, so its Alexandria-inclusive figure is correct and takes
+`file_VA + file_WV` with no subtraction. This is the one formula in this report an implementer
+would lift verbatim, so it is corrected in place rather than annotated.
 
 ---
 
@@ -140,7 +146,8 @@ Electoral College.** The swap partner is **South Carolina** every time, and the 
 with Alexandria, Virginia reads 53,086 against South Carolina's 52,835 and takes last place; as
 enumerated it reads 52,670 and sits ahead of it. **9,573 people decide it.**
 
-So the case is material under the adopted test *and*, in **3 of the 7** affected elections, under
+So the case is material under the adopted test *and*, in **3 of the 6** affected elections (*corrected from 7 on 2026-09-21 per #253/D066; the table's seven rows are the elections the
+1820/1830/1840 censuses **govern**, of which 1848 needs no correction*), under
 the architect's own rank test — which is the value of having computed it. The lesson is the one the
 architect itself stated: for a question this close, a prediction about a rank is not evidence.
 
@@ -542,14 +549,32 @@ This is not a loose end of the write-up; it decides numbers:
   **seven** stated in §1 and used by the script is the *apportionment-basis* count: 1848's 17
   electoral votes were apportioned from the 1840 enumerated Virginia, which excluded Alexandria.
 
+> **SUPERSEDED IN PART — 2026-09-21, by #253/D066.** The open question below is **answered**:
+> a per-capita denominator uses the **borders in force at the election**. So case 2 affects **six**
+> elections (1824–1844), not seven. For Toledo the **criterion** no longer clears Ohio for 1840 —
+> the apportionment-basis reading that did clear it is superseded — but **whether Ohio in fact
+> carries a residual depends on §6.5's ATTRIBUTED premise** that the strip was never restated out
+> of Michigan's column; if that premise holds, Ohio is short by exactly what Michigan is long.
+> Immaterial either way: condition 3 of the §3 threshold fails. **D066 settles the criterion and
+> upgrades no evidence label.** D066 also corrects a premise stated below and in #253: `governing_census_year` is a
+> *vintage* selector only and encodes no footprint answer, so the contradiction was between **this
+> report** and `conform.py`, not between two modules. The text below stands as what the sweep
+> concluded; read D066 over it.
+
 **This report uses the apportionment basis throughout** — that is what `governing_census_year`
 expresses, and it is why §1 says seven. It did **not** establish that this is the right choice, and
 an earlier revision silently used the other one to clear Ohio.
 
-**The repo has a stake and a stated position.** `usvote/census/conform.py:115-130` says the question
-is *"whether a figure is on the borders **in force at the election**"* and that asserting
-`at_election` for all fifty states *"is precisely the unverified claim **#208** exists to settle."*
-So the at_election reading has a claim on this issue's remit that this report does not discharge.
+**The repo has a stake and a stated position.** `usvote/census/conform.py`'s
+`BOUNDARY_AT_ELECTION` doc-comment said the question is *"whether a figure is on the borders **in
+force at the election**"* and that asserting `at_election` for all fifty states *"is precisely the
+unverified claim **#208** exists to settle."* So the at_election reading has a claim on this issue's
+remit that this report does not discharge.
+
+*Quotation note, 2026-09-21.* The second sentence **no longer exists in the tree**: #253 removed it,
+because #208 ran and handed the criterion question back rather than settling it. It is quoted above
+in the past tense as the position that motivated #253. The doc-comment is cited by name rather than
+by line range, since the range moved when #253 rewrote it.
 
 **Filed as #253**, because #251 would otherwise inherit the ambiguity into a `src/` constant: the
 correction it implements is six elections or seven depending on the answer.
@@ -640,7 +665,8 @@ correction it implements is six elections or seven depending on the answer.
    as acceptance criteria plus the sequencing note in 7.
 
 7. **Note for #245.** If the per-capita series reaches the public snapshot before this correction
-   lands, seven elections ship with a denominator known to be ~0.8–0.9% high, and correcting it later
+   lands, **six** elections (1824–1844, per #253/D066) ship with a denominator known to be
+   ~0.8–0.9% high, and correcting it later
    moves the snapshot content hash (D034 cutover). Sequencing the fix ahead of #245 avoids
    publishing a figure this repo already knows is wrong.
 
@@ -655,7 +681,7 @@ Stated in one place so nothing here reads as delivered.
 | **AC-5** — `docs/corrections.md` row + provenance-carrying constant + test | **Deferred to #251** | `src/` work with a test gate, inside a `research`-routed row that carries none. The catalog row lands **with** the constant, never ahead of it: a row describing a constant that does not exist would be a false claim about the tree. Owner-approved at the plan gate; #183 → #243 precedent. |
 | **#208 itself** | **Stays open until #251 lands** | AC-5 is dispositioned, not discharged, so this PR does not close the issue. |
 | **Toledo Strip** (§6.5) | **Classified immaterial; residual unquantified on *both* sides** | Condition 3 of the §3 threshold fails. One figure closes it — the 1830 enumeration for the strip within Monroe County, Michigan Territory. |
-| **Which footprint a denominator should use** (§6.6) | **OPEN — filed as #253** | Borders-at-election vs apportionment basis. Decides whether case 2 affects six elections or seven, and whether Ohio carries a Toledo residual. This report uses the apportionment basis throughout and did not establish that it should. |
+| **Which footprint a denominator should use** (§6.6) | **CLOSED 2026-09-21 — #253/D066: borders at the election** | Case 2 affects **six** elections (1824–1844). For Toledo the **criterion** no longer clears Ohio for 1840; whether a residual exists depends on §6.5's **ATTRIBUTED** premise that the strip was never restated, and it is immaterial either way (condition 3 fails — no source gives the strip's population). D066 settles the criterion and upgrades no evidence label. This report used the apportionment basis throughout and did not establish that it should; D066 supersedes that choice. §3.1's rank **table** is unaffected — its seven rows are the elections those censuses govern and are correct as computed; only 1848's disposition changes, and the summary sentence beneath the table was corrected from "3 of the 7" to "3 of the 6". |
 | **1810 Alexandria cell** (§5.3) | **Resolved to 8,552**, Virginia Note 2's `8.852` recorded as a defect in the printed note | Governs no in-span election. |
 | **1810 / 1820 enumerated Virginia** (§5.4) | **CONTRADICTED between two Bureau publications**; original-return pair used | The file's components close only on that pair. |
 | **§6's citations** | **ATTRIBUTED (relayed)**, not reproduced | The documentary sweep leaned on USGS Professional Paper 909, which this report's author did not read. §4 and §5 were run or read directly. |
