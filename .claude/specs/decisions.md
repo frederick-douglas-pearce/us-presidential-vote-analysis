@@ -4299,10 +4299,12 @@ read as covering the whole history.
 
 **Date:** 2026-09-21
 **Issue:** #253 (E10) · **Raised by:** #208 §6.6 · **Consumed by:** #251 ·
-**Builds on:** D059, D060, D064
-**Supersedes:** three statements of a span this entry makes false or partial —
-D060 §(f) and D059 point 4 (both flatly false for 1800–1840, Family A below), and
-D060's Context item 2 (true on the West Virginia axis only, Family B below).
+**Builds on:** D059, D060, D064 ·
+**Supersedes:** three statements of a span this entry makes false or partial, and the spans differ
+because the statements sit at different grains — **D059 point 4**, census-grain, false for the
+**1800–1840 censuses**; **D060 §(f)**, election-grain, false for **elections 1824–1844** (both
+Family A below); and **D060's Context item 2**, true on the West Virginia axis only (Family B
+below).
 
 **Context.**
 
@@ -4313,7 +4315,8 @@ computed on — and deliberately did not answer it. The two differ exactly when 
 between a census and an election, which is every case #208 examined.
 
 It decides live numbers: whether the Alexandria correction #251 ships covers six elections or
-seven, and whether Ohio carries a Toledo Strip residual for 1840.
+seven, and whether the **criterion** clears Ohio of a Toledo Strip residual for 1840. (Whether such
+a residual *exists* is a separate question this entry does **not** settle — see (i).)
 
 One premise in #253 is imprecise and is corrected rather than inherited. The issue says
 `conform.py` and `apportionment.py` "encode different answers". In `src/`,
@@ -4352,8 +4355,9 @@ Two precision notes, because overstating this would be its own false claim:
 - **The blast radius is aggregates only.** Virginia holds zero electoral votes in 1864 and 1868, so
   no per-state figure is affected; the defect is live for any **aggregate**.
 - **Stronger, and free.** Under apportionment basis West Virginia's own 1864 footprint is
-  **undefined** — its 5 electoral votes came from the admission act, not the 1860 apportionment. A
-  criterion that cannot assign a value to a participating state is not a criterion.
+  **undefined** — its 5 electoral votes came from the admission act, not the 1860 apportionment, so
+  there is no apportionment footprint to name. A criterion that cannot assign a value to a
+  participating state is not a criterion.
 
 **(d) The counter-argument, and why it loses.** Axis 3 is apportionment-derived: 1848 Virginia's 17
 electoral votes were apportioned from the 1840 *enumerated* Virginia, which excluded Alexandria,
@@ -4376,12 +4380,24 @@ established this is the as-at-election figure"*, which is false — the defect i
 quantified at 0.79%–0.91%. And no third value is minted for a condition #251 deletes: that would be
 a migration on a CHECK-constrained column for a transient state.
 
-**(f) The span is a RULE, never a year list.** A census-grain figure is reversed at election grain
-where the boundary change's effective date falls **between that census and the election**, derived
-over `ec_ingest_years()`. For Alexandria the effective date is **7 September 1846**. This is the
-`usvote/pv/absences.py` `CURATED_YEARS` pattern, and `governing_census_by_election` already defaults
-that way. A frozen list under-corrects **silently** if D010 widens the spine below 1824, where the
-1800 (5,949) and 1810 (8,552) Alexandria cells become live.
+**(f) The span is a RULE, never a year list — and it is TWO sets, which must not be conflated.**
+Both are derived over `ec_ingest_years()`; for Alexandria the effective date is **7 September
+1846**.
+
+- **The correction set** — elections whose figure must have Alexandria subtracted: those **held
+  before the effective date** whose governing census carries an Alexandria cell. Executed, that is
+  the six in (g).
+- **The reversal set** — elections where a census-grain subtraction must be undone, because the
+  election was held *after* the effective date while its governing census precedes it:
+  `governing_census_year(Y) < effective < Y`. Executed, that is **{1848}**, and it is the
+  **complement** of the correction set within the seven elections those censuses govern.
+
+The two are complements, not synonyms, and only the second is a *reversal*. Stating the rule as a
+derivation rather than a list follows `usvote/pv/absences.py`'s `CURATED_YEARS` pattern, and
+`governing_census_by_election` already defaults over the spine the same way. A frozen list
+under-corrects **silently** if D010 widens the spine below 1824: the **correction** set grows to
+take in 1804–1820, where the 1800 (5,949) and 1810 (8,552) Alexandria cells become live, while the
+reversal set stays `{1848}`.
 
 **(g) Alexandria is SIX elections: 1824, 1828, 1832, 1836, 1840, 1844.** `governing_census_year`
 maps both 1844 and 1848 to the 1840 census, and retrocession on 1846-09-07 put Alexandria inside
@@ -4396,34 +4412,39 @@ established by **executing** the code, not by reading it:
 - **H1 — the census-grain key is over-permissive.** `assert_no_interpolated_population` admits a row
   on **either** of two branches: it matches the census table's figure, or it matches a declared
   restatement. Because `allowed_restatements` is keyed on the census year, a pin motivated by one
-  election licenses that value for *every* election that census governs. Verified: with
-  `(1840, "Virginia")` pinned, a **wrong** 1844 carrying that value is accepted. Note what this is
-  **not**: the guard refuses nothing, so the key shape does not block the six-election answer.
+  election licenses that value for *every* election that census governs. **Executed:** with
+  `(1840, "Virginia")` pinned, a **wrong** 1844 carrying that value is accepted. The key shape
+  therefore does not *block* the six-election answer; what it loses is the ability to tell the two
+  elections apart.
 - **H2 — the `BOUNDARY_SUCCESSIONS` idiom can neither express nor verify this correction.**
   `apply_boundary_successions` verifies `restated − successor == published` and **raises** when the
   successor has no row; Alexandria's counterparty is the District of Columbia, which does not
   participate in 1848 (DC first participates in 1964). And the idiom is semantically inverted: it
   models a predecessor **losing** territory to a **participating successor state row**, whereas
-  Alexandria is Virginia **gaining** from a non-participating jurisdiction.
+  Alexandria is Virginia **gaining** from a non-participating jurisdiction. **Executed:** a
+  literal entry raises `Virginia in election 1848 needs its published 1840 figure, but the pin
+  cannot be verified: … District of Columbia is absent.`
 
-**H1 is defence in depth, not necessity.** The over-permissive key sits in a *guard*, while the
-*applier* already discriminates correctly — `apply_boundary_successions`' window separates 1844 from
-1848 at `effective_year = 1846`. An election-grain key would protect against a future bug in a
-function that currently gets it right. Whether to pay for it is #251's call.
+**That is the whole of what this entry asserts about mechanism.** Both bullets are records of what
+was run and what came back. This entry deliberately does **not** go on to say what they imply for
+#251 — whether an election-grain key is necessary or merely prudent, and what shape a working
+applier takes, are #251's to determine against whatever it builds. Earlier drafts of this section
+did characterise them, and every such characterisation was found false on execution.
 
 **Why this stops at constraints.** Not because a decision log may not carry implementation-shaped
 content — it may, and splitting decisions across documents to keep the log "pure" would forfeit the
 single source of truth it exists to be (maintainer's ruling, 2026-09-21). The reason is specific:
-**the design space is open.** Correcting at census grain in `transform.py` is itself the choice that
-creates the need for an election-grain reversal; correcting purely at **election** grain, leaving
-the census row as published, is a real alternative under which an election-grain key is *required*
-rather than optional. The census-grain route carries a real argument — it is what finally makes
+**the design space is open.** At least two routes exist and they have different consequences:
+correcting at census grain in `transform.py`, which is what raises the question of an election-grain
+reversal at all; or correcting purely at **election** grain, leaving the census row as published.
+Which constraints bite, and how hard, depends on that choice — which is precisely why this entry
+records the constraints and leaves the choice. The census-grain route carries a real argument — it is what finally makes
 `basis = as_enumerated` **true** for those rows (#208 recommendation 1) — but that is for #251 to
 weigh, not for #253 to rule.
 
 **The count is consumable as a specification, not as a licence to implement it a particular way.**
-Six derives from (f), the effective date, and `governing_census_year` — none of which touches the
-guard.
+Six is (f)'s **correction** set — elections held before 1846-09-07 whose governing census carries an
+Alexandria cell — and nothing above disturbs it, since none of it touches the guard.
 
 **(i) The criterion no longer clears Ohio for 1840; whether a residual exists is CONDITIONAL.**
 Under (a) the apportionment-basis reading that cleared Ohio is superseded. **Whether Ohio in fact
@@ -4434,8 +4455,9 @@ population. **This entry settles the criterion and upgrades no evidence label.**
 effect 26 January 1837, *after* the 1836 election, so 1836 is unaffected on either criterion.
 
 **(j) `usvote/census/reconcile.py` is untouched, and why is the cleanest illustration of (b).**
-#183's seat reconciliation reads `governing_census_year` as a pure vintage selector at each of its
-four call sites and compares published seats against the recorded allotment. That is an
+#183's seat reconciliation reads `governing_census_year` as a pure vintage selector — three call
+sites, all choosing which apportionment's seats to load — and compares published seats against the
+recorded allotment. That is an
 **apportionment question end to end** — both sides of its equality are apportionment artifacts — so
 it is correctly on the apportionment basis. Two surfaces in one repo legitimately sit on different
 bases because they ask different questions.
@@ -4445,10 +4467,11 @@ OPPOSITE treatments.**
 
 **Family A — flatly false, corrected.** The sentence reads that for **1824–1860** Virginia's
 restated figure **is borders-at-election**. False for 1824–1844, whose figures include Alexandria —
-borders-at-election is exactly what Alexandria breaks. Three sites: `conform.py`'s
+borders-at-election is exactly what Alexandria breaks. **Four sites:** `conform.py`'s
 `BOUNDARY_AT_ELECTION` doc-comment and the `docs/corrections.md` sentence under "Census conformance
-to the electoral record (#182)" → "Boundary succession…", both repaired to **1848–1860**; and
-**D059 point 4**, superseded above.
+to the electoral record (#182)" → "Boundary succession…", both repaired in place to
+**1848–1860**; and **D059 point 4** and **D060 §(f)**, both superseded above rather than edited, on
+the **D062** precedent.
 
 **Family B — narrowly TRUE, qualified.** The sentence reads that the #181 restatement **is correct**
 for 1824–1860. It *is* — **on the West Virginia axis**, which is what it contrasts. It is not false;
@@ -4478,14 +4501,16 @@ under-correction, not a loud error.
 **One process note, because it shaped (h).** An earlier draft of this entry ruled a four-item
 mechanism for #251 and justified it by claiming the guard would *refuse* the six-election answer.
 That claim was derived by **reading** the guard; executing it inverts the conclusion, and the
-prescription it produced raises in a different guard entirely. Both are gone from the decision
+prescription it produced raises in `apply_boundary_successions` — the **applier**, not the guard
+it named. Both are gone from the decision
 above. The lesson is not that a decision may not be implementation-shaped — it may — but that
 **a decision-grade claim about what code will do must be executed before it is recorded.**
 
 **Action required.**
 
 **#251 inherits (f) and (g)** — the span as a rule, and six elections — **plus (h) as two verified
-constraints, not a mechanism.** Its body is amended for "seven" → six and for a stale Toledo line.
+constraints, not a mechanism.** Its body is amended for three things: "seven" → six, a stale
+Toledo line, and a withdrawn refusal claim that a correction banner there now records.
 **#208 stays open until #251 lands.**
 
 **`CLAUDE.md` is deferred to #255**, covering its Family B sentence and the absent D066 entry.
