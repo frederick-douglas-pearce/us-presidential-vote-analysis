@@ -145,10 +145,15 @@ def load_electoral_votes(
     """
     fetch = scrape.fetch_from_corpus(EC_DIR)
     wanted = set(years)
+    # Pre-filter so the 44 out-of-scope index links do not each print an error.
+    # Reuse scrape's own year-segment spelling rather than re-deriving it: that
+    # helper exists because three copies once disagreed on trailing slashes, and a
+    # `.../1824/` href silently filtered out here would surface later as a bare
+    # KeyError in check_c rather than as a CheckFailed (scrape.py:303-311).
     links = [
         link
         for link in scrape.scrape_election_links(fetch=fetch)
-        if link.rsplit("/", 1)[-1].isdigit() and int(link.rsplit("/", 1)[-1]) in wanted
+        if (seg := scrape._year_segment(link)).isdigit() and int(seg) in wanted
     ]
     raw = scrape.scrape_raw_election_tables(links, wanted, fetch=fetch)
     return {
@@ -301,7 +306,9 @@ def check_c(pop: Population) -> None:
             ratio = next(r for r, s in ranked if s == "Virginia")
             people = virginia(pop, census, with_alexandria=with_alex)
             out[with_alex] = (people, ratio, place, len(ranked))
-            all_excluded[election] = excluded
+        # Recorded once, outside the with/without loop: both passes exclude the same
+        # states, since virginia() never returns None.
+        all_excluded[election] = excluded
         (pw, rw, kw, n), (po, ro, ko, _) = out[True], out[False]
         shift = "same" if kw == ko else f"{kw} -> {ko}"
         print(

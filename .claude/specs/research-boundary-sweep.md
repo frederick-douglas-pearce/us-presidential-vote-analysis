@@ -26,7 +26,7 @@ upward**:
 | # | Case | Jurisdictions | Effective | Affected elections | Magnitude | Ruling |
 |---|---|---|---|---|---|---|
 | 1 | **West Virginia separation** | VA → WV | 1863 | 1824–1860 (ten) | **12.7%–21.3%** understatement of Virginia's denominator | **MATERIAL** — already corrected (#181) |
-| 2 | **Alexandria retrocession** | DC → VA | 1846 | **1824, 1828, 1832, 1836, 1840, 1844, 1848** (seven) | **0.79%–0.91%** *overstatement* of Virginia's denominator, *after* correction 1 is applied | **MATERIAL** — **not corrected; this is the new finding** |
+| 2 | **Alexandria retrocession** | DC → VA | 1846 | **1824–1848** (seven on the apportionment basis; **six** under borders-at-election — §6.6) | **0.79%–0.91%** *overstatement* of Virginia's denominator, *after* correction 1 is applied | **MATERIAL** — **not corrected; this is the new finding** |
 
 Every other post-1824 boundary change is ruled **immaterial**, and §6 gives each one its reason — including the **Toledo Strip**, which §6.5 classifies but which also leaves the sweep's one
 **unquantified residual**, on Michigan rather than Ohio. Read §6.5 before quoting this row.
@@ -140,9 +140,8 @@ Electoral College.** The swap partner is **South Carolina** every time, and the 
 with Alexandria, Virginia reads 53,086 against South Carolina's 52,835 and takes last place; as
 enumerated it reads 52,670 and sits ahead of it. **9,573 people decide it.**
 
-So the case is material under the adopted test *and* under the architect's own rank test in **3 of
-the 7**
-the affected elections — which is the value of having computed it. The lesson is the one the
+So the case is material under the adopted test *and*, in **3 of the 7** affected elections, under
+the architect's own rank test — which is the value of having computed it. The lesson is the one the
 architect itself stated: for a question this close, a prediction about a rank is not evidence.
 
 ---
@@ -200,9 +199,13 @@ question "which cases could this technique have caught?" has an exact answer, ob
 which states carry population in the file **before they first appear in the EC record**, and then
 asking what they were carved out of:
 
-(Read the criterion as *"states whose **first** EC appearance falls after the span opens"* — every
-1824-era state trivially carries 1790 population, so the literal wording would select all 51. Of
-the 26 states that qualify, exactly two have a **state** predecessor.)
+(Read the criterion as *"areas whose **first** EC appearance falls after the span opens"*. The
+literal wording would select all 51, since the EC record starts at 1824 and every area carries
+population from some earlier census — though **not** all from 1790: only **18 of 51** report a 1790
+figure, which the script's own check-A line prints. **27 areas** qualify under the corrected
+reading — 26 states **and the District of Columbia** — and of those, exactly two have a **state**
+predecessor. Both are named below; DC is one of them, which is why the count is of *areas* and not
+of states.)
 
 - **West Virginia** carries population from 1790 and first holds electoral votes in 1864. Its
   predecessor is **Virginia — a state.** ✓ caught
@@ -288,6 +291,18 @@ boundary changes the file restates and which it leaves alone. §6 applies it.
 > then defined**, including the West Virginia counties in 1790-1860 but **excluding Arlington and
 > Alexandria in 1800-1840**."
 
+**And the District note prints the enumerated series itself** — this is the **independent** input
+that makes §2's two-sided claim a test rather than a restatement, and §4.1's identity a
+reconciliation rather than an identity (VERIFIED, verbatim, read in the same extraction):
+
+> "Population of the District as then constituted: **1800: 14,093; 1810: 24,023; 1820: 33,039;
+> 1830: 39,834; 1840: 43,712.**"
+
+Subtracting the file's present-day District figures (8,144 / 15,471 / 23,336 / 30,261 / 33,745)
+gives **5,949 / 8,552 / 9,703 / 9,573 / 9,967** — the Alexandria series, from a source that never
+mentions Virginia. An earlier revision of this report cited this note without the series and so left
+the derivation circular; the series is the whole reason it is not.
+
 ### 5.3 The figures, and how they compare to the derivation
 
 | census | Virginia Note 2 | District note − file DC | `Arlington` county row | original enumeration | agree? |
@@ -298,13 +313,31 @@ boundary changes the file restates and which it leaves alone. §6 applies it.
 | 1830 | **9,573** | 9,573 | 9,573 | **9,573** — Fifth Census *Abstract* p. 45, sub-totalled outright | ✓ four ways |
 | 1840 | **9,967** | 9,967 | 9,967 | **9,967** — *Compendium of the Sixth Census* | ✓ four ways |
 
+**Labels for that table, since §0 requires one per load-bearing claim.** The *Virginia Note 2*,
+*District note* and *`Arlington` row* columns are **VERIFIED** — read in an extraction of the volume
+taken here. The **original enumeration** column is **ATTRIBUTED**: those four volumes were located
+and read by a delegated primary-source pass, and this report did not re-open them. They corroborate
+the first three columns; nothing rests on them alone.
+
 **The 1810 disagreement is a typo in the Bureau's volume, not an OCR artifact, and it resolves to
 8,552.** An earlier draft of this report guessed OCR — the text layer *is* Acrobat Paper Capture and
 a 5/8 confusion is the commonest error on such a scan, so the guess was plausible. It was wrong.
-Three independent readings inside the same volume give **8,552**: the District note's series minus
-the file's DC figure, the `Arlington` county row read at 500 dpi, and the arithmetic itself — 8,552
-is the **only** value satisfying *both* `15,471 + x = 24,023` **and** `877,683 + 105,469 − x =
-974,600`. So Virginia Note 2's `8.852` is a defect in the printed note.
+**Two** independent readings inside the same volume give **8,552** — and the count matters, because
+an earlier draft of this section claimed three:
+
+1. the **District note's** series minus the file's DC figure (`24,023 − 15,471`);
+2. the volume's **`Arlington` county row**, read at 500 dpi.
+
+**The arithmetic is not a third reading.** The identity `15,471 + x = 24,023` *is* reading 1, and the
+second equation — `877,683 + 105,469 − x = 974,600` — needs `974,600`, which comes from a
+*different* publication and which §5.4 itself flags **CONTRADICTED** against the 1850 restatement's
+974,622. Worse, it leans on the answer: §5.4 prefers 974,600 partly *because the file's components
+reproduce it*, and those components already presuppose 8,552. The rival pair (Alexandria **8,530**,
+enumerated Virginia **974,622**) is perfectly self-consistent under the Virginia identity alone.
+
+**So the District note is what actually breaks the tie** — `15,471 + 8,530 = 24,001 ≠ 24,023` — with
+the `Arlington` row agreeing independently. That is sufficient, and it is all that is claimed.
+Virginia Note 2's `8.852` is a defect in the printed note.
 
 **It still governs no in-span election** — the 1810 census governs 1812–1820 — so nothing here
 depends on it. It is recorded because the earlier draft asserted that re-reading the page image was
@@ -334,7 +367,7 @@ rows**, a third independent cross-check on the file's provenance. The same note 
 |---|---|---|---|---|
 | 1790 | 691,737 | 55,873 | — (District did not exist) | **747,610** |
 | 1800 | 807,557 | 78,592 | 5,949 | **880,200** |
-| 1810 | 877,683 | 105,469 | 8,852 *(OCR-ambiguous)* | **974,300** *(or 974,600)* |
+| 1810 | 877,683 | 105,469 | 8,552 *(§5.3; Note 2's 8,852 is a defect)* | **974,600** |
 | 1820 | 938,261 | 136,808 | 9,703 | **1,065,366** |
 | 1830 | 1,044,054 | 176,924 | 9,573 | **1,211,405** |
 | 1840 | 1,025,227 | 224,537 | 9,967 | **1,239,797** |
@@ -355,7 +388,8 @@ report and in the script — pick the restatement and the identity misses by tho
 recorded because a later reader sourcing "the enumerated Virginia" from the 1850 volume will get a
 different number and conclude the reconciliation is broken when it is not.
 
-**Retrocession, dated** (for #251's provenance): Act of **9 July 1846**, ch. XXXV, **9 Stat. 35**,
+**Retrocession, dated** (for #251's provenance) — **ATTRIBUTED**, from the same delegated pass;
+the statutes were fetched and read there, not here: Act of **9 July 1846**, ch. XXXV, **9 Stat. 35**,
 whose §4 made it conditional on a referendum of the county; the poll ran **1–2 September 1846**
 (763 for, 222 against) and President Polk proclaimed it in force on **7 September 1846** (9 Stat.
 Appendix p. 1000). So the 1850 census counted Alexandria in Virginia, which is why 1850 and 1860
@@ -406,7 +440,7 @@ Per §5.1, the file restates a transfer **only if one or more whole counties mov
 | **Alexandria retrocession** | DC → VA | 1846 | **yes** | **MATERIAL** — §1 case 2, **uncorrected** |
 | **Berkeley & Jefferson Counties** | VA → WV | 1863/66, upheld *Virginia v. West Virginia*, 78 U.S. 39 (1871) | yes | **IMMATERIAL BY CONSTRUCTION** — see 6.3 |
 | **Massachusetts ↔ Rhode Island** | both ways | SCOTUS decree 1861, effective 1 Mar 1862 | **no** (towns) | **IMMATERIAL** — see 6.4 |
-| **Toledo Strip** | Michigan Terr. → Ohio | 1836/37 | **not restated** (§6.5) | **IMMATERIAL** for Ohio; **unquantified residual on Michigan** — see 6.5 |
+| **Toledo Strip** | Michigan Terr. → Ohio | 1836/37 | no — a sliver across Monroe Co., and **not restated** (§6.5) | **IMMATERIAL** (unquantifiable), with an **unquantified residual on both sides** — see 6.5 |
 | **Boston Corner** | MA → NY | 10 Stat. 602, 1855 | no (a hamlet) | immaterial — sub-county, not restated |
 | **Delaware Wedge** | PA → DE | compact ratified 1921 | no (684 acres) | immaterial — sub-county, not restated |
 | **Fair Haven strip** | VT → NY | 21 Stat. 72, 1880 | no | immaterial — sub-county |
@@ -446,49 +480,81 @@ also the apportionment basis for the 1864 and 1868 elections. **No correction is
 Note the direction of the luck: had the transfer been whole-county, this would have been a third
 material case affecting two elections at roughly 2–3% of Rhode Island.
 
-### 6.5 The Toledo Strip — classified, and the residual is on Michigan, not Ohio
+### 6.5 The Toledo Strip — classified immaterial, with a residual on BOTH sides
 
-**An earlier draft of this report got this case backwards** and left it unclassified. It said the
-strip's 1830 people "belong to **Ohio**" on a present-day footprint, and declined to rule. Both
-halves were wrong, and the volume settles it.
+**An earlier draft got this backwards and a later one over-corrected.** The first said the strip's
+1830 people "belong to **Ohio**" and declined to rule; the second ruled, but cleared Ohio outright.
+What is actually established is narrower than either.
 
-**The strip was never restated.** The Bureau's Michigan note says its pre-statehood coverage
-*"included population in the strip that was ceded to Ohio in 1836"* — and the tell is the very next
-clause, which says the 1820 and 1830 censuses also covered settlements in present-day Wisconsin,
-*"**shown under that State**."* The Wisconsin population was moved; the strip's was not, and the
-note distinguishes them in consecutive sentences. That is exactly what §5.1's whole-county rule
-predicts for a sliver cut across Monroe County.
+**Established: the strip was never restated** (VERIFIED as to the file arithmetic; the Bureau quote
+is **ATTRIBUTED**, since the 1996 volume is not in the local corpus and this is a reading of it, not
+a reproduction anyone here can re-run). The Michigan note says the pre-statehood coverage *"included
+population in the strip that was ceded to Ohio in 1836"*, and the tell is the adjacent clause, which
+says the 1820 and 1830 censuses also covered settlements in present-day Wisconsin *"**shown under
+that State**."* The Wisconsin population was moved; the strip's was not. Within the file,
+**Michigan (28,004) + Wisconsin (3,635) = 31,639**, the enumerated Michigan Territory total for 1830
+(the two file figures VERIFIED; the territory total **ATTRIBUTED**, not sourced from a primary
+table). Neither leg suffices alone — the arithmetic is also consistent with the strip never having
+been in Michigan Territory's total — so the quote is load-bearing.
 
-Corroborated arithmetically within the file: **Michigan (28,004) + Wisconsin (3,635) = 31,639**, the
-enumerated Michigan Territory total for 1830 (ATTRIBUTED — I did not source that total from a
-primary table; the two file figures are VERIFIED). Nothing left Michigan Territory's total for Ohio.
+**Not established: that Ohio is therefore clean.** If the strip was never restated, its people sit
+in Michigan's column and are **absent from Ohio's** — and Ohio held the strip at the 1840 election.
+So Ohio's figure is short by exactly what Michigan's is long: **an equal-and-opposite residual, not
+an absence of one.** A previous revision cleared Ohio by calling 937,903 "the basis its 21 electoral
+votes were apportioned on" while convicting Michigan because its figure "includes a strip that was
+Ohio's" — two different criteria, applied in one paragraph, with the switch unnamed. That is the
+open question in §6.7, and this section does not pretend to have settled it.
 
-**So the classification is:**
+**The ruling, which does not depend on resolving that:** **IMMATERIAL**, because condition 3 of the
+§3 threshold fails — **no source gives the strip's population.** The best figure located is Toledo
+*city* at roughly 1,205 in 1835 (ATTRIBUTED, and a city is not a strip). Note what this ruling rests
+on: unquantifiability alone. It is **not** the structural clearance Massachusetts ↔ Rhode Island
+gets in §6.4, where the whole-county rule shows there is no error to measure.
 
-- **Ohio: no error, definitively.** Ohio's 1830 figure of 937,903 *is* the enumerated Ohio, which is
-  the basis its 21 electoral votes were apportioned on. **IMMATERIAL**, on the same structural
-  ground as Massachusetts ↔ Rhode Island (§6.4) — not on a magnitude argument.
-- **Michigan: an unquantified residual.** Michigan's 1830 figure **includes** a strip that was Ohio's
-  from January 1837, and Michigan held **3 electoral votes in both 1836 and 1840**, both governed by
-  that census. The direction is known — the denominator is too high, so Michigan's persons-per-
-  electoral-vote is overstated — and the magnitude is not.
+**Which elections.** The cession took effect at Michigan's statehood on **26 January 1837**, which
+*postdates* the November **1836** election. On a borders-at-election reading only **1840** is
+affected; on an apportionment-basis reading the question does not arise for Michigan at all in 1836,
+since its three electoral votes came from its admission act rather than from the 1830 apportionment.
+An earlier revision named both years without noticing that its own date excluded one.
 
-**Under the §3 threshold this is IMMATERIAL, because condition 3 fails: no source gives the strip's
-population.** The best figure located is Toledo *city* at roughly 1,205 in 1835 (ATTRIBUTED, and a
-city is not a strip). That satisfies AC-1 — the case is classified — but the honest reading of the
-classification is *"cannot be corrected,"* **not** *"is small."*
+**Read "immaterial" here as "cannot be corrected", not "is small."** Michigan's 1830 base is only
+28,004, so a strip of even 1,000 people is **3.6%** of its denominator — several times Alexandria's
+0.79%–0.91%, and well past the ≥1% screen §3 rejected as a primary test. **This is the one case
+where the adopted threshold and a magnitude threshold disagree**, and it is stated rather than
+buried: a rule keyed on quantifiability rules out a case a rule keyed on size would rule in.
 
-**And here the threshold's own limit shows, so it is stated rather than buried.** Michigan's 1830
-base is only 28,004, so a strip of even 1,000 people is **3.6%** of its denominator — several times
-Alexandria's 0.79%–0.91%, and comfortably past the ≥1% screen §3 rejected as a primary test. A
-threshold keyed on quantifiability rules this immaterial while a magnitude threshold might not.
-That is a real cost of the adopted rule, and it lands on the one case where the two disagree.
+**What would close it** is one bounded figure: the 1830 census enumeration for the strip's territory
+within Monroe County, Michigan Territory.
 
-**What would close it** — and it is a clean, bounded question for a follow-up: the 1830 census
-enumeration for the strip's territory within Monroe County, Michigan Territory. One figure decides
-whether Michigan's 1836 and 1840 denominators need a correction of their own.
+### 6.6 An open question this sweep raises and does NOT answer
 
-### 6.6 Explicitly out of scope, stated rather than omitted (AC-3)
+**Which footprint should a per-capita denominator use — the borders in force at the *election*, or
+the basis the state's *apportionment* was computed on?** They differ exactly when a boundary moved
+between a census and an election, which is every case in this report.
+
+This is not a loose end of the write-up; it decides numbers:
+
+- **Toledo (§6.5).** Under borders-at-election, Ohio carries a residual for 1840. Under
+  apportionment-basis, it does not. The same choice governs Michigan.
+- **Alexandria, and the headline count in §1.** Retrocession took effect **7 September 1846**
+  (§5.4), so the **1848** election was held on post-retrocession borders — Alexandria was Virginia
+  in November 1848. Under borders-at-election, case 2 affects **six** elections, 1824–1844. The
+  **seven** stated in §1 and used by the script is the *apportionment-basis* count: 1848's 17
+  electoral votes were apportioned from the 1840 enumerated Virginia, which excluded Alexandria.
+
+**This report uses the apportionment basis throughout** — that is what `governing_census_year`
+expresses, and it is why §1 says seven. It did **not** establish that this is the right choice, and
+an earlier revision silently used the other one to clear Ohio.
+
+**The repo has a stake and a stated position.** `usvote/census/conform.py:115-130` says the question
+is *"whether a figure is on the borders **in force at the election**"* and that asserting
+`at_election` for all fifty states *"is precisely the unverified claim **#208** exists to settle."*
+So the at_election reading has a claim on this issue's remit that this report does not discharge.
+
+**Filed as #253**, because #251 would otherwise inherit the ambiguity into a `src/` constant: the
+correction it implements is six elections or seven depending on the answer.
+
+### 6.7 Explicitly out of scope, stated rather than omitted (AC-3)
 
 - **Maine / Massachusetts, 1820** — pre-1824. Its footprint effect is real (present-day
   Massachusetts figures for 1790–1810 exclude Maine) but every affected election precedes the span.
@@ -524,9 +590,11 @@ whether Michigan's 1836 and 1840 denominators need a correction of their own.
    volume to the working paper this file comes from. Cite that note. **Do not compute the term as
    `enumerated_DC − file_DC`** — that derivation is what this report used to *find* the case, and it
    would make the correction depend on a second external series when a published figure exists.
-   Carry the **1810 cell's `8,852`/`8,552` OCR ambiguity** into the constant as a comment; it is out
-   of the EC span, so it changes nothing, and silently picking one would be the manufactured
-   precision this repo keeps legislating against.
+   **The 1810 cell is the one exception and it is now resolved, not ambiguous** (§5.3): use
+   **8,552**, and comment that Virginia Note 2's `8,852` is a defect in the printed note, corrected
+   by the same volume's District note and `Arlington` row. An earlier revision of this report called
+   it an OCR artifact and told #251 to carry the ambiguity forward; both were wrong, and #251 has
+   been corrected on the issue. It governs no in-span election either way.
 
 2. **Rewrite, do not retire, the `(see #208)` hedge** in `usvote/census/transform.py`. It currently
    reads *"computed by the same arithmetic, but not re-verified against a primary source for this
@@ -583,7 +651,8 @@ Stated in one place so nothing here reads as delivered.
 |---|---|---|
 | **AC-5** — `docs/corrections.md` row + provenance-carrying constant + test | **Deferred to #251** | `src/` work with a test gate, inside a `research`-routed row that carries none. The catalog row lands **with** the constant, never ahead of it: a row describing a constant that does not exist would be a false claim about the tree. Owner-approved at the plan gate; #183 → #243 precedent. |
 | **#208 itself** | **Stays open until #251 lands** | AC-5 is dispositioned, not discharged, so this PR does not close the issue. |
-| **Toledo Strip, Michigan side** (§6.5) | **Classified immaterial; residual unquantified** | Condition 3 of the §3 threshold fails. Closing it needs one figure — the 1830 enumeration for the strip within Monroe County, Michigan Territory — and that is a bounded follow-up, not a gap in this sweep. |
+| **Toledo Strip** (§6.5) | **Classified immaterial; residual unquantified on *both* sides** | Condition 3 of the §3 threshold fails. One figure closes it — the 1830 enumeration for the strip within Monroe County, Michigan Territory. |
+| **Which footprint a denominator should use** (§6.6) | **OPEN — filed as #253** | Borders-at-election vs apportionment basis. Decides whether case 2 affects six elections or seven, and whether Ohio carries a Toledo residual. This report uses the apportionment basis throughout and did not establish that it should. |
 | **1810 Alexandria cell** (§5.3) | **Resolved to 8,552**, Virginia Note 2's `8.852` recorded as a defect in the printed note | Governs no in-span election. |
 | **1810 / 1820 enumerated Virginia** (§5.4) | **CONTRADICTED between two Bureau publications**; original-return pair used | The file's components close only on that pair. |
 | **§6's citations** | **ATTRIBUTED (relayed)**, not reproduced | The documentary sweep leaned on USGS Professional Paper 909, which this report's author did not read. §4 and §5 were run or read directly. |
