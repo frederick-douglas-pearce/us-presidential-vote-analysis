@@ -94,8 +94,8 @@ version of that skill was run over it, and CI fails on a post that records no va
 deliberate skip has to be written down as `none`. The four posts published before that convention
 existed are marked `predates` rather than claiming a pass that never ran. CI checks that the pass
 was recorded, not that the prose is clean — that part is judgment. Two editorial guardrails are
-absolute and are enforced by review, not by CI: nothing
-critical of a data source is ever published, and every historical claim is checked before it ships.
+absolute and are enforced by review, not by CI: nothing critical of a data source is ever
+published, and every historical claim is checked before it ships.
 Each post ends with the one-line form of this disclosure, per
 [`posts/README.md`](posts/README.md).
 

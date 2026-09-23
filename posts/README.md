@@ -53,9 +53,10 @@ was run over the finished draft, and `tooling/check-humanizer-pass.py` fails CI 
 skill strips structural AI-writing tells the drafter cannot see in its own prose: not-X-but-Y
 staging, one-line closers, staged run-ups, forced triads, dashes used as a universal connector,
 inflated significance. Run it after moving the draft into `posts/` on the PR branch, and land its
-edits as their own commit so the diff can be reviewed. The guard checks that the pass was **recorded**, never the prose itself: the skill's
-"When not to act" rules need judgment a pattern lint cannot supply. Record the version rather than
-`true`, so that when the skill changes its pattern list you can tell which posts predate the change.
+edits as their own commit so the diff can be reviewed. The guard checks that the pass was
+**recorded**, never the prose itself: the skill's "When not to act" rules need judgment a pattern
+lint cannot supply. Record the version rather than `true`, so that when the skill changes its
+pattern list you can tell which posts predate the change.
 Two non-version values are valid, and the guard counts them separately:
 
 - `none` records a pass deliberately declined for that post. It keeps the post green, and it is the
@@ -110,8 +111,8 @@ Ported from `claude-code-sessions` in
 [#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132).
 Five pieces, with a deliberate split: **the Action owns auth and the push; the script
 owns the transform, OG resolution, and the content-compare; two PR guards keep a post
-from reaching `main` in a state the site will reject, and a third keeps one from reaching
-it without a recorded humanizer pass.**
+from reaching `main` in a state the site will reject, and a third fails CI on a post with
+no recorded humanizer pass.**
 
 | Piece                                                                     | What it does                                                                         | When it runs                                                                                |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
@@ -122,8 +123,9 @@ it without a recorded humanizer pass.**
 | [`tooling/check-humanizer-pass.py`](../tooling/check-humanizer-pass.py)   | PR guard — every post records a humanizer pass (or an explicit `none`)               | [`humanizer-guard.yml`](../.github/workflows/humanizer-guard.yml), on PRs and `main` pushes |
 
 **Shipping a post is a merge.** Move the finished draft from `social/drafts/` into
-`posts/` on a branch, run the humanizer pass over it there as its own commit, open a PR — the guards check the card resolves, a humanizer pass is recorded, and the
-markdown is Prettier-clean — and merge. The sync runs on `main` and pushes the post plus its card
+`posts/` on a branch, run the humanizer pass over it there as its own commit, open a PR —
+the guards check the card resolves, a humanizer pass is recorded, and the markdown is
+Prettier-clean — and merge. The sync runs on `main` and pushes the post plus its card
 to the Pages repo.
 
 ### Prettier, and why a post can turn the site red
@@ -168,8 +170,8 @@ produces something that looks the same and fails differently:
    their bytes differ, so a re-run makes no spurious changes and no empty commit.
 3. **Atomicity is validate-all-then-write.** The full plan is built and validated before
    a single byte is written, so one bad post can't half-publish a batch.
-4. **The OG card guard (`check-og-cards.py`) reuses the publisher's `build_plan`** rather than re-deriving the rules,
-   so it cannot drift from what `build_plan` enforces — a future fail-closed condition
+4. **The OG card guard (`check-og-cards.py`) reuses the publisher's `build_plan`**
+   rather than re-deriving the rules, so it cannot drift from what `build_plan` enforces — a future fail-closed condition
    added _there_ is inherited for free. It does **not** cover everything publish
    enforces: the shared-namespace check needs the Pages history, and this guard has no
    Pages checkout, so a cross-repo clash passes here and stops at the sync (below).

@@ -144,9 +144,10 @@ def read_pass(src: Path) -> str | None:
     a bad path lands in the per-post report like every other failure instead of
     as a traceback."""
     try:
-        # Posts are UTF-8 and full of em dashes; without an explicit encoding a
-        # runner with a non-UTF-8 locale decodes as ASCII and dies. And a
-        # UnicodeDecodeError is a ValueError, so an OSError-only handler misses it.
+        # Posts are UTF-8 and full of em dashes; without an explicit encoding the
+        # read decodes with the locale's codec, which may raise or silently
+        # mis-decode. And a UnicodeDecodeError is a ValueError, so an OSError-only
+        # handler misses it.
         text = src.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         reason = getattr(e, "strerror", None) or e
