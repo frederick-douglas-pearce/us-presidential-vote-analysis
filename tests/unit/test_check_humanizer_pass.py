@@ -249,9 +249,8 @@ def test_the_read_does_not_depend_on_the_default_encoding(
 ) -> None:
     """Posts are full of em dashes. On a UTF-8 runner a bare `read_text()` reads
     them fine, so writing one and running the guard proves nothing. Instead force
-    reads with no named encoding to ASCII, a stand-in for any non-UTF-8 locale
-    default (a C locale with UTF-8 mode disabled raises; a Latin-1 one silently
-    mis-decodes), so only an explicit UTF-8 read passes."""
+    reads with no named encoding to ASCII, a stand-in for a non-UTF-8 locale
+    default, so only an explicit UTF-8 read passes."""
     src = repo.add_post("anatomy", "v3.0.0")
     src.write_bytes(src.read_bytes().replace(b"Body line.", "Body \u2014 line.".encode()))
     real_read_text = Path.read_text
