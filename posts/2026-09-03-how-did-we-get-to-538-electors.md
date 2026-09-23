@@ -7,6 +7,7 @@ categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/how-did-we-get-to-538-electors-og.png
 og_card_source: social/images/2026-09-03-linkedin-how-did-we-get-to-538-electors/og-card.png
+humanizer_pass: predates
 featured: false
 ---
 

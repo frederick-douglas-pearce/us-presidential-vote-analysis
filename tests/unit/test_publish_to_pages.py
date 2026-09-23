@@ -180,6 +180,34 @@ def test_body_is_byte_for_byte(box: Sandbox) -> None:
     assert published == original
 
 
+@pytest.mark.parametrize("value", ["v3.0.0", "none", "predates"])
+def test_humanizer_pass_never_reaches_pages(
+    box: Sandbox, capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    """`humanizer_pass` is an upstream-only editorial record (#258). Asserted on
+    the published bytes rather than on `DROP_FIELDS` membership: the post is
+    published without the field, then recorded and republished, and the Pages
+    output must be byte-identical with nothing rewritten — which is also why
+    backfilling the published posts with `predates` changes nothing live."""
+    src = box.add_post("humanized", "social/images/x/og-card.png")
+    box.publish([src])
+    before = (box.pages_posts / src.name).read_bytes()
+
+    src.write_text(
+        src.read_text().replace(
+            "featured: false\n", f"featured: false\nhumanizer_pass: {value}\n"
+        )
+    )
+    assert f"humanizer_pass: {value}" in src.read_text()
+    capsys.readouterr()
+    box.publish([src])
+
+    published = (box.pages_posts / src.name).read_bytes()
+    assert b"humanizer_pass" not in published
+    assert published == before
+    assert "0 change(s)" in capsys.readouterr().out
+
+
 # --- idempotency -----------------------------------------------------------
 
 

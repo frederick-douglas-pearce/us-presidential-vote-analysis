@@ -29,6 +29,7 @@ categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/<slug>-og.png
 og_card_source: social/images/<YYYY-MM-DD>-linkedin-<slug>/og-card.png
+humanizer_pass: vX.Y.Z | none
 featured: false
 ---
 ```
@@ -45,6 +46,25 @@ where it already was.
 repo-root-relative path to the rendered card that gets copied there at publish time.
 Keep the two slugs in agreement with the filename — a mismatch is the single easiest
 thing to get wrong here.
+
+`humanizer_pass` records which version of the [humanizer skill](https://github.com/blader/humanizer)
+was run over the finished draft, and `tooling/check-humanizer-pass.py` refuses a post without it
+([#258](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/258)). The
+skill strips structural AI-writing tells the drafter cannot see in its own prose: not-X-but-Y
+staging, one-line closers, staged run-ups, forced triads, dashes used as a universal connector,
+inflated significance. Run it over the draft and land its edits as their own commit, so the diff can
+be reviewed. The guard checks that the pass was **recorded**, never the prose itself: the skill's
+"When not to act" rules need judgment a pattern lint cannot supply. Record the version rather than
+`true`, so that when the skill changes its pattern list you can tell which posts predate the change.
+Two non-version values are valid, and the guard counts them separately:
+
+- `none` records a pass deliberately declined for that post. It keeps the post green, and it is the
+  count worth acting on.
+- `predates` marks the four posts published before this convention landed. It is a **closed set**:
+  the guard accepts it on those four filenames only, so a new post cannot use it.
+
+Like `og_card_source`, the field is upstream-only and stripped by `tooling/publish-to-pages.py` on
+publish.
 
 **AI-assistance disclosure is required.** Every post ends with a horizontal rule and:
 
@@ -88,20 +108,21 @@ Two carry over from `social/README.md` and apply to anything published here:
 
 Ported from `claude-code-sessions` in
 [#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132).
-Four pieces, with a deliberate split: **the Action owns auth and the push; the script
-owns the transform, OG resolution, and the content-compare; two PR guards keep a post
+Five pieces, with a deliberate split: **the Action owns auth and the push; the script
+owns the transform, OG resolution, and the content-compare; three PR guards keep a post
 from reaching `main` in a state the site will reject.**
 
-| Piece                                                                     | What it does                                                                         | When it runs                                                                            |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| [`tooling/publish-to-pages.py`](../tooling/publish-to-pages.py)           | Transforms frontmatter to Pages conventions, resolves + copies each post's OG card   | Called by the Action; runnable locally                                                  |
-| [`.github/workflows/pages-sync.yml`](../.github/workflows/pages-sync.yml) | Cross-repo auth + the reconcile-retry push to the Pages repo                         | Push to `main` touching `posts/**` or `social/images/**`; also `workflow_dispatch`      |
-| [`tooling/check-og-cards.py`](../tooling/check-og-cards.py)               | PR guard — runs the publisher's _own_ validator, so a card-less post fails on the PR | [`og-card-guard.yml`](../.github/workflows/og-card-guard.yml), on PRs and `main` pushes |
-| [`.github/workflows/prettier.yml`](../.github/workflows/prettier.yml)     | PR guard — `posts/` must be Prettier-clean in the site's own dialect                 | On PRs and `main` pushes                                                                |
+| Piece                                                                     | What it does                                                                         | When it runs                                                                                |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| [`tooling/publish-to-pages.py`](../tooling/publish-to-pages.py)           | Transforms frontmatter to Pages conventions, resolves + copies each post's OG card   | Called by the Action; runnable locally                                                      |
+| [`.github/workflows/pages-sync.yml`](../.github/workflows/pages-sync.yml) | Cross-repo auth + the reconcile-retry push to the Pages repo                         | Push to `main` touching `posts/**` or `social/images/**`; also `workflow_dispatch`          |
+| [`tooling/check-og-cards.py`](../tooling/check-og-cards.py)               | PR guard — runs the publisher's _own_ validator, so a card-less post fails on the PR | [`og-card-guard.yml`](../.github/workflows/og-card-guard.yml), on PRs and `main` pushes     |
+| [`.github/workflows/prettier.yml`](../.github/workflows/prettier.yml)     | PR guard — `posts/` must be Prettier-clean in the site's own dialect                 | On PRs and `main` pushes                                                                    |
+| [`tooling/check-humanizer-pass.py`](../tooling/check-humanizer-pass.py)   | PR guard — every post records a humanizer pass (or an explicit `none`)               | [`humanizer-guard.yml`](../.github/workflows/humanizer-guard.yml), on PRs and `main` pushes |
 
 **Shipping a post is a merge.** Move the finished draft from `social/drafts/` into
-`posts/`, open a PR — the guards check the card resolves and the markdown is
-Prettier-clean — and merge. The sync runs on `main` and pushes the post plus its card
+`posts/`, open a PR — the guards check the card resolves, a humanizer pass is recorded, and the
+markdown is Prettier-clean — and merge. The sync runs on `main` and pushes the post plus its card
 to the Pages repo.
 
 ### Prettier, and why a post can turn the site red
