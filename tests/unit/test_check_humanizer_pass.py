@@ -367,6 +367,9 @@ def test_empty_glob_fails_rather_than_reporting_green(
         ("v3.1", True),
         ("  v3.0.0  ", True),
         ("'v3.0.0'", True),
+        # Space inside the quotes: only the strip after unquoting removes it.
+        ("' none '", True),
+        ('" v3.0.0 "', True),
         ("none", True),
         (None, False),
         ("", False),
@@ -436,6 +439,9 @@ def test_the_workflow_runs_on_prs_and_main_pushes_scoped_to_its_paths() -> None:
     pull_request = _trigger_block(workflow, "pull_request")
     push = _trigger_block(workflow, "push")
     assert re.search(r"^    branches: \[main\]$", push, re.MULTILINE), push
+    # No branch filter on pull_request: one would silently switch the guard off
+    # for PRs into any branch it does not name, main included.
+    assert not re.search(r"^    branches", pull_request, re.MULTILINE), pull_request
     assert _paths(pull_request) == _GUARDED_PATHS
     assert _paths(push) == _GUARDED_PATHS
 
