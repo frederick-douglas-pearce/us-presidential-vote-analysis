@@ -79,7 +79,6 @@ FIELD = "humanizer_pass"
 # on behind an archive that can never change.
 PREDATES = "predates"
 DECLINED = "none"
-NON_VERSION_VALUES = (PREDATES, DECLINED)
 
 # The closed set of posts allowed `predates`: the four published before this
 # convention landed (#258). Nothing may join it. A listed post is *allowed*
@@ -95,8 +94,8 @@ PREDATES_POSTS: frozenset[str] = frozenset(
 )
 
 # A recorded pass names the skill version that ran (D-2). The leading `v` is
-# optional because the plugin manifest reports "3.0.0" while the docs write
-# "v3.0.0"; both are accepted, neither is rewritten.
+# optional because the skill's manifest and SKILL.md report "3.0.0" while its
+# release tag is "v3.0.0"; both are accepted, neither is rewritten.
 _VERSION_RE = re.compile(r"^v?\d+\.\d+(\.\d+)?$")
 
 # ` # ...` after a value is a YAML comment, not part of it. Recording the date
@@ -208,8 +207,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     n_predates = passed.count(PREDATES)
     n_declined = passed.count(DECLINED)
     n_fail = len(results) - len(passed)
+    # Printed on both paths: the `none` count is the actionable one (D-5), and a
+    # failing run is exactly when the author is reading this log.
+    counts = (
+        f"{n_predates} predate the convention. "
+        # The actionable number: posts that could have had a pass and did not.
+        f"{n_declined} declined a pass."
+    )
 
     if n_fail:
+        print(f"\n{counts}")
         sys.stdout.flush()  # keep the per-post report ahead of the stderr summary
         print(
             f"\n{n_fail} post(s) with no valid recorded humanizer pass. Run the "
@@ -221,11 +228,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    summary = f"\nAll {len(posts)} post(s) record a humanizer pass."
-    summary += f" {n_predates} predate the convention."
-    # The actionable number: posts that could have had a pass and did not.
-    summary += f" {n_declined} declined a pass."
-    print(summary)
+    print(f"\nAll {len(posts)} post(s) record a humanizer pass. {counts}")
     return 0
 
 

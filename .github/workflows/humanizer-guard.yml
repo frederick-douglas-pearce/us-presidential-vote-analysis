@@ -15,8 +15,9 @@ name: Humanizer guard
 # Runs the guard only. Its two test files (tests/unit/test_check_humanizer_pass.py
 # and tests/unit/test_publish_to_pages.py, which pins that the field never reaches
 # Pages) run in ci.yml, which has no path filter and runs the full unit suite on
-# every PR and main push. The sessions workflow runs its tests here because that
-# repo has no other tooling runner; this one does. Kept separate from ci.yml for
+# every PR into main and every main push. The sessions workflow runs its tests
+# here because that repo has no other CI runner for its tooling/tests/; this one
+# runs tests/unit/ in ci.yml. Kept separate from ci.yml for
 # og-card-guard.yml's reason: stdlib-only and path-filtered, so a red run is
 # legible as a missing record rather than a test failure.
 

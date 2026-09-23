@@ -1,5 +1,5 @@
-"""`tooling/check-humanizer-pass.py` keeps a post off `main` until a humanizer
-pass has been recorded in its frontmatter (#258).
+"""`tooling/check-humanizer-pass.py` fails CI on any post that has not recorded
+a humanizer pass in its frontmatter (#258).
 
 Ported from the `claude-code-sessions` repo's
 `tooling/tests/test_check_humanizer_pass.py` (unittest → pytest). The guard
@@ -16,6 +16,7 @@ convention may carry it, and the set is pinned to a literal so it cannot grow.
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 from types import ModuleType
 
@@ -243,15 +244,41 @@ def test_missing_frontmatter_fails(
     assert "[FAIL] 2026-01-01-broken.md: no frontmatter block found" in text
 
 
-def test_non_utf8_locale_does_not_traceback(
-    repo: Repo, capsys: pytest.CaptureFixture[str]
+def test_the_read_does_not_depend_on_the_default_encoding(
+    repo: Repo, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Posts are full of em dashes; the read must not depend on the runner's
-    locale."""
+    """Posts are full of em dashes. On a UTF-8 runner a bare `read_text()` reads
+    them fine, so writing one and running the guard proves nothing. Instead make
+    any read that does not name an encoding decode as ASCII — what a non-UTF-8
+    locale would do — so only a read that asks for UTF-8 explicitly passes."""
     src = repo.add_post("anatomy", "v3.0.0")
-    src.write_bytes(src.read_bytes().replace(b"Body line.", "Body — line.".encode()))
+    src.write_bytes(src.read_bytes().replace(b"Body line.", "Body \u2014 line.".encode()))
+    real_read_text = Path.read_text
+
+    def ascii_by_default(
+        self: Path, encoding: str | None = None, errors: str | None = None
+    ) -> str:
+        return real_read_text(self, encoding=encoding or "ascii", errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", ascii_by_default)
     code, text = repo.run(capsys)
     assert code == 0, text
+
+
+def test_an_undecodable_post_is_reported_not_raised(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A UnicodeDecodeError is a ValueError, not an OSError, so an OSError-only
+    handler would let it escape as a traceback and cut the report short. The
+    post after it must still be reported."""
+    (repo.posts / "2026-01-01-latin1.md").write_bytes(
+        b"---\nhumanizer_pass: v3.0.0\n---\n\xff\xfe body\n"
+    )
+    repo.add_post("zz-after", None)
+    code, text = repo.run(capsys)
+    assert code == 1, text
+    assert "[FAIL] 2026-01-01-latin1.md: cannot read 2026-01-01-latin1.md:" in text
+    assert "[FAIL] 2026-01-01-zz-after.md" in text
 
 
 def test_unreadable_path_is_reported_not_raised(
@@ -280,6 +307,22 @@ def test_reports_every_failing_post(
         assert f"[FAIL] 2026-01-01-{slug}.md" in text
     assert "[ok]   2026-01-01-good.md" in text
     assert "4 post(s) with no valid recorded humanizer pass" in text
+
+
+def test_a_failing_run_still_reports_both_counts(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The `none` count is the actionable one (D-5), and a failing run is when the
+    author is reading the log, so the counts print on the failure path too. The
+    two counts differ so a swapped or merged counter cannot pass."""
+    listed = sorted(PUBLISHED_BEFORE_CONVENTION)
+    repo.add_post("a", "predates", filename=listed[0])
+    repo.add_post("b", "none")
+    repo.add_post("c", "none")
+    repo.add_post("bad", None)
+    code, text = repo.run(capsys)
+    assert code == 1, text
+    assert "1 predate the convention. 2 declined a pass." in text
 
 
 # --- selection ----------------------------------------------------------------
@@ -356,3 +399,50 @@ def test_the_real_posts_pass_with_every_listed_post_backfilled(
     assert code == 0, text.out + text.err
     for name in PUBLISHED_BEFORE_CONVENTION:
         assert chp.read_pass(_REPO / "posts" / name) == "predates", name
+
+
+# --- the workflow (AC4) ---------------------------------------------------------
+
+_WORKFLOW = _REPO / ".github" / "workflows" / "humanizer-guard.yml"
+_GUARDED_PATHS = {
+    "posts/**",
+    "tooling/check-humanizer-pass.py",
+    "tooling/publish-to-pages.py",
+    ".github/workflows/humanizer-guard.yml",
+}
+
+
+def _trigger_block(workflow: str, trigger: str) -> str:
+    """The lines under `on:`'s `<trigger>:` key, up to the next sibling key."""
+    m = re.search(rf"^  {trigger}:\n((?:    .*\n|\s*\n)*)", workflow, re.MULTILINE)
+    assert m is not None, f"no `{trigger}:` trigger in {_WORKFLOW.name}"
+    return m.group(1)
+
+
+def _paths(block: str) -> set[str]:
+    m = re.search(r"^    paths:\n((?:      - .*\n)+)", block, re.MULTILINE)
+    assert m is not None, "trigger has no `paths:` list"
+    return set(re.findall(r'^      - "([^"]+)"', m.group(1), re.MULTILINE))
+
+
+def test_the_workflow_runs_on_prs_and_main_pushes_scoped_to_its_paths() -> None:
+    """AC4, read off the workflow text (PyYAML is not a declared dependency):
+    both triggers exist, `push` is limited to `main`, and each trigger's path
+    filter is exactly the guarded set, so dropping `posts/**` — after which the
+    guard would never run on a post-only PR — turns this red."""
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    assert re.search(r"^on:\n", workflow, re.MULTILINE)
+
+    pull_request = _trigger_block(workflow, "pull_request")
+    push = _trigger_block(workflow, "push")
+    assert re.search(r"^    branches: \[main\]$", push, re.MULTILINE), push
+    assert _paths(pull_request) == _GUARDED_PATHS
+    assert _paths(push) == _GUARDED_PATHS
+
+
+def test_the_workflow_runs_the_guard_over_every_post() -> None:
+    """The job must invoke the guard with no path arguments, so it checks the
+    default full glob rather than a named subset."""
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    runs = re.findall(r"^\s*- run: (.+)$", workflow, re.MULTILINE)
+    assert runs == ["python3 tooling/check-humanizer-pass.py"], runs

@@ -118,7 +118,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #   humanizer_pass — which humanizer skill version was run over the draft, an
 #                    editorial record enforced by check-humanizer-pass.py (#258)
 # The source repo also strips `claude_code_version_verified`, which drives its
-# re-verification cadence. This repo has no such field (see posts/README.md).
+# re-verification cadence; this repo has no such field.
 DROP_FIELDS = {"og_card_source", "humanizer_pass"}
 
 

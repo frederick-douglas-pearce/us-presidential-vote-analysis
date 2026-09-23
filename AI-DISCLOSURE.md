@@ -56,7 +56,8 @@ every route, whenever a blocking review finding raises a design question, which 
 turns off. A `/security-review` fires on §4's five sensitive path surfaces, plus a change-shaped
 trigger for new SQL string interpolation and a rule that fires on any `.claude/` diff. The Open
 Graph card guard is path-filtered to `posts/`, `social/images/` and the two publishing scripts, and
-the humanizer guard to `posts/`, the guard itself and the publisher it reuses. So a given change may be due none of these.
+the humanizer guard to `posts/`, the guard itself and the publisher it reuses. So a given change may
+be due none of these.
 
 **Cannot run in CI at all.** The UCSB / American Presidency Project corpus is not redistributable
 (D022), so it is not in this repository and CI never sees it. `TestRealCorpus` in the UCSB parse and
@@ -86,13 +87,14 @@ assert that fails loud rather than as a value that merely looks reasonable.
 **[`posts/`](posts/)** — the "Counted, Not Assumed" series. Drafted by the `marketer` agent against
 a brief, then edited by me; the raw agent draft is kept verbatim beside the edited one so the diff
 stays inspectable, though `social/` is git-ignored, so that comparison is mine to make and not a
-reader's. Before a post merges, the finished draft goes through the
-[humanizer skill](https://github.com/blader/humanizer), which strips the structural tells of machine
-prose, and its edits land as their own commit. Each post records in `humanizer_pass` which version of
-that skill was run over it, and CI refuses a post that records none; a deliberate skip has to be
-written down as `none`. The four posts published before that convention existed are marked
-`predates` rather than claiming a pass that never ran. CI checks that the pass was recorded, not that
-the prose is clean — that part is judgment. Two editorial guardrails are absolute and are enforced by review, not by CI: nothing
+reader's. Before a post merges, and after it moves into `posts/`, the finished draft goes through
+the [humanizer skill](https://github.com/blader/humanizer), which strips the structural tells of
+machine prose, and its edits land as their own commit. Each post records in `humanizer_pass` which
+version of that skill was run over it, and CI fails on a post that records no value at all; a
+deliberate skip has to be written down as `none`. The four posts published before that convention
+existed are marked `predates` rather than claiming a pass that never ran. CI checks that the pass
+was recorded, not that the prose is clean — that part is judgment. Two editorial guardrails are
+absolute and are enforced by review, not by CI: nothing
 critical of a data source is ever published, and every historical claim is checked before it ships.
 Each post ends with the one-line form of this disclosure, per
 [`posts/README.md`](posts/README.md).
