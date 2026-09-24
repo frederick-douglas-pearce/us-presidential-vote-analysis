@@ -4605,8 +4605,8 @@ this kind of falsehood is visible.
 **Consequences.** Six `dwh.election_population` rows move down (Virginia 1824–1844). 1848 keeps its
 value (1,249,764), now reached by a different route. No public surface changes, because per-capita
 is not in the API snapshot until #245. D066(e)'s "three states in practice" is retired: the six rows'
-`at_election` is now true. `CLAUDE.md` still states the interim position and is left to a follow-up
-issue, following the #253→#255 precedent.
+`at_election` is now true. `CLAUDE.md` still states the interim position and is left to **#264**,
+following the #253→#255 precedent.
 
 **Related:** #251, #208, #253, #245, D059, D060, D066, `src/usvote/census/transform.py`,
 `src/usvote/census/conform.py`, `docs/corrections.md`,

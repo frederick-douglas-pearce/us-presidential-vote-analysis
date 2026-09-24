@@ -482,8 +482,9 @@ class TestAlexandriaRetrocession:
         assert "Alexandria" not in str(virginia["note"])
 
     def test_the_district_of_columbia_row_is_left_as_published(self) -> None:
-        # It already excludes Alexandria (the Bureau's District note), so crediting it
-        # would double-count the other way. Alexandria's people land in no row.
+        # The source publishes it correctly for the District's own footprint, which
+        # already excludes Alexandria (the Bureau's District note), so it is not restated
+        # (D067(e)). Alexandria's people land in no row for these censuses.
         rows = _minimal_rows(
             old=[
                 _row(1840, "Virginia", 1_025_227, "resident_1790_1990"),
@@ -508,9 +509,41 @@ class TestAlexandriaRetrocession:
         after_wv = apply_virginia_boundary_correction(frame)
         va = after_wv.loc[after_wv.state == "Virginia", "population"].iloc[0]
         assert va == 1_249_764
+        # The intermediate note reads the verification map's published_components
+        # branch: it must say Alexandria is still in the figure, not claim a check.
+        note = after_wv.loc[after_wv.state == "Virginia", "note"].iloc[0]
+        assert "still includes Alexandria County" in note
+        assert "cross-checked" not in note
+        assert "not re-verified" not in note
         after_both = apply_alexandria_retrocession(after_wv)
         va = after_both.loc[after_both.state == "Virginia", "population"].iloc[0]
         assert va == 1_239_797
+
+    def test_the_final_note_records_the_verification_state(self) -> None:
+        rows = _minimal_rows(
+            old=[
+                _row(1830, "Virginia", 1_044_054, "resident_1790_1990"),
+                _row(1830, "West Virginia", 176_924, "resident_1790_1990"),
+            ]
+        )
+        virginia = transform_census(rows, _SPINE).set_index("state").loc["Virginia"]
+        assert "(verification: published_components)" in str(virginia["note"])
+        assert "1846-09-07" in str(virginia["note"])
+
+    def test_a_census_the_map_does_not_record_as_composed_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The map and the correction must agree on which censuses were composed; a
+        # third state that changes nothing persisted would be decoration.
+        patched = dict(VIRGINIA_VERIFICATION)
+        patched[1830] = VERIFIED_BY_PUBLISHED_TOTAL
+        monkeypatch.setattr(transform, "VIRGINIA_VERIFICATION", patched)
+        frame = pd.DataFrame(
+            [_census_record(1830, "Virginia", 1_220_978, BASIS_AS_ENUMERATED)],
+            columns=list(CENSUS_COLUMNS),
+        )
+        with pytest.raises(CensusTransformError, match="disagree"):
+            apply_alexandria_retrocession(frame)
 
     def test_a_row_the_west_virginia_step_did_not_restate_is_refused(self) -> None:
         # Subtracting Alexandria from the present-day figure would give a number that

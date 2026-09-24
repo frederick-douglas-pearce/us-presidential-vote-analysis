@@ -412,7 +412,7 @@ class TestBoundarySuccession:
 # 1848 -- held after the 1846 retrocession on the same census -- adds Alexandria back.
 VA_1840_ENUMERATED = 1_239_797
 ALEXANDRIA_1840 = 9_967
-VA_1848_AT_ELECTION = VA_1840_ENUMERATED + ALEXANDRIA_1840  # 1,249,764, typed by hand
+VA_1848_AT_ELECTION = 1_249_764  # = VA_1840_ENUMERATED + ALEXANDRIA_1840, typed by hand
 _RETROCESSION_SPINE = _spine(
     [(1844, "Virginia", 17), (1848, "Virginia", 17), (1848, "Maryland", 8)]
 )
@@ -453,8 +453,31 @@ class TestAlexandriaReversal:
         assert retrocession_reversal_elections(ALEXANDRIA_RETROCESSION, wider) == {1848}
 
     def test_an_election_in_the_effective_year_is_refused(self) -> None:
+        # Both derivations compare years, so both must refuse the undecidable case.
         with pytest.raises(CensusConformError, match="compare dates instead"):
             retrocession_reversal_elections(ALEXANDRIA_RETROCESSION, {1844, 1846, 1848})
+        with pytest.raises(CensusConformError, match="compare dates instead"):
+            retrocession_correction_elections(
+                ALEXANDRIA_RETROCESSION, {1844, 1846, 1848}
+            )
+
+    def test_a_reversal_election_with_no_pinned_census_is_refused(self) -> None:
+        # A reversal-set election whose governing census was never corrected has
+        # nothing to add back; the constant and the window disagree about history.
+        unpinned = ALEXANDRIA_RETROCESSION._replace(
+            population={1830: ALEXANDRIA_RETROCESSION.population[1830]}
+        )
+        frame = pd.DataFrame(
+            {
+                "election_year": [1848],
+                "state": ["Virginia"],
+                "governing_census_year": [1840],
+                "population": pd.array([VA_1840_ENUMERATED], dtype="Int64"),
+                "boundary_basis": [BOUNDARY_AT_ELECTION],
+            }
+        )
+        with pytest.raises(CensusConformError, match="no pinned figure"):
+            apply_boundary_retrocessions(frame, retrocessions=(unpinned,))
 
     def test_1844_keeps_the_corrected_figure_and_1848_gets_alexandria_back(self) -> None:
         frame = build_election_population(
@@ -564,6 +587,38 @@ class TestBoundaryCorrectionsDisjoint:
         )
         with pytest.raises(CensusConformError, match=r"election\(s\) \[1848\]"):
             assert_boundary_corrections_disjoint(successions=(colliding,))
+
+    def test_a_census_only_overlap_is_refused(self) -> None:
+        # Pins 1840 but acts on no election either retrocession set touches (its window
+        # opens in 1900), so only the census-intersection term can fire.
+        colliding = BoundarySuccession(
+            predecessor="Virginia",
+            successor="West Virginia",
+            effective_year=1900,
+            published_population={1840: 1_025_227},
+            citation="test",
+        )
+        with pytest.raises(
+            CensusConformError, match=r"census\(es\) \[1840\] / election\(s\) \[\]"
+        ):
+            assert_boundary_corrections_disjoint(successions=(colliding,))
+
+    def test_a_correction_set_only_overlap_is_refused(self) -> None:
+        # On a spine that stops at 1844 the succession's window is {1844} and the
+        # reversal set is empty, so only the correction-set term can fire.
+        colliding = BoundarySuccession(
+            predecessor="Virginia",
+            successor="West Virginia",
+            effective_year=1843,
+            published_population={1790: 691_737},
+            citation="test",
+        )
+        with pytest.raises(
+            CensusConformError, match=r"census\(es\) \[\] / election\(s\) \[1844\]"
+        ):
+            assert_boundary_corrections_disjoint(
+                successions=(colliding,), election_years=set(range(1824, 1848, 4))
+            )
 
     def test_a_succession_of_another_state_is_not_compared(self) -> None:
         other = BoundarySuccession(
@@ -788,23 +843,26 @@ def _seam_missing_the_coverage_guard(
 
     Stands in for the state of the tree if that line were deleted from the real seam. Its
     only job is to be a seam with a call missing, so drift from the real body is harmless —
-    what matters is that it calls three of the four.
+    what matters is that it calls five of the six, so the comparison is unequal by
+    content, never by arity alone.
     """
+    conform_module.assert_boundary_corrections_disjoint()
     frame = conform_module.build_election_population(census, ec_participation)
     conform_module.assert_election_population_shape(frame)
     # assert_spine_states_covered deliberately omitted
     conform_module.assert_no_double_count(frame)
     conform_module.assert_no_interpolated_population(frame, census)
+    conform_module.assert_retrocession_restored(frame, census)
 
 
 class TestTheSeam:
     """`assert_conforms_to_spine` is the only thing the load path calls, so its
     *composition* is a contract — and nothing pinned it before (#182 review, GE-F1).
 
-    Its own docstring says the reason it exists is that "the load path gets all four
+    Its own docstring says the reason it exists is that "the load path gets all six
     checks or none — an individually-wired subset is how one of them quietly stops
-    running". Deleting any one of the four from its body used to leave the whole suite
-    green: the unit tests call the four guards directly, the pipeline tests stub the seam,
+    running". Deleting any one of the guards from its body (four of them, then) used to
+    leave the whole suite green: the unit tests call the guards directly, the pipeline tests stub the seam,
     and the integration test only ever hands it good data. That is the
     outcome-versus-mechanism failure exactly — a working seam and a crippled one produce
     an identical result on the only input any test gave it.
@@ -827,7 +885,7 @@ class TestTheSeam:
         monkeypatch: pytest.MonkeyPatch,
         seam: Callable[[pd.DataFrame, pd.DataFrame], None],
     ) -> tuple[str, ...]:
-        """Run ``seam`` with all four guards replaced by recorders; return the call order.
+        """Run ``seam`` with all six guards replaced by recorders; return the call order.
 
         The seam resolves each guard as a module global at call time, so patching
         ``conform_module`` observes exactly the calls its body makes. ``monkeypatch.setattr``
@@ -857,8 +915,8 @@ class TestTheSeam:
     def test_the_seam_runs_every_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The test that closes the hole: it observes *which* guards run.
 
-        A negative-data test can only reach the guards that can fail on data, and two of
-        the four cannot by construction (the seam docstring says which and why). So the
+        A negative-data test can only reach the guards that can fail on data, and most of
+        the six cannot by construction (the seam docstring says which and why). So the
         only way to catch a deleted call is to record the calls.
         """
         self._assert_ran_every_guard(
@@ -905,7 +963,7 @@ class TestTheSeam:
     ) -> None:
         """Two seams must not become two guard lists.
 
-        If ``assert_conforms_to_spine`` kept its own copy of the four calls, a guard
+        If ``assert_conforms_to_spine`` kept its own copy of the six calls, a guard
         added to one would be missing from the other and both tests above would still
         pass. This pins the delegation itself.
         """

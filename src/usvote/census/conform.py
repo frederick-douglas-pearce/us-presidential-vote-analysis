@@ -129,7 +129,7 @@ ELECTION_POPULATION_NATURAL_KEY: tuple[str, ...] = ("election_year", "state")
 #: **This is also not the census ``basis``** (#182 architect review, C2d).
 #: ``census_population.basis`` answers "borders at census time vs modern". At election
 #: grain the question is "borders at *this election*", and the two disagree exactly
-#: where this module works: for the elections **1824-1860** Virginia's figure is
+#: where this module works: for the elections **1824-1868** Virginia's figure is
 #: borders-at-election by three different routes — the **restated**
 #: (``as_enumerated``) census figure for 1824-1844 and 1852-1860, that figure with
 #: Alexandria County added back for 1848 (:data:`BOUNDARY_RETROCESSIONS`), and for 1864
@@ -279,6 +279,7 @@ def retrocession_correction_elections(
     Derived over ``ec_ingest_years()`` by default (D066(f)).
     """
     years = ec_ingest_years() if election_years is None else election_years
+    _assert_no_election_in_effective_year(retrocession, years)
     effective = retrocession.effective_date.year
     return {
         year
@@ -792,9 +793,10 @@ def apply_boundary_retrocessions(
     ``at_election``: the result is the borders-at-election figure.
 
     A NULL figure is left NULL — there is nothing to add to, and filling it would
-    invent a value (D005). A reversal-set census the constant pins no figure for
-    raises, since the census row would then be uncorrected and adding would
-    double-count.
+    invent a value (D005). A reversal-set election whose governing census the constant
+    pins no figure for **raises**: that census was never corrected, so there is nothing
+    to reverse, and an election in the reversal set with no pinned census means the
+    constant and the window disagree about the history.
     """
     corrected = frame.copy()
     election_years = {int(year) for year in corrected["election_year"].unique()}
@@ -807,7 +809,13 @@ def apply_boundary_retrocessions(
             census_year = int(corrected.at[index, "governing_census_year"])
             transferred = retrocession.population.get(census_year)
             if transferred is None:
-                continue
+                raise CensusConformError(
+                    f"Election {int(corrected.at[index, 'election_year'])} is in "
+                    f"{retrocession.recipient}'s reversal set for the "
+                    f"{retrocession.donor} retrocession, but its governing "
+                    f"{census_year} census has no pinned figure: nothing was removed "
+                    f"at census grain, so there is nothing to add back."
+                )
             population = corrected.at[index, "population"]
             if pd.isna(population):
                 continue

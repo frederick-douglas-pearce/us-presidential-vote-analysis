@@ -130,11 +130,19 @@ VIRGINIA_CORRECTION_CENSUSES: tuple[int, ...] = tuple(range(1790, 1870, 10))
 #:
 #: :data:`VERIFIED_BY_PUBLISHED_COMPONENTS` — 1800-1840. #208 established that these
 #: five are **not** clean: the file's Virginia + West Virginia overshoots the enumerated
-#: Virginia by Alexandria County (0.79%-0.91% across the six elections 1824-1844 they
-#: govern). The residual is explained, quantified and corrected here: the figure is
-#: composed from three **published component** series — the file's two rows and the
-#: Bureau's own Alexandria figures (:data:`ALEXANDRIA_RETROCESSION`) — and that
-#: composition is exact (``research-boundary-sweep.md`` §4.1, §5.4).
+#: Virginia by Alexandria County (0.79%-0.91% across the six elections 1824-1844 held
+#: before the retrocession; these censuses govern seven, 1824-1848). The residual is
+#: explained, quantified and corrected here: the figure is composed from three
+#: **published component** series — the file's two rows and the Bureau's Alexandria
+#: figures (:data:`ALEXANDRIA_RETROCESSION`). The Bureau prints no enumerated total for
+#: these censuses; the composition reproduces the **original-return** totals exactly
+#: (``research-boundary-sweep.md`` §4.1, §5.4). For **1810 and 1820** that is weaker
+#: than it reads: §5.4 marks both **CONTRADICTED**, because the 1850 Seventh Census
+#: restates them 22 and 13 higher (974,622 / 1,065,379), and the composition closes only
+#: on the original-return pair. 1810 is weaker again, since its Alexandria cell is
+#: itself settled partly by arithmetic (:data:`ALEXANDRIA_RETROCESSION`).
+#: :func:`apply_alexandria_retrocession` refuses a census this map does not record in
+#: this state, and writes the state into the row note.
 #:
 #: A census in the window with **no** entry would be computed-but-unverified. None is
 #: left, and the state stays expressible so a widened window cannot inherit a
@@ -183,21 +191,23 @@ class Retrocession(NamedTuple):
 #: Virginia on 7 September 1846 (#208, #251).
 #:
 #: ``tabs15-65.xlsx`` credits it to Virginia at every census 1800-1840, so the restated
-#: Virginia figure for those censuses is 0.79%-0.91% high. The figures are the Census
-#: Bureau's **own**, not derived: Virginia State Note 2 of *Population of States and
-#: Counties of the United States: 1790 to 1990* (March 1996), the companion volume to
-#: the working paper the file comes from — *"State totals for 1800-1840 include
-#: population of the portion of the District of Columbia taken from Virginia (Fairfax
-#: County) in 1791 but retroceded to Virginia in 1846"*. They are deliberately **not**
-#: computed as ``enumerated_DC - file_DC``: that derivation is how #208 found the case,
-#: and using it would make the correction depend on a second external series when a
-#: published one exists. The same volume's District note and its ``Arlington`` county
-#: row agree at every census (``research-boundary-sweep.md`` §5.3).
+#: Virginia figure for those censuses is 0.79%-0.91% high. Four of the five figures are
+#: the Census Bureau's **own**, as printed: Virginia State Note 2 of *Population of
+#: States and Counties of the United States: 1790 to 1990* (March 1996), the companion
+#: volume to the working paper the file comes from — *"State totals for 1800-1840
+#: include population of the portion of the District of Columbia taken from Virginia
+#: (Fairfax County) in 1791 but retroceded to Virginia in 1846"*. Those four are
+#: deliberately **not** computed as ``enumerated_DC - file_DC``: that derivation is how
+#: #208 found the case, and using it would make the correction depend on a second
+#: external series when a published one exists. The same volume's District note and its
+#: ``Arlington`` county row agree with them (``research-boundary-sweep.md`` §5.3).
 #:
-#: **1810 is 8,552, and the printed Note 2's 8,852 is a defect in the note** — not an
-#: OCR artifact, and not an open ambiguity. The District note's enumerated series gives
-#: ``24,023 - 15,471 = 8,552``, and the ``Arlington`` row, read at 500 dpi, agrees; the
-#: rival 8,530 fails the District identity (``15,471 + 8,530 = 24,001``). It governs
+#: **1810 is the exception, and it is not Note 2's figure.** Note 2 prints 8,852, which
+#: is a defect in the note (not an OCR artifact, and no longer an open ambiguity). The
+#: value used, 8,552, rests on the volume's published ``Arlington`` county row (read at
+#: 500 dpi), with the tie against the rival 8,530 broken by the District note — and that
+#: tiebreak *is* the ``enumerated_DC - file_DC`` arithmetic avoided for the other four
+#: (``24,023 - 15,471 = 8,552``; ``15,471 + 8,530 = 24,001`` fails). It governs
 #: elections 1812-1820, outside the EC span, so nothing in the warehouse turns on it.
 #:
 #: Two traps worth carrying (§5.3): in 1820 the row printed *"County of Alexandria"* is
@@ -449,10 +459,15 @@ def apply_alexandria_retrocession(
 
     Runs **after** :func:`apply_virginia_boundary_correction` and subtracts the Bureau's
     published figure from the West-Virginia-restated row, so the result is
-    ``file Virginia + file West Virginia - Alexandria`` — the enumerated Virginia, exact
-    at all five censuses (``research-boundary-sweep.md`` §4.1: 880,200 / 974,600 /
-    1,065,366 / 1,211,405 / 1,239,797). Only then is ``as_enumerated`` true of these
-    rows on both axes.
+    ``file Virginia + file West Virginia - Alexandria``, which reproduces the
+    original-return enumerated Virginia at all five censuses
+    (``research-boundary-sweep.md`` §4.1: 880,200 / 974,600 / 1,065,366 / 1,211,405 /
+    1,239,797 — with 1810 and 1820 CONTRADICTED against a later restatement, see
+    :data:`VIRGINIA_VERIFICATION`). Only then is ``as_enumerated`` true of these rows on
+    both axes. Each corrected census must be recorded as
+    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS` in :data:`VIRGINIA_VERIFICATION` (read at
+    call time), or this raises: the map and the correction must not disagree about which
+    censuses were composed.
 
     Skips a census whose Virginia row is absent or NULL, as its sibling does — there is
     nothing to correct and nothing may be invented. **Raises** where the row is present
@@ -485,6 +500,14 @@ def apply_alexandria_retrocession(
                 f"retroceded {transferred:,} would yield a figure that is neither "
                 f"published nor enumerated. Refusing rather than guessing."
             )
+        if VIRGINIA_VERIFICATION.get(census_year) != VERIFIED_BY_PUBLISHED_COMPONENTS:
+            raise CensusTransformError(
+                f"{retrocession.recipient}'s {census_year} figure is being composed "
+                f"from published components, but VIRGINIA_VERIFICATION records "
+                f"{VIRGINIA_VERIFICATION.get(census_year)!r} for that census, not "
+                f"{VERIFIED_BY_PUBLISHED_COMPONENTS!r}. The map and the correction "
+                f"disagree; fix one of them."
+            )
         enumerated = int(current) - transferred
         corrected.at[index, "population"] = enumerated
         corrected.at[index, "note"] = (
@@ -493,10 +516,10 @@ def apply_alexandria_retrocession(
             f"counties that became West Virginia in 1863, which are added back from "
             f"the file's own West Virginia row, and it includes Alexandria County, "
             f"District of Columbia until its retrocession on "
-            f"{retrocession.effective_date.day} "
-            f"{retrocession.effective_date:%B %Y}, which is removed using the "
+            f"{retrocession.effective_date.isoformat()}, which is removed using the "
             f"Census Bureau's published figure ({transferred:,}). The result "
-            f"({enumerated:,}) is the enumerated Virginia, composed exactly from "
-            f"those three published components."
+            f"({enumerated:,}) is the enumerated Virginia as the original returns "
+            f"give it, composed exactly from those three published components "
+            f"(verification: {VERIFIED_BY_PUBLISHED_COMPONENTS})."
         )
     return corrected
