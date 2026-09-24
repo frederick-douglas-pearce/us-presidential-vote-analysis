@@ -1,7 +1,9 @@
 name: Prettier (posts)
 
-# Pre-merge gate so posts/ is Prettier-clean BEFORE it reaches main and gets
-# synced to the Pages site by pages-sync.yml. The site runs its own
+# Pre-merge check that fails CI when posts/ is not Prettier-clean, so the
+# problem shows on the PR BEFORE the post reaches main and gets synced to the
+# Pages site by pages-sync.yml. main has no branch protection, so the red check
+# does not block the merge; someone has to read it (#260). The site runs its own
 # `prettier . --check` on every push to its main, so a dirty post turns the
 # SITE red — and keeps it red, because the site's daily ESG cron re-runs the
 # same check every morning on the same file.

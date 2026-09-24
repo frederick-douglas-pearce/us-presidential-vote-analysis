@@ -110,9 +110,10 @@ Two carry over from `social/README.md` and apply to anything published here:
 Ported from `claude-code-sessions` in
 [#132](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/132).
 Five pieces, with a deliberate split: **the Action owns auth and the push; the script
-owns the transform, OG resolution, and the content-compare; two PR guards keep a post
-from reaching `main` in a state the site will reject, and a third fails CI on a post with
-no recorded humanizer pass.**
+owns the transform, OG resolution, and the content-compare; two PR guards fail CI on a
+post the site would reject, and a third fails CI on a post with no recorded humanizer
+pass.** `main` has no branch protection, so none of the three blocks a merge: a red check
+is advisory, and keeping a post off `main` relies on someone reading it.
 
 | Piece                                                                     | What it does                                                                         | When it runs                                                                                |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
