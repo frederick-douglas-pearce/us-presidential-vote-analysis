@@ -30,6 +30,7 @@ from usvote.census import conform as conform_module
 from usvote.census.conform import (
     BOUNDARY_AT_ELECTION,
     BOUNDARY_PRESENT_DAY,
+    BOUNDARY_RETROCESSIONS,
     BOUNDARY_SUCCESSIONS,
     CENSUS_COVERAGE_EXCEPTIONS,
     COVERAGE_COVERED,
@@ -41,13 +42,19 @@ from usvote.census.conform import (
     BoundarySuccession,
     CensusConformError,
     CoverageException,
+    apply_boundary_retrocessions,
     apply_boundary_successions,
+    assert_boundary_corrections_disjoint,
     assert_conforms_to_spine,
     assert_election_population_shape,
     assert_no_double_count,
     assert_no_interpolated_population,
+    assert_retrocession_restored,
     assert_spine_states_covered,
+    build_and_validate_election_population,
     build_election_population,
+    retrocession_correction_elections,
+    retrocession_reversal_elections,
     spine_participation,
 )
 from usvote.census.schema import (
@@ -57,6 +64,7 @@ from usvote.census.schema import (
     SERIES_RESIDENT,
     SOURCE_CENSUS_BUREAU,
 )
+from usvote.census.transform import ALEXANDRIA_RETROCESSION
 
 # The two figures the Virginia/West Virginia succession turns on, from the published file.
 VA_1860_PUBLISHED = 1_219_630
@@ -399,6 +407,175 @@ class TestBoundarySuccession:
             )
 
 
+# The Alexandria case (#251). The 1840 census row arrives already corrected at census
+# grain (file VA + file WV - Alexandria = the enumerated 1,239,797); 1844 inherits it,
+# 1848 -- held after the 1846 retrocession on the same census -- adds Alexandria back.
+VA_1840_ENUMERATED = 1_239_797
+ALEXANDRIA_1840 = 9_967
+VA_1848_AT_ELECTION = VA_1840_ENUMERATED + ALEXANDRIA_1840  # 1,249,764, typed by hand
+_RETROCESSION_SPINE = _spine(
+    [(1844, "Virginia", 17), (1848, "Virginia", 17), (1848, "Maryland", 8)]
+)
+_RETROCESSION_CENSUS = _census(
+    [
+        (1840, "Virginia", VA_1840_ENUMERATED, BASIS_AS_ENUMERATED),
+        (1840, "Maryland", 470_019, BASIS_PRESENT_DAY),
+    ]
+)
+
+
+class TestAlexandriaReversal:
+    """#251 — the census-grain correction is right for 1824-1844 and reversed for 1848."""
+
+    def test_the_catalog_is_built_from_the_census_side_constant(self) -> None:
+        assert BOUNDARY_RETROCESSIONS == (ALEXANDRIA_RETROCESSION,)
+
+    def test_the_correction_set_is_derived_and_is_the_six_elections(self) -> None:
+        # D066(g): six, as a rule over the spine (D066(f)), checked against a literal.
+        assert retrocession_correction_elections(ALEXANDRIA_RETROCESSION) == {
+            1824,
+            1828,
+            1832,
+            1836,
+            1840,
+            1844,
+        }
+
+    def test_the_reversal_set_is_derived_and_is_1848_alone(self) -> None:
+        assert retrocession_reversal_elections(ALEXANDRIA_RETROCESSION) == {1848}
+
+    def test_widening_the_spine_grows_only_the_correction_set(self) -> None:
+        # D066(f): below 1824 the 1800 and 1810 cells go live; the reversal stays 1848.
+        wider = set(range(1804, 2028, 4))
+        assert retrocession_correction_elections(ALEXANDRIA_RETROCESSION, wider) == set(
+            range(1804, 1848, 4)
+        )
+        assert retrocession_reversal_elections(ALEXANDRIA_RETROCESSION, wider) == {1848}
+
+    def test_an_election_in_the_effective_year_is_refused(self) -> None:
+        with pytest.raises(CensusConformError, match="compare dates instead"):
+            retrocession_reversal_elections(ALEXANDRIA_RETROCESSION, {1844, 1846, 1848})
+
+    def test_1844_keeps_the_corrected_figure_and_1848_gets_alexandria_back(self) -> None:
+        frame = build_election_population(
+            _RETROCESSION_CENSUS, _RETROCESSION_SPINE
+        ).set_index(["election_year", "state"])
+        assert frame.loc[(1844, "Virginia"), "population"] == VA_1840_ENUMERATED
+        assert frame.loc[(1848, "Virginia"), "population"] == VA_1848_AT_ELECTION
+        for year in (1844, 1848):
+            assert frame.loc[(year, "Virginia"), "boundary_basis"] == (
+                BOUNDARY_AT_ELECTION
+            )
+        # Another state on the same census is untouched.
+        assert frame.loc[(1848, "Maryland"), "population"] == 470_019
+
+    def test_a_null_figure_is_left_null_rather_than_filled(self) -> None:
+        census = _census([(1840, "Virginia", None, BASIS_AS_ENUMERATED)])
+        frame = build_election_population(census, _spine([(1848, "Virginia", 17)]))
+        assert frame["population"].isna().all()
+
+    def test_the_validating_builder_passes_the_reversal(self) -> None:
+        # Texas 1848 rides along because the coverage guard's stale-declaration
+        # reciprocal requires the one declared exception to be present.
+        spine = _spine(
+            [
+                (1844, "Virginia", 17),
+                (1848, "Virginia", 17),
+                (1848, "Maryland", 8),
+                (1848, "Texas", 4),
+            ]
+        )
+        frame = build_and_validate_election_population(_RETROCESSION_CENSUS, spine)
+        assert len(frame) == 4
+
+    def test_the_d005_guard_refuses_1848s_value_on_1844(self) -> None:
+        # D066(h) H1: one census governs both elections, so a census-keyed pin would
+        # admit this. Keyed on the election, it is refused.
+        frame = build_election_population(_RETROCESSION_CENSUS, _RETROCESSION_SPINE)
+        frame.loc[
+            (frame.election_year == 1844) & (frame.state == "Virginia"), "population"
+        ] = VA_1848_AT_ELECTION
+        with pytest.raises(CensusConformError, match="BOUNDARY_RETROCESSIONS"):
+            assert_no_interpolated_population(frame, _RETROCESSION_CENSUS)
+
+    def test_the_d005_guard_admits_the_reversal_itself(self) -> None:
+        frame = build_election_population(_RETROCESSION_CENSUS, _RETROCESSION_SPINE)
+        assert_no_interpolated_population(frame, _RETROCESSION_CENSUS)
+
+    def test_an_unreversed_1848_fails_the_consistency_check(self) -> None:
+        # The D005 guard alone admits this (it is the census figure); the consistency
+        # check is what notices the reversal did not run.
+        frame = build_election_population(
+            _RETROCESSION_CENSUS, _RETROCESSION_SPINE, retrocessions=()
+        )
+        assert_no_interpolated_population(frame, _RETROCESSION_CENSUS)
+        with pytest.raises(CensusConformError, match="should carry"):
+            assert_retrocession_restored(frame, _RETROCESSION_CENSUS)
+
+    def test_a_reversal_leaked_into_1844_fails_the_consistency_check(self) -> None:
+        frame = build_election_population(_RETROCESSION_CENSUS, _RETROCESSION_SPINE)
+        frame.loc[
+            (frame.election_year == 1844) & (frame.state == "Virginia"), "population"
+        ] = VA_1848_AT_ELECTION
+        with pytest.raises(CensusConformError, match="outside the reversal set"):
+            assert_retrocession_restored(frame, _RETROCESSION_CENSUS)
+
+    def test_the_applier_alone_touches_only_the_reversal_set(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "election_year": [1844, 1848],
+                "state": ["Virginia", "Virginia"],
+                "governing_census_year": [1840, 1840],
+                "population": pd.array([VA_1840_ENUMERATED] * 2, dtype="Int64"),
+                "boundary_basis": [BOUNDARY_AT_ELECTION] * 2,
+            }
+        )
+        out = apply_boundary_retrocessions(frame)
+        assert list(out["population"]) == [VA_1840_ENUMERATED, VA_1848_AT_ELECTION]
+
+
+class TestBoundaryCorrectionsDisjoint:
+    """AC-10 — the succession and the retrocession both edit Virginia, never together."""
+
+    def test_the_shipped_constants_are_disjoint(self) -> None:
+        assert_boundary_corrections_disjoint()
+
+    def test_a_succession_pinning_an_alexandria_census_is_refused(self) -> None:
+        colliding = BoundarySuccession(
+            predecessor="Virginia",
+            successor="West Virginia",
+            effective_year=1843,
+            published_population={1840: 1_025_227},
+            citation="test",
+        )
+        with pytest.raises(CensusConformError, match="disjoint"):
+            assert_boundary_corrections_disjoint(successions=(colliding,))
+
+    def test_a_succession_acting_on_1848_is_refused_even_on_another_census(
+        self,
+    ) -> None:
+        # Election-grain overlap alone: the pinned census differs, the window does not.
+        colliding = BoundarySuccession(
+            predecessor="Virginia",
+            successor="West Virginia",
+            effective_year=1845,
+            published_population={1790: 691_737},
+            citation="test",
+        )
+        with pytest.raises(CensusConformError, match=r"election\(s\) \[1848\]"):
+            assert_boundary_corrections_disjoint(successions=(colliding,))
+
+    def test_a_succession_of_another_state_is_not_compared(self) -> None:
+        other = BoundarySuccession(
+            predecessor="Massachusetts",
+            successor="Maine",
+            effective_year=1843,
+            published_population={1840: 1},
+            citation="test",
+        )
+        assert_boundary_corrections_disjoint(successions=(other,))
+
+
 class TestDoubleCount:
     def test_the_corrected_frame_does_not_double_count(self) -> None:
         frame = build_election_population(_SUCCESSION_CENSUS, _SUCCESSION_SPINE)
@@ -637,10 +814,12 @@ class TestTheSeam:
     #: them. Hand-written, so removing a call from the seam fails here rather than
     #: silently passing; deriving it from the function's source would be circular.
     EXPECTED_CALLS = (
+        "assert_boundary_corrections_disjoint",
         "assert_election_population_shape",
         "assert_spine_states_covered",
         "assert_no_double_count",
         "assert_no_interpolated_population",
+        "assert_retrocession_restored",
     )
 
     @staticmethod
@@ -1007,7 +1186,29 @@ class TestRealCorpus:
         assert_election_population_shape(frame)
         assert_no_double_count(frame)
         assert_no_interpolated_population(frame, census)
+        assert_retrocession_restored(frame, census)
         assert len(frame) == 2204
+
+    def test_virginias_alexandria_elections_carry_the_enumerated_figures(self) -> None:
+        """#251 over the real series: the six corrected, 1848 as at election.
+
+        The oracle is the enumerated Virginia (``research-boundary-sweep.md`` §4.1),
+        typed by hand rather than recomputed from the constant under test.
+        """
+        census = self._corpus_census()
+        frame = build_election_population(census, ec_participation_frame())
+        virginia = frame[frame.state == "Virginia"].set_index("election_year")
+        expected = {
+            1824: 1_065_366,
+            1828: 1_065_366,
+            1832: 1_211_405,
+            1836: 1_211_405,
+            1840: 1_211_405,
+            1844: 1_239_797,
+            1848: 1_249_764,
+        }
+        for year, population in expected.items():
+            assert virginia.loc[year, "population"] == population, year
 
     def test_dc_is_covered_for_every_election_it_participated_in(self) -> None:
         """AC3, over the real series rather than a two-row fixture."""
@@ -1022,7 +1223,7 @@ class TestRealCorpus:
 
     def test_only_virginia_carries_an_at_election_basis(self) -> None:
         # Twelve rows: Virginia's elections 1824-1868. Everything else is `present_day`,
-        # which is the honest default until #208 sweeps the other forty-nine states.
+        # the honest default; #208's sweep found no other material case to restate.
         census = self._corpus_census()
         frame = build_election_population(census, ec_participation_frame())
         at_election = frame[frame.boundary_basis == BOUNDARY_AT_ELECTION]

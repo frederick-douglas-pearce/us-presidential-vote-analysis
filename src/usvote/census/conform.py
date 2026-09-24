@@ -48,6 +48,8 @@ from usvote.census.schema import (
     SERIES_VALUES,
     build_series_check,
 )
+from usvote.census.transform import ALEXANDRIA_RETROCESSION, Retrocession
+from usvote.years import ec_ingest_years
 
 #: The frame contract #183 and #184 both inherit — **append-only**.
 #:
@@ -96,7 +98,7 @@ NULLABLE_ELECTION_POPULATION_COLUMNS: tuple[str, ...] = (
 #:
 #: **Why this frame is a table and not a view over** ``dwh.census_population`` **×**
 #: ``dwh.votes``. Expressed as SQL, the derivation below would become a *second*
-#: expression of policy this module already assembles behind four guards — and one of
+#: expression of policy this module already assembles behind its guards — and one of
 #: the two things it would have to re-express is not recoverable from the warehouse at
 #: all. D059 keeps ``basis`` out of the census natural key, so ``dwh.census_population``
 #: holds only the **restated** Virginia row; the published 1860 figure survives solely
@@ -127,29 +129,24 @@ ELECTION_POPULATION_NATURAL_KEY: tuple[str, ...] = ("election_year", "state")
 #: **This is also not the census ``basis``** (#182 architect review, C2d).
 #: ``census_population.basis`` answers "borders at census time vs modern". At election
 #: grain the question is "borders at *this election*", and the two disagree exactly
-#: where this module works: for the elections **1848-1860** Virginia's **restated**
-#: (``as_enumerated``) figure is borders-at-election, while for 1864 and 1868 the
-#: **published** (``present_day``) figure is *also* borders-at-election, because West
-#: Virginia is a separate state by then. Carrying the census label through would stamp
-#: 1864 Virginia ``present_day`` — an honesty warning — on the figure that is in fact
-#: correct for that election.
+#: where this module works: for the elections **1824-1860** Virginia's figure is
+#: borders-at-election by three different routes — the **restated**
+#: (``as_enumerated``) census figure for 1824-1844 and 1852-1860, that figure with
+#: Alexandria County added back for 1848 (:data:`BOUNDARY_RETROCESSIONS`), and for 1864
+#: and 1868 the **published** (``present_day``) figure, because West Virginia is a
+#: separate state by then. Carrying the census label through would stamp 1864 Virginia
+#: ``present_day`` — an honesty warning — on the figure that is in fact correct for
+#: that election.
 #:
-#: **The span above reads 1848-1860 and not 1824-1860, which is the correction D066
-#: makes to D060 §(f).** #208 established that the restated figure also includes
-#: **Alexandria County**, District of Columbia until its retrocession to Virginia on
-#: 7 September 1846 — so for the six elections **1824-1844** the restated figure is
-#: 0.79%-0.91% high and is *not* the as-at-election one. #251 corrects it.
-#:
-#: **So this label has three states in practice, not two**, and the third is why the six
-#: rows above are deliberately left alone. ``present_day`` is the honest default and
-#: says only "this is the published figure; we have not asserted it is the
-#: as-at-election one". ``at_election`` says we have. Virginia 1824-1844 is neither:
-#: the figure is established **not** to be as-at-election, precisely and
-#: quantifiably. Downgrading
-#: those six to ``present_day`` in the interim would assert the weaker *"not checked"*
-#: about rows that were checked, so they keep ``at_election`` until #251 makes it true.
-#: No third value is minted for a state #251 removes — it would be a migration on a
-#: CHECK-constrained column for a transient condition.
+#: **1824-1844 joined that span with #251.** #208 established that the restated figure
+#: also included **Alexandria County**, District of Columbia until its retrocession to
+#: Virginia on 7 September 1846, so for those six elections it was 0.79%-0.91% high.
+#: Between #253/D066 and #251 the label therefore had a third state in practice —
+#: established *not* to be as-at-election — carried as ``at_election`` on purpose rather
+#: than downgraded; #251 removed Alexandria at census grain
+#: (:func:`usvote.census.transform.apply_alexandria_retrocession`), which made the label
+#: true and retired that state. ``present_day`` remains the honest default: "this is the
+#: published figure; we have not asserted it is the as-at-election one".
 #:
 #: Today the only rows carrying ``at_election`` are Virginia 1824-1868.
 BOUNDARY_AT_ELECTION = "at_election"
@@ -221,8 +218,11 @@ class BoundarySuccession(NamedTuple):
 #: County**, District of Columbia until its retrocession to Virginia on 7 September
 #: 1846, so for the six elections **1824-1844** the restated figure is 0.79%-0.91% high
 #: and is not the borders-at-election one. That is a different mechanism (1846, DC->VA)
-#: from this constant's job (1863, VA->WV), it is corrected elsewhere by #251, and
-#: nothing here should be read as saying those six rows need no correction at all.
+#: from this constant's job (1863, VA->WV), and it is corrected elsewhere — at census
+#: grain by :func:`usvote.census.transform.apply_alexandria_retrocession`, with 1848's
+#: reversal in :data:`BOUNDARY_RETROCESSIONS` — never by this constant.
+#: :func:`assert_boundary_corrections_disjoint` asserts the two never touch the same
+#: census or election.
 #:
 #: Without the correction, an election-year total counts West Virginia's population
 #: twice — once inside restated Virginia and once as West Virginia. Virginia holds
@@ -246,6 +246,123 @@ BOUNDARY_SUCCESSIONS: tuple[BoundarySuccession, ...] = (
         ),
     ),
 )
+
+#: Retrocessions whose census-grain correction must be **reversed** at election grain.
+#: One today, built from the census-side constant so the figures have a single source.
+#:
+#: :func:`usvote.census.transform.apply_alexandria_retrocession` removes Alexandria
+#: County from Virginia's 1800-1840 census rows, which makes them the borders at those
+#: censuses. An election inherits its governing census's figure, so that is right for
+#: every election **held before** 7 September 1846 (D066(f)'s *correction* set:
+#: 1824-1844 in the EC span) and wrong for an election held **after** it on a census
+#: taken before it (the *reversal* set: 1848, governed by 1840 while Alexandria was
+#: Virginia's again). :func:`apply_boundary_retrocessions` adds the pinned figure back
+#: for that set. Both sets are **derived** over the spine
+#: (:func:`retrocession_correction_elections`, :func:`retrocession_reversal_elections`),
+#: never listed: widen the spine below 1824 and the correction set grows to 1804-1820
+#: while the reversal set stays {1848}.
+#:
+#: **Unlike a succession, the reversal has no counterparty to check against** (D066(h),
+#: H2): the District of Columbia does not participate in 1848, and its census row
+#: already excludes Alexandria. The census side and this side read the same constant,
+#: so any cross-check between them is a consistency check, never an independent one —
+#: :func:`assert_retrocession_restored` is labelled accordingly.
+BOUNDARY_RETROCESSIONS: tuple[Retrocession, ...] = (ALEXANDRIA_RETROCESSION,)
+
+
+def retrocession_correction_elections(
+    retrocession: Retrocession, election_years: Collection[int] | None = None
+) -> set[int]:
+    """Elections whose inherited census figure has the transferred territory removed.
+
+    Held before the effective date, and governed by a census the constant corrects.
+    Derived over ``ec_ingest_years()`` by default (D066(f)).
+    """
+    years = ec_ingest_years() if election_years is None else election_years
+    effective = retrocession.effective_date.year
+    return {
+        year
+        for year in years
+        if year < effective and governing_census_year(year) in retrocession.population
+    }
+
+
+def retrocession_reversal_elections(
+    retrocession: Retrocession, election_years: Collection[int] | None = None
+) -> set[int]:
+    """Elections that must have the transferred territory **added back**.
+
+    ``governing_census_year(Y) < effective < Y``: held after the effective date on a
+    census taken before it. The complement of the correction set within the elections
+    the corrected censuses govern (D066(f)).
+    """
+    years = ec_ingest_years() if election_years is None else election_years
+    _assert_no_election_in_effective_year(retrocession, years)
+    effective = retrocession.effective_date.year
+    return {
+        year for year in years if governing_census_year(year) < effective < year
+    }
+
+
+def _assert_no_election_in_effective_year(
+    retrocession: Retrocession, election_years: Collection[int]
+) -> None:
+    """Refuse the one case year-grain comparison cannot decide.
+
+    The windows compare years, which is exact only while no election falls in the
+    effective year itself — then the answer would turn on the day. None does
+    (1846 is not an election year); this makes that a checked fact.
+    """
+    effective = retrocession.effective_date.year
+    if effective in set(election_years):
+        raise CensusConformError(
+            f"An election falls in {effective}, the year {retrocession.donor}'s "
+            f"territory passed to {retrocession.recipient} "
+            f"({retrocession.effective_date.isoformat()}). The retrocession windows "
+            f"compare years and cannot place that election; compare dates instead."
+        )
+
+
+def assert_boundary_corrections_disjoint(
+    successions: Collection[BoundarySuccession] = BOUNDARY_SUCCESSIONS,
+    retrocessions: Collection[Retrocession] = BOUNDARY_RETROCESSIONS,
+    election_years: Collection[int] | None = None,
+) -> None:
+    """Assert no succession and retrocession edit the same state's census or election.
+
+    Both kinds edit Virginia today, by different mechanisms on different censuses
+    (#251, AC-10): Alexandria corrects 1800-1840 and reverses at 1848; West Virginia's
+    succession pins 1860 and acts at 1864/1868. Disjoint by the history, and asserted
+    rather than assumed — an overlap would let one correction's drift check read the
+    other's output.
+    """
+    years = ec_ingest_years() if election_years is None else election_years
+    for succession in successions:
+        succession_elections = {
+            year
+            for year in years
+            if year >= succession.effective_year
+            and governing_census_year(year) < succession.effective_year
+        }
+        for retrocession in retrocessions:
+            if succession.predecessor != retrocession.recipient:
+                continue
+            censuses = set(succession.published_population) & set(
+                retrocession.population
+            )
+            elections = succession_elections & (
+                retrocession_reversal_elections(retrocession, years)
+                | retrocession_correction_elections(retrocession, years)
+            )
+            if censuses or elections:
+                raise CensusConformError(
+                    f"The {succession.successor} succession and the "
+                    f"{retrocession.donor} retrocession both edit "
+                    f"{succession.predecessor} at census(es) {sorted(censuses)} / "
+                    f"election(s) {sorted(elections)}. They are built to act on "
+                    f"disjoint censuses and elections; an overlap needs a design "
+                    f"decision, not a silent composition."
+                )
 
 
 class CoverageException(NamedTuple):
@@ -469,6 +586,7 @@ def build_election_population(
     ec_participation: pd.DataFrame,
     *,
     successions: Collection[BoundarySuccession] = BOUNDARY_SUCCESSIONS,
+    retrocessions: Collection[Retrocession] = BOUNDARY_RETROCESSIONS,
 ) -> pd.DataFrame:
     """Return population at ``(election_year, state)`` grain, conformed to the EC spine.
 
@@ -498,6 +616,7 @@ def build_election_population(
         BOUNDARY_AT_ELECTION
     )
     frame = apply_boundary_successions(frame, successions=successions)
+    frame = apply_boundary_retrocessions(frame, retrocessions=retrocessions)
     frame = frame.drop(columns=["basis"])
 
     frame["coverage"] = COVERAGE_COVERED
@@ -659,6 +778,93 @@ def assert_spine_states_covered(
         )
 
 
+def apply_boundary_retrocessions(
+    frame: pd.DataFrame,
+    *,
+    retrocessions: Collection[Retrocession] = BOUNDARY_RETROCESSIONS,
+) -> pd.DataFrame:
+    """Add retroceded territory back for elections held after it was transferred.
+
+    Applies to the recipient's rows in the reversal set
+    (:func:`retrocession_reversal_elections` over this frame's elections). The
+    governing census has had the territory removed at census grain, which is right for
+    that census and wrong for an election held after the transfer. The label stays
+    ``at_election``: the result is the borders-at-election figure.
+
+    A NULL figure is left NULL — there is nothing to add to, and filling it would
+    invent a value (D005). A reversal-set census the constant pins no figure for
+    raises, since the census row would then be uncorrected and adding would
+    double-count.
+    """
+    corrected = frame.copy()
+    election_years = {int(year) for year in corrected["election_year"].unique()}
+    for retrocession in retrocessions:
+        reversal = retrocession_reversal_elections(retrocession, election_years)
+        window = corrected["election_year"].isin(reversal) & (
+            corrected["state"] == retrocession.recipient
+        )
+        for index in corrected.index[window]:
+            census_year = int(corrected.at[index, "governing_census_year"])
+            transferred = retrocession.population.get(census_year)
+            if transferred is None:
+                continue
+            population = corrected.at[index, "population"]
+            if pd.isna(population):
+                continue
+            corrected.at[index, "population"] = int(population) + transferred
+            corrected.at[index, "boundary_basis"] = BOUNDARY_AT_ELECTION
+    return corrected
+
+
+def assert_retrocession_restored(
+    frame: pd.DataFrame,
+    census: pd.DataFrame,
+    *,
+    retrocessions: Collection[Retrocession] = BOUNDARY_RETROCESSIONS,
+) -> None:
+    """Assert the reversal restored exactly the pinned figure, to exactly its set.
+
+    A **consistency** check, not a verification: both sides read the same constant,
+    and the reversal has no counterparty to verify against (D066(h), H2). What it does
+    pin is the mechanism's footprint — every recipient row in the reversal set is its
+    governing census figure plus the transferred figure, and no recipient row outside
+    the set is — so an applier that skips 1848, or leaks into 1844, fails here.
+    """
+    published = {
+        (int(row.census_year), str(row.state)): row.population
+        for row in census.loc[census["series"] == SERIES_RESIDENT].itertuples()
+    }
+    election_years = {int(year) for year in frame["election_year"].unique()}
+    for retrocession in retrocessions:
+        reversal = retrocession_reversal_elections(retrocession, election_years)
+        rows = frame.loc[frame["state"] == retrocession.recipient]
+        for row in rows.itertuples():
+            census_year = int(row.governing_census_year)
+            transferred = retrocession.population.get(census_year)
+            raw = published.get((census_year, retrocession.recipient))
+            if transferred is None or pd.isna(row.population) or raw is None:
+                continue
+            if pd.isna(raw):
+                continue
+            restored = int(row.population) - int(raw) == transferred
+            in_reversal = int(row.election_year) in reversal
+            if in_reversal and not restored:
+                raise CensusConformError(
+                    f"{retrocession.recipient} in election {int(row.election_year)} "
+                    f"was held after {retrocession.donor}'s territory returned "
+                    f"({retrocession.effective_date.isoformat()}) on the {census_year} "
+                    f"census, so it should carry that census's figure ({int(raw):,}) "
+                    f"plus {transferred:,}; it carries {int(row.population):,}."
+                )
+            if not in_reversal and restored:
+                raise CensusConformError(
+                    f"{retrocession.recipient} in election {int(row.election_year)} "
+                    f"carries the retroceded {transferred:,} on top of the "
+                    f"{census_year} census figure, but that election is outside the "
+                    f"reversal set {sorted(reversal)}."
+                )
+
+
 def assert_no_double_count(
     frame: pd.DataFrame,
     *,
@@ -717,6 +923,7 @@ def assert_no_interpolated_population(
     census: pd.DataFrame,
     *,
     successions: Collection[BoundarySuccession] = BOUNDARY_SUCCESSIONS,
+    retrocessions: Collection[Retrocession] = BOUNDARY_RETROCESSIONS,
 ) -> None:
     """Assert every population is a published figure or a declared restatement (D005).
 
@@ -730,6 +937,13 @@ def assert_no_interpolated_population(
     against the table's arithmetic. Without that branch this assert would fire on
     exactly the corrected rows, whose value is deliberately *not* in the table (D059
     keeps ``basis`` out of the natural key, so the table holds only the restated row).
+
+    **Retrocession reversals are admitted at election grain**, ``(election_year,
+    state)``, where succession pins are keyed on the census. The difference is D066(h)
+    H1: one census (1840) governs both 1844, which takes its figure unchanged, and 1848,
+    which takes it plus Alexandria — so a census-keyed pin would license the 1848 value
+    for 1844 too. Successions stay census-keyed because the elections a pin serves
+    (1864, 1868) want the same value.
     """
     published = {
         (int(row.census_year), str(row.state)): row.population
@@ -740,6 +954,20 @@ def assert_no_interpolated_population(
         for succession in successions
         for census_year, value in succession.published_population.items()
     }
+    election_years = {int(year) for year in frame["election_year"].unique()}
+    allowed_reversals: dict[tuple[int, str], int] = {}
+    for retrocession in retrocessions:
+        for election_year in retrocession_reversal_elections(
+            retrocession, election_years
+        ):
+            census_year = governing_census_year(election_year)
+            base = published.get((census_year, retrocession.recipient))
+            transferred = retrocession.population.get(census_year)
+            if base is None or pd.isna(base) or transferred is None:
+                continue
+            allowed_reversals[(election_year, retrocession.recipient)] = (
+                int(base) + transferred
+            )
     for row in frame.itertuples():
         if pd.isna(row.population):
             continue
@@ -751,11 +979,14 @@ def assert_no_interpolated_population(
             continue
         if allowed_restatements.get(key) == value:
             continue
+        if allowed_reversals.get((int(row.election_year), str(row.state))) == value:
+            continue
         published_text = "null" if source_value is None else f"{source_value:,}"
         raise CensusConformError(
             f"{row.state} in election {int(row.election_year)} carries population "
             f"{value:,}, which is neither the published {key[0]} figure "
-            f"({published_text}) nor a declared BOUNDARY_SUCCESSIONS restatement. A "
+            f"({published_text}) nor a declared BOUNDARY_SUCCESSIONS or "
+            f"BOUNDARY_RETROCESSIONS restatement. A "
             f"value that is neither is synthesized, which D005 forbids."
         )
 
@@ -765,7 +996,7 @@ def assert_conforms_to_spine(
 ) -> None:
     """Run every conformance guard over the census frame about to be loaded.
 
-    The one seam :mod:`usvote.census.pipeline` calls, so the load path gets all four
+    The one seam :mod:`usvote.census.pipeline` calls, so the load path gets all six
     checks or none — an individually-wired subset is how one of them quietly stops
     running.
 
@@ -780,9 +1011,9 @@ def assert_conforms_to_spine(
     changed layout fails with nothing written, rather than leaving a warehouse that is
     short a state and a caller who has to know to re-run with ``replace=True``.
 
-    **Which of the four can fail on data, and which are regression guards on the
-    builder** — worth writing down, because "four guards" invites the reading that all
-    four are watching the corpus (#182 review, GE-F1/GE-F5):
+    **Which of the six can fail on data, and which are regression guards on the
+    builder** — worth writing down, because "six guards" invites the reading that all
+    six are watching the corpus (#182 review, GE-F1/GE-F5):
 
     * :func:`assert_spine_states_covered` is the one that genuinely fires on a
       **corpus** defect — a state whose governing-census figure has gone missing, or a
@@ -805,8 +1036,15 @@ def assert_conforms_to_spine(
       slip — UCSB carries a dedicated guard for exactly that case. Its other checks —
       the column set, the ``population`` dtype, and the two closed vocabularies — are
       regression guards on the builder.
+    * :func:`assert_boundary_corrections_disjoint` (#251) reads only the two constants
+      and the spine's year set, so it guards a future **edit to a constant**, never the
+      corpus; it runs first because the others assume it.
+    * :func:`assert_retrocession_restored` (#251) cannot fail here by construction
+      either — the builder applied the same constant — and it is a **consistency**
+      check, not a verification: the 1848 reversal has no counterparty to verify against
+      (D066(h), H2). It pins the reversal's footprint against a future builder change.
 
-    All four are called here so that the load path cannot drift into a subset, and
+    All six are called here so that the load path cannot drift into a subset, and
     ``test_the_seam_runs_every_guard`` pins exactly that — against **both** spellings,
     since the guard list now lives in the function below and this one would otherwise be
     pinned by nothing.
@@ -955,9 +1193,11 @@ def build_and_validate_election_population(
     Two builds of the same frame from the same inputs is the shape a divergence hides
     in, and it costs a second pass over the whole 2,204-row conformance for nothing.
     """
+    assert_boundary_corrections_disjoint()
     frame = build_election_population(census, ec_participation)
     assert_election_population_shape(frame)
     assert_spine_states_covered(frame)
     assert_no_double_count(frame)
     assert_no_interpolated_population(frame, census)
+    assert_retrocession_restored(frame, census)
     return frame
