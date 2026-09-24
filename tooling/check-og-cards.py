@@ -26,9 +26,10 @@ below), so it structurally cannot run that check: a slug that collides with the
 sibling publisher passes here green and stops at the sync. That is recorded in
 posts/README.md, where an author writing a slug will meet it.
 
-Unlike the source repo (where `posts/` is direct-commit-allowed to `main`, making
-its guard advisory), this repo is PR-per-feature-branch, so the guard is a real
-pre-merge gate.
+This repo is PR-per-feature-branch, so a card-less post fails CI on its PR
+before it merges. That is still advisory: `main` has no branch protection, so a
+red check does not block the merge, and keeping the post off `main` relies on
+someone reading it (#260).
 
 It guards card *presence*, not *generation*: rendering stays the deliberate local
 step (`uv run python tooling/render-og-card.py <brief>.toml`, which needs
@@ -139,9 +140,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.flush()
         print(
             f"\n{n_fail} OG-card problem(s). This is the same fail-closed "
-            "resolution the Pages-sync\nAction runs at publish time — fixing it "
-            "here keeps it off `main`. Render the card\nwith `uv run python "
-            "tooling/render-og-card.py <brief>.toml` and set the post's\n"
+            "resolution the Pages-sync\nAction runs at publish time — fix it "
+            "before merging, or the sync\nfails on `main`. Render the card with "
+            "`uv run python\ntooling/render-og-card.py <brief>.toml` and set the "
+            "post's\n"
             "`og_card_source`, or correct the pointer.",
             file=sys.stderr,
         )

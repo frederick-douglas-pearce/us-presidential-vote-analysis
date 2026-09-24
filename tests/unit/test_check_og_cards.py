@@ -1,5 +1,5 @@
-"""`tooling/check-og-cards.py` is the pre-merge gate that keeps a card-less post
-off `main`.
+"""`tooling/check-og-cards.py` is the pre-merge check that fails CI on a card-less
+post. `main` is unprotected, so the red check is advisory (#260).
 
 Ported with the guard itself in #132, from the `claude-code-sessions` repo's
 `tooling/tests/test_check_og_cards.py` (unittest → pytest). The guard reuses the

@@ -38,7 +38,7 @@ What it does, per post:
    Because the body is copied verbatim, THIS SCRIPT NEVER FORMATS ANYTHING —
    what a post says here is what lands on the site, and the site runs
    `prettier . --check` on every push to its main. Keeping the posts in the
-   site's dialect is therefore a pre-merge gate's job, not this script's:
+   site's dialect is therefore a pre-merge check's job, not this script's:
    `.github/workflows/prettier.yml`, pinned to the site's exact formatter
    versions. Do not "helpfully" add a format pass here — it would break the
    byte-for-byte contract and make the published post differ from the source of
