@@ -1,0 +1,55 @@
+name: Humanizer guard
+
+# Pre-merge check that every post under posts/ records a humanizer pass in its
+# `humanizer_pass` frontmatter (issue #258). The humanizer skill
+# (https://github.com/blader/humanizer) strips structural AI-writing tells from a
+# draft; it is a manual step, and nothing about a finished draft reveals whether
+# it ran. This makes the omission visible on the PR. Ported from the
+# `claude-code-sessions` repo (#223 there).
+#
+# It guards the RECORD, not the prose (#258, D-1): the skill's own "When not to
+# act" rules need judgment a pattern lint cannot supply. `humanizer_pass: none`
+# records a deliberate skip; `predates` is a closed set of the four posts
+# published before this convention landed.
+#
+# Runs the guard only. Its two test files (tests/unit/test_check_humanizer_pass.py
+# and tests/unit/test_publish_to_pages.py, which pins that the field never reaches
+# Pages) run in ci.yml, which has no path filter and runs the full unit suite on
+# every PR into main and every main push. The sessions workflow runs its tests
+# here because that repo has no other CI runner for its tooling/tests/; this one
+# runs tests/unit/ in ci.yml. Kept separate from ci.yml for
+# og-card-guard.yml's reason: stdlib-only and path-filtered, so a red run is
+# legible as a missing record rather than a test failure.
+
+on:
+  pull_request:
+    paths:
+      - "posts/**"
+      - "tooling/check-humanizer-pass.py"
+      - "tooling/publish-to-pages.py"
+      - ".github/workflows/humanizer-guard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "posts/**"
+      - "tooling/check-humanizer-pass.py"
+      - "tooling/publish-to-pages.py"
+      - ".github/workflows/humanizer-guard.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  humanizer-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Reads frontmatter (reusing publish-to-pages.py's own parser) and checks
+      # each post records a humanizer skill version, `none`, or — for the four
+      # listed posts only — `predates`. No uv, no Pages repo, no secrets.
+      - run: python3 tooling/check-humanizer-pass.py

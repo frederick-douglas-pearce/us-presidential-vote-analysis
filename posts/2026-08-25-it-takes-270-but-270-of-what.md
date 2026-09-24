@@ -7,6 +7,7 @@ categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/it-takes-270-but-270-of-what-og.png
 og_card_source: social/images/2026-08-25-linkedin-it-takes-270-but-270-of-what/og-card.png
+humanizer_pass: predates
 featured: false
 ---
 

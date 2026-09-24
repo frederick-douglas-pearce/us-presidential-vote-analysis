@@ -29,7 +29,8 @@ sync commit subject from.
 
 What it does, per post:
 
-1. **Transform frontmatter.** Strip the upstream-only field (`og_card_source`);
+1. **Transform frontmatter.** Strip the upstream-only fields (`og_card_source`,
+   `humanizer_pass`);
    copy the body and every other field byte-for-byte. The strip is line-level,
    not a YAML round-trip, so the source formatting survives unchanged (a
    round-trip would reflow the frontmatter for no benefit).
@@ -114,10 +115,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # them):
 #   og_card_source — the OG-card pointer; consumed by THIS script to find the
 #                    image, never deployed
+#   humanizer_pass — which humanizer skill version was run over the draft, an
+#                    editorial record enforced by check-humanizer-pass.py (#258)
 # The source repo also strips `claude_code_version_verified`, which drives its
-# re-verification cadence. This repo has no such field (see posts/README.md),
-# so the strip list is a single entry.
-DROP_FIELDS = {"og_card_source"}
+# re-verification cadence; this repo has no such field.
+DROP_FIELDS = {"og_card_source", "humanizer_pass"}
 
 
 class PlanEntry(NamedTuple):
