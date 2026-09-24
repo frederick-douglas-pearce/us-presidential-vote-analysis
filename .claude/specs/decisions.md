@@ -4554,10 +4554,13 @@ recorded two executed constraints: a census-keyed D005 pin is over-permissive (H
 **Decision.**
 
 **(a) Census grain, plus an election-grain reversal.** `transform.ALEXANDRIA_RETROCESSION` holds the
-Bureau's five published figures (Virginia Note 2; 1810 = 8,552, with the note's printed 8,852
-recorded as a misprint). `apply_alexandria_retrocession` subtracts them in a **separate step after**
-`apply_virginia_boundary_correction`, so the 1800–1840 Virginia rows become the enumerated Virginia
-exactly. `conform.BOUNDARY_RETROCESSIONS` is built from the same constant, and
+five Alexandria figures. Four are Virginia Note 2's, as printed. 1810 is 8,552: Note 2 prints
+8,852, which is a misprint, and the value rests on the published `Arlington` row, with the District
+note's subtraction as the tiebreak. `apply_alexandria_retrocession` subtracts them in a **separate
+step after** `apply_virginia_boundary_correction`, so the 1800–1840 Virginia rows become the
+enumerated Virginia as the Bureau composes it from published components. That is the enumerated
+figure by construction for 1800, 1830 and 1840. For 1810 and 1820 it matches the original-return
+totals, both CONTRADICTED against the 1850 restatement (research §5.4). `conform.BOUNDARY_RETROCESSIONS` is built from the same constant, and
 `apply_boundary_retrocessions` adds the figure back for the derived reversal set. Neither set is
 listed as years.
 

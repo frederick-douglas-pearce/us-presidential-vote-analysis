@@ -134,15 +134,17 @@ VIRGINIA_CORRECTION_CENSUSES: tuple[int, ...] = tuple(range(1790, 1870, 10))
 #: before the retrocession; these censuses govern seven, 1824-1848). The residual is
 #: explained, quantified and corrected here: the figure is composed from three
 #: **published component** series — the file's two rows and the Bureau's Alexandria
-#: figures (:data:`ALEXANDRIA_RETROCESSION`). The Bureau prints no enumerated total for
-#: these censuses; the composition reproduces the **original-return** totals exactly
-#: (``research-boundary-sweep.md`` §4.1, §5.4). For **1810 and 1820** that is weaker
-#: than it reads: §5.4 marks both **CONTRADICTED**, because the 1850 Seventh Census
-#: restates them 22 and 13 higher (974,622 / 1,065,379), and the composition closes only
-#: on the original-return pair. 1810 is weaker again, since its Alexandria cell is
-#: itself settled partly by arithmetic (:data:`ALEXANDRIA_RETROCESSION`).
-#: :func:`apply_alexandria_retrocession` refuses a census this map does not record in
-#: this state, and writes the state into the row note.
+#: figures (:data:`ALEXANDRIA_RETROCESSION`). The 1996 volume prints the components,
+#: not an enumerated Virginia total, so for **1800, 1830 and 1840** the composition *is*
+#: the enumerated figure by construction and is checked against nothing independent
+#: (``research-boundary-sweep.md`` §4.1, §5.4). Only **1810 and 1820** have an
+#: independently printed total — the original returns, reprinted in the Bureau's *A
+#: Century of Population Growth* (1909) — and the composition matches it; §5.4 marks
+#: both **CONTRADICTED**, because the 1850 Seventh Census restates them 22 and 13 higher
+#: (974,622 / 1,065,379). 1810 is weaker again, since its Alexandria cell is itself
+#: settled partly by arithmetic (:data:`ALEXANDRIA_RETROCESSION`). The map and
+#: :func:`apply_alexandria_retrocession` are checked against each other in **both**
+#: directions there, and the step writes the state into the row note.
 #:
 #: A census in the window with **no** entry would be computed-but-unverified. None is
 #: left, and the state stays expressible so a widened window cannot inherit a
@@ -459,15 +461,17 @@ def apply_alexandria_retrocession(
 
     Runs **after** :func:`apply_virginia_boundary_correction` and subtracts the Bureau's
     published figure from the West-Virginia-restated row, so the result is
-    ``file Virginia + file West Virginia - Alexandria``, which reproduces the
-    original-return enumerated Virginia at all five censuses
-    (``research-boundary-sweep.md`` §4.1: 880,200 / 974,600 / 1,065,366 / 1,211,405 /
-    1,239,797 — with 1810 and 1820 CONTRADICTED against a later restatement, see
-    :data:`VIRGINIA_VERIFICATION`). Only then is ``as_enumerated`` true of these rows on
-    both axes. Each corrected census must be recorded as
-    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS` in :data:`VIRGINIA_VERIFICATION` (read at
-    call time), or this raises: the map and the correction must not disagree about which
-    censuses were composed.
+    ``file Virginia + file West Virginia - Alexandria`` — the enumerated Virginia as
+    the Bureau composes it from published components (``research-boundary-sweep.md``
+    §4.1, §5.4: 880,200 / 974,600 / 1,065,366 / 1,211,405 / 1,239,797). How far that is
+    independently confirmed differs by census; :data:`VIRGINIA_VERIFICATION` says how.
+    Only then is ``as_enumerated`` true of these rows on both axes.
+
+    The map (read at call time) and this step must agree in **both** directions, or
+    this raises: every census this step corrects must be recorded as
+    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS`, and every census so recorded must be one
+    this step corrects — otherwise the West Virginia step would persist a note saying
+    Alexandria is "removed in the next step" for a census where nothing removes it.
 
     Skips a census whose Virginia row is absent or NULL, as its sibling does — there is
     nothing to correct and nothing may be invented. **Raises** where the row is present
@@ -481,6 +485,19 @@ def apply_alexandria_retrocession(
     five census years are not sum-consistent — which the West Virginia double-count
     already made true, and which nothing in this package asserts.
     """
+    composed = {
+        year
+        for year, state in VIRGINIA_VERIFICATION.items()
+        if state == VERIFIED_BY_PUBLISHED_COMPONENTS
+    }
+    uncorrected = sorted(composed - set(retrocession.population))
+    if uncorrected:
+        raise CensusTransformError(
+            f"VIRGINIA_VERIFICATION records census(es) {uncorrected} as "
+            f"{VERIFIED_BY_PUBLISHED_COMPONENTS!r}, but {retrocession.donor}'s "
+            f"retrocession pins no figure for them, so nothing composes them. The map "
+            f"and the correction disagree; fix one of them."
+        )
     corrected = frame.copy()
     for census_year, transferred in retrocession.population.items():
         mask = (corrected["census_year"] == census_year) & (
@@ -518,8 +535,8 @@ def apply_alexandria_retrocession(
             f"District of Columbia until its retrocession on "
             f"{retrocession.effective_date.isoformat()}, which is removed using the "
             f"Census Bureau's published figure ({transferred:,}). The result "
-            f"({enumerated:,}) is the enumerated Virginia as the original returns "
-            f"give it, composed exactly from those three published components "
-            f"(verification: {VERIFIED_BY_PUBLISHED_COMPONENTS})."
+            f"({enumerated:,}) is the enumerated Virginia composed from those three "
+            f"published components (verification: "
+            f"{VERIFIED_BY_PUBLISHED_COMPONENTS})."
         )
     return corrected

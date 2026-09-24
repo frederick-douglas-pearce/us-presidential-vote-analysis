@@ -545,6 +545,24 @@ class TestAlexandriaRetrocession:
         with pytest.raises(CensusTransformError, match="disagree"):
             apply_alexandria_retrocession(frame)
 
+    def test_a_composed_census_with_no_alexandria_figure_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The converse direction: marking 1790 composed would make the West Virginia
+        # step persist "still includes Alexandria County" for a census that predates
+        # the District, with nothing downstream removing it.
+        patched = dict(VIRGINIA_VERIFICATION)
+        patched[1790] = VERIFIED_BY_PUBLISHED_COMPONENTS
+        monkeypatch.setattr(transform, "VIRGINIA_VERIFICATION", patched)
+        rows = _minimal_rows(
+            old=[
+                _row(1790, "Virginia", 691_737, "resident_1790_1990"),
+                _row(1790, "West Virginia", 55_873, "resident_1790_1990"),
+            ]
+        )
+        with pytest.raises(CensusTransformError, match=r"census\(es\) \[1790\]"):
+            transform_census(rows, _SPINE)
+
     def test_a_row_the_west_virginia_step_did_not_restate_is_refused(self) -> None:
         # Subtracting Alexandria from the present-day figure would give a number that
         # is neither published nor enumerated.

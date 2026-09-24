@@ -843,8 +843,8 @@ def _seam_missing_the_coverage_guard(
 
     Stands in for the state of the tree if that line were deleted from the real seam. Its
     only job is to be a seam with a call missing, so drift from the real body is harmless —
-    what matters is that it calls five of the six, so the comparison is unequal by
-    content, never by arity alone.
+    what matters is that it calls five of the six — exactly one call removed, as a
+    deletion from the real seam would leave it.
     """
     conform_module.assert_boundary_corrections_disjoint()
     frame = conform_module.build_election_population(census, ec_participation)
