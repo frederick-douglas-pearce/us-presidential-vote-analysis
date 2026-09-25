@@ -1171,10 +1171,13 @@ class TestUnprintedVotesCatalog:
             T.UNPRINTED_ELECTORAL_VOTES = original
 
     def test_the_catalogued_totals_are_the_seventeen_congress_refused(self) -> None:
-        # 3 (Georgia/Greeley) + 6 (Arkansas) + 8 (Louisiana) = 17, and the appointed
-        # corrections are the AR/LA half of that. The coincidence is real but per-state.
+        # 3 (Georgia/Greeley) + 6 (Arkansas) + 8 (Louisiana) = 17. The 1872 appointed
+        # corrections coincide with the AR/LA part of that; the coincidence is real but
+        # per-state. 1864 Nevada is an appointed correction for a different reason (one
+        # elector did not vote, #243) and has nothing to do with 1872's seventeen.
         assert sum(T.UNPRINTED_ELECTORAL_VOTES.values()) == 17
         assert dict(T.APPOINTED_ELECTORS_NOT_IN_TABLE) == {
+            (1864, "Nevada"): 3,
             (1872, "Arkansas"): 6,
             (1872, "Louisiana"): 8,
         }
@@ -1272,6 +1275,38 @@ class TestAppointedElectorCorrections:
             assert int(out[(1868, state)]) == 0
         assert int(out[(1868, "Totals")]) == 0
 
+    def test_1864_nevada_printed_cast_figure_is_raised_to_its_appointed_three(
+        self,
+    ) -> None:
+        """The second way the source understates an allotment: it prints the cast 2."""
+        matrix = pd.DataFrame([
+            {"year": 1864, "state": "Nevada", "total_electoral_votes": 2},
+            {"year": 1864, "state": "Ohio", "total_electoral_votes": 21},
+            {"year": 1864, "state": "Totals", "total_electoral_votes": 23},
+        ])
+        out = T._apply_appointed_elector_corrections(matrix).set_index(
+            ["year", "state"]
+        )["total_electoral_votes"]
+        assert int(out[(1864, "Nevada")]) == 3
+        assert int(out[(1864, "Totals")]) == 24  # 3 + 21, rebuilt from state rows
+
+    @pytest.mark.parametrize(
+        ("appointed", "printed"), [(2, 2), (1, 2)], ids=["stale", "lowering"]
+    )
+    def test_a_value_not_exceeding_the_printed_allotment_raises(
+        self, monkeypatch: pytest.MonkeyPatch, appointed: int, printed: int
+    ) -> None:
+        """Equal means the source was fixed (stale entry); smaller would lower it."""
+        monkeypatch.setattr(
+            T, "APPOINTED_ELECTORS_NOT_IN_TABLE", {(1864, "Nevada"): appointed}
+        )
+        matrix = pd.DataFrame([
+            {"year": 1864, "state": "Nevada", "total_electoral_votes": printed},
+            {"year": 1864, "state": "Totals", "total_electoral_votes": printed},
+        ])
+        with pytest.raises(TransformError, match="only ever RAISES an allotment"):
+            T._apply_appointed_elector_corrections(matrix)
+
     def test_a_state_matching_no_row_in_a_present_year_raises(self) -> None:
         original = T.APPOINTED_ELECTORS_NOT_IN_TABLE
         T.APPOINTED_ELECTORS_NOT_IN_TABLE = {(1872, "Atlantis"): 6}
@@ -1366,6 +1401,83 @@ class TestCountedMeasure:
         ])
         with pytest.raises(TransformError, match="totals row !="):
             T.assert_counted_totals_equal_state_sum(drifted)
+
+
+class TestNevada1864OnTheRealPage:
+    """#243 against the committed Archives 1864 page, not a hand-built frame.
+
+    The page prints Nevada's allotment as 2 (the votes cast) and its totals row as 233;
+    its own note 2 says Nevada was allocated three. The correction must reach 3 and 234,
+    and the two constants that encode it must each be necessary.
+    """
+
+    @staticmethod
+    def _parsed_1864() -> list[ParsedYear]:
+        tables = get_html_tables(
+            "https://www.archives.gov/electoral-college/1864",
+            find_all=True,
+            fetch=fetch_from_dir(FIXTURES_DIR),
+        )
+        return parse_election_years({1864: tables}, STATE_NAMES)
+
+    @staticmethod
+    def _candidate_cols(matrix: pd.DataFrame) -> list[int]:
+        return [c for c in matrix.columns if isinstance(c, int)]
+
+    def test_the_page_prints_the_cast_figure_that_the_correction_raises(self) -> None:
+        parsed = self._parsed_1864()
+        printed = {
+            str(v["state"]): int(v["total_electoral_votes"])
+            for v in parsed[0]["t2"]["votes_by_state"]
+        }
+        assert (printed["Nevada"], printed["Totals"]) == (2, 233)
+
+        matrix = T._votes_matrix(parsed).set_index("state")["total_electoral_votes"]
+        assert (int(matrix["Nevada"]), int(matrix["Totals"])) == (3, 234)
+
+    def test_the_corrected_year_passes_the_row_sum_check(self) -> None:
+        matrix = T._votes_matrix(self._parsed_1864())
+        T.assert_row_votes_sum_to_total(matrix, self._candidate_cols(matrix))
+
+    def test_without_the_shortfall_the_row_sum_check_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Appointed 3 alone: Nevada cast 2 against 3, and nothing explains the gap."""
+        monkeypatch.setattr(
+            T,
+            "ELECTORAL_VOTE_SHORTFALLS",
+            {k: v for k, v in T.ELECTORAL_VOTE_SHORTFALLS.items() if k[0] != 1864},
+        )
+        matrix = T._votes_matrix(self._parsed_1864())
+        with pytest.raises(TransformError, match="Nevada"):
+            T.assert_row_votes_sum_to_total(matrix, self._candidate_cols(matrix))
+
+    def test_without_the_appointed_correction_the_row_sum_check_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Shortfall alone: 2 cast + 1 missing against a printed 2 does not add up."""
+        monkeypatch.setattr(
+            T,
+            "APPOINTED_ELECTORS_NOT_IN_TABLE",
+            {
+                k: v
+                for k, v in T.APPOINTED_ELECTORS_NOT_IN_TABLE.items()
+                if k[0] != 1864
+            },
+        )
+        matrix = T._votes_matrix(self._parsed_1864())
+        with pytest.raises(TransformError, match="Nevada"):
+            T.assert_row_votes_sum_to_total(matrix, self._candidate_cols(matrix))
+
+    def test_drift_in_the_printed_1864_total_fails_loud(self) -> None:
+        """Check (c) subtracts Nevada's printed 2, so 232 + (3 - 2) != the rebuilt 234."""
+        parsed = self._parsed_1864()
+        totals = next(
+            v for v in parsed[0]["t2"]["votes_by_state"] if v["state"] == "Totals"
+        )
+        totals["total_electoral_votes"] = 232
+        with pytest.raises(TransformError, match="allotment reads 234"):
+            T._votes_matrix(parsed)
 
 
 class TestPrintedTotalsReconciliation:

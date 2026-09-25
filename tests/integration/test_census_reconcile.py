@@ -141,7 +141,9 @@ def test_each_exception_kind_behaves_as_its_definition_says(
     ``electoral_record_understates_allotment`` is the odd one out and the reason this
     test enumerates rather than pairs: it has a zero on **neither** side — seats exist
     and votes were cast, just fewer than the apportionment implies. A rule written from
-    the first two would not have caught it, which is exactly what happened.
+    the first two would not have caught it, which is exactly what happened. Its one
+    member, ``(1864, Nevada)``, was corrected in the spine by #243, so the kind is
+    memberless today and its branch below runs for no row.
     """
     dbc = DBC(integration_db_config)
     try:
@@ -160,6 +162,8 @@ def test_each_exception_kind_behaves_as_its_definition_says(
                 assert pd.isna(row.seats)
                 assert int(row.total_electoral_votes) > 0
             elif exception.kind == KIND_RECORD_UNDERSTATES_ALLOTMENT:
+                # Memberless since #243 on purpose — not dead code to clean up. It is
+                # the assertion the kind's next member will be held to.
                 # The third kind is the asymmetry's odd one out: seats exist AND votes
                 # were cast, but fewer than the apportionment implies. Both other kinds
                 # have a zero on one side; this one has neither, which is why a rule

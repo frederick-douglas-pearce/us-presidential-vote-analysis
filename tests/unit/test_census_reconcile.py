@@ -59,9 +59,9 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 #:
 #: **1864 was added under review, and its absence is why this suite was green while the
 #: real gate failed.** The first revision reconciled ten elections, none of them 1864 —
-#: the year carrying **thirteen** of the seventeen catalogued disagreements, and the one
-#: that was then undeclared (Nevada) made ``assert_seats_reconcile`` raise on the full
-#: spine.
+#: the year carrying most of the catalogued disagreements, and one that was then
+#: undeclared (Nevada, since corrected in the spine by #243) made
+#: ``assert_seats_reconcile`` raise on the full spine.
 #: A proof over a convenient subset is not a proof; the full 51-election run lives in the
 #: integration suite and could not be reached offline.
 ARCHIVES_FIXTURE_YEARS: tuple[int, ...] = (
@@ -84,20 +84,19 @@ ARCHIVES_FIXTURE_YEARS: tuple[int, ...] = (
 #: so a parser change that shifted an allotment could not slide through. 1872's 366 and
 #: 1868's 294 are the two the repo's own corrections catalog turns on (D045/D046).
 #:
-#: **1864 is the exception to this constant's own name, and it is pinned deliberately.**
-#: Its 233 is what the Archives record *currently* says, and that is a count of votes
-#: **cast**: Nevada appointed three electors and two voted, so the appointed total is
-#: **234**. The pin tracks the record rather than the truth precisely so the transition
-#: is visible — when **#243** lands and restores Nevada's allotment to 3, this literal
-#: must become 234 and the ``(1864, Nevada)`` catalog entry must go. Pinning 234 today
-#: would fail against the warehouse this repo actually builds.
+#: **1864 is 234, not the 233 the Archives page totals.** The page's 233 counts votes
+#: **cast**: Nevada appointed three electors and two voted, and the page prints the cast
+#: 2 in its allotment column. #243 restored the appointed 3 through
+#: :data:`usvote.transform.APPOINTED_ELECTORS_NOT_IN_TABLE`, which
+#: :func:`archives_allotments` applies. This literal was 233 until then, pinned to the
+#: record on purpose so that the transition would show up here.
 EXPECTED_APPOINTED_TOTALS: dict[int, int] = {
     1824: 261,
     1832: 288,
     1836: 294,
     1856: 296,
     1860: 303,
-    1864: 233,
+    1864: 234,
     1868: 294,
     1872: 366,
     2016: 538,
@@ -134,7 +133,8 @@ def archives_allotments() -> pd.DataFrame:
     Applies :data:`usvote.transform.APPOINTED_ELECTORS_NOT_IN_TABLE`, so 1872 Arkansas
     and Louisiana carry the 6 and 8 they appointed rather than the ``-`` the page prints
     (D045) — without it the year's denominator reads 352 instead of the 366 Congress
-    announced, and this whole reconciliation would be testing the wrong number.
+    announced, and this whole reconciliation would be testing the wrong number. It also
+    gives 1864 Nevada the 3 it appointed rather than the cast 2 the page prints (#243).
     """
     state_names = set(SEATS_BY_CENSUS[2020])
     tables = {}
@@ -350,8 +350,8 @@ class TestStaleDeclarations:
 class TestTheCatalog:
     """Shape of :data:`SEAT_RECONCILIATION_EXCEPTIONS`."""
 
-    def test_seventeen_entries_in_three_kinds(self) -> None:
-        assert len(SEAT_RECONCILIATION_EXCEPTIONS) == 17
+    def test_the_entries_per_kind(self) -> None:
+        assert len(SEAT_RECONCILIATION_EXCEPTIONS) == 16
         withheld = [
             e
             for e in SEAT_RECONCILIATION_EXCEPTIONS
@@ -369,27 +369,29 @@ class TestTheCatalog:
         ]
         assert len(withheld) == 14
         assert len(unapportioned) == 2
-        assert len(understated) == 1
+        # Memberless on purpose since #243, and kept in the vocabulary (D061 precedent).
+        assert len(understated) == 0
+        assert KIND_RECORD_UNDERSTATES_ALLOTMENT in SEAT_EXCEPTION_KINDS
 
-    def test_the_one_understated_row_is_nevada_1864_and_pins_the_cast_figure(
-        self,
-    ) -> None:
-        """The row where the *record* is wrong, not the census.
+    def test_nevada_1864_reconciles_now_that_the_spine_is_corrected(self) -> None:
+        """The kind's one former member, after #243 restored the appointed allotment.
 
-        The declaration pins **2** — what the Archives prints — while the note states the
-        appointed allotment is 3. Pinning the record's own value is what makes the entry
-        self-cleaning: when the deferred spine correction restores 3, the row reconciles
-        and the stale-declaration guard demands this entry's removal.
+        It used to be declared with the recorded 2 against an expected 3. Now the
+        record carries 3 and the row reconciles, so a declaration for it would be
+        stale — which is why it is gone.
         """
-        entry = next(
+        assert not [
             e
             for e in SEAT_RECONCILIATION_EXCEPTIONS
-            if e.kind == KIND_RECORD_UNDERSTATES_ALLOTMENT
-        )
-        assert (entry.election_year, entry.state) == (1864, "Nevada")
-        assert entry.recorded_electoral_votes == 2
+            if (e.election_year, e.state) == (1864, "Nevada")
+        ]
+        built = build_seat_reconciliation(archives_allotments())
+        nevada = built.loc[
+            (built["election_year"] == 1864) & (built["state"] == "Nevada")
+        ].iloc[0]
+        assert int(nevada["total_electoral_votes"]) == 3
         assert expected_electoral_votes(1864, "Nevada") == 3
-        assert "cast" in entry.note.lower()
+        assert bool(nevada["reconciles"])
 
     def test_the_withheld_rows_are_1864_and_1868_only(self) -> None:
         """Not 'every Reconstruction year' — 1872 has none, and that is a finding."""
@@ -467,8 +469,8 @@ class TestRealAllotments:
 
         Pinning the whole set rather than a count is what makes a new undeclared row fail
         here. The first revision asserted four rows over a fixture set that excluded 1864,
-        so thirteen real disagreements — including the undeclared Nevada one — were
-        outside what this test could see.
+        so most of the real disagreements — including the then-undeclared Nevada one,
+        since corrected in the spine by #243 — were outside what this test could see.
         """
         built = build_seat_reconciliation(archives_allotments())
         disagreeing = {
@@ -483,7 +485,6 @@ class TestRealAllotments:
             (1864, "Georgia"),
             (1864, "Louisiana"),
             (1864, "Mississippi"),
-            (1864, "Nevada"),
             (1864, "North Carolina"),
             (1864, "South Carolina"),
             (1864, "Tennessee"),

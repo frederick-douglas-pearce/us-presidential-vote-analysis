@@ -39,6 +39,7 @@ entry + a small `apply_*`/reconcile function, one test, and one row in the table
 | 1824, 1832, 1836, 1860 | Table 2 collapses the minor presidential candidates into a single unnamed "Others" column (parsed with `state=None`, like 2016's "Other") | Split "Others" back into its named candidates with the per-state electoral votes read from each year's Notes: **1824** Crawford (41) / Clay (37); **1832** Floyd (11) / Wirt (7); **1836** White (26) / Webster (14) / Mangum (11); **1860** Breckinridge (72) / Bell (39) | `OTHER_CANDIDATES_1824/1832/1836/1860`, `OTHER_VOTES_*` (applied by `apply_other_candidates`, `_votes_matrix`) | Per-state counts from each year's Archives Notes ("&lt;State&gt; cast N votes for &lt;Name&gt; as President"): [1824](https://www.archives.gov/electoral-college/1824), [1832](https://www.archives.gov/electoral-college/1832), [1836](https://www.archives.gov/electoral-college/1836), [1860](https://www.archives.gov/electoral-college/1860) |
 | 1824 (era) | The Archives prints the early Democratic-Republican party inconsistently — "Democratic-Republican" (Jackson) vs. "D-R" (Adams) — for the same party, so one party would read under two labels and the "-" join delimiter would mis-split "D-R" into a spurious `party_2` | Normalize the label to "D-R" before aggregation, and join a candidate's distinct parties on `|` (never present in a party code) instead of "-" | `PARTY_CODE_FIXES`, `PARTY_JOIN` (in `_candidate_parties`) | [Archives 1824](https://www.archives.gov/electoral-college/1824) |
 | 1832 | Two of Maryland's electors did not vote, so Maryland cast 8 of its 10 allotted votes (Jackson 3, Clay 5); the national Totals row is likewise 286 of 288 | Record the 2-vote shortfall so `assert_row_votes_sum_to_total` adds it back; the allotment is preserved and the Totals shortfall is derived | `ELECTORAL_VOTE_SHORTFALLS` | [Archives 1832 Notes](https://www.archives.gov/electoral-college/1832) ("two electors from Maryland did not vote, making the total number of votes cast 286") |
+| 1864 | Nevada, admitted eight days before the election, appointed three electors and one did not vote. Unlike 1832 Maryland and 2000 DC, the table prints the **cast** figure (2) in the allotment column, so the national Totals row is 233, a count of votes cast, where the appointed whole number is **234**. The row-sum check cannot see it, because 2 cast against a printed 2 adds up. | Restore Nevada's appointed allotment to 3 and rebuild the totals allotment from the state rows (233 → 234), and record the 1-vote shortfall so the row-sum check adds it back. Nevada is the first state in both constants; the row-sum check fails if either entry is removed without the other. Moves 1864's `ec_denominator` 233 → 234 (#243) | `APPOINTED_ELECTORS_NOT_IN_TABLE` + `ELECTORAL_VOTE_SHORTFALLS` | [Archives 1864](https://www.archives.gov/electoral-college/1864) Table 2 note 2 ("Nevada was allocated three electoral votes, but one elector did not vote"). Independently: one representative under the 1860 apportionment plus two senators; admitted 31 October 1864 by proclamation, **13 Stat. 749**, under the Enabling Act of 21 March 1864, **13 Stat. 30** |
 | 1824 | No candidate reached an Electoral College majority; Jackson led (99 EC votes) but the House elected John Quincy Adams (84), so the EC leader is *not* who took office | Mark the actual office-holder with `took_office=True` (Adams) while EC-winner stays derived from `president_electoral_rank == 1` (Jackson) — the two are kept distinct, not conflated | `CONTINGENT_OFFICE_HOLDERS` (applied by `_add_took_office`) | [Archives 1824 Notes](https://www.archives.gov/electoral-college/1824) |
 | 1868 | The page ends with **two totals rows** — `Totals (excluding Georgia's votes)` 285 and `Totals (including Georgia's votes)` 294 — and marks neither authoritative, because the Senate and House deadlocked over whether Georgia's nine votes counted. Downstream, `state == "Totals"` is a single per-year row, so both cannot survive. | Keep the totals row whose `total_electoral_votes` equals the sum of the page's own per-state allotments — **derived from the source, not a curated literal**, and not a way of taking a side: the allotment column counts electors *appointed*, and Georgia's nine were appointed beyond dispute. That resolves 1868 to **294** by D041's existing rule. Zero or several reconciling rows raise rather than guess. | `_select_totals_row`, `TOTALS_LABEL_PREFIX` (`parse.py`) | [Archives 1868](https://www.archives.gov/electoral-college/1868); re-verified against the fixture's own tokens — its 37 state rows sum to 294 / Grant 214 / Seymour 80, matching the *including* row exactly (D043 §1, D044) |
 | 1868 | Georgia's votes are printed **parenthesized**, `(9)`, in Seymour's column — the Archives' marking for votes cast but whose counting was in question. No other cell in the corpus uses the notation. | Parse a *wholly* parenthesized cell as the number it wraps, then flag the row `count_status='disputed'` with the Archives' own sentence as the reason — `disputed`, not `not_counted`: Congress decided **nothing** here (D043 §3/§5). **No** `ELECTORAL_VOTE_SHORTFALLS` entry is added — those votes were *cast*, so the row still sums to its allotment and the two mechanisms stay disjoint by construction (D043 §6). Aggregate (`is_total`) rows stay `counted`: one enum value cannot say "80, of which 9 disputed" (D044) | `_PARENTHESIZED_VOTES_RE` (`parse.py`); `COUNT_STATUS_OVERRIDES` (`transform.py`); the enum in `count_status.py` | [Archives 1868 Notes](https://www.archives.gov/electoral-college/1868): "The electoral votes of Georgia were contested and the Senate and the House of Representatives could not agree whether to accept – and count – them or not." |
@@ -327,17 +328,18 @@ robustness, not a data correction, so it lives with the parser like the other tw
 
 ## Census seat reconciliation (#183)
 
-**Mostly not a correction to anybody's data — and the exception is the point.** This
-section catalogues seventeen places where two federal records disagree. **Sixteen are
-places where both are right about different questions**: the Census Bureau's published
-apportionment says a state held seats, and the National Archives' electoral record says it
-cast no votes, or cast votes with no seats behind them. Both statements are true.
+**Not a correction to anybody's data.** This section catalogues the places where two
+federal records disagree, and every one of them is a place where **both are right about
+different questions**: the Census Bureau's published apportionment says a state held seats,
+and the National Archives' electoral record says it cast no votes, or cast votes with no
+seats behind them. Both statements are true.
 
-**The seventeenth is not like that.** There the electoral record is simply wrong by this
-repo's own D041 contract — it holds a count of votes *cast* in a column defined as the
-*appointed* allotment. It is catalogued here rather than fixed because correcting it
-reaches the public API surface; see **#243** and the `electoral_record_understates_allotment`
-kind below.
+**There was once an exception, and it is why the section has a third kind.** The
+reconciliation's first run found a row where the recorded allotment was a count of votes
+*cast* in a column this repo defines as the *appointed* allotment: 1864 Nevada. It was
+catalogued here first and then corrected in the spine by **#243** (see the main catalog's
+1864 row), so the `electoral_record_understates_allotment` kind below currently has no
+member.
 
 **The recorded electoral votes win** (D006). Where they disagree the census figure is
 annotated and the reason stated; an **undeclared** disagreement fails the build rather than
@@ -366,13 +368,13 @@ The consequence worth stating: because the reconciliation needs no corpus,
 `usvote/warehouse.py` calls it **outside** its census branch, so it runs on every
 warehouse build rather than only when someone has snapshotted a corpus.
 
-### The seventeen disagreements, in three kinds
+### The disagreements, by kind
 
-| Kind | Rows | What the record says |
+| Kind | Years | What the record says |
 |---|---|---|
-| `electoral_votes_withheld` | 14 | Seats apportioned, **zero** electoral votes cast |
-| `seats_not_apportioned` | 2 | Electoral votes cast with **no** apportioned seats |
-| `electoral_record_understates_allotment` | 1 | The recorded allotment is a **cast** figure |
+| `electoral_votes_withheld` | 1864, 1868 | Seats apportioned, **zero** electoral votes cast |
+| `seats_not_apportioned` | 1864, 1868 (West Virginia) | Electoral votes cast with **no** apportioned seats |
+| `electoral_record_understates_allotment` | none since #243 | The recorded allotment is a **cast** figure |
 
 **`electoral_votes_withheld` — 1864 and 1868 only.** Eleven states in 1864 and three in 1868
 (Mississippi, Texas, Virginia) held apportioned seats under the governing 1860 census and
@@ -395,30 +397,20 @@ votes were counted as `disputed` (D044), not withheld, and its allotment is inta
 votes counted and how many a state was allotted are different questions, and only the second
 is this reconciliation's business.
 
-**`electoral_record_understates_allotment` — Nevada, 1864. The one row where the *record*
-is the side that is wrong.** Nevada was admitted 31 October 1864 (proclamation, 13 Stat. 749,
-under the Enabling Act of 21 March 1864, 13 Stat. 30), eight days before the election, with one
-apportioned representative. One representative plus two senators is an appointed allotment of
-**3**; the Archives table prints **2**, and its 1864 national total of 233 is likewise a count of
-votes *cast*.
+**`electoral_record_understates_allotment` — no member since #243.** The kind exists for a
+row where the *record*, not the census, is the side that is wrong: a recorded allotment
+that is a count of votes cast. Its only instance was **1864 Nevada**, admitted eight days
+before the election with one apportioned representative, so an appointed allotment of 3.
+The Archives table printed the cast 2, and the page's own note 2 says Nevada "was allocated
+three electoral votes, but one elector did not vote". It was a separate kind because the
+other two record facts about history while this one records a defect in the record; filing
+it under either would have filed a defect as a fact.
 
-This is the same appointed-exceeds-cast situation as **1832 Maryland** (appointed 10, cast 8) and
-**2000 DC** (appointed 3, cast 2), both already recorded in `ELECTORAL_VOTE_SHORTFALLS`. It differs
-in one respect only — **which figure the Archives printed in the allotment column**: the appointed
-one for those two, the cast one here. So `dwh.votes.total_electoral_votes` carries a cast figure in
-a slot D041 defines as *appointed*, and the seat reconciliation is the first thing in this repo
-that ever looked.
-
-**Why it is catalogued rather than fixed here, and why it gets its own kind.** Correcting the spine
-moves 1864's `ec_denominator` from 233 to 234, which changes `ec_share_full` for that year and
-therefore the **public API snapshot content hash** — an EC-domain change with a D034 cutover,
-deferred to **#243** rather than made inside a census validation story. It is a separate kind
-because the other two record facts about history while this records a **known defect in the
-record**; filing it under either of those would file a defect as a fact, and declaring it under a
-bare "the record is authoritative" framing would enter, in a corrections catalog, the claim that a
-cast figure *is* the allotment — the exact inversion of D046's ladder. **The entry is
-self-cleaning**: when the spine correction lands the row reconciles, and the stale-declaration
-guard then requires this entry's removal.
+The entry was **self-cleaning**, and it cleaned itself as designed. #243 restored the
+appointed 3 in the spine (the main catalog's 1864 row), the row reconciled, and the
+stale-declaration guard required the entry's removal. The kind stays in the vocabulary with
+no member, as `present_but_unparsed` does in the census conformance catalog (D061), because
+it names a class of defect the reconciliation can find again.
 
 ### Three source characteristics that look like defects and are not
 

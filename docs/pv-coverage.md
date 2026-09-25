@@ -152,7 +152,7 @@ so no allotments are shown in this table, unlike the one above.
 
 | year | non-participating states | `pv_coverage` (EV) | by state count | what actually drives the number |
 |---|---|---|---|---|
-| 1864 | Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi, North Carolina, South Carolina, Tennessee, Texas, Virginia — eleven states | **1.0000** (233 / 233) | 0.6944 (25 / 36) | nothing — see below |
+| 1864 | Alabama, Arkansas, Florida, Georgia, Louisiana, Mississippi, North Carolina, South Carolina, Tennessee, Texas, Virginia — eleven states | **1.0000** (234 / 234) | 0.6944 (25 / 36) | nothing — see below |
 | 1868 | Mississippi, Texas, Virginia — three states | **0.9898** (291 / 294) | 0.8919 (33 / 37) | **Florida alone**, which is legislature-chosen, not non-participating |
 
 **A non-participating state has zero electoral votes**, so it contributes nothing to *either* side
