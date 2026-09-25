@@ -373,12 +373,17 @@ class TestTheCatalog:
         assert len(understated) == 0
         assert KIND_RECORD_UNDERSTATES_ALLOTMENT in SEAT_EXCEPTION_KINDS
 
-    def test_nevada_1864_reconciles_now_that_the_spine_is_corrected(self) -> None:
-        """The kind's one former member, after #243 restored the appointed allotment.
+    def test_nevada_1864_reconciles_under_the_catalogued_appointed_allotment(
+        self,
+    ) -> None:
+        """The kind's one former member, under the constant #243 added.
 
-        It used to be declared with the recorded 2 against an expected 3. Now the
-        record carries 3 and the row reconciles, so a declaration for it would be
-        stale — which is why it is gone.
+        It used to be declared with the recorded 2 against an expected 3. This checks
+        the catalogued appointed 3 in :data:`usvote.transform.APPOINTED_ELECTORS_NOT_IN_TABLE`
+        against the seat rule — :func:`archives_allotments` applies that constant to the
+        state rows itself rather than running the transform. That the spine's
+        transform carries 3 (and the rebuilt 234) is pinned separately, by
+        ``tests/unit/test_transform.py::TestNevada1864OnTheRealPage``.
         """
         assert not [
             e

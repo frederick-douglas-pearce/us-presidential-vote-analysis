@@ -1277,8 +1277,10 @@ def assert_corrections_reconcile_printed_totals(
                 )
 
         # (c) the allotment == printed + what the catalogued appointments added. Keyed
-        # on the year HAVING catalogued states rather than on the added amount being
-        # non-zero, so a correction that added nothing is still checked.
+        # on the year having catalogued states rather than on ``added``. In the
+        # pipeline a correction that adds nothing never reaches here —
+        # _apply_appointed_elector_corrections refuses ``appointed <= printed`` first —
+        # so this keying is belt-and-braces for a direct call, not the guard for it.
         catalogued = [
             (key, appointed)
             for key, appointed in APPOINTED_ELECTORS_NOT_IN_TABLE.items()
