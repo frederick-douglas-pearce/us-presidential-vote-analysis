@@ -136,10 +136,11 @@ VIRGINIA_CORRECTION_CENSUSES: tuple[int, ...] = tuple(range(1790, 1870, 10))
 #: **published component** series — the file's two rows and the Bureau's Alexandria
 #: figures (:data:`ALEXANDRIA_RETROCESSION`). The 1996 volume prints the components,
 #: not an enumerated Virginia total, so for **1800, 1830 and 1840** the composition *is*
-#: the enumerated figure by construction and is checked against nothing independent
-#: (``research-boundary-sweep.md`` §4.1, §5.4). Only **1810 and 1820** have an
-#: independently printed total — the original returns, reprinted in the Bureau's *A
-#: Century of Population Growth* (1909) — and the composition matches it; §5.4 marks
+#: the enumerated figure by construction and, in this repo's evidence, is checked
+#: against nothing independent (``research-boundary-sweep.md`` §4.1, §5.4). §5.4 records
+#: an independently printed total only for **1810 and 1820** — the original returns,
+#: reprinted in the Bureau's *A Century of Population Growth* (1909) — and the
+#: composition matches it; §5.4 marks
 #: both **CONTRADICTED**, because the 1850 Seventh Census restates them 22 and 13 higher
 #: (974,622 / 1,065,379). 1810 is weaker again, since its Alexandria cell is itself
 #: settled partly by arithmetic (:data:`ALEXANDRIA_RETROCESSION`). The map and
@@ -469,9 +470,10 @@ def apply_alexandria_retrocession(
 
     The map (read at call time) and this step must agree in **both** directions, or
     this raises: every census this step corrects must be recorded as
-    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS`, and every census so recorded must be one
-    this step corrects — otherwise the West Virginia step would persist a note saying
-    Alexandria is "removed in the next step" for a census where nothing removes it.
+    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS`, and every census so recorded must have a
+    figure pinned in ``retrocession.population`` — otherwise the West Virginia step
+    would persist a note saying Alexandria is "removed in the next step" for a census
+    where nothing removes it.
 
     Skips a census whose Virginia row is absent or NULL, as its sibling does — there is
     nothing to correct and nothing may be invented. **Raises** where the row is present
