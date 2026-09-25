@@ -29,7 +29,7 @@ builders; a composition root sits above every source and imports from all of the
 design (D027).
 
 **What the view is over.** :data:`~usvote.census.conform.ELECTION_POPULATION_TABLE`, the
-frame :mod:`usvote.census.conform` assembles behind four guards and #184 persists. It is
+frame :mod:`usvote.census.conform` assembles behind its guards and #184 persists. It is
 deliberately **not** a join of ``dwh.census_population`` against the EC fact: that would
 be a second expression of the governing-census calendar and of the Virginia boundary
 restatement, and the second of those is not recoverable from the warehouse at all (D059

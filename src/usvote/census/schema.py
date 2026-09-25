@@ -66,7 +66,9 @@ SERIES_VALUES: tuple[str, ...] = (SERIES_RESIDENT,)
 #: across ten elections — a plausible wrong number rather than a load error. Most rows
 #: are ``present_day`` and that is an honest claim, not a weak one: it says "this is the
 #: published figure and we have not asserted it equals the as-enumerated one". The
-#: fifty-state residual sweep is #208.
+#: fifty-state residual sweep (#208) found one further material case, and it is
+#: Virginia again: Alexandria County, removed from the 1800-1840 rows by #251, which is
+#: what makes ``as_enumerated`` true of those rows on both axes.
 BASIS_PRESENT_DAY = "present_day"
 BASIS_AS_ENUMERATED = "as_enumerated"
 BASIS_VALUES: tuple[str, ...] = (BASIS_PRESENT_DAY, BASIS_AS_ENUMERATED)

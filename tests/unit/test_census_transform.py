@@ -25,11 +25,15 @@ from usvote.census.schema import (
     SOURCE_CENSUS_BUREAU,
 )
 from usvote.census.transform import (
+    ALEXANDRIA_RETROCESSION,
     NON_STATE_AREAS,
     SOURCE_SPANS,
+    VERIFIED_BY_PUBLISHED_COMPONENTS,
+    VERIFIED_BY_PUBLISHED_TOTAL,
     VIRGINIA_CORRECTION_CENSUSES,
-    VIRGINIA_VERIFIED_CENSUSES,
+    VIRGINIA_VERIFICATION,
     CensusTransformError,
+    apply_alexandria_retrocession,
     apply_virginia_boundary_correction,
     assert_known_jurisdictions,
     assert_stitch_is_unambiguous,
@@ -38,6 +42,23 @@ from usvote.census.transform import (
 )
 
 _SPINE = ec_participation_frame()
+
+
+def _census_record(
+    year: int, state: str, pop: int | None, basis: str = BASIS_PRESENT_DAY
+) -> dict[str, object]:
+    return {
+        "source": SOURCE_CENSUS_BUREAU,
+        "census_year": year,
+        "state": state,
+        "series": SERIES_RESIDENT,
+        "basis": basis,
+        "population": pop,
+        "vintage": "v",
+        "source_file": "f",
+        "redistributable": True,
+        "note": None,
+    }
 
 
 def _row(year: int, area: str, pop: int | None, source: str) -> PopulationRow:
@@ -304,12 +325,12 @@ class TestVirginiaBoundaryCorrection:
         assert max(VIRGINIA_CORRECTION_CENSUSES) == 1860
         assert 1870 not in VIRGINIA_CORRECTION_CENSUSES
 
-    def test_the_note_distinguishes_verified_from_computed_censuses(self) -> None:
-        """The correction must not imply evidence it does not have.
+    def test_the_note_distinguishes_how_each_census_is_confirmed(self) -> None:
+        """The correction must not imply evidence it does not have (#251, AC-8).
 
-        1850 is cross-checked against a separate publication; 1820 is the same
-        arithmetic with no independent confirmation, and S1 says so. A uniformly
-        confident note would launder the second into the first.
+        1850 is confirmed against a separately-published Virginia total; 1820 is
+        composed from three published components, one of them external to the file.
+        A uniformly confident note would launder the second into the first.
         """
         rows = _minimal_rows(
             old=[
@@ -321,9 +342,42 @@ class TestVirginiaBoundaryCorrection:
         )
         frame = transform_census(rows, _SPINE).set_index(["state", "census_year"])
         assert "cross-checked" in frame.loc[("Virginia", 1850), "note"]
-        assert "not re-verified" in frame.loc[("Virginia", 1820), "note"]
-        assert 1850 in VIRGINIA_VERIFIED_CENSUSES
-        assert 1820 not in VIRGINIA_VERIFIED_CENSUSES
+        assert "Alexandria" not in frame.loc[("Virginia", 1850), "note"]
+        assert "three published components" in frame.loc[("Virginia", 1820), "note"]
+
+    def test_the_verification_map_has_three_states_pinned_to_a_literal(self) -> None:
+        # A third state, not wider membership (AC-8): 1800-1840 are confirmed, but
+        # by composition from published components rather than against a total.
+        assert dict(VIRGINIA_VERIFICATION) == {
+            1790: "published_total",
+            1800: "published_components",
+            1810: "published_components",
+            1820: "published_components",
+            1830: "published_components",
+            1840: "published_components",
+            1850: "published_total",
+            1860: "published_total",
+        }
+        assert VERIFIED_BY_PUBLISHED_TOTAL == "published_total"
+        assert VERIFIED_BY_PUBLISHED_COMPONENTS == "published_components"
+
+    def test_a_census_missing_from_the_map_reads_as_unverified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The third state is absence, and it must stay expressible: a census in the
+        # window with no entry says "not re-verified" rather than borrowing a claim.
+        frame = pd.DataFrame(
+            [
+                _census_record(1860, "Virginia", 1_219_630),
+                _census_record(1860, "West Virginia", 376_688),
+            ],
+            columns=list(CENSUS_COLUMNS),
+        )
+        without_1860 = {k: v for k, v in VIRGINIA_VERIFICATION.items() if k != 1860}
+        monkeypatch.setattr(transform, "VIRGINIA_VERIFICATION", without_1860)
+        corrected = apply_virginia_boundary_correction(frame)
+        note = corrected.loc[corrected.state == "Virginia", "note"].iloc[0]
+        assert "not re-verified" in note
 
     def test_a_missing_part_leaves_the_published_figure_alone(self) -> None:
         # A corrected figure built from a missing part would be exactly the fabricated
@@ -361,6 +415,203 @@ class TestVirginiaBoundaryCorrection:
         virginia = corrected[corrected.state == "Virginia"].iloc[0]
         assert virginia["population"] == 1_119_348
         assert virginia["basis"] == BASIS_PRESENT_DAY
+
+
+#: The file's own Virginia / West Virginia rows at the five Alexandria censuses, and the
+#: enumerated Virginia each composes to — ``research-boundary-sweep.md`` §4.1, typed
+#: here by hand as the oracle rather than recomputed from the constant under test.
+_ALEXANDRIA_CASES = (
+    (1800, 807_557, 78_592, 880_200),
+    (1810, 877_683, 105_469, 974_600),
+    (1820, 938_261, 136_808, 1_065_366),
+    (1830, 1_044_054, 176_924, 1_211_405),
+    (1840, 1_025_227, 224_537, 1_239_797),
+)
+
+
+class TestAlexandriaRetrocession:
+    """#251 — Alexandria County was District of Columbia from 1801 until 1846."""
+
+    def test_the_constant_holds_the_bureaus_five_figures(self) -> None:
+        # Pinned to a literal: 8,552 for 1810, not the printed note's 8,852.
+        assert dict(ALEXANDRIA_RETROCESSION.population) == {
+            1800: 5_949,
+            1810: 8_552,
+            1820: 9_703,
+            1830: 9_573,
+            1840: 9_967,
+        }
+        assert ALEXANDRIA_RETROCESSION.recipient == "Virginia"
+        assert ALEXANDRIA_RETROCESSION.donor == "District of Columbia"
+        assert ALEXANDRIA_RETROCESSION.effective_date.isoformat() == "1846-09-07"
+        assert "Virginia Note 2" in ALEXANDRIA_RETROCESSION.citation
+
+    @pytest.mark.parametrize(("year", "va", "wv", "enumerated"), _ALEXANDRIA_CASES)
+    def test_each_census_composes_to_the_enumerated_virginia(
+        self, year: int, va: int, wv: int, enumerated: int
+    ) -> None:
+        rows = _minimal_rows(
+            old=[
+                _row(year, "Virginia", va, "resident_1790_1990"),
+                _row(year, "West Virginia", wv, "resident_1790_1990"),
+            ]
+        )
+        virginia = transform_census(rows, _SPINE).set_index("state").loc["Virginia"]
+        assert virginia["population"] == enumerated
+        assert virginia["basis"] == BASIS_AS_ENUMERATED
+        note = str(virginia["note"])
+        assert "Alexandria County" in note
+        assert "West Virginia" in note
+        assert f"{enumerated:,}" in note
+
+    @pytest.mark.parametrize("year", [1790, 1850, 1860])
+    def test_censuses_outside_the_district_era_carry_no_term(self, year: int) -> None:
+        # 1790 predates the District; 1850/1860 postdate the retrocession. The window
+        # closing is as load-bearing as it opening.
+        va, wv = {1790: (691_737, 55_873), 1850: (1_119_348, 302_313)}.get(
+            year, (1_219_630, 376_688)
+        )
+        rows = _minimal_rows(
+            old=[
+                _row(year, "Virginia", va, "resident_1790_1990"),
+                _row(year, "West Virginia", wv, "resident_1790_1990"),
+            ]
+        )
+        virginia = transform_census(rows, _SPINE).set_index("state").loc["Virginia"]
+        assert virginia["population"] == va + wv
+        assert "Alexandria" not in str(virginia["note"])
+
+    def test_the_district_of_columbia_row_is_left_as_published(self) -> None:
+        # The source publishes it correctly for the District's own footprint, which
+        # already excludes Alexandria (the Bureau's District note), so it is not restated
+        # (D067(e)). Alexandria's people land in no row for these censuses.
+        rows = _minimal_rows(
+            old=[
+                _row(1840, "Virginia", 1_025_227, "resident_1790_1990"),
+                _row(1840, "West Virginia", 224_537, "resident_1790_1990"),
+                _row(1840, "District of Columbia", 33_745, "resident_1790_1990"),
+            ]
+        )
+        frame = transform_census(rows, _SPINE).set_index("state")
+        assert frame.loc["District of Columbia", "population"] == 33_745
+        assert frame.loc["District of Columbia", "basis"] == BASIS_PRESENT_DAY
+
+    def test_it_is_a_separate_step_from_the_west_virginia_restatement(self) -> None:
+        # AC-2: the West Virginia step alone still yields the file's own sum; only the
+        # second step touches the external figure.
+        frame = pd.DataFrame(
+            [
+                _census_record(1840, "Virginia", 1_025_227),
+                _census_record(1840, "West Virginia", 224_537),
+            ],
+            columns=list(CENSUS_COLUMNS),
+        )
+        after_wv = apply_virginia_boundary_correction(frame)
+        va = after_wv.loc[after_wv.state == "Virginia", "population"].iloc[0]
+        assert va == 1_249_764
+        # The intermediate note reads the verification map's published_components
+        # branch: it must say Alexandria is still in the figure, not claim a check.
+        note = after_wv.loc[after_wv.state == "Virginia", "note"].iloc[0]
+        assert "still includes Alexandria County" in note
+        assert "cross-checked" not in note
+        assert "not re-verified" not in note
+        after_both = apply_alexandria_retrocession(after_wv)
+        va = after_both.loc[after_both.state == "Virginia", "population"].iloc[0]
+        assert va == 1_239_797
+
+    def test_the_final_note_records_the_verification_state(self) -> None:
+        rows = _minimal_rows(
+            old=[
+                _row(1830, "Virginia", 1_044_054, "resident_1790_1990"),
+                _row(1830, "West Virginia", 176_924, "resident_1790_1990"),
+            ]
+        )
+        virginia = transform_census(rows, _SPINE).set_index("state").loc["Virginia"]
+        assert "(verification: published_components)" in str(virginia["note"])
+        assert "1846-09-07" in str(virginia["note"])
+
+    def test_a_census_the_map_does_not_record_as_composed_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The map and the correction must agree on which censuses were composed; a
+        # third state that changes nothing persisted would be decoration.
+        patched = dict(VIRGINIA_VERIFICATION)
+        patched[1830] = VERIFIED_BY_PUBLISHED_TOTAL
+        monkeypatch.setattr(transform, "VIRGINIA_VERIFICATION", patched)
+        frame = pd.DataFrame(
+            [_census_record(1830, "Virginia", 1_220_978, BASIS_AS_ENUMERATED)],
+            columns=list(CENSUS_COLUMNS),
+        )
+        with pytest.raises(CensusTransformError, match="disagree"):
+            apply_alexandria_retrocession(frame)
+
+    def test_a_composed_census_with_no_alexandria_figure_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The converse direction: marking 1790 composed would make the West Virginia
+        # step persist "still includes Alexandria County" for a census that predates
+        # the District, with nothing downstream removing it.
+        patched = dict(VIRGINIA_VERIFICATION)
+        patched[1790] = VERIFIED_BY_PUBLISHED_COMPONENTS
+        monkeypatch.setattr(transform, "VIRGINIA_VERIFICATION", patched)
+        rows = _minimal_rows(
+            old=[
+                _row(1790, "Virginia", 691_737, "resident_1790_1990"),
+                _row(1790, "West Virginia", 55_873, "resident_1790_1990"),
+            ]
+        )
+        with pytest.raises(CensusTransformError, match=r"census\(es\) \[1790\]"):
+            transform_census(rows, _SPINE)
+
+    def test_a_row_the_west_virginia_step_did_not_restate_is_refused(self) -> None:
+        # Subtracting Alexandria from the present-day figure would give a number that
+        # is neither published nor enumerated.
+        frame = pd.DataFrame(
+            [_census_record(1840, "Virginia", 1_025_227)],
+            columns=list(CENSUS_COLUMNS),
+        )
+        with pytest.raises(CensusTransformError, match="still 'present_day'"):
+            apply_alexandria_retrocession(frame)
+
+    def test_a_missing_west_virginia_part_fails_loud_end_to_end(self) -> None:
+        # The sibling skips a census whose West Virginia cell is NULL, leaving Virginia
+        # present_day; this step must then refuse rather than subtract.
+        rows = _minimal_rows(
+            old=[
+                _row(1840, "Virginia", 1_025_227, "resident_1790_1990"),
+                _row(1840, "West Virginia", None, "resident_1790_1990"),
+            ]
+        )
+        with pytest.raises(CensusTransformError, match="did not run"):
+            transform_census(rows, _SPINE)
+
+    def test_an_absent_or_null_virginia_is_skipped(self) -> None:
+        null_frame = pd.DataFrame(
+            [_census_record(1840, "Virginia", None, BASIS_AS_ENUMERATED)],
+            columns=list(CENSUS_COLUMNS),
+        )
+        out = apply_alexandria_retrocession(null_frame)
+        assert pd.isna(out.loc[0, "population"])
+        empty = pd.DataFrame(
+            [_census_record(1840, "Maryland", 470_019)], columns=list(CENSUS_COLUMNS)
+        )
+        assert apply_alexandria_retrocession(empty).equals(empty)
+
+    def test_the_real_fixture_reproduces_every_enumerated_virginia(self) -> None:
+        from usvote.census.parse import parse_resident_1790_1990
+
+        rows = {
+            "resident_1790_1990": parse_resident_1790_1990(
+                CENSUS_TABS_TRIMMED_XLSX.read_bytes(), source_id="resident_1790_1990"
+            ),
+            "resident_1910_2020": parse_population_change(
+                CENSUS_POPCHANGE_XLSX.read_bytes(), source_id="resident_1910_2020"
+            ),
+        }
+        frame = transform_census(rows, _SPINE)
+        virginia = frame[frame.state == "Virginia"].set_index("census_year")
+        for year, _va, _wv, enumerated in _ALEXANDRIA_CASES:
+            assert virginia.loc[year, "population"] == enumerated
 
 
 class TestFrameShape:

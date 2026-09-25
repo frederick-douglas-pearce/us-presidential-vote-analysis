@@ -161,12 +161,14 @@ problem in a new place.
 
 | Census(es) | Basis difference | Restatement applied | `transform.py` constant | Source / provenance |
 |---|---|---|---|---|
-| 1790–1860 | Virginia is reported on its present-day footprint, so it omits the counties that became West Virginia in 1863. The understatement runs 7.5% (1790) to 23.6% (1860); across the ten elections 1824–1860 it is **12.7%** (1820 census) to **21.3%** (1850), overstating Virginia's per-capita electoral weight by ~27% at the worst point that governs an election. West Virginia meanwhile carries a population for censuses in which it held no electoral votes. | Virginia's figure is restated in place as the file's own **Virginia + West Virginia**, and the row relabelled `as_enumerated`. West Virginia's own rows are **left untouched** at `present_day` — the population is real; what it is not is a state yet, and #182 is what removes it from a per-capita join. | `VIRGINIA_CORRECTION_CENSUSES`, `VIRGINIA_VERIFIED_CENSUSES` (applied by `apply_virginia_boundary_correction`) | The file proves the arithmetic on its own: at **1790**, **1850** and **1860** the VA + WV sum reproduces the separately-published enumerated Virginia exactly (747,610 / 1,421,661 / 1,596,318 — [`research-census-source.md`](../.claude/specs/research-census-source.md) §4). The other censuses in the window are the same arithmetic **without** an independent cross-check, and each row's note says so. |
+| 1790–1860 | Virginia is reported on its present-day footprint, so it omits the counties that became West Virginia in 1863. The understatement runs 7.5% (1790) to 23.6% (1860); across the ten elections 1824–1860 it is **12.7%** (1820 census) to **21.3%** (1850), overstating Virginia's per-capita electoral weight by ~27% at the worst point that governs an election. West Virginia meanwhile carries a population for censuses in which it held no electoral votes. | Virginia's figure is restated in place as the file's own **Virginia + West Virginia**, and the row relabelled `as_enumerated`. West Virginia's own rows are **left untouched** at `present_day` — the population is real; what it is not is a state yet, and #182 is what removes it from a per-capita join. | `VIRGINIA_CORRECTION_CENSUSES`, `VIRGINIA_VERIFICATION` (applied by `apply_virginia_boundary_correction`) | The arithmetic uses only the file's own rows: at **1790**, **1850** and **1860** the VA + WV sum reproduces the separately-published enumerated Virginia exactly (747,610 / 1,421,661 / 1,596,318 — [`research-census-source.md`](../.claude/specs/research-census-source.md) §4). That shows the split between the two rows is **exhaustive**, not that it is accurate county by county — the Bureau says that before 1860 it "cannot be done exactly". For **1800–1840** this is only one of two restatements: see the Alexandria row below. |
+| 1800–1840 | The file also credits Virginia with **Alexandria County**, which was part of the District of Columbia from 1801 until it was retroceded to Virginia on **7 September 1846**. After the West Virginia restatement Virginia is therefore still 0.79%–0.91% high across the six elections held before the retrocession (1824–1844; these censuses govern seven, through 1848), and in 1832, 1836 and 1840 that is enough to change which state was the most under-represented in the Electoral College. | A **second, separate** step subtracts the Bureau's published Alexandria figure (1800: 5,949 · 1810: 8,552 · 1820: 9,703 · 1830: 9,573 · 1840: 9,967) from the restated Virginia, which is the enumerated Virginia as the Bureau composes it from published components (880,200 / 974,600 / 1,065,366 / 1,211,405 / 1,239,797). The 1996 volume prints the components rather than a Virginia total, so for 1800, 1830 and 1840 this figure is the enumerated one by construction. §5.4 records an independently printed total only for **1810 and 1820**: the original returns, reprinted in *A Century of Population Growth* (1909). The composition matches both, and §5.4 marks both CONTRADICTED, because the 1850 Seventh Census restates them 22 and 13 higher. Only after this subtraction is `as_enumerated` true of these rows. The District's own row is **left as published**, because it already excludes Alexandria, so for these five censuses Alexandria's people are in **no** row. DC holds no electoral votes until 1964, so no denominator loses them, and nothing in the census package asserts a per-year sum. **1848 is the one election that must put Alexandria back**, handled at election grain (next section). | `ALEXANDRIA_RETROCESSION` (applied by `apply_alexandria_retrocession`, after the West Virginia step; it refuses any census `VIRGINIA_VERIFICATION` does not record as `published_components`) | Four of the five figures are the Bureau's own, as printed in Virginia State Note 2 of *Population of States and Counties of the United States: 1790 to 1990* (1996). The same volume's District note and its `Arlington` county row corroborate them ([`research-boundary-sweep.md`](../.claude/specs/research-boundary-sweep.md) §5.2–5.3). Those four are deliberately **not** derived as enumerated DC − file DC. **1810 is the exception.** Note 2 prints `8,852`, which is a misprint in the note. The value used, 8,552, rests on the published `Arlington` row, and the tie against the rival 8,530 is broken by the District note. That tiebreak *is* the DC subtraction avoided for the other four (24,023 − 15,471 = 8,552). The 1810 census governs no election in scope. The retrocession statute (9 Stat. 35, proclaimed 7 September 1846) is ATTRIBUTED in §5.4. `VIRGINIA_VERIFICATION` records these five censuses as `published_components`, meaning they are composed from published parts rather than checked against one published total. The row note carries that state into the database. #251. |
 
 **Two things this entry deliberately does not do.** It does not claim uniform
-confidence: `VIRGINIA_VERIFIED_CENSUSES` separates the three censuses with an
-independent cross-check from the five computed by the same arithmetic, and the per-row
-note carries that distinction into the database rather than leaving it here. And it does
+confidence: `VIRGINIA_VERIFICATION` records *how* each census is confirmed — against a
+published Virginia total (1790, 1850, 1860) or by composition from published components
+(1800–1840) — and both correction steps write that state into the per-row note, so the
+distinction reaches the database rather than living only here. And it does
 not sweep the other forty-nine states — whether Virginia is the only *material* boundary
 discrepancy in the 1824–2024 span was an open question, tracked as **#208** and
 referenced rather than absorbed.
@@ -175,8 +177,8 @@ referenced rather than absorbed.
 material case — **and the second case is also Virginia**: the file credits it with Alexandria
 County for 1800–1840, overstating the denominator 0.79%–0.91% across six elections (1824–1844,
 per #253/D066). Every other post-1824 boundary change is ruled immaterial, with a reason each, in
-`.claude/specs/research-boundary-sweep.md`. The Alexandria correction itself is **#251**, and #208
-stays open until it lands.
+`.claude/specs/research-boundary-sweep.md`. The Alexandria correction is the second row of the
+table above (#251), and it discharges the last open item of #208.
 
 ## Census conformance to the electoral record (#182)
 
@@ -205,15 +207,16 @@ evidence: per-state `total_electoral_votes` is identical across 1912, 1916, 1920
 `tests/integration/test_census_conform.py::test_the_allotment_change_years_match_this_mapping`,
 and it is an integration test because the counts exist only in `dwh.votes`.
 
-### Boundary succession — a restatement that is right for one era and wrong for the next
+### Boundary succession and retrocession — restatements that are right for one era and wrong for the next
 
 | Elections | Basis difference | Restatement applied | `conform.py` constant | Source / provenance |
 |---|---|---|---|---|
-| 1864, 1868 | Both are governed by the **1860** census, which precedes West Virginia's 1863 separation — but by 1864 West Virginia is a separate state holding 5 electoral votes. #181 restated Virginia's pre-1863 censuses in place as Virginia + West Virginia, which is correct for 1824–1860 **as to the West Virginia counties** and **double-counts** them here. (*Qualifier added 2026-09-21 per #253/D066: correct on the West Virginia axis only. Those same figures also carry **Alexandria County** for 1824–1844 — a separate mechanism, corrected by #251.*) | Virginia takes its **published** 1860 figure, `1,219,630`, and the row is labelled `at_election`. West Virginia's own rows are untouched. | `BOUNDARY_SUCCESSIONS` (applied by `apply_boundary_successions`, guarded by `assert_no_double_count`) | West Virginia was admitted 20 June 1863 under the Act of 31 December 1862 (12 Stat. 633) and Lincoln's proclamation of 20 April 1863. 1,219,630 + 376,688 = 1,596,318, the separately published enumerated Virginia total for 1860. |
+| 1864, 1868 | Both are governed by the **1860** census, which precedes West Virginia's 1863 separation — but by 1864 West Virginia is a separate state holding 5 electoral votes. #181 restated Virginia's pre-1863 censuses in place as Virginia + West Virginia, which is correct for 1824–1860 **as to the West Virginia counties** and **double-counts** them here. (*Qualifier added 2026-09-21 per #253/D066: correct on the West Virginia axis only. Those same figures also carried **Alexandria County** for 1824–1844. That is a separate mechanism, corrected by #251 in the row below.*) | Virginia takes its **published** 1860 figure, `1,219,630`, and the row is labelled `at_election`. West Virginia's own rows are untouched. | `BOUNDARY_SUCCESSIONS` (applied by `apply_boundary_successions`, guarded by `assert_no_double_count`) | West Virginia was admitted 20 June 1863 under the Act of 31 December 1862 (12 Stat. 633) and Lincoln's proclamation of 20 April 1863. 1,219,630 + 376,688 = 1,596,318, the separately published enumerated Virginia total for 1860. |
+| 1848 | Governed by the **1840** census. #251 removes Alexandria County from that census's Virginia, which is right for 1824–1844, but the election was held **after** the 7 September 1846 retrocession, so on election day Alexandria was Virginia's. | Virginia takes the corrected 1840 figure **plus** Alexandria's published 9,967 (1,239,797 + 9,967 = 1,249,764), labelled `at_election`. The elections this applies to are **derived**, not listed: held after the effective date on a census taken before it. Over the 1824–2024 spine that is {1848}, and the correction set is 1824–1844. Widening the spine below 1824 adds 1804–1820 to the correction set and leaves the reversal set at {1848}. The D005 guard admits this restatement keyed on **the election**, not the census, because 1840 governs both 1844 and 1848 and only one of them may carry this value (D066(h), H1). | `BOUNDARY_RETROCESSIONS` (built from `ALEXANDRIA_RETROCESSION`; applied by `apply_boundary_retrocessions`, checked by `assert_retrocession_restored`; `assert_boundary_corrections_disjoint` asserts it never acts on a census or election the West Virginia succession does) | Nothing can verify this addition independently: the District of Columbia does not participate in 1848, and both sides read the same constant (D066(h), H2). So `assert_retrocession_restored` is a **consistency** check (exactly the pinned figure, on exactly the derived elections) and not a verification. The values themselves are pinned against the real corpus by `TestRealCorpus` in `tests/unit/test_census_conform.py`, which skips without `USVOTE_CENSUS_CORPUS_DIR`. |
 
 **The pinned figure is an independent literal, not a recomputation**, and that is the point:
 it *checks* `apply_virginia_boundary_correction`'s arithmetic rather than inheriting it, so a
-future refinement (#208 is the candidate) fails loudly instead of silently shipping one of
+future refinement of that restatement fails loudly instead of silently shipping one of
 two numbers. It has to be a literal for a second reason — because `basis` is deliberately
 not in the census natural key (D059), the published figure is **not recoverable from the
 table**, which holds only the restated row.
@@ -225,22 +228,19 @@ anything **aggregates** population by election year.
 
 **At election grain the basis label is its own vocabulary**, `boundary_basis`
 (`at_election` / `present_day`), and not the census `basis`. The two disagree exactly here:
-for **1848–1860** Virginia the *restated* figure is borders-at-election, while for 1864/1868 the
-*published* one is. Carrying the census label through would stamp an honesty warning on the
+for **1824–1860** Virginia the *restated* figure is borders-at-election (for 1848, once Alexandria
+is added back), while for 1864/1868 the *published* one is. Carrying the census label through would stamp an honesty warning on the
 figure that is in fact correct for that election. `present_day` remains the honest default
 for everything else — today only Virginia's twelve elections 1824–1868 carry `at_election`.
 
-**That span read 1824–1860 until #253/D066 corrected it, and the six elections it lost are a
-known-wrong label this repo is carrying on purpose.** #208's boundary sweep established that the
-restated figure also includes **Alexandria County** — District of Columbia from 1801 until its
-retrocession to Virginia on **7 September 1846** — so for **1824, 1828, 1832, 1836, 1840 and 1844**
-the restated figure is 0.79%–0.91% high and is *not* the borders-at-election one. Those six rows
-still carry `at_election`, and are **not** downgraded to `present_day` in the interim: that value
-means "we have not established this is the as-at-election figure", which would be the weaker and
-less honest claim about rows whose defect is precisely established and quantified. **#251** applies
-the correction and makes the label true; **#208 stays open until it lands.** Elections 1848–1860 are
-unaffected — 1848 was held on post-retrocession borders, so the Alexandria-inclusive figure is
-correct for it.
+**Between #253/D066 and #251 that span read 1848–1860, and the six elections it lost carried a
+known-wrong label on purpose.** #208's boundary sweep established that the restated figure also
+included **Alexandria County**, District of Columbia from 1801 until its retrocession to Virginia on
+**7 September 1846**, so for **1824, 1828, 1832, 1836, 1840 and 1844** it was 0.79%–0.91% high.
+Those six rows kept `at_election` in the interim rather than being downgraded to `present_day`,
+which would have been the weaker claim about rows whose defect was established and quantified.
+**#251 removed Alexandria at census grain, which made the label true**, and added it back for 1848
+alone (the table above). The span is 1824–1860 again, now on both axes.
 
 **Which footprint a per-capita denominator uses at all is settled by D066**: borders at the
 election, with *vintage* (`governing_census_year`) and *denominator provenance*

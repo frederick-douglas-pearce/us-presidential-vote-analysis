@@ -4532,3 +4532,87 @@ is not owed here.
 `src/usvote/apportionment.py`, `docs/corrections.md`.
 
 ---
+
+## D067: Alexandria is removed at census grain and put back for 1848 at election grain
+
+**Date:** 2026-09-24
+**Issue:** #251 (E10) · **Builds on:** D059, D060, D066 · **Discharges:** D066(e)'s interim third
+state of `boundary_basis`, and #208's last open item
+
+**Context.**
+
+D066 ruled that a per-capita denominator uses the borders in force at the election and fixed the
+Alexandria span as a rule: a **correction** set (elections held before 7 September 1846 on a census
+that carries an Alexandria cell, which is 1824–1844 over today's spine) and a **reversal** set
+(`governing_census_year(Y) < effective < Y`, which is {1848}). It deliberately left the grain of the
+fix open. Correcting at census grain in `transform.py` makes `basis = as_enumerated` true for the
+1800–1840 rows, but it needs a reversal for 1848. Correcting only at election grain leaves the
+census rows as published, and so leaves them carrying a label that is known to be false. D066(h)
+recorded two executed constraints: a census-keyed D005 pin is over-permissive (H1), and the
+`BOUNDARY_SUCCESSIONS` idiom can neither express nor verify this case (H2).
+
+**Decision.**
+
+**(a) Census grain, plus an election-grain reversal.** `transform.ALEXANDRIA_RETROCESSION` holds the
+five Alexandria figures. Four are Virginia Note 2's, as printed. 1810 is 8,552: Note 2 prints
+8,852, which is a misprint, and the value rests on the published `Arlington` row, with the District
+note's subtraction as the tiebreak. `apply_alexandria_retrocession` subtracts them in a **separate
+step after** `apply_virginia_boundary_correction`, so the 1800–1840 Virginia rows become the
+enumerated Virginia as the Bureau composes it from published components. That is the enumerated
+figure by construction for 1800, 1830 and 1840. For 1810 and 1820 it matches the original-return
+totals, both CONTRADICTED against the 1850 restatement (research §5.4). `conform.BOUNDARY_RETROCESSIONS` is built from the same constant, and
+`apply_boundary_retrocessions` adds the figure back for the derived reversal set. Neither set is
+listed as years.
+
+**(b) A new shape, not a succession entry.** `Retrocession` is a recipient **gaining** territory from
+a jurisdiction that may hold no row, which is the inverse of `BoundarySuccession`. Keeping it
+separate is what H2 requires.
+
+**(c) The D005 guard admits the reversal keyed on the election.** `assert_no_interpolated_population`
+takes `retrocessions=` beside `successions=` and admits a reversal only at `(election_year, state)`.
+That answers H1: 1840 governs both 1844 and 1848 and only 1848 may carry the added-back value.
+Successions stay keyed on the census because the elections a succession pin serves (1864, 1868)
+want the same value. This is a scope choice, not a claim that the census key is right in general.
+
+**(d) The reversal is checked for consistency, and nothing verifies it independently.** The
+District does not participate in 1848, and both sides read one constant, so any cross-check is
+circular (H2). `assert_retrocession_restored` pins the mechanism's footprint (exactly the figure, on
+exactly the reversal set) and is labelled a consistency check. The values are pinned against the
+real corpus by the corpus-gated `TestRealCorpus`.
+
+**(e) `census_population` loses Alexandria's people, deliberately.** The District's row already
+excludes Alexandria (the Bureau's District note), so after (a) those people are in no row for
+1800–1840, and those five census years mix bases: Virginia `as_enumerated`, the District
+`present_day`. That is accepted because the District holds no electoral votes before 1964, the table
+was already not sum-consistent (the deliberate West Virginia double count), and no guard asserts a
+per-year sum. Crediting the District would restate a row the source publishes correctly for its own
+footprint.
+
+**(f) Verification has three states.** `VIRGINIA_VERIFICATION` replaces the binary
+`VIRGINIA_VERIFIED_CENSUSES`: `published_total` (1790/1850/1860), `published_components`
+(1800–1840), and absence, meaning unverified. That stays expressible even though no census in the
+window currently uses it.
+
+**(g) The two corrections are asserted disjoint.** `assert_boundary_corrections_disjoint` runs first
+in the validating builder and refuses any succession and retrocession of the same state that share a
+census or an election.
+
+**Rationale.**
+
+(a) is the only route on which every row in `dwh.census_population` says something true about
+itself. Its cost is a single derived reversal, and D066(f) had already named that as the complement
+of the correction set. The election-grain alternative would have kept the census table simpler by
+leaving a false `basis` on five of its rows, and the reason `basis` is a column (D059) is so that
+this kind of falsehood is visible.
+
+**Consequences.** Six `dwh.election_population` rows move down (Virginia 1824–1844). 1848 keeps its
+value (1,249,764), now reached by a different route. No public surface changes, because per-capita
+is not in the API snapshot until #245. D066(e)'s "three states in practice" is retired: the six rows'
+`at_election` is now true. `CLAUDE.md` still states the interim position and is left to **#264**,
+following the #253→#255 precedent.
+
+**Related:** #251, #208, #253, #245, D059, D060, D066, `src/usvote/census/transform.py`,
+`src/usvote/census/conform.py`, `docs/corrections.md`,
+`.claude/specs/research-boundary-sweep.md`.
+
+---

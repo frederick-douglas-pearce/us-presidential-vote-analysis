@@ -8,8 +8,9 @@ constant with a test rather than an inline condition:
   came from, recorded per row because the two disagree by amounts no assert can catch;
 * **scope** (:data:`NON_STATE_AREAS`) — which published rows are aggregates rather than
   jurisdictions;
-* **the boundary correction** (:data:`VIRGINIA_CORRECTION_CENSUSES`) — a hazard in this
-  source that produces plausible wrong numbers instead of a load error.
+* **the boundary corrections** (:data:`VIRGINIA_CORRECTION_CENSUSES` and
+  :data:`ALEXANDRIA_RETROCESSION`) — two hazards in this source, on two different axes,
+  that produce plausible wrong numbers instead of a load error.
 
 The EC spine is read for the jurisdiction check, injected as a frame the way
 :mod:`usvote.ucsb.transform` takes ``ec_participation`` — the D006-allowed direction
@@ -19,6 +20,8 @@ The EC spine is read for the jurisdiction check, injected as a frame the way
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from datetime import date
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -97,7 +100,14 @@ NON_STATE_AREAS: frozenset[str] = frozenset(
     }
 )
 
-#: The censuses whose Virginia figure is restated onto the borders then in force.
+#: The censuses whose Virginia figure is restated onto the borders then in force **as to
+#: the West Virginia counties**.
+#:
+#: That qualifier is load-bearing (#251/D066). This restatement is one axis; for the
+#: censuses 1800-1840 the figure it produces still carries **Alexandria County**, which
+#: was District of Columbia at those censuses, and so is borders-then-in-force only
+#: once :func:`apply_alexandria_retrocession` has also run. See
+#: :data:`ALEXANDRIA_RETROCESSION`.
 #:
 #: ``tabs15-65.xlsx`` reports **every** census on present-day state footprints, so for
 #: every census before West Virginia's 1863 separation its Virginia omits the counties
@@ -111,17 +121,125 @@ NON_STATE_AREAS: frozenset[str] = frozenset(
 #: in this source worth a correction rather than a note.
 VIRGINIA_CORRECTION_CENSUSES: tuple[int, ...] = tuple(range(1790, 1870, 10))
 
-#: The censuses where the restated Virginia figure has an **independent** cross-check:
-#: the file's own Virginia + West Virginia sum reproduces the separately-published
-#: enumerated Virginia exactly (S1 §4 — 1790 = 747,610; 1850 = 1,421,661;
-#: 1860 = 1,596,318).
+#: How each restated Virginia census is confirmed — **three states, not two** (#251).
 #:
-#: The other censuses in the window are computed by the same arithmetic but were **not**
-#: re-verified against a primary source, and S1 says so rather than implying otherwise.
-#: The distinction is recorded here, and in ``docs/corrections.md``, instead of letting
-#: a uniformly-confident correction imply evidence it does not have. The fifty-state
-#: residual sweep — whether Virginia is the only material case — is #208.
-VIRGINIA_VERIFIED_CENSUSES: frozenset[int] = frozenset({1790, 1850, 1860})
+#: :data:`VERIFIED_BY_PUBLISHED_TOTAL` — the file's own Virginia + West Virginia sum
+#: reproduces a **separately-published enumerated Virginia total** exactly (S1 §4 —
+#: 1790 = 747,610; 1850 = 1,421,661; 1860 = 1,596,318). Note that this already rests on
+#: an external figure: the file cannot confirm itself.
+#:
+#: :data:`VERIFIED_BY_PUBLISHED_COMPONENTS` — 1800-1840. #208 established that these
+#: five are **not** clean: the file's Virginia + West Virginia overshoots the enumerated
+#: Virginia by Alexandria County (0.79%-0.91% across the six elections 1824-1844 held
+#: before the retrocession; these censuses govern seven, 1824-1848). The residual is
+#: explained, quantified and corrected here: the figure is composed from three
+#: **published component** series — the file's two rows and the Bureau's Alexandria
+#: figures (:data:`ALEXANDRIA_RETROCESSION`). The 1996 volume prints the components,
+#: not an enumerated Virginia total, so for **1800, 1830 and 1840** the composition *is*
+#: the enumerated figure by construction and, in this repo's evidence, is checked
+#: against nothing independent (``research-boundary-sweep.md`` §4.1, §5.4). §5.4 records
+#: an independently printed total only for **1810 and 1820** — the original returns,
+#: reprinted in the Bureau's *A Century of Population Growth* (1909) — and the
+#: composition matches it; §5.4 marks
+#: both **CONTRADICTED**, because the 1850 Seventh Census restates them 22 and 13 higher
+#: (974,622 / 1,065,379). 1810 is weaker again, since its Alexandria cell is itself
+#: settled partly by arithmetic (:data:`ALEXANDRIA_RETROCESSION`). The map and
+#: :func:`apply_alexandria_retrocession` are checked against each other in **both**
+#: directions there, and the step writes the state into the row note.
+#:
+#: A census in the window with **no** entry would be computed-but-unverified. None is
+#: left, and the state stays expressible so a widened window cannot inherit a
+#: confidence it has not earned.
+#:
+#: **What an exact sum does and does not prove.** The Bureau itself: *"Prior to 1860
+#: this cannot be done exactly, because the present Virginia-West Virginia State
+#: boundary did not correspond to county boundaries in 1850 or earlier."* An exact
+#: reconciliation shows the Virginia/West Virginia split is **exhaustive** — nobody is
+#: lost or double-counted between the two rows — not that it is **accurate** county by
+#: county. Neither state claims the second.
+VERIFIED_BY_PUBLISHED_TOTAL = "published_total"
+VERIFIED_BY_PUBLISHED_COMPONENTS = "published_components"
+VIRGINIA_VERIFICATION: Mapping[int, str] = {
+    1790: VERIFIED_BY_PUBLISHED_TOTAL,
+    1800: VERIFIED_BY_PUBLISHED_COMPONENTS,
+    1810: VERIFIED_BY_PUBLISHED_COMPONENTS,
+    1820: VERIFIED_BY_PUBLISHED_COMPONENTS,
+    1830: VERIFIED_BY_PUBLISHED_COMPONENTS,
+    1840: VERIFIED_BY_PUBLISHED_COMPONENTS,
+    1850: VERIFIED_BY_PUBLISHED_TOTAL,
+    1860: VERIFIED_BY_PUBLISHED_TOTAL,
+}
+
+
+class Retrocession(NamedTuple):
+    """Territory a state **gained back** from a non-state jurisdiction after a census.
+
+    The inverse shape of :class:`usvote.census.conform.BoundarySuccession`, and
+    deliberately not an entry in it (D066(h), H2): a succession is a predecessor
+    *losing* people to a participating successor row it can be checked against, while a
+    retrocession is a recipient *gaining* from a jurisdiction that may hold no row at
+    all. ``population`` maps a census year to the transferred territory's published
+    figure; for those censuses the file's recipient figure **includes** it although the
+    territory was not the recipient's when enumerated.
+    """
+
+    recipient: str
+    donor: str
+    effective_date: date
+    population: Mapping[int, int]
+    citation: str
+
+
+#: Alexandria County — District of Columbia from 1801 until its retrocession to
+#: Virginia on 7 September 1846 (#208, #251).
+#:
+#: ``tabs15-65.xlsx`` credits it to Virginia at every census 1800-1840, so the restated
+#: Virginia figure for those censuses is 0.79%-0.91% high. Four of the five figures are
+#: the Census Bureau's **own**, as printed: Virginia State Note 2 of *Population of
+#: States and Counties of the United States: 1790 to 1990* (March 1996), the companion
+#: volume to the working paper the file comes from — *"State totals for 1800-1840
+#: include population of the portion of the District of Columbia taken from Virginia
+#: (Fairfax County) in 1791 but retroceded to Virginia in 1846"*. Those four are
+#: deliberately **not** computed as ``enumerated_DC - file_DC``: that derivation is how
+#: #208 found the case, and using it would make the correction depend on a second
+#: external series when a published one exists. The same volume's District note and its
+#: ``Arlington`` county row agree with them (``research-boundary-sweep.md`` §5.3).
+#:
+#: **1810 is the exception, and it is not Note 2's figure.** Note 2 prints 8,852, which
+#: is a defect in the note (not an OCR artifact, and no longer an open ambiguity). The
+#: value used, 8,552, rests on the volume's published ``Arlington`` county row (read at
+#: 500 dpi), with the tie against the rival 8,530 broken by the District note — and that
+#: tiebreak *is* the ``enumerated_DC - file_DC`` arithmetic avoided for the other four
+#: (``24,023 - 15,471 = 8,552``; ``15,471 + 8,530 = 24,001`` fails). It governs
+#: elections 1812-1820, outside the EC span, so nothing in the warehouse turns on it.
+#:
+#: Two traps worth carrying (§5.3): in 1820 the row printed *"County of Alexandria"* is
+#: the rural remainder only (1,485), the county total being that plus *"Alexandria"*
+#: (8,218); and the continuation of pre-1846 Alexandria County is the ``Arlington``
+#: row, not the modern ``Alexandria`` city row. And the subtraction is right **only
+#: because** the file's present-day Virginia includes Arlington/Alexandria at these
+#: censuses: against a source that excluded them the term must be dropped, not
+#: sign-flipped.
+#:
+#: The retrocession date is ATTRIBUTED, not re-read here (§5.4): Act of 9 July 1846,
+#: ch. XXXV, 9 Stat. 35, conditional on a county referendum held 1-2 September 1846,
+#: proclaimed in force 7 September 1846. The 1850 census counted Alexandria in
+#: Virginia, which is why 1850 and 1860 carry no term.
+ALEXANDRIA_RETROCESSION = Retrocession(
+    recipient="Virginia",
+    donor="District of Columbia",
+    effective_date=date(1846, 9, 7),
+    population={1800: 5_949, 1810: 8_552, 1820: 9_703, 1830: 9_573, 1840: 9_967},
+    citation=(
+        "US Census Bureau, Population of States and Counties of the United States: "
+        "1790 to 1990 (March 1996), Virginia Note 2: state totals for 1800-1840 "
+        "include the portion of the District of Columbia retroceded to Virginia in "
+        "1846 (1800: 5,949; 1810: 8,552 -- printed as 8,852, corrected by the same "
+        "volume's District note and Arlington row; 1820: 9,703; 1830: 9,573; "
+        "1840: 9,967). Retrocession: Act of 9 July 1846, 9 Stat. 35, proclaimed "
+        "7 September 1846."
+    ),
+)
 
 _VIRGINIA = "Virginia"
 _WEST_VIRGINIA = "West Virginia"
@@ -262,6 +380,7 @@ def transform_census(
 
     frame = pd.DataFrame.from_records(records, columns=list(CENSUS_COLUMNS))
     frame = apply_virginia_boundary_correction(frame)
+    frame = apply_alexandria_retrocession(frame)
     frame["population"] = frame["population"].astype("Int64")
     frame["census_year"] = frame["census_year"].astype(int)
     frame["redistributable"] = frame["redistributable"].astype(bool)
@@ -271,13 +390,21 @@ def transform_census(
 
 
 def apply_virginia_boundary_correction(frame: pd.DataFrame) -> pd.DataFrame:
-    """Restate pre-1863 Virginia onto the borders in force at each census.
+    """Restate pre-1863 Virginia onto its borders at each census, as to West Virginia.
 
     The corrected figure is Virginia + West Virginia **as the file itself publishes
-    them**, which is why this needs no external source: the file proves the arithmetic
-    on its own at the censuses that have an independent cross-check (1790, 1850, 1860 —
-    S1 §4), where the sum reproduces the separately-published enumerated Virginia
-    exactly.
+    them**, which is why this step needs no external figure to *compute*; confirming it
+    does, and :data:`VIRGINIA_VERIFICATION` records against what. At 1790, 1850 and 1860
+    the sum reproduces the separately-published enumerated Virginia exactly (S1 §4) —
+    which shows the split between the two rows is exhaustive, not that it is accurate
+    county by county (the Bureau: before 1860 it "cannot be done exactly").
+
+    **This is one axis of two.** For 1800-1840 the sum still includes Alexandria County,
+    which was not Virginia's at those censuses; :func:`apply_alexandria_retrocession`
+    removes it, and is kept a separate step because Alexandria's population is **not in
+    this file** — folding it in here would launder an external figure under a
+    self-computing function, and it is a different mechanism (1846, DC->VA) from this
+    one (1863, VA->WV).
 
     West Virginia's own rows are deliberately **left alone**, at ``present_day`` basis.
     They are a real population for the territory that became West Virginia, and #182 is
@@ -300,20 +427,118 @@ def apply_virginia_boundary_correction(frame: pd.DataFrame) -> pd.DataFrame:
             # part would be exactly the fabricated value D005 forbids.
             continue
         total = int(published_va) + int(published_wv)
-        evidence = (
-            "independently cross-checked against the separately-published enumerated "
-            "Virginia"
-            if census_year in VIRGINIA_VERIFIED_CENSUSES
-            else "computed by the same arithmetic, but not re-verified against a "
-            "primary source for this census (see #208)"
-        )
+        verification = VIRGINIA_VERIFICATION.get(census_year)
+        if verification == VERIFIED_BY_PUBLISHED_TOTAL:
+            evidence = (
+                "independently cross-checked against the separately-published "
+                "enumerated Virginia"
+            )
+        elif verification == VERIFIED_BY_PUBLISHED_COMPONENTS:
+            evidence = (
+                "one of two restatements for this census: it still includes Alexandria "
+                "County, removed in the next step"
+            )
+        else:
+            evidence = (
+                "computed by the same arithmetic, but not re-verified against a "
+                "primary source for this census"
+            )
         corrected.loc[va_mask, "population"] = total
         corrected.loc[va_mask, "basis"] = BASIS_AS_ENUMERATED
         corrected.loc[va_mask, "note"] = (
-            f"Restated onto the borders in force at the {census_year} census. The "
+            f"Restated onto the {census_year} borders as to West Virginia. The "
             f"published figure ({int(published_va):,}) is on present-day footprints "
             f"and omits the counties that became West Virginia in 1863; the restated "
             f"figure adds the published West Virginia ({int(published_wv):,}) back, "
             f"and is {evidence}."
+        )
+    return corrected
+
+
+def apply_alexandria_retrocession(
+    frame: pd.DataFrame, *, retrocession: Retrocession = ALEXANDRIA_RETROCESSION
+) -> pd.DataFrame:
+    """Remove Alexandria County from Virginia's 1800-1840 figures (#251).
+
+    Runs **after** :func:`apply_virginia_boundary_correction` and subtracts the Bureau's
+    published figure from the West-Virginia-restated row, so the result is
+    ``file Virginia + file West Virginia - Alexandria`` — the enumerated Virginia as
+    the Bureau composes it from published components (``research-boundary-sweep.md``
+    §4.1, §5.4: 880,200 / 974,600 / 1,065,366 / 1,211,405 / 1,239,797). How far that is
+    independently confirmed differs by census; :data:`VIRGINIA_VERIFICATION` says how.
+    Only then is ``as_enumerated`` true of these rows on both axes.
+
+    The map (read at call time) and this step must agree in **both** directions, or
+    this raises: every census this step corrects must be recorded as
+    :data:`VERIFIED_BY_PUBLISHED_COMPONENTS`, and every census so recorded must have a
+    figure pinned in ``retrocession.population`` — otherwise the West Virginia step
+    would persist a note saying Alexandria is "removed in the next step" for a census
+    where nothing removes it.
+
+    Skips a census whose Virginia row is absent or NULL, as its sibling does — there is
+    nothing to correct and nothing may be invented. **Raises** where the row is present
+    and still ``present_day``: that means the West Virginia step did not run (a missing
+    West Virginia cell, or a reordering), and subtracting Alexandria from the
+    present-day figure would produce a number that is neither published nor enumerated.
+
+    Alexandria's people land in **no** row afterwards: the file's District of Columbia
+    figure already excludes them (the Bureau's District note says so). DC holds no
+    electoral votes until 1964, so no denominator loses them; the cost is that these
+    five census years are not sum-consistent — which the West Virginia double-count
+    already made true, and which nothing in this package asserts.
+    """
+    composed = {
+        year
+        for year, state in VIRGINIA_VERIFICATION.items()
+        if state == VERIFIED_BY_PUBLISHED_COMPONENTS
+    }
+    uncorrected = sorted(composed - set(retrocession.population))
+    if uncorrected:
+        raise CensusTransformError(
+            f"VIRGINIA_VERIFICATION records census(es) {uncorrected} as "
+            f"{VERIFIED_BY_PUBLISHED_COMPONENTS!r}, but {retrocession.donor}'s "
+            f"retrocession pins no figure for them, so nothing composes them. The map "
+            f"and the correction disagree; fix one of them."
+        )
+    corrected = frame.copy()
+    for census_year, transferred in retrocession.population.items():
+        mask = (corrected["census_year"] == census_year) & (
+            corrected["state"] == retrocession.recipient
+        )
+        if not mask.any():
+            continue
+        index = corrected.index[mask][0]
+        current = corrected.at[index, "population"]
+        if pd.isna(current):
+            continue
+        if corrected.at[index, "basis"] != BASIS_AS_ENUMERATED:
+            raise CensusTransformError(
+                f"{retrocession.recipient}'s {census_year} row is still "
+                f"{corrected.at[index, 'basis']!r}: the West Virginia restatement did "
+                f"not run for this census, so subtracting {retrocession.donor}'s "
+                f"retroceded {transferred:,} would yield a figure that is neither "
+                f"published nor enumerated. Refusing rather than guessing."
+            )
+        if VIRGINIA_VERIFICATION.get(census_year) != VERIFIED_BY_PUBLISHED_COMPONENTS:
+            raise CensusTransformError(
+                f"{retrocession.recipient}'s {census_year} figure is being composed "
+                f"from published components, but VIRGINIA_VERIFICATION records "
+                f"{VIRGINIA_VERIFICATION.get(census_year)!r} for that census, not "
+                f"{VERIFIED_BY_PUBLISHED_COMPONENTS!r}. The map and the correction "
+                f"disagree; fix one of them."
+            )
+        enumerated = int(current) - transferred
+        corrected.at[index, "population"] = enumerated
+        corrected.at[index, "note"] = (
+            f"Restated onto the borders in force at the {census_year} census, on both "
+            f"axes. The published figure is on present-day footprints: it omits the "
+            f"counties that became West Virginia in 1863, which are added back from "
+            f"the file's own West Virginia row, and it includes Alexandria County, "
+            f"District of Columbia until its retrocession on "
+            f"{retrocession.effective_date.isoformat()}, which is removed using the "
+            f"Census Bureau's published figure ({transferred:,}). The result "
+            f"({enumerated:,}) is the enumerated Virginia composed from those three "
+            f"published components (verification: "
+            f"{VERIFIED_BY_PUBLISHED_COMPONENTS})."
         )
     return corrected
