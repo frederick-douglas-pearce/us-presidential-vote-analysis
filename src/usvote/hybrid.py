@@ -68,8 +68,8 @@ it: ``ec_determinative`` simply does not read that column.
 actually **counted** (#144, D046). Those are three different quantities and they form a
 ladder — **appointed ≥ cast ≥ counted** — with a documented gap at each step:
 ``ELECTORAL_VOTE_SHORTFALLS`` opens the first (appointed, never cast: the 2000 DC
-abstention, 1832 Maryland) and ``count_status`` opens the second (cast, never counted:
-1868's disputed nine, 1872's rejected seventeen).
+abstention, 1832 Maryland, 1864 Nevada) and ``count_status`` opens the second (cast,
+never counted: 1868's disputed nine, 1872's rejected seventeen).
 
 So Σ ``national_counted_electoral_votes`` can be *less* than ``ec_denominator`` and
 candidate shares sum to **≤ 1.0, never == 1.0** — correct, not a bug

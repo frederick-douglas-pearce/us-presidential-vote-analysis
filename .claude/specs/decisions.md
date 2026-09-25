@@ -4616,3 +4616,65 @@ following the #253→#255 precedent.
 `.claude/specs/research-boundary-sweep.md`.
 
 ---
+
+## D068: Nevada 1864's appointed allotment is restored in the spine; the appointed-elector correction covers a printed cast figure
+
+**Date:** 2026-09-25
+**Issue:** #243 · **Builds on:** D041, D045, D046, D063 · **Supersedes:** D063's deferral of the
+Nevada correction and its "17 rows in three kinds" scope note
+
+**Context.**
+
+D063's seat reconciliation found `(1864, Nevada)` recorded at 2 against an apportionment of 3, and
+catalogued it under `electoral_record_understates_allotment` rather than fixing the spine, because
+the fix moves a public number. The Archives' own 1864 page settles which figure is right: Table 2
+note 2 reads "Nevada was allocated three electoral votes, but one elector did not vote." So the
+table prints the votes **cast** in its allotment column, and its 233 total is a cast figure where
+the appointed whole number (D041) is 234.
+
+**Decision.**
+
+(a) **Two entries, one in each existing constant.** `APPOINTED_ELECTORS_NOT_IN_TABLE` gets
+`(1864, "Nevada"): 3` and `ELECTORAL_VOTE_SHORTFALLS` gets `(1864, "Nevada"): 1`. Nevada is the
+first state in both: the first because the table understates the allotment, the second because
+fewer electors voted than were appointed. `assert_row_votes_sum_to_total` checks cast + shortfall
+against the allotment, so removing either entry without the other fails the build.
+
+(b) **The appointed constant's values stay absolute, and it now covers two ways of understating.**
+The table prints `-` (1872 Arkansas and Louisiana) or prints the cast figure (1864 Nevada). Its
+values remain the full appointed allotment, not a delta over the printed cell.
+
+(c) **The printed-totals check subtracts what each corrected state printed.** Check (c) of
+`assert_corrections_reconcile_printed_totals` expected `printed_total + Σ appointed`, which holds
+only when every corrected state printed 0. It would have failed the build on the correct 234
+(expecting 236). It now expects `printed_total + Σ (appointed − printed_state_allotment)`, reading
+the per-state printed values from a sibling snapshot, `_printed_state_allotments`, taken before
+the correction runs.
+
+(d) **The appointed constant can only raise an allotment.**
+`_apply_appointed_elector_corrections` raises when a catalogued value is at or below what the
+source prints for that row. An equal value is an entry the source has since fixed, and a smaller
+one would lower a real allotment. This makes the constant self-cleaning, the same way the seat
+reconciliation's catalog is.
+
+(e) **The seat-reconciliation kind stays, with no member.** The Nevada `SeatException` is removed,
+as its self-cleaning design required. `KIND_RECORD_UNDERSTATES_ALLOTMENT` stays in
+`SEAT_EXCEPTION_KINDS` on the D061 `present_but_unparsed` precedent, because it names a class the
+reconciliation can find again.
+
+**Rationale.** (a) reuses the two mechanisms that already describe the two facts involved: an
+understated allotment and an elector who did not vote. A new constant would split
+"appointed-but-not-printed" across two homes. (b) keeps the value the independently checkable
+number (seats + 2 = 3). A delta would be meaningful only relative to whatever the source currently
+prints.
+
+**Consequences.** 1864's `ec_denominator` moves 233 → 234, so every candidate's `ec_share_full`
+for that year moves. No winner and no `ec_determinative` outcome changes. The counted and cast
+measures are unchanged (Nevada contributes 2 to Lincoln under both), and `pv_coverage` for 1864
+stays 1.0 (234 / 234). The API snapshot's content hash changes; `SNAPSHOT_SCHEMA_VERSION` does not.
+The live cutover is deliberately **not** made for this change alone: #245, sequenced after #243,
+carries the one D034 cutover for both. `CLAUDE.md` still describes the Nevada row as open and is
+left to a follow-up docs issue, following the #253→#255 and #251→#264 precedent.
+
+**Related:** #243, #183, #245, D041, D045, D046, D061, D063, `src/usvote/transform.py`,
+`src/usvote/census/reconcile.py`, `docs/corrections.md`.

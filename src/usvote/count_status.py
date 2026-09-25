@@ -1,14 +1,15 @@
 """The ``dwh.votes`` count-status enum contract (D043 §3, D044).
 
-A *counting* status carried by each vote row: were these electoral votes, once
-cast, actually **counted** by Congress? It is deliberately a separate fact from
+A *counting* status carried by each vote row: were these electoral votes, once cast,
+actually **counted** by Congress? It is deliberately a separate fact from
 :data:`usvote.transform.ELECTORAL_VOTE_SHORTFALLS`, which records votes that were
-**never cast** (appointed > cast: 1832 Maryland's two electors in ill health,
-2000 DC's protest abstention). This column is the other failure — *cast, then not
-counted* (cast > counted: 1868, 1872). D043 §6 keeps the two mechanisms disjoint
-on purpose, and they are disjoint **by construction**: a row whose votes were cast
-still sums to its allotment, so ``assert_row_votes_sum_to_total`` would reject a
-spurious shortfall entry for one of these years.
+**never cast** (appointed > cast: 1832 Maryland's two electors in ill health, 1864
+Nevada's elector who did not vote, 2000 DC's protest abstention). This column is the
+other failure — *cast, then not counted* (cast > counted: 1868, 1872). D043 §6 keeps
+the two mechanisms disjoint on purpose, and they are disjoint **by construction**: a
+row whose votes were cast still sums to its allotment, so
+``assert_row_votes_sum_to_total`` would reject a spurious shortfall entry for one of
+these years.
 
 **Why a module of its own** (D044). The enum has exactly one definition, and two
 callers that must not depend on each other: :mod:`usvote.transform` *assigns* the

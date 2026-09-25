@@ -13,12 +13,13 @@ disagreement is a **documented correction**, never a silent adjustment of the fa
 ``docs/corrections.md``, and an **undeclared** disagreement fails the build.
 
 **But "the record wins" is a rule about precedence, not a claim that every recorded
-value is right.** One catalogued row — ``(1864, Nevada)`` — is a case where the record
-is *known* to disagree with the repo's own D041 contract, and the catalog says so in as
-many words rather than recording the register as correct there. That is what
+value is right.** A disagreement can also be a case where the record is *known* to
+disagree with the repo's own D041 contract, and the catalog then says so in as many
+words rather than recording the register as correct there. That is what
 :data:`KIND_RECORD_UNDERSTATES_ALLOTMENT` exists for, and why it is a separate kind:
 laundering a known defect into "the record is authoritative here" is exactly the
-inversion D046 warns about.
+inversion D046 warns about. Its one instance so far, ``(1864, Nevada)``, was found here
+and then corrected in the spine by #243, so the kind currently has no member.
 
 **The rule, and the wrong-easy-answer it is not.** A state's electoral allotment is its
 apportioned House seats **plus two** for its senators::
@@ -110,6 +111,12 @@ KIND_SEATS_NOT_APPORTIONED = "seats_not_apportioned"
 #: **It is self-cleaning.** When the spine correction lands, the row reconciles, and
 #: :func:`_assert_no_stale_exception`'s first branch fires and forces this entry's
 #: removal. The catalog cannot quietly outlive the defect it describes.
+#:
+#: **It has no member, deliberately, and stays in the vocabulary.** Its only instance,
+#: ``(1864, Nevada)`` — a recorded 2 against an appointed 3 — self-cleaned exactly as
+#: described when #243 corrected the spine. The kind names a class the reconciliation
+#: can find again, on the ``present_but_unparsed`` precedent in
+#: :data:`usvote.census.conform.EXCEPTION_KINDS` (D061).
 KIND_RECORD_UNDERSTATES_ALLOTMENT = "electoral_record_understates_allotment"
 
 #: The closed vocabulary, on the :data:`usvote.census.conform.EXCEPTION_KINDS`
@@ -168,19 +175,11 @@ _WEST_VIRGINIA_ADMISSION = (
     "electors in 1864 and 1868."
 )
 
-_NEVADA_1864_ADMISSION = (
-    "Nevada was admitted 31 October 1864 by presidential proclamation (13 Stat. 749) "
-    "under the Enabling Act of 21 March 1864 (13 Stat. 30), eight days before the "
-    "election, and was apportioned one representative under the 1860 census. One "
-    "representative plus two senators is an appointed allotment of three; the National "
-    "Archives table prints two in its allotment column, and its 1864 national total of "
-    "233 is likewise a count of votes cast."
-)
 
 #: Every ``(election_year, state)`` where the published seats and the recorded allotment
-#: disagree, with the cause. **Seventeen rows, in three kinds.** Two of them are facts
-#: about history — seats without electoral votes, and electoral votes without seats —
-#: and the third records a known defect in the electoral record itself.
+#: disagree, with the cause. Every current row is a fact about history — seats without
+#: electoral votes, or electoral votes without seats. The third kind, a known defect in
+#: the electoral record itself, has no member since #243 corrected ``(1864, Nevada)``.
 #:
 #: The 14 withheld rows are **1864 and 1868 only** — 11 states in 1864, three in 1868.
 #: 1872 has none: by then every state was readmitted, and Arkansas's and Louisiana's
@@ -247,27 +246,6 @@ SEAT_RECONCILIATION_EXCEPTIONS: tuple[SeatException, ...] = (
             ),
         )
         for year in (1864, 1868)
-    ),
-    SeatException(
-        election_year=1864,
-        state="Nevada",
-        kind=KIND_RECORD_UNDERSTATES_ALLOTMENT,
-        recorded_electoral_votes=2,
-        citation=_NEVADA_1864_ADMISSION,
-        note=(
-            "The recorded 2 is a count of votes CAST; the appointed allotment is 3 "
-            "(one representative under the 1860 census, plus two senators). This is "
-            "the same appointed-exceeds-cast situation as 1832 Maryland and 2000 DC, "
-            "which this repo records in ELECTORAL_VOTE_SHORTFALLS; it differs only in "
-            "which figure the Archives printed in the allotment column — the appointed "
-            "one there, the cast one here. So the recorded allotment carries a cast "
-            "figure in a column D041 defines as appointed. Correcting the spine "
-            "moves the 1864 denominator from 233 to 234 and so changes ec_share_full "
-            "and the public API snapshot content hash, which is an EC-domain change "
-            "deferred to its own issue rather than made inside a census validation "
-            "story — it is tracked as #243. When it lands this row will reconcile and "
-            "the stale-declaration guard will require this entry's removal."
-        ),
     ),
 )
 

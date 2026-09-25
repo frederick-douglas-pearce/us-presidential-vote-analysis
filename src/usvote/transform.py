@@ -311,8 +311,18 @@ SPOTTED_EAGLE_LAST = "Spotted Eagle"
 # 2000 national Totals row inherits the same 1-vote shortfall (538 allotted, 537
 # cast). Source: https://www.archives.gov/electoral-college/2000 (Notes section) and
 # the Archives' email reply; see docs/corrections.md.
+#
+# 1864 Nevada: admitted eight days before the election, Nevada appointed three electors
+# and one did not vote, so it cast 2 of its 3 (all for Lincoln). The Archives' Table 2
+# note 2: "Nevada was allocated three electoral votes, but one elector did not vote."
+# Unlike Maryland and DC, the table prints the CAST figure (2) in the allotment column,
+# so this entry is paired with a (1864, "Nevada") entry in
+# APPOINTED_ELECTORS_NOT_IN_TABLE that restores the allotment to 3 (#243). The 1864
+# Totals row inherits the 1-vote shortfall (234 appointed, 233 cast).
+# Source: https://www.archives.gov/electoral-college/1864 (Table 2 note 2).
 ELECTORAL_VOTE_SHORTFALLS: Mapping[tuple[int, str], int] = {
     (1832, "Maryland"): 2,
+    (1864, "Nevada"): 1,
     (2000, "District of Columbia"): 1,
 }
 
@@ -445,8 +455,25 @@ UNPRINTED_ELECTORAL_VOTES: Mapping[tuple[int, str, str], int] = {
 }
 
 # Electors a state APPOINTED that its Archives table does not print in the allotment
-# column (#144, D045). Distinct from every other correction here: it moves the
-# *denominator*, not a candidate's votes.
+# column (#144, D045; widened by #243). Distinct from every other correction here: it
+# moves the *denominator*, not a candidate's votes. Each value is the state's full
+# **appointed** allotment (absolute, not a delta), and it must exceed what the table
+# prints for that row — :func:`_apply_appointed_elector_corrections` raises otherwise,
+# so an entry the source has since fixed fails the build instead of lingering.
+#
+# The table understates the allotment in two ways, and both are here:
+#
+# - It prints "-" (1872 Arkansas and Louisiana, below): the votes were cast and then
+#   refused, and the table leaves the whole row blank.
+# - It prints the number of votes CAST (1864 Nevada): Nevada appointed 3 electors and
+#   one did not vote, and the table's allotment column reads 2. The Archives' own Table
+#   2 note 2 says so: "Nevada was allocated three electoral votes, but one elector did
+#   not vote." Independently, Nevada held one representative under the 1860
+#   apportionment plus two senators; it was admitted 31 October 1864 by proclamation
+#   (13 Stat. 749) under the Enabling Act of 21 March 1864 (13 Stat. 30). So the year's
+#   denominator is 234, not the 233 the page's totals row prints. Because Nevada cast
+#   fewer votes than it appointed, it is also in ELECTORAL_VOTE_SHORTFALLS — the first
+#   state in both constants.
 #
 # 1872 Arkansas (6) and Louisiana (8) print "-" for their allotment because neither
 # state's votes entered the count — but both had appointed their full complement, and
@@ -463,17 +490,22 @@ UNPRINTED_ELECTORAL_VOTES: Mapping[tuple[int, str, str], int] = {
 # numbers coincide (6 and 8 in both). The coincidence holds only because every appointed
 # elector in those states cast for one candidate and all were rejected; a state that
 # appointed N of which only M were refused, or whose votes split, breaks it. Merging
-# them would bake the coincidence into the schema. The two are cross-checked for free:
-# :func:`assert_row_votes_sum_to_total` requires each row's cast votes to equal its
-# allotment, so an appointed 6 against an unprinted 5 raises.
+# them would bake the coincidence into the schema. The constants are cross-checked for
+# free: :func:`assert_row_votes_sum_to_total` requires each row's cast votes plus its
+# documented :data:`ELECTORAL_VOTE_SHORTFALLS` to equal its allotment. So an appointed
+# 6 against an unprinted 5 raises, and so does Nevada's appointed 3 if either it or its
+# 1-vote shortfall is removed without the other.
 #
 # Sources: CRS Report RL30769, "Electoral Vote Counts in Congress: Survey of Certain
 # Congressional Practices" (2000-12-13, a US Government work), which records the
 # announced whole number of 366 electors with 349 votes counted and 17 rejected (Georgia
 # 3, Arkansas 6, Louisiana 8); independently derivable from the Apportionment Act of
 # 1872 (17 Stat. 28) — 37 states x 2 senators + 292 representatives = 366, Arkansas 4 +
-# 2 = 6, Louisiana 6 + 2 = 8. See docs/corrections.md.
+# 2 = 6, Louisiana 6 + 2 = 8. For 1864 Nevada:
+# https://www.archives.gov/electoral-college/1864 (Table 2 note 2). See
+# docs/corrections.md.
 APPOINTED_ELECTORS_NOT_IN_TABLE: Mapping[tuple[int, str], int] = {
+    (1864, "Nevada"): 3,
     (1872, "Arkansas"): 6,
     (1872, "Louisiana"): 8,
 }
@@ -1068,15 +1100,17 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
        (1872's 17 rejected votes). Applied **after** the Others pass, because that pass
        zeroes and rewrites whole columns and would erase them.
     3. :data:`APPOINTED_ELECTORS_NOT_IN_TABLE` — correct the *allotment* column where
-       the source prints "-" for a state that did appoint electors (1872 AR/LA), then
-       rebuild the totals row's allotment from the state rows (352 -> 366).
+       the source prints less than a state appointed — "-" for 1872 AR/LA, the cast 2
+       for 1864 Nevada — then rebuild the totals row's allotment from the state rows
+       (352 -> 366, 233 -> 234).
 
     All three run before :func:`assert_row_votes_sum_to_total`, which is what makes the
     corrections checkable: 1872 Georgia only reconciles (11 = 6 + 2 + 3) once step 2 has
     restored Greeley's three votes.
 
     Because every pass **overwrites** the source's own published totals cells, the
-    printed row is snapshotted first and reconciled against the result by
+    printed row (and the printed allotment of every state pass 3 corrects) is
+    snapshotted first and reconciled against the result by
     :func:`assert_corrections_reconcile_printed_totals` — without which the downstream
     ``assert_totals_equal_state_sum`` would compare a derived number against itself for
     exactly the years that were corrected (code review, #144).
@@ -1085,6 +1119,7 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
         list(parsed_years), ["t2", "votes_by_state"], ["year"]
     )
     printed_totals = _printed_totals_by_year(matrix)
+    printed_allotments = _printed_state_allotments(matrix)
     for year, candidates in OTHER_CANDIDATES.items():
         year_mask = matrix["year"] == year
         if not year_mask.any():
@@ -1100,7 +1135,9 @@ def _votes_matrix(parsed_years: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
         _rebuild_totals_row(matrix, int(year), other_cols)
     matrix = _apply_unprinted_votes(matrix, parsed_years)
     matrix = _apply_appointed_elector_corrections(matrix)
-    assert_corrections_reconcile_printed_totals(matrix, printed_totals, parsed_years)
+    assert_corrections_reconcile_printed_totals(
+        matrix, printed_totals, parsed_years, printed_allotments
+    )
     return matrix
 
 
@@ -1133,10 +1170,32 @@ def _printed_totals_by_year(matrix: pd.DataFrame) -> dict[int, dict[str | int, i
     }
 
 
+def _printed_state_allotments(matrix: pd.DataFrame) -> dict[tuple[int, str], int]:
+    """Snapshot each catalogued state's allotment **as printed**, before pass 3.
+
+    The states are the keys of :data:`APPOINTED_ELECTORS_NOT_IN_TABLE`, whose
+    correction overwrites the printed cell.
+
+    The sibling of :func:`_printed_totals_by_year`, for check (c) of
+    :func:`assert_corrections_reconcile_printed_totals`: a correction raises the year's
+    allotment by ``appointed - printed`` for each state, and the printed half is gone
+    once pass 3 has run. For 1872 AR/LA it is 0 (the page prints "-"); for 1864 Nevada
+    it is the 2 the page prints. Keys absent from this run are simply not in the result.
+    """
+    snapshot: dict[tuple[int, str], int] = {}
+    for year, state in APPOINTED_ELECTORS_NOT_IN_TABLE:
+        row = (matrix["year"] == year) & (matrix["state"] == state)
+        if int(row.sum()) == 1:
+            printed = matrix.loc[row, "total_electoral_votes"].iloc[0]
+            snapshot[(year, state)] = int(printed)
+    return snapshot
+
+
 def assert_corrections_reconcile_printed_totals(
     matrix: pd.DataFrame,
     printed_totals: Mapping[int, Mapping[str | int, int]],
     parsed_years: Sequence[Mapping[str, Any]],
+    printed_allotments: Mapping[tuple[int, str], int],
 ) -> None:
     """Raise unless a corrected totals row equals the printed one plus its corrections.
 
@@ -1156,8 +1215,13 @@ def assert_corrections_reconcile_printed_totals(
       national figure, which no other assert does.
     - **Unprinted votes** — a corrected column must equal its printed value plus exactly
       the votes catalogued for it (1872: Grant 286 + 6 + 8 = 300; Greeley 0 + 3 = 3).
-    - **Appointed electors** — the corrected allotment must equal the printed one plus
-      the catalogued appointments (1872: 352 + 6 + 8 = 366).
+    - **Appointed electors** — the corrected allotment must equal the printed one plus,
+      for each catalogued state, what the correction added to that state's *printed*
+      allotment (1872: 352 + (6 - 0) + (8 - 0) = 366; 1864: 233 + (3 - 2) = 234). The
+      printed per-state value is ``printed_allotments``, from
+      :func:`_printed_state_allotments`. Subtracting it is what keeps this a check on
+      the source — the page's totals row against its own state rows — rather than one
+      that assumes every corrected state printed "-" (#243).
 
     A re-scrape or an Archives edit that moved a printed total would now fail here
     instead of being silently absorbed.
@@ -1212,18 +1276,27 @@ def assert_corrections_reconcile_printed_totals(
                     f"(expected {want})"
                 )
 
-        # (c) the allotment == printed + catalogued appointments
-        appointed = sum(
-            n for (y, _state), n in APPOINTED_ELECTORS_NOT_IN_TABLE.items() if y == year
-        )
-        if appointed and "total_electoral_votes" in printed:
+        # (c) the allotment == printed + what the catalogued appointments added. Keyed
+        # on the year having catalogued states rather than on ``added``. In the
+        # pipeline a correction that adds nothing never reaches here —
+        # _apply_appointed_elector_corrections refuses ``appointed <= printed`` first —
+        # so this keying is belt-and-braces for a direct call, not the guard for it.
+        catalogued = [
+            (key, appointed)
+            for key, appointed in APPOINTED_ELECTORS_NOT_IN_TABLE.items()
+            if key[0] == year and key in printed_allotments
+        ]
+        if catalogued and "total_electoral_votes" in printed:
+            added = sum(
+                appointed - printed_allotments[key] for key, appointed in catalogued
+            )
             got = int(row["total_electoral_votes"])
-            want = printed["total_electoral_votes"] + appointed
+            want = printed["total_electoral_votes"] + added
             if got != want:
                 offenders.append(
                     f"{year}: allotment reads {got}, but the source printed "
-                    f"{printed['total_electoral_votes']} and {appointed} appointed "
-                    f"elector(s) were catalogued (expected {want})"
+                    f"{printed['total_electoral_votes']} and the catalogued appointed "
+                    f"electors add {added} (expected {want})"
                 )
 
     if offenders:
@@ -1321,10 +1394,16 @@ def _apply_unprinted_votes(
 
 
 def _apply_appointed_elector_corrections(matrix: pd.DataFrame) -> pd.DataFrame:
-    """Restore allotments the source prints as "-", then rebuild the totals allotment.
+    """Restore allotments the source understates, then rebuild the totals allotment.
 
-    See :data:`APPOINTED_ELECTORS_NOT_IN_TABLE` for why 1872 Arkansas and Louisiana are
-    not the same case as 1868's Mississippi/Texas/Virginia, which stay genuine zeros.
+    The source understates them two ways: it prints "-" (1872 Arkansas and Louisiana) or
+    the number of votes cast (1864 Nevada, 2 of 3). See
+    :data:`APPOINTED_ELECTORS_NOT_IN_TABLE` for why 1872 Arkansas and Louisiana are not
+    the same case as 1868's Mississippi/Texas/Virginia, which stay genuine zeros.
+
+    Raises if a catalogued value does not exceed what the source prints for that row:
+    the constant only ever raises an allotment, so an equal value is a stale entry the
+    source has since fixed, and a smaller one would lower a real allotment.
 
     The totals row's allotment is **recomputed from the state rows** rather than
     incremented, so 366 is derived from the 37 states that make it up — the same
@@ -1340,6 +1419,16 @@ def _apply_appointed_elector_corrections(matrix: pd.DataFrame) -> pd.DataFrame:
             raise TransformError(
                 f"appointed-elector correction ({year}, {state!r}) matched "
                 f"{int(row.sum())} state rows, expected exactly 1."
+            )
+        printed = int(matrix.loc[row, "total_electoral_votes"].iloc[0])
+        if appointed <= printed:
+            raise TransformError(
+                f"appointed-elector correction ({year}, {state!r}) is {appointed}, but "
+                f"the source prints an allotment of {printed}. This constant only ever "
+                "RAISES an allotment the source understates: an equal value means the "
+                "source has been corrected and this entry is stale (remove it, and any "
+                "paired ELECTORAL_VOTE_SHORTFALLS entry the row-sum check then flags), "
+                "and a smaller one would lower a real allotment."
             )
         matrix.loc[row, "total_electoral_votes"] = appointed
         touched_years.add(year)
