@@ -1558,6 +1558,45 @@ def test_the_ratio_alone_does_not_move_the_digest() -> None:
     assert _content_hash(data, base) == _content_hash(data, moved)
 
 
+def test_the_digest_does_not_depend_on_row_order() -> None:
+    """``_content_hash`` sorts each table before hashing, so row order cannot move it.
+
+    Called directly because every build path hands it frames that are already sorted
+    (``build_snapshot`` and ``build_per_capita_table`` both sort), so a build-level
+    shuffle cannot show the sort inside the hash doing anything. Both tables are
+    reversed here: the fact rows and the per-capita rows.
+    """
+    from usvote.snapshot import _content_hash
+
+    data = _read_fact_for_hash()
+    pc = _hashable_per_capita()
+    reversed_data = data.iloc[::-1].reset_index(drop=True)
+    reversed_pc = pc.iloc[::-1].reset_index(drop=True)
+    assert _content_hash(data, pc) == _content_hash(reversed_data, pc)
+    assert _content_hash(data, pc) == _content_hash(data, reversed_pc)
+
+
+def _read_fact_for_hash() -> pd.DataFrame:
+    """The finished ``ec_pv`` frame ``_content_hash`` reads, from the synthetic fact."""
+    frame = add_candidate_slug(
+        _ec_pv_frame().merge(_status_frame(), on=["year", "state"], how="left")
+    )
+    for col in (
+        "total_electoral_votes",
+        "president_electoral_votes",
+        "national_electoral_votes",
+        "president_electoral_rank",
+        "candidate_votes",
+        "state_total_votes",
+        "president_electoral_votes_counted",
+        "national_counted_electoral_votes",
+    ):
+        frame[col] = frame[col].astype("Int64")
+    return frame[list(DATA_COLUMNS)].sort_values(
+        ["year", "state", "candidate_slug"], kind="stable"
+    ).reset_index(drop=True)
+
+
 def test_per_capita_rows_reach_the_digest() -> None:
     """Adding one per-capita row changes the digest.
 
