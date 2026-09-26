@@ -321,5 +321,9 @@ Leaving it out keeps the hash free of floats. A change to the formula is not abs
 silently: the build checks that every ratio equals `population / total_electoral_votes`
 and refuses a snapshot where it does not, so a formula change forces an edit to the build,
 which is when the schema version should move. A separator byte sits between the two
-tables' rows as defence in depth. It has no test of its own: the tables serialize to
-different field counts, so no collision it would prevent has been constructed. The version went 3 → 4.
+tables' rows as defence in depth. It has no test of its own. On clean data it makes no
+difference, because the tables serialize to different field counts. Nothing yet stops a
+string value from containing the hash's own delimiter characters, though, and with such a
+value two different snapshots can collide; the separator closes only one such case. The
+general fix is a build guard that rejects control characters, tracked as a follow-up. The
+version went 3 → 4.

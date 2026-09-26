@@ -4721,8 +4721,12 @@ is pinned by a literal in `tests/unit/test_snapshot.py`. `build_per_capita_table
 premise and refuses a ratio that is not `population / total_electoral_votes` (to `rtol=1e-12`),
 so a change to the view's formula cannot pass silently: it fails the build until the snapshot
 code is updated, which is when the schema version should move. A separator byte sits between
-the two tables' rows as defence in depth; it has no test, because the two tables serialize to
-different field counts and no collision it would prevent has been constructed.
+the two tables' rows as defence in depth. It has no test: on clean data the two tables
+serialize to different field counts, so it changes nothing. Mutation testing showed the premise
+behind that — no string value contains the hash's `\x1e`/`\x1f` delimiters — is not enforced, and
+a colliding pair exists for inputs that break it. That is accepted as a known limit (human
+decision at the #245 acceptance gate), with a build guard rejecting control characters left to a
+follow-up issue.
 
 (d) **Census is a required snapshot input and UCSB stays forbidden as one.** `read_per_capita`
 fails loud when the view is absent. A public EC + MIT clone can still build a warehouse but not a

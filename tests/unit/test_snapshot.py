@@ -1600,10 +1600,12 @@ def _read_fact_for_hash() -> pd.DataFrame:
 def test_per_capita_rows_reach_the_digest() -> None:
     """Adding one per-capita row changes the digest.
 
-    This does **not** test the table separator. No collision can be built between the
-    two tables without it, because their rows serialize to different field counts with
-    delimiters that cannot occur in the data, so the separator is defence in depth and
-    has no test of its own.
+    This does **not** test the table separator, which has no test of its own. On clean
+    data the two tables' rows serialize to different field counts, so removing it
+    changes nothing, and mutation testing confirmed that removing it survives. It matters
+    only for a string value containing the hash's own ``\x1e``/``\x1f`` delimiters, which
+    nothing yet rejects — a known limit accepted at the #245 acceptance gate, with a
+    control-character guard left to a follow-up issue.
     """
     from usvote.snapshot import _content_hash
 
