@@ -1,7 +1,8 @@
 """Live-Postgres integration test for the snapshot build (#150).
 
 Excluded from the default suite by the ``integration`` marker; run with
-``pytest -m integration`` against a real database **and** the three local corpora.
+``pytest -m integration`` against a real database **and** the four local inputs (the
+Archives corpus, the MIT CSV, the state shapefile and — since #245 — the census corpus).
 
 **Why this exists.** The snapshot is the *public artifact* — what the Cloud Run image
 bakes in and what ``api.us-presidential-election-center.org`` serves — and until this
@@ -60,8 +61,12 @@ and moves both sides of the equality, so nothing here detects it. It is caught i
 the offline literal set in ``tests/unit/test_pv_absences.py::TestCatalogIntegrity::test_the_in_scope_catalog_is_exactly_32_rows_split_18_14``, which pins the
 catalog's size and its 18/14 split directly.
 
-**Three corpora, deliberately not four.** ``USVOTE_UCSB_HTML_DIR`` is **not** required
-and must not become required. Since #139/D048 the build derives ``pv_status`` in-process
+**The census corpus is required; the UCSB corpus is not, and must not become so.** These
+are different kinds of input, and #245 made the difference concrete. Census is a
+**required** build input since #245 — the snapshot's ``per_capita`` table is read from
+``dwh.election_per_capita``, which exists only on a warehouse that loaded census, and
+the Bureau's tables are public domain and fetchable. ``USVOTE_UCSB_HTML_DIR`` is **not**
+required and must not become required. Since #139/D048 the build derives ``pv_status`` in-process
 from :mod:`usvote.pv.absences` over the EC spine and **never** reads
 ``dwh.pv_state_status``, whose pre-1976 rows are UCSB-derived (D022/D030). A snapshot
 test that needed the UCSB corpus would assert a dependency the licensing firewall says
@@ -96,6 +101,7 @@ from usvote.snapshot_schema import (
     DATA_TABLE,
     HYBRID_SUMMARY_TABLE,
     META_TABLE,
+    PER_CAPITA_TABLE,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
 )
@@ -103,6 +109,26 @@ from usvote.snapshot_schema import (
 _EC_CORPUS = os.environ.get("USVOTE_EC_HTML_DIR", "")
 _MIT_CSV = os.environ.get("USVOTE_MIT_CSV_PATH", "")
 _SHAPEFILE = os.environ.get("USVOTE_SHAPEFILE_PATH", "")
+_CENSUS_CORPUS = os.environ.get("USVOTE_CENSUS_CORPUS_DIR", "")
+
+#: The per-capita table's rows: every participating ``(year, state)`` across the 51
+#: elections — the same count as the fact's distinct ``(year, state)`` pairs, which the
+#: build asserts two-way.
+PER_CAPITA_ROWS = 2204
+#: Its NULL ratios, in the two kinds the series has: one no-governing-figure cell
+#: (1848 Texas, unenumerated by the US in 1840) and fourteen zero allotments (eleven
+#: states in 1864, three in 1868 — the withheld electoral votes).
+PER_CAPITA_NO_FIGURE = {(1848, "Texas")}
+PER_CAPITA_ZERO_ALLOTMENT_ROWS = 14
+#: Two Virginia figures the census boundary logic reaches by different routes (CLAUDE.md,
+#: #182 and #251). 1864 restores the Bureau's published 1860 figure for Virginia on its
+#: present-day footprint (1,219,630) in place of the table's West Virginia restatement;
+#: West Virginia was a separate state by then. 1848 is the enumerated 1840 Virginia
+#: (1,239,797) with Alexandria County's 9,967 added back, for the one election whose
+#: governing census predates the retrocession. Neither is recoverable from the census
+#: table alone, so either reaching the public artifact intact is a real pin.
+VIRGINIA_1864_POPULATION = 1_219_630
+VIRGINIA_1848_POPULATION = 1_249_764
 
 #: The served window (D048) — every election the EC spine carries.
 SERVED_YEARS = 51
@@ -166,10 +192,11 @@ def _corpus_fetch(html_dir: str) -> Any:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not (_EC_CORPUS and _MIT_CSV and _SHAPEFILE),
+    not (_EC_CORPUS and _MIT_CSV and _SHAPEFILE and _CENSUS_CORPUS),
     reason=(
         "needs the local corpora: USVOTE_EC_HTML_DIR, USVOTE_MIT_CSV_PATH, "
-        "USVOTE_SHAPEFILE_PATH (USVOTE_UCSB_HTML_DIR is deliberately NOT required)"
+        "USVOTE_SHAPEFILE_PATH, USVOTE_CENSUS_CORPUS_DIR (USVOTE_UCSB_HTML_DIR is "
+        "deliberately NOT required)"
     ),
 )
 def test_snapshot_from_a_real_full_span_warehouse(
@@ -191,6 +218,7 @@ def test_snapshot_from_a_real_full_span_warehouse(
             _SHAPEFILE,
             _MIT_CSV,
             replace=True,
+            census_corpus_dir=_CENSUS_CORPUS,
             environ=dict(os.environ),
             fetch=_corpus_fetch(_EC_CORPUS),
         )
@@ -199,7 +227,7 @@ def test_snapshot_from_a_real_full_span_warehouse(
         # the public artifact is built from. UCSB is skipped by ``run_warehouse``'s
         # ``if ucsb_html_dir is not None``, not merely absent from the environment.
         # (No line number: any edit above it in warehouse.py would silently repoint it.)
-        assert result.sources_loaded == frozenset({"ec", "mit"})
+        assert result.sources_loaded == frozenset({"ec", "mit", "census"})
 
         out = tmp_path / "snapshot.sqlite"
         # ``close=False``: the ``finally`` below owns the connection.
@@ -423,6 +451,53 @@ def test_snapshot_from_a_real_full_span_warehouse(
             )
             # 1824: six legislatures appointed electors holding 71 of 261 votes.
             assert float(coverage_1824) == pytest.approx(190 / 261, abs=1e-6)
+
+            # --- #245: the per-capita table -------------------------------------
+            assert one(f"SELECT count(*) FROM {PER_CAPITA_TABLE}") == PER_CAPITA_ROWS
+            assert (
+                one(
+                    f"SELECT count(*) FROM (SELECT DISTINCT year, state FROM "
+                    f"{DATA_TABLE})"
+                )
+                == PER_CAPITA_ROWS
+            )
+            no_figure = {
+                (int(y), s)
+                for y, s in conn.execute(
+                    f"SELECT year, state FROM {PER_CAPITA_TABLE} "
+                    "WHERE population IS NULL AND coverage = 'no_governing_figure' "
+                    "AND persons_per_electoral_vote IS NULL"
+                )
+            }
+            assert no_figure == PER_CAPITA_NO_FIGURE
+            assert (
+                one(
+                    f"SELECT count(*) FROM {PER_CAPITA_TABLE} "
+                    "WHERE total_electoral_votes = 0 "
+                    "AND persons_per_electoral_vote IS NULL"
+                )
+                == PER_CAPITA_ZERO_ALLOTMENT_ROWS
+            )
+            # No other NULL ratio: the two kinds above are the whole NULL set.
+            assert one(
+                f"SELECT count(*) FROM {PER_CAPITA_TABLE} "
+                "WHERE persons_per_electoral_vote IS NULL"
+            ) == len(PER_CAPITA_NO_FIGURE) + PER_CAPITA_ZERO_ALLOTMENT_ROWS
+            va_1864 = conn.execute(
+                f"SELECT population, governing_census_year, persons_per_electoral_vote "
+                f"FROM {PER_CAPITA_TABLE} WHERE year = 1864 AND state = 'Virginia'"
+            ).fetchone()
+            assert va_1864 == (VIRGINIA_1864_POPULATION, 1860, None)
+            va_1848 = conn.execute(
+                f"SELECT population, total_electoral_votes, persons_per_electoral_vote "
+                f"FROM {PER_CAPITA_TABLE} WHERE year = 1848 AND state = 'Virginia'"
+            ).fetchone()
+            assert va_1848[0] == VIRGINIA_1848_POPULATION
+            assert va_1848[2] == pytest.approx(VIRGINIA_1848_POPULATION / va_1848[1])
+            # The census provenance reached the metadata row.
+            assert conn.execute(
+                f"SELECT census_source, census_license FROM {META_TABLE}"
+            ).fetchone() == ("USCB", "US-PD")
         finally:
             conn.close()
     finally:

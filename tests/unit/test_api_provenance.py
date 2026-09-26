@@ -37,6 +37,8 @@ def _note() -> str:
         provenance.license_display("CC0-1.0"),
         ec_source=provenance.source_display("NARA"),
         ec_license=provenance.license_display("US-PD"),
+        census_source=provenance.source_display("USCB"),
+        census_license=provenance.license_display("US-PD"),
         pv_year_min=1976,
         pv_year_max=2024,
     )
@@ -77,3 +79,19 @@ def test_redistributable_codes_are_mapped() -> None:
     """
     assert "MIT" in provenance._SOURCES
     assert "CC0-1.0" in provenance._LICENSES
+
+
+def test_the_census_codes_are_mapped() -> None:
+    """The per-capita provenance codes (#245) resolve, so a v4 snapshot's ``meta``
+    renders rather than failing every response with ``UnknownProvenanceCode``."""
+    from usvote.snapshot_schema import CENSUS_LICENSE, CENSUS_SOURCE
+
+    assert provenance.source_display(CENSUS_SOURCE).name == "U.S. Census Bureau"
+    assert provenance.license_display(CENSUS_LICENSE).code == "US-PD"
+
+
+def test_redistributable_note_names_the_census_source() -> None:
+    """#245: the note enumerates where every served figure comes from, so the census
+    source — which produced the per-capita figures — must be in it (D069)."""
+    note = _note()
+    assert "Per-capita population figures come from the U.S. Census Bureau" in note

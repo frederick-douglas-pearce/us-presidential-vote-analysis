@@ -44,6 +44,7 @@ from usvote.snapshot import (
     DATA_COLUMNS,
     DATA_TABLE,
     META_TABLE,
+    PER_CAPITA_VIEW,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -59,9 +60,16 @@ from usvote.snapshot import (
     read_redistributable,
 )
 from usvote.snapshot_schema import (
+    CENSUS_LICENSE,
+    CENSUS_SOURCE,
     EC_LICENSE,
     EC_SOURCE,
     HYBRID_SUMMARY_TABLE,
+    PER_CAPITA_BOUNDARY_BASIS_VALUES,
+    PER_CAPITA_COLUMNS,
+    PER_CAPITA_COVERAGE_VALUES,
+    PER_CAPITA_SERIES_VALUES,
+    PER_CAPITA_TABLE,
 )
 from usvote.snapshot_schema import (
     HYBRID_SUMMARY_COLUMNS as SNAPSHOT_HYBRID_SUMMARY_COLUMNS,
@@ -224,6 +232,43 @@ def _ec_pv_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)[[*EC_PV_COLUMNS, "state_usps"]]
 
 
+def _per_capita_frame(fact: pd.DataFrame | None = None) -> pd.DataFrame:
+    """A ``dwh.election_per_capita``-shaped frame keyed to ``fact``'s ``(year, state)``.
+
+    Derived from the fact frame's keys and allotments rather than written out, because
+    this module's tests reshape the fact frame freely and the build requires the two key
+    sets to match. Populations are fabricated but distinct per row, and the ratio is
+    computed as the view computes it (NULL on a zero allotment), since the build checks
+    it against its operands.
+    """
+    fact = _ec_pv_frame() if fact is None else fact
+    keys = (
+        fact[["year", "state", "state_usps", "total_electoral_votes"]]
+        .drop_duplicates(["year", "state"])
+        .sort_values(["year", "state"])
+        .reset_index(drop=True)
+    )
+    rows = []
+    for i, k in enumerate(keys.itertuples(index=False)):
+        ev = int(k.total_electoral_votes)
+        population = 1_000_000 + 1_000 * i
+        rows.append(
+            {
+                "election_year": int(k.year),
+                "state": k.state,
+                "state_usps": k.state_usps,
+                "governing_census_year": (int(k.year) - 2) // 10 * 10,
+                "total_electoral_votes": ev,
+                "population": population,
+                "boundary_basis": "at_election",
+                "coverage": "covered",
+                "population_series": "resident",
+                "persons_per_electoral_vote": population / ev if ev else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _build(
     tmp_path: Path,
     frame: pd.DataFrame | None = None,
@@ -235,6 +280,7 @@ def _build(
         fact,
         str(out),
         pv_status_df=_status_frame(fact) if status is None else status,
+        per_capita_df=_per_capita_frame(fact),
         build_timestamp=_TS,
     )
     return out, meta
@@ -246,6 +292,7 @@ def _build_raises(frame: pd.DataFrame, status: pd.DataFrame | None = None) -> No
         frame,
         "/dev/null",
         pv_status_df=_status_frame(frame) if status is None else status,
+        per_capita_df=_per_capita_frame(frame),
         build_timestamp=_TS,
     )
 
@@ -675,12 +722,15 @@ def test_version_is_content_hash_independent_of_timestamp(tmp_path: Path) -> Non
     out_a = tmp_path / "a.sqlite"
     out_b = tmp_path / "b.sqlite"
     meta_a = build_snapshot(
-        _ec_pv_frame(), str(out_a), pv_status_df=_status_frame(), build_timestamp=_TS
+        _ec_pv_frame(), str(out_a), pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
+        build_timestamp=_TS
     )
     meta_b = build_snapshot(
         _ec_pv_frame(),
         str(out_b),
         pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
         build_timestamp=datetime(2030, 1, 1, tzinfo=UTC),
     )
     assert meta_a.snapshot_version == meta_b.snapshot_version
@@ -692,6 +742,7 @@ def test_version_changes_when_data_changes(tmp_path: Path) -> None:
         _ec_pv_frame(),
         str(tmp_path / "a.sqlite"),
         pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
         build_timestamp=_TS,
     )
     changed = _ec_pv_frame()
@@ -700,6 +751,7 @@ def test_version_changes_when_data_changes(tmp_path: Path) -> None:
         changed,
         str(tmp_path / "b.sqlite"),
         pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
         build_timestamp=_TS,
     )
     assert base.snapshot_version != other.snapshot_version
@@ -740,6 +792,7 @@ def test_duplicate_grain_row_fails_loud(tmp_path: Path) -> None:
             frame,
             str(tmp_path / "snapshot.sqlite"),
             pv_status_df=_status_frame(frame),
+            per_capita_df=_per_capita_frame(frame),
             build_timestamp=_TS,
         )
 
@@ -747,10 +800,14 @@ def test_duplicate_grain_row_fails_loud(tmp_path: Path) -> None:
 def test_build_is_idempotent_overwrite(tmp_path: Path) -> None:
     out = tmp_path / "snapshot.sqlite"
     first = build_snapshot(
-        _ec_pv_frame(), str(out), pv_status_df=_status_frame(), build_timestamp=_TS
+        _ec_pv_frame(), str(out), pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
+        build_timestamp=_TS
     )
     second = build_snapshot(
-        _ec_pv_frame(), str(out), pv_status_df=_status_frame(), build_timestamp=_TS
+        _ec_pv_frame(), str(out), pv_status_df=_status_frame(),
+        per_capita_df=_per_capita_frame(),
+        build_timestamp=_TS
     )
     assert first.snapshot_version == second.snapshot_version
     assert out.exists()
@@ -760,20 +817,30 @@ def test_build_is_idempotent_overwrite(tmp_path: Path) -> None:
 
 
 class _StubDBC:
-    """Minimal stand-in exposing the one method ``read_redistributable`` calls."""
+    """Minimal stand-in exposing the one method the two view reads call.
 
-    def __init__(self, exists: bool) -> None:
+    ``exists`` governs the join view and ``per_capita_exists`` the census view (#245),
+    separately, so a warehouse with EC + MIT but no census can be stood up.
+    """
+
+    def __init__(self, exists: bool, per_capita_exists: bool = True) -> None:
         self._exists = exists
+        self._per_capita_exists = per_capita_exists
         self.closed = False
 
     def select_query_to_df(self, query: str, close: bool = False) -> pd.DataFrame:
         if "to_regclass" in query:
-            rel = "dwh.ec_pv_redistributable" if self._exists else None
-            return pd.DataFrame({"relation": [rel]})
+            if PER_CAPITA_VIEW in query:
+                present = self._per_capita_exists
+            else:
+                present = self._exists
+            return pd.DataFrame({"relation": ["dwh.relation" if present else None]})
         if "state_usps" in query:  # SELECT state, state_usps FROM dwh.state
             return pd.DataFrame(
                 {"state": list(_USPS), "state_usps": list(_USPS.values())}
             )
+        if PER_CAPITA_VIEW in query:
+            return _per_capita_frame().drop(columns=["state_usps"])
         # The view read: return the frame WITHOUT the enrichment column (the view
         # itself does not carry state_usps — read_redistributable merges it in).
         return _ec_pv_frame().drop(columns=["state_usps"])
@@ -1227,13 +1294,15 @@ def test_the_hybrid_summary_guard_passes_a_clean_pre_window_row() -> None:
 
 
 def test_the_schema_version_moved_for_the_new_shape() -> None:
-    """AC-2: the content hash covers ``ec_pv`` only, so the version moves by hand.
+    """The version moves by hand on a shape change: the content hash covers the
+    source-data rows (``ec_pv`` and, since #245, ``per_capita``), never the table shape
+    or the derived tables, so nothing else would move it.
 
     A literal, deliberately. Comparing the constant to itself would pass under any
-    value; the whole obligation is that a human moved it when the derived tables
-    changed shape, and only a literal records that.
+    value; the whole obligation is that a human moved it when the shape changed, and
+    only a literal records that. 3 → 4 was #245's new ``per_capita`` table.
     """
-    assert SNAPSHOT_SCHEMA_VERSION == 3
+    assert SNAPSHOT_SCHEMA_VERSION == 4
 
 
 def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
@@ -1273,3 +1342,431 @@ def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
         "the slug columns are minted by the snapshot build; if the warehouse view "
         "starts carrying them, this test's `derived` allowance is hiding a real overlap"
     )
+
+
+# --- #245: the per-capita table ----------------------------------------------
+
+
+class TestPerCapitaContract:
+    """The duplicated census names, held to their originals.
+
+    ``usvote.snapshot`` may not import ``usvote.census`` (it is a top-level module;
+    ``test_no_top_level_module_imports_a_source_subpackage``), and
+    ``usvote.snapshot_schema`` may not either (it is a top-level module under the same
+    guard, and the serving layer imports it). So the view name, the columns read from it and the
+    three vocabularies are **copies**. A test may import both sides, and these are what
+    make the copies safe: a rename on the census side fails here, not against a real
+    warehouse.
+    """
+
+    def test_the_view_name_is_the_census_view(self) -> None:
+        from usvote.census import per_capita
+
+        assert PER_CAPITA_VIEW == per_capita.PER_CAPITA_VIEW
+
+    def test_the_columns_read_are_the_views_columns(self) -> None:
+        from usvote.census import per_capita
+        from usvote.snapshot import _PER_CAPITA_VIEW_COLUMNS
+
+        # A subset, not equality: every column the build reads must exist in the view
+        # (a rename on the census side fails here), but the view may grow columns the
+        # snapshot does not read — the one-way rule D047 §3 sets for DATA_COLUMNS.
+        assert set(_PER_CAPITA_VIEW_COLUMNS) <= set(per_capita.PER_CAPITA_COLUMNS)
+        assert len(set(_PER_CAPITA_VIEW_COLUMNS)) == len(_PER_CAPITA_VIEW_COLUMNS)
+
+    def test_the_vocabularies_are_the_census_vocabularies(self) -> None:
+        from usvote.census import conform, schema
+
+        assert PER_CAPITA_SERIES_VALUES == schema.SERIES_VALUES
+        assert PER_CAPITA_BOUNDARY_BASIS_VALUES == conform.BOUNDARY_BASIS_VALUES
+        assert PER_CAPITA_COVERAGE_VALUES == conform.COVERAGE_VALUES
+
+    def test_the_public_projection_comes_from_the_view(self) -> None:
+        """``PER_CAPITA_COLUMNS`` ⊆ the view's columns (renamed) ∪ ``state_usps``.
+
+        One-way, as for ``DATA_COLUMNS`` (D047 §3): the reverse would couple the public
+        table to every column the view ever grows.
+        """
+        from usvote.census import per_capita
+
+        renamed = {
+            "year" if c == "election_year" else c for c in per_capita.PER_CAPITA_COLUMNS
+        }
+        assert set(PER_CAPITA_COLUMNS) - renamed == {"state_usps"}
+
+
+def _pc_build(
+    tmp_path: Path, per_capita: pd.DataFrame, name: str = "snapshot.sqlite"
+) -> SnapshotMeta:
+    return build_snapshot(
+        _ec_pv_frame(),
+        str(tmp_path / name),
+        pv_status_df=_status_frame(),
+        per_capita_df=per_capita,
+        build_timestamp=_TS,
+    )
+
+
+def _pc_raises(per_capita: pd.DataFrame, match: str) -> None:
+    with pytest.raises(SnapshotError, match=match):
+        build_snapshot(
+            _ec_pv_frame(),
+            "/dev/null",
+            pv_status_df=_status_frame(),
+            per_capita_df=per_capita,
+            build_timestamp=_TS,
+        )
+
+
+def test_the_per_capita_table_is_written_one_row_per_year_and_state(
+    tmp_path: Path,
+) -> None:
+    out, meta = _build(tmp_path)
+    table = _read(out, PER_CAPITA_TABLE)
+    assert tuple(table.columns) == PER_CAPITA_COLUMNS
+    fact_keys = set(
+        _read(out, DATA_TABLE)[["year", "state"]].itertuples(index=False, name=None)
+    )
+    assert set(table[["year", "state"]].itertuples(index=False, name=None)) == (
+        fact_keys
+    )
+    assert len(table) == len(fact_keys)
+    # 1972 Washington carries a zero allotment in the fixture: NULL, not inf.
+    zero = table[table["total_electoral_votes"] == 0]
+    assert not zero.empty
+    assert zero["persons_per_electoral_vote"].isna().all()
+    # Everything else is population / allotment, as the view computes it.
+    rest = table[table["total_electoral_votes"] != 0]
+    assert (
+        rest["persons_per_electoral_vote"]
+        == rest["population"] / rest["total_electoral_votes"]
+    ).all()
+    assert (meta.census_source, meta.census_license) == (CENSUS_SOURCE, CENSUS_LICENSE)
+    meta_tbl = _read(out, META_TABLE)
+    assert meta_tbl["census_source"].iloc[0] == "USCB"
+    assert meta_tbl["census_license"].iloc[0] == "US-PD"
+
+
+def test_a_per_capita_change_alone_moves_the_version(tmp_path: Path) -> None:
+    """AC-2, the mechanism: a census reload that moved one population — and left every
+    electoral fact alone — must yield a new ``snapshot_version``, or the D034 cutover
+    never fires. The ``ec_pv`` frame is byte-identical across the two builds, so only
+    the per-capita rows' entry into the hash can separate them.
+    """
+    base = _pc_build(tmp_path, _per_capita_frame(), "a.sqlite")
+    moved = _per_capita_frame()
+    moved.loc[0, "population"] = int(moved.loc[0, "population"]) + 1
+    moved.loc[0, "persons_per_electoral_vote"] = (
+        moved.loc[0, "population"] / moved.loc[0, "total_electoral_votes"]
+    )
+    other = _pc_build(tmp_path, moved, "b.sqlite")
+    assert base.snapshot_version != other.snapshot_version
+
+
+def test_a_per_capita_label_change_alone_moves_the_version(tmp_path: Path) -> None:
+    """The hash takes every per-capita column but the ratio, not just the population."""
+    base = _pc_build(tmp_path, _per_capita_frame(), "a.sqlite")
+    relabelled = _per_capita_frame()
+    relabelled.loc[0, "boundary_basis"] = "present_day"
+    other = _pc_build(tmp_path, relabelled, "b.sqlite")
+    assert base.snapshot_version != other.snapshot_version
+
+
+def test_an_unchanged_per_capita_table_keeps_the_version(tmp_path: Path) -> None:
+    """The counterpart: folding per-capita in must not make the version vary between
+    builds of identical data (D028) — e.g. by hashing a row order the frame does not fix.
+    """
+    shuffled = _per_capita_frame().sample(frac=1.0, random_state=7)
+    a = _pc_build(tmp_path, _per_capita_frame(), "a.sqlite")
+    b = build_snapshot(
+        _ec_pv_frame(),
+        str(tmp_path / "b.sqlite"),
+        pv_status_df=_status_frame(),
+        per_capita_df=shuffled,
+        build_timestamp=datetime(2030, 1, 1, tzinfo=UTC),
+    )
+    assert a.snapshot_version == b.snapshot_version
+
+
+def _hashable_per_capita() -> pd.DataFrame:
+    """``_per_capita_frame`` in the finished ``per_capita`` shape ``_content_hash`` reads."""
+    table = _per_capita_frame().rename(columns={"election_year": "year"})
+    for col in ("year", "governing_census_year", "total_electoral_votes", "population"):
+        table[col] = table[col].astype("Int64")
+    return table[list(PER_CAPITA_COLUMNS)]
+
+
+def test_the_hashed_per_capita_columns_are_pinned() -> None:
+    """Which per-capita columns enter the hash, as a hand-written literal.
+
+    Derived in the module (every column but the ratio), so a literal is the only thing
+    that records the choice: a change that also hashed the ratio, or dropped a column,
+    fails here rather than silently changing what a version covers.
+    """
+    from usvote.snapshot import _PER_CAPITA_HASHED_COLUMNS
+
+    assert _PER_CAPITA_HASHED_COLUMNS == (
+        "year",
+        "state",
+        "state_usps",
+        "governing_census_year",
+        "total_electoral_votes",
+        "population",
+        "population_series",
+        "boundary_basis",
+        "coverage",
+    )
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("year", 1999),
+        ("state", "Elsewhere"),
+        ("state_usps", "ZZ"),
+        ("governing_census_year", 1990),
+        ("total_electoral_votes", 99),
+        ("population", 123),
+        ("population_series", None),
+        ("boundary_basis", "present_day"),
+        ("coverage", "no_governing_figure"),
+    ],
+)
+def test_each_hashed_per_capita_column_moves_the_digest(
+    column: str, value: object
+) -> None:
+    """Every hashed column reaches the digest on its own — tested on ``_content_hash``
+    directly, so no build guard intercepts a value that would be incoherent as data."""
+    from usvote.snapshot import _content_hash
+
+    data = pd.DataFrame(columns=list(DATA_COLUMNS))
+    base = _hashable_per_capita()
+    moved = base.copy()
+    moved.loc[0, column] = value
+    assert _content_hash(data, base) != _content_hash(data, moved)
+
+
+def test_the_ratio_alone_does_not_move_the_digest() -> None:
+    """The ratio is deliberately outside the hash (it is a function of two hashed
+    columns); a hash that took it — or took it instead of ``population`` — fails here."""
+    from usvote.snapshot import _content_hash
+
+    data = pd.DataFrame(columns=list(DATA_COLUMNS))
+    base = _hashable_per_capita()
+    moved = base.copy()
+    moved["persons_per_electoral_vote"] = moved["persons_per_electoral_vote"] * 2
+    assert _content_hash(data, base) == _content_hash(data, moved)
+
+
+def test_the_digest_does_not_depend_on_row_order() -> None:
+    """``_content_hash`` sorts each table before hashing, so row order cannot move it.
+
+    Called directly because every build path hands it frames that are already sorted
+    (``build_snapshot`` and ``build_per_capita_table`` both sort), so a build-level
+    shuffle cannot show the sort inside the hash doing anything. Both tables are
+    reversed here: the fact rows and the per-capita rows.
+    """
+    from usvote.snapshot import _content_hash
+
+    data = _read_fact_for_hash()
+    pc = _hashable_per_capita()
+    reversed_data = data.iloc[::-1].reset_index(drop=True)
+    reversed_pc = pc.iloc[::-1].reset_index(drop=True)
+    assert _content_hash(data, pc) == _content_hash(reversed_data, pc)
+    assert _content_hash(data, pc) == _content_hash(data, reversed_pc)
+
+
+def _read_fact_for_hash() -> pd.DataFrame:
+    """The finished ``ec_pv`` frame ``_content_hash`` reads, from the synthetic fact."""
+    frame = add_candidate_slug(
+        _ec_pv_frame().merge(_status_frame(), on=["year", "state"], how="left")
+    )
+    for col in (
+        "total_electoral_votes",
+        "president_electoral_votes",
+        "national_electoral_votes",
+        "president_electoral_rank",
+        "candidate_votes",
+        "state_total_votes",
+        "president_electoral_votes_counted",
+        "national_counted_electoral_votes",
+    ):
+        frame[col] = frame[col].astype("Int64")
+    return frame[list(DATA_COLUMNS)].sort_values(
+        ["year", "state", "candidate_slug"], kind="stable"
+    ).reset_index(drop=True)
+
+
+def test_per_capita_rows_reach_the_digest() -> None:
+    """Adding one per-capita row changes the digest.
+
+    This does **not** test the table separator, which has no test of its own. On clean
+    data the two tables' rows serialize to different field counts, so removing it
+    changes nothing, and mutation testing confirmed that removing it survives. It matters
+    only for a string value containing the hash's own ``\x1e``/``\x1f`` delimiters, which
+    nothing yet rejects — a known limit accepted at the #245 acceptance gate, with a
+    control-character guard left to a follow-up issue.
+    """
+    from usvote.snapshot import _content_hash
+
+    data = pd.DataFrame(columns=list(DATA_COLUMNS))
+    empty = _content_hash(data, _hashable_per_capita().head(0))
+    one_row = _content_hash(data, _hashable_per_capita().head(1))
+    assert empty != one_row
+
+
+def test_a_state_served_with_no_per_capita_row_fails_loud() -> None:
+    _pc_raises(
+        _per_capita_frame().iloc[1:],
+        r"^1 \(year, state\) pair\(s\) served in ec_pv have no per-capita row",
+    )
+
+
+def test_a_per_capita_row_with_no_electoral_fact_fails_loud() -> None:
+    frame = _per_capita_frame()
+    extra = frame.iloc[[0]].copy()
+    extra["election_year"] = 1900
+    _pc_raises(
+        pd.concat([frame, extra], ignore_index=True),
+        r"^1 per-capita row\(s\) have no electoral fact in ec_pv",
+    )
+
+
+def test_a_duplicated_per_capita_key_fails_loud() -> None:
+    frame = _per_capita_frame()
+    _pc_raises(pd.concat([frame, frame.iloc[[0]]], ignore_index=True), "not unique")
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("coverage", "partial"),
+        ("boundary_basis", "apportionment"),
+        ("population_series", "apportionment"),
+    ],
+)
+def test_a_label_outside_its_vocabulary_fails_loud(column: str, value: str) -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, column] = value
+    _pc_raises(frame, f"per-capita {column}")
+
+
+def test_a_series_label_without_a_population_fails_loud() -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, "population"] = None
+    frame.loc[0, "persons_per_electoral_vote"] = None
+    frame.loc[0, "coverage"] = "no_governing_figure"
+    _pc_raises(frame, "NULL together")
+
+
+def test_a_ratio_that_drifted_from_its_operands_fails_loud() -> None:
+    """The hash omits the ratio *because* it is population / allotment; checked, not
+    assumed. A ratio off by one person-per-vote would otherwise ship under an unchanged
+    version."""
+    frame = _per_capita_frame()
+    nonzero = frame.index[frame["total_electoral_votes"] != 0][0]
+    # A relative perturbation of 1e-9: far above what two IEEE divisions of the same
+    # operands can differ by, far below a +1 person offset — so loosening the
+    # tolerance to "close enough" fails here.
+    frame.loc[nonzero, "persons_per_electoral_vote"] *= 1 + 1e-9
+    _pc_raises(frame, "not population / total_electoral_votes")
+
+
+def test_a_ratio_where_the_allotment_is_zero_fails_loud() -> None:
+    frame = _per_capita_frame()
+    zero = frame.index[frame["total_electoral_votes"] == 0][0]
+    frame.loc[zero, "persons_per_electoral_vote"] = 1.0
+    _pc_raises(frame, "NULL exactly where")
+
+
+def test_a_null_ratio_with_both_operands_fails_loud() -> None:
+    frame = _per_capita_frame()
+    nonzero = frame.index[frame["total_electoral_votes"] != 0][0]
+    frame.loc[nonzero, "persons_per_electoral_vote"] = None
+    _pc_raises(frame, "NULL exactly where")
+
+
+def test_a_per_capita_row_with_no_usps_fails_loud() -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, "state_usps"] = None
+    _pc_raises(frame, "no state_usps")
+
+
+def test_a_per_capita_frame_missing_a_column_fails_loud() -> None:
+    _pc_raises(_per_capita_frame().drop(columns=["coverage"]), "missing column")
+
+
+def test_the_census_view_is_a_required_input() -> None:
+    """AC-6: a warehouse with no census view cannot build a snapshot — it fails loud,
+    naming the census corpus, rather than shipping one without the table."""
+    from usvote.snapshot import read_per_capita
+
+    with pytest.raises(SnapshotError, match="USVOTE_CENSUS_CORPUS_DIR"):
+        read_per_capita(_StubDBC(exists=True, per_capita_exists=False))  # type: ignore[arg-type]
+
+
+def test_build_from_db_without_census_fails_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import usvote.snapshot as snapshot_mod
+    from usvote.snapshot import build_snapshot_from_db
+
+    monkeypatch.setattr(
+        snapshot_mod, "derive_curated_pv_status_roster", lambda dbc, schema=None: _status_frame()
+    )
+    out = tmp_path / "snapshot.sqlite"
+    with pytest.raises(SnapshotError, match="requires the census source"):
+        build_snapshot_from_db(
+            _StubDBC(exists=True, per_capita_exists=False),  # type: ignore[arg-type]
+            str(out),
+            build_timestamp=_TS,
+        )
+    assert not out.exists()
+
+
+def test_read_per_capita_enriches_with_state_usps() -> None:
+    from usvote.snapshot import read_per_capita
+
+    df = read_per_capita(_StubDBC(exists=True))  # type: ignore[arg-type]
+    assert df["state_usps"].notna().all()
+    assert "election_year" in df.columns
+
+
+def test_a_population_without_a_series_label_fails_loud() -> None:
+    """The NULL-together coupling's other direction (series NULL, population present)."""
+    frame = _per_capita_frame()
+    frame.loc[0, "population_series"] = None
+    _pc_raises(frame, "NULL together")
+
+
+def test_a_null_population_labelled_covered_fails_loud() -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, "population"] = None
+    frame.loc[0, "population_series"] = None
+    frame.loc[0, "persons_per_electoral_vote"] = None
+    _pc_raises(frame, "coverage must be 'no_governing_figure' exactly")
+
+
+def test_a_population_labelled_no_governing_figure_fails_loud() -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, "coverage"] = "no_governing_figure"
+    _pc_raises(frame, "coverage must be 'no_governing_figure' exactly")
+
+
+@pytest.mark.parametrize("column", ["coverage", "boundary_basis"])
+def test_a_null_label_fails_loud(column: str) -> None:
+    frame = _per_capita_frame()
+    frame.loc[0, column] = None
+    _pc_raises(frame, f"per-capita {column} is NULL")
+
+
+def test_a_stale_allotment_with_matching_keys_fails_loud() -> None:
+    """The #243 shape: a correction moves one allotment and keeps every key, so the
+    key-set check passes and only the per-key allotment comparison can catch it."""
+    frame = _per_capita_frame()
+    nonzero = frame.index[frame["total_electoral_votes"] != 0][0]
+    frame.loc[nonzero, "total_electoral_votes"] += 1
+    frame.loc[nonzero, "persons_per_electoral_vote"] = (
+        frame.loc[nonzero, "population"] / frame.loc[nonzero, "total_electoral_votes"]
+    )
+    _pc_raises(frame, "differs from the served ec_pv row's total_electoral_votes")

@@ -234,6 +234,62 @@ def get_candidate(
     return models.Envelope(data=data, meta=_meta(repo, len(data)))
 
 
+@router.get(
+    "/elections/{year}/per-capita",
+    response_model=models.Envelope[models.PerCapitaRow],
+    responses=_NOT_FOUND_RESPONSE,
+    summary="Persons per electoral vote for every state in one election.",
+    tags=["Per capita"],
+)
+def get_election_per_capita(
+    year: int,
+    request: Request,
+    response: Response,
+    state: str | None = Query(None, description="Narrow to one USPS state code."),
+) -> models.Envelope[models.PerCapitaRow]:
+    """How many residents each state's electoral votes stood for in one election (#245).
+
+    One row per participating state. A year that was never an election in scope is a
+    404; a ``state`` filter that matches nothing is a 200 with an empty ``data``. The
+    population figures come from the Census Bureau (``meta.provenance.census_*``).
+    """
+    repo = _repo(request)
+    if not repo.year_exists(year):
+        raise ResourceNotFound("year_not_found", _unknown_year_message(repo, year))
+    cache_dependency(request, response)
+    rows = repo.per_capita_by_year(year, state=state)
+    data = [models.PerCapitaRow.model_validate(r) for r in rows]
+    return models.Envelope(data=data, meta=_meta(repo, len(data)))
+
+
+@router.get(
+    "/states/{usps}/per-capita",
+    response_model=models.Envelope[models.PerCapitaRow],
+    responses=_NOT_FOUND_RESPONSE,
+    summary="Persons per electoral vote for one state across every covered year.",
+    tags=["Per capita"],
+)
+def get_state_per_capita(
+    usps: str,
+    request: Request,
+    response: Response,
+    year_from: int | None = _YEAR_FROM,
+    year_to: int | None = _YEAR_TO,
+) -> models.Envelope[models.PerCapitaRow]:
+    """One state's persons per electoral vote across the covered window (#245)."""
+    _validate_year_range(year_from, year_to)
+    repo = _repo(request)
+    if not repo.state_exists(usps):
+        raise ResourceNotFound(
+            "state_not_found",
+            f"No state with USPS code {usps.upper()!r} in the snapshot.",
+        )
+    cache_dependency(request, response)
+    rows = repo.per_capita_by_state(usps, year_from=year_from, year_to=year_to)
+    data = [models.PerCapitaRow.model_validate(r) for r in rows]
+    return models.Envelope(data=data, meta=_meta(repo, len(data)))
+
+
 def _election_summary(
     repo: SnapshotRepository, year: int
 ) -> models.ElectionSummary | None:

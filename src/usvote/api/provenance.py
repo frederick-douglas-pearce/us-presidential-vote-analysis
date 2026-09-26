@@ -54,6 +54,9 @@ _SOURCES: dict[str, SourceDisplay] = {
     "NARA": SourceDisplay(
         code="NARA", name="U.S. National Archives and Records Administration"
     ),
+    # The per-capita series' population figures (#245 / D069): the Bureau's published
+    # decennial tables, a U.S. Government work — hence the same ``US-PD`` license code.
+    "USCB": SourceDisplay(code="USCB", name="U.S. Census Bureau"),
 }
 
 #: License code → name + canonical URL. Keyed by the snapshot's ``license`` /
@@ -105,6 +108,8 @@ def redistributable_note(
     *,
     ec_source: SourceDisplay,
     ec_license: LicenseDisplay,
+    census_source: SourceDisplay,
+    census_license: LicenseDisplay,
     pv_year_min: int,
     pv_year_max: int,
 ) -> str:
@@ -113,7 +118,7 @@ def redistributable_note(
     Composed from the resolved displays so no source or license name appears twice —
     this note cannot drift from :data:`_SOURCES` / :data:`_LICENSES`.
 
-    **It names both provenances, and that is the point** (#139 / D048). Before the
+    **It names every provenance, and that is the point** (#139 / D048). Before the
     surface widened, every row carried MIT popular vote, so a note naming only MIT was
     complete. After it, most rows are electoral-college data from the Archives with no
     popular vote at all — and a note that still said "sourced from MIT Election Lab"
@@ -121,6 +126,11 @@ def redistributable_note(
     covers 1824. The popular-vote window is stated numerically here for the same reason:
     "which years can I actually compare popular votes for" must be answerable from the
     text, not inferred from a field of nulls.
+
+    **A third provenance since #245** (D069): the per-capita series' population figures
+    come from the Census Bureau. The note enumerates where every served figure comes
+    from, so leaving census out would have a per-capita response's own provenance note
+    name every source except the one that produced it.
     """
     return (
         f"Redistributable data only. Electoral-college figures come from the "
@@ -129,6 +139,7 @@ def redistributable_note(
         f"{license_.name} and cover {pv_year_min}–{pv_year_max} only; earlier "
         f"elections carry no popular vote on this surface, and each row's `pv_status` "
         f"says whether that is because none was held or because no redistributable "
-        f"source reaches it. Non-redistributable UCSB / American Presidency Project "
-        f"data is excluded from this public API surface."
+        f"source reaches it. Per-capita population figures come from the "
+        f"{census_source.name} — {census_license.name}. Non-redistributable UCSB / "
+        f"American Presidency Project data is excluded from this public API surface."
     )

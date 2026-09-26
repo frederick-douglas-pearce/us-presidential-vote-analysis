@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
 from usvote.api import create_app
@@ -30,8 +31,8 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     assert info["title"] == "US Presidential Vote API"
     # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
     # value and stop pinning the thing that matters: that a human moved it when the
-    # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102.
-    assert info["version"] == "0.4.0"
+    # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245.
+    assert info["version"] == "0.5.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -83,6 +84,7 @@ def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None
         synthetic_ec_pv_frame(),
         out,
         pv_status_df=synthetic_pv_status_frame(),
+        per_capita_df=synthetic_per_capita_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
@@ -109,6 +111,7 @@ def test_openapi_description_carries_the_disclaimer(
         synthetic_ec_pv_frame(),
         out,
         pv_status_df=synthetic_pv_status_frame(),
+        per_capita_df=synthetic_per_capita_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
@@ -130,7 +133,7 @@ def test_openapi_description_carries_the_disclaimer(
 def test_openapi_tags_are_grouped_and_described(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     tags = {t["name"]: t.get("description", "") for t in schema["tags"]}
-    for name in ("Elections", "States", "Candidates", "Meta", "Ops"):
+    for name in ("Elections", "States", "Candidates", "Per capita", "Meta", "Ops"):
         assert name in tags, name
         assert tags[name], f"tag {name} has no description"
 
@@ -140,6 +143,8 @@ def test_endpoints_carry_the_right_tags(client: TestClient) -> None:
     assert paths["/v1/elections"]["get"]["tags"] == ["Elections"]
     assert paths["/v1/states/{usps}"]["get"]["tags"] == ["States"]
     assert paths["/v1/candidates/{slug}"]["get"]["tags"] == ["Candidates"]
+    assert paths["/v1/elections/{year}/per-capita"]["get"]["tags"] == ["Per capita"]
+    assert paths["/v1/states/{usps}/per-capita"]["get"]["tags"] == ["Per capita"]
     assert paths["/v1/meta"]["get"]["tags"] == ["Meta"]
     assert paths["/health"]["get"]["tags"] == ["Ops"]
 

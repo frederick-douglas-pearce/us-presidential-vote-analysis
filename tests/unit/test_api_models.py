@@ -21,6 +21,7 @@ from usvote.snapshot import DERIVED_DATA_COLUMNS
 from usvote.snapshot_schema import (
     DATA_COLUMNS,
     HYBRID_SUMMARY_COLUMNS,
+    PER_CAPITA_COLUMNS,
     ROLLUP_COLUMNS,
 )
 
@@ -130,3 +131,12 @@ def test_key_public_models_ship_an_example() -> None:
         models.ErrorBody,
     ):
         assert model in with_examples, model.__name__
+
+
+def test_every_per_capita_column_is_mapped_or_dropped() -> None:
+    """The fourth tuple joins the drift guard (#245), for the reason the third did."""
+    covered = _mapped_columns(models.PerCapitaRow) | models._DROPPED_COLUMNS
+    missing = set(PER_CAPITA_COLUMNS) - covered
+    assert not missing, (
+        f"unmapped per_capita columns (add a field or drop them): {missing}"
+    )

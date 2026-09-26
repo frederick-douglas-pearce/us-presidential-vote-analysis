@@ -21,9 +21,10 @@ from dataclasses import dataclass
 #: Bump when the snapshot's table shape or the roll-up's derivation logic changes. A
 #: consumer keys compatibility off it, and :mod:`usvote.snapshot` folds it into the
 #: content hash so a shape change forces a new ``snapshot_version``. **Because the hash
-#: covers only the ``ec_pv`` data rows (not the derived roll-up), a change to how the
-#: roll-up is computed with identical underlying data would NOT move the hash on
-#: its own — so a roll-up-logic change MUST bump this version.**
+#: covers only the source-data rows (``ec_pv``, and since #245 ``per_capita``) — not
+#: the derived roll-up — a change to how the roll-up is computed with identical
+#: underlying data would NOT move the hash on its own — so a roll-up-logic change MUST
+#: bump this version.**
 #:
 #: ``2`` (#139 / D048) — the served window widened from the MIT-only 1976–2024 to the
 #: full EC span 1824–2024; ``ec_pv`` gained ``pv_status``, the counted electoral-vote
@@ -38,7 +39,15 @@ from dataclasses import dataclass
 #: flag and the hybrid score); a new ``hybrid_summary`` table carries the per-election
 #: grain (three winners, two flips, three margins). Nothing was removed and no existing
 #: column changed meaning.
-SNAPSHOT_SCHEMA_VERSION = 3
+#:
+#: ``4`` (#245 / D069) — the per-capita series ships. A new ``per_capita`` table carries
+#: persons per electoral vote by ``(year, state)``, and ``snapshot_meta`` gained the
+#: census source/license. **The content hash now covers two tables** — ``ec_pv`` and
+#: ``per_capita`` — because the second is not derived from the first: it is a separate
+#: source (the Census Bureau), so a census reload that moves a population must move the
+#: version or the D034 cutover never fires. The derived tables (``national_rollup``,
+#: ``hybrid_summary``) are still outside it, and the rule above still binds them.
+SNAPSHOT_SCHEMA_VERSION = 4
 
 #: The **electoral-college** provenance codes (#139 / D048), written into
 #: ``snapshot_meta`` by every build. The PV codes are read from the ``pv_source``
@@ -54,7 +63,15 @@ SNAPSHOT_SCHEMA_VERSION = 3
 EC_SOURCE = "NARA"
 EC_LICENSE = "US-PD"
 
-#: The four snapshot tables (the serving contract E8-S2/S3 read).
+#: The **census** provenance codes (#245 / D069), for the ``per_capita`` table.
+#: Constants for the reason the EC pair is: one source, no reference table to read it
+#: from. The Bureau's published tables are works of the U.S. Government (17 U.S.C. §
+#: 105), so the license is the same statutory public domain the Archives carry (S1 /
+#: #180, Branch A).
+CENSUS_SOURCE = "USCB"
+CENSUS_LICENSE = "US-PD"
+
+#: The five snapshot tables (the serving contract E8-S2/S3 read).
 DATA_TABLE = "ec_pv"
 ROLLUP_TABLE = "national_rollup"
 #: The per-**election** grain (#102 / E8-S8). A fourth table rather than more columns on
@@ -63,6 +80,11 @@ ROLLUP_TABLE = "national_rollup"
 #: across a per-candidate table would repeat one year's answer once per candidate and
 #: invite a consumer to group by the wrong key.
 HYBRID_SUMMARY_TABLE = "hybrid_summary"
+#: Persons per electoral vote by ``(year, state)`` (#245 / D069). A table of its own
+#: rather than columns on ``ec_pv`` for the reason ``hybrid_summary`` is one: its grain
+#: is ``(year, state)`` and ``ec_pv``'s is ``(year, state, candidate)``, so columns
+#: there would repeat one state's figure once per candidate.
+PER_CAPITA_TABLE = "per_capita"
 META_TABLE = "snapshot_meta"
 
 #: The ``ec_pv`` fact columns, in order. This is ``usvote.join.EC_PV_COLUMNS`` with the
@@ -191,6 +213,54 @@ HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
 )
 
 
+#: The ``per_capita`` columns, in order (#245 / D069).
+#:
+#: An **independent explicit projection** of the warehouse view
+#: ``dwh.election_per_capita`` (:data:`usvote.census.per_capita.PER_CAPITA_COLUMNS`),
+#: the one-way containment rule :data:`DATA_COLUMNS` keeps (D047 §3): a column added to
+#: the view reaches the public table only when someone lists it here too. It cannot be
+#: an alias even if that were wanted — neither the snapshot build (a top-level module,
+#: barred from importing a source subpackage) nor the serving layer (D028's deny-list)
+#: may import ``usvote.census``.
+#: ``tests/unit/test_snapshot.py::TestPerCapitaContract`` pins the correspondence.
+#:
+#: ``year`` is the view's ``election_year``, renamed to match every other snapshot
+#: table; ``state_usps`` is joined in by the build, as it is for ``ec_pv``.
+PER_CAPITA_COLUMNS: tuple[str, ...] = (
+    "year",
+    "state",
+    "state_usps",
+    # The census that supplies the figure — an *apportionment* fact, so 1924 and 1928
+    # read 1910 (Congress passed no apportionment after the 1920 census).
+    "governing_census_year",
+    # The appointed allotment (D041), the ratio's denominator.
+    "total_electoral_votes",
+    "population",
+    "population_series",
+    # Whose people the figure counts: ``at_election`` or ``present_day`` (D066).
+    "boundary_basis",
+    # Why a population is absent, where it is: ``covered`` or ``no_governing_figure``.
+    "coverage",
+    # population ÷ total_electoral_votes. NULL where the population is (one cell,
+    # 1848 Texas) or the allotment is zero (the fourteen 1864/1868 withheld cells) —
+    # both causes are readable off the row's own operands, so there is no status column.
+    "persons_per_electoral_vote",
+)
+
+#: The closed vocabularies ``per_capita`` carries — copies of the census tuples
+#: (``usvote.census.schema.SERIES_VALUES`` and ``usvote.census.conform``'s
+#: ``BOUNDARY_BASIS_VALUES`` / ``COVERAGE_VALUES``), held here because nothing that
+#: needs them may import census (see :data:`PER_CAPITA_COLUMNS`). The build refuses a
+#: value outside them and the SQLite table carries a CHECK built from them;
+#: ``tests/unit/test_snapshot.py::TestPerCapitaContract`` pins each equal to its census
+#: original, which is what
+#: makes the copy safe.
+PER_CAPITA_SERIES_VALUES: tuple[str, ...] = ("resident",)
+PER_CAPITA_BOUNDARY_BASIS_VALUES: tuple[str, ...] = ("at_election", "present_day")
+PER_CAPITA_COVERAGE_NO_FIGURE = "no_governing_figure"
+PER_CAPITA_COVERAGE_VALUES: tuple[str, ...] = ("covered", PER_CAPITA_COVERAGE_NO_FIGURE)
+
+
 @dataclass(frozen=True)
 class SnapshotMeta:
     """The provenance row written to ``snapshot_meta`` and returned by the build.
@@ -215,7 +285,7 @@ class SnapshotMeta:
     deliberate trade — a silently 50-year snapshot is the same class of error the
     ``pv_status`` column exists to prevent, one level up.
 
-    **Two provenances, because since #139 the surface has two** (D048). ``source`` /
+    **Three provenances.** The first two arrived with #139 (D048): ``source`` /
     ``license`` describe the **popular-vote** data (MIT / CC0-1.0) and keep their
     original names for backward compatibility; ``ec_source`` / ``ec_license`` describe
     the **electoral-college** data (the National Archives, a work of the U.S.
@@ -224,6 +294,9 @@ class SnapshotMeta:
     Archives'. Codes only; their public display lives in
     :mod:`usvote.api.provenance` (D016/D028: the snapshot stores the drift-proof code,
     the serving layer annotates it).
+
+    The third, since #245 (D069): ``census_source`` / ``census_license`` describe the
+    per-capita population figures (the U.S. Census Bureau, public domain).
     """
 
     snapshot_version: str
@@ -239,3 +312,5 @@ class SnapshotMeta:
     ec_source: str
     ec_license: str
     build_timestamp: str
+    census_source: str
+    census_license: str

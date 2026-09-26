@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
 from usvote.pv.status import PV_STATUS_VALUES
@@ -43,6 +44,7 @@ def test_build_refuses_a_non_redistributable_row(tmp_path: Path) -> None:
             frame,
             str(tmp_path / "snap.sqlite"),
             pv_status_df=synthetic_pv_status_frame(),
+            per_capita_df=synthetic_per_capita_frame(),
             build_timestamp=SNAPSHOT_TS,
         )
 
@@ -56,6 +58,7 @@ def test_build_refuses_a_non_mit_source_row(tmp_path: Path) -> None:
             frame,
             str(tmp_path / "snap.sqlite"),
             pv_status_df=synthetic_pv_status_frame(),
+            per_capita_df=synthetic_per_capita_frame(),
             build_timestamp=SNAPSHOT_TS,
         )
 

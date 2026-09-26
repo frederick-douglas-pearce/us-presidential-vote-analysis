@@ -4678,3 +4678,88 @@ left to a follow-up docs issue, following the #253→#255 and #251→#264 preced
 
 **Related:** #243, #183, #245, D041, D045, D046, D061, D063, `src/usvote/transform.py`,
 `src/usvote/census/reconcile.py`, `docs/corrections.md`.
+
+## D069: The per-capita series ships as a hashed snapshot table read by name, and census becomes a required snapshot input
+
+**Date:** 2026-09-25
+**Issue:** #245 · **Builds on:** D028, D034, D047, D048, D064, D066 · **Discharges:** D064's scope
+note (the architect's C8 finding that a new snapshot table would sit outside the content hash)
+
+**Context.**
+
+#184 built persons per electoral vote as the warehouse view `dwh.election_per_capita` and left
+public exposure to #245 (D064). The census source is public domain (S1 / #180, Branch A), so the
+series may reach the snapshot and `/v1`. The issue's implementation note assumed the snapshot
+build could import `usvote.census`. It cannot. `usvote/snapshot.py` is a top-level module, and
+`test_no_top_level_module_imports_a_source_subpackage` (`tests/unit/test_ec_corpus.py`) forbids any
+top-level module except the two composition roots from importing a source subpackage. That is the
+same guard that placed `per_capita.py` under `usvote/census/` (D064(f)).
+
+**Decision.**
+
+(a) **A fifth snapshot table, `per_capita`, keyed `(year, state)`.** Its column tuple is an
+independent explicit projection in `snapshot_schema.py`, following the D047 §3 one-way rule. The
+view's `election_year` becomes `year` to match every other table, and `state_usps` is joined from
+`dwh.state` as it is for `ec_pv`.
+
+(b) **The build reads the view by SQL name, not by import.** `snapshot.py` holds the view name and
+the columns it reads as local literals, the way it already reads `dwh.state`. The three closed
+vocabularies (`coverage`, `boundary_basis`, `population_series`) are copied into stdlib-only
+`snapshot_schema.py`, which the serving layer imports and which therefore also cannot import
+census. `TestPerCapitaContract` in `tests/unit/test_snapshot.py` pins every copy to its census
+original. Exempting `snapshot.py` as a composition root was rejected, because it is an EC-domain
+reader with its own entry point, and D064(f) already refused to exempt a module to keep a
+placement.
+
+(c) **The content hash covers `per_capita`, minus the ratio.** `per_capita` holds a second
+source's numbers rather than a derivation of `ec_pv`, so a census reload that moves a population
+must move `snapshot_version`. Otherwise the D034 cutover never fires. This discharges the C8
+hazard D064's scope note handed to #245, and keeps the older rule that *derived* tables stay
+outside. The ratio is left out because it is a pure function of two hashed integers and the view's
+formula, which keeps the hash float-free (the `_INTEGER_COLUMNS` invariant). The hashed column set
+is pinned by a literal in `tests/unit/test_snapshot.py`. `build_per_capita_table` checks the
+premise and refuses a ratio that is not `population / total_electoral_votes` (to `rtol=1e-12`),
+so a change to the view's formula cannot pass silently: it fails the build until the snapshot
+code is updated, which is when the schema version should move. A separator byte sits between
+the two tables' rows as defence in depth. It has no test: on clean data the two tables
+serialize to different field counts, so it changes nothing. Mutation testing showed the premise
+behind that — no string value contains the hash's `\x1e`/`\x1f` delimiters — is not enforced, and
+a colliding pair exists for inputs that break it. That is accepted as a known limit (human
+decision at the #245 acceptance gate), with a build guard rejecting control characters left to a
+follow-up issue.
+
+(d) **Census is a required snapshot input and UCSB stays forbidden as one.** `read_per_capita`
+fails loud when the view is absent. A public EC + MIT clone can still build a warehouse but not a
+snapshot. That is acceptable because the census corpus is public domain and fetchable. It is the
+opposite of UCSB, whose absence from the required set is a licensing firewall (D022/D030).
+
+(e) **Guards at the build.** The table must be unique on `(year, state)`, must cover the same
+`(year, state)` set as `ec_pv` in both directions, and must carry the same `total_electoral_votes`
+as `ec_pv` for every key. The key sets catch a stale census load that is missing or has extra
+states. The allotment comparison catches one that keeps every key and carries an old allotment,
+which is the shape of #243's Nevada 1864 correction. Labels must fall inside their vocabularies,
+`population_series` must be NULL together with `population`, `coverage` must be
+`no_governing_figure` exactly where `population` is NULL, every row needs a `state_usps`, and the
+ratio must be NULL exactly where its operands explain it. The view guarantees some of these structurally (D064(c)), but the
+snapshot is a second consumer across a process and file boundary, and the public artifact is where
+a silent defect would be served.
+
+(f) **Serving.** Two routes: `/v1/elections/{year}/per-capita` and `/v1/states/{usps}/per-capita`.
+They mirror the existing by-year and by-state resources and 404 on an unknown path identifier.
+`PerCapitaRow` exposes the allotment as `state_electoral_votes`, the name `EcPvRow` uses. Every
+response's `meta.provenance` gains `census_source` / `census_license` (USCB / US-PD) plus display
+fields. `redistributable_note` gains a sentence naming the Census Bureau and its license. That note
+lists where every served figure comes from, which is its own docstring's point, so without census
+a per-capita response's note would name every source except the one that produced its data.
+This reverses the plan-time ruling that left the note alone on the grounds that it only stated
+the UCSB exclusion boundary. That premise was wrong, as code review found. `SnapshotRepository.open`
+now reads `schema_version` before the full metadata row, so a server on an older-schema snapshot
+reports the version mismatch rather than a missing column. `SNAPSHOT_SCHEMA_VERSION` 3 → 4 and
+`API_VERSION` 0.4.0 → 0.5.0.
+
+**Consequences.** Merging does not deploy. The v4 snapshot and the image that serves it cut over
+together (D034), and that one cutover also carries #243's Nevada change. `CLAUDE.md` is left to a
+follow-up docs issue.
+
+**Related:** #245, #184, #243, #180, D028, D034, D047, D048, D064, D066, `src/usvote/snapshot.py`,
+`src/usvote/snapshot_schema.py`, `src/usvote/api/routes.py`, `docs/api-snapshot.md`.

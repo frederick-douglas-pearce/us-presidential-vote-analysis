@@ -35,7 +35,7 @@ from usvote.api.models import (
 from usvote.api.origin_guard import install_origin_guard
 from usvote.api.repository import SnapshotRepository
 from usvote.api.routes import ResourceNotFound
-from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE
+from usvote.snapshot_schema import CENSUS_LICENSE, CENSUS_SOURCE, EC_LICENSE, EC_SOURCE
 
 #: ``Cache-Control`` for the liveness probe — never cached, unlike the ``/v1`` surface.
 _HEALTH_CACHE_CONTROL = "no-store"
@@ -61,6 +61,8 @@ _CC0 = provenance.license_display("CC0-1.0")
 # OpenAPI block advertise one code while every live response 500'd on the other.
 _NARA = provenance.source_display(EC_SOURCE)
 _US_PD = provenance.license_display(EC_LICENSE)
+_USCB = provenance.source_display(CENSUS_SOURCE)
+_CENSUS_LICENSE = provenance.license_display(CENSUS_LICENSE)
 
 #: The popular-vote window quoted in the **static fallback** description only — the path
 #: taken when the schema is built before the lifespan opens the snapshot. The served
@@ -82,7 +84,11 @@ API_TITLE = "US Presidential Vote API"
 #: fields, both year endpoints gained an ``election`` object, and ``/summary`` returns a
 #: new response model. Additive, hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 2 -> 3
 #: for the same event.
-API_VERSION = "0.4.0"
+#:
+#: 0.4.0 -> 0.5.0 by #245: two per-capita routes, a ``PerCapitaRow`` model, and four
+#: ``census_*`` fields on every response's ``meta.provenance``. Additive, hence minor.
+#: ``SNAPSHOT_SCHEMA_VERSION`` moved 3 -> 4 for the same event.
+API_VERSION = "0.5.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -113,17 +119,22 @@ popular vote or the hybrid would have flipped the electoral-college result, and 
 method's top-two margin in percentage points. Precomputed, so the comparison does
 not depend on a consumer re-deriving it from the raw totals.
 
+**Persons per electoral vote.** How many residents each state's electoral votes stood
+for — the governing census's population divided by the state's allotment — by election
+(`/v1/elections/{year}/per-capita`) or by state (`/v1/states/{usps}/per-capita`), from
+decennial census population (see the provenance note below).
+
 **Coverage:** {coverage_window} (US presidential elections).
 
 **Data provenance & licensing.** {provenance_note} Every response carries the exact
 source, license, coverage window, and snapshot version under `meta.provenance`; the same
 block, with build details, is at `GET /v1/meta`.
 
-**Not an official source.** This is a derived dataset, assembled from published
-sources by an independent project. It has no official standing and is not affiliated
-with, or endorsed by, the National Archives, the MIT Election Lab, the UCSB American
-Presidency Project, or any election authority. Nothing served here is a canvass, a
-certification, or a legal record of an election.
+**Not an official source.** This is a derived dataset, assembled from published sources
+by an independent project. It has no official standing and is not affiliated with, or
+endorsed by, the National Archives, the MIT Election Lab, the U.S. Census Bureau, the
+UCSB American Presidency Project, or any election authority. Nothing served here is a
+canvass, a certification, or a legal record of an election.
 
 **Getting started.** Browse the interactive docs at `/docs` (Swagger UI) or `/redoc`
 (ReDoc). Every response is JSON in a `{data, meta}` envelope and carries an `ETag` and
@@ -147,6 +158,8 @@ API_DESCRIPTION = _render_description(
         _CC0,
         ec_source=_NARA,
         ec_license=_US_PD,
+        census_source=_USCB,
+        census_license=_CENSUS_LICENSE,
         pv_year_min=_FALLBACK_PV_WINDOW[0],
         pv_year_max=_FALLBACK_PV_WINDOW[1],
     ),
@@ -167,6 +180,13 @@ _OPENAPI_TAGS: list[dict[str, Any]] = [
         "description": (
             "One candidate's EC + PV rows across every covered year, keyed by the "
             "durable public slug."
+        ),
+    },
+    {
+        "name": "Per capita",
+        "description": (
+            "Persons per electoral vote by (year, state), from U.S. Census Bureau "
+            "population."
         ),
     },
     {
@@ -228,6 +248,8 @@ def _install_live_openapi(app: FastAPI) -> None:
             lic = provenance.license_display(meta.license)
             ec_src = provenance.source_display(meta.ec_source)
             ec_lic = provenance.license_display(meta.ec_license)
+            census_src = provenance.source_display(meta.census_source)
+            census_lic = provenance.license_display(meta.census_license)
             info = schema["info"]
             info["description"] = _render_description(
                 f"{meta.year_min}–{meta.year_max}",
@@ -236,6 +258,8 @@ def _install_live_openapi(app: FastAPI) -> None:
                     lic,
                     ec_source=ec_src,
                     ec_license=ec_lic,
+                    census_source=census_src,
+                    census_license=census_lic,
                     pv_year_min=meta.pv_year_min,
                     pv_year_max=meta.pv_year_max,
                 ),
@@ -291,6 +315,8 @@ def _meta_block(repo: SnapshotRepository) -> dict[str, object]:
         "license": meta.license,
         "ec_source": meta.ec_source,
         "ec_license": meta.ec_license,
+        "census_source": meta.census_source,
+        "census_license": meta.census_license,
         "build_timestamp": meta.build_timestamp,
     }
 

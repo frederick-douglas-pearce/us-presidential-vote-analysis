@@ -296,7 +296,9 @@ def _run_all(args: argparse.Namespace) -> int:
     if census_corpus_dir is None:
         print(
             "NOTICE: building WITHOUT census population — dwh.census_population will "
-            "not be created. Set USVOTE_CENSUS_CORPUS_DIR and run "
+            "not be created, and the API snapshot (`python -m usvote.snapshot`) "
+            "cannot be built from this warehouse, since it requires the per-capita "
+            "view (#245). Set USVOTE_CENSUS_CORPUS_DIR and run "
             "`python -m usvote.census snapshot` to include it.",
             file=sys.stderr,
         )

@@ -247,3 +247,114 @@ def test_row_cap_fails_loud(settings: ApiSettings, monkeypatch: pytest.MonkeyPat
     with TestClient(create_app(settings), raise_server_exceptions=False) as c:
         resp = c.get("/v1/states/CA")  # 4 rows > cap of 1
         assert resp.status_code == 500
+
+
+# --- per capita (#245) ------------------------------------------------------
+
+
+def test_election_per_capita_returns_one_row_per_state(client: TestClient) -> None:
+    body = client.get("/v1/elections/2020/per-capita").json()
+    assert [r["state_usps"] for r in body["data"]] == ["CA", "TX"]  # ordered by state
+    assert body["meta"]["count"] == 2
+    ca = body["data"][0]
+    # The fixture's 2020 California: 37,000,000 residents over 55 electoral votes, and
+    # the allotment arrives under the same public name the election rows use.
+    assert ca["state_electoral_votes"] == 55
+    assert ca["population"] == 37_000_000
+    assert ca["persons_per_electoral_vote"] == pytest.approx(37_000_000 / 55)
+    assert ca["coverage"] == "covered"
+    assert "total_electoral_votes" not in ca
+    assert body["meta"]["provenance"]["census_source"] == "USCB"
+
+
+def test_election_per_capita_nulls_are_explained_by_the_row(client: TestClient) -> None:
+    """Neither NULL ratio is bare: each carries the operand that explains it."""
+    rows = {
+        r["state_usps"]: r
+        for r in client.get("/v1/elections/1860/per-capita").json()["data"]
+    }
+    assert rows["NV"]["persons_per_electoral_vote"] is None
+    assert rows["NV"]["state_electoral_votes"] == 0
+    assert rows["VT"]["persons_per_electoral_vote"] is None
+    assert rows["VT"]["population"] is None
+    assert rows["VT"]["population_series"] is None
+    assert rows["VT"]["coverage"] == "no_governing_figure"
+
+
+def test_election_per_capita_state_filter(client: TestClient) -> None:
+    body = client.get("/v1/elections/2020/per-capita", params={"state": "tx"}).json()
+    assert [r["state_usps"] for r in body["data"]] == ["TX"]
+
+
+def test_election_per_capita_empty_filter_is_200(client: TestClient) -> None:
+    resp = client.get("/v1/elections/2020/per-capita", params={"state": "VT"})
+    assert resp.status_code == 200
+    assert resp.json()["data"] == []
+
+
+def test_election_per_capita_unknown_year_404(client: TestClient) -> None:
+    resp = client.get("/v1/elections/1800/per-capita")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "year_not_found"
+    assert "etag" not in resp.headers
+
+
+def test_state_per_capita_across_years(client: TestClient) -> None:
+    body = client.get("/v1/states/ca/per-capita").json()
+    assert [r["year"] for r in body["data"]] == [1860, 2016, 2020]  # ordered by year
+    assert {r["state_usps"] for r in body["data"]} == {"CA"}
+
+
+def test_state_per_capita_year_window(client: TestClient) -> None:
+    body = client.get("/v1/states/CA/per-capita", params={"year_to": 2016}).json()
+    assert [r["year"] for r in body["data"]] == [1860, 2016]
+
+
+def test_state_per_capita_unknown_404(client: TestClient) -> None:
+    resp = client.get("/v1/states/ZZ/per-capita")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "state_not_found"
+
+
+def test_state_per_capita_inverted_window_is_422(client: TestClient) -> None:
+    resp = client.get(
+        "/v1/states/CA/per-capita", params={"year_from": 2020, "year_to": 2016}
+    )
+    assert resp.status_code == 422
+
+
+def test_per_capita_carries_the_snapshot_etag(client: TestClient) -> None:
+    resp = client.get("/v1/elections/2020/per-capita")
+    etag = resp.headers["etag"]
+    assert etag == f'"{resp.json()["meta"]["provenance"]["snapshot_version"]}"'
+    again = client.get("/v1/elections/2020/per-capita", headers={"If-None-Match": etag})
+    assert again.status_code == 304
+
+
+def test_per_capita_reads_order_explicitly(
+    settings: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two per-capita reads carry their own ORDER BY.
+
+    The ordering asserts above cannot show it: the build writes the table already
+    sorted and the ``(year, state)`` primary key walks in that order, so a read with no
+    ORDER BY returns the same rows in the same order today. Pinning the clause is what
+    keeps the response order a contract rather than a property of the file.
+    """
+    from usvote.api.repository import SnapshotRepository
+
+    seen: list[str] = []
+    original = SnapshotRepository._select
+
+    def spy(
+        self: SnapshotRepository, sql: str, params: tuple[object, ...]
+    ) -> list[dict[str, object]]:
+        seen.append(sql)
+        return original(self, sql, params)
+
+    monkeypatch.setattr(SnapshotRepository, "_select", spy)
+    repo = SnapshotRepository.open(str(settings.snapshot_path))
+    repo.per_capita_by_year(2020)
+    repo.per_capita_by_state("CA")
+    assert seen[0].rstrip().endswith("ORDER BY state")
+    assert seen[1].rstrip().endswith("ORDER BY year")

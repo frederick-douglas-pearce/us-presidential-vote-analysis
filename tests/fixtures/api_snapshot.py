@@ -314,3 +314,89 @@ def synthetic_pv_status_frame() -> pd.DataFrame:
         ),
     ]
     return pd.DataFrame(modern + historical)
+
+
+def api_snapshot_per_capita_row(
+    *,
+    year: int,
+    state: str,
+    governing_census_year: int,
+    total_ev: int,
+    population: int | None,
+    boundary_basis: str = "at_election",
+) -> dict[str, object]:
+    """One ``dwh.election_per_capita`` row (+ ``state_usps``) shaped for ``build_snapshot``.
+
+    The ratio is computed here exactly as the view computes it — NULL where the
+    population is NULL or the allotment zero — because the build checks the ratio
+    against its operands and would (rightly) refuse any other value. ``coverage`` and
+    ``population_series`` follow ``population`` the way the census frame couples them.
+    """
+    covered = population is not None
+    return {
+        "election_year": year,
+        "state": state,
+        "state_usps": _USPS[state],
+        "governing_census_year": governing_census_year,
+        "total_electoral_votes": total_ev,
+        "population": population,
+        "boundary_basis": boundary_basis,
+        "coverage": "covered" if covered else "no_governing_figure",
+        "population_series": "resident" if covered else None,
+        "persons_per_electoral_vote": (
+            population / total_ev if population is not None and total_ev else None
+        ),
+    }
+
+
+def synthetic_per_capita_frame() -> pd.DataFrame:
+    """The per-capita companion to :func:`synthetic_ec_pv_frame` (#245).
+
+    **Keyed to exactly the same eight** ``(year, state)`` **pairs** — 2016/2020/1860 ×
+    the states each year carries. ``build_snapshot`` asserts the two key sets are equal
+    in both directions, so adding a state or a year to the fact frame without adding it
+    here fails every build that uses these fixtures, loudly. The allotments match the
+    fact frame's ``total_electoral_votes`` for the same reason a real build's do: both
+    come from the EC spine.
+
+    Two rows carry a NULL ratio, one of each kind the real series has: **1860 Nevada**
+    has a zero allotment (as the fact frame gives it), and **1860 Vermont** has no
+    governing-census figure (``coverage='no_governing_figure'``) — standing in for
+    1848 Texas, the one real such cell. Populations are fabricated.
+    """
+    return pd.DataFrame(
+        [
+            api_snapshot_per_capita_row(
+                year=2016, state="Texas", governing_census_year=2010, total_ev=38,
+                population=25_000_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=2016, state="California", governing_census_year=2010,
+                total_ev=55, population=37_000_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=2020, state="Texas", governing_census_year=2010, total_ev=38,
+                population=25_000_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=2020, state="California", governing_census_year=2010,
+                total_ev=55, population=37_000_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=1860, state="Texas", governing_census_year=1850, total_ev=6,
+                population=210_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=1860, state="California", governing_census_year=1850,
+                total_ev=8, population=92_000,
+            ),
+            api_snapshot_per_capita_row(
+                year=1860, state="Vermont", governing_census_year=1850, total_ev=4,
+                population=None,
+            ),
+            api_snapshot_per_capita_row(
+                year=1860, state="Nevada", governing_census_year=1850, total_ev=0,
+                population=6_000, boundary_basis="present_day",
+            ),
+        ]
+    )
