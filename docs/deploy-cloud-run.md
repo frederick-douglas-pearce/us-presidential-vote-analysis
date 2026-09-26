@@ -140,6 +140,7 @@ Run these with `uv run` so the project's managed Python 3.14 + all deps are used
 ```
 # Build the warehouse + snapshot locally (see README "Local smoke test").
 uv run python -m usvote corpus            # optional: refresh $USVOTE_EC_HTML_DIR first (#89)
+uv run python -m usvote.census snapshot   # once: fetch the census corpus into $USVOTE_CENSUS_CORPUS_DIR
 uv run python -m usvote all
 uv run python -m usvote.snapshot          # writes $USVOTE_API_SNAPSHOT_PATH
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
@@ -154,8 +155,12 @@ with `--replace` rebuilds the same facts and re-hits the same breach.
 `--no-validate-overlap` accepts the build if the thresholds are the thing under review (D051
 expects gate 1's per-year floor to be the first to need it).
 
-Env vars this step reads: `USVOTE_SHAPEFILE_PATH`, `USVOTE_MIT_CSV_PATH`, `PG*`, and
-`USVOTE_API_SNAPSHOT_PATH` as the output. Two optional ones change **where the data comes
+Env vars this step reads: `USVOTE_SHAPEFILE_PATH`, `USVOTE_MIT_CSV_PATH`,
+`USVOTE_CENSUS_CORPUS_DIR`, `PG*`, and `USVOTE_API_SNAPSHOT_PATH` as the output.
+**`USVOTE_CENSUS_CORPUS_DIR` is required since #245** ([D069](../.claude/specs/decisions.md)):
+the snapshot's `per_capita` table is read from `dwh.election_per_capita`, which exists only when
+`usvote all` loaded census. Without it `usvote all` still succeeds (census is skipped with a
+NOTICE), but `usvote.snapshot` then fails with "`dwh.election_per_capita` does not exist". Two optional ones change **where the data comes
 from**: `USVOTE_UCSB_HTML_DIR` (adds the UCSB popular-vote control) and `USVOTE_EC_HTML_DIR`
 (rebuilds the EC spine from the local Archives corpus instead of scraping — see the caveat in
 §8 before relying on it for a refresh).
@@ -172,9 +177,10 @@ uv run python -m usvote.snapshot
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
 
-**Redistributable-only (AC5)** is guaranteed at the source: the snapshot is built from
-`ec_pv_redistributable` (MIT/CC0 only, [D030](../.claude/specs/decisions.md)), re-asserted at
-build time. Nothing non-redistributable can reach the bucket or the hosted service.
+**Redistributable-only (AC5)** is guaranteed at the source: the snapshot's election data is
+built from `ec_pv_redistributable` (MIT/CC0 only, [D030](../.claude/specs/decisions.md)),
+re-asserted at build time, and its `per_capita` table from `dwh.election_per_capita` (Census
+Bureau tables, public domain). Nothing non-redistributable can reach the bucket or the hosted service.
 
 ## 7. Configure GitHub + Cloudflare, then deploy
 
@@ -304,6 +310,7 @@ Data changes rarely (a bug fix, or every ~4 years for a new election):
 
 ```
 uv run python -m usvote corpus                                    # refresh the Archives HTML first
+uv run python -m usvote.census snapshot                           # refresh the census corpus if a new census is out
 uv run python -m usvote all && uv run python -m usvote.snapshot   # rebuild from the warehouse
 gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 ```
@@ -323,10 +330,19 @@ gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 >   serving the previous correct version) but it is **uninformative**, and nothing downstream
 >   distinguishes it from "nothing changed upstream".
 >
+> The census corpus is saved bytes too (`python -m usvote.census snapshot` writes it), so the
+> same caveat applies to per-capita figures: a rebuild from an old census corpus replays the old
+> populations.
+>
 > So: run `usvote corpus` **first** whenever you are refreshing because you expect new or
 > corrected data. The rebuild prints the corpus's page count and fetch-date range — check it. To
 > force a live scrape instead, pass `--no-corpus`. To re-fetch one suspect year, delete that
 > `<year>.html` and re-run `usvote corpus`.
+
+**The snapshot and the image cut over together (D034).** The API refuses at startup to serve a
+snapshot whose `schema_version` differs from the one its code was built for, so a snapshot
+built from a newer schema must be deployed from a commit carrying that schema — run the
+workflow from `main` after the schema change has merged (schema 4 arrived with #245).
 
 Then **Actions → Deploy (Cloud Run) → Run workflow**. The image is tagged with the new
 `snapshot_version`, Cloud Run cuts over, and the workflow **purges Cloudflare after cutover**

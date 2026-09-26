@@ -35,7 +35,7 @@ from usvote.api.models import (
 from usvote.api.origin_guard import install_origin_guard
 from usvote.api.repository import SnapshotRepository
 from usvote.api.routes import ResourceNotFound
-from usvote.snapshot_schema import EC_LICENSE, EC_SOURCE
+from usvote.snapshot_schema import CENSUS_LICENSE, CENSUS_SOURCE, EC_LICENSE, EC_SOURCE
 
 #: ``Cache-Control`` for the liveness probe — never cached, unlike the ``/v1`` surface.
 _HEALTH_CACHE_CONTROL = "no-store"
@@ -61,6 +61,8 @@ _CC0 = provenance.license_display("CC0-1.0")
 # OpenAPI block advertise one code while every live response 500'd on the other.
 _NARA = provenance.source_display(EC_SOURCE)
 _US_PD = provenance.license_display(EC_LICENSE)
+_USCB = provenance.source_display(CENSUS_SOURCE)
+_CENSUS_LICENSE = provenance.license_display(CENSUS_LICENSE)
 
 #: The popular-vote window quoted in the **static fallback** description only — the path
 #: taken when the schema is built before the lifespan opens the snapshot. The served
@@ -119,8 +121,8 @@ not depend on a consumer re-deriving it from the raw totals.
 
 **Persons per electoral vote.** How many residents each state's electoral votes stood
 for — the governing census's population divided by the state's allotment — by election
-(`/v1/elections/{year}/per-capita`) or by state (`/v1/states/{usps}/per-capita`). The
-population figures come from the U.S. Census Bureau.
+(`/v1/elections/{year}/per-capita`) or by state (`/v1/states/{usps}/per-capita`), from
+decennial census population (see the provenance note below).
 
 **Coverage:** {coverage_window} (US presidential elections).
 
@@ -156,6 +158,8 @@ API_DESCRIPTION = _render_description(
         _CC0,
         ec_source=_NARA,
         ec_license=_US_PD,
+        census_source=_USCB,
+        census_license=_CENSUS_LICENSE,
         pv_year_min=_FALLBACK_PV_WINDOW[0],
         pv_year_max=_FALLBACK_PV_WINDOW[1],
     ),
@@ -244,6 +248,8 @@ def _install_live_openapi(app: FastAPI) -> None:
             lic = provenance.license_display(meta.license)
             ec_src = provenance.source_display(meta.ec_source)
             ec_lic = provenance.license_display(meta.ec_license)
+            census_src = provenance.source_display(meta.census_source)
+            census_lic = provenance.license_display(meta.census_license)
             info = schema["info"]
             info["description"] = _render_description(
                 f"{meta.year_min}–{meta.year_max}",
@@ -252,6 +258,8 @@ def _install_live_openapi(app: FastAPI) -> None:
                     lic,
                     ec_source=ec_src,
                     ec_license=ec_lic,
+                    census_source=census_src,
+                    census_license=census_lic,
                     pv_year_min=meta.pv_year_min,
                     pv_year_max=meta.pv_year_max,
                 ),

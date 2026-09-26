@@ -120,9 +120,11 @@ PER_CAPITA_ROWS = 2204
 #: states in 1864, three in 1868 — the withheld electoral votes).
 PER_CAPITA_NO_FIGURE = {(1848, "Texas")}
 PER_CAPITA_ZERO_ALLOTMENT_ROWS = 14
-#: Two published Virginia figures the census boundary logic reaches by different routes
-#: (CLAUDE.md, #182 and #251): 1864 restores the published 1860 enumeration against the
-#: West Virginia restatement, and 1848 adds Alexandria back for the one election whose
+#: Two Virginia figures the census boundary logic reaches by different routes (CLAUDE.md,
+#: #182 and #251). 1864 restores the Bureau's published 1860 figure for Virginia on its
+#: present-day footprint (1,219,630) in place of the table's West Virginia restatement;
+#: West Virginia was a separate state by then. 1848 is the enumerated 1840 Virginia
+#: (1,239,797) with Alexandria County's 9,967 added back, for the one election whose
 #: governing census predates the retrocession. Neither is recoverable from the census
 #: table alone, so either reaching the public artifact intact is a real pin.
 VIRGINIA_1864_POPULATION = 1_219_630

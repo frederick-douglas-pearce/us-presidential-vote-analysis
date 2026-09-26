@@ -329,3 +329,32 @@ def test_per_capita_carries_the_snapshot_etag(client: TestClient) -> None:
     assert etag == f'"{resp.json()["meta"]["provenance"]["snapshot_version"]}"'
     again = client.get("/v1/elections/2020/per-capita", headers={"If-None-Match": etag})
     assert again.status_code == 304
+
+
+def test_per_capita_reads_order_explicitly(
+    settings: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two per-capita reads carry their own ORDER BY.
+
+    The ordering asserts above cannot show it: the build writes the table already
+    sorted and the ``(year, state)`` primary key walks in that order, so a read with no
+    ORDER BY returns the same rows in the same order today. Pinning the clause is what
+    keeps the response order a contract rather than a property of the file.
+    """
+    from usvote.api.repository import SnapshotRepository
+
+    seen: list[str] = []
+    original = SnapshotRepository._select
+
+    def spy(
+        self: SnapshotRepository, sql: str, params: tuple[object, ...]
+    ) -> list[dict[str, object]]:
+        seen.append(sql)
+        return original(self, sql, params)
+
+    monkeypatch.setattr(SnapshotRepository, "_select", spy)
+    repo = SnapshotRepository.open(str(settings.snapshot_path))
+    repo.per_capita_by_year(2020)
+    repo.per_capita_by_state("CA")
+    assert seen[0].rstrip().endswith("ORDER BY state")
+    assert seen[1].rstrip().endswith("ORDER BY year")

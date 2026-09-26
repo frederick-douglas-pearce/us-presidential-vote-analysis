@@ -221,8 +221,8 @@ HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
 #: the view reaches the public table only when someone lists it here too. It cannot be
 #: an alias even if that were wanted — neither the snapshot build (a top-level module,
 #: barred from importing a source subpackage) nor the serving layer (D028's deny-list)
-#: may import ``usvote.census``. ``tests/unit/test_snapshot.py`` pins the
-#: correspondence.
+#: may import ``usvote.census``.
+#: ``tests/unit/test_snapshot.py::TestPerCapitaContract`` pins the correspondence.
 #:
 #: ``year`` is the view's ``election_year``, renamed to match every other snapshot
 #: table; ``state_usps`` is joined in by the build, as it is for ``ec_pv``.
@@ -252,11 +252,13 @@ PER_CAPITA_COLUMNS: tuple[str, ...] = (
 #: ``BOUNDARY_BASIS_VALUES`` / ``COVERAGE_VALUES``), held here because nothing that
 #: needs them may import census (see :data:`PER_CAPITA_COLUMNS`). The build refuses a
 #: value outside them and the SQLite table carries a CHECK built from them;
-#: ``tests/unit/test_snapshot.py`` pins each equal to its census original, which is what
+#: ``tests/unit/test_snapshot.py::TestPerCapitaContract`` pins each equal to its census
+#: original, which is what
 #: makes the copy safe.
 PER_CAPITA_SERIES_VALUES: tuple[str, ...] = ("resident",)
 PER_CAPITA_BOUNDARY_BASIS_VALUES: tuple[str, ...] = ("at_election", "present_day")
-PER_CAPITA_COVERAGE_VALUES: tuple[str, ...] = ("covered", "no_governing_figure")
+PER_CAPITA_COVERAGE_NO_FIGURE = "no_governing_figure"
+PER_CAPITA_COVERAGE_VALUES: tuple[str, ...] = ("covered", PER_CAPITA_COVERAGE_NO_FIGURE)
 
 
 @dataclass(frozen=True)
@@ -283,7 +285,7 @@ class SnapshotMeta:
     deliberate trade — a silently 50-year snapshot is the same class of error the
     ``pv_status`` column exists to prevent, one level up.
 
-    **Two provenances, because since #139 the surface has two** (D048). ``source`` /
+    **Three provenances.** The first two arrived with #139 (D048): ``source`` /
     ``license`` describe the **popular-vote** data (MIT / CC0-1.0) and keep their
     original names for backward compatibility; ``ec_source`` / ``ec_license`` describe
     the **electoral-college** data (the National Archives, a work of the U.S.

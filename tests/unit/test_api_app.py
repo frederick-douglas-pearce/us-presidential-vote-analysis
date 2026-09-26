@@ -77,6 +77,34 @@ def test_schema_version_mismatch_fails_loud_at_open(
         SnapshotRepository.open(snapshot_path)
 
 
+def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
+    snapshot_path: str, tmp_path: Path
+) -> None:
+    """A v3 snapshot under a v4 server must say "schema_version 3 != 4" (#245).
+
+    A v3 ``snapshot_meta`` lacks the ``census_*`` columns, so a reader that fetched the
+    full row before comparing versions would fail on a missing column and report "not a
+    valid usvote snapshot" — the wrong diagnosis at exactly the snapshot↔image cutover
+    (D034) where a mismatch is expected. This builds that older shape by dropping the
+    two columns and writing the old version number.
+    """
+    import shutil
+    import sqlite3
+
+    old = tmp_path / "v3.sqlite"
+    shutil.copy(snapshot_path, old)
+    conn = sqlite3.connect(old)
+    try:
+        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN census_source")
+        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN census_license")
+        conn.execute("UPDATE snapshot_meta SET schema_version = 3")
+        conn.commit()
+    finally:
+        conn.close()
+    with pytest.raises(SnapshotError, match=r"schema_version 3 != this server's 4"):
+        SnapshotRepository.open(str(old))
+
+
 # --- /health ----------------------------------------------------------------
 
 

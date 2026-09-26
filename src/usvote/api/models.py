@@ -179,7 +179,9 @@ _PER_CAPITA_EXAMPLE: dict[str, Any] = {
     "state_electoral_votes": 55,
     "population": 37253956,
     "population_series": "resident",
-    "boundary_basis": "at_election",
+    # present_day, as every row but Virginia 1824-1868 reads: the Bureau's table
+    # reports on modern footprints, which only Virginia's restatement changes (D066).
+    "boundary_basis": "present_day",
     "coverage": "covered",
     "persons_per_electoral_vote": 677344.6545454545,
 }
@@ -223,6 +225,8 @@ _PROVENANCE_EXAMPLE: dict[str, Any] = {
         _EX_LIC,
         ec_source=_EX_EC_SRC,
         ec_license=_EX_EC_LIC,
+        census_source=_EX_CENSUS_SRC,
+        census_license=_EX_CENSUS_LIC,
         pv_year_min=1976,
         pv_year_max=2024,
     ),
@@ -683,7 +687,8 @@ class Provenance(BaseModel):
     those codes (:mod:`usvote.api.provenance`). The note makes the D030 redistributable
     boundary explicit: MIT (CC0) and the Archives (public domain) only, UCSB excluded.
 
-    **Two provenances, because the surface has two** (#139 / D048). ``source`` /
+    **Three provenances, because the surface has three.** The first two arrived with
+    #139 (D048): ``source`` /
     ``license`` describe the **popular-vote** data and keep their original unprefixed
     names for backward compatibility; ``ec_source`` / ``ec_license`` describe the
     **electoral-college** data. Before the window widened the distinction was invisible
@@ -769,6 +774,8 @@ class Provenance(BaseModel):
                 lic,
                 ec_source=ec_src,
                 ec_license=ec_lic,
+                census_source=census_src,
+                census_license=census_lic,
                 pv_year_min=meta.pv_year_min,
                 pv_year_max=meta.pv_year_max,
             ),

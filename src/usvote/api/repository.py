@@ -93,13 +93,19 @@ class SnapshotRepository:
                 f"snapshot file {snapshot_path!r} does not exist — build it with "
                 "`python -m usvote.snapshot` (needs the local warehouse)."
             )
-        meta = cls._read_meta(snapshot_path)
-        if meta.schema_version != SNAPSHOT_SCHEMA_VERSION:
+        # The version is read and compared **before** the full row, and the order is
+        # the point: the full read names every current ``SnapshotMeta`` field, so on a
+        # snapshot of another schema it fails on a missing column and would report "not
+        # a valid usvote snapshot" instead of the version mismatch — at exactly the
+        # snapshot↔image cutover (D034) where the mismatch is the thing to say (#245).
+        version = cls._read_schema_version(snapshot_path)
+        if version != SNAPSHOT_SCHEMA_VERSION:
             raise SnapshotError(
-                f"snapshot schema_version {meta.schema_version} != this server's "
+                f"snapshot schema_version {version} != this server's "
                 f"{SNAPSHOT_SCHEMA_VERSION}; rebuild the snapshot against the current "
                 "code (`python -m usvote.snapshot`) or deploy a matching server."
             )
+        meta = cls._read_meta(snapshot_path)
         return cls(snapshot_path, meta)
 
     @staticmethod
@@ -114,6 +120,28 @@ class SnapshotRepository:
         )
         conn.row_factory = sqlite3.Row
         return conn
+
+    @classmethod
+    def _read_schema_version(cls, snapshot_path: str) -> object:
+        """Read ``snapshot_meta.schema_version`` alone — a column every schema has."""
+        conn = cls._connect(snapshot_path)
+        try:
+            try:
+                row = conn.execute(
+                    f"SELECT schema_version FROM {META_TABLE}"  # noqa: S608 — constant
+                ).fetchone()
+            except sqlite3.OperationalError as e:  # missing table / malformed file
+                raise SnapshotError(
+                    f"snapshot {snapshot_path!r} is missing the {META_TABLE} table — "
+                    f"it is not a valid usvote snapshot ({e})."
+                ) from e
+        finally:
+            conn.close()
+        if row is None:
+            raise SnapshotError(
+                f"snapshot {snapshot_path!r} has an empty {META_TABLE} table."
+            )
+        return row["schema_version"]
 
     @classmethod
     def _read_meta(cls, snapshot_path: str) -> SnapshotMeta:

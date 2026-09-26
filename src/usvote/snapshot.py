@@ -55,10 +55,12 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     (``year_min`` / ``year_max``) **and the narrower redistributable-PV sub-window**
     (``pv_year_min`` / ``pv_year_max``), the PV ``source`` = MIT with its ``license``
     (CC0-1.0, read from the ``pv_source`` reference data, not hardcoded), the EC
-    ``ec_source`` / ``ec_license`` (the National Archives; a U.S. Government work), and
-    an **informational-only** build timestamp. Two provenances, because after #139 the
-    surface has two: most of the table is Archives EC data with no popular vote at all,
-    and a ``meta`` block naming only MIT would assert MIT covers 1824 (D048).
+    ``ec_source`` / ``ec_license`` (the National Archives; a U.S. Government work), the
+    census ``census_source`` / ``census_license`` (the Census Bureau, for the
+    ``per_capita`` table, #245), and an **informational-only** build timestamp. Three
+    provenances, because the surface has three: most of the table is Archives EC data
+    with no popular vote at all, a ``meta`` block naming only MIT would assert MIT
+    covers 1824 (D048), and the per-capita populations are the Bureau's.
 
 **Version = content hash, not timestamp (D028).** ``snapshot_version`` is a SHA-256
 over the ``ec_pv`` rows in a deterministic ``ORDER BY (year, state, candidate_slug)``,
@@ -133,6 +135,7 @@ from usvote.snapshot_schema import (
     META_TABLE,
     PER_CAPITA_BOUNDARY_BASIS_VALUES,
     PER_CAPITA_COLUMNS,
+    PER_CAPITA_COVERAGE_NO_FIGURE,
     PER_CAPITA_COVERAGE_VALUES,
     PER_CAPITA_SERIES_VALUES,
     PER_CAPITA_TABLE,
@@ -268,8 +271,10 @@ _PER_CAPITA_GRAIN: tuple[str, ...] = ("year", "state")
 
 #: The ``per_capita`` columns folded into the content hash: **every column but the
 #: ratio.** The ratio is a pure function of two hashed integers (``population`` and
-#: ``total_electoral_votes``) and the view's formula — and a formula change is a code
-#: change, which :data:`SNAPSHOT_SCHEMA_VERSION` covers — so hashing it would add no
+#: ``total_electoral_votes``) and the view's formula. A change to that formula is not
+#: silently absorbed: :func:`build_per_capita_table`'s ratio check refuses the build
+#: until this module is updated to match, which is also when
+#: :data:`SNAPSHOT_SCHEMA_VERSION` should move. So hashing the ratio would add no
 #: detection power and would put the first float into a hash
 #: :data:`_INTEGER_COLUMNS` exists to keep float-free. That argument holds only while
 #: the ratio really is that function, which is why
@@ -805,6 +810,14 @@ def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
             )
 
 
+#: The shared remedy for a per-capita frame that disagrees with the served facts.
+_STALE_CENSUS_REMEDY = (
+    "Both derive from the EC spine, so this is a census load that is stale against "
+    "the warehouse — reload census (`python -m usvote.census load`, or "
+    "`python -m usvote all` with USVOTE_CENSUS_CORPUS_DIR set)."
+)
+
+
 def build_per_capita_table(
     per_capita_df: pd.DataFrame, data_df: pd.DataFrame
 ) -> pd.DataFrame:
@@ -814,7 +827,7 @@ def build_per_capita_table(
     :func:`read_per_capita` produces; ``data_df`` is the finished ``ec_pv`` frame, which
     the key-set check below compares against.
 
-    **Five checks, each for a failure the others cannot see.** The warehouse view
+    **Six checks, each for a failure the others cannot see.** The warehouse view
     guarantees the first and the last *structurally* (D064(c)), but this is a second
     consumer of it, reading across a process and a file boundary, so nothing here
     enforces them — and the public artifact is the one place a silent defect would be
@@ -827,17 +840,27 @@ def build_per_capita_table(
        spine-left (D060) and keeps zero-allotment states — so on a warehouse built in
        one run they are equal. They diverge when a census load is stale against a
        rebuilt spine, and then one direction is a state served with no per-capita row
-       and the other a per-capita row for a state that did not take part.
-    3. **Every label inside its vocabulary** (:data:`PER_CAPITA_COVERAGE_VALUES` and
-       its two siblings). ``population_series`` may be NULL only where ``population``
-       is — the coupling ``assert_election_population_shape`` enforces upstream.
-    4. **Every row has a** ``state_usps``, since the by-state route keys on it.
-    5. **The ratio is exactly the function of its operands the content hash assumes**:
-       NULL where the population is NULL or the allotment zero, and otherwise equal to
-       ``population / total_electoral_votes``. The hash omits the ratio on that premise
-       (:data:`_PER_CAPITA_HASHED_COLUMNS`), so the premise is checked, not assumed —
-       a ratio that drifted from its operands would otherwise ship under an unchanged
-       version.
+       and the other a per-capita row for a state that did not take part. Each
+       direction raises its own message.
+    3. **The same allotment as** ``ec_pv`` **for every key.** The ratio's denominator
+       must be the ``total_electoral_votes`` the served election rows carry. A stale
+       census load does not only miss keys: a correction that moves an allotment and
+       keeps every key (#243's Nevada 1864, 2 → 3) leaves the key sets equal and the
+       per-capita denominator wrong, so check 2 alone would pass it.
+    4. **Every label inside its vocabulary** (:data:`PER_CAPITA_COVERAGE_VALUES` and
+       its two siblings), and the NULL couplings that make a NULL population legible:
+       ``population_series`` is NULL exactly where ``population`` is (the coupling
+       ``assert_election_population_shape`` enforces upstream), and ``coverage`` is
+       ``no_governing_figure`` exactly where it is — the label the public row relies
+       on to say *why* a population is absent.
+    5. **Every row has a** ``state_usps``, since the by-state route keys on it.
+    6. **The ratio is the function of its operands the content hash assumes**: NULL
+       where the population is NULL or the allotment zero, and otherwise equal to
+       ``population / total_electoral_votes`` to within ``rtol=1e-12`` (both sides are
+       one correctly-rounded IEEE division, so any real drift is far larger). The hash
+       omits the ratio on that premise (:data:`_PER_CAPITA_HASHED_COLUMNS`), so the
+       premise is checked, not assumed — a ratio that drifted from its operands would
+       otherwise ship under an unchanged version.
     """
     needed = (*_PER_CAPITA_VIEW_COLUMNS, "state_usps")
     missing = [c for c in needed if c not in per_capita_df.columns]
@@ -864,15 +887,31 @@ def build_per_capita_table(
     pc_keys = set(table[grain].itertuples(index=False, name=None))
     served_without = sorted(fact_keys - pc_keys)
     orphaned = sorted(pc_keys - fact_keys)
-    if served_without or orphaned:
+    if served_without:
         raise SnapshotError(
-            "the per-capita table and ec_pv disagree about which (year, state) pairs "
-            f"took part: {len(served_without)} served with no per-capita row "
-            f"{served_without[:10]}, {len(orphaned)} per-capita row(s) with no "
-            f"electoral fact {orphaned[:10]}. Both derive from the EC spine, so this "
-            "is a census load that is stale against the warehouse — reload census "
-            "(`python -m usvote.census load`, or `python -m usvote all` with "
-            "USVOTE_CENSUS_CORPUS_DIR set)."
+            f"{len(served_without)} (year, state) pair(s) served in ec_pv have no "
+            f"per-capita row: {served_without[:10]}. {_STALE_CENSUS_REMEDY}"
+        )
+    if orphaned:
+        raise SnapshotError(
+            f"{len(orphaned)} per-capita row(s) have no electoral fact in ec_pv: "
+            f"{orphaned[:10]}. {_STALE_CENSUS_REMEDY}"
+        )
+
+    fact_allotment = data_df[[*grain, "total_electoral_votes"]].drop_duplicates(grain)
+    joined = table[[*grain, "total_electoral_votes"]].merge(
+        fact_allotment, on=grain, how="inner", suffixes=("_pc", "_fact"), validate="1:1"
+    )
+    disagree = joined["total_electoral_votes_pc"].astype("Int64") != joined[
+        "total_electoral_votes_fact"
+    ].astype("Int64")
+    if bool(disagree.any()):
+        offenders = joined.loc[disagree].values.tolist()[:10]
+        raise SnapshotError(
+            f"{int(disagree.sum())} per-capita row(s) carry an allotment that differs "
+            "from the served ec_pv row's total_electoral_votes "
+            f"[year, state, per_capita, ec_pv]: {offenders}. The ratio's denominator "
+            f"would disagree with the election rows. {_STALE_CENSUS_REMEDY}"
         )
 
     vocabularies = (
@@ -897,6 +936,14 @@ def build_per_capita_table(
         raise SnapshotError(
             "per-capita population_series and population must be NULL together: "
             f"{table.loc[series_uncoupled, grain].values.tolist()[:10]}"
+        )
+    no_figure = table["coverage"] == PER_CAPITA_COVERAGE_NO_FIGURE
+    coverage_uncoupled = no_figure != table["population"].isna()
+    if bool(coverage_uncoupled.any()):
+        raise SnapshotError(
+            f"per-capita coverage must be {PER_CAPITA_COVERAGE_NO_FIGURE!r} exactly "
+            "where population is NULL: "
+            f"{table.loc[coverage_uncoupled, grain].values.tolist()[:10]}"
         )
 
     no_usps = table["state_usps"].isna()
@@ -1368,7 +1415,8 @@ def read_per_capita(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
     census when ``USVOTE_CENSUS_CORPUS_DIR`` is unset, and the view builder then skips
     too (D064(e)) — so a public EC + MIT clone can still build a *warehouse* but no
     longer a *snapshot*. Raising here, rather than shipping a snapshot without the
-    table, is the point: a missing table would 404 every per-capita request and read as
+    table, is the point: a missing table would fail every per-capita request (a 500
+    from the SQLite read), or an empty one would answer each with no rows and read as
     "no such data", when the data exists and simply was not loaded. The census corpus is
     public domain and fetchable (``python -m usvote.census snapshot``), which is what
     makes requiring it acceptable where requiring UCSB never would be (D022/D030).

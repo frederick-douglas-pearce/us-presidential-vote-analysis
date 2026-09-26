@@ -28,11 +28,13 @@ skips census (with a NOTICE) when `USVOTE_CENSUS_CORPUS_DIR` is unset, so a publ
 clone can still build a **warehouse** but no longer a **snapshot**. Fetch the corpus once
 with `python -m usvote.census snapshot`. The Bureau's tables are public domain, which is
 what makes requiring them acceptable. The UCSB corpus is the opposite case: it is **not**
-required and must never become required (D022/D030). Pass `-o/--out` to override `USVOTE_API_SNAPSHOT_PATH`. The build is **reproducible
+required and must never become required (D022/D030).
+
+Pass `-o/--out` to override `USVOTE_API_SNAPSHOT_PATH`. The build is **reproducible
 and idempotent**: the same warehouse data always yields the same `snapshot_version`, and
 re-running overwrites the file atomically.
 
-## Two windows, two provenances
+## Two windows, three provenances
 
 The snapshot reads `ec_pv_redistributable`, which wraps `pv_redistributable` — defined
 independently as `WHERE redistributable` (MIT / CC0 only, [D016](../.claude/specs/decisions.md)
@@ -48,6 +50,7 @@ PV attached only where MIT covers it. Until [D048](../.claude/specs/decisions.md
 |---|---|---|---|
 | **Electoral college** — every EC column | **1824–2024** (`year_min`/`year_max`) | U.S. National Archives (`NARA`) | public domain, a work of the U.S. Government (`US-PD`) |
 | **Popular vote** — `candidate_votes`, `state_total_votes`, `party`, `source`, `reliability` | **1976–2024** (`pv_year_min`/`pv_year_max`) | MIT Election Lab (`MIT`) | `CC0-1.0` |
+| **Per-capita population** — the `per_capita` table (#245) | **1824–2024** (the served window) | U.S. Census Bureau (`USCB`) | public domain, a work of the U.S. Government (`US-PD`) |
 
 Both windows are in `snapshot_meta` and in every response's `meta.provenance.coverage`, so
 coverage is **stated, never inferred from a field of nulls**. That distinction is the whole
@@ -260,9 +263,12 @@ cell, 1848 Texas, which the US did not enumerate in 1840), or a zero allotment (
 cells, the withheld electoral votes of 1864 and 1868). The build refuses any other NULL,
 and any ratio that is not exactly `population / total_electoral_votes`.
 
-**Two-way agreement with `ec_pv`.** Both tables derive from the EC spine's participation
-roster, so they cover the same `(year, state)` pairs. The build asserts it in both
-directions, which catches a census load that is stale against a rebuilt warehouse.
+**Agreement with `ec_pv`.** Both tables derive from the EC spine's participation roster, so
+they cover the same `(year, state)` pairs with the same allotments. The build asserts both:
+the key sets are equal in both directions, and every per-capita `total_electoral_votes`
+equals the served election rows' figure for the same key. The second check exists because a
+stale census load can keep every key and still carry an old allotment — the shape of #243's
+Nevada 1864 correction.
 
 Served at `GET /v1/elections/{year}/per-capita` (every state in one election; optional
 `state` filter) and `GET /v1/states/{usps}/per-capita` (one state across years;
@@ -310,7 +316,10 @@ Widening the hash to cover the derived tables was considered and rejected. The v
 source's numbers, so a census reload can move a population while every electoral fact stays
 put. With the hash over `ec_pv` alone that reload would ship under the old version, and the
 D034 edge-cache cutover would never fire. Every `per_capita` column is hashed **except the
-ratio**. The ratio is a pure function of two hashed integers and the view's formula, and a
-formula change is a code change that bumps the schema version. Leaving it out keeps the
-hash free of floats, and the build checks that the ratio really equals `population /
-total_electoral_votes` before relying on that. The version went 3 → 4.
+ratio**. The ratio is a pure function of two hashed integers and the view's formula.
+Leaving it out keeps the hash free of floats. A change to the formula is not absorbed
+silently: the build checks that every ratio equals `population / total_electoral_votes`
+and refuses a snapshot where it does not, so a formula change forces an edit to the build,
+which is when the schema version should move. A separator byte sits between the two
+tables' rows as defence in depth. It has no test of its own: the tables serialize to
+different field counts, so no collision it would prevent has been constructed. The version went 3 → 4.
