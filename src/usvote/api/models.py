@@ -685,7 +685,8 @@ class Provenance(BaseModel):
     snapshot metadata** (E8-S1) so they can't drift from what was actually built; the
     human ``*_name`` / ``*_url`` / ``redistributable_note`` are the presentation of
     those codes (:mod:`usvote.api.provenance`). The note makes the D030 redistributable
-    boundary explicit: MIT (CC0) and the Archives (public domain) only, UCSB excluded.
+    boundary explicit: MIT (CC0), the Archives and the Census Bureau (both public
+    domain), UCSB excluded.
 
     **Three provenances, because the surface has three.** The first two arrived with
     #139 (D048): ``source`` /

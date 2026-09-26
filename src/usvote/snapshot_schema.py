@@ -294,6 +294,9 @@ class SnapshotMeta:
     Archives'. Codes only; their public display lives in
     :mod:`usvote.api.provenance` (D016/D028: the snapshot stores the drift-proof code,
     the serving layer annotates it).
+
+    The third, since #245 (D069): ``census_source`` / ``census_license`` describe the
+    per-capita population figures (the U.S. Census Bureau, public domain).
     """
 
     snapshot_version: str

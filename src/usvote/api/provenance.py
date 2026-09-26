@@ -118,7 +118,7 @@ def redistributable_note(
     Composed from the resolved displays so no source or license name appears twice —
     this note cannot drift from :data:`_SOURCES` / :data:`_LICENSES`.
 
-    **It names both provenances, and that is the point** (#139 / D048). Before the
+    **It names every provenance, and that is the point** (#139 / D048). Before the
     surface widened, every row carried MIT popular vote, so a note naming only MIT was
     complete. After it, most rows are electoral-college data from the Archives with no
     popular vote at all — and a note that still said "sourced from MIT Election Lab"
