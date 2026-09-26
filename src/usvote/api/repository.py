@@ -32,6 +32,8 @@ from usvote.snapshot_schema import (
     HYBRID_SUMMARY_COLUMNS,
     HYBRID_SUMMARY_TABLE,
     META_TABLE,
+    PER_CAPITA_COLUMNS,
+    PER_CAPITA_TABLE,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -272,6 +274,39 @@ class SnapshotRepository:
             (year,),
         )
         return rows[0] if rows else None
+
+    def per_capita_by_year(
+        self, year: int, state: str | None = None
+    ) -> list[dict[str, object]]:
+        """The ``per_capita`` rows for a year, optionally one state (#245)."""
+        clauses = ["year = ?"]
+        params: list[object] = [year]
+        if state is not None:
+            clauses.append("state_usps = ?")
+            params.append(state.upper())
+        return self._per_capita_rows(clauses, params, "state")
+
+    def per_capita_by_state(
+        self, usps: str, year_from: int | None = None, year_to: int | None = None
+    ) -> list[dict[str, object]]:
+        """The ``per_capita`` rows for one state across years (#245)."""
+        clauses = ["state_usps = ?"]
+        params: list[object] = [usps.upper()]
+        extra, extra_params = _year_range_clauses(year_from, year_to)
+        clauses += extra
+        params += extra_params
+        return self._per_capita_rows(clauses, params, "year")
+
+    def _per_capita_rows(
+        self, clauses: list[str], params: list[object], order_by: str
+    ) -> list[dict[str, object]]:
+        """Capped SELECT of the ``per_capita`` projection — :meth:`_data_rows`' twin."""
+        cols = ", ".join(PER_CAPITA_COLUMNS)
+        return self._select(
+            f"SELECT {cols} FROM {PER_CAPITA_TABLE} "  # noqa: S608
+            f"WHERE {' AND '.join(clauses)} ORDER BY {order_by}",
+            tuple(params),
+        )
 
     def state_exists(self, usps: str) -> bool:
         """Whether the snapshot contains this USPS state code (else 404)."""

@@ -13,13 +13,22 @@ API layer (E8-S2/S3) consumes; the authority is the module
 
 ```
 export USVOTE_API_SNAPSHOT_PATH=/path/to/snapshot.sqlite
-python -m usvote all           # (re)build the warehouse incl. ec_pv_redistributable
-python -m usvote.snapshot      # read the view, write the snapshot (needs local Postgres)
+export USVOTE_CENSUS_CORPUS_DIR=/path/to/census_corpus   # required since #245
+python -m usvote all           # (re)build the warehouse incl. both source views
+python -m usvote.snapshot      # read the views, write the snapshot (needs local Postgres)
 ```
 
 `python -m usvote.snapshot` requires the local warehouse **at build time only** — it reads
-`dwh.ec_pv_redistributable` and fails loud (pointing you at `usvote all`) if that view is
-absent. Pass `-o/--out` to override `USVOTE_API_SNAPSHOT_PATH`. The build is **reproducible
+`dwh.ec_pv_redistributable` and `dwh.election_per_capita`, and fails loud if either view is
+absent.
+
+**The census corpus is a required input since #245** ([D069](../.claude/specs/decisions.md)).
+The per-capita view exists only on a warehouse that loaded census; `python -m usvote all`
+skips census (with a NOTICE) when `USVOTE_CENSUS_CORPUS_DIR` is unset, so a public EC + MIT
+clone can still build a **warehouse** but no longer a **snapshot**. Fetch the corpus once
+with `python -m usvote.census snapshot`. The Bureau's tables are public domain, which is
+what makes requiring them acceptable. The UCSB corpus is the opposite case: it is **not**
+required and must never become required (D022/D030). Pass `-o/--out` to override `USVOTE_API_SNAPSHOT_PATH`. The build is **reproducible
 and idempotent**: the same warehouse data always yields the same `snapshot_version`, and
 re-running overwrites the file atomically.
 
@@ -104,7 +113,7 @@ from, since that map is also where a new correction is added. The provenance res
 of the catalog, where each entry carries its Archives URL. See the note in
 `assert_count_status_reasons_are_catalogued`.
 
-## The four tables
+## The five tables
 
 ### `ec_pv` — the joined fact
 
@@ -225,12 +234,50 @@ the in-repo catalog carries a public-domain citation. Under the published policy
 which is what makes the divergence safe as well as deliberate. If you are diffing the view
 against the artifact, this column is the expected difference and the only one.
 
+### `per_capita` — persons per electoral vote (#245)
+
+One row per `(year, state)`: how many residents each of a state's electoral votes stood
+for. Read from the warehouse view `dwh.election_per_capita` (#184), which is over the
+persisted election-grain table `dwh.election_population` ([D064](../.claude/specs/decisions.md)).
+A table of its own because of grain: `ec_pv` is per candidate, so columns there would repeat
+one state's figure once per candidate. `PRIMARY KEY (year, state)`; indexed on `state_usps`.
+
+| column | type | meaning |
+|---|---|---|
+| `year` | INTEGER | election year (the view's `election_year`) |
+| `state` / `state_usps` | TEXT | full name and USPS code |
+| `governing_census_year` | INTEGER | the census whose apportionment was in force — 2020 reads 2010, and 1924/1928 read 1910 |
+| `total_electoral_votes` | INTEGER | the appointed allotment, the ratio's denominator (public name `state_electoral_votes`) |
+| `population` | INTEGER, nullable | the governing census's resident population |
+| `population_series` | TEXT, nullable | `resident`; NULL exactly where `population` is |
+| `boundary_basis` | TEXT | `at_election` or `present_day` ([D066](../.claude/specs/decisions.md)) |
+| `coverage` | TEXT | `covered` or `no_governing_figure` |
+| `persons_per_electoral_vote` | REAL, nullable | `population / total_electoral_votes` |
+
+**A NULL ratio is never bare, and needs no status column.** It has two causes and each is
+readable off the row: a NULL `population` with `coverage = 'no_governing_figure'` (one
+cell, 1848 Texas, which the US did not enumerate in 1840), or a zero allotment (fourteen
+cells, the withheld electoral votes of 1864 and 1868). The build refuses any other NULL,
+and any ratio that is not exactly `population / total_electoral_votes`.
+
+**Two-way agreement with `ec_pv`.** Both tables derive from the EC spine's participation
+roster, so they cover the same `(year, state)` pairs. The build asserts it in both
+directions, which catches a census load that is stale against a rebuilt warehouse.
+
+Served at `GET /v1/elections/{year}/per-capita` (every state in one election; optional
+`state` filter) and `GET /v1/states/{usps}/per-capita` (one state across years;
+`year_from` / `year_to`). The view name, the columns read and the three vocabularies are
+**copies** in `usvote/snapshot.py` and `usvote/snapshot_schema.py`, because neither module
+may import `usvote.census`. `tests/unit/test_snapshot.py::TestPerCapitaContract` holds each
+copy equal to its census original.
+
 ### `snapshot_meta` — one provenance row
 
 `snapshot_version`, `schema_version`, `row_count`, `candidate_count`, `year_min`/`year_max`
 (served) and `pv_year_min`/`pv_year_max` (popular vote), `source` = MIT / `license` =
 CC0-1.0 (read from the `pv_source` reference data), `ec_source` = NARA / `ec_license` =
-US-PD, and an informational `build_timestamp`. Feeds the API `meta` block and the ETag.
+US-PD, `census_source` = USCB / `census_license` = US-PD (the per-capita population, #245),
+and an informational `build_timestamp`. Feeds the API `meta` block and the ETag.
 
 The windows are **descriptive of the snapshot's actual content**. Note that a *scoped*
 warehouse can no longer produce a snapshot at all (D048): the build derives `pv_status` over
@@ -241,13 +288,14 @@ the same class of error `pv_status` exists to prevent one level down.
 ## `snapshot_version` is a content hash, not a timestamp
 
 `snapshot_version` is a SHA-256 over the `ec_pv` rows in a deterministic
-`ORDER BY (year, state, candidate_slug)` plus `schema_version`. The build timestamp is
+`ORDER BY (year, state, candidate_slug)`, then the `per_capita` rows in `(year, state)`
+order, plus `schema_version`. The build timestamp is
 **excluded** from it. This is the single value that reconciles reproducibility ("same
 warehouse, same version") with the freshness/ETag contract ("identical data, identical
 version") the API (E8-S2) serves.
 
-Because the hash covers only the `ec_pv` data rows — **not** the derived `national_rollup`
-or `hybrid_summary` — a change to how those are *computed* over identical underlying data
+Because the hash covers only the source-data rows (`ec_pv` and `per_capita`) — **not** the
+derived `national_rollup` or `hybrid_summary` — a change to how those are *computed* over identical underlying data
 would not move the hash on its own. Such a change therefore **must** bump
 `SNAPSHOT_SCHEMA_VERSION` (which is folded into the hash), so cached consumers see a new
 version. #102 is the worked example: it added a whole table and five roll-up columns without
@@ -257,3 +305,12 @@ by hand.
 Widening the hash to cover the derived tables was considered and rejected. The version is a
 *content* address for the facts; a derived table that changed while the facts did not is a
 **code** change, and the schema version is the instrument for that.
+
+**`per_capita` is inside the hash because it is not derived** (#245). It carries a second
+source's numbers, so a census reload can move a population while every electoral fact stays
+put. With the hash over `ec_pv` alone that reload would ship under the old version, and the
+D034 edge-cache cutover would never fire. Every `per_capita` column is hashed **except the
+ratio**. The ratio is a pure function of two hashed integers and the view's formula, and a
+formula change is a code change that bumps the schema version. Leaving it out keeps the
+hash free of floats, and the build checks that the ratio really equals `population /
+total_electoral_votes` before relying on that. The version went 3 → 4.

@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
 from usvote.api import create_app
@@ -58,6 +59,7 @@ def test_opens_snapshot_path_with_spaces(tmp_path: Path) -> None:
         synthetic_ec_pv_frame(),
         out,
         pv_status_df=synthetic_pv_status_frame(),
+        per_capita_df=synthetic_per_capita_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     repo = SnapshotRepository.open(out)
@@ -92,6 +94,9 @@ def test_health_reports_status_and_snapshot_meta(client: TestClient) -> None:
         "pv_year_max": 2020,
     }
     assert body["source"] == "MIT"
+    # #245: /health's hand-built block carries the census codes too, so the ops probe
+    # and /v1/meta describe the same snapshot.
+    assert (body["census_source"], body["census_license"]) == ("USCB", "US-PD")
 
 
 def test_health_is_uncached_and_has_no_etag(client: TestClient) -> None:
@@ -119,6 +124,11 @@ def test_v1_meta_carries_human_provenance(client: TestClient) -> None:
     assert prov["license"] == "CC0-1.0"
     assert prov["license_url"].startswith("http")
     assert "UCSB" in prov["redistributable_note"]
+    # #245: the per-capita population provenance, on every response.
+    assert prov["census_source"] == "USCB"
+    assert prov["census_source_name"] == "U.S. Census Bureau"
+    assert prov["census_license"] == "US-PD"
+    assert prov["census_license_url"].startswith("http")
 
 
 def test_conditional_get_returns_304_when_version_matches(client: TestClient) -> None:

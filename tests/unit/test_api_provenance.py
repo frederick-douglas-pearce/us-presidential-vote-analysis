@@ -77,3 +77,12 @@ def test_redistributable_codes_are_mapped() -> None:
     """
     assert "MIT" in provenance._SOURCES
     assert "CC0-1.0" in provenance._LICENSES
+
+
+def test_the_census_codes_are_mapped() -> None:
+    """The per-capita provenance codes (#245) resolve, so a v4 snapshot's ``meta``
+    renders rather than failing every response with ``UnknownProvenanceCode``."""
+    from usvote.snapshot_schema import CENSUS_LICENSE, CENSUS_SOURCE
+
+    assert provenance.source_display(CENSUS_SOURCE).name == "U.S. Census Bureau"
+    assert provenance.license_display(CENSUS_LICENSE).code == "US-PD"

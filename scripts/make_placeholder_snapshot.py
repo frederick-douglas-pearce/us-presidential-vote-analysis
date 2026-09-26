@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tests.fixtures.api_snapshot import (  # noqa: E402  (after the sys.path shim)
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
 from usvote.snapshot import build_snapshot  # noqa: E402  (after the sys.path shim)
@@ -45,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         synthetic_ec_pv_frame(),
         out_path,
         pv_status_df=synthetic_pv_status_frame(),
+        per_capita_df=synthetic_per_capita_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     print(

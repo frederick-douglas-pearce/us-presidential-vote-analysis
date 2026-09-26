@@ -82,7 +82,11 @@ API_TITLE = "US Presidential Vote API"
 #: fields, both year endpoints gained an ``election`` object, and ``/summary`` returns a
 #: new response model. Additive, hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 2 -> 3
 #: for the same event.
-API_VERSION = "0.4.0"
+#:
+#: 0.4.0 -> 0.5.0 by #245: two per-capita routes, a ``PerCapitaRow`` model, and four
+#: ``census_*`` fields on every response's ``meta.provenance``. Additive, hence minor.
+#: ``SNAPSHOT_SCHEMA_VERSION`` moved 3 -> 4 for the same event.
+API_VERSION = "0.5.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -113,17 +117,22 @@ popular vote or the hybrid would have flipped the electoral-college result, and 
 method's top-two margin in percentage points. Precomputed, so the comparison does
 not depend on a consumer re-deriving it from the raw totals.
 
+**Persons per electoral vote.** How many residents each state's electoral votes stood
+for — the governing census's population divided by the state's allotment — by election
+(`/v1/elections/{year}/per-capita`) or by state (`/v1/states/{usps}/per-capita`). The
+population figures come from the U.S. Census Bureau.
+
 **Coverage:** {coverage_window} (US presidential elections).
 
 **Data provenance & licensing.** {provenance_note} Every response carries the exact
 source, license, coverage window, and snapshot version under `meta.provenance`; the same
 block, with build details, is at `GET /v1/meta`.
 
-**Not an official source.** This is a derived dataset, assembled from published
-sources by an independent project. It has no official standing and is not affiliated
-with, or endorsed by, the National Archives, the MIT Election Lab, the UCSB American
-Presidency Project, or any election authority. Nothing served here is a canvass, a
-certification, or a legal record of an election.
+**Not an official source.** This is a derived dataset, assembled from published sources
+by an independent project. It has no official standing and is not affiliated with, or
+endorsed by, the National Archives, the MIT Election Lab, the U.S. Census Bureau, the
+UCSB American Presidency Project, or any election authority. Nothing served here is a
+canvass, a certification, or a legal record of an election.
 
 **Getting started.** Browse the interactive docs at `/docs` (Swagger UI) or `/redoc`
 (ReDoc). Every response is JSON in a `{data, meta}` envelope and carries an `ETag` and
@@ -167,6 +176,13 @@ _OPENAPI_TAGS: list[dict[str, Any]] = [
         "description": (
             "One candidate's EC + PV rows across every covered year, keyed by the "
             "durable public slug."
+        ),
+    },
+    {
+        "name": "Per capita",
+        "description": (
+            "Persons per electoral vote by (year, state), from U.S. Census Bureau "
+            "population."
         ),
     },
     {
@@ -291,6 +307,8 @@ def _meta_block(repo: SnapshotRepository) -> dict[str, object]:
         "license": meta.license,
         "ec_source": meta.ec_source,
         "ec_license": meta.ec_license,
+        "census_source": meta.census_source,
+        "census_license": meta.census_license,
         "build_timestamp": meta.build_timestamp,
     }
 

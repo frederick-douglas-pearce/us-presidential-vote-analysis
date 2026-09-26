@@ -54,6 +54,9 @@ _SOURCES: dict[str, SourceDisplay] = {
     "NARA": SourceDisplay(
         code="NARA", name="U.S. National Archives and Records Administration"
     ),
+    # The per-capita series' population figures (#245 / D069): the Bureau's published
+    # decennial tables, a U.S. Government work — hence the same ``US-PD`` license code.
+    "USCB": SourceDisplay(code="USCB", name="U.S. Census Bureau"),
 }
 
 #: License code → name + canonical URL. Keyed by the snapshot's ``license`` /

@@ -56,11 +56,11 @@ The `usvote/api/` subpackage serves the redistributable EC+PV data over HTTP fro
 
 ```
 $ export USVOTE_API_SNAPSHOT_PATH=/path/to/snapshot.sqlite
-$ python -m usvote.snapshot     # build the snapshot from dwh.ec_pv_redistributable (needs the warehouse)
+$ python -m usvote.snapshot     # build the snapshot from dwh.ec_pv_redistributable + dwh.election_per_capita (needs the warehouse, incl. census)
 $ python -m usvote.api          # serve it locally (no DB needed); or `python -m usvote.api serve --port 8000`
 ```
 
-For production/container use, point an ASGI server straight at the app factory: `uvicorn --factory usvote.api:create_app`. The server starts and answers requests with Postgres **stopped** — that is the point. `GET /health` reports the loaded snapshot's version and coverage; the data endpoints live under the versioned `/v1` prefix: `GET /v1/elections` (list covered years), `/v1/elections/{year}` (per-state rows + national summary), `/v1/elections/{year}/summary` (the national roll-up), `/v1/states/{usps}`, and `/v1/candidates/{slug}` (each a typed Pydantic model in a shared `{data, meta}` envelope; [`GET /v1/meta`](docs/api-snapshot.md) is the provenance block). CORS defaults to localhost and is overridden with `USVOTE_API_CORS_ORIGINS`.
+For production/container use, point an ASGI server straight at the app factory: `uvicorn --factory usvote.api:create_app`. The server starts and answers requests with Postgres **stopped** — that is the point. `GET /health` reports the loaded snapshot's version and coverage; the data endpoints live under the versioned `/v1` prefix: `GET /v1/elections` (list covered years), `/v1/elections/{year}` (per-state rows + national summary), `/v1/elections/{year}/summary` (the national roll-up), `/v1/states/{usps}`, `/v1/candidates/{slug}`, and the persons-per-electoral-vote series at `/v1/elections/{year}/per-capita` and `/v1/states/{usps}/per-capita` (each a typed Pydantic model in a shared `{data, meta}` envelope; [`GET /v1/meta`](docs/api-snapshot.md) is the provenance block). CORS defaults to localhost and is overridden with `USVOTE_API_CORS_ORIGINS`.
 
 **Browsing the docs (start here as an external developer).** Interactive OpenAPI docs render at **`/docs`** (Swagger UI) and **`/redoc`** (ReDoc) — the hand-off surface. They carry the thesis, the endpoint reference with realistic examples, and a first-class **data-provenance & licensing** statement up front: the popular-vote data is sourced from the **MIT Election Lab** under **CC0 1.0** (public domain), and non-redistributable UCSB data is excluded ([D016](.claude/specs/decisions.md)/[D030](.claude/specs/decisions.md)). That same provenance — source, license, coverage window, and snapshot version — also travels in every response under `meta.provenance`, so it can never drift from what was actually built.
 
@@ -102,7 +102,8 @@ $ set -a; source .env; set +a               # load PG* + USVOTE_* (never commit 
 # 1. Build the warehouse (needs Postgres). ~30s; scrapes the Archives + loads MIT.
 $ python -m usvote all                       # a fresh/empty DB needs no --replace
 
-# 2. Materialize the read-only snapshot (needs Postgres; reads dwh.ec_pv_redistributable).
+# 2. Materialize the read-only snapshot (needs Postgres; reads dwh.ec_pv_redistributable and
+#    dwh.election_per_capita, so the warehouse must have loaded census — USVOTE_CENSUS_CORPUS_DIR).
 $ python -m usvote.snapshot
 
 # 3. Serve it (no DB — only USVOTE_API_SNAPSHOT_PATH). Pick a free port if 8000 is taken.
@@ -174,7 +175,7 @@ environment, so exporting them by hand or using `direnv` works equally well.
 | `USVOTE_MIT_CSV_PATH` | path to the MIT Election Lab `1976-2024-president.csv` | *(required for the MIT popular-vote pipeline)* |
 | `USVOTE_UCSB_HTML_DIR` | path to the local UCSB raw-HTML snapshot directory | *(required for the UCSB popular-vote scrape)* |
 | `USVOTE_EC_HTML_DIR` | path to the local Archives raw-HTML corpus (`python -m usvote corpus`) | *(optional — set it to rebuild without scraping)* |
-| `USVOTE_CENSUS_CORPUS_DIR` | path to the local Census population corpus (`python -m usvote.census snapshot`) | *(required for the census pipeline)* |
+| `USVOTE_CENSUS_CORPUS_DIR` | path to the local Census population corpus (`python -m usvote.census snapshot`) | *(required for the census pipeline, and so for the API snapshot build)* |
 | `USVOTE_API_SNAPSHOT_PATH` | path to the read-only SQLite API snapshot — written by `python -m usvote.snapshot`, read by `python -m usvote.api` | *(required for the snapshot build and the API)* |
 | `USVOTE_API_CORS_ORIGINS` | comma-separated CORS allow-list for the API | *(unset &rarr; localhost dev origins; never a silent `*`)* |
 

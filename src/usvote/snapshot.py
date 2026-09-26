@@ -9,7 +9,7 @@ makes the DB-free property *structural*: ``usvote/api/`` imports the artifact + 
 repository, never :mod:`usvote.db`. This module names ``ec_pv_redistributable`` (EC
 star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/``.
 
-**The serving contract (what E8-S2/S3 consume).** A SQLite file with three tables:
+**The serving contract (what E8-S2/S3 consume).** A SQLite file with five tables:
 
 ``ec_pv`` — the joined fact, one row per ``(year, state, candidate_slug)`` over the
     **full EC span, 1824–2024** (#139 / D048; it was the MIT-only 1976–2024 window until
@@ -41,6 +41,15 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     from the fact table is the multiply-by-candidate-count trap
     :func:`usvote.hybrid.ec_denominator_by_year` exists to prevent.
 
+``hybrid_summary`` — one row per election: the three-method comparison (#102).
+
+``per_capita`` — one row per ``(year, state)``: persons per electoral vote, read from
+    the census-side warehouse view ``dwh.election_per_capita`` (#245 / D069). The census
+    source is therefore a **required** build input: a warehouse built without
+    ``USVOTE_CENSUS_CORPUS_DIR`` has no such view, and the build fails loud rather than
+    shipping a snapshot without the table. UCSB stays the opposite — never required
+    (D022/D030).
+
 ``snapshot_meta`` — one row of provenance for the API ``meta`` block: the content-hash
     ``snapshot_version``, the schema version, row/candidate counts, the served window
     (``year_min`` / ``year_max``) **and the narrower redistributable-PV sub-window**
@@ -52,8 +61,10 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     and a ``meta`` block naming only MIT would assert MIT covers 1824 (D048).
 
 **Version = content hash, not timestamp (D028).** ``snapshot_version`` is a SHA-256
-over the ``ec_pv`` rows in a deterministic ``ORDER BY (year, state, candidate_slug)``
-plus the schema version; the build timestamp is excluded from it. This reconciles the
+over the ``ec_pv`` rows in a deterministic ``ORDER BY (year, state, candidate_slug)``,
+then the ``per_capita`` rows in ``(year, state)`` order (#245 — a second *source*, so a
+census reload must move the version), plus the schema version; the build timestamp is
+excluded from it. This reconciles the
 two requirements that would otherwise conflict — byte-reproducibility ("same warehouse,
 same version") and the ETag freshness contract ("identical data, identical version") —
 and is why the timestamp is metadata only.
@@ -112,12 +123,19 @@ from usvote.pv.status import (
 )
 from usvote.slug import candidate_slug
 from usvote.snapshot_schema import (
+    CENSUS_LICENSE,
+    CENSUS_SOURCE,
     DATA_COLUMNS,
     DATA_TABLE,
     EC_LICENSE,
     EC_SOURCE,
     HYBRID_SUMMARY_TABLE,
     META_TABLE,
+    PER_CAPITA_BOUNDARY_BASIS_VALUES,
+    PER_CAPITA_COLUMNS,
+    PER_CAPITA_COVERAGE_VALUES,
+    PER_CAPITA_SERIES_VALUES,
+    PER_CAPITA_TABLE,
     ROLLUP_COLUMNS,
     ROLLUP_TABLE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -204,6 +222,66 @@ _INTEGER_COLUMNS: tuple[str, ...] = (
 
 #: The deterministic order the content hash and the ``ec_pv`` rows are written in.
 _ORDER_BY: tuple[str, ...] = ("year", "state", "candidate_slug")
+
+#: The census-side warehouse view the ``per_capita`` table is read from (#184).
+#:
+#: **A local literal, not an import, and that is forced rather than chosen.** This is
+#: :data:`usvote.census.per_capita.PER_CAPITA_VIEW`, but this module is a top-level one
+#: and ``test_no_top_level_module_imports_a_source_subpackage``
+#: (``tests/unit/test_ec_corpus.py``) forbids it importing ``usvote.census``
+#: (D006/D015) — the guard that put ``per_capita.py`` under ``usvote/census/`` in the
+#: first place (D064(f)). Reading a relation by SQL name is what this module already
+#: does for ``dwh.state`` (:data:`STATE_DIM`). The duplication is held by
+#: ``tests/unit/test_snapshot.py::TestPerCapitaContract``, which imports both sides
+#: and pins this name and :data:`_PER_CAPITA_VIEW_COLUMNS` to the census constants.
+PER_CAPITA_VIEW = "election_per_capita"
+
+#: The view's columns this build reads, in the view's own names — the other half of the
+#: pinned correspondence. ``state_usps`` is not among them: it is joined in from
+#: :data:`STATE_DIM`, as for ``ec_pv``.
+_PER_CAPITA_VIEW_COLUMNS: tuple[str, ...] = (
+    "election_year",
+    "state",
+    "governing_census_year",
+    "total_electoral_votes",
+    "population",
+    "boundary_basis",
+    "coverage",
+    "population_series",
+    "persons_per_electoral_vote",
+)
+
+#: The ratio — the one derived, floating-point column of ``per_capita``.
+_PER_CAPITA_RATIO = "persons_per_electoral_vote"
+
+#: ``per_capita``'s integer columns, cast to ``Int64`` for the reason
+#: :data:`_INTEGER_COLUMNS` gives: stable hash formatting, SQL NULL rather than ``NaN``.
+_PER_CAPITA_INTEGER_COLUMNS: tuple[str, ...] = (
+    "year",
+    "governing_census_year",
+    "total_electoral_votes",
+    "population",
+)
+
+#: ``per_capita``'s grain, and the order its rows are hashed and written in.
+_PER_CAPITA_GRAIN: tuple[str, ...] = ("year", "state")
+
+#: The ``per_capita`` columns folded into the content hash: **every column but the
+#: ratio.** The ratio is a pure function of two hashed integers (``population`` and
+#: ``total_electoral_votes``) and the view's formula — and a formula change is a code
+#: change, which :data:`SNAPSHOT_SCHEMA_VERSION` covers — so hashing it would add no
+#: detection power and would put the first float into a hash
+#: :data:`_INTEGER_COLUMNS` exists to keep float-free. That argument holds only while
+#: the ratio really is that function, which is why
+#: :func:`build_per_capita_table` checks it against its operands rather than trusting
+#: it.
+_PER_CAPITA_HASHED_COLUMNS: tuple[str, ...] = tuple(
+    c for c in PER_CAPITA_COLUMNS if c != _PER_CAPITA_RATIO
+)
+
+#: The marker between the two tables' rows in the content hash, so a row cannot migrate
+#: from the end of one table to the start of the other and leave the digest unchanged.
+_TABLE_SEPARATOR = b"\x1d"
 
 
 class SnapshotError(RuntimeError):
@@ -727,6 +805,135 @@ def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
             )
 
 
+def build_per_capita_table(
+    per_capita_df: pd.DataFrame, data_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Project and validate the ``per_capita`` table from the census view frame (#245).
+
+    ``per_capita_df`` is ``dwh.election_per_capita`` plus ``state_usps`` — what
+    :func:`read_per_capita` produces; ``data_df`` is the finished ``ec_pv`` frame, which
+    the key-set check below compares against.
+
+    **Five checks, each for a failure the others cannot see.** The warehouse view
+    guarantees the first and the last *structurally* (D064(c)), but this is a second
+    consumer of it, reading across a process and a file boundary, so nothing here
+    enforces them — and the public artifact is the one place a silent defect would be
+    served rather than merely stored.
+
+    1. **Unique on** ``(year, state)``. The SQLite PRIMARY KEY would also catch a
+       duplicate, three steps later and pointing at the INSERT rather than the cause.
+    2. **The same** ``(year, state)`` **set as** ``ec_pv``, in both directions. Both
+       derive from the EC spine's participation roster — the census frame is built
+       spine-left (D060) and keeps zero-allotment states — so on a warehouse built in
+       one run they are equal. They diverge when a census load is stale against a
+       rebuilt spine, and then one direction is a state served with no per-capita row
+       and the other a per-capita row for a state that did not take part.
+    3. **Every label inside its vocabulary** (:data:`PER_CAPITA_COVERAGE_VALUES` and
+       its two siblings). ``population_series`` may be NULL only where ``population``
+       is — the coupling ``assert_election_population_shape`` enforces upstream.
+    4. **Every row has a** ``state_usps``, since the by-state route keys on it.
+    5. **The ratio is exactly the function of its operands the content hash assumes**:
+       NULL where the population is NULL or the allotment zero, and otherwise equal to
+       ``population / total_electoral_votes``. The hash omits the ratio on that premise
+       (:data:`_PER_CAPITA_HASHED_COLUMNS`), so the premise is checked, not assumed —
+       a ratio that drifted from its operands would otherwise ship under an unchanged
+       version.
+    """
+    needed = (*_PER_CAPITA_VIEW_COLUMNS, "state_usps")
+    missing = [c for c in needed if c not in per_capita_df.columns]
+    if missing:
+        raise SnapshotError(
+            f"the per-capita frame is missing column(s) {missing} — it should be "
+            f"dwh.{PER_CAPITA_VIEW} plus state_usps (read_per_capita)."
+        )
+    table = per_capita_df.rename(columns={"election_year": "year"})
+    table = _to_int64(table, _PER_CAPITA_INTEGER_COLUMNS)[list(PER_CAPITA_COLUMNS)]
+    table = table.sort_values(list(_PER_CAPITA_GRAIN), kind="stable").reset_index(
+        drop=True
+    )
+
+    grain = list(_PER_CAPITA_GRAIN)
+    duplicated = table.duplicated(grain, keep=False)
+    if bool(duplicated.any()):
+        raise SnapshotError(
+            f"the per-capita frame is not unique on {grain}: "
+            f"{table.loc[duplicated, grain].values.tolist()[:10]}"
+        )
+
+    fact_keys = set(data_df[grain].drop_duplicates().itertuples(index=False, name=None))
+    pc_keys = set(table[grain].itertuples(index=False, name=None))
+    served_without = sorted(fact_keys - pc_keys)
+    orphaned = sorted(pc_keys - fact_keys)
+    if served_without or orphaned:
+        raise SnapshotError(
+            "the per-capita table and ec_pv disagree about which (year, state) pairs "
+            f"took part: {len(served_without)} served with no per-capita row "
+            f"{served_without[:10]}, {len(orphaned)} per-capita row(s) with no "
+            f"electoral fact {orphaned[:10]}. Both derive from the EC spine, so this "
+            "is a census load that is stale against the warehouse — reload census "
+            "(`python -m usvote.census load`, or `python -m usvote all` with "
+            "USVOTE_CENSUS_CORPUS_DIR set)."
+        )
+
+    vocabularies = (
+        ("coverage", PER_CAPITA_COVERAGE_VALUES),
+        ("boundary_basis", PER_CAPITA_BOUNDARY_BASIS_VALUES),
+        ("population_series", PER_CAPITA_SERIES_VALUES),
+    )
+    for column, allowed in vocabularies:
+        present = table[column].dropna()
+        unknown = sorted(set(present) - set(allowed))
+        if unknown:
+            raise SnapshotError(
+                f"per-capita {column} value(s) {unknown} are outside the snapshot's "
+                f"vocabulary {list(allowed)} — the census vocabulary changed without "
+                "usvote.snapshot_schema following it."
+            )
+    for column in ("coverage", "boundary_basis"):
+        if bool(table[column].isna().any()):
+            raise SnapshotError(f"per-capita {column} is NULL on some row(s).")
+    series_uncoupled = table["population_series"].isna() != table["population"].isna()
+    if bool(series_uncoupled.any()):
+        raise SnapshotError(
+            "per-capita population_series and population must be NULL together: "
+            f"{table.loc[series_uncoupled, grain].values.tolist()[:10]}"
+        )
+
+    no_usps = table["state_usps"].isna()
+    if bool(no_usps.any()):
+        raise SnapshotError(
+            "per-capita row(s) have no state_usps (the dwh.state join missed): "
+            f"{sorted(set(table.loc[no_usps, 'state']))}"
+        )
+
+    population = table["population"].astype("Float64")
+    allotment = table["total_electoral_votes"].astype("Float64")
+    ratio = pd.to_numeric(table[_PER_CAPITA_RATIO], errors="raise").astype("Float64")
+    explained = population.isna() | (allotment == 0)
+    wrong_null = ratio.isna() & ~explained
+    fabricated = ratio.notna() & explained
+    if bool(wrong_null.any()) or bool(fabricated.any()):
+        raise SnapshotError(
+            "per-capita ratio is NULL exactly where the population is NULL or the "
+            "allotment zero, and nowhere else — violated at "
+            f"{table.loc[wrong_null | fabricated, grain].values.tolist()[:10]}"
+        )
+    computed = ~explained
+    expected = (population[computed] / allotment[computed]).to_numpy(dtype=float)
+    actual = ratio[computed].to_numpy(dtype=float)
+    drifted = ~np.isclose(actual, expected, rtol=1e-12, atol=0.0)
+    if bool(drifted.any()):
+        rows = table.loc[computed].loc[drifted, grain].values.tolist()
+        raise SnapshotError(
+            "per-capita ratio is not population / total_electoral_votes at "
+            f"{rows[:10]}; the content hash omits the ratio because it is exactly that "
+            "function of two hashed columns, so a drifted ratio would ship under an "
+            "unchanged snapshot_version."
+        )
+    table[_PER_CAPITA_RATIO] = ratio.to_numpy(dtype=float, na_value=np.nan)
+    return table
+
+
 def _to_int64(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
     """Cast ``columns`` to nullable ``Int64`` (LEFT-JOIN floats/NaN → clean ints/NA)."""
     out = df.copy()
@@ -753,20 +960,33 @@ def _rows(df: pd.DataFrame) -> list[tuple[Any, ...]]:
     ]
 
 
-def _content_hash(data_df: pd.DataFrame) -> str:
-    """SHA-256 of the ``ec_pv`` rows (deterministic order) + the schema version (D028).
+def _content_hash(data_df: pd.DataFrame, per_capita_df: pd.DataFrame) -> str:
+    """SHA-256 of the source-data rows (deterministic order) + schema version (D028).
+
+    Two tables feed it, in a fixed order: the ``ec_pv`` rows, a table separator, then
+    the ``per_capita`` rows (#245) — every column but the float ratio, for the reason
+    :data:`_PER_CAPITA_HASHED_COLUMNS` gives. ``per_capita`` is in because it is a
+    second **source**, not a derivation of the first: a census reload that moved one
+    population and left every electoral fact alone must still yield a new version, or
+    the D034 edge-cache cutover never fires and the origin serves the old figure.
 
     The build timestamp is *not* mixed in — identical warehouse data must yield an
     identical version so the ETag (E8-S2) is content-addressed and the build is
     reproducible. Rows are serialized field-by-field with control-char separators that
     cannot occur in the data, after the integer cast so numeric formatting is stable.
     """
-    ordered = data_df.sort_values(list(_ORDER_BY), kind="stable")
     h = hashlib.sha256()
     h.update(f"schema={SNAPSHOT_SCHEMA_VERSION}\x1e".encode())
-    for row in _rows(ordered[list(DATA_COLUMNS)]):
-        h.update("\x1f".join("" if v is None else str(v) for v in row).encode())
-        h.update(b"\x1e")
+    tables = (
+        (data_df, _ORDER_BY, DATA_COLUMNS),
+        (per_capita_df, _PER_CAPITA_GRAIN, _PER_CAPITA_HASHED_COLUMNS),
+    )
+    for df, order_by, columns in tables:
+        ordered = df.sort_values(list(order_by), kind="stable")
+        for row in _rows(ordered[list(columns)]):
+            h.update("\x1f".join("" if v is None else str(v) for v in row).encode())
+            h.update(b"\x1e")
+        h.update(_TABLE_SEPARATOR)
     return h.hexdigest()
 
 
@@ -775,6 +995,7 @@ def build_snapshot(
     out_path: str,
     *,
     pv_status_df: pd.DataFrame,
+    per_capita_df: pd.DataFrame,
     build_timestamp: datetime | None = None,
 ) -> SnapshotMeta:
     """Build the SQLite snapshot from an ``ec_pv_redistributable``-shaped frame.
@@ -782,8 +1003,10 @@ def build_snapshot(
     ``ec_pv_df`` is the view frame (:data:`usvote.join.EC_PV_COLUMNS`) enriched with
     ``state_usps`` — exactly what :func:`read_redistributable` produces.
     ``pv_status_df`` is the ``(year, state, pv_status)`` roster
-    :func:`derive_curated_pv_status_roster` derives. The pure core, unit-tested
-    offline from synthetic frames (no DB).
+    :func:`derive_curated_pv_status_roster` derives. ``per_capita_df`` is the census
+    view frame :func:`read_per_capita` reads (#245); required, like the roster, because
+    a default would let a caller silently ship a snapshot with no per-capita table. The
+    pure core, unit-tested offline from synthetic frames (no DB).
 
     **Why the roster arrives as an argument rather than being derived here.** The
     obvious simplification — call :func:`~usvote.pv.absences.build_curated_roster`
@@ -800,17 +1023,22 @@ def build_snapshot(
     named ``source``); mint the candidate slug + drop ``candidate_id`` (D006)
     **over the whole frame** — see the note below; derive the hybrid at both grains
     (:func:`build_hybrid_tables`); precompute the national roll-up and run all three
-    pre-window guards; content-hash the fact rows (D028); and write the
-    four tables to ``out_path`` atomically (temp file + ``os.replace``) so a partial
+    pre-window guards; project and check the per-capita table
+    (:func:`build_per_capita_table`); content-hash the fact and per-capita rows (D028);
+    and write the five tables to ``out_path`` atomically (temp file +
+    ``os.replace``) so a partial
     write never leaves a corrupt snapshot.
 
-    **The content hash still covers the ``ec_pv`` fact rows only**, so #102's new
-    ``hybrid_summary`` table and the roll-up's five new columns are **invisible** to it
-    — which is exactly why :data:`SNAPSHOT_SCHEMA_VERSION` had to move by hand (2 → 3).
-    Widening the hash to cover the derived tables was considered and rejected: the
-    version is a *content* address for the facts, and a derived table that changed while
-    the facts did not is a code change, which the schema version is the right instrument
-    for.
+    **The content hash covers the source-data tables only** — ``ec_pv`` and, since #245,
+    ``per_capita`` — so #102's ``hybrid_summary`` table and the roll-up's five hybrid
+    columns are **invisible** to it, which is exactly why
+    :data:`SNAPSHOT_SCHEMA_VERSION` had to move by hand (2 → 3). Widening the hash to
+    cover the derived tables was considered and rejected: the version is a *content*
+    address for the source data, and a derived table that changed while the data did not
+    is a code change, which the schema version is the right instrument for.
+    ``per_capita`` is on the other side of that line because it is *not* derived from
+    ``ec_pv``: it carries a second source's numbers, which can change while every
+    electoral fact stays put.
 
     **Slugs are minted over every row, and the old ordering is gone.** This used to
     filter to the served window *first* so that a collision between two candidates the
@@ -867,10 +1095,11 @@ def build_snapshot(
     assert_no_pv_aggregate_below_mit_window(rollup_df)
     hybrid_summary_df = _to_int64(hybrid_summary_df, ("ec_denominator",))
     assert_no_hybrid_pv_below_mit_window(hybrid_summary_df)
+    per_capita_table = build_per_capita_table(per_capita_df, data_df)
 
     ts = build_timestamp if build_timestamp is not None else datetime.now(UTC)
     meta = SnapshotMeta(
-        snapshot_version=_content_hash(data_df),
+        snapshot_version=_content_hash(data_df, per_capita_table),
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         row_count=len(data_df),
         candidate_count=int(data_df["candidate_slug"].nunique()),
@@ -883,8 +1112,12 @@ def build_snapshot(
         ec_source=EC_SOURCE,
         ec_license=EC_LICENSE,
         build_timestamp=ts.isoformat(),
+        census_source=CENSUS_SOURCE,
+        census_license=CENSUS_LICENSE,
     )
-    _write_sqlite(out_path, data_df, rollup_df, hybrid_summary_df, meta)
+    _write_sqlite(
+        out_path, data_df, rollup_df, hybrid_summary_df, per_capita_table, meta
+    )
     return meta
 
 
@@ -893,9 +1126,10 @@ def _write_sqlite(
     data_df: pd.DataFrame,
     rollup_df: pd.DataFrame,
     hybrid_summary_df: pd.DataFrame,
+    per_capita_df: pd.DataFrame,
     meta: SnapshotMeta,
 ) -> None:
-    """Write the four tables to a fresh SQLite file at ``out_path``, atomically.
+    """Write the five tables to a fresh SQLite file at ``out_path``, atomically.
 
     Built into a temp file in the same directory then ``os.replace``-d over ``out_path``
     so a reader (or a re-run) never sees a half-written snapshot. The file is opened
@@ -925,6 +1159,11 @@ def _write_sqlite(
                 f"VALUES ({','.join('?' * len(cols))})",
                 _rows(hybrid_summary_df),
             )
+            conn.executemany(
+                f"INSERT INTO {PER_CAPITA_TABLE} ({','.join(PER_CAPITA_COLUMNS)}) "
+                f"VALUES ({','.join('?' * len(PER_CAPITA_COLUMNS))})",
+                _rows(per_capita_df),
+            )
             meta_cols = tuple(asdict(meta))
             conn.execute(
                 f"INSERT INTO {META_TABLE} ({','.join(meta_cols)}) "
@@ -942,8 +1181,8 @@ def _write_sqlite(
 
 
 def _create_tables(conn: sqlite3.Connection) -> None:
-    """Create the four snapshot tables (+ indexes): ``ec_pv``, ``national_rollup``,
-    ``hybrid_summary``, ``snapshot_meta``.
+    """Create the five snapshot tables (+ indexes): ``ec_pv``, ``national_rollup``,
+    ``hybrid_summary``, ``per_capita``, ``snapshot_meta``.
     """
     conn.execute(
         f"CREATE TABLE {DATA_TABLE} ("
@@ -1030,6 +1269,29 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " pv_margin REAL,"
         " hybrid_margin REAL)"
     )
+    series_check = _in_check("population_series", PER_CAPITA_SERIES_VALUES)
+    basis_check = _in_check("boundary_basis", PER_CAPITA_BOUNDARY_BASIS_VALUES)
+    coverage_check = _in_check("coverage", PER_CAPITA_COVERAGE_VALUES)
+    conn.execute(
+        f"CREATE TABLE {PER_CAPITA_TABLE} ("
+        " year INTEGER NOT NULL,"
+        " state TEXT NOT NULL,"
+        " state_usps TEXT NOT NULL,"
+        " governing_census_year INTEGER NOT NULL,"
+        " total_electoral_votes INTEGER NOT NULL,"
+        # Nullable together (the one no-governing-figure cell), never one without the
+        # other — the build checks the coupling; the store enforces the vocabulary.
+        " population INTEGER,"
+        f" population_series TEXT CHECK ({series_check}),"
+        f" boundary_basis TEXT NOT NULL CHECK ({basis_check}),"
+        f" coverage TEXT NOT NULL CHECK ({coverage_check}),"
+        " persons_per_electoral_vote REAL,"
+        # One row per (year, state), as the warehouse table's UNIQUE constraint has it.
+        " PRIMARY KEY (year, state))"
+    )
+    conn.execute(
+        f"CREATE INDEX idx_{PER_CAPITA_TABLE}_usps ON {PER_CAPITA_TABLE}(state_usps)"
+    )
     conn.execute(
         f"CREATE TABLE {META_TABLE} ("
         " snapshot_version TEXT NOT NULL,"
@@ -1044,8 +1306,15 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " license TEXT NOT NULL,"
         " ec_source TEXT NOT NULL,"
         " ec_license TEXT NOT NULL,"
-        " build_timestamp TEXT NOT NULL)"
+        " build_timestamp TEXT NOT NULL,"
+        " census_source TEXT NOT NULL,"
+        " census_license TEXT NOT NULL)"
     )
+
+
+def _in_check(column: str, values: tuple[str, ...]) -> str:
+    """``column IN ('a', 'b')`` from a closed vocabulary constant — never user input."""
+    return f"{column} IN ({', '.join(repr(v) for v in values)})"
 
 
 # --- live-DB read + CLI -----------------------------------------------------
@@ -1089,6 +1358,40 @@ def read_redistributable(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
         f"SELECT state, state_usps FROM {schema}.{STATE_DIM}"
     )
     return ec_pv.merge(state_usps, on="state", how="left")
+
+
+def read_per_capita(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
+    """Read ``dwh.election_per_capita`` (+ ``state_usps``), failing loud if absent.
+
+    **This is where census becomes a required snapshot input** (#245 / D069). The view
+    exists only on a warehouse that loaded census — ``python -m usvote all`` skips
+    census when ``USVOTE_CENSUS_CORPUS_DIR`` is unset, and the view builder then skips
+    too (D064(e)) — so a public EC + MIT clone can still build a *warehouse* but no
+    longer a *snapshot*. Raising here, rather than shipping a snapshot without the
+    table, is the point: a missing table would 404 every per-capita request and read as
+    "no such data", when the data exists and simply was not loaded. The census corpus is
+    public domain and fetchable (``python -m usvote.census snapshot``), which is what
+    makes requiring it acceptable where requiring UCSB never would be (D022/D030).
+
+    The view is named by the local literal :data:`PER_CAPITA_VIEW`; see there for why it
+    cannot be imported.
+    """
+    if not _relation_exists(dbc, schema, PER_CAPITA_VIEW):
+        raise SnapshotError(
+            f"{schema}.{PER_CAPITA_VIEW} does not exist — the snapshot now requires "
+            "the census source (#245). Load it: set USVOTE_CENSUS_CORPUS_DIR (fetch "
+            "the corpus with `python -m usvote.census snapshot`) and run "
+            "`python -m usvote all`, or `python -m usvote.census load` on an existing "
+            "warehouse."
+        )
+    cols = ", ".join(_PER_CAPITA_VIEW_COLUMNS)
+    per_capita = dbc.select_query_to_df(
+        f"SELECT {cols} FROM {schema}.{PER_CAPITA_VIEW}"
+    )
+    state_usps = dbc.select_query_to_df(
+        f"SELECT state, state_usps FROM {schema}.{STATE_DIM}"
+    )
+    return per_capita.merge(state_usps, on="state", how="left", validate="m:1")
 
 
 def derive_curated_pv_status_roster(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
@@ -1156,10 +1459,12 @@ def build_snapshot_from_db(
     try:
         ec_pv_df = read_redistributable(dbc, schema=schema)
         pv_status_df = derive_curated_pv_status_roster(dbc, schema=schema)
+        per_capita_df = read_per_capita(dbc, schema=schema)
         return build_snapshot(
             ec_pv_df,
             out_path,
             pv_status_df=pv_status_df,
+            per_capita_df=per_capita_df,
             build_timestamp=build_timestamp,
         )
     finally:

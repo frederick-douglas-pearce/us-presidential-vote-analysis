@@ -27,6 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from usvote.api import provenance
 from usvote.snapshot_schema import (
+    CENSUS_LICENSE,
+    CENSUS_SOURCE,
     EC_LICENSE,
     EC_SOURCE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -34,9 +36,10 @@ from usvote.snapshot_schema import (
 )
 
 #: Snapshot columns intentionally **not** on any public model. Empty today (every
-#: ``ec_pv`` / ``national_rollup`` / ``hybrid_summary`` column is exposed under a public
-#: name), but the drift guard reads this list, so a deliberately-internal future column
-#: has an explicit home here rather than silently failing the completeness assert.
+#: ``ec_pv`` / ``national_rollup`` / ``hybrid_summary`` / ``per_capita`` column is
+#: exposed under a public name), but the drift guard reads this list, so a
+#: deliberately-internal future column has an explicit home here rather than silently
+#: failing the completeness assert.
 _DROPPED_COLUMNS: frozenset[str] = frozenset()
 
 
@@ -166,6 +169,21 @@ _ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
     "hybrid_margin": 0.2090,
 }
 
+#: 2020 California: the 2010 census (which governs 2020 — the 2020 census first governed
+#: 2024) counted 37,253,956 residents, against an allotment of 55.
+_PER_CAPITA_EXAMPLE: dict[str, Any] = {
+    "year": 2020,
+    "state": "California",
+    "state_usps": "CA",
+    "governing_census_year": 2010,
+    "state_electoral_votes": 55,
+    "population": 37253956,
+    "population_series": "resident",
+    "boundary_basis": "at_election",
+    "coverage": "covered",
+    "persons_per_electoral_vote": 677344.6545454545,
+}
+
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {
     "year": 2000,
     "candidate_count": 7,
@@ -180,6 +198,8 @@ _EX_LIC = provenance.license_display("CC0-1.0")
 # build no longer emits (see the same note in app.py).
 _EX_EC_SRC = provenance.source_display(EC_SOURCE)
 _EX_EC_LIC = provenance.license_display(EC_LICENSE)
+_EX_CENSUS_SRC = provenance.source_display(CENSUS_SOURCE)
+_EX_CENSUS_LIC = provenance.license_display(CENSUS_LICENSE)
 
 _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "snapshot_version": (
@@ -193,6 +213,10 @@ _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "ec_source_name": _EX_EC_SRC.name,
     "ec_license": _EX_EC_LIC.code,
     "ec_license_url": _EX_EC_LIC.url,
+    "census_source": _EX_CENSUS_SRC.code,
+    "census_source_name": _EX_CENSUS_SRC.name,
+    "census_license": _EX_CENSUS_LIC.code,
+    "census_license_url": _EX_CENSUS_LIC.url,
     "coverage": _COVERAGE_EXAMPLE,
     "redistributable_note": provenance.redistributable_note(
         _EX_SRC,
@@ -541,6 +565,78 @@ class ElectionSummary(BaseModel):
     )
 
 
+class PerCapitaRow(BaseModel):
+    """Persons per electoral vote for one ``(year, state)`` (#245 / D069).
+
+    How many residents each of a state's electoral votes stood for — the governing
+    census's resident population divided by the state's **appointed** allotment. Read
+    from the snapshot's ``per_capita`` table, which is the warehouse view
+    ``dwh.election_per_capita`` (#184) carried to the public surface.
+
+    **A null ratio is never bare, and there is no status field because none is needed**:
+    both causes are readable off the row. ``population`` is null (with ``coverage`` =
+    ``'no_governing_figure'``) where no census figure exists — one cell, 1848 Texas,
+    which the United States had not enumerated in 1840. ``state_electoral_votes`` is 0
+    where a state's electoral votes were withheld — eleven states in 1864 and three in
+    1868.
+    """
+
+    model_config = _config(_PER_CAPITA_EXAMPLE)
+
+    year: int = Field(description="Election year.")
+    state: str = Field(description="Full state name.")
+    state_usps: str = Field(description="USPS two-letter code, e.g. 'CA'.")
+    governing_census_year: int = Field(
+        description=(
+            "The census whose apportionment was in force at this election, and which "
+            "supplies the population. Not the nearest census: 2020 reads 2010, and "
+            "1924/1928 read 1910 because Congress passed no apportionment after 1920."
+        )
+    )
+    state_electoral_votes: int = Field(
+        validation_alias="total_electoral_votes",
+        description=(
+            "The state's appointed electoral-vote allotment this year — the ratio's "
+            "denominator, and the same figure as state_electoral_votes on the election "
+            "rows."
+        ),
+    )
+    population: int | None = Field(
+        default=None,
+        description=(
+            "The governing census's resident population for the state; None where "
+            "no figure exists (see coverage)."
+        ),
+    )
+    population_series: str | None = Field(
+        default=None,
+        description=(
+            "Which census series the population is: 'resident'. None exactly where "
+            "population is."
+        ),
+    )
+    boundary_basis: str = Field(
+        description=(
+            "Whose people the population counts: 'at_election' (the state's borders "
+            "when the election was held) or 'present_day' (the source's modern "
+            "footprint, not asserted to match the borders at the election)."
+        )
+    )
+    coverage: str = Field(
+        description=(
+            "Why a population is present or absent: 'covered' or "
+            "'no_governing_figure' (no census figure exists for this state and year)."
+        )
+    )
+    persons_per_electoral_vote: float | None = Field(
+        default=None,
+        description=(
+            "population / state_electoral_votes. None where population is None or the "
+            "allotment is 0 — never 0 and never infinite."
+        ),
+    )
+
+
 class YearListItem(BaseModel):
     """One entry in the list-years index: a covered year and its candidate count."""
 
@@ -593,6 +689,11 @@ class Provenance(BaseModel):
     **electoral-college** data. Before the window widened the distinction was invisible
     — every served row had MIT popular vote attached. It is not invisible now: most of
     the table is pre-1976, where the only data is the Archives'.
+
+    **A third since #245** (D069): ``census_*`` describe the per-capita population
+    figures, which come from the Census Bureau and appear only on the per-capita
+    routes. Carried on every response, as ``ec_*`` is on popular-vote-only ones, so the
+    block describes the whole snapshot rather than varying by route.
     """
 
     model_config = _config(_PROVENANCE_EXAMPLE)
@@ -612,6 +713,18 @@ class Provenance(BaseModel):
         description="Electoral-college data license code, e.g. 'US-PD'."
     )
     ec_license_url: str = Field(description="Canonical URL for the EC license.")
+    census_source: str = Field(
+        description="Per-capita population source code, e.g. 'USCB'."
+    )
+    census_source_name: str = Field(
+        description="Spelled-out census source, e.g. 'U.S. Census Bureau'."
+    )
+    census_license: str = Field(
+        description="Per-capita population license code, e.g. 'US-PD'."
+    )
+    census_license_url: str = Field(
+        description="Canonical URL for the census license."
+    )
     coverage: Coverage = Field(description="The year windows the snapshot contains.")
     redistributable_note: str = Field(
         description="Plain-language statement of the redistributable data boundary."
@@ -629,6 +742,8 @@ class Provenance(BaseModel):
         lic = provenance.license_display(meta.license)
         ec_src = provenance.source_display(meta.ec_source)
         ec_lic = provenance.license_display(meta.ec_license)
+        census_src = provenance.source_display(meta.census_source)
+        census_lic = provenance.license_display(meta.census_license)
         return cls(
             snapshot_version=meta.snapshot_version,
             source=src.code,
@@ -639,6 +754,10 @@ class Provenance(BaseModel):
             ec_source_name=ec_src.name,
             ec_license=ec_lic.code,
             ec_license_url=ec_lic.url,
+            census_source=census_src.code,
+            census_source_name=census_src.name,
+            census_license=census_lic.code,
+            census_license_url=census_lic.url,
             coverage=Coverage(
                 year_min=meta.year_min,
                 year_max=meta.year_max,

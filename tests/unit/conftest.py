@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
 from usvote.api import create_app
@@ -43,10 +44,22 @@ def synthetic_status_frame() -> pd.DataFrame:
 
 
 @pytest.fixture
+def synthetic_per_capita() -> pd.DataFrame:
+    """The per-capita frame the build requires (#245; override to customize).
+
+    Keyed to the canonical ``synthetic_frame``'s ``(year, state)`` pairs. A test that
+    overrides ``synthetic_frame`` with a different key set must override this too — the
+    build asserts the two sets are equal.
+    """
+    return synthetic_per_capita_frame()
+
+
+@pytest.fixture
 def snapshot_path(
     tmp_path: Path,
     synthetic_frame: pd.DataFrame,
     synthetic_status_frame: pd.DataFrame,
+    synthetic_per_capita: pd.DataFrame,
 ) -> str:
     """A real SQLite snapshot built from ``synthetic_frame`` — no live DB."""
     out = str(tmp_path / "snapshot.sqlite")
@@ -54,6 +67,7 @@ def snapshot_path(
         synthetic_frame,
         out,
         pv_status_df=synthetic_status_frame,
+        per_capita_df=synthetic_per_capita,
         build_timestamp=SNAPSHOT_TS,
     )
     return out
