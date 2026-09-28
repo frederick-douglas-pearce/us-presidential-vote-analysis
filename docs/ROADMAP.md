@@ -24,8 +24,8 @@ bottom is what the backlog expands into GitHub issues and stories.
 | **E6** Canonical key + cross-source join | **Done** (#63) — `ec_pv_preferred` (analysis) and `ec_pv_redistributable` (public), joined EC-left on the canonical `(year, state, candidate)` grain |
 | **E7** Hybrid computation | **Done** (#120) — the three-method computation core is built (`usvote/hybrid.py`, #121/#122): EC share, PV share, the hybrid average, `ec_determinative`, and EV-weighted coverage. **Done** — flip detection and three-method margins (#123), the four materialized views (#124), the partial-coverage note (#125) and the D017 layer-3 overlap gate (#167) all landed |
 | **E8** Internal API | **Done, and past its MVP bar** (#94) — a read-only SQLite snapshot served by FastAPI with no live DB (D028), publicly deployed to Cloud Run behind Cloudflare and **live at `https://api.us-presidential-election-center.org`** (#101, D034/D035). The served window was widened from the MIT-only 1976–2024 back to the full **1824–2024** EC span in #139. **Open:** hybrid/flip/margin fields (#102) — E7 has landed, so this is no longer gated |
-| **E9** Analytical explorer data mart | **Not started** |
-| **E10** Census / apportionment analysis | **Not started** (#129) — added after this outline was written |
+| **E9** Public dashboard *(re-scoped from "analytical explorer data mart", D070)* | **Scoped, not started** — a dashboard at `explore.us-presidential-election-center.org` that reads the public API; the mart is deferred under YAGNI. Gated on a platform research spike (E9-S1); see [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
+| **E10** Census / apportionment analysis | **Done** — every story landed (tracker #129) — added after this outline was written; per-capita series on the public API since #245 |
 | *(unnumbered)* Publishing | **Done and in use** — see below |
 
 Two workstreams sit outside the original E1–E9 outline:
@@ -62,8 +62,8 @@ scarcity is itself a motivation: the dataset is a deliverable, not just an input
 
 - **Near-term analytical star:** an interactive EC-vs-PV-vs-hybrid "what-if"
   explorer answering *"would this election have flipped, and by how much?"* with
-  maps and narrative (D001). The presentation platform/frontend is **deferred** —
-  do not design it yet.
+  maps and narrative (D001). The presentation platform/frontend was **deferred**;
+  D070 lifted that deferral, and the host is chosen by E9-S1.
 - **Infrastructure backbone:** graduate from the monolithic notebook to a tested,
   reproducible `src/` package so the numbers are trustworthy; new data ingested
   every 4 years (D003).
@@ -156,8 +156,8 @@ flips and margins, and expose them through an internal API that powers our app.
 - Hybrid computation — average of EC and PV, flip detection, margin comparison across
   all three methods (**E7**; D011). The detailed hybrid written spec (including the
   no-270 contingent-election treatment) is a named future workstream, not an M3 blocker.
-- Analytical explorer data mart — the query surface behind flips/margins/maps/narrative
-  (**E9**).
+- ~~Analytical explorer data mart~~ — re-scoped by D070 to a **public dashboard** over
+  the public API (**E9**); the mart is deferred under YAGNI.
 - Internal API — exposes the joined dataset; **MVP bar = it powers our app** (**E8**;
   D002). Excludes `redistributable=false` rows from any public-facing surface (D014).
   Frontend/presentation platform remains out of scope.
@@ -181,7 +181,8 @@ flips and margins, and expose them through an internal API that powers our app.
   votes; non-blocking nice-to-have (D007).
 - **Hybrid no-270 legal treatment** — the "no candidate reaches 270" ambiguity relevant
   to the hybrid method; parked for a later decision (D010).
-- **Presentation platform** — the actual frontend/dashboard host; deferred (D001).
+- **Presentation platform** — the actual frontend/dashboard host. Deferral lifted by
+  D070; chosen by the E9-S1 research spike (recorded as D071).
 - ~~**`social/` content**~~ — **REAL, and in use** (D012). Became the **"Counted, Not
   Assumed"** blog series (<https://frederick-douglas-pearce.github.io/blog/>) plus the
   fail-closed publish path and PR guards described in the README. `social/` itself stays
@@ -206,8 +207,8 @@ the original plan; the **Status** column is where each one actually got to.
 | **E6** | Canonical key + cross-source join | shared candidate/state spine; conform MIT + UCSB onto EC as source of truth | M2 (named) | **Done** (#63) |
 | **E7** | Hybrid computation | EC/PV average; flip detection; three-method margin comparison | M3 (named) | **Done** (#120) |
 | **E8** | Internal API | FastAPI/REST over `ec_pv_redistributable` via a read-only embedded snapshot (no live DB); redistributable-only; MVP bar = powers our app; **depends only on E6, not E7** (D028–D032) | M3 (scoped + filed, #94) | **Done + publicly deployed**; #102 open |
-| **E9** | Analytical explorer data mart | query surface for flips/margins/maps/narrative | M3 (named) | Not started |
-| **E10** | Census / apportionment analysis | state population + apportionment; the per-capita elector-weight drift question | *(added later)* | Not started (#129) |
+| **E9** | Public dashboard *(was: analytical explorer data mart — re-scoped, D070)* | dashboard over the public API: raw tables → charts → narrative tabs → landing page; mart deferred (YAGNI) | M3 (named) | Scoped (`epic:dashboard`) |
+| **E10** | Census / apportionment analysis | state population + apportionment; the per-capita elector-weight drift question | *(added later)* | **Done** — every story landed (tracker #129) |
 
 **Critical path:** E1 → E2 (backbone) with E3 running in parallel. PV is dual-source
 (D014): **E4 (UCSB historical, un-deferred, high-priority)** and E5 (MIT modern) feed E6

@@ -4763,3 +4763,85 @@ follow-up docs issue.
 
 **Related:** #245, #184, #243, #180, D028, D034, D047, D048, D064, D066, `src/usvote/snapshot.py`,
 `src/usvote/snapshot_schema.py`, `src/usvote/api/routes.py`, `docs/api-snapshot.md`.
+
+## D070: The analytical mart is deferred under YAGNI; E9 becomes a public dashboard that reads the public API
+
+**Date:** 2026-09-27
+**Builds on:** D001, D002, D028, D029, D030, D034 · **Re-scopes:** E9 (ROADMAP)
+
+**Context.** The roadmap named E9, "Analytical explorer data mart", as the query surface
+behind the what-if explorer (M3). It was never filed: it had no epic label and no issues. D029
+had already removed it as a dependency of the API. Meanwhile the serving side became a read-only
+snapshot with no live database (D028). The snapshot carries every table a first dashboard needs:
+the joined fact, the national roll-up, the per-election three-method summary and the per-capita
+series. The planned `step3` notebook's "data mart schema for dashboards" was written before any
+of that existed. Fred has decided to build the public dashboard now. It is scoped in
+`.claude/specs/backlog-dashboard.md`, which the `pm` agent drafted and the `architect` agent
+reviewed.
+
+**Decision.**
+
+(a) **No data mart now.** E9 is re-scoped from "mart" to "public dashboard", under the label
+`epic:dashboard`. No mart work is scheduled.
+
+(b) **The dashboard consumes the public `/v1` API** at its public hostname and bundles no copy
+of the data. This is enforced structurally. The dashboard's runtime code reads data only over
+HTTPS from one configured API base URL. It references no `run.app` URL, ships no data files, and
+a Python frontend imports nothing from `usvote` at runtime.
+
+(c) **New data shapes are built only on concrete need.** When a chart or table needs data the
+API does not serve, it gets a story that names that chart. The need is met by a **new snapshot
+table or `/v1` endpoint**, not a Postgres mart object, because the serving side never touches
+Postgres (D028). A new snapshot table needs a `SNAPSHOT_SCHEMA_VERSION` bump and the D034
+snapshot-and-image cutover. A new endpoint over an existing table needs only an `API_VERSION`
+bump. "Need" means visualization, reporting or measured performance, not anticipation. One case
+needs a decision, not just an endpoint: a what-if view that toggles the coverage policy. The
+public surface fixes policy (b) (D038, D050 §2).
+
+(d) **Earlier references to the E9 mart.** D029 and D039 anticipate a mart behind the snapshot
+seam, and that remains possible. D053 says "E9's mart can still read [the hybrid views]". That
+stays true and is simply unexercised. **D057 gave two grounds for retaining
+`build_hybrid_from_db`. This decision defers the first, which named the planned E9/`step3` mart
+as the function's consumer.** The second ground still holds: the function is the oracle that
+`tests/integration/test_hybrid_views.py` differentially tests against. So the function stays.
+
+(e) **D001's frontend-host deferral is lifted as to *whether and when*, and not as to *which
+host*.** The dashboard is in scope now as E9, and it is the dev loop's next epic. The host and
+platform are chosen by E9-S1, a research spike the architect reviews, against Fred's criteria in
+priority order:
+1. cost, with a $0/month target and a $10/month hard ceiling;
+2. ease of implementation and maintenance;
+3. Python-based and marketable, since this is a portfolio project;
+4. support for a custom domain;
+5. cold start;
+6. sharing, meaning shareable URLs and link previews;
+7. forward compatibility, as a tie-breaker.
+
+S1's accepted verdict is recorded as D071. Some things are settled now, whatever host is
+chosen. The audience is non-technical readers first. The dashboard is served at
+**`explore.us-presidential-election-center.org`**, which supersedes the expectation in
+`docs/deploy-cloud-run.md` §0 of the apex or `www` on GitHub Pages. Delivery is phased: skeleton
+→ raw tables → charts → narrative tabs → landing page. Otherwise D001 stands. The guiding star
+is unchanged, and the Looker prototype is still not the intended host.
+
+**Rationale.**
+- **The snapshot already answers the early questions.** It answers every question Phase 1 and
+  the early Phase 2 charts ask. A mart built ahead of those charts would guess at shapes they
+  have not yet shown they need.
+- **One source of truth.** A dashboard with its own copy of the data would have two artifacts to
+  keep in step. Readers could not see version skew between them. Reading the API makes the
+  dashboard the API's first real consumer, which meets D002's MVP bar literally. It also exposes
+  API defects where they would reach users anyway.
+- **D030 holds structurally.** A dashboard whose only input is the redistributable snapshot
+  cannot show UCSB data.
+- **Recording the lift and the host separately keeps the log honest.** The *decision to build*
+  was made today and the *host* is not yet chosen. One entry claiming both would be half false.
+- **Cost accepted.** The dashboard inherits the API's constraints: edge caching, the per-IP rate
+  limit, CORS, and the cold start of a scale-to-zero origin on uncached URLs. The architect's
+  review found that a browser-side dashboard is expected to meet cached responses without CORS
+  headers, because the canary and the deploy smoke test fill canonical URLs without an `Origin`.
+  E9-S1 must measure these costs rather than assume them.
+
+**Related:** `.claude/specs/backlog-dashboard.md`, E9-S1, `docs/api-snapshot.md`,
+`src/usvote/api/`, D001, D038, D050, D053, D057, #10 (the original notebook mart issue,
+closed).
