@@ -8,7 +8,9 @@ Analyzes historical US Presidential Election data (**1824–present, complete** 
 
 - `step1_electoral_college_data.ipynb` — **implemented.** Scrapes Electoral College vote data from the [National Archives](https://www.archives.gov/electoral-college/results) and loads it into the `dwh` (data warehouse) schema.
 - `step2_popular_vote_data.ipynb` — planned. Popular vote data from UC Santa Barbara, added to the same warehouse tables.
-- `step3_voting_data_analysis.ipynb` — planned. Analysis, visualizations, and a data mart schema for dashboards. The three-method computation core that this step's analysis rests on is **already built** outside the notebook, in `usvote/hybrid.py` (see below).
+- `step3_voting_data_analysis.ipynb` — planned. Analysis and visualizations. The three-method computation core that this step's analysis rests on is **already built** outside the notebook, in `usvote/hybrid.py` (see below). Its old third deliverable, a data mart schema for dashboards, is **deferred under YAGNI** ([D070](.claude/specs/decisions.md)): the public dashboard reads the API instead (below).
+
+**The public dashboard (E9, #275)** is the front end of D001's what-if explorer, re-scoped from the analytical mart by [D070](.claude/specs/decisions.md). It will be served at `explore.us-presidential-election-center.org` and **reads the live public `/v1` API**, bundling no copy of the data — so D030 holds structurally and the API is its own first consumer. Its runtime code references no `run.app` URL and, if it is Python, imports nothing from `usvote` (D070(b)). New data shapes are built only when a named chart needs them, as a new snapshot table or `/v1` endpoint, never a Postgres mart object (D070(c)). **The platform and host are not chosen yet**: the research spike #276 decides them, and so where the dashboard code lives, with its verdict recorded as D071. Until then, nothing about the dashboard's stack should be assumed. The spec, including every story body and the constraints each one carries, is [`.claude/specs/backlog-dashboard.md`](.claude/specs/backlog-dashboard.md).
 
 Alongside the pipeline the repo carries a **publishing workstream** — the "Counted, Not Assumed" blog series in [`posts/`](posts/), its drafts in the git-ignored `social/`, and the scripts and CI gates that ship them. It shares no code with the pipeline; see [Publishing](#publishing-posts-social-tooling--a-second-non-pipeline-workstream).
 
@@ -109,7 +111,7 @@ The notebook is being migrated **incrementally** into an installable `usvote` pa
 | `usvote/db.py` | `db_tools.py` | The `DBC` psycopg2 wrapper | E1-S3 (#21) |
 | `usvote/pipeline.py` | top-level | Wire scrape → parse → transform → load | E2-S5 (#28) |
 
-The notebook's display/viz helpers (`make_map_usa`, `pprint_list_of_dicts`, `print_election_year_results`) are **not** part of this spine and stay in the notebook (the presentation layer is deferred per D001). Config (DB params, shapefile path) is externalized in E2-S6 (#31), not carried into the skeleton.
+The notebook's display/viz helpers (`make_map_usa`, `pprint_list_of_dicts`, `print_election_year_results`) are **not** part of this spine and stay in the notebook (the public presentation layer is the E9 dashboard, which reads the API rather than this package — D070). Config (DB params, shapefile path) is externalized in E2-S6 (#31), not carried into the skeleton.
 
 **Source-namespacing convention.** The top-level `usvote/` modules are the **Electoral College / National Archives** pipeline — the source-of-truth spine (D006). The two popular-vote sources land as sibling subpackages, `usvote/ucsb/` (E4) and `usvote/mit/` (E5), each with its own scrape/parse/transform/load and a `pipeline.py` wiring the stages (`run_mit_pipeline`, `run_ucsb_pipeline`). EC stays flat by design; PV sources nest.
 
