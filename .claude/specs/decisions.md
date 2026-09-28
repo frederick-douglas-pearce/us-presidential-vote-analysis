@@ -4845,3 +4845,118 @@ is unchanged, and the Looker prototype is still not the intended host.
 **Related:** `.claude/specs/backlog-dashboard.md`, E9-S1, `docs/api-snapshot.md`,
 `src/usvote/api/`, D001, D038, D050, D053, D057, #10 (the original notebook mart issue,
 closed).
+
+## D071: The dashboard is Plotly Dash on App Engine standard, one pinned F1 instance in its own GCP project, served at `explore.` through a DNS-only CNAME
+
+**Date:** 2026-09-28
+**Builds on:** D070(e), D031, D033, D034, D035 · **Discharges:** D070(e)'s host question ·
+**Evidence:** `.claude/specs/research-dashboard-platform.md` (E9-S1, #276), architect-reviewed
+
+**Context.** D070(e) left the platform and host to a research spike scored against Fred's
+criteria, in priority order: cost ($0 target, $10 ceiling), ease, Python and marketable, custom
+domain, cold start, sharing, and forward compatibility.
+
+The spike evaluated the five named candidates, a "none of the above" scan (browser-side Python on
+static hosts, a non-Python control, and a sweep of general-purpose
+app hosts), and three throwaway
+deployments. Neither finalist was on the original list. Five findings shaped the decision:
+1. **The Cloudflare Workers free quota is account-wide** (100,000/day), and the API's Worker
+   already spends it.
+2. **Browser-side Python boots in 9–19 s** on a desktop CPU.
+3. **Streamlit has no hosting path that fits the ceiling** and keeps link sharing working.
+4. **Cloud Run's own domain mapping is Preview**, "not production-ready".
+5. **The existing $5 budget covers the whole billing account**, and its kill-switch can pause only
+   the API.
+
+**Decision.**
+
+(a) **Framework: Plotly Dash.** Shareable views are **paths** (Dash Pages, `/election/<year>`), so
+each view server-renders its own Open Graph card in the first HTML response. Link scrapers do not
+run JavaScript. The query string carries filters within a view.
+
+(b) **Host: Google App Engine standard,** in a **new GCP project dedicated to the dashboard** on
+the existing billing account:
+- `python314`, us-west1;
+- one F1 instance pinned with `min_instances: 1` and an explicit `max_instances: 1`, with warmup
+  enabled;
+- the previous version deleted after each promotion, because both settings are per version.
+
+It never cold-starts and costs about $0 in compute: one pinned instance uses 24 of the free tier's
+"28 hours per day of F1 instances", per project. MEASURED on a throwaway: a fresh browser reached a
+rendered table in 1.7 s.
+
+(c) **Domain:** App Engine custom-domain mapping (GA) for
+`explore.us-presidential-election-center.org`, via a **DNS-only CNAME**. The zone-wide "Always use
+https" setting the API sits under stays untouched. The `appspot.com` host redirects to `explore.`.
+
+(d) **Data access** follows D070(b):
+- only `https://api.us-presidential-election-center.org`, never `run.app`, and never the origin
+  secret;
+- an **in-process cache** keyed on `snapshot_version`, with a TTL or ETag recheck;
+- **one gunicorn worker**, so there is one cache;
+- first fills throttled below the API's 60/min/IP rule;
+- a throttled **warmup prefetch** of the canonical `/v1` URLs.
+
+The prefetch removes the one cold start left: with the API idle, a never-fetched view took 9.1 s
+(MEASURED).
+
+**No CORS, Worker, rate-limit or origin-secret change to the API is needed.** Hypothesis (d), a
+cached response without CORS headers, is CONTRADICTED: the edge keeps a separate entry per
+`Origin` value (MEASURED).
+
+(e) **Code lives in this repo:**
+- a top-level `dashboard/` directory with its own `dashboard` dependency group (never `serve` or
+  the base dependencies, per D033);
+- `dashboard/` is the deploy root, with a `.gcloudignore`;
+- a static AST scan asserts no `usvote` import in runtime code.
+
+The dashboard's tests may import the stdlib-only vocabulary modules, as S2's AC already allows.
+
+(f) **Prerequisites, filed 2026-09-28:**
+- **#283 (S1b), required before Phase 0 goes live.** Scope the existing budget to `uspv-api`, and
+  give the dashboard project its own budget and a kill-switch that pauses only the dashboard, on
+  least-privilege service accounts (the D034 §5 pattern).
+- **#284 (S1a), optional:** `Literal` vocabularies in the API models, on D031 grounds.
+- **#285:** Workers Paid, a separate API-resilience decision under E8.
+
+**Runner-up, and when to flip to it.** The runner-up is **Dash on Cloud Run behind Firebase
+Hosting**: also about $0, with a GA domain. Its CDN served a cached page in 0.15 s, but a visitor
+waited 6.2 s after idle, because Dash's POST callbacks wake Cloud Run. Flip to it if any of these
+holds:
+- the real dashboard outgrows F1 (384 MB / 600 MHz), or fails a viral-day load test at
+  `max_instances: 1`;
+- the pin proves billable;
+- App Engine recycles the instance often enough that visitors see cold starts;
+- abuse makes the DNS-only origin's uncapped egress a real cost;
+- App Engine standard is deprecated;
+- Fred weights host marketability above always-warm simplicity.
+
+If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) or Render Starter
+($7/month).
+
+**Rationale.**
+- **Cost first.** Both GCP finalists are about $0. App Engine then wins on ease (one service, one
+  deploy) and on cold start. It loses only on host marketability, which is the soft spot the flip
+  conditions name.
+- **What was rejected, in one line each:**
+  - Streamlit Community Cloud: no custom domain, and 12-h sleep with click-to-wake.
+  - Posit hosting: $59–349/month for a domain.
+  - HF Spaces: $9 of the $10, for weak sharing.
+  - Shinylive: no URL state.
+  - stlite: a 16–19 s boot.
+  - Vercel Hobby: overage is a 30-day outage.
+  - The non-Python control: not Python.
+- **The dedicated project** buys a per-project free tier and, once #283 lands, a budget and
+  kill-switch that cannot pause the API.
+
+**Consequences.**
+- #277's implementation notes are re-cut by this decision; the doc's §11 carries the list.
+- `loop.config.md` §3/§4 gain the `dashboard/` path and its deploy surface. That edit is the
+  human's.
+- `docs/deploy-cloud-run.md` §0's apex/`www` GitHub Pages expectation was already superseded by
+  D070(e).
+
+**Related:** #276, #277–#280, #283, #284, #285, `.claude/specs/research-dashboard-platform.md`,
+`.claude/specs/backlog-dashboard.md`, D001, D070.
+
+---
