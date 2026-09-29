@@ -4974,10 +4974,12 @@ If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) 
 - #277's implementation notes are re-cut by this decision; the doc's §11 carries the list.
 - `loop.config.md` §3/§4 gain the `dashboard/` path and its deploy surface. That edit is the
   human's.
-- The about-$0 egress estimate assumes compressed responses (Dash's `compress=True`) and, once
-  charts arrive (S6), plotly.js served from its CDN (`serve_locally=False`). Both are
-  requirements, the second set by the owner on 2026-09-29 and open to re-evaluation when S6 is
-  worked.
+- The egress estimate (≈ $1.1 on a 10,000-visit day, research doc §1 item 1) assumes compressed
+  responses (Dash's `compress=True`) and, once charts arrive (S6), plotly.js served from its CDN;
+  served from the app it is ≈ $3 (INFERRED). Both are requirements, the second set by the owner on
+  2026-09-29 and open to re-evaluation when S6 is worked. S6's plan chooses the mechanism: Dash's
+  `serve_locally=False` is app-wide and would load every bundle it has a CDN link for from
+  third-party CDNs (VERIFIED, Dash 4.4.1 source).
 - `docs/deploy-cloud-run.md` §0's apex/`www` GitHub Pages expectation was already superseded by
   D070(e).
 

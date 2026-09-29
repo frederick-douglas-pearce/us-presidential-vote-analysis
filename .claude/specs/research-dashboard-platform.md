@@ -21,7 +21,7 @@
 >   shared link to its first data cell in ≤ 3 s, with the dashboard cold and with the API's edge
 >   cold. With both warm, the 2.2 s run at 10 Mbps / 100 ms is inside the 3 s data criterion, but
 >   neither cold case is met by a measurement: a cold App Engine instance (after a deploy or a
->   recycle) was not measured, and the one run with the API cold (9.12 s) fails. That is why S2
+>   recycle) was not measured, and the one run with the API's edge cold (9.12 s) fails. That is why S2
 >   must prefetch, and why #277 measures both cases (§4.5).
 > - **Runner-up:** Dash on Cloud Run behind Firebase Hosting (§1).
 >
@@ -125,9 +125,12 @@ Why this and not the others, criterion by criterion in the issue's order:
    - MEASURED: a first visit transfers 0.91 MB, so a viral day is ≈ 9 GB ≈ **$1.1** of egress.
      The probe app (not committed) set Dash's `compress=True`; Dash defaults to `False` (VERIFIED,
      Dash 4.4.1 source), so S2 must set it too. The probe page had no charts. Once S6 adds them,
-     the estimate holds only if plotly.js is served from its CDN (`serve_locally=False`), which is
-     therefore an S6 requirement (§11). Served from the app, a first visit is ≈ 2.3 MB (agent B),
-     ≈ 23 GB ≈ $3 on the viral day (INFERRED).
+     the estimate holds only if plotly.js is served from its CDN, which is therefore an S6
+     requirement (§11). Served from the app, a first visit is ≈ 2.3 MB (agent B), ≈ 23 GB ≈ $3 on
+     the viral day (INFERRED), still inside the ceiling. Dash's `serve_locally=False` would do it,
+     but that flag is app-wide: every bundle with a CDN link, React and the Dash renderer's from
+     unpkg included, would then load from third-party CDNs on every page (VERIFIED, Dash 4.4.1
+     source). The mechanism is left to S6's plan (§11).
    - Deploys add Cloud Build and staging-bucket storage (pennies, INFERRED). Hence "about $0", not
      "$0".
    - A dedicated project gets its own per-project free hours. It gets its own budget only once S1b
@@ -206,7 +209,8 @@ service).
     method (VERIFIED).
   - MEASURED: its CDN served a cached page in **0.15 s** (`x-cache: HIT`) after a cold first hit
     of 2.2 s.
-  - The same host marketability under the parent-platform rule (Google Cloud). It tells a
+  - The same host marketability under the owner's host rule, which scores the platform that
+    runs the compute (Cloud Run, so Google Cloud). It tells a
     container-and-CDN story rather than a second-product one.
 - **But the CDN hides cold start from scrapers, not from visitors.** MEASURED after about 21 min
   idle (the interval was not logged; INFERRED): a scraper-style fetch of a cached page returned `x-cache: HIT` in **0.14 s**, while a fresh browser
@@ -302,16 +306,16 @@ which carry the evidence labels.
 - C5: rows 3–5 (a visitor's wait inferred from Cloud Run's measured container start, so 3); rows
   6, 16, 17 and 18 (always on as configured, not measured; row 18 is scored on the always-on
   configuration its C1 is priced at). Rows 9 and 19 take the rubric's unmeasured-wake level; row
-  11 takes it on an UNVERIFIED premise that it sleeps (a ruled-out candidate, under the owner's
-  allowance).
+  11 takes it on agent D's reading of shinyapps.io's application guide (a 15-minute default idle
+  timeout, paraphrased; no verbatim quote kept), with a wake time neither measured nor quoted.
 - C6: wherever the rubric's INFERRED level applies (rows 5, 10, 12, 15, 20).
 
 **Judgment cells, explained.**
 - **C2.** App Engine scores 4 with its costs listed in §4.2: a permanent region, a non-container
   deploy (lock-in), a `requirements.txt` export, a `max_instances` default to override, and
   version cleanup. They are well-documented costs of a mature platform, and the rubric's 4 covers
-  them. The other level-4 cells and their costs: row 3, the Preview domain mapping set up by hand
-  beside the API's container pattern; rows 6 and 7 (Render), 10 (Posit), 16 (Fly), 17 (Railway)
+  them. The other level-4 cells and their costs: row 3, a new integration: the Cloud Run domain
+  mapping, which the API does not use (it is fronted by a Worker), in Preview and set up by hand; rows 6 and 7 (Render), 10 (Posit), 16 (Fly), 17 (Railway)
   and 19 (Vercel), a new deploy integration outside GCP; row 20, one static build with a new CI
   integration (Pages).
   Row 9 (HF Spaces) is 3: it deploys by pushing to a separate Space repository, a second deploy
@@ -405,7 +409,7 @@ free.
 | Render Free | $0 | $0; Free services are suspended if bandwidth runs out with no payment method (VERIFIED) | yes, by suspension | no |
 | Fly.io always-on | ≈ $2–4 | + ≈ $0.30 egress | none | required |
 | Railway Hobby | $5, including $5 of usage | ≈ $5 (INFERRED) | a hard-limit option (agent H) | UNVERIFIED |
-| Cloudflare Containers | $5 Workers Paid + usage | ≈ $5–7 (agent H, INFERRED) | none | required for Workers Paid |
+| Cloudflare Containers | $5 Workers Paid + usage | ≈ $5–7, one lite instance kept always on (agent H: ≈ $6.7, INFERRED) | none | required for Workers Paid |
 | Vercel Hobby | $0 | $0 | yes: over the limit, *"you will have to wait until 30 days have passed"* | UNVERIFIED |
 | HF Spaces PRO | $9 | $9 | UNVERIFIED | UNVERIFIED |
 | Posit Connect Cloud Enhanced / shinyapps.io Professional | $59 / $349 | same | UNVERIFIED | UNVERIFIED |
@@ -579,7 +583,7 @@ Run series are reproduced verbatim in §5.4.
 | Render Starter | no spin-down on a paid instance; not measured | — | INFERRED (agent B) |
 | Cloudflare Containers | priced always on in §4.1 (agent H, INFERRED); if it sleeps instead, *"cold starts can often be in the 1-3 second range"*, a container start rather than a visitor's wait | — | VERIFIED quote (agent H) / INFERRED |
 | Vercel Hobby | serverless functions scale to zero; cold start neither measured nor quoted | — | INFERRED |
-| shinyapps.io | sleep policy UNVERIFIED | — | UNVERIFIED |
+| shinyapps.io | idle timeout 15 minutes by default, so it sleeps; wake time neither measured nor quoted | — | VERIFIED (agent D), paraphrased; no verbatim quote kept |
 | stlite (Pyodide 0.29.3) | — | 16.6–19.0 s cold, 16.2 s warm | MEASURED (agent F) |
 | Panel on Pyodide | — | 0.9 s to a prerendered view, 8.7 s to live | MEASURED (agent F) |
 | marimo WASM | — | 19.2 s | MEASURED (agent F) |
@@ -1293,13 +1297,17 @@ Requirements this verdict adds to #277. How each is guarded or tested is #277's 
 
 ### S6–S8 (unfiled)
 
-- **S6 (charts)** adds two loads to the F1 instance:
-  - server-side figure building on a 600 MHz CPU;
-  - plotly.js at 4.8 MB raw (VERIFIED, agent B). **Requirement (owner, 2026-09-29): serve it
-    from its CDN (`serve_locally=False`)**, so App Engine's egress estimate holds (§1 item 1).
-    If the architect has concerns when S6 is worked, it is re-evaluated then.
-
-  Both feed the first flip condition.
+- **S6 (charts)** adds server-side figure building on a 600 MHz CPU to the F1 instance, which
+  feeds the first flip condition.
+- plotly.js is 4.8 MB raw (VERIFIED, agent B). **Requirement (owner, 2026-09-29): serve it from
+  its CDN**, so it is not an F1 egress load and App Engine's estimate holds (§1 item 1).
+  - **Open question for S6's plan:** the mechanism. Dash's `serve_locally=False` is app-wide: it
+    would also load React and the Dash renderer from unpkg on every page (VERIFIED, Dash 4.4.1
+    source). Whether plotly.js alone can come from its CDN while everything else stays local is
+    untested. A short local check at planning time settles it.
+  - If neither is acceptable, serving it from the app costs about $3 on a viral day, inside the
+    ceiling (§1 item 1). If the architect has concerns when S6 is worked, the requirement is
+    re-evaluated then.
 - **S8's apex question** can also be served by App Engine (INFERRED).
 
 ### Nothing here needs a new API endpoint
@@ -1382,7 +1390,8 @@ sleep-policy rows, an unlogged idle interval shown as measured, and an uncheckab
 The owner authorized a third round, and chose to keep App Engine's ease score at 4 with its costs
 listed (§2, §4.2). All 12 were addressed.
 
-A round-3 checker, reading only that fix commit, found 10 of the 12 discharged and returned 14
+A round-3 checker, reading only that fix commit, found 11 of the 12 discharged, and the twelfth
+(the matrix-rubric finding) partly, and returned 14
 residual or new findings (13 blocking, 1 editorial). The larger ones: the custom-domain rubric fix
 had pushed the Pages- and Worker-fronted rows off level 5; §4.5 and §14 still implied App Engine
 met the target cold; and row 1's C1 of 5 rested on a page without plotly.js, so the owner made
@@ -1414,7 +1423,7 @@ the owner chose one final checker on that fix.
 | Hypotheses (a)–(d), verdicts with labels | Done (§8) |
 | API sub-question | Done (§9): S1b required, S1a optional |
 | Per-story consequences | Done (§11) |
-| Measured cold starts for the two finalists, including the stacked case | **Partial for the recommendation:** the API-cold stacked case was measured (9.12 s, §4.5); a cold App Engine instance was not, and #277 measures it. **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option |
+| Measured cold starts for the two finalists, including the stacked case | **Partial for the recommendation:** the stacked case was measured (9.12 s, §4.5), with the API's edge cold for that URL and its instance idle about 40 minutes (INFERRED); a cold App Engine instance was not, and #277 measures it. **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option |
 | Cold-start target stated | Done (§4.5): the MVP target, set by the owner |
 | Cost at both traffic levels, hard cap and card for every candidate | Done (§4.1), with UNVERIFIED cells for ruled-out candidates |
 | Sleep policy per platform | Done (§4.5), with the same allowance |
