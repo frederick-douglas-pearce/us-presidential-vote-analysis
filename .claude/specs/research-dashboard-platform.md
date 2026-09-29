@@ -65,8 +65,12 @@ architect review (§12).
 | **ATTRIBUTED** | A named secondary source says so. Usable only with the source named in-line |
 | **UNVERIFIED** | Could not be confirmed. Not a basis for a decision |
 | **CONTRADICTED** | A better source or a measurement disproves it |
+| **INFERRED** | Reasoned from VERIFIED or MEASURED material, but not itself observed or quoted. Stated so a reader can see where the chain of evidence ends; never a basis for a decision on its own |
 
 MEASURED is added to the four-label set because this spike, unlike the earlier two, ran things.
+INFERRED is added because the issue itself uses it, and because this spike's measurements invite
+conclusions that go one step past them; `research-faithless-electors.md` writes the same thing as
+"UNVERIFIED (inferred from …)".
 Pricing and limits are quoted verbatim with their URL. Every retrieval is dated 2026-09-28 unless
 stated otherwise.
 
@@ -591,7 +595,7 @@ Run series are reproduced verbatim in §5.4.
 
 **A measurement note that corrects the design of the Cloud Run series.** A Dash Pages page's HTML
 does not contain its own page's data. The HTML for `/election/1872` embeds the home view's rows
-(REPRODUCED by grepping the response), and 1872's table arrives through the `_pages_location`
+(MEASURED: grepped from the response), and 1872's table arrives through the `_pages_location`
 callback, which is where the server calls the API.
 
 So **`curl` TTFB never includes the per-year API fetch.** The Cloud Run series' planned
@@ -729,7 +733,7 @@ not take effect.** Every row below measures a cold dashboard container, not the 
 | 09:16 | planned stacked (`/election/1904`) | **on** | 4.54 s | 0.17 s |
 | 09:37 | planned dashboard-only (`/election/1904`) | **on** | 4.57 s | 0.16 s |
 
-All six cold hits showed a new boot timestamp (REPRODUCED).
+All six cold hits showed a new boot timestamp (MEASURED, §5.4).
 
 **Container cold start: 2.1–3.8 s.** `--cpu-boost` bought nothing measurable at n=2, which matches
 Google's own silence on a latency figure, so the API's `--no-cpu-boost` stands.
@@ -1018,14 +1022,15 @@ MEASURED:
 | PythonAnywhere | Free has *"restricted outbound Internet access"*; Developer $10 | <https://www.pythonanywhere.com/pricing/> |
 | Heroku | Eco *"Sleeps after 30 minutes of inactivity"*; *"transitioning to a sustaining engineering model"* | <https://www.heroku.com/pricing/>, <https://www.heroku.com/blog/an-update-on-heroku/> |
 | Northflank | *"Always-on-compute – no sleeping"* but *"should not be used for production applications"* | <https://northflank.com/pricing> |
-| DigitalOcean App Platform | the free tier covers *"3 apps with static sites"*; a service is *"1 vCPU 512 MiB … $ 5.00"* | agent H (URL not recorded) |
-| Azure Container Apps | *"The first 180,000 vCPU-seconds, 360,000 GiB-seconds, and 2 million requests per subscription per month are free"*; but *"Mapping to an intermediate CNAME value blocks certificate issuance and renewal. Examples … Cloudflare"* | agent H (URL not recorded) |
+| DigitalOcean App Platform | the free tier covers *"3 apps with static sites"*; a service is *"1 vCPU 512 MiB 50 GiB No $ 5.00"* | <https://www.digitalocean.com/pricing/app-platform> |
+| Azure Container Apps | free each month per subscription: *"The first 180,000 vCPU-seconds The first 360,000 GiB-seconds The first 2 million HTTP requests"*; but *"Mapping to an intermediate CNAME value blocks certificate issuance and renewal. Examples of CNAME values are traffic managers, Cloudflare, and similar services"* | <https://learn.microsoft.com/en-us/azure/container-apps/billing>, <https://learn.microsoft.com/en-us/azure/container-apps/custom-domains-managed-certificates> |
 | AWS Lambda function URLs | a custom domain needs CloudFront in front (agent H, INFERRED) | — |
-| Leapcell | *"$ 0 per seat / month"*, *"100,000 / month included"* invocations: one viral day could spend a month's allowance | agent H (URL not recorded) |
+| Leapcell | Hobby *"$ 0 per seat / month"*, serverless invocations *"100,000 / month included"*: one viral day could spend a month's allowance | <https://leapcell.io/pricing> |
 | Zeabur | bring-your-own server; not pursued (UNVERIFIED) | — |
 
-Rows without a URL are agent H's quotes, which its condensed report kept without their URLs.
-They concern ruled-out hosts and are not a basis for the decision.
+The DigitalOcean, Azure and Leapcell quotes were re-fetched raw by the parent on 2026-09-29, after
+the acceptance check found agent H's report had kept them without URLs. The two rows without a URL
+carry no quote. All concern ruled-out hosts and are not a basis for the decision.
 
 ---
 
