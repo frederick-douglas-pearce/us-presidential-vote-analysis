@@ -4956,8 +4956,8 @@ If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) 
 
 **Rationale.**
 - **Cost first.** Both GCP finalists are about $0. App Engine then wins on ease (one service, one
-  deploy) and on cold start, and ties on everything else. Host marketability is scored by parent
-  platform (the owner's rule): both are Google Cloud, 24.6% in Stack Overflow 2025. With the API on
+  deploy) and on cold start, and ties on everything else. Host marketability is scored by the
+  platform that runs the compute (the owner's rule): both are Google Cloud, 24.6% in Stack Overflow 2025. With the API on
   Cloud Run, App Engine adds a second GCP compute product to the portfolio.
 - **What was rejected, in one line each:**
   - Streamlit Community Cloud: no custom domain, and 12-h sleep with click-to-wake.
@@ -4974,6 +4974,10 @@ If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) 
 - #277's implementation notes are re-cut by this decision; the doc's §11 carries the list.
 - `loop.config.md` §3/§4 gain the `dashboard/` path and its deploy surface. That edit is the
   human's.
+- The about-$0 egress estimate assumes compressed responses (Dash's `compress=True`) and, once
+  charts arrive (S6), plotly.js served from its CDN (`serve_locally=False`). Both are
+  requirements, the second set by the owner on 2026-09-29 and open to re-evaluation when S6 is
+  worked.
 - `docs/deploy-cloud-run.md` §0's apex/`www` GitHub Pages expectation was already superseded by
   D070(e).
 
