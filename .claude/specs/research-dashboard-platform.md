@@ -427,6 +427,13 @@ free.
 | Cloudflare Pages (static) | $0 | $0 | yes, but the API quota is the real limit | no |
 | Streamlit Community Cloud | $0 | $0 (fails at resource limits) | yes | no |
 
+**Cloud Run's free tier**, which the Cloud Run rows' "≈ $0 at idle" rests on (VERIFIED, raw
+re-fetch 2026-09-29, <https://cloud.google.com/run/pricing>): *"Free tier (based on us-central1
+active pricing): CPU - First 180,000 vCPU-seconds free per month RAM - First 360,000 GiB-seconds
+free per month Requests - 2 million requests free per month"*, and egress *"with a free tier of
+1GiB free data transfer within North America per month"*. The API already draws on it; whether a
+second project shares that allowance is not stated on the page (UNVERIFIED).
+
 UNVERIFIED cells are for ruled-out candidates, whose details were not pursued further (owner's
 decision, 2026-09-28).
 
