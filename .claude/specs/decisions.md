@@ -4863,11 +4863,12 @@ deployments. Neither finalist was on the original list. Five findings shaped the
 1. **The Cloudflare Workers free quota is account-wide** (100,000/day), and the API's Worker
    already spends it.
 2. **Browser-side Python takes 8.7–19.2 s to a live view** on a desktop CPU.
-3. **No Streamlit hosting path meets the ceiling, the custom domain and per-URL link previews at
-   once.** Community Cloud has no custom domain; App Engine standard has no websockets; Cloud Run
-   needs a paid Worker or its Preview domain mapping; stlite boots in 16–19 s; and Render Starter,
-   Fly and Railway, which fit the ceiling and carry websockets, give Streamlit no server-rendered
-   per-URL Open Graph tags.
+3. **No Streamlit hosting path meets the ceiling, the custom domain, per-URL link previews and an
+   acceptable cold start at once.** On every server-side host Streamlit serves a static index with
+   no per-URL Open Graph tags. Community Cloud also has no custom domain and needs a click to
+   wake; App Engine standard has no websockets; Cloud Run needs a paid Worker or its Preview
+   domain mapping, and scales to zero; and stlite would need an undemonstrated per-path build for
+   OG tags (INFERRED) and boots in 16–19 s.
 4. **Cloud Run's own domain mapping is Preview**, "not production-ready".
 5. **The existing $5 budget covers the whole billing account**, and its kill-switch can pause only
    the API.
