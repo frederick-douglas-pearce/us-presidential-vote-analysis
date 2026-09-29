@@ -19,10 +19,11 @@
 >   Graph tags, in **0.13–0.19 s**.
 > - **MVP cold-start target** (set by the owner, 2026-09-28): Open Graph HTML in ≤ 1 s, and a cold
 >   shared link to its first data cell in ≤ 3 s, with the dashboard cold and with the API's edge
->   cold. With both warm, the 2.2 s run at 10 Mbps / 100 ms is inside the 3 s data criterion, but
->   neither cold case is met by a measurement: a cold App Engine instance (after a deploy or a
->   recycle) was not measured, and the one run with the API's edge cold (9.12 s) fails. That is why S2
->   must prefetch, and why #277 measures both cases (§4.5).
+>   cold. Measured on App Engine with the API's edge warm: right after a deploy, warmup had the
+>   new instance up before traffic arrived, and a visitor got OG HTML in 0.82 s and the first data
+>   cell in 2.11 s at 10 Mbps / 100 ms, inside both limits. A truly cold instance took 2.30 s and
+>   3.75 s, failing both, so the pin and warmup are load-bearing. The one run with the API's edge
+>   cold (9.12 s) fails too, which is why S2 must prefetch (§4.5).
 > - **Runner-up:** Dash on Cloud Run behind Firebase Hosting (§1).
 >
 > **Three findings change what later stories must do.**
@@ -53,7 +54,7 @@
 - a sweep of general-purpose app hosts, added at the owner's request.
 
 Then parent verification: raw re-fetches of the pages the verdict depends on, live probes of the
-production API, **three throwaway deployments** measured and then torn down (§5, §13), and an
+production API, **four throwaway deployments** measured and then torn down (§5, §13), and an
 architect review (§12).
 
 **Evidence labels, following `research-faithless-electors.md`. They are load-bearing.**
@@ -182,6 +183,12 @@ Why this and not the others, criterion by criterion in the issue's order:
 5. **Cold start: the dashboard stayed warm; the API behind it does not.**
    - The instance is pinned, and it stayed warm for every request of the ~40-minute probe session
      (MEASURED). Recycling over days is UNVERIFIED.
+   - **When the instance is new** (MEASURED on a second throwaway, 2026-09-29, API edge warm):
+     after a deploy, warmup had started the new instance before the deploy returned, so the first
+     visitor got OG HTML in 0.82 s and the first data cell in 2.11 s at 10 Mbps / 100 ms, inside
+     the target. A truly cold instance (`min_instances: 0`, after 14.5 min idle) took 2.30 s to the
+     HTML and 3.75 s to data, failing both limits. The pin and warmup are what keep visitors off
+     that path; a recycle without a warmed replacement would put them on it (a flip condition).
    - MEASURED: a fresh browser reached a rendered AG Grid table in 1.7 s. The same app on
      scale-to-zero Cloud Run took 2.1–3.8 s for the HTML alone after idle (§4.5).
    - **The API still scales to zero, and that is the cold start left.** MEASURED: with the
@@ -561,8 +568,22 @@ against it:
 
 Against it, with the dashboard warm: OG HTML in 0.13–0.19 s (0.82 s on the first hit) is inside
 1 s, and with the API also warm, 2.20 s at 10 Mbps / 100 ms is inside 3 s. Neither is a cold case.
-The stacked case, 9.12 s unthrottled, fails the data criterion. A cold App Engine instance, after a
-deploy or a recycle, was not measured for either criterion; #277 measures it. The Cloud Run container's cold HTML
+The stacked case, 9.12 s unthrottled, fails the data criterion.
+
+**The dashboard-cold case, measured on a second throwaway App Engine project (2026-09-29),** with
+the API's edge warm for each URL (checked `HIT` just before) and the log in §5.4:
+- **Right after a deploy, pinned configuration:** the new instance's boot stamp (09:18:59) is 8 s
+  before the deploy returned, so warmup started it before any traffic. First request: OG HTML in
+  **0.82 s** TTFB. On the next deploy, a fresh throttled browser reached the first data cell in
+  **2.11 s**. Both inside the target.
+- **A truly cold instance** (`min_instances: 0`, idle until the instance count was 0): first
+  request **2.30 s** TTFB, the instance booting at that moment. After a further 16 min idle, a
+  fresh throttled browser took **3.75 s** to the first data cell; the boot stamp read afterwards
+  was 3 s after the browser started, so it was cold. Both fail the target.
+
+So the pinned design meets the target in the dashboard-cold case that deploys create, and would miss
+it only if App Engine recycled the pinned instance without warming its replacement first. How
+often that happens is UNVERIFIED (§1 flip conditions). The Cloud Run container's cold HTML
 alone, 2.1–3.8 s, fails the 1 s OG criterion.
 
 **Raw logs.** Rows marked *log not preserved* were read off the terminal during the session and
@@ -572,6 +593,8 @@ Run series are reproduced verbatim in §5.4.
 | Host / state | Server TTFB | Browser: page → table rendered | Label |
 |---|---|---|---|
 | App Engine F1, pinned (warm throughout the session) | 0.13–0.19 s (first hit 0.82 s) | **1.72 s** fresh cache / 1.05 s warm; **2.20 s** / 1.12 s at 10 Mbps, 100 ms | MEASURED; log not preserved |
+| App Engine F1, right after a deploy (pinned; warmup started the instance first), API edge warm | 0.82 s | **2.11 s** at 10 Mbps / 100 ms | MEASURED (§5.4) |
+| App Engine F1, truly cold instance (`min_instances: 0`), API edge warm | 2.30 s | **3.75 s** at 10 Mbps / 100 ms | MEASURED (§5.4) |
 | App Engine F1, **stacked**: dashboard warm, a never-fetched election, API idle ~40 min (the interval is INFERRED: not logged) | 0.28 s (HTML only; see note) | **9.12 s** fresh cache / 1.13 s warm | MEASURED (§5.4) |
 | Cloud Run, scale-to-zero, ≥21 min idle: dashboard container cold | 3.76, 3.37, 2.08, 2.33 s | — | MEASURED (§5.4) |
 | Cloud Run, same, `--cpu-boost` | 4.54, 4.57 s (n=2: no improvement observed) | — | MEASURED (§5.4) |
@@ -822,6 +845,43 @@ x-cache: HIT
 {"url": "https://uspv-explore-276.web.app/election/1932", "mode": "fast", "cold-browser": {"secs_to_table": 6.23, "MB": 0.87}, "warm-browser": {"secs_to_table": 0.75, "MB": 0.0}}
 ```
 
+**App Engine cold instance (§4.5), throwaway `uspv-explore-276b`, 2026-09-29.** `edge` lines
+confirm the API's edge held each URL; `instances` lines list the running instances (version, id).
+The `coldinstance-browser-throttled` run at 09:37:43 is **not** a cold measurement: the instance
+list lagged behind the instance the 09:37:32 request had just started. The re-run at 09:54 is the
+valid one, and its boot-stamp check shows the instance started after the browser did.
+
+```text
+2026-09-29T09:17:36Z # series start
+2026-09-29T09:17:41Z api-edge /v1/elections/1996 cf-cache-status: HIT
+2026-09-29T09:19:07Z deployed v2 (app.yaml) rc=0
+2026-09-29T09:19:09Z instances: v1	0010dd8607af05e505abb083bb9dae5e3ec0d6968867767699827d4e5d782659d429501779194e28b2f51bb818f69e7ddc5d8e99dbcfc41852504e8f041da42c327be8222a16d81c5d1b3d0905d8 v2	0010dd860748c5255060e3ca281adcb3e6e12fa8e5a419bcd52ed44b6df1084325b8ef2eaac3c33d746557d1de4c3472c0ce704768f44a7fe2065041a03b7895b8d8e284f5413b3ddbfe593ad8f1 
+2026-09-29T09:19:10Z postdeploy-pinned-first-request /election/1996 200 ttfb=0.824174 total=0.854195 [boot 1790673539] <meta property="og:title" content="1996 election — explore">
+2026-09-29T09:19:10Z warm-after /election/1996 200 ttfb=0.124944 total=0.149659 [boot 1790673539] <meta property="og:title" content="1996 election — explore">
+2026-09-29T09:19:10Z api-edge /v1/elections/1992 cf-cache-status: HIT
+2026-09-29T09:20:37Z deployed v3 (app.yaml) rc=0
+2026-09-29T09:20:40Z instances: v1	0010dd8607af05e505abb083bb9dae5e3ec0d6968867767699827d4e5d782659d429501779194e28b2f51bb818f69e7ddc5d8e99dbcfc41852504e8f041da42c327be8222a16d81c5d1b3d0905d8 v2	0010dd860748c5255060e3ca281adcb3e6e12fa8e5a419bcd52ed44b6df1084325b8ef2eaac3c33d746557d1de4c3472c0ce704768f44a7fe2065041a03b7895b8d8e284f5413b3ddbfe593ad8f1 v3	0010dd860737526cee118b2955e8f6a19940a6a599a4573b3773dce616bb771f455ae869ad508d2f27df3a8d8926ba735931f06b27204b93b412ca60a04d7e5ebf9bfac181124a6cc379f987568a 
+2026-09-29T09:20:44Z postdeploy-pinned-browser-throttled /election/1992 {"url": "https://uspv-explore-276b.uw.r.appspot.com/election/1992", "mode": "throttled", "cold-browser": {"secs_to_table": 2.11, "MB": 0.91}, "warm-browser": {"secs_to_table": 1.14, "MB": 0.01}}
+2026-09-29T09:22:05Z deployed v4 (app-cold.yaml) rc=0
+2026-09-29T09:22:05Z v4-initial-warm /election/2000 200 ttfb=0.189656 total=0.212905 [boot 1790673720] <meta property="og:title" content="2000 election — explore">
+2026-09-29T09:37:24Z instances reached 0 after ~870s of polling
+2026-09-29T09:37:27Z api-edge /v1/elections/1988 cf-cache-status: HIT
+2026-09-29T09:37:30Z instances: 
+2026-09-29T09:37:32Z coldinstance-first-request /election/1988 200 ttfb=2.300482 total=2.330685 [boot 1790674652] <meta property="og:title" content="1988 election — explore">
+2026-09-29T09:37:35Z instances reached 0 after ~30s of polling
+2026-09-29T09:37:35Z api-edge /v1/elections/1984 cf-cache-status: HIT
+2026-09-29T09:37:38Z instances: 
+2026-09-29T09:37:43Z coldinstance-browser-throttled /election/1984 {"url": "https://uspv-explore-276b.uw.r.appspot.com/election/1984", "mode": "throttled", "cold-browser": {"secs_to_table": 2.16, "MB": 0.91}, "warm-browser": {"secs_to_table": 1.21, "MB": 0.01}}
+2026-09-29T09:37:43Z # series end
+2026-09-29T09:38:16Z # rerun: cold-instance browser (no request since 09:37:43; wait 16 min, then require 0 instances)
+2026-09-29T09:54:19Z instances after 16 min idle: 0
+2026-09-29T09:54:20Z api-edge /v1/elections/1980 cf-cache-status: HIT
+2026-09-29T09:54:20Z browser start epoch 1790675660
+2026-09-29T09:54:26Z coldinstance-browser-throttled-rerun /election/1980 {"url": "https://uspv-explore-276b.uw.r.appspot.com/election/1980", "mode": "throttled", "cold-browser": {"secs_to_table": 3.75, "MB": 0.91}, "warm-browser": {"secs_to_table": 1.14, "MB": 0.01}}
+2026-09-29T09:54:26Z boot stamp now: [boot 1790675663] (cold if >= browser start epoch 1790675660)
+2026-09-29T09:54:26Z # rerun end
+```
+
 ---
 
 ## 6. Per-candidate characterization
@@ -1053,7 +1113,7 @@ marked *log not preserved* where they appear):
 - the ~40-minute API idle interval before the stacked case;
 - the ~21-minute idle interval before the Firebase after-idle case, and the state of the
   dashboard's Cloud Run instance and of the API's instance and edge during it;
-- a cold App Engine instance: every App Engine run had the dashboard warm.
+- how often App Engine recycles a pinned instance, and whether it warms the replacement first.
 
 **Quoted only:**
 - everything about Render, HF, Posit hosting (apart from agent D's one measured interstitial),
@@ -1413,6 +1473,7 @@ the owner chose one final checker on that fix.
 |---|---|---|---|
 | Cloud Run `coldprobe-276`, and image `us-west1-docker.pkg.dev/uspv-api/usvote/coldprobe-276:throwaway` | project `uspv-api` | the Cloud Run cold series | **Yes**, 2026-09-28 ~09:45 UTC: service deleted, image deleted with its tags; `uspv-api` verified back to `usvote-api` + `budget-killswitch` and the `usvote-api` image only |
 | Project `uspv-explore-276`: the App Engine app, Cloud Run `coldprobe-fb`, Artifact Registry `probe`, Firebase and its Hosting site | a new project on the same billing account | the App Engine and Firebase tests | **Yes**, 2026-09-28 ~10:10 UTC: `gcloud projects delete` → `DELETE_REQUESTED`. Billing stops at once; GCP purges the project after its 30-day recovery window, removing the App Engine app, Firebase and the Hosting site with it |
+| Project `uspv-explore-276b`: an App Engine app, versions v1–v4 of the probe | a second new project on the same billing account (the first project's ID cannot be reused) | the App Engine cold-instance measurement, 2026-09-29 | **Yes**, 2026-09-29 ~10:00 UTC: `gcloud projects delete` → `DELETE_REQUESTED` |
 
 ---
 
@@ -1428,7 +1489,7 @@ the owner chose one final checker on that fix.
 | Hypotheses (a)–(d), verdicts with labels | Done (§8) |
 | API sub-question | Done (§9): S1b required, S1a optional |
 | Per-story consequences | Done (§11) |
-| Measured cold starts for the two finalists, including the stacked case | **Partial for the recommendation:** the stacked case was measured (9.12 s, §4.5), with the API's edge cold for that URL and its instance idle about 40 minutes (INFERRED); a cold App Engine instance was not, and #277 measures it. **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option |
+| Measured cold starts for the two finalists, including the stacked case | **Done for the recommendation:** the dashboard-cold case, after a deploy and as a truly cold instance (§4.5, measured 2026-09-29), and the stacked case (9.12 s), with the API's edge cold for that URL and its instance idle about 40 minutes (INFERRED). **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option. **Other free candidates:** Render Free and Streamlit Community Cloud are covered by their documented wake behaviour, not measured. Both this and the runner-up's partial case are recorded as an amendment to the criterion on #276 (owner, 2026-09-29) |
 | Cold-start target stated | Done (§4.5): the MVP target, set by the owner |
 | Cost at both traffic levels, hard cap and card for every candidate | Done (§4.1), with UNVERIFIED cells for ruled-out candidates |
 | Sleep policy per platform | Done (§4.5), with the same allowance |

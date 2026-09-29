@@ -4858,7 +4858,7 @@ domain, cold start, sharing, and forward compatibility.
 
 The spike evaluated the five named candidates, a "none of the above" scan (browser-side Python on
 static hosts, a non-Python control, and a sweep of general-purpose
-app hosts), and three throwaway
+app hosts), and four throwaway
 deployments. Neither finalist was on the original list. Five findings shaped the decision:
 1. **The Cloudflare Workers free quota is account-wide** (100,000/day), and the API's Worker
    already spends it.
@@ -4889,7 +4889,10 @@ the existing billing account:
 It costs about $0 in compute: one pinned instance uses 24 of the free tier's "28 hours per day of
 F1 instances", per project. Pinned, it stayed warm for every request of a ~40-minute probe
 session; how often App Engine recycles it over days is UNVERIFIED and is a flip condition. MEASURED
-on a throwaway: a fresh browser reached a rendered table in 1.7 s.
+on a throwaway: a fresh browser reached a rendered table in 1.7 s. After a deploy, warmup had the
+new instance up before traffic, so a first visitor got OG HTML in 0.82 s and data in 2.11 s at
+10 Mbps / 100 ms; a truly cold instance took 2.30 s and 3.75 s. The pin and warmup are
+load-bearing.
 
 (c) **Domain:** App Engine custom-domain mapping (GA) for
 `explore.us-presidential-election-center.org`, via a **DNS-only CNAME**. The zone-wide "Always use
