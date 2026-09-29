@@ -4954,7 +4954,7 @@ Run. Flip to it if any of these holds (the research doc's §1 carries the same l
 The code location flips, not the host, if a future Dash release's pins conflict with the
 pipeline's resolution: the dashboard then moves to a separate repository.
 
-If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) or Render Starter
+If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–3/month) or Render Starter
 ($7/month).
 
 **Rationale.**

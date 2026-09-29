@@ -247,8 +247,8 @@ service).
 pins conflict with the pipeline's resolution moves the dashboard to a separate repository.
 
 **Conditions that flip it to a paid host.** If both GCP options fail live, the fallbacks are
-**Fly.io** (shared-cpu-1x always on, ≈ $2–4/month, INFERRED from VERIFIED rates) or **Render
-Starter** ($7/month, VERIFIED). Both are inside the $10 ceiling.
+**Fly.io** (shared-cpu-1x always on, ≈ $2–3/month at 256–512 MB, computed from Fly's rate
+constants, §6.9) or **Render Starter** ($7/month, VERIFIED). Both are inside the $10 ceiling.
 
 **Code location: this repo**, in a top-level `dashboard/` directory with its own `dashboard`
 dependency group (§10).
@@ -317,8 +317,8 @@ which carry the evidence labels.
 - C5: rows 3–5 (a visitor's wait inferred from Cloud Run's measured container start, so 3); rows
   6, 16, 17 and 18 (always on as configured, not measured; row 18 is scored on the always-on
   configuration its C1 is priced at). Rows 9 and 19 take the rubric's unmeasured-wake level; row
-  11 takes it on agent D's reading of shinyapps.io's application guide (a 15-minute default idle
-  timeout, paraphrased; no verbatim quote kept), with a wake time neither measured nor quoted.
+  11 takes it because shinyapps.io sleeps after a 15-minute default idle timeout (VERIFIED, §4.5),
+  with a wake time neither measured nor quoted.
 - C6: wherever the rubric's INFERRED level applies (rows 5, 10, 12, 15, 20).
 
 **Judgment cells, explained.**
@@ -418,7 +418,7 @@ free.
 | Streamlit or Shiny on Cloud Run, Preview mapping | ≈ $0 | an open websocket bills as instance time (VERIFIED, §6.5); ≲ $5 on the viral day (INFERRED) | none | on file |
 | Render Starter | $7 | $7 + ≈ $0.60 if responses are compressed: about 9 GB against 5 GB included, at $0.15/GB. The 0.9 MB visit was measured with Dash's `compress=True`, set in the probe app (not committed); Dash defaults to `False` (VERIFIED, Dash 4.4.1 source). Agent B's overage estimates, on top of the $7 and including plotly.js: ≈ $2.85 compressed (≈ $9.85 in all), ≈ $11.70 uncompressed (≈ $18.70, over the ceiling) (INFERRED) | none | required |
 | Render Free | $0 | $0; Free services are suspended if bandwidth runs out with no payment method (VERIFIED) | yes, by suspension | no |
-| Fly.io always-on | ≈ $2–4 | + ≈ $0.30 egress | none | required |
+| Fly.io always-on | ≈ $1.94 at 256 MB, ≈ $3.19 at 512 MB (computed from the rate constants in §6.9; INFERRED arithmetic, before any regional markup) | + ≈ $0.20 egress at *"$0.02 per GB"* (North America) | none | required |
 | Railway Hobby | $5, including $5 of usage | ≈ $5 (INFERRED) | a hard-limit option (agent H) | UNVERIFIED |
 | Cloudflare Containers | $5 Workers Paid + usage | ≈ $5–7, one lite instance kept always on (agent H: ≈ $6.7, INFERRED) | none | required for Workers Paid |
 | Vercel Hobby | $0 | $0 | yes: over the limit, *"you will have to wait until 30 days have passed"* | UNVERIFIED |
@@ -458,8 +458,9 @@ The differentiators are deploy topology, lock-in and churn:
   - Dash went 4.0.0 (2026-02-03) → 4.4.1 (2026-07-21) → 4.5.0rc0 (2026-09-21). `DataTable` is
     deprecated for AG Grid and is removed in 5.0 (VERIFIED, <https://dash.plotly.com/datatable>).
   - Streamlit shipped 12 releases between 2026-03-31 and 2026-09-15 (VERIFIED, PyPI's release
-    list), including a Tornado→Starlette server swap in 1.57.0: *"Introducing Starlette as the
-    default web server!"* (VERIFIED, Streamlit's 2026 release notes, agent A).
+    list, <https://pypi.org/pypi/streamlit/json>), including a Tornado→Starlette server swap in
+    1.57.0: *"Introducing Starlette as the default web server!"* (VERIFIED, raw re-fetch,
+    <https://docs.streamlit.io/develop/quick-reference/release-notes/2026>).
 
 ### 4.3 Python and marketable
 
@@ -568,7 +569,7 @@ against it:
 
 Against it, with the dashboard warm: OG HTML in 0.13–0.19 s (0.82 s on the first hit) is inside
 1 s, and with the API also warm, 2.20 s at 10 Mbps / 100 ms is inside 3 s. Neither is a cold case.
-The stacked case, 9.12 s unthrottled, fails the data criterion.
+The API-edge-cold case (dashboard warm), 9.12 s unthrottled, fails the data criterion.
 
 **The dashboard-cold case, measured on a second throwaway App Engine project (2026-09-29),** with
 the API's edge warm for each URL (checked `HIT` just before) and the log in §5.4:
@@ -587,7 +588,7 @@ often that happens is UNVERIFIED (§1 flip conditions). The Cloud Run container'
 alone, 2.1–3.8 s, fails the 1 s OG criterion.
 
 **Raw logs.** Rows marked *log not preserved* were read off the terminal during the session and
-are not reproduced anywhere. The stacked App Engine row, the Firebase after-idle row and the Cloud
+are not reproduced anywhere. The App Engine API-edge-cold row, the Firebase after-idle row and the Cloud
 Run series are reproduced verbatim in §5.4.
 
 | Host / state | Server TTFB | Browser: page → table rendered | Label |
@@ -595,7 +596,7 @@ Run series are reproduced verbatim in §5.4.
 | App Engine F1, pinned (warm throughout the session) | 0.13–0.19 s (first hit 0.82 s) | **1.72 s** fresh cache / 1.05 s warm; **2.20 s** / 1.12 s at 10 Mbps, 100 ms | MEASURED; log not preserved |
 | App Engine F1, right after a deploy (pinned; warmup started the instance first), API edge warm | 0.82 s | **2.11 s** at 10 Mbps / 100 ms | MEASURED (§5.4) |
 | App Engine F1, truly cold instance (`min_instances: 0`), API edge warm | 2.30 s | **3.75 s** at 10 Mbps / 100 ms | MEASURED (§5.4) |
-| App Engine F1, **stacked**: dashboard warm, a never-fetched election, API idle ~40 min (the interval is INFERRED: not logged) | 0.28 s (HTML only; see note) | **9.12 s** fresh cache / 1.13 s warm | MEASURED (§5.4) |
+| App Engine F1, **API edge cold, dashboard warm**: a never-fetched election, API idle ~40 min (the interval is INFERRED: not logged). Not the both-cold stacked case, which was not measured | 0.28 s (HTML only; see note) | **9.12 s** fresh cache / 1.13 s warm | MEASURED (§5.4) |
 | Cloud Run, scale-to-zero, ≥21 min idle: dashboard container cold | 3.76, 3.37, 2.08, 2.33 s | — | MEASURED (§5.4) |
 | Cloud Run, same, `--cpu-boost` | 4.54, 4.57 s (n=2: no improvement observed) | — | MEASURED (§5.4) |
 | Cloud Run, warm | 0.12–0.20 s | — | MEASURED (§5.4) |
@@ -610,7 +611,7 @@ Run series are reproduced verbatim in §5.4.
 | Render Starter | no spin-down on a paid instance; not measured | — | INFERRED (agent B) |
 | Cloudflare Containers | priced always on in §4.1 (agent H, INFERRED); if it sleeps instead, *"cold starts can often be in the 1-3 second range"*, a container start rather than a visitor's wait | — | VERIFIED quote (agent H) / INFERRED |
 | Vercel Hobby | serverless functions scale to zero; cold start neither measured nor quoted | — | INFERRED |
-| shinyapps.io | idle timeout 15 minutes by default, so it sleeps; wake time neither measured nor quoted | — | VERIFIED (agent D), paraphrased; no verbatim quote kept |
+| shinyapps.io | *"Application Instances will be put into a sleep state when they have been idle for the Instance Idle Timeout value (default is 15 minutes)"*; wake time neither measured nor quoted | — | VERIFIED (raw re-fetch, <https://docs.posit.co/shinyapps.io/guide/applications/>) |
 | stlite (Pyodide 0.29.3) | — | 16.6–19.0 s cold, 16.2 s warm | MEASURED (agent F) |
 | Panel on Pyodide | — | 0.9 s to a prerendered view, 8.7 s to live | MEASURED (agent F) |
 | marimo WASM | — | 19.2 s | MEASURED (agent F) |
@@ -626,7 +627,9 @@ So **`curl` TTFB never includes the per-year API fetch.** The Cloud Run series' 
 six samples measured a cold dashboard container, plus, INFERRED, one fetch of the home view's data
 that the API's edge had already cached.
 
-**The true stacked cost is the browser row: 9.12 s against 1.13 s warm.** The API was idle about
+**The API-edge-cold cost is the browser row: 9.12 s against 1.13 s warm.** It is half of the
+stacked case #276 describes: the dashboard was warm. The both-cold case was not measured, and goes
+to #277 (owner, 2026-09-29). The API was idle about
 40 minutes (INFERRED: the interval was not logged), and the Worker's edge had never cached that
 URL. Attributing the ~8 s difference to the API's own cold start is INFERRED: the API's instance
 state was not observed directly.
@@ -650,8 +653,9 @@ above.
 
 **The browser-side cold start is CPU-bound, not cache-bound** (agent F).
 - Warm reloads were barely faster.
-- Chrome partitions its cache per site (VERIFIED, Chrome 86+), so a visitor's earlier Pyodide
-  download from another site is not reused.
+- Chrome partitions its cache per site: *"Chrome will partition its HTTP cache starting in Chrome
+  86"* (VERIFIED, <https://developer.chrome.com/blog/http-cache-partitioning>). So a visitor's
+  earlier Pyodide download from another site is not reused.
 
 Fred's suggestion was a fast static landing page, with the Python runtime loading only after
 click-through. It fixes the first impression but not the wait, which moves to the click, and on a
@@ -680,7 +684,14 @@ A cold origin is therefore a sharing risk, not only a UX one.
 | Gradio | `gr.Request.query_params` (VERIFIED) | **no Python API** (VERIFIED) | per app only (VERIFIED) |
 | Panel | `pn.state.location.query_params` (VERIFIED) | `location.sync` (VERIFIED) | through a custom Jinja template (INFERRED) |
 
-Labels are per cell, from agent G's report. **Design consequence: make every shareable view a
+Labels are per cell, from agent G's report. The parent re-fetched each framework's reference page
+on 2026-09-29 and confirmed the named APIs exist there: Dash <https://dash.plotly.com/urls>;
+Streamlit <https://docs.streamlit.io/develop/api-reference/caching-and-state/st.query_params>;
+Shiny <https://shiny.posit.co/py/api/core/Session.html> and
+<https://shiny.posit.co/py/api/core/bookmark.Bookmark.html>; Gradio
+<https://www.gradio.app/docs/gradio/request>; Panel <https://panel.holoviz.org/how_to/state/url.html>.
+The behavioural cells beyond an API's existence (no write API, a static index, `pushState`) rest on
+agent G's reading of the frameworks' source. **Design consequence: make every shareable view a
 path** (`/election/2000`, `/state/OH`) so Dash Pages emits its card, and keep the query string for
 filters within a view.
 
@@ -826,7 +837,7 @@ and the megabytes transferred. `"mode": "fast"` is an unthrottled run; the throt
 # series end 2026-09-28T09:37:51Z
 ```
 
-**App Engine stacked case (§4.5):**
+**App Engine API-edge-cold case, dashboard warm (§4.5).** The log's `gae-stacked-cold` label predates the renaming:
 
 ```text
 2026-09-28T10:00:00Z
@@ -908,7 +919,8 @@ Condensed. Each quote carries its URL.
 - **Shared egress IPs.** *"These IP addresses may change at any time without notice"*
   (<https://docs.streamlit.io/deploy/streamlit-community-cloud/status>).
 - **Streamlit in Snowflake / Snowpark Container Services:** viewers need Snowflake authentication
-  (VERIFIED); about $130/month (ATTRIBUTED, select.dev). Ruled out.
+  (VERIFIED); about $130/month (UNVERIFIED: agent A cited select.dev without keeping a URL).
+  Ruled out.
 
 ### 6.2 Dash on Render
 
@@ -965,7 +977,10 @@ Condensed. Each quote carries its URL.
 
 - **The hypothesis clauses** are ruled on in §8.
 - **Websocket frameworks.**
-  - Streamlit and Shiny need websockets (VERIFIED).
+  - Streamlit needs websockets (VERIFIED: its troubleshooting doc has users set
+    `--server.enableWebsocketCompression=false`,
+    <https://docs.streamlit.io/knowledge-base/deploy/remote-start>). Shiny's need is agent D's and
+    agent E's reading, with no URL kept (INFERRED here).
   - Cloud Run caps a websocket at the request timeout: *"subject to request timeouts (currently up
     to 60 minutes and defaults to 5 minutes)"*
     (<https://docs.cloud.google.com/run/docs/triggering/websockets>).
@@ -1070,7 +1085,7 @@ MEASURED:
 
 | Host | Finding | Source |
 |---|---|---|
-| Fly.io | no free tier for new customers (trial: *"2 hours of machine runtime or 7 days of access"*, card required); always-on shared-cpu-1x ≈ $1.94–3.80/mo, computed from the page's rate constants | <https://fly.io/docs/about/free-trial/>, <https://fly.io/docs/about/pricing/> |
+| Fly.io | no free tier for new customers (trial: *"2 hours of machine runtime or 7 days of access"*, card required); always-on shared-cpu-1x ≈ $1.94/mo at 256 MB and ≈ $3.19/mo at 512 MB (INFERRED arithmetic: 75e-8 × 2,592,000 s, plus 193e-8 × 2,592,000 per GB above the 0.25 GB included). VERIFIED raw, <https://fly.io/docs/about/pricing/>: the page's rate constants are `PRICE_PER_VCPU_SECOND={shared:75e-8` $/s, `PRICE_PER_GB_SECOND=193e-8` $/GB-s and `INCLUDED_RAM_GB_PER_VCPU={shared:.25`, over `SECONDS_PER_MONTH=2592e3` | <https://fly.io/docs/about/free-trial/>, <https://fly.io/docs/about/pricing/> |
 | Railway | *"Custom domains 1 trial, then 0"* on Free; *"Hobby $5 / month"* | <https://railway.com/pricing>, <https://docs.railway.com/reference/pricing/plans> |
 | Vercel Hobby | *"restricted to non-commercial personal use only"*; overage: *"you will have to wait until 30 days have passed"* | <https://vercel.com/docs/limits/fair-use-guidelines>, <https://vercel.com/docs/plans/hobby> |
 | Cloudflare Containers | $5 Workers Paid + usage; *"cold starts can often be in the 1-3 second range"* | <https://developers.cloudflare.com/containers/faq/> |
@@ -1101,7 +1116,7 @@ For a reader re-weighting §2, this is which numbers came from a deployment and 
 **MEASURED** (raw log in §5.4 where one was kept; the rest were read off the terminal and are
 marked *log not preserved* where they appear):
 - Cloud Run cold and warm TTFB (§5.4);
-- App Engine warm TTFB and browser time-to-table (log not preserved), and its stacked case (§5.4);
+- App Engine warm TTFB and browser time-to-table (log not preserved), and its API-edge-cold case (§5.4);
 - Firebase Hosting's first hit and CDN HIT (log not preserved), and its after-idle case (§5.4);
 - the Dash probe's memory and page weight (log not preserved);
 - server-rendered OG tags on three hosts;
@@ -1110,7 +1125,8 @@ marked *log not preserved* where they appear):
 - the live `api.` Origin probes.
 
 **Not measured, though the text relies on it:**
-- the ~40-minute API idle interval before the stacked case;
+- the ~40-minute API idle interval before the API-edge-cold case;
+- the both-cold stacked case (dashboard and API edge cold together), which goes to #277;
 - the ~21-minute idle interval before the Firebase after-idle case, and the state of the
   dashboard's Cloud Run instance and of the API's instance and edge during it;
 - how often App Engine recycles a pinned instance, and whether it warms the replacement first.
@@ -1132,7 +1148,7 @@ marked *log not preserved* where they appear):
 | **(b1)** A Cloud-Run dashboard at `explore.` does not pass through the API's Worker | **SUPPORTED** | VERIFIED | Custom Domains bind per hostname; the runbook binds only `api.` |
 | **(b2)** …and hits D035's Host-routing 404 | **SUPPORTED** | ATTRIBUTED (repo, D035) | not re-tested |
 | **(b3)** …so it needs its own front: a second Worker or domain mapping | **SUPPORTED, incomplete** | VERIFIED | domain mapping exists in us-west1 but is Preview. **Firebase Hosting is a third, GA option the hypothesis did not list** |
-| **(b4)** A Worker can proxy websockets | **SUPPORTED** | VERIFIED | *"This establishes a WebSocket connection proxied through a Worker."* Billed once per connection |
+| **(b4)** A Worker can proxy websockets | **SUPPORTED** | VERIFIED | *"This establishes a WebSocket connection proxied through a Worker."* (<https://developers.cloudflare.com/workers/runtime-apis/response/>). Billed once per connection (Workers pricing, §4.1) |
 | **(b5)** Cloud Run's timeout caps websocket sessions | **SUPPORTED** | VERIFIED | *"subject to request timeouts (currently up to 60 minutes…)"* |
 | **(b6)** Dash callbacks are POSTs and not edge-cacheable | **SUPPORTED** | VERIFIED (source) / MEASURED | POST to `_dash-update-component`; they passed through the Firebase rewrite uncached |
 | **(c)** Gradio is ML-oriented and weaker for a BI dashboard | **SUPPORTED, with nuance** | VERIFIED / ATTRIBUTED | self-described as for "machine learning apps"; it has dashboard components, but no URL write, a static head, and no cross-page interaction |
@@ -1209,7 +1225,7 @@ probe must demonstrate, as #276 asks.
   - first fills throttled below 60/min, since App Engine's egress IPs are shared Google ranges
     (INFERRED);
   - a throttled prefetch of the canonical URLs **on warmup and on every `snapshot_version`
-    change**, swapping the cache atomically. The stacked cold case (9.12 s, MEASURED, §4.5) fails
+    change**, swapping the cache atomically. The API-edge-cold case (9.12 s, MEASURED, §4.5) fails
     the MVP target, so this is a requirement, not an optimization.
 
 **Edge caching.** The server should fetch canonical URLs only, so the Worker's per-URL cache serves
@@ -1364,7 +1380,8 @@ Requirements this verdict adds to #277. How each is guarded or tested is #277's 
 
 - **S6 (charts)** adds server-side figure building on a 600 MHz CPU to the F1 instance, which
   feeds the first flip condition.
-- plotly.js is 4.8 MB raw (VERIFIED, agent B). **Requirement (owner, 2026-09-29): serve it from
+- plotly.js is 4.8 MB raw (MEASURED: `plotly.min.js` in the plotly wheel is 4,815,814 bytes,
+  read by the parent from agent B's unpacked wheel). **Requirement (owner, 2026-09-29): serve it from
   its CDN**, so it is not an F1 egress load and App Engine's estimate holds (§1 item 1).
   - **Open question for S6's plan:** the mechanism. Dash's `serve_locally=False` is app-wide: it
     would also load React and the Dash renderer from unpkg on every page (VERIFIED, Dash 4.4.1
@@ -1404,7 +1421,7 @@ decision (D070(b), D030, D033, D035). D034 was under tension until S1b was made 
 | **I1**: "caps compute outright" is overstated | Adopted, sharpened by the re-fetch: `max_instances` is per version (VERIFIED) and `min_instances` applies only to the serving version (VERIFIED). Version cleanup goes into S2; a flip condition is added |
 | **I2**: S1b "optional" conflicts with S2's AC, and the existing budget may not be isolated | Adopted **and confirmed**: the live budget has no project filter (VERIFIED). S1b is now required, with below- and over-threshold live-probe acceptance |
 | **I3**: S1a's rationale is wrong for the in-repo verdict | Adopted. S1a is optional and justified by D031; it now covers the per-capita vocabularies; §10's separate-repo sentence is corrected |
-| **I4**: the stacked cold start was not measured for the recommended option | Adopted: measured (§4.5), and a throttled warmup prefetch goes into S2. Since code review, it runs on warmup and on every `snapshot_version` change (§12.2) |
+| **I4**: the stacked cold start was not measured for the recommended option | Adopted: measured with the dashboard warm (§4.5; the both-cold case goes to #277), and a throttled warmup prefetch goes into S2. Since code review, it runs on warmup and on every `snapshot_version` change (§12.2) |
 | **I5**: the DNS-only downside is unstated | Adopted: §1 item 4, §4.4, and a flip condition |
 | **I6**: most pricing quotes have no URL | Adopted: URLs inline throughout §6 |
 
@@ -1489,7 +1506,7 @@ the owner chose one final checker on that fix.
 | Hypotheses (a)–(d), verdicts with labels | Done (§8) |
 | API sub-question | Done (§9): S1b required, S1a optional |
 | Per-story consequences | Done (§11) |
-| Measured cold starts for the two finalists, including the stacked case | **Done for the recommendation:** the dashboard-cold case, after a deploy and as a truly cold instance (§4.5, measured 2026-09-29), and the stacked case (9.12 s), with the API's edge cold for that URL and its instance idle about 40 minutes (INFERRED). **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option. **Other free candidates:** Render Free and Streamlit Community Cloud are covered by their documented wake behaviour, not measured. Both this and the runner-up's partial case are recorded as an amendment to the criterion on #276 (owner, 2026-09-29) |
+| Measured cold starts for the two finalists, including the stacked case | **Done for the recommendation:** the dashboard-cold case, after a deploy and as a truly cold instance (§4.5, measured 2026-09-29), and the API-edge-cold case with the dashboard warm (9.12 s; the API's instance idle about 40 minutes, INFERRED). The both-cold stacked case was not measured; it goes to #277, recorded in the #276 amendment (owner, 2026-09-29). **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option. **Other free candidates:** Render Free and Streamlit Community Cloud are covered by their documented wake behaviour, not measured. Both this and the runner-up's partial case are recorded as an amendment to the criterion on #276 (owner, 2026-09-29) |
 | Cold-start target stated | Done (§4.5): the MVP target, set by the owner |
 | Cost at both traffic levels, hard cap and card for every candidate | Done (§4.1), with UNVERIFIED cells for ruled-out candidates |
 | Sleep policy per platform | Done (§4.5), with the same allowance |
