@@ -4862,8 +4862,12 @@ app hosts), and three throwaway
 deployments. Neither finalist was on the original list. Five findings shaped the decision:
 1. **The Cloudflare Workers free quota is account-wide** (100,000/day), and the API's Worker
    already spends it.
-2. **Browser-side Python boots in 9–19 s** on a desktop CPU.
-3. **Streamlit has no hosting path that fits the ceiling** and keeps link sharing working.
+2. **Browser-side Python takes 8.7–19.2 s to a live view** on a desktop CPU.
+3. **No Streamlit hosting path meets the ceiling, the custom domain and per-URL link previews at
+   once.** Community Cloud has no custom domain; App Engine standard has no websockets; Cloud Run
+   needs a paid Worker or its Preview domain mapping; stlite boots in 16–19 s; and Render Starter,
+   Fly and Railway, which fit the ceiling and carry websockets, give Streamlit no server-rendered
+   per-URL Open Graph tags.
 4. **Cloud Run's own domain mapping is Preview**, "not production-ready".
 5. **The existing $5 budget covers the whole billing account**, and its kill-switch can pause only
    the API.
@@ -4881,70 +4885,86 @@ the existing billing account:
   enabled;
 - the previous version deleted after each promotion, because both settings are per version.
 
-It never cold-starts and costs about $0 in compute: one pinned instance uses 24 of the free tier's
-"28 hours per day of F1 instances", per project. MEASURED on a throwaway: a fresh browser reached a
-rendered table in 1.7 s.
+It costs about $0 in compute: one pinned instance uses 24 of the free tier's "28 hours per day of
+F1 instances", per project. Pinned, it stayed warm for every request of a ~40-minute probe
+session; how often App Engine recycles it over days is UNVERIFIED and is a flip condition. MEASURED
+on a throwaway: a fresh browser reached a rendered table in 1.7 s.
 
 (c) **Domain:** App Engine custom-domain mapping (GA) for
 `explore.us-presidential-election-center.org`, via a **DNS-only CNAME**. The zone-wide "Always use
 https" setting the API sits under stays untouched. The `appspot.com` host redirects to `explore.`.
 
-(d) **Data access** follows D070(b):
-- only `https://api.us-presidential-election-center.org`, never `run.app`, and never the origin
-  secret;
+(d) **Data access:**
+- only `https://api.us-presidential-election-center.org`, never `run.app` (D070(b)), and never
+  the origin secret (#276's API sub-question);
 - an **in-process cache** keyed on `snapshot_version`, with a TTL or ETag recheck;
-- **one gunicorn worker**, so there is one cache;
+- **one cache per instance**, so one process;
 - first fills throttled below the API's 60/min/IP rule;
-- a throttled **warmup prefetch** of the canonical `/v1` URLs.
+- a throttled **prefetch** of the canonical `/v1` URLs **on warmup and on every
+  `snapshot_version` change**, swapping the cache atomically. Each API deploy purges the edge
+  while the pinned instance stays up, so warmup alone would not cover it.
 
-The prefetch removes the one cold start left: with the API idle, a never-fetched view took 9.1 s
-(MEASURED).
+The prefetch is required, not an optimization: with the dashboard warm and the API idle (about 40
+minutes, INFERRED), a never-fetched view took 9.1 s (MEASURED), which fails the target in (g).
 
 **No CORS, Worker, rate-limit or origin-secret change to the API is needed.** Hypothesis (d), a
-cached response without CORS headers, is CONTRADICTED: the edge keeps a separate entry per
-`Origin` value (MEASURED).
+cached response without CORS headers, is CONTRADICTED: the edge keeps separate entries for a
+request with no `Origin` and one with an `Origin` (MEASURED). That two allowed origins also get
+separate entries is INFERRED.
 
 (e) **Code lives in this repo:**
 - a top-level `dashboard/` directory with its own `dashboard` dependency group (never `serve` or
   the base dependencies, per D033);
 - `dashboard/` is the deploy root, with a `.gcloudignore`;
-- a static AST scan asserts no `usvote` import in runtime code.
+- no runtime module imports `usvote`. #277 designs the guard; since `usvote` is installed in the
+  dev environment, it cannot rely on an import failing.
 
-The dashboard's tests may import the stdlib-only vocabulary modules, as S2's AC already allows.
+The dashboard's tests may import the vocabulary modules, as S2's AC already allows. The AC calls
+them stdlib-only, which is false for `usvote.pv.status` (it imports pandas); #287 corrects that
+wording.
 
 (f) **Prerequisites, filed 2026-09-28:**
 - **#283 (S1b), required before Phase 0 goes live.** Scope the existing budget to `uspv-api`, and
-  give the dashboard project its own budget and a kill-switch that pauses only the dashboard, on
+  give the dashboard project its own budget and a kill-switch that disables only the dashboard
+  app (`USER_DISABLED`; never `max_instances: 0`, which App Engine reads as no cap), on
   least-privilege service accounts (the D034 §5 pattern).
 - **#284 (S1a), optional:** `Literal` vocabularies in the API models, on D031 grounds.
 - **#285:** Workers Paid, a separate API-resilience decision under E8.
 
+(g) **MVP cold-start target** (set by the owner, 2026-09-28): any shareable path returns its Open
+Graph HTML in ≤ 1 s TTFB, and a cold shared link reaches its first data cell in ≤ 3 s at a 390 px
+viewport on 10 Mbps / 100 ms, both with the dashboard cold and with the API's edge cold. #277
+measures against it. Later performance work goes only where it affects users most.
+
 **Runner-up, and when to flip to it.** The runner-up is **Dash on Cloud Run behind Firebase
 Hosting**: also about $0, with a GA domain. Its CDN served a cached page in 0.15 s, but a visitor
-waited 6.2 s after idle, because Dash's POST callbacks wake Cloud Run. Flip to it if any of these
-holds:
-- the real dashboard outgrows F1 (384 MB / 600 MHz), or fails a viral-day load test at
+waited 6.2 s after idle; the likeliest cause, INFERRED, is that Dash's POST callbacks woke Cloud
+Run. Flip to it if any of these holds (the research doc's §1 carries the same list):
+- the real dashboard outgrows F1 (384 MB / 600 MHz), or fails #277's load test at
   `max_instances: 1`;
 - the pin proves billable;
 - App Engine recycles the instance often enough that visitors see cold starts;
 - abuse makes the DNS-only origin's uncapped egress a real cost;
-- App Engine standard is deprecated;
-- Fred weights host marketability above always-warm simplicity.
+- App Engine standard is deprecated, or its Python runtime starts to lag.
+
+The code location flips, not the host, if a future Dash release's pins conflict with the
+pipeline's resolution: the dashboard then moves to a separate repository.
 
 If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) or Render Starter
 ($7/month).
 
 **Rationale.**
 - **Cost first.** Both GCP finalists are about $0. App Engine then wins on ease (one service, one
-  deploy) and on cold start. It loses only on host marketability, which is the soft spot the flip
-  conditions name.
+  deploy) and on cold start, and ties on everything else. Host marketability is scored by parent
+  platform (the owner's rule): both are Google Cloud, 24.6% in Stack Overflow 2025. With the API on
+  Cloud Run, App Engine adds a second GCP compute product to the portfolio.
 - **What was rejected, in one line each:**
   - Streamlit Community Cloud: no custom domain, and 12-h sleep with click-to-wake.
   - Posit hosting: $59–349/month for a domain.
   - HF Spaces: $9 of the $10, for weak sharing.
   - Shinylive: no URL state.
   - stlite: a 16–19 s boot.
-  - Vercel Hobby: overage is a 30-day outage.
+  - Vercel Hobby: overage is an outage of up to 30 days.
   - The non-Python control: not Python.
 - **The dedicated project** buys a per-project free tier and, once #283 lands, a budget and
   kill-switch that cannot pause the API.
@@ -4956,7 +4976,7 @@ If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–4/month) 
 - `docs/deploy-cloud-run.md` §0's apex/`www` GitHub Pages expectation was already superseded by
   D070(e).
 
-**Related:** #276, #277–#280, #283, #284, #285, `.claude/specs/research-dashboard-platform.md`,
+**Related:** #276, #277–#280, #283, #284, #285, #287, `.claude/specs/research-dashboard-platform.md`,
 `.claude/specs/backlog-dashboard.md`, D001, D070.
 
 ---

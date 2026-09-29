@@ -1,6 +1,6 @@
 # Research: Dashboard Platform and Host (E9-S1)
 
-> **Status: COMPLETE. Architect-reviewed (§12).** This is the E9-S1 (issue #276) research
+> **Status: COMPLETE. Architect-reviewed, and revised after code review (§12).** This is the E9-S1 (issue #276) research
 > deliverable. It chooses the platform and host for the public dashboard at
 > `explore.us-presidential-election-center.org` that reads the live `/v1` API (D070). The choice
 > records as **D071**. It evaluates the five candidates #276 names, scans "none of the above"
@@ -11,22 +11,31 @@
 > always-on F1 instance.**
 > - **Cost: about $0/month in compute.** The free tier is 28 F1-hours per day per project, and one
 >   pinned instance uses 24.
-> - **It never cold-starts**, and it serves the custom domain through a **GA** mapping.
+> - **Pinned, it stayed warm** for every request of a ~40-minute probe session. How often App
+>   Engine recycles it over days is UNVERIFIED, and is a flip condition (§1). It serves the custom
+>   domain through a **GA** mapping.
 > - **Measured on a throwaway deployment:** a fresh browser rendered the election table in
 >   **1.7 s** (2.2 s at 10 Mbps / 100 ms), and the server returned the page, with its per-URL Open
 >   Graph tags, in **0.13–0.19 s**.
+> - **MVP cold-start target** (set by the owner, 2026-09-28): Open Graph HTML in ≤ 1 s, and a cold
+>   shared link to its first data cell in ≤ 3 s. The 1.7 s and 2.2 s runs above meet it. The one
+>   run with the API cold (9.12 s) does not, which is why S2 must prefetch (§4.5).
 > - **Runner-up:** Dash on Cloud Run behind Firebase Hosting (§1).
 >
 > **Three findings change what later stories must do.**
-> 1. **Hypothesis (d) is CONTRADICTED.** A live probe showed the API's edge keeping a separate
->    cache entry for each `Origin` value (§8). No Worker or CORS change is needed for it.
+> 1. **Hypothesis (d) is CONTRADICTED.** A live probe showed the API's edge keeping separate cache
+>    entries for a request with no `Origin` and one with an `Origin` (MEASURED, §8). That two
+>    *allowed* origins also get separate entries follows from that, but was not measured
+>    (INFERRED). No Worker or CORS change is needed.
 > 2. **The Cloudflare Workers free quota, not CORS, is the cross-cutting risk.** The quota is
 >    100,000 requests/day, **account-wide**, and the API's Worker already spends it. A second Worker
 >    in front of `explore.`, or a browser-side dashboard making about 10 or more API calls per
->    visit, could exhaust it on a viral day. The **public API** would then return 1027 errors until
->    midnight UTC.
+>    visit, could exhaust it on a viral day. How a Custom Domain Worker fails at exhaustion is not
+>    documented (UNVERIFIED); the likely outcome is that the **public API** stops answering, for
+>    example with 1027 errors, until midnight UTC (INFERRED, §4.1).
 > 3. **The existing $5 budget covers the whole billing account.** It has no project filter,
->    VERIFIED from the live budget config. Its kill-switch pauses only the API. So a dashboard's
+>    VERIFIED from the live budget config on 2026-09-28 (the output was not preserved). Its
+>    kill-switch pauses only the API. So a dashboard's
 >    overspend would pause the **API**, and the dedicated-project design needs S1b to deliver the
 >    isolation it promises (§9).
 
@@ -61,17 +70,20 @@ stated otherwise.
 **A verification limit worth stating plainly.** The per-candidate characterizations in §6 rest on
 the research agents' fetches.
 
-The parent independently re-fetched **every page the recommendation and runner-up depend on**, as
-raw HTML with curl and grep rather than through a summarizing fetch tool:
+The parent independently re-fetched these pages as raw HTML, with curl and grep rather than
+through a summarizing fetch tool:
 - App Engine's free-tier and pricing pages, the `app.yaml` reference, the environments comparison,
   and the app-management page;
+- App Engine's custom-domain mapping page, runtime support schedule and instance-class table.
+  These three were re-fetched during code review (§12), after the first version of this paragraph
+  wrongly listed every recommendation page as re-fetched;
 - Cloud Run pricing and Cloud Run domain mapping;
 - the Cloudflare Workers limits page, Pages Functions pricing, Custom Domains, and the
   CORS-and-cache page;
 - Render's free-tier doc and pricing page.
 
-**Not re-fetched by the parent:** Firebase Hosting's pages (agent H's raw fetch); every
-ruled-out host in §6.
+**Not re-fetched by the parent:** every Firebase Hosting page the runner-up depends on (agent H's
+raw fetch), and every ruled-out host in §6.
 
 The raw-fetch discipline was earned. **A summarizing fetch of the Cloud Run domain-mapping page
 reported "us-west1 is NOT included" in the supported regions. The raw page lists us-west1.**
@@ -125,43 +137,56 @@ Why this and not the others, criterion by criterion in the issue's order:
      - App Engine deploys are not containers, unlike the D032 API, so the paid fallback hosts would
        need a Dockerfile. The lock-in is mild but real.
 3. **Python and marketable.**
-   - Dash is **second in the only named survey that measures dashboard libraries**. JetBrains/PSF
-     2024 "Libraries for creating dashboards": Streamlit 33%, Plotly Dash 28% (ATTRIBUTED).
+   - Dash and Streamlit are the **top two in both JetBrains/PSF surveys that measure dashboard
+     libraries**, in opposite order: 2024, Streamlit 33% and Plotly Dash 28%; 2023, Plotly Dash 31%
+     and Streamlit 28% (both ATTRIBUTED, §4.3).
    - 6.25M PyPI downloads last month (ATTRIBUTED, pypistats).
-   - The host scores lower: App Engine is not separately surveyed, and it reads as older than Cloud
-     Run (INFERRED). **This is the recommendation's soft spot, and the flip conditions below name
-     it.**
-   - Streamlit, the most adopted framework, has no path onto this host. App Engine standard
-     supports no websockets (*"WebSockets No Yes"*, standard against flexible, VERIFIED,
+   - **Host, scored by its parent platform** (the owner's rule, 2026-09-28): App Engine and Cloud
+     Run are both Google Cloud, 24.6% in Stack Overflow 2025 (ATTRIBUTED), so the two GCP finalists
+     tie. With the API already on Cloud Run, a dashboard on App Engine adds a second GCP compute
+     product to the portfolio.
+   - Streamlit has no path onto this host. App Engine standard supports no websockets
+     (*"WebSockets No Yes"*, standard against flexible, VERIFIED,
      <https://cloud.google.com/appengine/docs/the-appengine-environments>), and Streamlit requires
      them (§6.5).
 4. **Custom domain.**
    - App Engine's mapping carries **no Preview label**. Cloud Run's mapping is *"in the preview
      launch stage … not production-ready"* (both VERIFIED).
-   - It needs the apex verified in Search Console.
-   - It needs either a DNS-only CNAME or Cloudflare's zone-wide "Always use https" turned off
-     (VERIFIED). **Take the DNS-only CNAME.** Do not change a zone-wide setting the API sits
-     under.
+   - It needs the apex verified in Search Console: *"Even if you only want to map a subdomain …
+     enter the naked domain name to verify ownership … Enter information in the Search Console
+     window that appears"* (VERIFIED, raw re-fetch,
+     <https://cloud.google.com/appengine/docs/standard/mapping-custom-domains>).
+   - The same page says that *"if you are using Cloudflare CDN, you should turn off the 'Always use
+     https' option"* (VERIFIED). A DNS-only (grey-cloud) record does not put `explore.` on
+     Cloudflare's CDN, so it avoids that condition (INFERRED). **Take the DNS-only CNAME.** Do not
+     change a zone-wide setting the API sits under.
    - **The cost of DNS-only, stated plainly:** `explore.` then has no Cloudflare rate limit, DDoS
      absorption or edge cache in front of it. Egress is the one uncapped cost line, so repeated
      abusive pulls of the 0.9 MB page are uncapped cost (INFERRED). S1b's budget and kill-switch
      are the backstop.
-5. **Cold start: none for the dashboard.**
-   - The instance is pinned.
+5. **Cold start: the dashboard stayed warm; the API behind it does not.**
+   - The instance is pinned, and it stayed warm for every request of the ~40-minute probe session
+     (MEASURED). Recycling over days is UNVERIFIED.
    - MEASURED: a fresh browser reached a rendered AG Grid table in 1.7 s. The same app on
      scale-to-zero Cloud Run took 2.1–3.8 s for the HTML alone after idle (§4.5).
-   - **The API behind it still scales to zero, and that is the one cold start left.** MEASURED:
-     with the dashboard warm and a never-fetched election, a fresh browser took **9.12 s** to render
-     the table after the API had idled about 40 minutes, against 1.13 s warm.
-   - S2's throttled warmup prefetch of the canonical `/v1` URLs removes it: visitors then hit the
-     Worker's edge cache, not the API (§4.5).
+   - **The API still scales to zero, and that is the cold start left.** MEASURED: with the
+     dashboard warm and a never-fetched election, a fresh browser took **9.12 s** to render the
+     table, against 1.13 s warm. The API had idled about 40 minutes, an interval that was not
+     logged (INFERRED).
+   - **That fails the MVP target** (§4.5): OG-bearing HTML in ≤ 1 s TTFB, and a cold shared link
+     to its first data cell in ≤ 3 s at 390 px on 10 Mbps / 100 ms, with the dashboard cold and
+     with the API's edge cold.
+   - So S2 must prefetch the canonical `/v1` URLs, throttled, **on warmup and again whenever
+     `snapshot_version` changes**. Each API deploy purges the edge while the pinned instance stays
+     up, so a warmup-only prefetch would leave the gap open after every deploy. The prefetch is
+     expected to bring the cold-API case within target (INFERRED); #277 measures it.
 6. **Sharing.**
    - Dash Pages server-renders `og:title` / `og:description` / `og:image` into the **first HTML
      response per path**. VERIFIED from source; MEASURED on all three deployments.
    - Link scrapers do not run JavaScript (VERIFIED, Apple TN3156, §4.6). So a path-keyed view
      (`/election/<year>`) unfurls with its own card.
    - `dcc.Location` reads and writes the query string (VERIFIED).
-   - An always-warm origin also meets Meta's *"within a few seconds"* crawl budget.
+   - A warm origin also meets Meta's *"within a few seconds"* crawl budget.
 7. **Forward compatibility.** A full Python server inside GCP. A sibling chat service would be a
    separate service and needs nothing from this choice.
 
@@ -173,27 +198,30 @@ service).
     method (VERIFIED).
   - MEASURED: its CDN served a cached page in **0.15 s** (`x-cache: HIT`) after a cold first hit
     of 2.2 s.
-  - Higher host marketability: Cloud Run + Docker + Firebase. Firebase is 13.1% in Stack Overflow
-    2025 (ATTRIBUTED).
+  - The same host marketability under the parent-platform rule (Google Cloud). It tells a
+    container-and-CDN story rather than a second-product one.
 - **But the CDN hides cold start from scrapers, not from visitors.** MEASURED after 21 min idle: a
   scraper-style fetch of a cached page returned `x-cache: HIT` in **0.14 s**, while a fresh browser
-  took **6.23 s** to render the table. The page-content callback is a POST, and it had to wake
-  Cloud Run.
+  took **6.23 s** to render the table. The likeliest cause is that the page-content callback, a
+  POST the CDN does not cache, had to wake Cloud Run. That cause is INFERRED: neither the instance's
+  state nor the API edge's state was recorded.
 - **More moving parts:** two deploys, and a `public` Cache-Control hook the app must add, because
   Firebase treats dynamic content as private by default (VERIFIED).
 
-**Conditions that flip the choice to the runner-up:**
+**Conditions that flip the choice to the runner-up** (D071 carries the same list):
 - the real dashboard exceeds F1's 384 MB, or its callback latency on the 600 MHz CPU is
   unacceptable (an always-on F2 is not free);
-- a load test shows `max_instances: 1` queuing or erroring under a viral-day rate. The cap fixes
-  cost but also fixes capacity;
+- #277's load test shows `max_instances: 1` queuing or erroring at the peak rate that story
+  states. The cap fixes cost but also fixes capacity;
 - the pin turns out to be billed after all, through a free-tier change or versions that cannot be
   kept to one;
 - App Engine recycles the pinned instance often enough that visitors see cold starts;
 - abuse traffic makes the DNS-only origin's uncapped egress a real cost. The runner-up's CDN
   absorbs cached GETs;
-- App Engine standard is deprecated, or its Python runtime starts to lag;
-- Fred weights host marketability above always-warm simplicity.
+- App Engine standard is deprecated, or its Python runtime starts to lag.
+
+**The condition that flips the code location** (§10), not the host: a future Dash release whose
+pins conflict with the pipeline's resolution moves the dashboard to a separate repository.
 
 **Conditions that flip it to a paid host.** If both GCP options fail live, the fallbacks are
 **Fly.io** (shared-cpu-1x always on, ≈ $2–4/month, INFERRED from VERIFIED rates) or **Render
@@ -214,17 +242,20 @@ dependency group (§10).
 
 ## 2. Head-to-head matrix
 
-**Scale.** Raw scores 1–5 (5 best) per criterion, **unweighted**, so a reader can re-weight. **C1
-scores monthly cost alone:**
+**Scale.** Raw scores 1–5 (5 best), **unweighted**, so a reader can re-weight. Every column has
+its own rubric. A cell that needed judgment beyond its rubric says why in §§4–6. Risks such as
+quota exhaustion sit in the last column, not in the scores.
 
-| Monthly cost | C1 |
-|---|---|
-| $0 | 5 |
-| ≤ $5 | 4 |
-| $5–10 | 3 |
-| >$10 | 1 |
-
-Risks such as quota exhaustion sit in the last column, not in C1.
+| Column | 5 | 4 | 3 | 2 | 1 |
+|---|---|---|---|---|---|
+| **C1 cost**: a month holding one 10,000-visit day, otherwise idle (§4.1) | $0 at idle, and the viral day adds ≤ $2 of usage | ≤ $5 | $5–10 | — | > $10, over the ceiling |
+| **C2 ease** | one service, one CI deploy, no notable cost (no candidate reaches it) | one service and one CI deploy, with one notable cost: lock-in, a new CI integration, or a permanent setting | two deploy surfaces, a hand-edited component, or high framework churn | a significant workaround: an iframe, or a runtime that cannot run Python 3.14 | no reproducible CI deploy |
+| **C3 framework**: the JetBrains/PSF "dashboards" question (§4.3) | top two in both the 2023 and 2024 surveys | — | 10–12% | not in the survey's reported list | not Python |
+| **C3 host**: the parent platform's share, Stack Overflow 2025 "cloud development" (§4.3) | ≥ 30% | 20–30% | 10–20% | listed, under 10% | not listed |
+| **C4 custom domain** (§4.4) | GA on a tier inside the ceiling, through a DNS-only or same-zone CNAME, with no zone-wide change | — | Preview, or only on a paid tier of $9 or more | needs a zone-wide Cloudflare change | none inside the ceiling |
+| **C5 cold start as a visitor sees it**: the dashboard's own. The API's is common to every design (§4.5) | no sleep by design | cold ≤ 3 s | 3–10 s | 10–30 s, or sleeps with an unmeasured wake | ≥ 30 s, or a click to wake |
+| **C6 sharing** (§4.6). Then −1 where a scraper can find the origin asleep for more than a few seconds | per-URL Open Graph in the first HTML for paths and queries, plus URL read and write | per-path OG, plus URL read and write | per-URL OG only through a customization nobody demonstrated (INFERRED), plus URL read and write | OG per app or generic only, or URL restore failed when measured | no top-level URL state: an iframe, or no write API |
+| **C7 forward compatibility** (§4.7) | a full server-side runtime on this host | a constrained or absent server side, so a server component needs a second host | the platform is retiring or pins an old Python | — | — |
 
 **Columns.** C1 cost · C2 ease · C3 Python/marketable (framework / host) · C4 custom domain · C5
 cold start as a *visitor* sees it · C6 sharing · C7 forward compatibility. Cells summarize §§4–6,
@@ -232,36 +263,38 @@ which carry the evidence labels.
 
 | # | Candidate | C1 | C2 | C3 fw / host | C4 | C5 | C6 | C7 | Dealbreaker (bold) / main risk |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | **Dash on App Engine F1, pinned (recommended)** | 5 | 4 | 4 / 2 | 5 | 5 | 4 | 5 | F1 headroom and capacity under load (live risk) |
-| 2 | **Dash on Cloud Run + Firebase Hosting (runner-up)** | 5 | 3 | 4 / 4 | 5 | 2 | 4 | 5 | 6.2 s visitor wait after idle |
-| 3 | Dash on Cloud Run + Cloud Run domain mapping | 5 | 3 | 4 / 4 | 3 | 2 | 3 | 5 | domain mapping is Preview, "not production-ready" |
-| 4 | Dash on Cloud Run + a second Worker (on Workers Paid) | 4 | 3 | 4 / 4 | 4 | 2 | 3 | 5 | on the free plan it spends the API's quota |
-| 5 | Streamlit / Shiny on Cloud Run | 4 | 3 | 5 or 3 / 4 | 3 | 2 | 2–4 | 5 | websockets need a Worker (Workers Paid) or Preview mapping; 60-min session cap |
-| 6 | Dash on Render Starter | 3 | 4 | 4 / 2 | 4 | 5 | 4 | 5 | card on file; bandwidth uncapped |
-| 7 | Dash on Render Free | 5 | 4 | 4 / 2 | 4 | 1 | 2 | 5 | 15-min spin-down, about 1 min wake, robots disallow-all while asleep |
-| 8 | Streamlit on Community Cloud | 5 | 3 | 5 / 2 | 1 | 1 | 2 | 4 | **no custom domain** |
-| 9 | Gradio on HF Spaces (PRO $9) | 3 | 3 | 3 / 3 | 3 | 3 | 1 | 4 | no URL write |
-| 10 | Shiny on Posit Connect Cloud | 1 | 4 | 3 / 2 | 1 | 2 | 3 | 5 | **$59/mo for a custom domain** |
-| 11 | Shiny on shinyapps.io | 1 | 2 | 3 / 1 | 1 | 2 | 1 | 3 | **$349/mo, iframe, Py ≤3.12, retiring** |
-| 12 | stlite on Cloudflare Pages | 5 | 3 | 5 / 2 | 5 | 1 | 4 | 4 | 16.6–19.0 s boot; browser API calls spend the Workers quota |
-| 13 | Panel on Pyodide, Cloudflare Pages | 5 | 3 | 3 / 2 | 5 | 3 | 2 | 4 | 8.7 s to live; shared-URL restore failed |
-| 14 | Shinylive | 5 | 3 | 3 / 1 | 5 | 2 | 1 | 4 | **no URL state** |
-| 15 | marimo WASM | 5 | 3 | 4 / 2 | 5 | 1 | 4 | 4 | 19 s boot |
-| 16 | Fly.io always-on | 4 | 4 | 4 / 2 | 5 | 5 | 4 | 5 | card required, no free tier |
-| 17 | Railway Hobby | 4 | 4 | 4 / 1 | 5 | 5 | 4 | 5 | Free has no custom domain |
-| 18 | Cloudflare Containers | 3 | 3 | 4 / 3 | 5 | 4 | 4 | 5 | uncapped usage; also lifts the API quota |
-| 19 | Vercel Hobby | 5 | 4 | 4 / 4 | 5 | 3 | 3 | 4 | **overage is a 30-day outage** |
-| 20 | Non-Python static (control) | 5 | 4 | 1 / – | 5 | 5 | 5 | 5 | **not Python (C3)** |
+| 1 | **Dash on App Engine F1, pinned (recommended)** | 5 | 4 | 5 / 4 | 5 | 5 | 4 | 5 | F1 headroom and capacity under load (live risk); recycling over days UNVERIFIED |
+| 2 | **Dash on Cloud Run + Firebase Hosting (runner-up)** | 5 | 3 | 5 / 4 | 5 | 3 | 4 | 5 | 6.2 s visitor wait after idle |
+| 3 | Dash on Cloud Run + Cloud Run domain mapping | 5 | 4 | 5 / 4 | 3 | 3 | 4 | 5 | domain mapping is Preview, "not production-ready" |
+| 4 | Dash on Cloud Run + a second Worker (on Workers Paid) | 3 | 3 | 5 / 4 | 5 | 3 | 4 | 5 | on the free plan it spends the API's quota |
+| 5 | Streamlit / Shiny on Cloud Run | 4 | 3 | 5 or 2 / 4 | 3 | 3 | 3 | 5 | websockets need a Worker (Workers Paid) or the Preview mapping; 60-min session cap |
+| 6 | Dash on Render Starter | 3 | 4 | 5 / 1 | 5 | 5 | 4 | 5 | card on file; bandwidth uncapped |
+| 7 | Dash on Render Free | 5 | 4 | 5 / 1 | 5 | 1 | 3 | 5 | 15-min spin-down, about 1 min wake, robots disallow-all while asleep |
+| 8 | Streamlit on Community Cloud | 5 | 3 | 5 / 1 | 1 | 1 | 1 | 4 | **no custom domain** |
+| 9 | Gradio on HF Spaces (PRO $9) | 3 | 3 | 3 / 1 | 3 | 2 | 1 | 4 | no URL write |
+| 10 | Shiny on Posit Connect Cloud | 1 | 4 | 2 / 1 | 1 | 3 | 2 | 5 | **$59/mo for a custom domain** |
+| 11 | Shiny on shinyapps.io | 1 | 2 | 2 / 1 | 1 | 2 | 1 | 3 | **$349/mo, iframe, Py ≤3.12, retiring** |
+| 12 | stlite on Cloudflare Pages | 5 | 3 | 5 / 4 | 5 | 2 | 3 | 4 | 16.6–19.0 s boot; browser API calls spend the Workers quota |
+| 13 | Panel on Pyodide, Cloudflare Pages | 5 | 3 | 3 / 4 | 5 | 3 | 2 | 4 | 8.7 s to live; shared-URL restore failed |
+| 14 | Shinylive on Cloudflare Pages | 5 | 3 | 2 / 4 | 5 | 2 | 1 | 4 | **no URL state** |
+| 15 | marimo WASM on Cloudflare Pages | 5 | 3 | 2 / 4 | 5 | 2 | 3 | 4 | 19 s boot |
+| 16 | Fly.io always-on | 4 | 4 | 5 / 1 | 5 | 5 | 4 | 5 | card required, no free tier |
+| 17 | Railway Hobby | 4 | 4 | 5 / 2 | 5 | 5 | 4 | 5 | Free has no custom domain |
+| 18 | Cloudflare Containers | 3 | 3 | 5 / 4 | 5 | 4 | 4 | 5 | uncapped usage; also lifts the API quota |
+| 19 | Vercel Hobby | 5 | 4 | 5 / 3 | 5 | 3 | 4 | 4 | **overage is an outage of up to 30 days** |
+| 20 | Non-Python static (control) | 5 | 4 | 1 / 4 | 5 | 5 | 3 | 4 | **not Python (C3)** |
 
-**Re-weighting check.** With cost first, the C1=5 rows are 1, 2, 3, 7, 8, 12, 13, 14, 15, 19 and
-20. Of those:
-- rows 8, 14, 19 and 20 carry a bold dealbreaker;
-- rows 3, 7, 12, 13 and 15 score ≤3 on C5 or C4 and lose to row 1 on C2 or C5;
-- rows 1 and 2 remain.
+Scores that rest on an INFERRED input: C1 for rows 3–5 (Cloud Run egress and websocket billing on a
+viral day); C5 for rows 3–5 and 19 (no browser measurement), 16 and 17 (always-on as configured),
+and 9 and 11 (wake times not measured); C6 wherever the rubric's INFERRED level applies (rows 5,
+10, 12, 15, 20).
 
-Row 1 beats row 2 on C2 (ease) and C5 (cold start). Row 2 beats row 1 only on C3-host.
-**They swap only if host marketability outweighs ease plus cold start.** That is the last flip
-condition in §1.
+**Re-weighting check.** Row 1 scores at least as well as every other row on every column, with
+C3's framework and host compared separately, and strictly better than each on at least one. So no
+weighting of these columns ranks another row above it. Against the runner-up, row 1 is ahead on
+C2 (one deploy against two) and C5 (pinned against scale-to-zero) and level everywhere else. Row 2
+is kept because its failure modes differ from row 1's, which is what the flip conditions in §1
+describe, not because any weighting prefers it.
 
 ---
 
@@ -271,7 +304,10 @@ Both finalists came from this scan. Neither was on the issue's candidate list.
 
 - **Browser-side Python on a static host:** stlite, Shinylive, Panel on Pyodide, marimo WASM,
   PyScript/raw Pyodide, and Quarto, on Cloudflare Pages or GitHub Pages.
-  - Agent F built each one and measured it (§5.3).
+  - Agent F built and measured stlite, Shinylive, Panel on Pyodide, marimo, and raw Pyodide,
+    which stands in for PyScript because PyScript runs on it (§5.3).
+  - Quarto was not built. Its interactive Python runs on Shinylive, so it inherits Shinylive's
+    result, including the missing URL state (agent F).
   - Cloudflare Pages beats GitHub Pages on every axis compared (§6.6).
 - **Other framework-on-Cloud-Run combinations:** Streamlit, Shiny and Dash on Cloud Run (§6.5).
 - **A non-Python static control** (vanilla JS / Vite / Observable Framework). MEASURED at 0.02 MB
@@ -294,10 +330,13 @@ Both finalists came from this scan. Neither was on the issue's candidate list.
 - When a limit is exceeded, a **route** fails open (*"Bypasses the Worker. Requests behave as if no
   Worker is configured."*) or closed (*"Returns a Cloudflare `1027` error page."*).
 
-The API is a **Custom Domain** Worker, not a route, and it has no origin to fall back to. Per
-D035, a bypassed request would reach `run.app` without the Host rewrite and 404. **Treat
-exhaustion as an API outage** (INFERRED). Exhausting the quota to observe it would take the live
-API down.
+The API is served through a Workers **Custom Domain**, not a route. The quoted fail-open and
+fail-closed behaviour is documented for routes; how a Custom Domain behaves at exhaustion is not
+(UNVERIFIED, agent E). A Custom Domain has no origin server of its own to fall open to: the Worker
+*is* what answers `api.`, and it reaches Cloud Run only by fetching `run.app` itself (D035). So
+the likely outcome is that `api.` stops answering, perhaps with a 1027 page, until the quota resets
+(INFERRED). **Treat exhaustion as an API outage.** Exhausting the quota to observe it would take
+the live API down.
 
 What spends the quota on a viral day of **10,000 visits** (this spike uses that number
 throughout):
@@ -315,16 +354,29 @@ for an account"*, *"10 million included per month +$0.30 per additional million"
 API whatever the dashboard does. The recommended design does not need it. It is filed as its own
 API-resilience decision, **#285**.
 
-**Per-host cost at the two traffic levels** (verbatim quotes in §6):
+**Per-host cost at the two traffic levels** (verbatim quotes in §6). C1 in §2 scores the month
+holding the 10,000-visit day. A 10,000-visit day moves about 9 GB at the 0.9 MB first visit
+measured in §5.2; browser-side builds move far more, but from a static host whose requests are
+free.
 
-| Host | Near-zero traffic | 10,000-visit day | Hard cap? | Card |
+| Host | Near-zero traffic | Month with a 10,000-visit day | Hard cap? | Card |
 |---|---|---|---|---|
 | App Engine F1, pinned | ≈ $0 | ≈ $1.1 egress | compute: per version (`max_instances`, VERIFIED); egress: none | already on file |
 | Cloud Run + Firebase Hosting | ≈ $0 | ≈ $0–2 (Hosting transfer; the free allowance is CONTRADICTED between two Google pages) | none | on file |
-| Render Starter | $7 | $7 + ≈ $0–12 of bandwidth, depending on config | none | required |
+| Cloud Run + domain mapping, or + a second Worker | ≈ $0; + $5 for Workers Paid | ≈ $1 egress (INFERRED) | none | on file |
+| Render Starter | $7 | $7 + ≈ $0.60: about 9 GB against 5 GB included, at $0.15/GB | none | required |
+| Render Free | $0 | $0; Free services are suspended if bandwidth runs out with no payment method (VERIFIED) | yes, by suspension | no |
 | Fly.io always-on | ≈ $2–4 | + ≈ $0.30 egress | none | required |
+| Railway Hobby | $5, including $5 of usage | ≈ $5 (INFERRED) | a hard-limit option (agent H) | UNVERIFIED |
+| Cloudflare Containers | $5 Workers Paid + usage | ≈ $5–7 (agent H, INFERRED) | none | required for Workers Paid |
+| Vercel Hobby | $0 | $0 | yes: over the limit, *"you will have to wait until 30 days have passed"* | UNVERIFIED |
+| HF Spaces PRO | $9 | $9 | UNVERIFIED | UNVERIFIED |
+| Posit Connect Cloud Enhanced / shinyapps.io Professional | $59 / $349 | same | UNVERIFIED | UNVERIFIED |
 | Cloudflare Pages (static) | $0 | $0 | yes, but the API quota is the real limit | no |
 | Streamlit Community Cloud | $0 | $0 (fails at resource limits) | yes | no |
+
+UNVERIFIED cells are for ruled-out candidates, whose details were not pursued further (owner's
+decision, 2026-09-28).
 
 ### 4.2 Ease of implementation and maintenance
 
@@ -351,24 +403,28 @@ The differentiators are deploy topology, lock-in and churn:
 - **Framework churn:**
   - Dash went 4.0.0 (2026-02-03) → 4.4.1 (2026-07-21) → 4.5.0rc0 (2026-09-21). `DataTable` is
     deprecated for AG Grid and is removed in 5.0 (VERIFIED, <https://dash.plotly.com/datatable>).
-  - Streamlit shipped 12 releases between 2026-03-31 and 2026-09-15, including a Tornado→Starlette
-    server swap (VERIFIED, PyPI).
+  - Streamlit shipped 12 releases between 2026-03-31 and 2026-09-15 (VERIFIED, PyPI's release
+    list), including a Tornado→Starlette server swap in 1.57.0: *"Introducing Starlette as the
+    default web server!"* (VERIFIED, Streamlit's 2026 release notes, agent A).
 
 ### 4.3 Python and marketable
 
 Framework and host are scored separately, as the issue asked. All figures are dated 2026-09-28.
 
-| Framework | PyPI downloads, last month (pypistats) | GitHub stars | JetBrains/PSF 2024 "dashboards" | HN "Who is hiring", Oct 2025–Sep 2026 (exact match) |
-|---|---|---|---|---|
-| Streamlit | 19,132,152 | 45,845 | 33% | 6 |
-| Dash | 6,253,566 | 24,438 | 28% | 1 ("plotly") |
-| Gradio | 5,227,393 | 43,633 | 11% | 0 |
-| Panel | 1,378,386 | 5,779 | 10% | 0 |
-| Shiny for Python | 222,825 | 1,754 | not listed | 0 |
+| Framework | PyPI downloads, last month (pypistats) | GitHub stars | JetBrains/PSF 2024 "dashboards" | JetBrains/PSF 2023 "dashboards" | HN "Who is hiring", Oct 2025–Sep 2026 (exact match) |
+|---|---|---|---|---|---|
+| Streamlit | 19,132,152 | 45,845 | 33% | 28% | 6 |
+| Dash | 6,253,566 | 24,438 | 28% | 31% | 1 ("plotly") |
+| Gradio | 5,227,393 | 43,633 | 11% | 12% | 0 |
+| Panel | 1,378,386 | 5,779 | 10% | 12% | 0 |
+| Shiny for Python | 222,825 | 1,754 | not in the reported list | not in the reported list | 0 |
 
 Sources, all ATTRIBUTED: <https://pypistats.org/api/packages/dash/recent> (and the other
-packages); the GitHub API; <https://lp.jetbrains.com/python-developers-survey-2024/>; HN Algolia
-with typo tolerance off, since with it on, "streamlit" matches "streamline".
+packages); the GitHub API; <https://lp.jetbrains.com/python-developers-survey-2024/> (agent A) and
+<https://lp.jetbrains.com/python-developers-survey-2023/>, whose text reads *"Plotly Dash and
+Streamlit are the top two choices"* (agent B); HN Algolia with typo tolerance off, since with it
+on, "streamlit" matches "streamline". "Not in the reported list" means the agents' quoted survey
+figures stop before it, not that the survey was searched for it.
 
 Caveats:
 - None of the five appears in the Stack Overflow 2025 survey (VERIFIED by absence,
@@ -378,20 +434,31 @@ Caveats:
 - The 2025 and 2026 JetBrains pages return 404. The 2026 survey's results are not yet published
   (VERIFIED).
 - LinkedIn's guest job counts (for example "7,000+ holoviz jobs") are fuzzy-match noise and are
-  **excluded as a signal** (UNVERIFIED as a metric).
+  **excluded as a signal** (CONTRADICTED as a usable metric, agent G).
 
 **Hosts** (Stack Overflow 2025, "Cloud development", all respondents, ATTRIBUTED): AWS 43.3%,
 Azure 26.3%, Google Cloud 24.6%, Cloudflare 20.1%, Firebase 13.1%, DigitalOcean 10.7%, Vercel
 10.6%, Netlify 5.9%, Heroku 5.4%, Railway 1.5%. Render, Fly and App Engine are not listed
 separately.
 
-**Reading it.** Streamlit is the most adopted by every named source, and Dash is a clear second.
-The recommendation takes Dash because every Streamlit hosting path that fits the ceiling fails
-elsewhere:
+**The host rule: score the parent platform** (the owner's choice, 2026-09-28). A product the
+survey does not list separately takes its platform's share, so App Engine, Cloud Run, and Cloud
+Run behind Firebase Hosting all score as Google Cloud (24.6%), and Cloudflare Pages and Containers
+as Cloudflare (20.1%). The owner's reasoning: with the API already on Cloud Run, a dashboard on App
+Engine shows breadth within GCP rather than repeating one product.
+
+**Reading it.** Streamlit leads on downloads, stars and HN mentions, and led the 2024 survey. Dash
+led the 2023 survey. The two are the top pair in both. The recommendation takes Dash because no
+Streamlit hosting path meets the ceiling, the custom domain and per-URL link previews at once:
 - Community Cloud fails C4 and C5;
 - App Engine standard has no websockets;
 - Cloud Run needs a Worker or a Preview domain mapping for websockets;
-- the browser-side path (stlite) takes 16–19 s to boot.
+- the browser-side path (stlite) takes 16–19 s to boot;
+- Render Starter, Fly and Railway fit the ceiling and carry websockets, but Streamlit serves a
+  static index with no per-URL Open Graph tags, so its shared links unfurl generically (§4.6).
+  Render's websocket support is VERIFIED (its free-tier doc counts *"WebSocket messages from
+  existing connections"* as traffic); Fly's and Railway's is INFERRED from their running
+  long-lived containers.
 
 It is not a judgment that Dash is the more marketable framework.
 
@@ -399,7 +466,7 @@ It is not a judgment that Dash is the more marketable framework.
 
 | Host | `explore.` on the recommended tier? | Cloudflare mechanics | Label |
 |---|---|---|---|
-| App Engine | yes, GA, managed cert | DNS-only CNAME, or turn off zone-wide "Always use https" | VERIFIED |
+| App Engine | yes, GA, managed cert; the apex verified in Search Console first | with Cloudflare's CDN, turn off zone-wide "Always use https"; a DNS-only CNAME avoids that | VERIFIED (raw re-fetch) / INFERRED (DNS-only) |
 | Firebase Hosting | yes, GA | a TXT record kept present, plus A/AAAA records; proxied likely breaks cert issuance | VERIFIED / INFERRED |
 | Cloud Run domain mapping | yes, but **Preview**; us-west1 supported | "turn off the 'Always use https' option" | VERIFIED (raw re-fetch) |
 | Cloud Run via a second Worker | yes | spends the Workers quota | VERIFIED |
@@ -410,11 +477,13 @@ It is not a judgment that Dash is the more marketable framework.
 | Cloudflare Pages | yes | CNAME auto-created on the same zone; no Host rewrite needed | VERIFIED |
 | GitHub Pages | yes | DNS-only; proxied blocks the cert (GitHub staff, 2020) | VERIFIED / ATTRIBUTED |
 
-**A correction to the issue's framing** (INFERRED, agent H). D035's 404 happened because Cloud Run
-knew only its `run.app` hostname. Hosts that register the custom hostname themselves (App Engine,
-Firebase, Render, Fly, Railway) route a proxied CNAME without any Host rewrite. What proxying
-breaks on those hosts is **certificate issuance and renewal**. That is why DNS-only is the safe
-default everywhere, and why no finalist needs a Worker.
+**A correction to the issue's framing.** D035's 404 happened because Cloud Run knew only its
+`run.app` hostname. Hosts that register the custom hostname themselves route a proxied CNAME
+without any Host rewrite. Agent H names App Engine, Railway, Fly, Heroku and Northflank (INFERRED,
+agent H). Render's own Cloudflare doc says to stay "DNS only" until the certificate issues and then
+optionally proxy (VERIFIED, agent B). What proxying breaks on those hosts is **certificate issuance
+and renewal**. That is why DNS-only is the safe default everywhere, and why no finalist needs a
+Worker.
 
 **The price of DNS-only** is that nothing of Cloudflare's sits in front of the origin: no WAF rate
 limit, no edge cache, no bot mitigation. For App Engine that leaves the uncapped egress line
@@ -430,19 +499,37 @@ Measured and documented, side by side. Every MEASURED row used the same throwawa
 Browser timings were taken in headless Chrome via Playwright, at a 390×844 phone viewport on a
 desktop CPU (i7-9750H). Each measures the time until the first AG Grid data cell exists.
 
+**MVP target** (set by the owner, 2026-09-28, on the architect's recommendation). #277 measures
+against it:
+- **Open Graph HTML:** any shareable path returns its OG-bearing HTML in **≤ 1 s TTFB**.
+- **Cold shared link → first data cell in ≤ 3 s**, at a 390 px viewport on a 10 Mbps / 100 ms
+  link, in **both** cases: the dashboard cold, and the API's edge cold for that URL.
+- Later performance work goes only where it affects users most.
+
+Against it: pinned App Engine meets the OG criterion (0.13–0.19 s, 0.82 s on the first hit) and,
+with the API warm, the data criterion (2.20 s at 10 Mbps / 100 ms). The stacked case, 9.12 s
+unthrottled, fails the data criterion. The Cloud Run container's cold HTML alone, 2.1–3.8 s, fails the 1 s OG
+criterion.
+
+**Raw logs.** Rows marked *log not preserved* were read off the terminal during the session and
+are not reproduced anywhere. The stacked App Engine row, the Firebase after-idle row and the Cloud
+Run series are reproduced verbatim in §5.4.
+
 | Host / state | Server TTFB | Browser: page → table rendered | Label |
 |---|---|---|---|
-| App Engine F1, pinned (dashboard never cold) | 0.13–0.19 s (first hit 0.82 s) | **1.72 s** fresh cache / 1.05 s warm; **2.20 s** / 1.12 s at 10 Mbps, 100 ms | MEASURED |
-| App Engine F1, **stacked**: dashboard warm, a never-fetched election, API idle ~40 min | 0.28 s (HTML only; see note) | **9.12 s** fresh cache / 1.13 s warm | MEASURED |
-| Cloud Run, scale-to-zero, ≥21 min idle: dashboard container cold | 3.76, 3.37, 2.08, 2.33 s | — | MEASURED |
-| Cloud Run, same, `--cpu-boost` | 4.54, 4.57 s (n=2: no improvement observed) | — | MEASURED |
-| Cloud Run, warm | 0.12–0.20 s | — | MEASURED |
-| Cloud Run behind Firebase Hosting, first hit (CDN MISS, instance cold) | 2.21 s | 1.78 s fresh / 0.77 s warm (instance now warm) | MEASURED |
-| Firebase Hosting, cached URL, CDN HIT | 0.15 s | — | MEASURED |
-| Firebase Hosting, cached URL, Cloud Run cold after 21 min idle | 0.14 s (`x-cache: HIT`, what a scraper sees) | **6.23 s** fresh / 0.75 s warm | MEASURED |
+| App Engine F1, pinned (warm throughout the session) | 0.13–0.19 s (first hit 0.82 s) | **1.72 s** fresh cache / 1.05 s warm; **2.20 s** / 1.12 s at 10 Mbps, 100 ms | MEASURED; log not preserved |
+| App Engine F1, **stacked**: dashboard warm, a never-fetched election, API idle ~40 min (the interval is INFERRED: not logged) | 0.28 s (HTML only; see note) | **9.12 s** fresh cache / 1.13 s warm | MEASURED (§5.4) |
+| Cloud Run, scale-to-zero, ≥21 min idle: dashboard container cold | 3.76, 3.37, 2.08, 2.33 s | — | MEASURED (§5.4) |
+| Cloud Run, same, `--cpu-boost` | 4.54, 4.57 s (n=2: no improvement observed) | — | MEASURED (§5.4) |
+| Cloud Run, warm | 0.12–0.20 s | — | MEASURED (§5.4) |
+| Cloud Run behind Firebase Hosting, first hit (CDN MISS, instance cold) | 2.21 s | 1.78 s fresh / 0.77 s warm (instance now warm) | MEASURED; log not preserved |
+| Firebase Hosting, cached URL, CDN HIT | 0.15 s | — | MEASURED; log not preserved |
+| Firebase Hosting, cached URL, Cloud Run cold after 21 min idle | 0.14 s (`x-cache: HIT`, what a scraper sees) | **6.23 s** fresh / 0.75 s warm | MEASURED (§5.4) |
 | Render Free | "about one minute" to wake | — | VERIFIED |
 | Streamlit Community Cloud | sleeps after 12 h; a visitor must click to wake | — | VERIFIED |
-| Posit Connect Cloud (a third-party app) | 2.23 s to a "Loading…" interstitial, 4.54 s total | — | MEASURED (agent D, n=1) |
+| HF Spaces, CPU Basic on PRO | sleeps after 48 h without traffic, and a visit restarts it; wake time not measured | — | VERIFIED (agent C) |
+| Posit Connect Cloud (a third-party app) | 2.23 s to a "Loading…" interstitial, 4.54 s total; sleep policy UNVERIFIED | — | MEASURED (agent D, n=1) |
+| Fly.io, Railway Hobby | always on as configured; neither measured | — | INFERRED |
 | stlite (Pyodide 0.29.3) | — | 16.6–19.0 s cold, 16.2 s warm | MEASURED (agent F) |
 | Panel on Pyodide | — | 0.9 s to a prerendered view, 8.7 s to live | MEASURED (agent F) |
 | marimo WASM | — | 19.2 s | MEASURED (agent F) |
@@ -455,15 +542,21 @@ callback, which is where the server calls the API.
 
 So **`curl` TTFB never includes the per-year API fetch.** The Cloud Run series' planned
 "stacked" and "dashboard-only" split therefore did not measure what it was named for (§5.1). All
-six samples measured a cold dashboard container, plus one edge-cached fetch.
+six samples measured a cold dashboard container, plus, INFERRED, one fetch of the home view's data
+that the API's edge had already cached.
 
 **The true stacked cost is the browser row: 9.12 s against 1.13 s warm.** The API was idle about
-40 minutes, and the Worker's edge had never cached that URL. Attributing the ~8 s difference to the
-API's own cold start is INFERRED: the API's instance state was not observed directly.
+40 minutes (INFERRED: the interval was not logged), and the Worker's edge had never cached that
+URL. Attributing the ~8 s difference to the API's own cold start is INFERRED: the API's instance
+state was not observed directly.
 
-**Consequence for S2:** a throttled warmup prefetch of the canonical `/v1` URLs (under 60/min, so
-about 150–250 URLs in about 4 minutes) fills the edge cache for the dashboard's colo. After that,
-visitors never wake the API between snapshot versions.
+**Consequence for S2:** a throttled prefetch of the canonical `/v1` URLs (under 60/min, so about
+150–250 URLs in about 4 minutes) fills the dashboard's in-process cache and the edge cache for its
+colo. It must run **on warmup and again whenever `snapshot_version` changes**, swapping the new
+cache in atomically. Each API deploy purges the edge while the pinned instance stays up, so a
+warmup-only prefetch would leave visitors waking the API after every deploy. With both triggers,
+visitors are expected not to wake the API at all (INFERRED); #277 measures that against the target
+above.
 
 **What it costs to buy the cold start away:**
 - **App Engine:** $0. The pin fits the free tier.
@@ -500,13 +593,13 @@ A cold origin is therefore a sharing risk, not only a UX one.
 
 | Framework | Read query string | Write query string | Per-URL OG in the first HTML |
 |---|---|---|---|
-| Dash | `dcc.Location.search`; Pages layout kwargs | yes (always `pushState`) | **yes, per path** (Pages); per-query via `hooks.index` |
-| Shiny for Python | `session.clientdata.url_search()` | `session.bookmark.update_query_string(mode="replace"/"push")` | **yes**: the UI is a function of the request, plus `head_content` |
-| Streamlit | `st.query_params` | yes; `bind="query-params"` on widgets | **no**: static index; only via the experimental `st.App` middleware |
-| Gradio | `gr.Request.query_params` | **no Python API** | per app only |
-| Panel | `pn.state.location.query_params` | `location.sync` | via a custom Jinja template |
+| Dash | `dcc.Location.search`; Pages layout kwargs (VERIFIED) | yes, always `pushState` (VERIFIED) | **yes, per path** (Pages; VERIFIED from source, MEASURED); per query only through `hooks.index` (INFERRED) |
+| Shiny for Python | `session.clientdata.url_search()` (VERIFIED) | `session.bookmark.update_query_string(mode="replace"/"push")` (VERIFIED) | the UI is a function of the request, plus `head_content` (VERIFIED); that this yields per-URL OG is INFERRED |
+| Streamlit | `st.query_params` (VERIFIED) | yes; `bind="query-params"` on widgets (VERIFIED) | **no**: a static index (VERIFIED); only perhaps through the experimental `st.App` middleware (INFERRED) |
+| Gradio | `gr.Request.query_params` (VERIFIED) | **no Python API** (VERIFIED) | per app only (VERIFIED) |
+| Panel | `pn.state.location.query_params` (VERIFIED) | `location.sync` (VERIFIED) | through a custom Jinja template (INFERRED) |
 
-All VERIFIED from docs and source (agent G). **Design consequence: make every shareable view a
+Labels are per cell, from agent G's report. **Design consequence: make every shareable view a
 path** (`/election/2000`, `/state/OH`) so Dash Pages emits its card, and keep the query string for
 filters within a view.
 
@@ -517,11 +610,12 @@ domain.
 
 ### 4.7 Forward compatibility (tie-breaker only)
 
-- Every server-side host scores 5. A sibling chat service on its own subdomain needs nothing from
-  the dashboard's host, and the dashboard needs no secret.
-- Browser-side options and Community Cloud score 4. That is not for holding no secret, which the
-  issue does not penalize; it is because they would need a second host for any server-side
-  component.
+- Hosts that give a full server-side runtime score 5. A sibling chat service on its own subdomain
+  needs nothing from the dashboard's host, and the dashboard needs no secret.
+- Hosts with a constrained or absent server side score 4: the browser-side options, Community
+  Cloud, HF Spaces and Vercel's serverless functions. That is not for holding no secret, which the
+  issue does not penalize; it is because a server-side component would need a second host.
+- shinyapps.io scores 3: it is retiring, and it runs Python only up to 3.12.
 - No candidate was decided on this criterion.
 
 ### 4.8 Also reported (not scored)
@@ -529,8 +623,10 @@ domain.
 - **Phone width:**
   - Dash emits a viewport meta by default but has no responsive grid of its own. It needs
     dash-bootstrap-components or CSS (INFERRED).
-  - All four Pyodide builds rendered at 390 px, with the table scrolling horizontally (MEASURED,
-    agent F).
+  - Four of agent F's Pyodide builds (raw Pyodide, stlite, Shinylive, marimo) rendered their
+    table at the 390 px viewport, the table wider than the screen and cut off at the right edge.
+    Source: agent F's screenshots `bench/shot_{pyodide,stlite,shiny,marimo}.png`, read by the
+    parent; they are not committed. A still image cannot show whether the table scrolls.
 - **Table keyboard and screen-reader support.** This is a platform property that is hard to change
   later.
   - **Dash AG Grid** claims WCAG 2.0 AA / Section 508 and ARIA `role="grid"`, tested with JAWS and
@@ -596,26 +692,76 @@ project (VERIFIED, <https://cloud.google.com/appengine/docs/standard/managing-pr
 
 **Results** are in §4.5.
 
-**Measured locally in Docker, same image:**
+**Measured locally in Docker, same image** (log not preserved):
 - Resident memory **82.6 MiB** after six election pages, against F1's 384 MB.
 - The index HTML is 8,011 B gzipped.
 - The ten JS/CSS assets listed in it total 633,794 B gzipped, excluding lazily loaded component
   chunks.
 - A browser first visit transferred 0.87–0.91 MB.
 
-### 5.3 Browser-side builds (agent F, local, runtime from the production CDN)
+### 5.3 Browser-side builds (agent F, local)
 
-| Build | Runtime (Python) | Cold bytes | Cold render | Warm |
-|---|---|---|---|---|
-| Vanilla JS | none | 0.02 MB | 0.10 s | 0.08 s |
-| Raw Pyodide + pandas | 314.0.7 (3.14.2) | 13.9 MB | 10.6 s | 10.1 s |
-| stlite 1.9.2 | 0.29.3 (3.13.2) | 23.1 MB | 16.6–19.0 s | 16.2 s |
-| Shinylive 0.10.15 | 0.27.7 (3.12.7) | ≈22 MB gz | 13.3–14.0 s | 13.3 s |
-| Panel 1.9.4 | 0.29.3 (3.13) | 22.4 MB | 0.9 s prerendered / 8.7 s live | 7.9 s |
-| marimo 0.25.0 | 314.0.0 (3.14) | ≈23.6 MB | 19.2 s | 18.6 s |
+| Build | Runtime (Python) | Runtime served from | Cold bytes | Cold render | Warm |
+|---|---|---|---|---|---|
+| Vanilla JS | none | self | 0.02 MB | 0.10 s | 0.08 s |
+| Raw Pyodide + pandas | 314.0.7 (3.14.2) | jsDelivr | 13.9 MB | 10.6 s | 10.1 s |
+| stlite 1.9.2 | 0.29.3 (3.13.2) | jsDelivr | 23.1 MB | 16.6–19.0 s | 16.2 s |
+| Shinylive 0.10.15 | 0.27.7 (3.12.7) | self-hosted | ≈22 MB gz | 13.3–14.0 s | 13.3 s |
+| Panel 1.9.4 | 0.29.3 (3.13) | jsDelivr, plus the HoloViz/Bokeh CDN | 22.4 MB | 0.9 s prerendered / 8.7 s live | 7.9 s |
+| marimo 0.25.0 | 314.0.0 (3.14) | self-hosted, plus jsDelivr | ≈23.6 MB | 19.2 s | 18.6 s |
 
 **Conditions:** headless Chrome at 390×844 on a desktop CPU, unthrottled. **These are desktop-CPU
 numbers.** A mid-range phone is slower.
+
+### 5.4 Raw logs, verbatim
+
+The three logs the session kept, reproduced so the numbers above can be checked. TTFB is curl's
+`time_starttransfer`; `[boot …]` is the process-boot timestamp the probe app embeds in its page; a
+browser line reports seconds from navigation until the first AG Grid data cell (`.ag-cell`) exists,
+and the megabytes transferred. `"mode": "fast"` is an unthrottled run; the throttled mode emulates
+10 Mbps down and 100 ms latency.
+
+**Cloud Run cold series (§5.1)**, `coldprobe-276`:
+
+```text
+# series start 2026-09-28T07:31:20Z boost=off
+2026-09-28T07:52:24Z cold-stacked /election/1824 200 ttfb=3.764380 total=3.788648 [boot 1790581944]
+2026-09-28T07:52:24Z warm /election/1824 200 ttfb=0.203384 total=0.247277 [boot 1790581944]
+2026-09-28T07:52:25Z warm-otherpage /election/2000 200 ttfb=0.122067 total=0.154628 [boot 1790581944]
+2026-09-28T08:13:28Z cold-dashonly /election/1824 200 ttfb=3.368646 total=3.457423 [boot 1790583208]
+2026-09-28T08:13:28Z warm /election/1824 200 ttfb=0.176776 total=0.202736 [boot 1790583208]
+2026-09-28T08:13:28Z warm-otherpage /election/2000 200 ttfb=0.137672 total=0.164445 [boot 1790583208]
+2026-09-28T08:34:31Z cold-stacked /election/1968 200 ttfb=2.076916 total=2.097362 [boot 1790584471]
+2026-09-28T08:34:31Z warm /election/1968 200 ttfb=0.115190 total=0.154563 [boot 1790584471]
+2026-09-28T08:34:31Z warm-otherpage /election/2000 200 ttfb=0.125124 total=0.222508 [boot 1790584471]
+2026-09-28T08:55:33Z cold-dashonly /election/1968 200 ttfb=2.329202 total=2.358489 [boot 1790585733]
+2026-09-28T08:55:34Z warm /election/1968 200 ttfb=0.185625 total=0.212218 [boot 1790585733]
+2026-09-28T08:55:34Z warm-otherpage /election/2000 200 ttfb=0.170045 total=0.207926 [boot 1790585733]
+# boost=on 2026-09-28T08:55:41Z
+2026-09-28T09:16:46Z cold-boost-stacked /election/1904 200 ttfb=4.535752 total=4.566135 [boot 1790587005]
+2026-09-28T09:16:46Z warm /election/1904 200 ttfb=0.172137 total=0.202467 [boot 1790587005]
+2026-09-28T09:37:51Z cold-boost-dashonly /election/1904 200 ttfb=4.570193 total=4.595694 [boot 1790588270]
+2026-09-28T09:37:51Z warm /election/1904 200 ttfb=0.163682 total=0.205647 [boot 1790588270]
+# series end 2026-09-28T09:37:51Z
+```
+
+**App Engine stacked case (§4.5):**
+
+```text
+2026-09-28T10:00:00Z
+gae-stacked-cold /election/1888 200 ttfb=0.277198
+gae-api-now-warm-edge-miss /election/1876 200 ttfb=0.174071
+{"url": "https://uspv-explore-276.uw.r.appspot.com/election/1880", "mode": "fast", "cold-browser": {"secs_to_table": 9.12, "MB": 0.91}, "warm-browser": {"secs_to_table": 1.13, "MB": 0.01}}
+```
+
+**Firebase Hosting after 21 min idle (§4.5):**
+
+```text
+2026-09-28T09:03:44Z
+scraper-cached /election/1932 200 ttfb=0.135535
+x-cache: HIT
+{"url": "https://uspv-explore-276.web.app/election/1932", "mode": "fast", "cold-browser": {"secs_to_table": 6.23, "MB": 0.87}, "warm-browser": {"secs_to_table": 0.75, "MB": 0.0}}
+```
 
 ---
 
@@ -761,11 +907,17 @@ VERIFIED (parent raw re-fetch):
 - Websockets: standard *"No"*, flexible *"Yes"*
   (<https://cloud.google.com/appengine/docs/the-appengine-environments>).
 
-VERIFIED (agent H):
-- *"F1 (default) 384 MB 600 MHz automatic"*;
+VERIFIED (agent H; the first two re-fetched raw by the parent during code review):
+- *"F1 (default) 384 MB 600 MHz automatic"* (<https://cloud.google.com/appengine/docs/standard>);
 - *"Python 3.14 Ubuntu 24.04 python314 2030-10-10"*
   (<https://cloud.google.com/appengine/docs/standard/lifecycle/support-schedule>);
 - *"Oregon (us-west1)"* in the pricing region list.
+- Custom domains: the apex is verified in Search Console even to map a subdomain, and with
+  Cloudflare's CDN "Always use https" must be off (parent raw re-fetch,
+  <https://cloud.google.com/appengine/docs/standard/mapping-custom-domains>).
+- `max_instances`: *"Specify a value between 0 and 2147483647, where zero disables the setting"*
+  (parent raw re-fetch, `app.yaml` reference). So `max_instances: 0` removes the cap; it does not
+  stop the app.
 
 App Engine's free quota is listed separately from Cloud Run's, so it does not share the API's Cloud
 Run free tier (INFERRED).
@@ -811,6 +963,14 @@ MEASURED:
 | PythonAnywhere | Free has *"restricted outbound Internet access"*; Developer $10 | <https://www.pythonanywhere.com/pricing/> |
 | Heroku | Eco *"Sleeps after 30 minutes of inactivity"*; *"transitioning to a sustaining engineering model"* | <https://www.heroku.com/pricing/>, <https://www.heroku.com/blog/an-update-on-heroku/> |
 | Northflank | *"Always-on-compute – no sleeping"* but *"should not be used for production applications"* | <https://northflank.com/pricing> |
+| DigitalOcean App Platform | the free tier covers *"3 apps with static sites"*; a service is *"1 vCPU 512 MiB … $ 5.00"* | agent H (URL not recorded) |
+| Azure Container Apps | *"The first 180,000 vCPU-seconds, 360,000 GiB-seconds, and 2 million requests per subscription per month are free"*; but *"Mapping to an intermediate CNAME value blocks certificate issuance and renewal. Examples … Cloudflare"* | agent H (URL not recorded) |
+| AWS Lambda function URLs | a custom domain needs CloudFront in front (agent H, INFERRED) | — |
+| Leapcell | *"$ 0 per seat / month"*, *"100,000 / month included"* invocations: one viral day could spend a month's allowance | agent H (URL not recorded) |
+| Zeabur | bring-your-own server; not pursued (UNVERIFIED) | — |
+
+Rows without a URL are agent H's quotes, which its condensed report kept without their URLs.
+They concern ruled-out hosts and are not a basis for the decision.
 
 ---
 
@@ -818,15 +978,19 @@ MEASURED:
 
 For a reader re-weighting §2, this is which numbers came from a deployment and which from a page.
 
-**MEASURED:**
-- Cloud Run cold and warm TTFB;
-- App Engine warm TTFB, its stacked case, and browser time-to-table;
-- Firebase Hosting MISS/HIT behaviour and time-to-table, fresh and after idle;
-- the Dash probe's memory and page weight;
+**MEASURED** (raw log in §5.4 where one was kept; the rest were read off the terminal and are
+marked *log not preserved* where they appear):
+- Cloud Run cold and warm TTFB (§5.4);
+- App Engine warm TTFB and browser time-to-table (log not preserved), and its stacked case (§5.4);
+- Firebase Hosting's first hit and CDN HIT (log not preserved), and its after-idle case (§5.4);
+- the Dash probe's memory and page weight (log not preserved);
 - server-rendered OG tags on three hosts;
 - agent F's six browser-side builds;
 - agent D's one Connect Cloud interstitial;
 - the live `api.` Origin probes.
+
+**Not measured, though the text relies on it:** the ~40-minute API idle interval before the
+stacked case, and the state of the API's instance and edge during the Firebase after-idle case.
 
 **Quoted only:**
 - everything about Render, HF, Posit hosting, Fly, Railway, Vercel and Cloudflare Containers;
@@ -848,7 +1012,7 @@ For a reader re-weighting §2, this is which numbers came from a deployment and 
 | **(b5)** Cloud Run's timeout caps websocket sessions | **SUPPORTED** | VERIFIED | *"subject to request timeouts (currently up to 60 minutes…)"* |
 | **(b6)** Dash callbacks are POSTs and not edge-cacheable | **SUPPORTED** | VERIFIED (source) / MEASURED | POST to `_dash-update-component`; they passed through the Firebase rewrite uncached |
 | **(c)** Gradio is ML-oriented and weaker for a BI dashboard | **SUPPORTED, with nuance** | VERIFIED / ATTRIBUTED | self-described as for "machine learning apps"; it has dashboard components, but no URL write, a static head, and no cross-page interaction |
-| **(d)** Browser-side dashboards get cached responses without CORS headers | **CONTRADICTED** | **MEASURED**; mechanism INFERRED | see below |
+| **(d)** Browser-side dashboards get cached responses without CORS headers | **CONTRADICTED** | first mechanism MEASURED; second INFERRED; cause INFERRED | see below |
 
 **Hypothesis (d) in full.**
 
@@ -857,18 +1021,24 @@ The issue's reading of the app side is correct:
 - The Worker caches `/v1` 200s through `caches.default` with `cache.match(request)` (VERIFIED,
   runbook §7).
 
-**The measurement contradicts the conclusion.** MEASURED on 2026-09-28 at 05:14 UTC, in the SEA
-and PDX colos, `/v1/meta` from one client:
-1. A request with no `Origin` returned HIT, `age: 74475`, with no ACAO.
+**The measurement contradicts the conclusion.** MEASURED on 2026-09-28 at about 05:14 UTC,
+`/v1/meta` from one client:
+1. In the SEA colo, a request with no `Origin` returned HIT, `age: 74475`, with no ACAO.
 2. Seconds later, **in the same colo**, a request with `Origin: https://explore.…` returned HIT with
-   `age: 23`, a **distinct** entry.
-3. An apex-`Origin` entry carrying `access-control-allow-origin:
-   https://us-presidential-election-center.org` and `vary: Origin` coexisted with both.
+   `age: 23`: a **distinct** entry.
+3. In the PDX colo, an apex-`Origin` request returned HIT with `age: 23`, carrying
+   `access-control-allow-origin: https://us-presidential-election-center.org` and `vary: Origin`.
 
-So both of (d)'s mechanisms fail. A no-`Origin` fill is never served to a browser that sends an
-`Origin`, and two allowed origins never overwrite each other.
+**Mechanism 1 is CONTRADICTED (MEASURED):** a no-`Origin` fill is not served to a request that
+sends an `Origin`.
 
-**The mechanism is INFERRED.** Cloudflare documents, for its CDN cache, that *"Cloudflare supports
+**Mechanism 2 was not measured, and is INFERRED false.** It concerns two *allowed* origins, and
+`explore.` is not in `API_CORS_ORIGINS`, so no request above came from a second allowed origin; the
+apex entry was also seen in a different colo from the `explore.` one. That two allowed origins get
+separate entries follows from the per-`Origin` keying measured in step 2, and from Cloudflare's
+CDN documentation below.
+
+**Why the edge keys on `Origin` is INFERRED.** Cloudflare documents, for its CDN cache, that *"Cloudflare supports
 CORS by: Identifying cached assets based on the Host Header, Origin Header, URL path, and query"*
 (VERIFIED, raw fetch, <https://developers.cloudflare.com/cache/cache-security/cors/>). That this
 applies to the Worker Cache API is INFERRED. The measurement carries the finding, not the page.
@@ -886,46 +1056,55 @@ browser-side dashboard, which the recommendation is not.
 
 ### For the recommended option (server-side Dash on App Engine)
 
+**What this section states.** Each item is a requirement and the issue that owns it. How each is
+guarded or tested is that issue's to design (the owner's decision, 2026-09-28, on the code review
+in §12). For each S1-lettered story it also names the phase, the change surface, and what the live
+probe must demonstrate, as #276 asks.
+
 **CORS allow-list: no change.**
 - Server-to-server fetches carry no `Origin` and are not subject to CORS.
 - `API_CORS_ORIGINS` stays apex-only, and no `*` decision is needed.
 - The stale comment at `src/usvote/api/config.py:24-26` ("the exact dashboard origin is deferred
   (frontend D001)") should say instead that the dashboard is server-side and needs no CORS origin.
-  It is a one-line change; S2 or S1a carries it.
+  It is a one-line change, carried by #284 or #277, whichever lands first. Both issues say so.
 - **Hypothesis (d) needs no fix** (§8). If a browser-side component is ever added, adding its
   origin to `API_CORS_ORIGINS` is enough, since the edge keys on `Origin`.
 - Server-side fetches share the canary's no-`Origin` cache entries, which helps.
 
-**Rate limit (60/min/IP): no exemption needed, if the dashboard caches in-process.** S2 must make
-all of the following guards, not conventions:
-- **What to cache.** The API's data changes only per snapshot version (D034). So cache each
-  distinct `/v1` URL and revalidate cheaply: key on `snapshot_version` from `/v1/meta`, rechecked on
-  a short TTL (S3's AC requires ETag revalidation or a TTL). Calls to `api.` are then bounded by
-  distinct URLs, not by visits.
-- **One cache per instance.** The cache is per process, so run **one gunicorn worker with
-  threads**. Otherwise each worker fills its own copy.
-- **Throttle first fills.** On a new instance, spread the first fills below 60/min. App Engine's
-  egress IPs are shared Google ranges (INFERRED).
-- **Stacked cold start.** A never-fetched URL wakes the scale-to-zero API: MEASURED at 9.12 s
-  against 1.13 s warm (§4.5). A throttled prefetch of the canonical URLs on warmup means visitors
-  never pay that.
+**Rate limit (60/min/IP): no exemption needed, if the dashboard caches in-process.**
+- **Requests per view.** The server fetches one canonical `/v1` URL per view on a cache miss, and
+  none on a hit, filtering in-process (INFERRED from the design). Calls to `api.` are then bounded
+  by distinct URLs per snapshot version, not by visits: about 150–250 URLs, against 60 per minute.
+- **Requirements, owned by #277:**
+  - an in-process cache of API responses, keyed on `snapshot_version` from `/v1/meta`, rechecked
+    on a short TTL or by ETag (S3's AC requires one of the two);
+  - one cache per instance, so one process;
+  - first fills throttled below 60/min, since App Engine's egress IPs are shared Google ranges
+    (INFERRED);
+  - a throttled prefetch of the canonical URLs **on warmup and on every `snapshot_version`
+    change**, swapping the cache atomically. The stacked cold case (9.12 s, MEASURED, §4.5) fails
+    the MVP target, so this is a requirement, not an optimization.
 
-**Edge caching.** The server should fetch canonical URLs only (one resource per view, filtered
-in-process), so the Worker's per-URL cache serves them. The query string is part of the cache
-key.
+**Edge caching.** The server should fetch canonical URLs only, so the Worker's per-URL cache serves
+them. The query string is part of the cache key.
 
 **Origin secret.**
-- The dashboard reaches the API **only through `https://api.us-presidential-election-center.org`**.
-- It never calls `run.app` and never holds the secret (D070(b)). The secret stays in Cloudflare
-  and Secret Manager.
-- S2's guard asserts that no `run.app` string appears under `dashboard/`.
+- The dashboard reaches the API **only through `https://api.us-presidential-election-center.org`**,
+  never `run.app` (D070(b)).
+- It never holds the origin secret, which stays in Cloudflare and Secret Manager. That is #276's
+  own API sub-question, answered here; D070(b) does not speak to the secret.
+- #277 owns the guard. A source-text search alone would not see a base URL supplied by
+  configuration.
 
 **Value vocabularies: no API change is required.**
 - D070(b) forbids `usvote` imports **at runtime** only.
-- S2's AC explicitly lets the dashboard's *tests* import the stdlib-only vocabulary modules
-  (`usvote.snapshot_schema`, `usvote.count_status`, `usvote.pv.status`) to assert that every
-  closed value has a label (`backlog-dashboard.md`, S2 AC).
-- With the code in this repo, that is the vocabulary check, with no `openapi.json` dependency.
+- S2's AC lets the dashboard's *tests* import the vocabulary modules (`usvote.snapshot_schema`,
+  `usvote.count_status`, `usvote.pv.status`) to assert that every closed value has a label
+  (`backlog-dashboard.md`, S2 AC). With the code in this repo, that is the vocabulary check, with
+  no `openapi.json` dependency.
+- The AC calls those modules stdlib-only. `usvote.pv.status` is not: it imports numpy and pandas
+  (`src/usvote/pv/status.py`, lines 41–42), so such a test needs the base dependencies. #277
+  settles the consequence; #287 corrects the AC's wording and the same claim in `CLAUDE.md`.
 
 **Workers quota.** The recommended design spends a negligible share of it. **Workers Paid ($5) is
 not required**, though it would protect the API independently (**#285**).
@@ -937,10 +1116,10 @@ HTML and on Dash's fingerprinted assets through a Flask `after_request` hook.
 
 ### Result: S1-lettered stories
 
-| Story | Change | Must precede | Change surface and acceptance |
-|---|---|---|---|
-| **S1b, required** ([#283](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/283)) | **Scope the existing `uspv budget` to project `uspv-api`**. It has no project filter today (VERIFIED from the live config: no `projects` in `budgetFilter`), so dashboard spend would trip the API's kill-switch. **Give the dashboard project its own budget and kill-switch**: extend `deploy/killswitch/` (today Cloud-Run-only: `run_v2.ServicesClient`, `max_instance_count = 0`) with an App Engine action (disable the app, or `max_instances` → 0), or deploy a second function. Also a least-privilege runtime service account for the dashboard | Phase 0 go-live (#277) | **infra**: a PR for `deploy/killswitch/` plus a runbook entry, then a manual budget and function deploy. **Accepted by live probes:** the API budget's filter lists only `uspv-api`; a *below-threshold* test publish on the dashboard's topic logs and does **not** pause; an over-threshold publish targeted at the dashboard pauses **only** the dashboard, with the un-pause step run and documented |
-| **S1a, optional** ([#284](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/284)) | Type `pv_status`, `electoral_count_status`, and the per-capita `coverage`, `boundary_basis` and `population_series` as `Literal[...]` in `src/usvote/api/models.py` (`:323`, `:339`, `:615`, `:622`, `:629`), so `openapi.json` carries the closed sets. Justified by D031 (OpenAPI as a deliverable) and by any future non-Python consumer, not by the dashboard. Note: a `Literal` turns an unexpected value into a response-validation 500, so it pins the snapshot vocabularies; consider an `API_VERSION` bump | none | **app code**: PR, CI, then a deploy run. Accepted by a live probe showing the enums in `/openapi.json` |
+| Story | Change | Must precede | Change surface | What the live probe must demonstrate |
+|---|---|---|---|---|
+| **S1b, required** ([#283](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/283)) | **Scope the existing `uspv budget` to project `uspv-api`**. It has no project filter today (VERIFIED from the live config: no `projects` in `budgetFilter`), so dashboard spend would trip the API's kill-switch. **Give the dashboard project its own budget and kill-switch.** The kill-switch action is to **disable the App Engine app** (`USER_DISABLED`), never `max_instances: 0`, which App Engine documents as removing the cap (§6.7). `deploy/killswitch/` is Cloud-Run-only today (`run_v2.ServicesClient`), so it gains an App Engine action or a second function is deployed. The dashboard's least-privilege runtime service account is also #283's | Phase 0 go-live (#277) | **infra**: a PR for `deploy/killswitch/` plus a runbook entry, then a manual budget and function deploy | the API budget's filter lists only `uspv-api`; a below-threshold event on the dashboard's budget changes nothing; an over-threshold one disables the dashboard (`explore.` stops serving, its instances reach 0) while `api.`'s `/health` still returns 200; the un-pause step is run and documented. #283 designs the probe so that the "only the dashboard" half can fail |
+| **S1a, optional** ([#284](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/284)) | Type `pv_status`, `electoral_count_status`, and the per-capita `coverage`, `boundary_basis` and `population_series` as `Literal[...]` in `src/usvote/api/models.py`, so `openapi.json` carries the closed sets. Justified by D031 (OpenAPI as a deliverable) and by any future non-Python consumer, not by the dashboard. A `Literal` turns an unexpected value into a response-validation 500, so it pins the snapshot vocabularies; consider an `API_VERSION` bump | none | **app code**: PR, CI, then a deploy run | `/openapi.json` on the public host shows the enums. #284 owns the drift test that pins each `Literal` to its source vocabulary |
 
 The architect's review (§12) is why S1b is required rather than optional. S2's settled AC already
 says *"If it is on GCP, it is covered by the budget alert and kill-switch"*. The live budget's
@@ -961,8 +1140,8 @@ dependency group.
   would constrain the D033 image (INFERRED); watch it.
 - **A group keeps D033's slim image untouched.** It is a group, not `serve` and not the base
   dependencies.
-- **The vocabulary check works offline.** The dashboard's tests can import the stdlib-only
-  vocabulary modules directly (S2 AC), with no API change.
+- **The vocabulary check works offline.** The dashboard's tests can import the vocabulary modules
+  directly (S2 AC), with no API change. One of them, `usvote.pv.status`, needs pandas (§9).
 - **The portfolio story** is one repository showing the whole system.
 - **Nothing is duplicated.** The dev loop, CLAUDE.md conventions and CI are reused.
 
@@ -973,11 +1152,12 @@ dependency group.
   the upload physically excludes `src/usvote/` and any git-ignored snapshot.
 - **`requirements.txt`** is exported from the lock in CI, either uncommitted or committed with a
   drift check.
-- **The no-`usvote`-import guard is a static (AST) scan**, not an import test, because `usvote` is
-  installed in the dev environment. It mirrors `test_api_import_graph.py`. Nothing goes under
-  `src/usvote/` (D070(b)).
-- **Accounts.** A WIF provider and deploy service account for the new project, plus a
-  least-privilege runtime service account in place of App Engine's default (D034 §5).
+- **A guard that no runtime module under `dashboard/` imports `usvote`** (D070(b)); nothing goes
+  under `src/usvote/`. #277 designs it. Because `usvote` is installed in the dev environment, the
+  guard cannot rely on an import failing; `tests/unit/test_layering.py` shows the repo's pattern
+  for that (a subprocess in which the forbidden package is made unimportable).
+- **Accounts.** A WIF provider and deploy service account for the new project (S2). The
+  least-privilege runtime service account, in place of App Engine's default (D034 §5), is #283's.
 - **No Dockerfile** is needed on App Engine. The runner-up or a paid fallback would need its own,
   since CI's `docker-build` job builds the root one.
 - `loop.config.md` §3/§4 gain the `dashboard/` path and its deploy surface. That is the human's
@@ -998,11 +1178,13 @@ conflict with the pipeline's resolution.**
 
 ### #277 (S2, walking skeleton)
 
+Requirements this verdict adds to #277. How each is guarded or tested is #277's to design.
+
 **Host setup:**
 - App Engine standard, F1, `python314`, us-west1, in a **new GCP project**.
 - `min_instances: 1` and an explicit `max_instances: 1`, with warmup enabled.
-- Delete the previous version after each promotion, confirmed by a live instance count (§1 item
-  1).
+- Delete the previous version after each promotion, since both settings are per version (§1
+  item 1).
 
 **Domain:**
 - App Engine domain mapping through a DNS-only CNAME, with Search Console verification of the
@@ -1012,20 +1194,25 @@ conflict with the pipeline's resolution.**
 **Deploy:** GitHub Actions + WIF, `workflow_dispatch`, deploy root `dashboard/`, and
 `requirements.txt` exported from the lock.
 
-**Guards:**
-- no `run.app` string;
-- the AST import scan;
-- a single gunicorn worker;
-- an in-process API cache keyed on `snapshot_version`, with a TTL or ETag recheck;
-- a sub-60/min fill throttle and a throttled warmup prefetch.
+**Data access (§9):**
+- the API only through its public hostname; never `run.app`, never the origin secret;
+- no `usvote` import in runtime code;
+- one in-process cache per instance, keyed on `snapshot_version`, with a TTL or ETag recheck;
+- first fills throttled below 60/min;
+- a throttled prefetch of the canonical URLs on warmup **and** on every `snapshot_version`
+  change, with an atomic cache swap;
+- the `config.py` CORS comment (§9), unless #284 has already carried it.
 
 **Links:** shareable views are paths (Dash Pages), so their OG cards render.
 
 **Provenance** comes from `meta.provenance`, the carry-forward constraint.
 
 **Verification:**
-- A **load test** at a viral-day rate against `max_instances: 1`.
-- A re-measure of the stacked cold case on the real app.
+- **The MVP cold-start target** (§4.5): OG HTML in ≤ 1 s TTFB, and a cold shared link to its first
+  data cell in ≤ 3 s at 390 px on 10 Mbps / 100 ms, with the dashboard cold and with the API's
+  edge cold. The API-edge-cold case should be measured after an API deploy, since that is when the
+  edge is purged.
+- A load test against `max_instances: 1` at a peak rate #277 states.
 - The canary probes `explore.` as well.
 
 **Needs S1b (#283) first.**
@@ -1061,7 +1248,9 @@ the chart is.
 
 ---
 
-## 12. Architect review
+## 12. Architect review and code review
+
+### 12.1 Architect review of the draft
 
 **Reviewer:** the `architect` agent, 2026-09-28, read-only, on the draft of this document. It
 produced a verdict on each of six questions, then **1 blocking, 6 important and 18 minor**
@@ -1089,10 +1278,10 @@ decision (D070(b), D030, D033, D035). D034 was under tension until S1b was made 
 
 | Finding | Disposition |
 |---|---|
-| M1–M6 (matrix scoring) | C1 is now cost-only on a stated scale; row 2 C5 → 2; row 13 re-scored; row 1 C7 → 5; the re-weighting list is complete; the dealbreaker column is cleaned up |
+| M1–M6 (matrix scoring) | C1 made cost-only on a stated scale; rows re-scored; the dealbreaker column cleaned up. Superseded by the per-column rubrics and re-scoring after code review (§12.2) |
 | M7 (the (d) label) | Now MEASURED; mechanism INFERRED |
 | M8 (banner conditional) | Made conditional on *k* |
-| M9 (LinkedIn label) | Now excluded, UNVERIFIED as a metric |
+| M9 (LinkedIn label) | Excluded as a signal. The label was first changed to UNVERIFIED; code review restored agent G's CONTRADICTED (§12.2) |
 | M10 (pydantic overlap) | Reworded in §10 |
 | M11 (cross-references) | Fixed; a GitHub Pages comparison is added to §6.6 |
 | M12 (checklist D071) | Fixed |
@@ -1101,8 +1290,27 @@ decision (D070(b), D030, D033, D035). D034 was under tension until S1b was made 
 | M15–M17 (S2 items) | Added to §10 and §11 |
 | M18 (lock-in) | A sentence in §1 item 2 and §4.2 |
 
-**One suggestion is recorded here rather than acted on:** file Workers Paid as a separate
-API-resilience issue. The owner chose to file it: **#285** (§4.1).
+**One further suggestion** was to file Workers Paid as a separate API-resilience issue. The owner
+filed it as **#285** (§4.1).
+
+### 12.2 Code review, round 1 (PR #286)
+
+Three read-only finders reviewed the committed draft: internal consistency, guard efficacy, and
+factual accuracy against the sources. They returned **42 findings, all blocking**, 38 of them about
+a claim that was false, overstated or mislabelled. Several raised design questions, so the
+architect gave a scope ruling and the owner decided them before any fix (2026-09-28). The ruling
+kept the recommendation: none of the 42 changes the choice.
+
+| Root cause | Findings | Disposition |
+|---|---|---|
+| Summary layers dropped their sections' qualifiers | "never cold-starts"; the 6.2 s cause stated as fact; hypothesis (d)'s second mechanism; the Custom Domain failure mode; the Streamlit reasons; the source for "never holds the secret"; flip lists that differed between §1 and D071; a warmup-only prefetch | Fixed in the banner, §1, §4, §8, §9 and D071. The prefetch now runs on warmup and on every `snapshot_version` change |
+| Only C1 had a rubric | C3-host scores against their own source, uneven C4–C7 cells, §4.7's "every host scores 5", the viral-day cost of Render Starter | Every column has a rubric (§2); the matrix is re-scored. The owner set the C3-host rule to the parent platform's share, so App Engine and Cloud Run tie and the host-marketability flip condition is dropped |
+| Section-level labels | §4.6 "all VERIFIED"; LinkedIn relabelled without new evidence; the parent re-fetch list; runtime sources in §5.3; the 390 px claim; §4.4's attribution; release-notes versus PyPI; unpreserved logs | Per-cell labels; CONTRADICTED restored; three App Engine pages re-fetched and the list corrected; logs reproduced in §5.4 or marked as not preserved |
+| The doc re-specified other stories' guards, and three of those specifications were false | an import guard said to mirror `test_api_import_graph.py` (that test is a regex search, not an AST scan); `max_instances → 0` as a kill-switch (App Engine reads 0 as no cap); `usvote.pv.status` called stdlib-only (it imports pandas); mis-paired line numbers for #284's fields | The three claims are removed. §9 and §11 now state requirements and their owning issue. **Deferred by the ruling, as the owner accepted:** guard and probe designs to #277 (dashboard guards, version-cleanup check, load test, prefetch measurement), #283 (kill-switch action and probe design, runtime service account) and #284 (the `Literal` drift test). The `CLAUDE.md` and backlog "stdlib-only" wording goes to #287. The #283 and #284 bodies were corrected the same day |
+| Coverage claims beyond the content | §3's "built each one"; hosts named in §3 but missing from §6.9; §14's "done" for the runner-up's stacked case; partial answers on hard caps, sleep policies and per-view requests | §3 and §6.9 corrected; §4.1 and §4.5 extended, with UNVERIFIED cells for ruled-out candidates (the owner's decision); §9 states requests per view; §14 marks the runner-up's case partial |
+| No cold-start target | S2's AC measures "against S1's target", and S1 set none | The owner set the MVP target (§4.5) |
+
+A second, lighter review round checks these fixes.
 
 ---
 
@@ -1127,10 +1335,15 @@ API-resilience issue. The owner chose to file it: **#285** (§4.1).
 | Hypotheses (a)–(d), verdicts with labels | Done (§8) |
 | API sub-question | Done (§9): S1b required, S1a optional |
 | Per-story consequences | Done (§11) |
-| Measured cold starts for the two finalists, including the stacked case | Done (§4.5, §5) |
+| Measured cold starts for the two finalists, including the stacked case | **Done for the recommendation** (§4.5, §5). **Partial for the runner-up:** its after-idle browser case (6.23 s) was measured, but the dashboard-cold and API-edge-cold parts were not isolated. By the owner's decision (2026-09-28) it is not re-deployed; it stays the pivot option |
+| Cold-start target stated | Done (§4.5): the MVP target, set by the owner |
+| Cost at both traffic levels, hard cap and card for every candidate | Done (§4.1), with UNVERIFIED cells for ruled-out candidates |
+| Sleep policy per platform | Done (§4.5), with the same allowance |
+| Per-view request count against the 60/min limit | Done (§9) |
 | Pricing quoted verbatim with URL; parent re-fetch list stated | Done (top, §6) |
 | Throwaway deployments torn down | Done (§13) |
-| Architect review recorded | Done (§12) |
+| Architect review recorded | Done (§12.1) |
+| Code review round 1 recorded, with dispositions | Done (§12.2) |
 | Code location recommended | Done (§10) |
 | Accepted verdict recorded as D071 | Done (`decisions.md`, this PR) |
-| S1-lettered stories filed | Done on 2026-09-28, after the owner reviewed the list: S1b **#283**, S1a **#284**; and #285 (Workers Paid, under E8) |
+| S1-lettered stories filed | Done on 2026-09-28, after the owner reviewed the list: S1b **#283**, S1a **#284**; and #285 (Workers Paid, under E8). Both S1 bodies were corrected after code review; #287 carries the `CLAUDE.md` and backlog wording |
