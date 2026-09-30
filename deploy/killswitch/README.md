@@ -140,4 +140,4 @@ gcloud pubsub topics publish dashboard-budget-alerts --project=uspv-explore \
 `tests/unit/test_killswitch.py` pins the function's calls offline, against strict fakes of
 the Google clients. Whether the live services accept those calls is what the probes in
 [`docs/deploy-dashboard.md`](../../docs/deploy-dashboard.md) §6 establish (their output is
-to be recorded on #283); re-run them after raising a ceiling in `requirements.txt`.
+recorded on #283); re-run them after raising a ceiling in `requirements.txt`.

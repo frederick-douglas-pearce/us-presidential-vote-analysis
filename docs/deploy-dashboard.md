@@ -74,9 +74,18 @@ gcloud billing budgets create --billing-account="$BILLING_ACCOUNT" \
 ## 5. The runtime service account
 
 The dashboard only calls the public API over HTTPS: it holds no secret and calls no GCP API,
-so its identity needs only to write logs. Set it as the app's **default** service account,
-so every version runs as it even without a `service_account:` line, and name it in each
-version's `app.yaml` too.
+so at runtime its identity needs only to write logs. Set it as the app's **default** service
+account, so every version runs as it even without a `service_account:` line, and name it in
+each version's `app.yaml` too.
+
+App Engine also **builds** each version as that version's service account, so the same
+identity needs build rights. Grant them on the specific resources the build touches, never
+project-wide (the troubleshooter's Storage Admin advice is far broader): read and object
+writes on the staging bucket (Cloud Build stores its log there by appending and composing
+objects, so `objectCreator` is not enough), and push to two registries. `us.gcr.io` does
+not exist in a new project; create it rather than granting create-on-push. #283's first
+placeholder deploy established this set error by error (its record is on #283); whether the
+`gae-standard` grant is strictly needed was not isolated.
 
 ```
 gcloud iam service-accounts create explore-run --project="$PROJECT" \
@@ -85,7 +94,25 @@ RUNTIME_SA="explore-run@${PROJECT}.iam.gserviceaccount.com"
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${RUNTIME_SA}" --role=roles/logging.logWriter
 gcloud app update --service-account="$RUNTIME_SA" --project="$PROJECT"
+
+# Build rights, each on one resource.
+STAGING="gs://staging.${PROJECT}.appspot.com"
+for ROLE in roles/storage.objectUser roles/storage.legacyBucketReader; do
+  gcloud storage buckets add-iam-policy-binding "$STAGING" \
+    --member="serviceAccount:${RUNTIME_SA}" --role="$ROLE"
+done
+gcloud artifacts repositories create us.gcr.io --repository-format=docker \
+  --location=us --project="$PROJECT"
+gcloud artifacts repositories add-iam-policy-binding us.gcr.io --location=us \
+  --project="$PROJECT" --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/artifactregistry.writer
+gcloud artifacts repositories add-iam-policy-binding gae-standard --location="$REGION" \
+  --project="$PROJECT" --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/artifactregistry.writer
 ```
+
+The staging bucket appears with `gcloud app create`; `gae-standard` appears on the first
+build attempt, so if it is missing, run one deploy (it fails) and then grant.
 
 ## 6. Probes
 
@@ -122,9 +149,9 @@ gcloud app deploy --project=uspv-explore --quiet
 HOST=$(gcloud app describe --project=uspv-explore --format='value(defaultHostname)')
 ```
 
-A brand-new project's first deploy can fail on the Cloud Build identity's permissions
-(App Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment));
-record what it needed, for #277. Once #277 maps the domain, it re-runs probes 2 and 3
+The build runs as `explore-run`, so the §5 build grants must be in place first (App
+Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment)
+covers the errors a missing one produces). Once #277 maps the domain, it re-runs probes 2 and 3
 below with `HOST` set to the `explore.` hostname. The instance-count checks in probe 2
 mean something only if that version pins `min_instances: 1` as the placeholder does.
 

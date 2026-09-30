@@ -120,8 +120,8 @@ def pause_app_engine(config: Config) -> None:
     """Disable the App Engine application (serving status ``USER_DISABLED``).
 
     The ``apps.patch`` reference lists only ``authDomain``, ``defaultCookieExpiration``
-    and ``iap`` as updatable. That ``servingStatus`` is accepted too is UNVERIFIED until
-    #283's over-threshold probe, whose output is to be recorded there. REST fallback:
+    and ``iap`` as updatable. ``servingStatus`` is accepted too: #283's over-threshold
+    probe (2026-09-30, recorded on that issue) disabled the app this way. REST fallback:
     ``PATCH https://appengine.googleapis.com/v1/apps/<project>?updateMask=servingStatus``
     with ``{"servingStatus": "USER_DISABLED"}``.
     """
