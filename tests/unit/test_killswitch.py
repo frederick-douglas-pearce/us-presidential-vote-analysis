@@ -5,13 +5,15 @@ Its Cloud Function deps are installed by Cloud Functions at deploy time and are 
 `uv.lock`, so these tests load the module by path against **strict hand-written fakes** of
 `functions_framework`, `cloudevents.http`, `google.cloud.run_v2` and
 `google.cloud.appengine_admin_v1`. Not `MagicMock`: it would accept any call shape,
-including a wrong one. Each fake exposes exactly the methods the function uses, with the
-real clients' keyword-only signatures (checked against google-cloud-appengine-admin 1.18.0
-and google-cloud-run 0.16.1), so an unexpected argument is a `TypeError`.
+including a wrong one. Each fake exposes exactly the methods the function uses, with
+signatures narrower than the real clients' (checked against google-cloud-appengine-admin
+1.18.0 and google-cloud-run 0.16.1): keyword-only where the real ones also accept
+positionals, and without the optional parameters the function does not pass. So an
+unexpected argument is a `TypeError`.
 
 The tests pin the **mechanism**: which client is constructed, which call it makes, and the
-exact request it sends. That the real service accepts that request is established by the
-live probes recorded on #283, not here.
+exact request it sends. Whether the real service accepts that request is a question for
+#283's live probes (`docs/deploy-dashboard.md` §6), not for this file.
 """
 
 from __future__ import annotations
@@ -63,6 +65,8 @@ class Calls:
     run_log: list[tuple[str, Any]] = field(default_factory=list)
     appengine_log: list[tuple[str, Any]] = field(default_factory=list)
     service_max_instances: int = 1
+    # What `get_application` reports; the operation's `result()` moves it to
+    # `status_after_update`, so a re-read after the wait sees the server's new state.
     app_status: ServingStatus = ServingStatus.SERVING
     status_after_update: ServingStatus = ServingStatus.USER_DISABLED
 
@@ -86,7 +90,10 @@ def _fake_modules(calls: Calls) -> dict[str, ModuleType]:
     class Operation:
         def result(self, *, timeout: float) -> SimpleNamespace:
             calls.appengine_log.append(("result", timeout))
-            return SimpleNamespace(serving_status=calls.status_after_update)
+            calls.app_status = calls.status_after_update
+            # A response that omits the field, as the real one may; the function must
+            # re-read the app rather than trust this.
+            return SimpleNamespace(serving_status=ServingStatus.UNSPECIFIED)
 
     class ApplicationsClient:
         def __init__(self) -> None:
@@ -184,18 +191,31 @@ class TestConfig:
         with pytest.raises(ValueError, match="GCP_PROJECT"):
             load({"KILLSWITCH_TARGET": "app_engine"})
 
-    def test_a_non_positive_fraction_fails_the_import(self, load: Any) -> None:
+    @pytest.mark.parametrize("value", ["0", "-0.5", "nan", "inf"])
+    def test_a_fraction_that_is_not_positive_and_finite_fails_the_import(
+        self, load: Any, value: str
+    ) -> None:
+        # nan would pause on every message (`cost < budget * nan` is always False).
         with pytest.raises(ValueError, match="PAUSE_AT_FRACTION"):
-            load({**DASHBOARD_ENV, "PAUSE_AT_FRACTION": "0"})
+            load({**DASHBOARD_ENV, "PAUSE_AT_FRACTION": value})
+
+    @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+    def test_an_operation_timeout_that_is_not_positive_and_finite_fails_the_import(
+        self, load: Any, value: str
+    ) -> None:
+        with pytest.raises(ValueError, match="APP_ENGINE_OPERATION_TIMEOUT_S"):
+            load({**DASHBOARD_ENV, "APP_ENGINE_OPERATION_TIMEOUT_S": value})
 
 
 class TestNoPause:
     @pytest.mark.parametrize("env", [API_ENV, DASHBOARD_ENV], ids=["api", "dashboard"])
-    def test_below_threshold_constructs_no_client(
-        self, load: Any, calls: Calls, env: dict[str, str]
+    def test_below_threshold_constructs_no_client_and_says_so(
+        self, load: Any, calls: Calls, env: dict[str, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         load(env).budget_killswitch(_event(cost=4.99, budget=5))
         assert (calls.run_clients, calls.appengine_clients) == (0, 0)
+        # The live below-threshold probe keys on this line.
+        assert "under threshold" in capsys.readouterr().out
 
     @pytest.mark.parametrize("env", [API_ENV, DASHBOARD_ENV], ids=["api", "dashboard"])
     def test_a_zero_budget_is_reported_and_constructs_no_client(
@@ -218,7 +238,7 @@ class TestAppEngine:
     (App Engine reads zero as "no cap")."""
 
     def test_disables_the_app_with_exactly_this_request(
-        self, load: Any, calls: Calls
+        self, load: Any, calls: Calls, capsys: pytest.CaptureFixture[str]
     ) -> None:
         load({**DASHBOARD_ENV, "APP_ENGINE_OPERATION_TIMEOUT_S": "45"}).budget_killswitch(
             _event(cost=5, budget=5)
@@ -236,7 +256,10 @@ class TestAppEngine:
                 },
             ),
             ("result", 45.0),
+            # Re-read after the wait: the response is not trusted.
+            ("get_application", "apps/uspv-explore"),
         ]
+        assert "DISABLED apps/uspv-explore" in capsys.readouterr().out
 
     def test_an_already_disabled_app_is_not_updated(
         self, load: Any, calls: Calls
@@ -245,12 +268,13 @@ class TestAppEngine:
         load(DASHBOARD_ENV).budget_killswitch(_event(cost=9, budget=5))
         assert calls.appengine_log == [("get_application", "apps/uspv-explore")]
 
-    def test_an_update_that_does_not_disable_raises(
-        self, load: Any, calls: Calls
+    def test_an_update_that_does_not_disable_raises_and_never_claims_it_did(
+        self, load: Any, calls: Calls, capsys: pytest.CaptureFixture[str]
     ) -> None:
         calls.status_after_update = ServingStatus.SERVING
         with pytest.raises(RuntimeError, match="serving_status"):
             load(DASHBOARD_ENV).budget_killswitch(_event(cost=5, budget=5))
+        assert "DISABLED apps/" not in capsys.readouterr().out
 
 
 class TestCloudRun:

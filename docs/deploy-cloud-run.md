@@ -358,10 +358,24 @@ alerts** at 50/90/100% (Billing → Budgets & alerts). At free-tier traffic you'
 it — it's the backstop, not the plan.
 
 **Scope the budget to project `uspv-api`** (its `budgetFilter.projects` lists only
-`uspv-api`). Unscoped, a budget covers the whole billing account, so spend in any other
+`uspv-api`'s project number; the Budget API returns numbers, not IDs). Unscoped, a budget covers the whole billing account, so spend in any other
 project on it, the dashboard's included, would pause the API. The dashboard has its own
 budget and kill-switch in its own project ([`docs/deploy-dashboard.md`](deploy-dashboard.md)).
-Un-pause the API by re-running the Deploy workflow (§8), after resolving the cause.
+Un-pause the API with **Actions → Deploy (Cloud Run) → Run workflow**, which re-sets
+`--max-instances=1` (no data refresh needed), after resolving the cause.
+
+The function's source now requires `KILLSWITCH_TARGET=cloud_run` (#283). A revision
+deployed before that keeps running until redeployed; redeploy it with the full env the
+[kill-switch README](../deploy/killswitch/README.md) gives, then check it with a
+below-threshold publish, whose log line must read `under threshold` and name
+`target=cloud_run`:
+
+```
+gcloud pubsub topics publish budget-alerts --project=uspv-api \
+  --message='{"costAmount": 1, "budgetAmount": 5}'
+```
+
+Never publish an over-threshold message here unless you mean to pause the API.
 
 ## 10. Monitoring: the API canary and its dead-man's switch (#194, #197)
 

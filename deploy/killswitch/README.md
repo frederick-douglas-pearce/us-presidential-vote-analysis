@@ -6,10 +6,12 @@ the hard cost cap neither Cloud Run nor App Engine provides natively
 a backstop; at free-tier traffic it should never fire.
 
 **One source, one deployment per target.** Each deployment lives in its target's own GCP
-project, is triggered only by that project's own budget topic, and runs as a service
-account that holds roles in that project only. That IAM boundary is what makes "pause only
-the dashboard" structural: the dashboard's function cannot pause the API, because its
-identity has no role on `uspv-api`.
+project and is triggered only by that project's own budget topic. The dashboard's function
+runs as a service account holding a role in `uspv-explore` only, and that IAM boundary makes
+one half of "pause only the dashboard" structural: the dashboard's function cannot pause the
+API. The other half, that dashboard spend cannot trip the API's budget, is configuration
+(the API budget's project filter), checked by readback in
+[`docs/deploy-dashboard.md`](../../docs/deploy-dashboard.md) §6.
 
 | Target | Project | Budget → topic | Action | Un-pause |
 |---|---|---|---|---|
@@ -27,7 +29,8 @@ stops its instances and its serving.
 ## Configuration
 
 `KILLSWITCH_TARGET` is **required** (no default), and the whole configuration is validated
-when the function loads, so a misconfigured deployment fails to start rather than failing
+when the function loads (the target, its required env, and that both numbers are finite and
+positive), so a misconfigured deployment fails to start rather than failing
 at the moment it should pause something.
 
 | Env | Targets | Notes |
@@ -35,7 +38,7 @@ at the moment it should pause something.
 | `KILLSWITCH_TARGET` | both | `cloud_run` or `app_engine` |
 | `GCP_PROJECT` | both | the target's project |
 | `CLOUD_RUN_REGION`, `CLOUD_RUN_SERVICE` | `cloud_run` | required |
-| `APP_ENGINE_OPERATION_TIMEOUT_S` | `app_engine` | optional, default `120`; below the function timeout |
+| `APP_ENGINE_OPERATION_TIMEOUT_S` | `app_engine` | optional, default `120`; keep it below the function's `--timeout` (the deploy below sets `300s`; the gen2 default is 60 s) |
 | `PAUSE_AT_FRACTION` | both | optional, default `1.0` (pause at 100%) |
 
 The budget must use a **specified amount**. A budget set to "last period's spend" reads $0
@@ -56,14 +59,20 @@ gcloud functions deploy budget-killswitch --project="$PROJECT" \
   --trigger-topic=budget-alerts \
   --set-env-vars="KILLSWITCH_TARGET=cloud_run,GCP_PROJECT=${PROJECT},CLOUD_RUN_REGION=${REGION},CLOUD_RUN_SERVICE=${SERVICE},PAUSE_AT_FRACTION=1.0"
 
+# Deployed before #283? That revision predates KILLSWITCH_TARGET, and the current source
+# refuses to start without it: redeploy with the full --set-env-vars above (not a
+# source-only deploy), then run the below-threshold probe under "Testing a deployment".
+
 # 3. Billing → Budgets & alerts → a budget (e.g. $5/mo) whose scope is project uspv-api
 #    ONLY, connected to the `budget-alerts` topic under "Manage notifications". Without the
 #    project filter it covers the whole billing account, so another project's spend would
 #    pause the API.
 ```
 
-Grant the function's runtime service account `roles/run.admin` (or a custom role with
-`run.services.get`/`run.services.update`) on the project so it can pause the service.
+Grant the function's runtime service account `roles/run.admin` on the project so it can
+pause the service. (A custom role with `run.services.get`/`run.services.update` is not
+enough on its own: updating a service also needs `iam.serviceAccounts.actAs` on the
+service's runtime identity.)
 Today it runs as the default compute SA with `roles/run.admin`; moving it to a dedicated
 least-privilege SA is [#288](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/288).
 
@@ -96,7 +105,7 @@ gcloud functions deploy dashboard-killswitch --project="$PROJECT" \
   --gen2 --runtime=python312 --region="$REGION" \
   --source=deploy/killswitch --entry-point=budget_killswitch \
   --trigger-topic=dashboard-budget-alerts \
-  --service-account="$KS_SA" --trigger-service-account="$KS_SA" \
+  --service-account="$KS_SA" --trigger-service-account="$KS_SA" --timeout=300s \
   --set-env-vars="KILLSWITCH_TARGET=app_engine,GCP_PROJECT=${PROJECT},PAUSE_AT_FRACTION=1.0"
 gcloud functions add-invoker-policy-binding dashboard-killswitch --project="$PROJECT" \
   --region="$REGION" --member="serviceAccount:${KS_SA}"
@@ -107,11 +116,13 @@ has no serving-status flag, so use the Admin API (or the console: App Engine →
 **Enable application**):
 
 ```
-curl -sS -X PATCH \
+OP=$(curl -sS -X PATCH \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
   "https://appengine.googleapis.com/v1/apps/uspv-explore?updateMask=servingStatus" \
-  -d '{"servingStatus": "SERVING"}'
+  -d '{"servingStatus": "SERVING"}' \
+  | python3 -c 'import sys, json; print(json.load(sys.stdin)["name"].split("/")[-1])')
+gcloud app operations wait "$OP" --project=uspv-explore   # the PATCH is a long-running op
 gcloud app describe --project=uspv-explore --format='value(servingStatus)'   # SERVING
 ```
 
@@ -127,6 +138,6 @@ gcloud pubsub topics publish dashboard-budget-alerts --project=uspv-explore \
 ```
 
 `tests/unit/test_killswitch.py` pins the function's calls offline, against strict fakes of
-the Google clients. That the live services accept those calls is established by the probes
-recorded on #283; re-run them after changing a dependency's major version in
-`requirements.txt`.
+the Google clients. Whether the live services accept those calls is what the probes in
+[`docs/deploy-dashboard.md`](../../docs/deploy-dashboard.md) §6 establish (#283 records
+their output); re-run them after raising a ceiling in `requirements.txt`.

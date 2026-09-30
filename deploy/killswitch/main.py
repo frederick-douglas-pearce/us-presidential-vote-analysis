@@ -23,7 +23,7 @@ Env:
 - ``GCP_PROJECT``: the target's project (required).
 - ``cloud_run`` only: ``CLOUD_RUN_REGION``, ``CLOUD_RUN_SERVICE`` (required).
 - ``app_engine`` only: ``APP_ENGINE_OPERATION_TIMEOUT_S`` (optional, default ``120``;
-  keep it below the function's own timeout).
+  keep it below the function's own ``--timeout``; the README's deploy sets 300s).
 - ``PAUSE_AT_FRACTION`` (optional, default ``1.0`` = pause at 100% of the budget).
 """
 
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -69,17 +70,26 @@ def load_config(env: Mapping[str, str]) -> Config:
     missing = [k for k in _REQUIRED_ENV[target] if not env.get(k)]
     if missing:
         raise ValueError(f"target {target!r} requires env {missing}")
-    pause_at = float(env.get("PAUSE_AT_FRACTION", "1.0"))
-    if pause_at <= 0:
-        raise ValueError(f"PAUSE_AT_FRACTION must be > 0, got {pause_at}")
+    # NaN would make every message pause (``cost < budget * nan`` is always False) and
+    # infinity would make none, so both are refused along with non-positive values.
+    pause_at = _positive_finite(env, "PAUSE_AT_FRACTION", "1.0")
     return Config(
         target=target,
         project=env["GCP_PROJECT"],
         pause_at=pause_at,
         cloud_run_region=env.get("CLOUD_RUN_REGION"),
         cloud_run_service=env.get("CLOUD_RUN_SERVICE"),
-        app_engine_timeout_s=float(env.get("APP_ENGINE_OPERATION_TIMEOUT_S", "120")),
+        app_engine_timeout_s=_positive_finite(
+            env, "APP_ENGINE_OPERATION_TIMEOUT_S", "120"
+        ),
     )
+
+
+def _positive_finite(env: Mapping[str, str], key: str, default: str) -> float:
+    value = float(env.get(key, default))
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{key} must be a finite number > 0, got {value}")
+    return value
 
 
 # At import: a bad config fails the deploy's startup, not the over-threshold moment.
@@ -106,8 +116,8 @@ def pause_app_engine(config: Config) -> None:
     """Disable the App Engine application (serving status ``USER_DISABLED``).
 
     The ``apps.patch`` reference lists only ``authDomain``, ``defaultCookieExpiration``
-    and ``iap`` as updatable, but ``servingStatus`` is accepted; #283's live probe is
-    what establishes it. REST fallback:
+    and ``iap`` as updatable. That ``servingStatus`` is accepted too is UNVERIFIED until
+    #283's over-threshold probe, whose output is recorded on that issue. REST fallback:
     ``PATCH https://appengine.googleapis.com/v1/apps/<project>?updateMask=servingStatus``
     with ``{"servingStatus": "USER_DISABLED"}``.
     """
@@ -125,13 +135,13 @@ def pause_app_engine(config: Config) -> None:
             "update_mask": {"paths": ["serving_status"]},
         }
     )
-    # Wait, so the log line below is true; a failure raises and the next budget message
-    # retries (the already-disabled check above keeps retries idempotent).
-    result = operation.result(timeout=config.app_engine_timeout_s)
-    if result.serving_status != disabled:
-        raise RuntimeError(
-            f"{name} update finished with serving_status={result.serving_status!r}"
-        )
+    # Wait, then re-read the app rather than trusting the operation's response, so the
+    # log line below is true. A failure raises and the next budget message retries (the
+    # already-disabled check above keeps retries idempotent).
+    operation.result(timeout=config.app_engine_timeout_s)
+    status = client.get_application(name=name).serving_status
+    if status != disabled:
+        raise RuntimeError(f"{name} update finished with serving_status={status!r}")
     print(f"DISABLED {name} (serving_status=USER_DISABLED)")
 
 

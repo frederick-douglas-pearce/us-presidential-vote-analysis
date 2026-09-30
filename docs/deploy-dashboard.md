@@ -24,11 +24,15 @@ gcloud billing budgets list --billing-account="$BILLING_ACCOUNT" --format=yaml  
 gcloud billing budgets update <BUDGET_ID> --billing-account="$BILLING_ACCOUNT" \
   --filter-projects=projects/uspv-api
 gcloud billing budgets describe <BUDGET_ID> --billing-account="$BILLING_ACCOUNT" \
-  --format='yaml(budgetFilter,notificationsRule)'   # projects: only uspv-api; topic unchanged
+  --format='yaml(budgetFilter,notificationsRule)'
+# budgetFilter.projects: only projects/<N>, where N is uspv-api's project number
+# (gcloud projects describe uspv-api --format='value(projectNumber)'); the API accepts
+# an ID on input and returns the number. notificationsRule.pubsubTopic: unchanged.
 ```
 
-Reading budgets needs `billingbudgets.googleapis.com` enabled on the quota project `gcloud`
-uses.
+The `gcloud billing budgets` commands (list, describe, update, create) need
+`billingbudgets.googleapis.com` enabled on the quota project `gcloud` uses (the current
+config project; these commands take no `--project`).
 
 ## 2. Create the project and the App Engine app
 
@@ -38,7 +42,8 @@ gcloud projects create "$PROJECT"
 gcloud billing projects link "$PROJECT" --billing-account="$BILLING_ACCOUNT"
 gcloud services enable appengine.googleapis.com cloudfunctions.googleapis.com \
   run.googleapis.com eventarc.googleapis.com pubsub.googleapis.com \
-  cloudbuild.googleapis.com artifactregistry.googleapis.com --project="$PROJECT"
+  cloudbuild.googleapis.com artifactregistry.googleapis.com iam.googleapis.com \
+  --project="$PROJECT"
 gcloud app create --region="$REGION" --project="$PROJECT"   # the region is permanent
 ```
 
@@ -85,23 +90,47 @@ gcloud app update --service-account="$RUNTIME_SA" --project="$PROJECT"
 
 Run after any change to the guard, and record the output. The "only the dashboard" half
 cannot be shown by publishing to the dashboard's topic alone (that topic cannot reach the
-API's function), so it rests on readbacks that could each come back wrong:
+API's function), so it rests on readbacks that could each come back wrong (budget filters
+read back as project **numbers**: compare against
+`gcloud projects describe <id> --format='value(projectNumber)'`):
 
-- the dashboard budget's `budgetFilter.projects` is `uspv-explore` only, its amount is
-  specified, and it publishes to `dashboard-budget-alerts`;
-- the API budget's filter is `uspv-api` only, and it still publishes to `budget-alerts`;
+- the dashboard budget's `budgetFilter.projects` is `uspv-explore`'s number only, its
+  amount is specified, and it publishes to `dashboard-budget-alerts`;
+- the API budget's filter is `uspv-api`'s number only, and it still publishes to
+  `budget-alerts`;
 - the API function's trigger topic is `projects/uspv-api/topics/budget-alerts`, and the
   dashboard topic's only subscription is the dashboard function's;
 - the dashboard function's env and its runtime and trigger service accounts;
 - `explore-killswitch` has no binding on `uspv-api`.
 
-Then, against a running version:
+Then, against a running version. Before #277 ships the app, that is a **throwaway
+placeholder**, deployed from a scratch directory (never under `dashboard/`, which is
+#277's): a one-route app whose `app.yaml` pins the instance count, so "instances reach 0"
+can fail rather than happen through idleness:
+
+```
+# app.yaml (plus a main.py serving "ok" on /, and requirements.txt with gunicorn + flask)
+runtime: python314
+service_account: explore-run@uspv-explore.iam.gserviceaccount.com
+inbound_services: [warmup]
+automatic_scaling: {min_instances: 1, max_instances: 1}
+
+gcloud app deploy --project=uspv-explore --quiet
+HOST=$(gcloud app describe --project=uspv-explore --format='value(defaultHostname)')
+```
+
+A brand-new project's first deploy can fail on the Cloud Build identity's permissions
+(App Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment));
+record what it needed, for #277. Once #277 maps the domain, it re-runs step 2 against
+`explore.`.
 
 1. **Below threshold:** publish `{"costAmount": 1, "budgetAmount": 5}` to
    `dashboard-budget-alerts`; the function logs `under threshold` and the app stays
    `SERVING`.
-2. **Over threshold:** publish `{"costAmount": 5, "budgetAmount": 5}`. The app becomes
-   `USER_DISABLED`, its instance count goes to 0 and it stops serving, while
+2. **Over threshold:** record `gcloud app instances list --project=uspv-explore` (one
+   instance), then publish `{"costAmount": 5, "budgetAmount": 5}`. The app becomes
+   `USER_DISABLED`; `gcloud app instances list` goes empty; `curl -sS -o /dev/null -w
+   '%{http_code}' "https://$HOST/"` no longer returns 200 (record what it returns). Meanwhile
    `https://api.us-presidential-election-center.org/health` still returns 200 and Cloud Run
    `usvote-api` keeps `max_instance_count = 1`.
 3. **Un-pause** as the kill-switch README gives, and confirm the app serves again.
