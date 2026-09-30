@@ -1,7 +1,8 @@
 """Load-test the dashboard at ``max_instances: 1`` (#277; D071's first flip condition).
 
-The stated peak is **5 page loads per second for 2 minutes**: about three times a
-10,000-visit day compressed into its busiest hour. A viral link means mostly first-time
+The default is **5 page loads per second for 2 minutes**, about twice a whole
+10,000-visit day compressed into one hour; ``--rate`` finds the knee below it (#277
+measured 1, 2.5 and 5; #291 tracks raising it). A viral link means mostly first-time
 visitors, so each simulated load is a **first** visit, fetching everything a fresh
 browser fetches, with ``Accept-Encoding: gzip`` so the F1 instance does the compression
 it does for real visitors:

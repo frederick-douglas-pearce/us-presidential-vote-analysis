@@ -344,9 +344,13 @@ measures both from a fresh browser context each run. The server states worth mea
   meets a cold API only on a cache miss.
 
 [`scripts/dashboard_load_test.py`](../scripts/dashboard_load_test.py) drives first-visit
-page loads (shell, every bundle, layout, dependencies, the routing callback) at a stated
-peak of 5 per second for 2 minutes against the single instance. Count the API calls it
-caused from the app's log (`api fetch` lines):
+page loads (shell, every bundle, layout, dependencies, the routing callback) against the
+single instance. Read server-side latency from App Engine's request log, not the client:
+the client's numbers include its own bandwidth. Measured 2026-09-30 (#277): at 1 and 2.5
+loads/s the server p95 was 16 ms and 77 ms; at 5 loads/s every request queued to about
+1.15 s (no 5xx or 429). The knee is between 2.5 and 5 first-visit loads per second, far
+above a 10,000-visit day's busiest hour; #291 tracks raising it. Count the API calls a
+run caused from the app's log (`api fetch` lines):
 
 ```
 gcloud logging read 'resource.type="gae_app" AND textPayload:"api fetch"' \
