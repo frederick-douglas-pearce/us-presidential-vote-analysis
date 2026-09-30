@@ -20,8 +20,10 @@ Beyond Dash itself this module adds four things, all host-level:
 
 from __future__ import annotations
 
+import html as html_escaping
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import dash
 import flask
@@ -43,7 +45,13 @@ VERSION_HOST_MARKER = "-dot-"
 
 
 def canonical_url(path: str) -> str:
-    return f"https://{CANONICAL_HOST}{path}"
+    """The canonical URL for a request path, re-quoted.
+
+    ``flask.request.path`` is percent-decoded, and Dash answers every path, so the path
+    is attacker-controlled text: quoting it keeps ``"``, ``<``, ``?``, ``#`` and line
+    breaks out of both the HTML this URL is written into and the redirect built from it.
+    """
+    return f"https://{CANONICAL_HOST}{quote(path, safe='/')}"
 
 
 class ExploreDash(dash.Dash):
@@ -60,7 +68,8 @@ class ExploreDash(dash.Dash):
         favicon: Any = "",
         renderer: Any = "",
     ) -> Any:
-        url = canonical_url(flask.request.path)
+        # Escaped as well as quoted: this is written into attribute values.
+        url = html_escaping.escape(canonical_url(flask.request.path), quote=True)
         metas = (
             f"{metas}"
             f'\n      <meta property="og:url" content="{url}">'
@@ -92,7 +101,7 @@ app.layout = html.Main(dash.page_container, className="explore")
 
 def redirect_target(host: str, path: str, query: str) -> str | None:
     """Where a request should be sent instead, or ``None`` to serve it here."""
-    name = host.split(":", 1)[0].lower()
+    name = host.split(":", 1)[0].lower().rstrip(".")
     if not name.endswith(VENDOR_HOST_SUFFIX):
         return None
     if VERSION_HOST_MARKER in name or path.startswith("/_ah/"):

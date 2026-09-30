@@ -167,6 +167,24 @@ class TestIndex:
         assert "validation_layout" not in html
         assert calls == []
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            '/%22%3E%3Cscript%3Ealert(1)%3C/script%3E%3Cx%20a=%22',
+            "/%3Cimg%20src=x%20onerror=alert(1)%3E",
+            "/'%3E%3Csvg%20onload=alert(1)%3E",
+        ],
+    )
+    def test_a_hostile_path_is_never_reflected_as_markup(self, path: str) -> None:
+        response = appmod.server.test_client().get(path)
+        body = response.get_data(as_text=True)
+        # The whole body, so Dash's own tags are covered as well as ours.
+        for marker in ("<script>alert", "<img src=x", "<svg onload", '"><script'):
+            assert marker not in body
+        canonical = [ln for ln in body.splitlines() if 'rel="canonical"' in ln]
+        assert len(canonical) == 1
+        assert canonical[0].count('"') == 4  # rel="…" href="…": no quote broke out
+
     def test_responses_are_compressed(self) -> None:
         response = appmod.server.test_client().get(
             "/", headers={"Accept-Encoding": "gzip"}
@@ -617,6 +635,19 @@ class TestRedirect:
             ("USPV-EXPLORE.UW.R.APPSPOT.COM:443", "/", "", f"https://{CANONICAL_HOST}/"),
             ("uspv-explore.uw.r.appspot.com", "/_ah/warmup", "", None),
             ("abc123-r7-dot-uspv-explore.uw.r.appspot.com", "/", "", None),
+            ("uspv-explore.appspot.com.", "/", "", f"https://{CANONICAL_HOST}/"),
+            (
+                "uspv-explore.uw.r.appspot.com",
+                "/a?b#c",
+                "x=1",
+                f"https://{CANONICAL_HOST}/a%3Fb%23c?x=1",
+            ),
+            (
+                "uspv-explore.uw.r.appspot.com",
+                "/a\r\nSet-Cookie: x=1",
+                "",
+                f"https://{CANONICAL_HOST}/a%0D%0ASet-Cookie%3A%20x%3D1",
+            ),
             (CANONICAL_HOST, "/", "", None),
             ("localhost:8050", "/", "", None),
         ],
@@ -634,6 +665,17 @@ class TestRedirect:
         assert response.status_code == 301
         assert response.headers["Location"] == (
             f"https://{CANONICAL_HOST}/election/2000?state=OH"
+        )
+
+    def test_a_line_break_in_the_path_redirects_instead_of_failing(self) -> None:
+        response = appmod.server.test_client().get(
+            "/a%0d%0aSet-Cookie:%20x=1",
+            headers={"Host": "uspv-explore.uw.r.appspot.com"},
+        )
+        assert response.status_code == 301
+        assert "\n" not in response.headers["Location"]
+        assert "Set-Cookie" not in response.headers or "x=1" not in str(
+            response.headers.get("Set-Cookie")
         )
 
     def test_the_canonical_host_is_served(self) -> None:
