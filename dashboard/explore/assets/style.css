@@ -1,0 +1,31 @@
+/* One readable column at any width; nothing fixed-width, so a phone never scrolls sideways. */
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #fff;
+}
+.explore {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0.5rem 0 0.75rem; }
+h2 { font-size: 1.15rem; margin: 1.75rem 0 0.5rem; }
+ul { padding-left: 1.25rem; margin: 0; }
+li { margin: 0.25rem 0; }
+a { color: #0b5cad; }
+.label { font-weight: 600; }
+.lede { color: #444; }
+.snapshot { margin-top: 2rem; font-size: 0.75rem; color: #666; }
+.snapshot code { overflow-wrap: anywhere; }
+.unavailable { margin-top: 1.5rem; padding: 0.75rem 1rem; border-left: 4px solid #b58900; background: #fdf6e3; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e8e8e8; background: #121212; }
+  a { color: #7ab8ff; }
+  .lede { color: #bbb; }
+  .snapshot { color: #999; }
+  .unavailable { background: #2b2610; }
+}

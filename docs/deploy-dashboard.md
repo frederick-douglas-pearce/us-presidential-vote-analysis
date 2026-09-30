@@ -2,10 +2,17 @@
 
 The dashboard runs on **App Engine standard** in its own GCP project, `uspv-explore`, on the
 same billing account as the API ([decision **D071**](../.claude/specs/decisions.md)). This
-runbook grows with E9. Its first part, from #283, sets up the project and the **cost guard**:
-a budget and kill-switch that can pause the dashboard and nothing else. The app's own deploy,
-its WIF identity and the `explore.` domain mapping are #277's and land here as later
-sections.
+runbook grows with E9. §1–§6 (#283) set up the project and the **cost guard**: a budget and
+kill-switch that can pause the dashboard and nothing else. §7–§12 (#277) add the deploy
+identity, the `explore.` domain, the deploy workflow, monitoring and measurement.
+
+The app itself lives in [`dashboard/`](../dashboard/), the App Engine deploy root: the
+`explore/` package, `app.yaml` and an allow-list `.gcloudignore`. Its dependencies are the
+lock's `dashboard` group, exported to `dashboard/requirements.txt` at deploy time (never
+committed). It reads data only from `https://api.us-presidential-election-center.org`,
+through one in-process cache keyed on the API's `snapshot_version` (D071(d)); the page
+content comes from `/v1/meta`, whose `provenance` object is what #277's acceptance criteria
+call `meta.provenance` (the list endpoints wrap the same object in `meta`).
 
 > **Order matters: the guard comes before anything serves.** Scope the API's budget first,
 > so the new project's first spend cannot land on the API's kill-switch. Then create the
@@ -131,10 +138,10 @@ read back as project **numbers**: compare against
 - the dashboard function's env and its runtime and trigger service accounts;
 - `explore-killswitch` has no binding on `uspv-api`.
 
-Then, against a running version. Before #277 ships the app, that is a **throwaway
-placeholder**, deployed from a scratch directory (never under `dashboard/`, which is
-#277's): a one-route app whose `app.yaml` pins the instance count, so "instances reach 0"
-can fail rather than happen through idleness:
+Then, against a running version whose `app.yaml` pins the instance count, so "instances
+reach 0" can fail rather than happen through idleness. The dashboard's own `app.yaml` does
+(§9). Before #277 shipped the app, #283 used a **throwaway placeholder** deployed from a
+scratch directory, kept here for the record:
 
 ```yaml
 # app.yaml (plus a main.py serving "ok" on /, and requirements.txt with gunicorn + flask)
@@ -151,9 +158,9 @@ HOST=$(gcloud app describe --project=uspv-explore --format='value(defaultHostnam
 
 The build runs as `explore-run`, so the §5 build grants must be in place first (App
 Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment)
-covers the errors a missing one produces). Once #277 maps the domain, it re-runs probes 2 and 3
-below with `HOST` set to the `explore.` hostname. The instance-count checks in probe 2
-mean something only if that version pins `min_instances: 1` as the placeholder does.
+covers the errors a missing one produces). With the domain mapped (§8), run probes 2 and 3
+with `HOST=explore.us-presidential-election-center.org`. The instance-count checks in probe
+2 mean something only if the serving version pins `min_instances: 1`.
 
 1. **Below threshold:** publish `{"costAmount": 1, "budgetAmount": 5}` to
    `dashboard-budget-alerts`; the function logs `under threshold` and the app stays
@@ -165,3 +172,183 @@ mean something only if that version pins `min_instances: 1` as the placeholder d
    `https://api.us-presidential-election-center.org/health` still returns 200 and Cloud Run
    `usvote-api` keeps `max_instance_count = 1`.
 3. **Un-pause** as the kill-switch README gives, and confirm the app serves again.
+
+## 7. The deploy identity (WIF)
+
+A pool of its own in `uspv-explore`, so nothing that can edit the API's deploy identity can
+reach the dashboard's. The provider is locked to this repository **and** to the dashboard
+workflow file.
+
+```
+GH_REPO=frederick-douglas-pearce/us-presidential-vote-analysis
+gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project="$PROJECT"
+gcloud iam workload-identity-pools create github --location=global \
+  --display-name="GitHub" --project="$PROJECT"
+gcloud iam workload-identity-pools providers create-oidc github-actions \
+  --location=global --workload-identity-pool=github --project="$PROJECT" \
+  --display-name="GitHub Actions" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.workflow_ref=assertion.workflow_ref" \
+  --attribute-condition="assertion.repository=='${GH_REPO}' && assertion.workflow_ref.startsWith('${GH_REPO}/.github/workflows/deploy-dashboard.yml@')"
+POOL=$(gcloud iam workload-identity-pools describe github --location=global \
+  --project="$PROJECT" --format='value(name)')
+
+gcloud iam service-accounts create explore-deploy --project="$PROJECT" \
+  --display-name="Dashboard deploy (GitHub Actions)"
+DEPLOY_SA="explore-deploy@${PROJECT}.iam.gserviceaccount.com"
+gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" --project="$PROJECT" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/${POOL}/attribute.repository/${GH_REPO}"
+```
+
+Its roles, each as narrow as the deploy allows. `gcloud app deploy` uploads the source **as
+the caller**, so the deploy account needs the staging bucket too; the build itself runs as
+`explore-run` (§5).
+
+```
+for ROLE in roles/appengine.deployer roles/appengine.serviceAdmin \
+            roles/cloudbuild.builds.editor; do
+  gcloud projects add-iam-policy-binding "$PROJECT" \
+    --member="serviceAccount:${DEPLOY_SA}" --role="$ROLE"
+done
+gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --project="$PROJECT" \
+  --member="serviceAccount:${DEPLOY_SA}" --role=roles/iam.serviceAccountUser
+for ROLE in roles/storage.objectUser roles/storage.legacyBucketReader; do
+  gcloud storage buckets add-iam-policy-binding "$STAGING" \
+    --member="serviceAccount:${DEPLOY_SA}" --role="$ROLE"
+done
+```
+
+**Never grant it `roles/appengine.appAdmin`.** Un-pausing a kill-switched app
+(`USER_DISABLED` → `SERVING`) needs that role, so without it no deploy run can undo the
+kill-switch; un-pausing stays a deliberate human step (§6 probe 3).
+
+GitHub repository variables (Settings → Secrets and variables → Actions → Variables):
+`EXPLORE_GCP_PROJECT_ID` (`uspv-explore`), `EXPLORE_WIF_PROVIDER` (the provider's full
+resource name: `gcloud iam workload-identity-pools providers describe github-actions
+--location=global --workload-identity-pool=github --project="$PROJECT"
+--format='value(name)'`), `EXPLORE_DEPLOY_SA`, `EXPLORE_HOSTNAME`
+(`explore.us-presidential-election-center.org`) and `EXPLORE_APP_HOSTNAME` (the app's
+default host, `gcloud app describe --format='value(defaultHostname)'`, for the canary).
+
+## 8. The domain (before the first real deploy)
+
+The mapping is app-level, so it is made once, against whatever version serves. Doing it
+before the first real deploy is what lets the canonical host be a constant in
+`explore/config.py`: the app redirects the `appspot.com` host to `explore.` from its first
+version, and a browser caches a 301, so it must never point at a host that is not mapped yet.
+
+1. **Verify the apex in Search Console** as the Google account that runs `gcloud`:
+   `gcloud domains verify us-presidential-election-center.org` opens Search Console; choose
+   the **Domain** property and add the TXT record it gives to the Cloudflare zone. Confirm
+   with `gcloud domains list-user-verified`.
+2. **Map the host**, with a Google-managed certificate:
+   ```
+   gcloud app domain-mappings create explore.us-presidential-election-center.org \
+     --certificate-management=AUTOMATIC --project="$PROJECT"
+   ```
+   It prints the DNS record to create (a CNAME to `ghs.googlehosted.com.`).
+3. **Add the CNAME in Cloudflare as DNS only** (grey cloud), never proxied: the dashboard
+   is served by App Engine directly (D071(c)), and the zone's "Always use HTTPS" setting,
+   which the API sits under, is left as it is.
+4. **Wait for the certificate**: `gcloud app domain-mappings describe
+   explore.us-presidential-election-center.org --project="$PROJECT"` until
+   `sslSettings.certificateId` is set and `https://explore.…/` answers with a valid
+   certificate.
+
+## 9. Deploying
+
+Run **Deploy dashboard (App Engine)** (`.github/workflows/deploy-dashboard.yml`) from the
+Actions tab. It is `workflow_dispatch` only and waits on the `production` environment's
+reviewer, like the API's deploy. What it does, in the order that makes rollback automatic:
+
+1. exports `dashboard/requirements.txt` from the lock and refuses one that could install
+   `usvote` (`--no-emit-project`: the deployed runtime has no `usvote` to import);
+2. deploys a new version (`v-<sha12>-r<run>`) **without promoting it**;
+3. probes it on its own host, `https://<version>-dot-<app host>/`, with
+   [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh): the page shell is 200 and
+   names the canonical host, and the page content carries the snapshot version the API is
+   serving (the degraded page is a 200 too, so a status code alone proves nothing);
+4. moves all traffic to it and probes `explore.` the same way, then checks that the
+   `appspot.com` host 301s to `explore.`;
+5. only then deletes every other version, and asserts exactly one remains. `min_instances`
+   and `max_instances` are per-version settings, so a leftover version would keep its own
+   pinned instance running.
+
+If 3 or 4 fails, the workflow moves traffic back to the previous version and deletes the
+new one. The site keeps serving what it served before.
+
+`app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
+gunicorn worker (one process, so one cache) as `explore-run`, and carries no
+`env_variables`; `tests/unit/test_dashboard_guards.py` pins each of those.
+
+## 10. Redeploy and rollback
+
+- **Redeploy** the same code (after the kill-switch, say): run the workflow again. Version
+  ids are unique per run, so re-running a commit never collides with the serving version.
+- **Roll back** to an earlier commit: run the workflow on that commit (the "Use workflow
+  from" branch or tag selector). The previous version is always deleted after a successful
+  deploy, so there is nothing to switch traffic back to by hand; the automatic rollback in
+  §9 covers a deploy that fails its probes.
+- **Pause by hand** (abuse, or an incident): the same `PATCH` the
+  [kill-switch README](../deploy/killswitch/README.md) gives for un-pausing, with
+  `{"servingStatus": "USER_DISABLED"}`, or the console's **Disable application**. `gcloud
+  app update` has no serving-status flag. Un-pause as that README says.
+
+## 11. Monitoring and cost
+
+The daily [API canary](../.github/workflows/api-canary.yml) probes the dashboard too, when
+`EXPLORE_HOSTNAME` is set:
+
+- `https://explore.…/` is 200 at that hostname, with no redirect, and its canonical link
+  names it;
+- the page content (the Dash routing callback) is not the degraded message and carries the
+  snapshot version the API's `/health` reports. It retries past two refresh intervals
+  (5 min each) before failing, so an API deploy during the run is not a false alarm;
+- with `EXPLORE_APP_HOSTNAME` set, the `appspot.com` host 301s to `explore.`.
+
+**Declined: the browser-side `Origin` check.** #277's AC asks the canary to send
+`Origin: https://explore.…` and assert `Access-Control-Allow-Origin` *for a browser-side
+dashboard*. This one is server-side (D071(d)): the browser only ever talks to `explore.`,
+and App Engine fetches `/v1` with no `Origin` header, so CORS never applies and
+`API_CORS_ORIGINS` is deliberately unchanged. If a browser-side component is ever added,
+that story adds the origin and this check.
+
+**The degraded message** appears only when the cache is **empty** (a fresh instance that
+could not reach the API). A warm cache keeps serving the last snapshot it read when the API
+is down, which is correct under D034: snapshots are immutable, so the last one is still true.
+
+**Cost posture.** One F1 instance pinned all day uses 24 of the free tier's 28 F1
+instance-hours per day, per project, so compute is about $0 (D071(b)); `max_instances: 1`
+is a hard cap on instances. Egress is compressed (`compress=True`). The $5 budget and the
+kill-switch (§3–§4) pause the app at 100%, well inside the $10/month ceiling. **Residual
+exposure:** the origin is DNS-only, so Cloudflare does not stand in front of it, and abuse
+could run up egress before the budget's alerts (which lag by hours) fire the kill-switch.
+That is one of D071's flip conditions.
+
+## 12. Measuring cold start and load
+
+The MVP target (D071(g)): OG HTML in ≤ 1 s TTFB, and first data in ≤ 3 s for a cold shared
+link at 390 px on 10 Mbps / 100 ms.
+[`scripts/measure_dashboard_cold_start.py`](../scripts/measure_dashboard_cold_start.py)
+measures both from a fresh browser context each run. The server states worth measuring:
+
+- **Warm** (the ordinary case): run it.
+- **Dashboard cold**: right after a deploy (warmup has run), and after a kill-switch
+  un-pause (the instance starts from nothing).
+- **API edge cold**: purge the API's Cloudflare cache, wait for the API to scale to zero
+  (about 15 minutes idle), then restart the dashboard (redeploy, or pause and un-pause), so
+  the empty cache's warmup and first fills meet a cold edge and a cold origin. A purge
+  alone changes nothing a visitor sees: the dashboard serves from its in-process cache, and
+  the purge does not change `snapshot_version`, so no refetch happens. By design, a visitor
+  meets a cold API only on a cache miss.
+
+[`scripts/dashboard_load_test.py`](../scripts/dashboard_load_test.py) drives first-visit
+page loads (shell, every bundle, layout, dependencies, the routing callback) at a stated
+peak of 5 per second for 2 minutes against the single instance. Count the API calls it
+caused from the app's log (`api fetch` lines):
+
+```
+gcloud logging read 'resource.type="gae_app" AND textPayload:"api fetch"' \
+  --project="$PROJECT" --freshness=10m --format='value(timestamp,textPayload)'
+```

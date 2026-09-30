@@ -1,0 +1,168 @@
+# Deploy the public dashboard to App Engine standard (E9-S2, #277 / D071).
+#
+# Owner-run and keyless: Workload Identity Federation into the dashboard's own project
+# (`uspv-explore`), through a pool that lives in that project, so nothing about the API's
+# deploy identity can reach it. Gated behind the `production` GitHub Environment, the same
+# human gate the API deploy uses (deploy.yml).
+#
+# The order is the rollback story, so keep it:
+#   1. deploy the new version WITHOUT promoting it;
+#   2. probe it on its own version host (<version>-dot-<app host>);
+#   3. move all traffic to it;
+#   4. probe the public hostname;
+#   5. only then delete every other version (min_instances and max_instances are
+#      per-version settings, so a leftover version keeps a pinned instance running) and
+#      assert exactly one version remains.
+# A failure in 2-4 moves traffic back to the previous version and deletes the new one,
+# so a bad deploy costs a failed run, not an outage.
+#
+# Environment-specific values come from repo Variables (runbook: docs/deploy-dashboard.md):
+#   EXPLORE_GCP_PROJECT_ID, EXPLORE_WIF_PROVIDER, EXPLORE_DEPLOY_SA, EXPLORE_HOSTNAME
+#
+# Trigger is workflow_dispatch ONLY — never pull_request (a forked PR must not deploy).
+
+name: Deploy dashboard (App Engine)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this deploy (audit note)"
+        required: false
+        default: "manual deploy"
+
+permissions:
+  contents: read   # checkout
+  id-token: write  # mint the WIF OIDC token
+
+concurrency:
+  group: deploy-dashboard
+  cancel-in-progress: false  # never cancel an in-flight deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      PROJECT: ${{ vars.EXPLORE_GCP_PROJECT_ID }}
+      EXPLORE_HOST: ${{ vars.EXPLORE_HOSTNAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # The runtime's whole dependency closure is the lock's `dashboard` group. Exported,
+      # never committed, so it cannot drift from uv.lock. --no-emit-project leaves the
+      # usvote package itself out, which is what makes D070(b) physical in production:
+      # the deployed app has no usvote to import.
+      - name: Export requirements.txt from the lock
+        run: |
+          set -euo pipefail
+          uv export --frozen --only-group dashboard --no-emit-project \
+            -o dashboard/requirements.txt
+          if grep -Eiq '^(usvote|-e |\.)' dashboard/requirements.txt; then
+            echo "::error::the exported requirements would install usvote or a local path"
+            exit 1
+          fi
+          grep -Eq '^dash==' dashboard/requirements.txt
+          grep -Eq '^gunicorn==' dashboard/requirements.txt
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.EXPLORE_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.EXPLORE_WIF_PROVIDER }}
+          service_account: ${{ vars.EXPLORE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Record the serving version
+        id: before
+        run: |
+          set -euo pipefail
+          PREVIOUS=$(gcloud app versions list --project="$PROJECT" --service=default \
+            --filter='traffic_split>0' --format='value(id)' | head -n1)
+          APP_HOST=$(gcloud app describe --project="$PROJECT" --format='value(defaultHostname)')
+          # Unique per run, so re-running one commit never collides with a serving version.
+          VERSION="v-${GITHUB_SHA::12}-r${GITHUB_RUN_NUMBER}"
+          echo "previous=${PREVIOUS}" >> "$GITHUB_OUTPUT"
+          echo "app_host=${APP_HOST}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "serving: ${PREVIOUS:-none}; deploying: ${VERSION}"
+
+      - name: Deploy without promoting
+        id: deploy
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+        run: |
+          set -euo pipefail
+          gcloud app deploy dashboard/app.yaml --project="$PROJECT" \
+            --version="$VERSION" --no-promote --quiet
+
+      # scripts/probe_dashboard.sh says what "serving" means: the page shell plus page
+      # content carrying the API's live snapshot version (the degraded page is a 200 too).
+      - name: Probe the new version on its own host
+        id: probe_version
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+          APP_HOST: ${{ steps.before.outputs.app_host }}
+        run: scripts/probe_dashboard.sh "https://${VERSION}-dot-${APP_HOST}" "$EXPLORE_HOST"
+
+      - name: Move all traffic to the new version
+        id: traffic
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+        run: |
+          set -euo pipefail
+          gcloud app services set-traffic default --project="$PROJECT" \
+            --splits="${VERSION}=1" --quiet
+
+      - name: Probe the public hostname
+        id: probe_public
+        run: scripts/probe_dashboard.sh "https://${EXPLORE_HOST}" "$EXPLORE_HOST"
+
+      - name: The vendor host redirects to the public hostname
+        id: probe_redirect
+        env:
+          APP_HOST: ${{ steps.before.outputs.app_host }}
+        run: |
+          set -euo pipefail
+          loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${APP_HOST}/")
+          [ "$loc" = "301 https://${EXPLORE_HOST}/" ] || { echo "::error::https://${APP_HOST}/ answered '${loc}'"; exit 1; }
+          echo "  ✓ ${APP_HOST} → ${EXPLORE_HOST}"
+
+      - name: Roll back
+        if: ${{ failure() && steps.deploy.outcome == 'success' }}
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+          PREVIOUS: ${{ steps.before.outputs.previous }}
+        run: |
+          set -uo pipefail
+          if [ -n "$PREVIOUS" ]; then
+            gcloud app services set-traffic default --project="$PROJECT" \
+              --splits="${PREVIOUS}=1" --quiet
+            echo "traffic restored to ${PREVIOUS}"
+          fi
+          gcloud app versions delete "$VERSION" --project="$PROJECT" --service=default --quiet
+          echo "::error::deploy of ${VERSION} rolled back"
+
+      - name: Delete every other version
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+        run: |
+          set -euo pipefail
+          others=$(gcloud app versions list --project="$PROJECT" --service=default \
+            --format='value(id)' | grep -vx "$VERSION" || true)
+          if [ -n "$others" ]; then
+            # shellcheck disable=SC2086
+            gcloud app versions delete $others --project="$PROJECT" --service=default --quiet
+          fi
+          remaining=$(gcloud app versions list --project="$PROJECT" --service=default --format='value(id)')
+          if [ "$remaining" != "$VERSION" ]; then
+            echo "::error::expected exactly one version (${VERSION}); found: ${remaining//$'\n'/, }"
+            exit 1
+          fi
+          echo "  ✓ one version: ${VERSION}"

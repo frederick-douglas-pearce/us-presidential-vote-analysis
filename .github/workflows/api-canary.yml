@@ -1,4 +1,5 @@
-# Scheduled canary for the PUBLIC API surface (#194; the #148 failure class).
+# Scheduled canary for the PUBLIC API surface (#194; the #148 failure class) and, since
+# #277, the public dashboard that reads it.
 #
 # #148 was a Cloudflare edge setting (Bot Fight Mode) that 403'd every non-browser client
 # from a datacenter ASN for 34 days — this repo's CI, and every real consumer of the API
@@ -12,7 +13,9 @@
 # 200" is also exactly what a lock that has fallen open looks like — the pair is the
 # evidence, never either half.
 #
-# Read-only: GETs against the public API. No secrets, no GCP auth, no deploy.
+# Read-only: GETs against the public API, plus the dashboard's page shell and the Dash
+# routing callback (a POST that renders the page and changes nothing). No secrets, no GCP
+# auth, no deploy.
 name: API canary (public surface)
 
 on:
@@ -32,7 +35,8 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 for the API checks, plus up to 12 minutes of the dashboard's retry window.
+    timeout-minutes: 25
     # Never checks out, never calls the API — no token needed at all.
     permissions: {}
     # No hostname, no public surface to check (a fresh clone, a fork).
@@ -46,6 +50,9 @@ jobs:
           # here. The origin lock is what protects the origin, not obscurity — but there
           # is no reason to publish the bypass target either.
           RAW_ORIGIN_URL: ${{ vars.RAW_ORIGIN_URL }}
+          # The public dashboard (#277) and its App Engine default host.
+          EXPLORE_HOST: ${{ vars.EXPLORE_HOSTNAME }}
+          EXPLORE_APP_HOST: ${{ vars.EXPLORE_APP_HOSTNAME }}
         run: |
           set -uo pipefail
           FAILURES=0
@@ -124,6 +131,59 @@ jobs:
             # /health's `origin_guard` is the service reporting the guard is ARMED, which
             # is not evidence it FIRES. Only a request from outside proves that.
             echo "::warning::raw origin-lock check skipped — set the RAW_ORIGIN_URL variable to verify the /v1 lock from outside"
+          fi
+
+          # The public dashboard (#277), the API's first consumer. Server-side (D071(d)): it
+          # fetches /v1 from App Engine with no Origin header, so there is no CORS
+          # allow-list to assert here; #277's browser-side Origin/ACAO check is declined
+          # for that reason (docs/deploy-dashboard.md §11).
+          if [ -n "${EXPLORE_HOST}" ]; then
+            echo "=== the dashboard (https://${EXPLORE_HOST}) ==="
+            # The page shell: 200 at the public hostname itself, no redirect, and its
+            # canonical link names that hostname.
+            if expect_status "dashboard /" "https://${EXPLORE_HOST}/" 200; then
+              grep -q "rel=\"canonical\" href=\"https://${EXPLORE_HOST}/\"" "$BODY" \
+                || fail "dashboard / has no canonical link to https://${EXPLORE_HOST}/"
+            fi
+
+            # The page content, fetched the way a browser renders it (the Dash Pages
+            # routing callback). A 200 alone proves nothing: the degraded page ("the
+            # data service isn't responding") is a 200 too. So it must carry a snapshot
+            # version, and — once the dashboard's refresher has had time to notice an API
+            # deploy (TTL 5 min) — the same version the API's /health reports.
+            ROUTING='{"output":".._pages_content.children..._pages_store.data..","outputs":[{"id":"_pages_content","property":"children"},{"id":"_pages_store","property":"data"}],"inputs":[{"id":"_pages_location","property":"pathname","value":"/"},{"id":"_pages_location","property":"search","value":""}],"changedPropIds":["_pages_location.pathname"],"state":[]}'
+            dash_ok=0
+            for i in $(seq 1 12); do
+              curl -sS -o "$BODY" --max-time 20 -H 'Content-Type: application/json' \
+                --data "$ROUTING" "https://${EXPLORE_HOST}/_dash-update-component" || true
+              if grep -q "isn't responding" "$BODY"; then
+                note="degraded (the dashboard cannot read the API)"
+              elif [ -n "$origin_version" ] && grep -q "$origin_version" "$BODY"; then
+                dash_ok=1; break
+              elif [ -z "$origin_version" ] && grep -Eq '[0-9a-f]{64}' "$BODY"; then
+                dash_ok=1; break
+              else
+                note="not serving the API's snapshot ${origin_version:0:12}…"
+              fi
+              # 12 × 60 s: past two refresher TTLs, so an API deploy mid-run is not a failure.
+              [ "$i" -lt 12 ] && sleep 60
+            done
+            if [ "$dash_ok" -eq 1 ]; then
+              echo "  ✓ dashboard content carries the live snapshot"
+            else
+              fail "dashboard content: ${note:-no response}"
+              head -c 600 "$BODY"; echo
+            fi
+
+            # The vendor host must hand visitors to the public hostname.
+            if [ -n "${EXPLORE_APP_HOST}" ]; then
+              loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${EXPLORE_APP_HOST}/" || echo "000")
+              [ "$loc" = "301 https://${EXPLORE_HOST}/" ] \
+                && echo "  ✓ ${EXPLORE_APP_HOST} → ${EXPLORE_HOST}" \
+                || fail "https://${EXPLORE_APP_HOST}/ answered '${loc}', want a 301 to https://${EXPLORE_HOST}/"
+            fi
+          else
+            echo "::warning::dashboard checks skipped — set the EXPLORE_HOSTNAME variable"
           fi
 
           if [ "$FAILURES" -ne 0 ]; then
