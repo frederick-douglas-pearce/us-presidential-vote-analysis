@@ -21,10 +21,11 @@ These are the only acceptance guard for three promises the public dashboard make
 behavioural check; it covers the paths it drives (warmup, the page shell, the page
 render) with the API refused, which is every network path the skeleton has. A path that
 runs only after a *successful* response (prefetching a second path, a fill on a miss) is
-not reached, and #278's second registered path is where that coverage has to grow. One
+not reached; #293 grows that coverage, before or with #278's second registered path. One
 limit of the audit hook itself: a raw ``connect`` to a *hostname* resolves the name
-before the ``socket.connect`` event fires, so with the network cut it fails unrecorded;
-the lint's ban on importing ``socket`` is what covers raw sockets. The
+before the ``socket.connect`` event fires, so with the network cut it fails unrecorded.
+Raw sockets to a hostname are covered only by the lint's denylist (``socket``, ``http``,
+``ssl``, …), which catches the obvious imports, not every module that can open one. The
 AST pass is a lint against *accidental* regressions: a second HTTP client, a file read,
 a dynamic import. It is not a sandbox against code written to evade it (a name built at
 runtime, say), and it does not claim to be.
@@ -80,7 +81,8 @@ def _run(program: str) -> subprocess.CompletedProcess[str]:
 
 
 #: Installed before anything else runs: every ``usvote`` import attempt recorded and
-#: refused, and every socket host recorded and refused (so the program is offline).
+#: refused, and every socket host recorded and refused (so no connection the hook sees
+#: can succeed).
 _PRELUDE = """
 import sys
 

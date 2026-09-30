@@ -30,7 +30,7 @@ from explore import api
 from explore import app as appmod
 
 #: Written out rather than imported from ``explore.config``: a test that read the host
-#: from the module under test would move with it (r1.guard-efficacy.16).
+#: from the module under test would move with it.
 CANONICAL_HOST = "explore.us-presidential-election-center.org"
 PUBLIC_API_BASE = "https://api.us-presidential-election-center.org"
 

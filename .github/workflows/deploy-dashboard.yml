@@ -154,12 +154,21 @@ jobs:
         env:
           VERSION: ${{ steps.before.outputs.version }}
           PREVIOUS: ${{ steps.before.outputs.previous }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
         run: |
           set -uo pipefail
           rc=0
-          exists() { gcloud app versions describe "$1" --project="$PROJECT" --service=default >/dev/null 2>&1; }
-          if ! exists "$VERSION"; then
-            echo "version ${VERSION} was never created; nothing to roll back"
+          # A deploy that did not succeed never moved traffic (it is --no-promote, and the
+          # traffic step comes later), so the only question left is a leftover version.
+          # When the deploy succeeded, restore traffic unconditionally: no lookup whose
+          # failure could be mistaken for "nothing to do".
+          if [ "$DEPLOY_OUTCOME" != "success" ]; then
+            if gcloud app versions describe "$VERSION" --project="$PROJECT" --service=default >/dev/null; then
+              gcloud app versions delete "$VERSION" --project="$PROJECT" --service=default --quiet \
+                || echo "::warning::the deploy failed and ${VERSION} exists but could not be deleted; it pins an instance until deleted (docs/deploy-dashboard.md §10)"
+            else
+              echo "::warning::the deploy did not succeed and ${VERSION} could not be found; if it exists (a cancelled deploy can still create it), delete it (docs/deploy-dashboard.md §10)"
+            fi
             exit 0
           fi
           if [ -z "$PREVIOUS" ] || [ "$PREVIOUS" = "$VERSION" ]; then

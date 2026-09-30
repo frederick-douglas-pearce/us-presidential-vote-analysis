@@ -12,7 +12,7 @@ Three properties hold here, and the tests pin each one:
   response stays correct until the version changes, and the cache is replaced whole
   when it does: :meth:`Client.refresh` prefetches every registered URL into a new
   :class:`Snapshot` and swaps it in with one assignment. A failed prefetch leaves the
-  old snapshot serving. A snapshot never stores a response from another version: a
+  old snapshot serving. ``/v1/meta``'s body defines a snapshot's version; every other
   response is stored only in the snapshot whose version its ``ETag`` names. (What one
   page render reads is not pinned to one snapshot; that matters once a page reads more
   than one path, and #278 owns it.)
@@ -328,7 +328,11 @@ class Client:
                 # into a stream of retries.
                 self._sleep(self._retry_backoff)
             else:
-                # A wake-up requested while that refresh ran is answered by it too.
+                # Cleared so a cold start's wake-up (set while this first refresh
+                # ran) does not cost a second /v1/meta. A version-mismatch wake-up set
+                # during the refresh is dropped here too; the next mismatched miss or
+                # the TTL answers it. Reachable only once a page reads a path that is
+                # not prefetched (#278, FU-1).
                 self._wake.clear()
                 self._wake.wait(self._ttl)
 

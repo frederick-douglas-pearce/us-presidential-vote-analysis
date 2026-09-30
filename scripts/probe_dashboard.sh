@@ -13,8 +13,10 @@
 # is re-read on every try, and the one read first is accepted too, so an API cutover
 # during a dashboard deploy does not fail a good deploy.
 #
-# Worst case: tries × (15 s + 15 s + 5 s + the API read). The default 12 tries stays
-# inside the 8-minute step timeout the workflow sets.
+# The default 12 tries is sized for a cold instance warming up (a failing try is quick,
+# ≈ 5–6 s). If every call hangs instead, a try can take 50 s (three 15 s requests and the
+# 5 s sleep), and the workflow's 8-minute step timeout ends the probe first; the step
+# then fails and the rollback runs, but this script's own error line is not printed.
 set -uo pipefail
 
 BASE="${1:?base url}"
