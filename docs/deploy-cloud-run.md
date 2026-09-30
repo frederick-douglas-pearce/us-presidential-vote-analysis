@@ -357,6 +357,12 @@ Budget Pub/Sub alert crossing your threshold, sets the service to `--max-instanc
 alerts** at 50/90/100% (Billing → Budgets & alerts). At free-tier traffic you'll never hit
 it — it's the backstop, not the plan.
 
+**Scope the budget to project `uspv-api`** (its `budgetFilter.projects` lists only
+`uspv-api`). Unscoped, a budget covers the whole billing account, so spend in any other
+project on it, the dashboard's included, would pause the API. The dashboard has its own
+budget and kill-switch in its own project ([`docs/deploy-dashboard.md`](deploy-dashboard.md)).
+Un-pause the API by re-running the Deploy workflow (§8), after resolving the cause.
+
 ## 10. Monitoring: the API canary and its dead-man's switch (#194, #197)
 
 [`.github/workflows/api-canary.yml`](../.github/workflows/api-canary.yml) probes the **public**

@@ -114,8 +114,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 # published share card looks like (render-og-card.py). Their tests import them by
 # path, so before this widening mypy checked the call sites and not the
 # definitions. The cost was two real findings in render-og-card.py; the ongoing
-# cost is that a new tooling/ script must carry annotations.
-files = ["src", "tests", "tooling"]
+# cost is that a new tooling/ script must carry annotations. `deploy` joined in #283
+# for the same reason: the budget kill-switch's tests load deploy/killswitch/main.py
+# by path, and it is the code authorized to pause the live API and dashboard.
+files = ["src", "tests", "tooling", "deploy"]
 # Pragmatic strictness (issue #19): require annotations and surface the common
 # unsoundness (implicit Optional, unreachable code, silently-Any returns, stale
 # ignores). Not full `strict = true` yet — `disallow_any_*` would drown in the
@@ -140,6 +142,12 @@ strict_equality = true
 # numpy all ship py.typed, so they need no override.)
 [[tool.mypy.overrides]]
 module = ["pandas", "pandas.*", "geopandas", "geopandas.*", "psycopg2", "psycopg2.*"]
+ignore_missing_imports = true
+
+# The kill-switch's Cloud Function deps (deploy/killswitch/requirements.txt) are
+# installed by Cloud Functions at deploy time and are deliberately not in uv.lock (#283).
+[[tool.mypy.overrides]]
+module = ["functions_framework", "cloudevents", "cloudevents.*", "google", "google.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
