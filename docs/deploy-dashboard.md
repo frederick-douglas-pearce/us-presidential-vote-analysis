@@ -124,8 +124,9 @@ HOST=$(gcloud app describe --project=uspv-explore --format='value(defaultHostnam
 
 A brand-new project's first deploy can fail on the Cloud Build identity's permissions
 (App Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment));
-record what it needed, for #277. Once #277 maps the domain, it re-runs probe 2 below
-against `explore.`.
+record what it needed, for #277. Once #277 maps the domain, it re-runs probes 2 and 3
+below with `HOST` set to the `explore.` hostname. The instance-count checks in probe 2
+mean something only if that version pins `min_instances: 1` as the placeholder does.
 
 1. **Below threshold:** publish `{"costAmount": 1, "budgetAmount": 5}` to
    `dashboard-budget-alerts`; the function logs `under threshold` and the app stays

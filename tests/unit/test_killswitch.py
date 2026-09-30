@@ -214,8 +214,9 @@ class TestNoPause:
     ) -> None:
         load(env).budget_killswitch(_event(cost=4.99, budget=5))
         assert (calls.run_clients, calls.appengine_clients) == (0, 0)
-        # The live below-threshold probes key on this line; the target token is what tells
-        # a post-#283 revision of the API function from the one it replaced.
+        # The below-threshold probes (docs/deploy-dashboard.md §6 probe 1,
+        # docs/deploy-cloud-run.md §9) key on this line; §9 keys on the target token too,
+        # to tell a post-#283 revision of the API function from the one it replaced.
         out = capsys.readouterr().out
         assert "under threshold" in out
         assert f"target={env['KILLSWITCH_TARGET']}" in out
