@@ -1,5 +1,11 @@
 # Cloud Function deps (installed by Cloud Functions at deploy; NOT part of the usvote
 # package or its lock — this is a standalone GCP function, deployed from deploy/killswitch/).
-functions-framework>=3.5
-cloudevents>=1.10
-google-cloud-run>=0.10
+# Nothing locks these. Each floor is the version tests/unit/test_killswitch.py's fakes were
+# checked against; each ceiling stops the next breaking release (for the 0.x
+# google-cloud-run, that is the next minor). Raising one means re-checking the fakes and
+# re-running the probes in docs/deploy-dashboard.md §6 (the API target has only its
+# below-threshold probe, in docs/deploy-cloud-run.md §9).
+functions-framework>=3.10,<4
+cloudevents>=1.12,<2
+google-cloud-run>=0.16,<0.17
+google-cloud-appengine-admin>=1.18,<2
