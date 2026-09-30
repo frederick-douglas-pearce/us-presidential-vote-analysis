@@ -13,8 +13,11 @@
 #   5. only then delete every other version (min_instances and max_instances are
 #      per-version settings, so a leftover version keeps a pinned instance running) and
 #      assert exactly one version remains.
-# A failure in 2-4 moves traffic back to the previous version and deletes the new one,
-# so a bad deploy costs a failed run, not an outage.
+# A failure or cancellation in 2-4 moves traffic back to the previous version and deletes
+# the new one, so a bad deploy costs a failed run, not an outage. Each probe carries its
+# own step timeout, so a hung probe fails its step (and rolls back) well inside the job's
+# timeout rather than being cancelled with it. A failure in 5 leaves the new version
+# serving and an old one behind; the job fails and says which versions to delete.
 #
 # Environment-specific values come from repo Variables (runbook: docs/deploy-dashboard.md):
 #   EXPLORE_GCP_PROJECT_ID, EXPLORE_WIF_PROVIDER, EXPLORE_DEPLOY_SA, EXPLORE_HOSTNAME
@@ -42,7 +45,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Build (≈6 min measured) + two probes (≤ 8 min each, their step timeouts) + the rest.
+    timeout-minutes: 40
     environment: production
     env:
       PROJECT: ${{ vars.EXPLORE_GCP_PROJECT_ID }}
@@ -86,8 +90,14 @@ jobs:
           PREVIOUS=$(gcloud app versions list --project="$PROJECT" --service=default \
             --filter='traffic_split>0' --format='value(id)' | head -n1)
           APP_HOST=$(gcloud app describe --project="$PROJECT" --format='value(defaultHostname)')
-          # Unique per run, so re-running one commit never collides with a serving version.
-          VERSION="v-${GITHUB_SHA::12}-r${GITHUB_RUN_NUMBER}"
+          # Unique per run *attempt*: "Re-run jobs" keeps the run number and the SHA, and
+          # only the attempt changes. Deploying onto an existing version would replace it
+          # in place, before any probe, so an existing id is refused outright.
+          VERSION="v-${GITHUB_SHA::12}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
+          if gcloud app versions describe "$VERSION" --project="$PROJECT" --service=default >/dev/null 2>&1; then
+            echo "::error::version ${VERSION} already exists; refusing to deploy over it"
+            exit 1
+          fi
           echo "previous=${PREVIOUS}" >> "$GITHUB_OUTPUT"
           echo "app_host=${APP_HOST}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -106,6 +116,7 @@ jobs:
       # content carrying the API's live snapshot version (the degraded page is a 200 too).
       - name: Probe the new version on its own host
         id: probe_version
+        timeout-minutes: 8
         env:
           VERSION: ${{ steps.before.outputs.version }}
           APP_HOST: ${{ steps.before.outputs.app_host }}
@@ -122,47 +133,76 @@ jobs:
 
       - name: Probe the public hostname
         id: probe_public
+        timeout-minutes: 8
         run: scripts/probe_dashboard.sh "https://${EXPLORE_HOST}" "$EXPLORE_HOST"
 
       - name: The vendor host redirects to the public hostname
         id: probe_redirect
+        timeout-minutes: 2
         env:
           APP_HOST: ${{ steps.before.outputs.app_host }}
         run: |
           set -euo pipefail
-          loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${APP_HOST}/")
+          loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${APP_HOST}/") || loc="curl failed"
           [ "$loc" = "301 https://${EXPLORE_HOST}/" ] || { echo "::error::https://${APP_HOST}/ answered '${loc}'"; exit 1; }
           echo "  ✓ ${APP_HOST} → ${EXPLORE_HOST}"
 
+      # Runs when anything from the deploy through the redirect probe failed, timed out
+      # or was cancelled — never after the probes all passed (a cleanup failure is below).
       - name: Roll back
-        if: ${{ failure() && steps.deploy.outcome == 'success' }}
+        if: ${{ (failure() || cancelled()) && steps.before.outcome == 'success' && steps.probe_redirect.outcome != 'success' }}
         env:
           VERSION: ${{ steps.before.outputs.version }}
           PREVIOUS: ${{ steps.before.outputs.previous }}
         run: |
           set -uo pipefail
-          if [ -n "$PREVIOUS" ]; then
-            gcloud app services set-traffic default --project="$PROJECT" \
-              --splits="${PREVIOUS}=1" --quiet
-            echo "traffic restored to ${PREVIOUS}"
+          rc=0
+          exists() { gcloud app versions describe "$1" --project="$PROJECT" --service=default >/dev/null 2>&1; }
+          if ! exists "$VERSION"; then
+            echo "version ${VERSION} was never created; nothing to roll back"
+            exit 0
           fi
-          gcloud app versions delete "$VERSION" --project="$PROJECT" --service=default --quiet
-          echo "::error::deploy of ${VERSION} rolled back"
+          if [ -z "$PREVIOUS" ] || [ "$PREVIOUS" = "$VERSION" ]; then
+            echo "::error::no previous version to restore; ${VERSION} is left in place — check it and delete it by hand if it is not serving (docs/deploy-dashboard.md §10)"
+            exit 1
+          fi
+          gcloud app services set-traffic default --project="$PROJECT" \
+            --splits="${PREVIOUS}=1" --quiet || rc=1
+          if [ "$rc" -eq 0 ]; then
+            gcloud app versions delete "$VERSION" --project="$PROJECT" --service=default --quiet || rc=1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::deploy of ${VERSION} failed; rolled back to ${PREVIOUS} and deleted ${VERSION}"
+          else
+            echo "::error::ROLLBACK FAILED: traffic may still be on ${VERSION}, and it may still exist — restore ${PREVIOUS} by hand (docs/deploy-dashboard.md §10)"
+          fi
+          exit "$rc"
 
       - name: Delete every other version
+        id: cleanup
         env:
           VERSION: ${{ steps.before.outputs.version }}
         run: |
           set -euo pipefail
-          others=$(gcloud app versions list --project="$PROJECT" --service=default \
-            --format='value(id)' | grep -vx "$VERSION" || true)
-          if [ -n "$others" ]; then
+          for attempt in 1 2 3; do
+            others=$(gcloud app versions list --project="$PROJECT" --service=default \
+              --format='value(id)' | grep -vx "$VERSION" || true)
+            [ -z "$others" ] && break
             # shellcheck disable=SC2086
-            gcloud app versions delete $others --project="$PROJECT" --service=default --quiet
-          fi
+            gcloud app versions delete $others --project="$PROJECT" --service=default --quiet \
+              && break || sleep 15
+          done
           remaining=$(gcloud app versions list --project="$PROJECT" --service=default --format='value(id)')
           if [ "$remaining" != "$VERSION" ]; then
             echo "::error::expected exactly one version (${VERSION}); found: ${remaining//$'\n'/, }"
             exit 1
           fi
           echo "  ✓ one version: ${VERSION}"
+
+      # The new version passed every probe and serves, but an old one is still there,
+      # pinning an instance (and spending the budget) until someone deletes it.
+      - name: Report a cleanup failure
+        if: ${{ failure() && steps.probe_redirect.outcome == 'success' }}
+        run: |
+          echo "::error::the new version serves, but other versions remain: delete them with 'gcloud app versions list/delete' (docs/deploy-dashboard.md §10)"
+          exit 1

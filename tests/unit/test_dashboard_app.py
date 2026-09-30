@@ -9,10 +9,13 @@ runtime, one API host, no data files, ``app.yaml`` pins) are in
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import http.client
 import http.server
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -25,7 +28,14 @@ from dash.development.base_component import Component
 
 from explore import api
 from explore import app as appmod
-from explore.config import CANONICAL_HOST
+
+#: Written out rather than imported from ``explore.config``: a test that read the host
+#: from the module under test would move with it (r1.guard-efficacy.16).
+CANONICAL_HOST = "explore.us-presidential-election-center.org"
+PUBLIC_API_BASE = "https://api.us-presidential-election-center.org"
+
+#: The process client as the app built it, captured before any fixture replaces it.
+PROCESS_CLIENT = api.CLIENT
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "dashboard" / "v1_meta.json"
 META: dict[str, Any] = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -100,7 +110,22 @@ def offline_client(fetch: Any = None, **kwargs: Any) -> api.Client:
     if fetch is None:
         fetch, _ = fake_fetch({api.META_PATH: META})
     kwargs.setdefault("bucket", api.TokenBucket(per_minute=6000, burst=1000))
+    kwargs.setdefault("max_request_wait", 1.0)
+    # Long by default, so a refresher left running by a failing test sleeps quietly.
+    kwargs.setdefault("retry_backoff", 3600)
     return api.Client(fetch=fetch, **kwargs)
+
+
+class RecordingBucket(api.TokenBucket):
+    """A real bucket that also records every acquire and the wait it was allowed."""
+
+    def __init__(self) -> None:
+        super().__init__(per_minute=6000, burst=1000)
+        self.waits: list[float | None] = []
+
+    def acquire(self, max_wait: float | None) -> None:
+        self.waits.append(max_wait)
+        super().acquire(max_wait)
 
 
 @pytest.fixture(autouse=True)
@@ -111,16 +136,50 @@ def _offline_process_client(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- rendering ---------------------------------------------------------------------
 
 
+def sentinel_meta() -> dict[str, Any]:
+    """META with a distinct value for every provenance field the page shows."""
+    meta = copy.deepcopy(META)
+    p = meta["provenance"]
+    for key in (
+        "ec_source_name",
+        "ec_license",
+        "source_name",
+        "license",
+        "census_source_name",
+        "census_license",
+    ):
+        p[key] = f"SENTINEL-{key}"
+    for key in ("ec_license_url", "license_url", "census_license_url"):
+        p[key] = f"https://sentinel.example/{key}"
+    p["snapshot_version"] = "SENTINEL-version"
+    return meta
+
+
+def list_items(node: Any) -> list[Any]:
+    if isinstance(node, (list, tuple)):
+        return [li for child in node for li in list_items(child)]
+    if isinstance(node, Component):
+        own = [node] if type(node).__name__ == "Li" else []
+        return own + list_items(getattr(node, "children", None))
+    return []
+
+
 class TestRender:
-    def test_names_all_three_sources_and_links_each_license(self) -> None:
-        tree = home_module()["render"](META)
-        text = " ".join(texts(tree))
-        p = META["provenance"]
-        for name in (p["ec_source_name"], p["source_name"], p["census_source_name"]):
-            assert name in text
-        assert sorted(hrefs(tree)) == sorted(
-            [p["ec_license_url"], p["license_url"], p["census_license_url"]]
-        )
+    def test_each_source_line_pairs_its_name_with_its_own_license_link(self) -> None:
+        """Every value comes from the response, and each link sits on its own line."""
+        tree = home_module()["render"](sentinel_meta())
+        by_label = {texts(li)[0]: li for li in list_items(tree) if "SENTINEL" in str(li)}
+        expected = {
+            "Electoral votes: ": ("ec_source_name", "ec_license", "ec_license_url"),
+            "Popular votes: ": ("source_name", "license", "license_url"),
+            "Population: ": ("census_source_name", "census_license", "census_license_url"),
+        }
+        assert set(by_label) == set(expected)
+        for label, (name, lic, url) in expected.items():
+            li = by_label[label]
+            assert f"SENTINEL-{name} (" in texts(li)
+            assert f"SENTINEL-{lic}" in texts(li)  # the link's text is the license
+            assert hrefs(li) == [f"https://sentinel.example/{url}"]
 
     def test_coverage_years_are_read_from_the_response_not_literals(self) -> None:
         meta = copy.deepcopy(META)
@@ -136,7 +195,18 @@ class TestRender:
         assert "1976" not in text
 
     def test_shows_the_snapshot_version(self) -> None:
-        assert VERSION in texts(home_module()["render"](META))
+        assert "SENTINEL-version" in texts(home_module()["render"](sentinel_meta()))
+
+    def test_the_link_preview_text_states_no_years(self) -> None:
+        """The index never waits on the API, so it cannot carry a second coverage copy."""
+        description = dash.page_registry["pages.home"]["description"]
+        assert not any(ch.isdigit() for ch in description)
+
+    def test_a_value_of_an_unexpected_type_renders_as_text(self) -> None:
+        meta = copy.deepcopy(META)
+        meta["provenance"]["license"] = {"not": "a string"}
+        tree = home_module()["render"](meta)
+        assert "{'not': 'a string'}" in texts(tree)
 
     def test_the_page_renders_through_the_routing_callback(self) -> None:
         client = appmod.server.test_client()
@@ -254,11 +324,23 @@ class TestDegraded:
 
 
 class TestBuildUrl:
-    def test_builds_on_the_public_host(self) -> None:
-        assert (
+    @pytest.mark.parametrize(
+        "path",
+        ["/v1/meta", "/v1/elections", "/v1/elections/2000/summary", "/v1/states/OH"],
+    )
+    def test_builds_on_the_public_host(self, path: str) -> None:
+        assert api.build_url(path) == PUBLIC_API_BASE + path
+
+    def test_the_host_check_refuses_a_base_that_moved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scheme/host check, not only the path pattern, keeps requests on the host."""
+        monkeypatch.setattr(api, "API_BASE", "https://usvote-api-x.a.run.app")
+        with pytest.raises(ValueError):
             api.build_url("/v1/meta")
-            == "https://api.us-presidential-election-center.org/v1/meta"
-        )
+        monkeypatch.setattr(api, "API_BASE", "http://api.us-presidential-election-center.org")
+        with pytest.raises(ValueError):
+            api.build_url("/v1/meta")
 
     @pytest.mark.parametrize(
         "path",
@@ -280,12 +362,21 @@ class TestBuildUrl:
 
 
 class _FakeRaw:
-    def __init__(self, status: int, body: bytes, etag: str | None) -> None:
+    def __init__(
+        self,
+        status: int,
+        body: bytes,
+        etag: str | None,
+        read_error: BaseException | None = None,
+    ) -> None:
         self.status = status
         self.headers = {"ETag": etag} if etag else {}
         self._body = body
+        self._read_error = read_error
 
     def read(self) -> bytes:
+        if self._read_error is not None:
+            raise self._read_error
         return self._body
 
     def __enter__(self) -> _FakeRaw:
@@ -299,9 +390,11 @@ class _FakeOpener:
     def __init__(self, result: Any) -> None:
         self.result = result
         self.requests: list[urllib.request.Request] = []
+        self.timeouts: list[float] = []
 
     def open(self, request: urllib.request.Request, timeout: float) -> Any:
         self.requests.append(request)
+        self.timeouts.append(timeout)
         if isinstance(self.result, BaseException):
             raise self.result
         return self.result
@@ -339,6 +432,11 @@ class TestFetch:
             _FakeRaw(200, b"<html>not json</html>", None),
             _FakeRaw(200, b"[1, 2]", None),
             _FakeRaw(204, b"", None),
+            # http.client errors urllib re-raises unwrapped (not OSError):
+            http.client.BadStatusLine("garbage"),
+            http.client.LineTooLong("header line"),
+            _FakeRaw(200, b"{}", None, read_error=http.client.IncompleteRead(b"{")),
+            RuntimeError("anything else at the I/O boundary"),
         ],
     )
     def test_every_failure_becomes_api_unavailable(
@@ -347,6 +445,19 @@ class TestFetch:
         monkeypatch.setattr(api, "_OPENER", _FakeOpener(result))
         with pytest.raises(api.ApiUnavailable):
             api.fetch("/v1/meta")
+
+    def test_every_fetch_is_bounded_by_the_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        opener = _FakeOpener(_FakeRaw(200, b"{}", None))
+        monkeypatch.setattr(api, "_OPENER", opener)
+        api.fetch("/v1/meta")
+        assert opener.timeouts == [15.0]
+        assert api.FETCH_TIMEOUT_S == 15.0
+
+    def test_an_off_host_path_is_a_loud_error_not_an_unavailable_api(self) -> None:
+        with pytest.raises(ValueError):
+            api.fetch("//evil.example/v1/meta")
 
     @pytest.mark.parametrize(
         ("etag", "version"),
@@ -394,6 +505,15 @@ class TestOpener:
         assert caught.value.code == 302
         assert _RedirectHandler.hits == ["/start"]  # /elsewhere was never requested
 
+    def test_the_process_opener_has_no_proxy_and_no_redirect_handling(self) -> None:
+        """The opener fetch uses: no ProxyHandler at all, and only the refusing redirect."""
+        handlers = api._OPENER.handlers  # type: ignore[attr-defined]
+        assert not [h for h in handlers if isinstance(h, urllib.request.ProxyHandler)]
+        redirects = [
+            h for h in handlers if isinstance(h, urllib.request.HTTPRedirectHandler)
+        ]
+        assert redirects and all(isinstance(h, api._NoRedirect) for h in redirects)
+
     def test_honours_no_proxy_variable(
         self, monkeypatch: pytest.MonkeyPatch, redirect_server: str
     ) -> None:
@@ -418,12 +538,59 @@ class TestOpener:
 
 
 class TestCache:
-    def test_first_get_refreshes_then_serves_from_cache(self) -> None:
-        fetch, calls = fake_fetch({api.META_PATH: META})
-        client = offline_client(fetch)
+    def test_a_cold_get_is_filled_by_the_refresher_then_served_from_cache(self) -> None:
+        threads: list[str] = []
+
+        def fetch(path: str) -> api.Response:
+            threads.append(threading.current_thread().name)
+            return api.Response(body=META, version=VERSION)
+
+        client = offline_client(fetch, ttl=3600)
         assert client.get(api.META_PATH) == META
         assert client.get(api.META_PATH) == META
-        assert calls == [api.META_PATH]
+        assert threads == ["explore-refresher"]  # never on the visitor's thread
+
+    def test_a_cold_get_with_a_dead_api_gives_up_within_the_bound(self) -> None:
+        threads: list[str] = []
+
+        def fetch(path: str) -> api.Response:
+            threads.append(threading.current_thread().name)
+            raise api.ApiUnavailable("down")
+
+        client = offline_client(fetch, max_request_wait=0.3, retry_backoff=3600)
+        started = time.monotonic()
+        with pytest.raises(api.ApiUnavailable):
+            client.get(api.META_PATH)
+        assert time.monotonic() - started < 1.0
+        assert set(threads) == {"explore-refresher"}
+
+    def test_cold_visitors_are_not_serialized_behind_a_slow_api(self) -> None:
+        """Eight visitors against an API that hangs: each gives up at the bound."""
+        release = threading.Event()
+
+        def fetch(path: str) -> api.Response:
+            release.wait(10)
+            raise api.ApiUnavailable("slow, then down")
+
+        client = offline_client(fetch, max_request_wait=0.3, retry_backoff=3600)
+        elapsed: list[float] = []
+        lock = threading.Lock()
+
+        def visit() -> None:
+            started = time.monotonic()
+            with contextlib.suppress(api.ApiUnavailable):
+                client.get(api.META_PATH)
+            with lock:
+                elapsed.append(time.monotonic() - started)
+
+        visitors = [threading.Thread(target=visit) for _ in range(8)]
+        for v in visitors:
+            v.start()
+        for v in visitors:
+            v.join(5)
+        release.set()
+        assert len(elapsed) == 8
+        assert max(elapsed) < 1.5  # serialized, they would take 8 × the hang
 
     def test_a_new_version_prefetches_into_a_new_snapshot_and_swaps_once(self) -> None:
         bodies = {api.META_PATH: META, "/v1/elections": {"data": []}}
@@ -449,6 +616,39 @@ class TestCache:
         assert client.snapshot is second
         assert second.version == "next-version"
         assert first.version == VERSION  # the old snapshot was replaced, not mutated
+
+    def test_the_swap_happens_once_after_every_prefetch_succeeds(self) -> None:
+        """Two prefetch paths, the second failing: nothing half-filled is ever served."""
+        state = {"version": VERSION}
+        failing = {"on": False}
+        seen_during_prefetch: list[Any] = []
+        holder: dict[str, api.Client] = {}
+
+        def fetch(path: str) -> api.Response:
+            if path != api.META_PATH:
+                seen_during_prefetch.append(holder["client"].snapshot)
+                if path == "/v1/two" and failing["on"]:
+                    raise api.ApiUnavailable("boom")
+            body: dict[str, Any] = (
+                copy.deepcopy(META) if path == api.META_PATH else {"path": path}
+            )
+            if path == api.META_PATH:
+                body["provenance"]["snapshot_version"] = state["version"]
+            return api.Response(body=body, version=state["version"])
+
+        client = offline_client(fetch, prefetch_paths=lambda: ["/v1/one", "/v1/two"])
+        holder["client"] = client
+        first = client.refresh()
+        assert set(first.responses) == {api.META_PATH, "/v1/one", "/v1/two"}
+        assert seen_during_prefetch == [None, None]  # not swapped in mid-loop
+
+        seen_during_prefetch.clear()
+        state["version"] = "next-version"
+        failing["on"] = True
+        with pytest.raises(api.ApiUnavailable):
+            client.refresh()
+        assert client.snapshot is first
+        assert all(snap is first for snap in seen_during_prefetch)
 
     def test_a_failed_prefetch_leaves_the_old_snapshot_serving(self) -> None:
         state = {"version": VERSION}
@@ -500,7 +700,32 @@ class TestCache:
         assert client._wake.is_set()  # the refresher is nudged to swap in the new version
 
     def test_the_process_client_prefetches_what_pages_register(self) -> None:
+        assert PROCESS_CLIENT._prefetch_paths is api.registered_prefetch_paths
         assert api.registered_prefetch_paths() == [api.META_PATH]
+
+    def test_every_fill_passes_the_bucket_with_the_right_wait(self) -> None:
+        bucket = RecordingBucket()
+        fetch, calls = fake_fetch(
+            {api.META_PATH: META, "/v1/one": {"x": 1}, "/v1/miss": {"x": 2}}
+        )
+        client = offline_client(
+            fetch, bucket=bucket, prefetch_paths=lambda: ["/v1/one"]
+        )
+        client.refresh()
+        assert bucket.waits == [None, None]  # the refresher waits as long as it needs
+        client.get("/v1/miss")
+        assert bucket.waits == [None, None, client._max_request_wait]
+        assert len(bucket.waits) == len(calls)  # one acquire per API call
+
+    def test_the_process_client_uses_the_pinned_bucket(self) -> None:
+        bucket = PROCESS_CLIENT._bucket
+        assert (bucket._rate, bucket._burst) == (30.0 / 60.0, 10.0)
+        assert PROCESS_CLIENT._max_request_wait == 2.0
+        assert (api.FILLS_PER_MINUTE, api.FILL_BURST, api.MAX_REQUEST_WAIT_S) == (
+            30.0,
+            10.0,
+            2.0,
+        )
 
 
 class TestRegistryCoverage:
@@ -569,16 +794,24 @@ class TestTokenBucket:
 
 
 class TestRefresher:
-    def test_warmup_refreshes_and_starts_the_refresher(
+    def test_warmup_refreshes_on_its_own_thread_then_starts_the_refresher(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        fetch, calls = fake_fetch({api.META_PATH: META})
+        threads: list[str] = []
+
+        def fetch(path: str) -> api.Response:
+            threads.append(threading.current_thread().name)
+            return api.Response(body=META, version=VERSION)
+
         client = offline_client(fetch, ttl=3600)
         monkeypatch.setattr(api, "CLIENT", client)
         response = appmod.server.test_client().get("/_ah/warmup")
         assert response.status_code == 200
         assert client.snapshot is not None and client.snapshot.version == VERSION
         assert client.refresher_running
+        time.sleep(0.2)  # give a wrongly eager refresher time to fetch again
+        # Exactly one /v1/meta, made synchronously by warmup, not by the refresher.
+        assert threads == [threading.current_thread().name]
 
     def test_warmup_answers_200_even_when_the_api_is_down(
         self, monkeypatch: pytest.MonkeyPatch
@@ -599,16 +832,39 @@ class TestRefresher:
 
     def test_the_refresher_survives_a_failing_cycle(self) -> None:
         attempts = threading.Semaphore(0)
+        calls = {"n": 0}
 
         def fetch(path: str) -> api.Response:
+            calls["n"] += 1
             attempts.release()
-            raise api.ApiUnavailable("down")
+            if calls["n"] == 1:
+                raise api.ApiUnavailable("down")
+            return api.Response(body=META, version=VERSION)  # recovered: goes idle
 
-        client = offline_client(fetch, ttl=0.01)
+        client = offline_client(fetch, ttl=3600, retry_backoff=0.01)
         client.ensure_refresher()
         assert attempts.acquire(timeout=5)
         assert attempts.acquire(timeout=5)  # a second cycle ran after the failure
         assert client.refresher_running
+        deadline = time.monotonic() + 5
+        while client.snapshot is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert client.snapshot is not None
+
+    def test_a_failed_cycle_backs_off_whatever_wakes_it(self) -> None:
+        attempts: list[float] = []
+
+        def fetch(path: str) -> api.Response:
+            attempts.append(time.monotonic())
+            raise api.ApiUnavailable("down")
+
+        client = offline_client(fetch, retry_backoff=0.5)
+        client.ensure_refresher()
+        deadline = time.monotonic() + 0.4
+        while time.monotonic() < deadline:  # visitors hammering a cold cache
+            client._wake.set()
+            time.sleep(0.02)
+        assert len(attempts) == 1
 
     def test_ensure_refresher_is_idempotent(self) -> None:
         client = offline_client(ttl=3600)

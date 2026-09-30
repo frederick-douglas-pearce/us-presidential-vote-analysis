@@ -35,7 +35,9 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    # 10 for the API checks, plus up to 12 minutes of the dashboard's retry window.
+    # Worst cases: the API checks ≈5.5 min (4 × 3 tries × 20 s + sleeps), the dashboard
+    # ≈17 min (its shell check ≈1.3 min, 12 content tries × 20 s + 11 × 60 s, the redirect
+    # 20 s). Both fit inside 25.
     timeout-minutes: 25
     # Never checks out, never calls the API — no token needed at all.
     permissions: {}
@@ -154,9 +156,13 @@ jobs:
             ROUTING='{"output":".._pages_content.children..._pages_store.data..","outputs":[{"id":"_pages_content","property":"children"},{"id":"_pages_store","property":"data"}],"inputs":[{"id":"_pages_location","property":"pathname","value":"/"},{"id":"_pages_location","property":"search","value":""}],"changedPropIds":["_pages_location.pathname"],"state":[]}'
             dash_ok=0
             for i in $(seq 1 12); do
-              curl -sS -o "$BODY" --max-time 20 -H 'Content-Type: application/json' \
-                --data "$ROUTING" "https://${EXPLORE_HOST}/_dash-update-component" || true
-              if grep -q "isn't responding" "$BODY"; then
+              # Truncate first: a failed curl must not leave an earlier check's body
+              # (which carries the snapshot version too) to be read as this one's.
+              : > "$BODY"
+              if ! curl -sS -o "$BODY" --max-time 20 -H 'Content-Type: application/json' \
+                --data "$ROUTING" "https://${EXPLORE_HOST}/_dash-update-component"; then
+                note="the dashboard did not answer (connection or timeout)"
+              elif grep -q "isn't responding" "$BODY"; then
                 note="degraded (the dashboard cannot read the API)"
               elif [ -n "$origin_version" ] && grep -q "$origin_version" "$BODY"; then
                 dash_ok=1; break
@@ -177,7 +183,7 @@ jobs:
 
             # The vendor host must hand visitors to the public hostname.
             if [ -n "${EXPLORE_APP_HOST}" ]; then
-              loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${EXPLORE_APP_HOST}/" || echo "000")
+              loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://${EXPLORE_APP_HOST}/") || loc="curl failed"
               [ "$loc" = "301 https://${EXPLORE_HOST}/" ] \
                 && echo "  ✓ ${EXPLORE_APP_HOST} → ${EXPLORE_HOST}" \
                 || fail "https://${EXPLORE_APP_HOST}/ answered '${loc}', want a 301 to https://${EXPLORE_HOST}/"

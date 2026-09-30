@@ -264,7 +264,10 @@ reviewer, like the API's deploy. What it does, in the order that makes rollback 
 
 1. exports `dashboard/requirements.txt` from the lock and refuses one that could install
    `usvote` (`--no-emit-project`: the deployed runtime has no `usvote` to import);
-2. deploys a new version (`v-<sha12>-r<run>`) **without promoting it**;
+2. deploys a new version (`v-<sha12>-r<run>-a<attempt>`) **without promoting it**. The
+   attempt is in the id because "Re-run jobs" keeps the run number and the SHA; an id that
+   already exists is refused, since deploying onto it would replace it in place before
+   any probe;
 3. probes it on its own host, `https://<version>-dot-<app host>/`, with
    [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh): the page shell is 200 and
    names the canonical host, and the page content carries the snapshot version the API is
@@ -275,8 +278,14 @@ reviewer, like the API's deploy. What it does, in the order that makes rollback 
    and `max_instances` are per-version settings, so a leftover version would keep its own
    pinned instance running.
 
-If 3 or 4 fails, the workflow moves traffic back to the previous version and deletes the
-new one. The site keeps serving what it served before.
+If anything from the deploy through the redirect check fails, times out or is cancelled,
+the **Roll back** step moves traffic back to the previous version and deletes the new
+one, and the site keeps serving what it served before. Each probe has its own 8-minute
+step timeout, so a hung probe fails its step (and rolls back) well inside the job's
+40 minutes. The step says plainly when it could not roll back ("ROLLBACK FAILED"), or had
+nothing to restore (a first deploy), and then fails the job; see §10. If step 5 fails,
+the new version is serving and an old one is left behind: the job fails with a message
+naming the cleanup to do by hand.
 
 `app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
 gunicorn worker (one process, so one cache) as `explore-run`, and carries no
@@ -284,12 +293,21 @@ gunicorn worker (one process, so one cache) as `explore-run`, and carries no
 
 ## 10. Redeploy and rollback
 
-- **Redeploy** the same code (after the kill-switch, say): run the workflow again. Version
-  ids are unique per run, so re-running a commit never collides with the serving version.
-- **Roll back** to an earlier commit: run the workflow on that commit (the "Use workflow
-  from" branch or tag selector). The previous version is always deleted after a successful
-  deploy, so there is nothing to switch traffic back to by hand; the automatic rollback in
-  §9 covers a deploy that fails its probes.
+- **Redeploy** the same code: run the workflow again. **After the kill-switch, un-pause
+  first** (the [kill-switch README](../deploy/killswitch/README.md)); a deploy cannot
+  un-pause the app, by design (the deploy account has no `appengine.appAdmin`, §7), and
+  its probes fail while the app is `USER_DISABLED`.
+- **Roll back** to earlier code: push a branch or tag at that commit and pick it in the
+  workflow's "Use workflow from" selector. The ref must contain
+  `.github/workflows/deploy-dashboard.yml`, so this reaches only commits from #277 on. The
+  previous version is deleted after every successful deploy, so there is no old version
+  to switch traffic back to by hand; the automatic rollback in §9 covers a deploy that
+  fails its probes.
+- **After any failed deploy**, check that exactly one version remains, since a second
+  version keeps a pinned instance running and spends the budget:
+  `gcloud app versions list --project=uspv-explore --service=default`. Delete strays with
+  `gcloud app versions delete <id> --project=uspv-explore --service=default`, never the
+  one with `TRAFFIC_SPLIT` 1.00.
 - **Pause by hand** (abuse, or an incident): the same `PATCH` the
   [kill-switch README](../deploy/killswitch/README.md) gives for un-pausing, with
   `{"servingStatus": "USER_DISABLED"}`, or the console's **Disable application**. `gcloud
@@ -336,12 +354,14 @@ measures both from a fresh browser context each run. The server states worth mea
 - **Warm** (the ordinary case): run it.
 - **Dashboard cold**: right after a deploy (warmup has run), and after a kill-switch
   un-pause (the instance starts from nothing).
-- **API edge cold**: purge the API's Cloudflare cache, wait for the API to scale to zero
-  (about 15 minutes idle), then restart the dashboard (redeploy, or pause and un-pause), so
-  the empty cache's warmup and first fills meet a cold edge and a cold origin. A purge
-  alone changes nothing a visitor sees: the dashboard serves from its in-process cache, and
-  the purge does not change `snapshot_version`, so no refetch happens. By design, a visitor
-  meets a cold API only on a cache miss.
+- **API edge cold**: the order matters, because a running dashboard's refresher re-reads
+  `/v1/meta` through the edge every 5 minutes and so refills it. **Pause the dashboard
+  first** (§10), then purge the API's Cloudflare cache, wait until the API origin has had
+  no request for about 15 minutes (it then scales to zero; check its request log, since
+  crawlers wake it too), then un-pause and measure the first visitor. A purge alone
+  changes nothing a visitor sees: the dashboard serves from its in-process cache, and the
+  purge does not change `snapshot_version`, so no refetch happens. By design, a visitor
+  meets a cold API only when the cache is empty.
 
 [`scripts/dashboard_load_test.py`](../scripts/dashboard_load_test.py) drives first-visit
 page loads (shell, every bundle, layout, dependencies, the routing callback) against the

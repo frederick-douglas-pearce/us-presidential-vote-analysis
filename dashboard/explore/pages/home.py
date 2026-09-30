@@ -19,9 +19,10 @@ dash.register_page(
     __name__,
     path="/",
     title=SITE_TITLE,
+    # No years here: the index HTML never waits on the API, so this text cannot read
+    # the coverage windows, and a second copy of them would be a second source of truth.
     description=(
-        "Where the US presidential election data comes from and what it covers: "
-        "Electoral College results since 1824, popular votes since 1976."
+        "Where the US presidential election data comes from and which years it covers."
     ),
     # Every canonical API path this page reads. The refresher prefetches these on each
     # new snapshot version, so no visitor waits on a cold API (D071(d)).
@@ -59,7 +60,12 @@ def render(meta: dict[str, Any]) -> html.Div:
                         [
                             html.Span(f"{label}: ", className="label"),
                             f"{provenance[name]} (",
-                            html.A(provenance[lic], href=provenance[url]),
+                            # str(): a value of an unexpected type renders as text,
+                            # rather than failing in Dash's serializer, outside
+                            # layout()'s try.
+                            html.A(
+                                str(provenance[lic]), href=str(provenance[url])
+                            ),
                             ")",
                         ]
                     )
@@ -86,7 +92,7 @@ def render(meta: dict[str, Any]) -> html.Div:
                 id="coverage",
             ),
             html.P(
-                ["Data snapshot ", html.Code(provenance["snapshot_version"])],
+                ["Data snapshot ", html.Code(str(provenance["snapshot_version"]))],
                 className="snapshot",
                 id="snapshot-version",
             ),

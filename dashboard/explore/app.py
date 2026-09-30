@@ -4,14 +4,17 @@ Beyond Dash itself this module adds four things, all host-level:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
-  the address bar. Two exemptions: ``/_ah/*`` (App Engine's own warmup) and
-  version-specific hosts (``<version>-dot-…``), which the deploy workflow probes before
-  moving traffic.
+  the address bar. Two exemptions: ``/_ah/*`` (App Engine's own warmup) and any
+  ``-dot-`` host (``<version>-dot-…``, which the deploy workflow probes before moving
+  traffic, and ``default-dot-…``, which only someone who typed it reaches; the
+  canonical link names ``explore.`` on both).
 - **A canonical link and ``og:url``** on every page, naming the canonical host whichever
   host served it.
-- **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously before the
-  instance takes traffic, and every request makes sure the refresher thread is running.
-  Neither happens at import, so importing this module makes no network call.
+- **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
+  thread, and only then starts the refresher, so the instance takes traffic with a
+  filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
+  is running. Neither happens at import, so importing this module makes no network
+  call.
 - **No validation layout.** ``suppress_callback_exceptions=True`` stops Dash from
   calling every page's ``layout()`` on the first request and embedding the result in
   every index page. The index HTML therefore carries no data and never waits on the
@@ -42,6 +45,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 VENDOR_HOST_SUFFIX = ".appspot.com"
 VERSION_HOST_MARKER = "-dot-"
+WARMUP_PATH = "/_ah/warmup"
 
 
 def canonical_url(path: str) -> str:
@@ -118,11 +122,12 @@ def _before_request() -> werkzeug.Response | None:
     )
     if target is not None:
         return flask.redirect(target, code=301)
-    api.CLIENT.ensure_refresher()
+    if flask.request.path != WARMUP_PATH:  # warmup starts it after its own refresh
+        api.CLIENT.ensure_refresher()
     return None
 
 
-@server.route("/_ah/warmup")
+@server.route(WARMUP_PATH)
 def _warmup() -> tuple[str, int]:
     """App Engine's warmup request: fill the cache before the instance takes traffic.
 

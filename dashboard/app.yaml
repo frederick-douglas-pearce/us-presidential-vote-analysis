@@ -1,7 +1,8 @@
 # App Engine standard config for the public dashboard (E9, D071). Deployed by
 # .github/workflows/deploy-dashboard.yml; runbook: docs/deploy-dashboard.md.
 #
-# Every line here is load-bearing, and tests/unit/test_dashboard_guards.py pins it:
+# Every line here is load-bearing, and test_app_yaml_is_exactly_the_pinned_configuration
+# (tests/unit/test_dashboard_guards.py) pins the whole file, entrypoint included:
 # - one F1 instance, pinned (min = max = 1) with warmup: the cold-start target in D071(g)
 #   depends on the pin, and an explicit max is the cost cap (new projects default to 20);
 # - one gunicorn worker, so one process and one in-process cache (D071(d));

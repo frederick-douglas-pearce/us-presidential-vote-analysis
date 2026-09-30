@@ -4,15 +4,30 @@ These are the only acceptance guard for three promises the public dashboard make
 
 1. **No ``usvote`` at runtime.** ``usvote`` is installed in the dev environment, so the
    guard cannot rely on an import failing. It runs the dashboard in a fresh interpreter
-   with ``usvote`` made unimportable, drives its real request paths, and then checks
-   ``sys.modules`` — which also catches a ``try: import usvote / except ImportError``.
-2. **One data input: HTTPS to one host.** The same interpreter records every host a
-   socket is asked to reach, and the test compares them with an **independent literal**
-   rather than with ``explore.config``, so repointing the config fails the test instead of
-   moving it. An AST pass forbids every other way to read data (files, other HTTP
-   clients) and confines the connection-opening call to ``explore.api.fetch``.
-3. **No data files and no ``run.app``** in the deploy root, plus the ``app.yaml``
-   settings D071 makes load-bearing.
+   whose ``usvote`` finder **records every attempt** and refuses it, drives the app's
+   real request paths, and asserts there were no attempts at all. Recording the attempt
+   is what catches ``try: import usvote / except ImportError`` and dynamic imports: a
+   refused import never reaches ``sys.modules``, so checking that alone would not.
+2. **One data input: HTTPS to one host.** The same interpreter installs an **audit hook**
+   on the socket events (``connect``, ``getaddrinfo``, ``gethostbyname``, ``sendto``),
+   which fire for C-level calls too, records each host and refuses it. The recorded
+   hosts are compared with an **independent literal**, not with ``explore.config``, so
+   repointing the config fails the test instead of moving it. Proxy variables are set in
+   that interpreter before the app is imported, so an opener that honoured them would
+   show the proxy's host.
+3. **No data files and no ``run.app``** in the deploy root, plus the exact ``app.yaml``.
+
+**What each layer is for, stated so it is not read as more.** The subprocess is the
+behavioural check; it covers the paths it drives (warmup, the page shell, the page
+render) with the API refused, which is every network path the skeleton has. A path that
+runs only after a *successful* response (prefetching a second path, a fill on a miss) is
+not reached, and #278's second registered path is where that coverage has to grow. One
+limit of the audit hook itself: a raw ``connect`` to a *hostname* resolves the name
+before the ``socket.connect`` event fires, so with the network cut it fails unrecorded;
+the lint's ban on importing ``socket`` is what covers raw sockets. The
+AST pass is a lint against *accidental* regressions: a second HTTP client, a file read,
+a dynamic import. It is not a sandbox against code written to evade it (a name built at
+runtime, say), and it does not claim to be.
 
 Recorded API responses under ``tests/fixtures/dashboard/`` are test input only; a test
 here asserts no runtime module can name them (the ``ec_state_roster_by_year.json``
@@ -23,11 +38,11 @@ from __future__ import annotations
 
 import ast
 import os
+import shlex
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -42,11 +57,17 @@ PROBE = REPO / "scripts" / "probe_dashboard.sh"
 #: a test that read the host from the module under test would move with it.
 PUBLIC_API_HOST = "api.us-presidential-election-center.org"
 
+#: Set in the guard interpreter before the app is imported. An opener that honoured
+#: proxy variables would resolve this host, and the host check would see it.
+GUARD_PROXY = "http://proxy.guard.invalid:3128"
+
 RUNTIME_MODULES = sorted(p for p in PACKAGE.rglob("*.py") if "__pycache__" not in p.parts)
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if not k.upper().endswith("_PROXY")}
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        env[name] = GUARD_PROXY
     env["PYTHONPATH"] = str(DASHBOARD)
     return subprocess.run(
         [sys.executable, "-c", program],
@@ -58,37 +79,39 @@ def _run(program: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-#: Installed before anything else runs: ``usvote`` unimportable, and every socket
-#: connection and name lookup recorded and refused (so the program is also offline).
+#: Installed before anything else runs: every ``usvote`` import attempt recorded and
+#: refused, and every socket host recorded and refused (so the program is offline).
 _PRELUDE = """
-import socket
 import sys
+
+ATTEMPTS = []
+HOSTS = []
 
 
 class _BlockUsvote:
     def find_spec(self, fullname, path=None, target=None):
         if fullname == "usvote" or fullname.startswith("usvote."):
+            ATTEMPTS.append(fullname)
             raise ImportError(f"usvote is unimportable in this process: {fullname}")
         return None
 
 
 sys.meta_path.insert(0, _BlockUsvote())
 
-HOSTS = []
 
-
-def _record_connection(address, *args, **kwargs):
-    HOSTS.append(address[0])
+def _audit(event, args):
+    if event in ("socket.getaddrinfo", "socket.gethostbyname"):
+        host = args[0]
+    elif event in ("socket.connect", "socket.sendto"):
+        address = args[1]
+        host = address[0] if isinstance(address, tuple) else address
+    else:
+        return
+    HOSTS.append(host.decode() if isinstance(host, bytes) else str(host))
     raise OSError("network disabled by the guard")
 
 
-def _record_lookup(host, *args, **kwargs):
-    HOSTS.append(host)
-    raise OSError("network disabled by the guard")
-
-
-socket.create_connection = _record_connection
-socket.getaddrinfo = _record_lookup
+sys.addaudithook(_audit)
 """
 
 _RUNTIME_PROGRAM = (
@@ -97,12 +120,13 @@ _RUNTIME_PROGRAM = (
 import threading
 from pathlib import Path
 
+BASELINE_THREADS = set(threading.enumerate())
+
 import explore.app as appmod
 from explore import api
 
-assert not any(t.name == "explore-refresher" for t in threading.enumerate()), (
-    "the refresher started at import"
-)
+assert set(threading.enumerate()) == BASELINE_THREADS, "a thread started at import"
+assert api.CLIENT._thread is None, "the refresher started at import"
 assert HOSTS == [], f"importing the app made a network call: {HOSTS}"
 
 client = appmod.server.test_client()
@@ -129,8 +153,7 @@ missing = sorted(str(p) for p in package.rglob("*.py")
                  if "__pycache__" not in p.parts and p.resolve() not in loaded)
 assert not missing, f"runtime modules never imported: {missing}"
 
-leaked = sorted(m for m in sys.modules if m == "usvote" or m.startswith("usvote."))
-assert not leaked, f"usvote reached the runtime: {leaked}"
+assert ATTEMPTS == [], f"the runtime tried to import usvote: {ATTEMPTS}"
 print("HOSTS=" + ",".join(sorted(set(HOSTS))))
 """
 )
@@ -147,31 +170,44 @@ def test_the_runtime_imports_no_usvote_and_reaches_only_the_public_api() -> None
 
 
 def test_the_guard_program_can_fail() -> None:
-    """Non-vacuity: the blocker refuses ``usvote`` and the recorder sees any host."""
+    """Non-vacuity: each recorder sees what it exists to see."""
     program = (
         _PRELUDE
         + """
+import importlib
+import socket
+import urllib.request
+
 try:
-    import usvote  # noqa: F401
+    importlib.import_module("usvote")  # a dynamic import, swallowed
 except ImportError:
-    print("BLOCKED")
-try:
-    socket.create_connection(("usvote-api-x.a.run.app", 443))
+    pass
+try:  # C level, no helper. An IP literal: a hostname would be resolved before the
+    # socket.connect audit event fires, so with the network cut it would fail unrecorded.
+    socket.socket().connect(("203.0.113.7", 443))
 except OSError:
     pass
+try:  # urllib's default opener honours the proxy variables the guard sets
+    urllib.request.build_opener().open("http://example.invalid/", timeout=5)
+except OSError:
+    pass
+print("ATTEMPTS=" + ",".join(ATTEMPTS))
 print("HOSTS=" + ",".join(HOSTS))
 """
     )
     result = _run(program)
     assert result.returncode == 0, result.stderr
-    assert "BLOCKED" in result.stdout
-    assert "HOSTS=usvote-api-x.a.run.app" in result.stdout
+    assert "ATTEMPTS=usvote" in result.stdout
+    hosts_line = [ln for ln in result.stdout.splitlines() if ln.startswith("HOSTS=")][0]
+    hosts = set(hosts_line.removeprefix("HOSTS=").split(","))
+    assert "203.0.113.7" in hosts
+    assert "proxy.guard.invalid" in hosts
 
 
-# --- static checks over the runtime modules -----------------------------------------------
+# --- a lint over the runtime modules --------------------------------------------------
 
-#: No runtime module may import these: every one is a way to read data other than the
-#: public API through ``explore.api.fetch``.
+#: Modules no runtime module may import: each is a way to read data other than the
+#: public API through ``explore.api.fetch``, or to reach one dynamically.
 BANNED_MODULES = frozenset(
     {
         "usvote",
@@ -189,29 +225,60 @@ BANNED_MODULES = frozenset(
         "subprocess",
         "io",
         "pandas",
+        "os",
+        "pathlib",
+        "importlib",
+        "pkgutil",
+        "glob",
+        "shutil",
+        "tempfile",
+        "builtins",
     }
 )
 
-#: ``urllib`` is allowed only in the one module that owns the chokepoint.
+#: ``urllib.parse`` is pure string handling; the rest of ``urllib`` opens connections
+#: and is allowed only in the chokepoint module.
 CHOKEPOINT = PACKAGE / "api.py"
+URLLIB_ANYWHERE = frozenset({"urllib.parse"})
 
-#: Call names that read files, banned everywhere.
-BANNED_CALLS = frozenset({"open", "read_text", "read_bytes", "load"})
+#: Names that read files or open connections, flagged wherever they appear (as a name
+#: or an attribute, called or not), so ``o = open; o(x)`` is caught too.
+BANNED_NAMES = frozenset(
+    {
+        "open",
+        "__import__",
+        "urlopen",
+        "urlretrieve",
+        "read_text",
+        "read_bytes",
+        "get_data",
+        "popen",
+        "load",
+    }
+)
 
 
-def _imports(tree: ast.AST) -> list[str]:
-    names: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            names.append(node.module)
-    return names
+def _is_the_chokepoint_call(node: ast.AST, func: str | None, path: Path) -> bool:
+    """``_OPENER.open`` inside ``fetch`` in ``api.py`` — the one allowed ``open``."""
+    return (
+        path == CHOKEPOINT
+        and func == "fetch"
+        and isinstance(node, ast.Attribute)
+        and node.attr == "open"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "_OPENER"
+    )
 
 
-def _calls(tree: ast.AST) -> list[tuple[str, str | None]]:
-    """(callee name, enclosing function) for every call in the module."""
-    found: list[tuple[str, str | None]] = []
+def _violations(tree: ast.AST, path: Path) -> list[str]:
+    found: list[str] = []
+
+    def check_import(name: str, line: int) -> None:
+        top = name.split(".")[0]
+        if top in BANNED_MODULES:
+            found.append(f"line {line}: imports {name}")
+        elif top == "urllib" and name not in URLLIB_ANYWHERE and path != CHOKEPOINT:
+            found.append(f"line {line}: imports {name}; only api.py may")
 
     def visit(node: ast.AST, func: str | None) -> None:
         for child in ast.iter_child_nodes(node):
@@ -220,12 +287,32 @@ def _calls(tree: ast.AST) -> list[tuple[str, str | None]]:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
                 else func
             )
-            if isinstance(child, ast.Call):
-                callee = child.func
-                if isinstance(callee, ast.Name):
-                    found.append((callee.id, func))
-                elif isinstance(callee, ast.Attribute):
-                    found.append((callee.attr, func))
+            line = getattr(child, "lineno", 0)
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    check_import(alias.name, line)
+            elif isinstance(child, ast.ImportFrom) and child.module and child.level == 0:
+                check_import(child.module, line)
+                for alias in child.names:
+                    if alias.name in BANNED_NAMES:
+                        found.append(f"line {line}: imports {alias.name}")
+            elif isinstance(child, ast.Name) and child.id in BANNED_NAMES:
+                found.append(f"line {line}: {child.id}")
+            elif (
+                isinstance(child, ast.Attribute)
+                and child.attr in BANNED_NAMES
+                and not _is_the_chokepoint_call(child, func, path)
+            ):
+                found.append(f"line {line}: .{child.attr}")
+            elif (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id == "getattr"
+                and len(child.args) >= 2
+                and isinstance(child.args[1], ast.Constant)
+                and isinstance(child.args[1].value, str)
+            ):
+                found.append(f"line {line}: getattr(..., {child.args[1].value!r})")
             visit(child, inner)
 
     visit(tree, None)
@@ -233,36 +320,40 @@ def _calls(tree: ast.AST) -> list[tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
-def test_no_runtime_module_imports_another_data_path(path: Path) -> None:
+def test_no_runtime_module_has_another_data_path(path: Path) -> None:
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    for name in _imports(tree):
-        top = name.split(".")[0]
-        assert top not in BANNED_MODULES, f"{path.name} imports {name}"
-        if top == "urllib":
-            assert path == CHOKEPOINT, f"{path.name} imports {name}; only api.py may"
+    assert _violations(tree, path) == []
 
 
-@pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
-def test_no_runtime_module_reads_a_file_or_opens_a_connection(path: Path) -> None:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    for name, func in _calls(tree):
-        if name == "open" and path == CHOKEPOINT and func == "fetch":
-            continue  # the one chokepoint: _OPENER.open(...) inside api.fetch
-        assert name not in BANNED_CALLS, f"{path.name}: {name}() in {func or 'module'}"
+def test_the_runtime_modules_are_the_expected_ones() -> None:
+    """The parametrized lint above cannot pass by finding nothing to check."""
+    names = {str(p.relative_to(PACKAGE)) for p in RUNTIME_MODULES}
+    assert {"api.py", "app.py", "config.py", "pages/home.py"} <= names
 
 
-def test_the_ast_checks_can_fail() -> None:
-    """Non-vacuity: the two checks above flag what they are meant to flag."""
-    source = (
-        "import sqlite3\n"
-        "from urllib.request import urlopen\n"
-        "def f():\n    return open('x').read()\n"
-        "def fetch():\n    return OPENER.open('y')\n"
-    )
-    tree = ast.parse(source)
-    assert {"sqlite3", "urllib.request"} <= set(_imports(tree))
-    assert ("open", "f") in _calls(tree)
-    assert ("open", "fetch") in _calls(tree)
+@pytest.mark.parametrize(
+    ("source", "path", "flagged"),
+    [
+        ("import os\n", PACKAGE / "app.py", True),
+        ("from importlib import import_module\n", PACKAGE / "app.py", True),
+        ("o = open\n", PACKAGE / "pages" / "home.py", True),
+        ("x = getattr(p, 'read_text')()\n", PACKAGE / "app.py", True),
+        ("import urllib.request\n", PACKAGE / "app.py", True),
+        ("from urllib.parse import quote\n", PACKAGE / "app.py", False),
+        ("import urllib.request\n", CHOKEPOINT, False),
+        ("def fetch():\n    return _OPENER.open(r)\n", CHOKEPOINT, False),
+        ("def other():\n    return _OPENER.open(r)\n", CHOKEPOINT, True),
+        ("def fetch():\n    return open('meta.json').read()\n", CHOKEPOINT, True),
+        ("def fetch():\n    return urllib.request.urlopen(u)\n", CHOKEPOINT, True),
+        ("import json\njson.load(f)\n", PACKAGE / "app.py", True),
+        ("import json\njson.loads(s)\n", PACKAGE / "app.py", False),
+    ],
+)
+def test_the_lint_rules_flag_what_they_should(
+    source: str, path: Path, flagged: bool
+) -> None:
+    """Non-vacuity at the level of the rules, not of the tree walk."""
+    assert bool(_violations(ast.parse(source), path)) is flagged
 
 
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
@@ -277,10 +368,17 @@ def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
     assert offenders == []
 
 
-#: What the deploy root may contain. An allow-list, so a data file cannot arrive under a
-#: new extension; a later story that needs another kind of file extends it here.
-ALLOWED_SUFFIXES = frozenset({".py", ".css", ".yaml"})
-ALLOWED_NAMES = frozenset({".gcloudignore", "requirements.txt"})
+def _deploy_root_file_allowed(relative: Path) -> bool:
+    """Where each kind of file may sit in the deploy root. A later story that needs
+    another kind of file (a favicon, say) extends this, with a reason."""
+    parts = relative.parts
+    if len(parts) == 1:
+        return relative.name in {"app.yaml", ".gcloudignore", "requirements.txt"}
+    if parts[0] != "explore":
+        return False
+    if relative.suffix == ".py":
+        return True
+    return relative.suffix == ".css" and parts[1] == "assets"
 
 
 def test_the_deploy_root_holds_no_data_files() -> None:
@@ -289,10 +387,25 @@ def test_the_deploy_root_holds_no_data_files() -> None:
         for p in DASHBOARD.rglob("*")
         if p.is_file()
         and "__pycache__" not in p.parts
-        and p.suffix not in ALLOWED_SUFFIXES
-        and p.name not in ALLOWED_NAMES
+        and not _deploy_root_file_allowed(p.relative_to(DASHBOARD))
     ]
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("relative", "allowed"),
+    [
+        ("app.yaml", True),
+        ("explore/results.yaml", False),
+        ("explore/data.json", False),
+        ("explore/assets/style.css", True),
+        ("explore/pages/extra.css", False),
+        ("explore/pages/home.py", True),
+        ("snapshot.sqlite", False),
+    ],
+)
+def test_the_deploy_root_allow_list(relative: str, allowed: bool) -> None:
+    assert _deploy_root_file_allowed(Path(relative)) is allowed
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
@@ -305,32 +418,24 @@ def test_no_runtime_module_names_the_test_fixtures(path: Path) -> None:
 # --- deploy configuration ------------------------------------------------------------------
 
 
-def _app_yaml() -> dict[str, Any]:
-    loaded = yaml.safe_load((DASHBOARD / "app.yaml").read_text(encoding="utf-8"))
-    assert isinstance(loaded, dict)
-    return loaded
+def test_app_yaml_is_exactly_the_pinned_configuration() -> None:
+    """Every setting, including the whole entrypoint and the absence of env_variables.
 
-
-def test_app_yaml_pins_one_warm_f1_instance() -> None:
-    config = _app_yaml()
-    assert config["runtime"] == "python314"
-    assert config["instance_class"] == "F1"
-    assert config["automatic_scaling"] == {"min_instances": 1, "max_instances": 1}
-    assert config["inbound_services"] == ["warmup"]
-
-
-def test_app_yaml_runs_one_process_as_the_least_privilege_account() -> None:
-    config = _app_yaml()
-    assert config["service_account"] == "explore-run@uspv-explore.iam.gserviceaccount.com"
-    entry = config["entrypoint"].split()
-    assert entry[0] == "gunicorn"
-    assert entry[-1] == "explore.app:server"
-    assert entry[entry.index("-w") + 1] == "1"  # one worker: one process, one cache
-
-
-def test_app_yaml_carries_no_environment() -> None:
-    """No env var can repoint the API base, set a proxy, or add a second input."""
-    assert "env_variables" not in _app_yaml()
+    One F1, pinned (D071(b)); warmup; one gunicorn worker, so one process and one cache
+    (D071(d)), with the thread count #277's load test measured; the least-privilege
+    runtime account (#283). A change here is a change to what was measured and reviewed.
+    """
+    config = yaml.safe_load((DASHBOARD / "app.yaml").read_text(encoding="utf-8"))
+    assert config == {
+        "runtime": "python314",
+        "instance_class": "F1",
+        "service_account": "explore-run@uspv-explore.iam.gserviceaccount.com",
+        "entrypoint": (
+            "gunicorn -b :$PORT -w 1 --threads 8 --timeout 60 explore.app:server"
+        ),
+        "inbound_services": ["warmup"],
+        "automatic_scaling": {"min_instances": 1, "max_instances": 1},
+    }
 
 
 def test_gcloudignore_uploads_only_the_runtime() -> None:
@@ -362,30 +467,49 @@ def test_the_api_image_does_not_gain_dash() -> None:
     assert "gunicorn" not in serve
 
 
-def test_the_dashboard_export_cannot_install_usvote() -> None:
-    """What the deploy ships: the lock's dashboard group, without the project itself."""
-    result = subprocess.run(
-        [
-            "uv",
-            "export",
-            "--frozen",
-            "--only-group",
-            "dashboard",
-            "--no-emit-project",
-            "--no-hashes",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=REPO,
-        timeout=120,
-    )
+#: The export the deploy workflow must run: the dashboard group only, without the
+#: project itself (so the deployed runtime has no usvote to import).
+EXPORT_ARGV = [
+    "uv",
+    "export",
+    "--frozen",
+    "--only-group",
+    "dashboard",
+    "--no-emit-project",
+    "-o",
+    "dashboard/requirements.txt",
+]
+
+
+def _workflow_export_argv() -> list[str]:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    commands = [
+        step["run"]
+        for step in workflow["jobs"]["deploy"]["steps"]
+        if "uv export" in step.get("run", "")
+    ]
+    assert len(commands) == 1, "expected exactly one uv export in the deploy workflow"
+    joined = commands[0].replace("\\\n", " ")
+    line = next(ln for ln in joined.splitlines() if "uv export" in ln)
+    return shlex.split(line)
+
+
+def test_the_workflow_exports_exactly_the_dashboard_group() -> None:
+    assert _workflow_export_argv() == EXPORT_ARGV
+
+
+def test_the_dashboard_export_cannot_install_usvote(tmp_path: Path) -> None:
+    """Runs the workflow's own export command (into a temp file) and reads the result."""
+    argv = [*_workflow_export_argv()[:-1], str(tmp_path / "requirements.txt")]
+    result = subprocess.run(argv, capture_output=True, text=True, cwd=REPO, timeout=120)
     assert result.returncode == 0, result.stderr
     requirements = [
         ln.strip()
-        for ln in result.stdout.splitlines()
-        if ln.strip() and not ln.lstrip().startswith("#")
+        for ln in (tmp_path / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.lstrip().startswith(("#", "--hash"))
     ]
     names = {ln.split("==")[0].split(" ")[0].lower() for ln in requirements}
     assert {"dash", "flask-compress", "gunicorn"} <= names
     assert "usvote" not in names
+    assert not {"pandas", "geopandas", "psycopg2-binary", "fastapi"} & names
     assert not [ln for ln in requirements if ln.startswith(("-e", "."))]

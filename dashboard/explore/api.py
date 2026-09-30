@@ -12,15 +12,22 @@ Three properties hold here, and the tests pin each one:
   response stays correct until the version changes, and the cache is replaced whole
   when it does: :meth:`Client.refresh` prefetches every registered URL into a new
   :class:`Snapshot` and swaps it in with one assignment. A failed prefetch leaves the
-  old snapshot serving. A response is stored only in the snapshot whose version its
-  ``ETag`` names, so two views never mix versions.
-- **Bounded pressure on the API.** Fills pass a token bucket kept well under the API's
-  60/min/IP rule (App Engine's egress addresses are shared), and a request waits on it
-  only briefly before reporting the API as unavailable.
+  old snapshot serving. A snapshot never stores a response from another version: a
+  response is stored only in the snapshot whose version its ``ETag`` names. (What one
+  page render reads is not pinned to one snapshot; that matters once a page reads more
+  than one path, and #278 owns it.)
+- **Bounded pressure on the API, and a bounded wait for a visitor.** Fills pass a token
+  bucket kept well under the API's 60/min/IP rule (App Engine's egress addresses are
+  shared). A visitor's request never refreshes the cache itself: with no snapshot yet it
+  wakes the refresher and waits at most :data:`MAX_REQUEST_WAIT_S` for the first one,
+  then reports the API as unavailable. So a slow or dead API cannot queue visitors on a
+  lock, or hold every server thread behind network timeouts.
 
 The refresher is one daemon thread per process (one gunicorn worker, so one cache),
 started lazily by the app, never at import: an import-time thread would make network
-calls in every test and tool that imports this module.
+calls in every test and tool that imports this module. After a failed cycle it backs
+off for :data:`RETRY_BACKOFF_S` whatever wakes it, so visitors arriving while the API is
+down cannot turn into a stream of retries.
 """
 
 from __future__ import annotations
@@ -53,9 +60,14 @@ FETCH_TIMEOUT_S = 15.0
 FILLS_PER_MINUTE = 30.0
 FILL_BURST = 10.0
 
-#: How long a *visitor's* request may wait for a token before the page reports the API
-#: unavailable. The refresher's prefetch waits as long as it needs.
+#: How long a *visitor's* request may wait — for a fill token, or for the refresher's
+#: first snapshot — before the page reports the API unavailable. Within D071(g)'s 3 s
+#: first-data budget. The refresher's own fills wait as long as they need.
 MAX_REQUEST_WAIT_S = 2.0
+
+#: After a failed refresh, the refresher waits this long before retrying, and visitor
+#: wake-ups do not shorten it.
+RETRY_BACKOFF_S = 30.0
 
 #: The one path the cache is versioned on.
 META_PATH = "/v1/meta"
@@ -123,6 +135,8 @@ def etag_version(etag: str | None) -> str | None:
 
 def fetch(path: str) -> Response:
     """GET one API path. The only function in the dashboard that opens a connection."""
+    # Outside the try on purpose: a path refused as off-host is a bug to surface, not
+    # an unavailable API to paper over.
     url = build_url(path)
     request = urllib.request.Request(
         url, headers={"Accept": "application/json", "User-Agent": "usvote-explore"}
@@ -134,8 +148,12 @@ def fetch(path: str) -> Response:
             payload = raw.read()
     except urllib.error.HTTPError as exc:
         raise ApiUnavailable(f"GET {path}: HTTP {exc.code}") from exc
-    except (urllib.error.URLError, OSError) as exc:
-        raise ApiUnavailable(f"GET {path}: {exc}") from exc
+    except Exception as exc:
+        # Everything else at the one I/O boundary: URLError, OSError, and the
+        # http.client errors urllib does not wrap (IncompleteRead, BadStatusLine,
+        # LineTooLong). Any of them escaping would turn the degraded message into a
+        # server error and a blank page.
+        raise ApiUnavailable(f"GET {path}: {type(exc).__name__}: {exc}") from exc
     if status != 200:
         raise ApiUnavailable(f"GET {path}: HTTP {status}")
     try:
@@ -210,13 +228,18 @@ class Client:
         bucket: TokenBucket | None = None,
         ttl: float = REFRESH_TTL_S,
         max_request_wait: float = MAX_REQUEST_WAIT_S,
+        retry_backoff: float = RETRY_BACKOFF_S,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._fetch = fetch
         self._prefetch_paths = prefetch_paths
         self._bucket = bucket or TokenBucket()
         self._ttl = ttl
         self._max_request_wait = max_request_wait
+        self._retry_backoff = retry_backoff
+        self._sleep = sleep
         self._snapshot: Snapshot | None = None
+        self._ready = threading.Event()  # set once the first snapshot is serving
         self._refresh_lock = threading.Lock()
         self._thread_lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -254,21 +277,26 @@ class Client:
                     )
                 fresh.responses[path] = response.body
             self._snapshot = fresh  # the atomic swap
+            self._ready.set()
             log.info(
                 "serving snapshot %s (%d responses)", version, len(fresh.responses)
             )
             return fresh
 
     def get(self, path: str) -> JsonObject:
-        """A response for ``path``: cached if possible, else one throttled fill."""
+        """A response for ``path``: cached if possible, else one throttled fill.
+
+        Never refreshes on the request thread. With no snapshot yet, it wakes the
+        refresher and waits at most ``max_request_wait`` for the first one.
+        """
         snapshot = self._snapshot
         if snapshot is None:
-            # A refresh may be in flight (warmup, or the refresher's first cycle): wait
-            # for it rather than fetching /v1/meta a second time.
-            with self._refresh_lock:
-                snapshot = self._snapshot
+            self.ensure_refresher()
+            self._wake.set()
+            self._ready.wait(self._max_request_wait)
+            snapshot = self._snapshot
             if snapshot is None:
-                snapshot = self.refresh(max_wait=self._max_request_wait)
+                raise ApiUnavailable("no snapshot yet; the refresher is retrying")
         cached = snapshot.responses.get(path)
         if cached is not None:
             return cached
@@ -280,13 +308,29 @@ class Client:
         return response.body
 
     def _run(self) -> None:
-        while True:
-            try:
-                self.refresh()
-            except Exception:  # never let the refresher die on one bad cycle
-                log.exception("snapshot refresh failed; keeping the current snapshot")
+        # A snapshot that is already serving (warmup filled it) needs no immediate
+        # recheck; start with the wait instead of fetching /v1/meta a second time.
+        failed = False
+        if self._snapshot is not None:
             self._wake.wait(self._ttl)
             self._wake.clear()
+        while True:
+            # A wake-up requested before this cycle is answered by it.
+            self._wake.clear()
+            try:
+                self.refresh()
+                failed = False
+            except Exception:  # never let the refresher die on one bad cycle
+                log.exception("snapshot refresh failed; keeping the current snapshot")
+                failed = True
+            if failed:
+                # Not wakeable: visitors arriving while the API is down must not turn
+                # into a stream of retries.
+                self._sleep(self._retry_backoff)
+            else:
+                # A wake-up requested while that refresh ran is answered by it too.
+                self._wake.clear()
+                self._wake.wait(self._ttl)
 
     def ensure_refresher(self) -> None:
         """Start the refresher thread if it is not running. Idempotent and cheap."""
