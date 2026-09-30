@@ -265,6 +265,12 @@ class TestAppEngine:
         ]
         assert "DISABLED apps/uspv-explore" in capsys.readouterr().out
 
+    def test_the_default_wait_is_120_seconds(self, load: Any, calls: Calls) -> None:
+        # The deploy sets the function's --timeout to 300s (deploy/killswitch/README.md);
+        # a default wait at or above it would be killed by the platform mid-wait.
+        load(DASHBOARD_ENV).budget_killswitch(_event(cost=5, budget=5))
+        assert ("result", 120.0) in calls.appengine_log
+
     def test_an_already_disabled_app_is_not_updated(
         self, load: Any, calls: Calls
     ) -> None:
