@@ -31,8 +31,9 @@ gcloud billing budgets describe <BUDGET_ID> --billing-account="$BILLING_ACCOUNT"
 ```
 
 The `gcloud billing budgets` commands (list, describe, update, create) need
-`billingbudgets.googleapis.com` enabled on the quota project `gcloud` uses (the current
-config project; these commands take no `--project`).
+`billingbudgets.googleapis.com` enabled on the quota project `gcloud` uses:
+`--billing-project` if passed, else the `billing/quota_project` property, else the current
+project (which `--project` sets for one command).
 
 ## 2. Create the project and the App Engine app
 
@@ -108,21 +109,23 @@ placeholder**, deployed from a scratch directory (never under `dashboard/`, whic
 #277's): a one-route app whose `app.yaml` pins the instance count, so "instances reach 0"
 can fail rather than happen through idleness:
 
-```
+```yaml
 # app.yaml (plus a main.py serving "ok" on /, and requirements.txt with gunicorn + flask)
 runtime: python314
 service_account: explore-run@uspv-explore.iam.gserviceaccount.com
 inbound_services: [warmup]
 automatic_scaling: {min_instances: 1, max_instances: 1}
+```
 
+```
 gcloud app deploy --project=uspv-explore --quiet
 HOST=$(gcloud app describe --project=uspv-explore --format='value(defaultHostname)')
 ```
 
 A brand-new project's first deploy can fail on the Cloud Build identity's permissions
 (App Engine's [deployment troubleshooter](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment));
-record what it needed, for #277. Once #277 maps the domain, it re-runs step 2 against
-`explore.`.
+record what it needed, for #277. Once #277 maps the domain, it re-runs probe 2 below
+against `explore.`.
 
 1. **Below threshold:** publish `{"costAmount": 1, "budgetAmount": 5}` to
    `dashboard-budget-alerts`; the function logs `under threshold` and the app stays

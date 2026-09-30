@@ -86,7 +86,11 @@ def load_config(env: Mapping[str, str]) -> Config:
 
 
 def _positive_finite(env: Mapping[str, str], key: str, default: str) -> float:
-    value = float(env.get(key, default))
+    raw = env.get(key, default)
+    try:
+        value = float(raw)
+    except ValueError as e:
+        raise ValueError(f"{key} must be a number, got {raw!r}") from e
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{key} must be a finite number > 0, got {value}")
     return value
@@ -117,7 +121,7 @@ def pause_app_engine(config: Config) -> None:
 
     The ``apps.patch`` reference lists only ``authDomain``, ``defaultCookieExpiration``
     and ``iap`` as updatable. That ``servingStatus`` is accepted too is UNVERIFIED until
-    #283's over-threshold probe, whose output is recorded on that issue. REST fallback:
+    #283's over-threshold probe, whose output is to be recorded there. REST fallback:
     ``PATCH https://appengine.googleapis.com/v1/apps/<project>?updateMask=servingStatus``
     with ``{"servingStatus": "USER_DISABLED"}``.
     """

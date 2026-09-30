@@ -191,7 +191,7 @@ class TestConfig:
         with pytest.raises(ValueError, match="GCP_PROJECT"):
             load({"KILLSWITCH_TARGET": "app_engine"})
 
-    @pytest.mark.parametrize("value", ["0", "-0.5", "nan", "inf"])
+    @pytest.mark.parametrize("value", ["0", "-0.5", "nan", "inf", "abc", ""])
     def test_a_fraction_that_is_not_positive_and_finite_fails_the_import(
         self, load: Any, value: str
     ) -> None:
@@ -199,7 +199,7 @@ class TestConfig:
         with pytest.raises(ValueError, match="PAUSE_AT_FRACTION"):
             load({**DASHBOARD_ENV, "PAUSE_AT_FRACTION": value})
 
-    @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+    @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "abc", ""])
     def test_an_operation_timeout_that_is_not_positive_and_finite_fails_the_import(
         self, load: Any, value: str
     ) -> None:
@@ -214,8 +214,11 @@ class TestNoPause:
     ) -> None:
         load(env).budget_killswitch(_event(cost=4.99, budget=5))
         assert (calls.run_clients, calls.appengine_clients) == (0, 0)
-        # The live below-threshold probe keys on this line.
-        assert "under threshold" in capsys.readouterr().out
+        # The live below-threshold probes key on this line; the target token is what tells
+        # a post-#283 revision of the API function from the one it replaced.
+        out = capsys.readouterr().out
+        assert "under threshold" in out
+        assert f"target={env['KILLSWITCH_TARGET']}" in out
 
     @pytest.mark.parametrize("env", [API_ENV, DASHBOARD_ENV], ids=["api", "dashboard"])
     def test_a_zero_budget_is_reported_and_constructs_no_client(
