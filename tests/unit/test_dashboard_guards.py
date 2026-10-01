@@ -42,10 +42,11 @@ code that runs only after a successful response is under the guard too.
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
 other than SQLite's) raises no event and is not seen. Pages other than ``/`` are pinned
 in the success run only by the absence of the degraded message, so a page that skipped
-its post-success code would still pass; a per-page success contract is S3a's (#278). The AST pass is a lint against
-*accidental* regressions: a second HTTP client, a file read, a dynamic import. It is not
-a sandbox against code written to evade it (a name built at runtime, say), and it does
-not claim to be.
+its post-success code would still pass. A per-page success contract is deferred to the
+stories #278 is being split into. The AST pass is a lint against *accidental*
+regressions: a second HTTP client, a file read, a dynamic import. It is not a sandbox
+against code written to evade it (a name built at runtime, say), and it does not claim
+to be.
 
 Recorded API responses under ``tests/fixtures/dashboard/`` are test input only. The
 success run reads them in this process and embeds them in the guard program, so the
@@ -398,10 +399,17 @@ def _result(completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 # --- which file opens are allowed ----------------------------------------------------
 
-#: The interpreter's own library roots: the stdlib and the environment's site-packages.
+#: The interpreter's own library roots: the stdlib and the environment's site-packages,
+#: each as configured and as resolved.
 LIBRARY_ROOTS = tuple(
-    Path(os.path.realpath(sysconfig.get_paths()[key]))
-    for key in ("stdlib", "platstdlib", "purelib", "platlib")
+    dict.fromkeys(
+        path
+        for key in ("stdlib", "platstdlib", "purelib", "platlib")
+        for path in (
+            Path(os.path.abspath(sysconfig.get_paths()[key])),
+            Path(os.path.realpath(sysconfig.get_paths()[key])),
+        )
+    )
 )
 
 #: Named files outside those roots that the runtime opens, each with its reason. A CI
@@ -429,11 +437,11 @@ def _is_under(path: Path, root: Path) -> bool:
 def _open_violation(raw: str) -> bool:
     """Whether the runtime opening ``raw`` (as the audit event named it) is a violation.
 
-    Relative names are read from the guard program's working directory. The ``tests/``
-    check uses the resolved name, so ``../tests/x`` or a symlink cannot reach it
-    unnoticed. The allow decision accepts the name either as written or resolved, since
-    an installer may make site-packages entries symlinks into a store (uv's symlink
-    mode, Nix).
+    Relative names are read from the guard program's working directory. Every rule uses
+    the resolved name, so ``../tests/x`` or a symlink cannot reach a file unnoticed,
+    with one exception: a name written under :data:`LIBRARY_ROOTS` is accepted as
+    written too, since an installer may make site-packages entries symlinks into a
+    store (uv's symlink mode, Nix). ``tests/`` wins over every allow.
     """
     if raw.startswith("<") and raw.endswith(">"):
         return False  # a pseudo-filename (``<unknown>``), as linecache tries
@@ -441,10 +449,10 @@ def _open_violation(raw: str) -> bool:
     resolved = Path(os.path.realpath(written))
     if _is_under(resolved, TESTS.resolve()):
         return True
-    roots = (*LIBRARY_ROOTS, PACKAGE.resolve())
+    if resolved in ALLOWED_FILES or _is_under(resolved, PACKAGE.resolve()):
+        return False
     return not any(
-        path in ALLOWED_FILES or any(_is_under(path, root) for root in roots)
-        for path in (written, resolved)
+        _is_under(path, root) for root in LIBRARY_ROOTS for path in (written, resolved)
     )
 
 
@@ -642,7 +650,7 @@ def test_tests_wins_over_every_allow_rule(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_a_symlink_into_tests_is_a_violation(tmp_path: Path) -> None:
-    """Names are resolved before they are classified."""
+    """The ``tests/`` check uses the resolved name."""
     link = tmp_path / "innocent.json"
     link.symlink_to(FIXTURES / "v1_meta.json")
     assert _open_violation(str(link)) is True
@@ -965,3 +973,35 @@ def test_the_dashboard_export_cannot_install_usvote(tmp_path: Path) -> None:
     assert "usvote" not in names
     assert not {"pandas", "geopandas", "psycopg2-binary", "fastapi"} & names
     assert not [ln for ln in requirements if ln.startswith(("-e", "."))]
+
+
+def _link_out(tmp_path: Path, root: Path) -> Path:
+    """A ``.py`` name inside ``root`` that is a symlink to a data file outside it."""
+    target = tmp_path / "outside" / "data.json"
+    target.parent.mkdir()
+    target.write_text("{}", encoding="utf-8")
+    root.mkdir()
+    link = root / "pkg.py"
+    link.symlink_to(target)
+    return link
+
+
+def test_a_symlink_under_a_library_root_is_accepted_as_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store-symlinked site-packages entry (uv's symlink mode, Nix) is allowed."""
+    root = tmp_path / "site-packages"
+    link = _link_out(tmp_path, root)
+    monkeypatch.setattr(sys.modules[__name__], "LIBRARY_ROOTS", (*LIBRARY_ROOTS, root))
+    assert _open_violation(str(link)) is False
+    assert _open_violation(str(link.resolve())) is True  # the target itself is not
+
+
+def test_a_symlink_out_of_the_package_is_a_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the library roots accept a name as written; ``explore/`` does not."""
+    package = tmp_path / "explore"
+    link = _link_out(tmp_path, package)
+    monkeypatch.setattr(sys.modules[__name__], "PACKAGE", package)
+    assert _open_violation(str(link)) is True
