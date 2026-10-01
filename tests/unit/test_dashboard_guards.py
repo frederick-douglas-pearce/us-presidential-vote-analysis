@@ -53,6 +53,10 @@ DASHBOARD = REPO / "dashboard"
 PACKAGE = DASHBOARD / "explore"
 WORKFLOW = REPO / ".github" / "workflows" / "deploy-dashboard.yml"
 PROBE = REPO / "scripts" / "probe_dashboard.sh"
+#: Contributor guidance (#298), never uploaded: `.gcloudignore` is an allow-list that
+#: does not name it, which `test_gcloudignore_uploads_only_the_runtime` pins. Its prose
+#: says the runtime names no `run.app` URL, so the text scan below skips this one path.
+GUIDANCE = DASHBOARD / "CLAUDE.md"
 
 #: The public API host, written out here rather than imported from ``explore.config``:
 #: a test that read the host from the module under test would move with it.
@@ -364,6 +368,7 @@ def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
         for p in [*DASHBOARD.rglob("*"), WORKFLOW, PROBE]
         if p.is_file()
         and "__pycache__" not in p.parts
+        and p != GUIDANCE
         and "run.app" in p.read_text(encoding="utf-8", errors="replace")
     ]
     assert WORKFLOW.is_file() and PROBE.is_file()
@@ -375,7 +380,12 @@ def _deploy_root_file_allowed(relative: Path) -> bool:
     another kind of file (a favicon, say) extends this, with a reason."""
     parts = relative.parts
     if len(parts) == 1:
-        return relative.name in {"app.yaml", ".gcloudignore", "requirements.txt"}
+        return relative.name in {
+            "app.yaml",
+            ".gcloudignore",
+            "requirements.txt",
+            "CLAUDE.md",  # GUIDANCE: the allow-list keeps it out of the upload
+        }
     if parts[0] != "explore":
         return False
     if relative.suffix == ".py":
@@ -398,6 +408,8 @@ def test_the_deploy_root_holds_no_data_files() -> None:
     ("relative", "allowed"),
     [
         ("app.yaml", True),
+        ("CLAUDE.md", True),
+        ("explore/CLAUDE.md", False),  # explore/ uploads whole
         ("explore/results.yaml", False),
         ("explore/data.json", False),
         ("explore/assets/style.css", True),
