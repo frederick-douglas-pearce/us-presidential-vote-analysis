@@ -160,12 +160,14 @@ jobs:
           rc=0
           # A deploy that did not succeed never moved traffic (it is --no-promote, and the
           # traffic step comes later), so the only question left is a leftover version.
+          # The exception is an app's first-ever deploy, where App Engine gives the only
+          # version all traffic: that surfaces as the delete warning below (§10 by hand).
           # When the deploy succeeded, restore traffic unconditionally: no lookup whose
           # failure could be mistaken for "nothing to do".
           if [ "$DEPLOY_OUTCOME" != "success" ]; then
             if gcloud app versions describe "$VERSION" --project="$PROJECT" --service=default >/dev/null; then
               gcloud app versions delete "$VERSION" --project="$PROJECT" --service=default --quiet \
-                || echo "::warning::the deploy failed and ${VERSION} exists but could not be deleted; it pins an instance until deleted (docs/deploy-dashboard.md §10)"
+                || echo "::warning::the deploy did not succeed and ${VERSION} exists but could not be deleted; it pins an instance until deleted (docs/deploy-dashboard.md §10)"
             else
               echo "::warning::the deploy did not succeed and ${VERSION} could not be found; if it exists (a cancelled deploy can still create it), delete it (docs/deploy-dashboard.md §10)"
             fi

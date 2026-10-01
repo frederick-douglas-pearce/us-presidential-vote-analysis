@@ -14,7 +14,9 @@
 # during a dashboard deploy does not fail a good deploy.
 #
 # The default 12 tries is sized for a cold instance warming up (a failing try is quick,
-# ≈ 5–6 s). If every call hangs instead, a try can take 50 s (three 15 s requests and the
+# ≈ 7–8 s: the 5 s sleep, up to 2 s while the render waits on an empty cache, and three
+# round trips; a cold instance's first try adds its start-up time). If every call hangs
+# instead, a try can take 50 s (three 15 s requests and the
 # 5 s sleep), and the workflow's 8-minute step timeout ends the probe first; the step
 # then fails and the rollback runs, but this script's own error line is not printed.
 set -uo pipefail
