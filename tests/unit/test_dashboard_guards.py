@@ -42,8 +42,8 @@ code that runs only after a successful response is under the guard too.
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
 other than SQLite's) raises no event and is not seen. Pages other than ``/`` are pinned
 in the success run only by the absence of the degraded message, so a page that skipped
-its post-success code would still pass. A per-page success contract is deferred to the
-stories #278 is being split into. The AST pass is a lint against *accidental*
+its post-success code would still pass. A per-page success contract is deferred to #278,
+as recorded in PR #304's review. The AST pass is a lint against *accidental*
 regressions: a second HTTP client, a file read, a dynamic import. It is not a sandbox
 against code written to evade it (a name built at runtime, say), and it does not claim
 to be.
@@ -984,6 +984,14 @@ def _link_out(tmp_path: Path, root: Path) -> Path:
     link = root / "pkg.py"
     link.symlink_to(target)
     return link
+
+
+@pytest.mark.parametrize("key", ["stdlib", "platstdlib", "purelib", "platlib"])
+def test_the_library_roots_carry_the_configured_form(key: str) -> None:
+    """A root that itself sits behind a symlink matches the names imports write."""
+    configured = sysconfig.get_paths()[key]
+    assert Path(os.path.abspath(configured)) in LIBRARY_ROOTS
+    assert Path(os.path.realpath(configured)) in LIBRARY_ROOTS
 
 
 def test_a_symlink_under_a_library_root_is_accepted_as_written(
