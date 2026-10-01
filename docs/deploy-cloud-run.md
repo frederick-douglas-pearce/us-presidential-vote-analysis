@@ -22,9 +22,11 @@ worst case. At this project's traffic, expect to sit inside the Cloud Run free t
 ## 0. Prerequisites
 
 - A **GCP project** with billing enabled (see the [README quick commands](../README.md)).
-- A **domain you control** on **Cloudflare** (free plan). One domain serves both this API
-  (`api.<domain>`) and a future dashboard (`<domain>` / `www` on GitHub Pages). Cloudflare
-  Registrar sells at wholesale cost and auto-wires DNS.
+- A **domain you control** on **Cloudflare** (free plan). One domain serves this API
+  (`api.<domain>`) and the public dashboard (`explore.<domain>`, on App Engine in its own
+  project — [D071](../.claude/specs/decisions.md), runbook
+  [`deploy-dashboard.md`](deploy-dashboard.md)). Cloudflare Registrar sells at wholesale
+  cost and auto-wires DNS.
 - `gcloud` authenticated locally (`gcloud auth login`) for the one-time setup.
 
 Set shell variables (adjust to your names):

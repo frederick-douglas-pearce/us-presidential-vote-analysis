@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 
 from usvote import config
 
-#: Environment variable holding the CORS allow-list (comma-separated origins). The exact
-#: dashboard origin is deferred (frontend D001); until it is supplied we default to
+#: Environment variable holding the CORS allow-list (comma-separated origins). The
+#: public dashboard needs no entry: it is server-side (D071(d)) and fetches from App
+#: Engine with no ``Origin`` header, so CORS never applies to it. Unset, we default to
 #: localhost dev origins and **never** a silent ``*`` (D031) — an open CORS policy on a
 #: public-graduation surface is a decision, not a default.
 CORS_ORIGINS_VAR = "USVOTE_API_CORS_ORIGINS"

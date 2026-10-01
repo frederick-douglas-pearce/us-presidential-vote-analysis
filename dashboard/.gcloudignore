@@ -1,0 +1,8 @@
+# Upload only the runtime: ignore everything, then allow the app package, its config and
+# the requirements file the deploy workflow exports from uv.lock. Keeping this an
+# allow-list means nothing new under dashboard/ ships by accident (#277).
+/*
+!/app.yaml
+!/requirements.txt
+!/explore/
+/explore/**/__pycache__/

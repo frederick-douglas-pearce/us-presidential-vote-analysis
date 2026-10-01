@@ -1,0 +1,20 @@
+# App Engine standard config for the public dashboard (E9, D071). Deployed by
+# .github/workflows/deploy-dashboard.yml; runbook: docs/deploy-dashboard.md.
+#
+# Every line here is load-bearing, and test_app_yaml_is_exactly_the_pinned_configuration
+# (tests/unit/test_dashboard_guards.py) pins the whole file, entrypoint included:
+# - one F1 instance, pinned (min = max = 1) with warmup: the cold-start target in D071(g)
+#   depends on the pin, and an explicit max is the cost cap (new projects default to 20);
+# - one gunicorn worker, so one process and one in-process cache (D071(d));
+# - the least-privilege runtime service account from #283;
+# - no env_variables: the API base and the canonical host are constants in
+#   explore/config.py, so nothing here can point the dashboard anywhere else.
+runtime: python314
+instance_class: F1
+service_account: explore-run@uspv-explore.iam.gserviceaccount.com
+entrypoint: gunicorn -b :$PORT -w 1 --threads 8 --timeout 60 explore.app:server
+inbound_services:
+  - warmup
+automatic_scaling:
+  min_instances: 1
+  max_instances: 1

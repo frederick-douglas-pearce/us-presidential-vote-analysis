@@ -51,6 +51,10 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.11",
     "mypy>=1.15",
+    # tests/unit/test_dashboard_guards.py reads dashboard/app.yaml (#277). Declared rather
+    # than relied on transitively through jupyterlab.
+    "pyyaml>=6",
+    "types-pyyaml>=6",
     # Notebook remains runnable during the incremental notebook->package migration.
     "jupyterlab>=4.0",
 ]
@@ -68,6 +72,20 @@ serve = [
     "uvicorn>=0.34",
     "pydantic>=2",
 ]
+
+# The public dashboard (E9, D071): Plotly Dash on App Engine standard, deployed from
+# `dashboard/`. A group of its own, never `serve` (the D033 API image must not gain Dash)
+# and never the base dependencies. The deploy workflow exports exactly this group to
+# `dashboard/requirements.txt`, so versions are single-sourced from uv.lock. It is in
+# `default-groups` below so a bare `uv sync` / `uv run pytest` keeps the dashboard's
+# tests collectable.
+dashboard = [
+    "dash[compress]>=4.4",   # compress=True (D071 egress estimate) needs flask-compress
+    "gunicorn>=23",
+]
+
+[tool.uv]
+default-groups = ["dev", "dashboard"]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]
@@ -89,6 +107,9 @@ line-length = 88
 # ruff infers this from requires-python, but pin it explicitly as insurance.
 target-version = "py311"
 extend-exclude = ["*.ipynb"]
+# `dashboard/` is its own import root (the App Engine deploy root), so `explore` sorts
+# as first-party.
+src = [".", "src", "dashboard"]
 
 # A pragmatic starter rule set (issue #19): pyflakes/pycodestyle errors plus the
 # high-signal, low-noise families. Strictness can ratchet up later. Beyond the
@@ -117,7 +138,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 # cost is that a new tooling/ script must carry annotations. `deploy` joined in #283
 # for the same reason: the budget kill-switch's tests load deploy/killswitch/main.py
 # by path, and it is the code authorized to pause the live API and dashboard.
-files = ["src", "tests", "tooling", "deploy"]
+# `dashboard` joined in #277: the public dashboard's app package (`dashboard/explore/`).
+files = ["src", "tests", "tooling", "deploy", "dashboard"]
 # Pragmatic strictness (issue #19): require annotations and surface the common
 # unsoundness (implicit Optional, unreachable code, silently-Any returns, stale
 # ignores). Not full `strict = true` yet — `disallow_any_*` would drown in the
@@ -152,6 +174,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The dashboard's deploy root is its import root (App Engine runs `explore.app:server`
+# from `dashboard/`), so its tests import `explore` from there.
+pythonpath = ["dashboard"]
 # Exclude live-Postgres integration tests by default (and in CI). Run them
 # explicitly with `pytest -m integration`. The `integration` MARKER (not the
 # tests/ directory layout) is the source of truth for selection; the offline

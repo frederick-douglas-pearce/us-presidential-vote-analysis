@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "snapshot_version": "71b777de23181c224d80207fb756a9a4541fe18ce70cced28dd8de9d666c20a0",
+    "source": "MIT",
+    "source_name": "MIT Election Lab",
+    "license": "CC0-1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0",
+    "ec_source": "NARA",
+    "ec_source_name": "U.S. National Archives and Records Administration",
+    "ec_license": "US-PD",
+    "ec_license_url": "https://www.usa.gov/government-works",
+    "census_source": "USCB",
+    "census_source_name": "U.S. Census Bureau",
+    "census_license": "US-PD",
+    "census_license_url": "https://www.usa.gov/government-works",
+    "coverage": {
+      "year_min": 1824,
+      "year_max": 2024,
+      "pv_year_min": 1976,
+      "pv_year_max": 2024
+    },
+    "redistributable_note": "Redistributable data only. Electoral-college figures come from the U.S. National Archives and Records Administration — Public domain (a work of the U.S. Government, 17 U.S.C. § 105) — and cover every election in the snapshot. Popular-vote figures come from MIT Election Lab under CC0 1.0 Universal (Public Domain Dedication) and cover 1976–2024 only; earlier elections carry no popular vote on this surface, and each row's `pv_status` says whether that is because none was held or because no redistributable source reaches it. Per-capita population figures come from the U.S. Census Bureau — Public domain (a work of the U.S. Government, 17 U.S.C. § 105). Non-redistributable UCSB / American Presidency Project data is excluded from this public API surface."
+  },
+  "schema_version": 4,
+  "row_count": 5623,
+  "candidate_count": 96,
+  "build_timestamp": "2026-09-27T07:46:19.757183+00:00"
+}
