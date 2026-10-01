@@ -1,0 +1,284 @@
+{
+  "data": [
+    {
+      "year": 1824,
+      "candidate_count": 4,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1828,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1832,
+      "candidate_count": 4,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1836,
+      "candidate_count": 5,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1840,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1844,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1848,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1852,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1856,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1860,
+      "candidate_count": 4,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1864,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1868,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1872,
+      "candidate_count": 6,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1876,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1880,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1884,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1888,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1892,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1896,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1900,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1904,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1908,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1912,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1916,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1920,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1924,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1928,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1932,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1936,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1940,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1944,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1948,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1952,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1956,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1960,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1964,
+      "candidate_count": 2,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1968,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1972,
+      "candidate_count": 3,
+      "has_popular_vote": false
+    },
+    {
+      "year": 1976,
+      "candidate_count": 3,
+      "has_popular_vote": true
+    },
+    {
+      "year": 1980,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 1984,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 1988,
+      "candidate_count": 3,
+      "has_popular_vote": true
+    },
+    {
+      "year": 1992,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 1996,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2000,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2004,
+      "candidate_count": 3,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2008,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2012,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2016,
+      "candidate_count": 7,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2020,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    },
+    {
+      "year": 2024,
+      "candidate_count": 2,
+      "has_popular_vote": true
+    }
+  ],
+  "meta": {
+    "provenance": {
+      "snapshot_version": "71b777de23181c224d80207fb756a9a4541fe18ce70cced28dd8de9d666c20a0",
+      "source": "MIT",
+      "source_name": "MIT Election Lab",
+      "license": "CC0-1.0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0",
+      "ec_source": "NARA",
+      "ec_source_name": "U.S. National Archives and Records Administration",
+      "ec_license": "US-PD",
+      "ec_license_url": "https://www.usa.gov/government-works",
+      "census_source": "USCB",
+      "census_source_name": "U.S. Census Bureau",
+      "census_license": "US-PD",
+      "census_license_url": "https://www.usa.gov/government-works",
+      "coverage": {
+        "year_min": 1824,
+        "year_max": 2024,
+        "pv_year_min": 1976,
+        "pv_year_max": 2024
+      },
+      "redistributable_note": "Redistributable data only. Electoral-college figures come from the U.S. National Archives and Records Administration — Public domain (a work of the U.S. Government, 17 U.S.C. § 105) — and cover every election in the snapshot. Popular-vote figures come from MIT Election Lab under CC0 1.0 Universal (Public Domain Dedication) and cover 1976–2024 only; earlier elections carry no popular vote on this surface, and each row's `pv_status` says whether that is because none was held or because no redistributable source reaches it. Per-capita population figures come from the U.S. Census Bureau — Public domain (a work of the U.S. Government, 17 U.S.C. § 105). Non-redistributable UCSB / American Presidency Project data is excluded from this public API surface."
+    },
+    "count": 51
+  }
+}
