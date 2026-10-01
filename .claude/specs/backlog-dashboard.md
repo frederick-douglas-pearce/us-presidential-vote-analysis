@@ -320,9 +320,10 @@ behavior. That comes before any table or chart depends on it.
     tree. Recorded API responses used as test fixtures are allowed, and a test asserts that
     runtime code never reads them (the `ec_state_roster_by_year.json` precedent).
   - For a Python frontend, **no `usvote` import in runtime code**, guarded on the
-    `tests/unit/test_api_import_graph.py` pattern. Tests *may* import the stdlib-only
-    vocabulary modules (`usvote.snapshot_schema`, `usvote.count_status`,
-    `usvote.pv.status`) to assert that every closed value has a label.
+    `tests/unit/test_api_import_graph.py` pattern. Tests *may* import the vocabulary
+    modules to assert that every closed value has a label: `usvote.snapshot_schema` and
+    `usvote.count_status`, which are stdlib-only, and `usvote.pv.status`, which imports
+    numpy and pandas, so a test importing it needs the base dependencies installed (#287).
 - **API prerequisites from S1 have landed:** every S1-lettered change marked "before
   Phase 0" (e.g. the dashboard origin in `API_CORS_ORIGINS`, the CORS/cache fix if
   hypothesis (d) is confirmed) is merged, deployed, and for Cloudflare-side changes applied
