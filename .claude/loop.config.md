@@ -19,7 +19,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). **Current active epic: `epic:dashboard` (E9, #275), entering at #276 — the platform research spike (`research`, `priority:high`), which gates every other member (#277 → #278 → {#279, #280}). E9 was re-scoped from the analytical mart to a public dashboard over the live API by D070 (2026-09-27); its spec is `.claude/specs/backlog-dashboard.md`, and #276's accepted verdict records as D071 (confirm the free slot at recording time). Any API or infrastructure change #276 identifies is filed as an S1-lettered story (S1a, S1b, …) and joins this run ahead of the phase that needs it. E9-S6–S8 are unfiled tracker rows in the backlog, not issues, until Phase 1 (#278–#280) ships. Previous epic: `epic:census` (E10, #129) — `RUN COMPLETE` 2026-09-27; its two `deferred` rows (#267, #272) are both closed, and the #129 tracker has no open children. Before it: `epic:tech-debt` (E12) — `RUN PARKED` 2026-09-11 with all 20 rows terminal; its five parked members (#187/#189/#203/#205/#214) release only on an explicit human un-park. A change to this row is `blocked: human-only` — the engine forbids the orchestrator editing this file.** Standing queue: `epic:tech-debt` (E12, #179) never closes, so its run parks rather than completes | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
+| `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). **Current active epic: `epic:dashboard` (E9, #275). Phase 0 is done: #276's verdict recorded as D071 (Plotly Dash on App Engine standard, project `uspv-explore`), #283 (S1b) gave the dashboard project its own budget and kill-switch, and #277 (S2) put the walking skeleton live at `explore.us-presidential-election-center.org` (PR #292, merged 2026-09-30). Phase 1 enters at #278 (S3, the election tables, `priority:medium`), which gates #279 and #280; #293 (the runtime data-path guard's success-path coverage) lands before or with #278's second registered fetch path. #284 (S1a, `priority:low`) is optional and gates nothing. Filed during #277 and not yet curated into the queue: #291 (capacity), #293, #294 (the rollback drill) and #295 (research: cold start while the API is also cold). E9-S6–S8 are unfiled tracker rows in the backlog, not issues, until Phase 1 (#278–#280) ships. E9's spec is `.claude/specs/backlog-dashboard.md`. Previous epic: `epic:census` (E10, #129) — `RUN COMPLETE` 2026-09-27; its two `deferred` rows (#267, #272) are both closed, and the #129 tracker has no open children. Before it: `epic:tech-debt` (E12) — `RUN PARKED` 2026-09-11 with all 20 rows terminal; its five parked members (#187/#189/#203/#205/#214) release only on an explicit human un-park. A change to this row is `blocked: human-only` — the engine forbids the orchestrator editing this file.** Standing queue: `epic:tech-debt` (E12, #179) never closes, so its run parks rather than completes | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation, the architect gate in §2; **and rules on scope, stopping with that ruling attached, when a BLOCKING code-review finding raises a design question**) | inferred from available agent roster. The scope ruling is a **second gate the engine makes due, not this file** (dev-loop 0.3.0, #114): `ARCHITECT_TRIGGERS` does not bound it, it fires on every route at whatever round the finding arises, and no value here switches it off — absent, `—` or `TODO`, the stop still fires with no ruling attached. The engine's Gate table is the authoritative list of every gate this binding staffs. **Never delete this row.** |
 | `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on the branch's working diff. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence |
@@ -116,10 +116,16 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
 - **`stub-defer` marker:** exclude from selection any issue whose **title begins with `Epic:`** —
   these are umbrella trackers (#94/#63/#33/#12), not directly implementable. No real work issue
   uses that title prefix, so the rule is greppable with no extra labels.
-- **Dashboard code (E9):** location **undecided** until #276's verdict (D071) — this repo under a
-  dedicated dependency group, or a separate repo. No dashboard code goes under `src/usvote/`
-  (D070(b)). Whichever story first lands dashboard code extends this section and §4 with its
-  path and deploy surface.
+- **Dashboard code (E9):** settled by D071(e) and landed by #277. `dashboard/` is the App
+  Engine **deploy root** (`app.yaml`, and a `.gcloudignore` allow-list that uploads only the
+  runtime); the app package is `dashboard/explore/`. Its tests live beside the pipeline's as
+  `tests/unit/test_dashboard_*.py`, and recorded API responses under `tests/fixtures/dashboard/`
+  are test input only. Its dependencies are the `dashboard` dependency group, which is in
+  `[tool.uv] default-groups` so a bare `uv run pytest` collects those tests — never `serve` (the
+  D033 API image must not gain Dash) and never the base dependencies. **No dashboard code goes
+  under `src/usvote/`, and no runtime module under `dashboard/` imports `usvote`** (D070(b)).
+  A dashboard change routes as `code` and takes the same gates: `dashboard` is in mypy's
+  `files` and ruff's `src`, and pytest's `pythonpath` makes `explore` importable to its tests.
 - **`code` (default):** bug/enhancement touching `src/usvote/` → full pipeline (lint + mypy +
   pytest, integration when the DB write path changes).
 
@@ -133,7 +139,7 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
   **This rule wins over the "Skip for docs / no-surface changes" bullet below**, which it would
   otherwise tie with on every such change — `.claude/` carries hook and permission config, so a
   no-surface *diff* is not a no-consequence one.
-- **Sensitive surface** → run `/security-review` when dev-complete. **Five** path surfaces, plus
+- **Sensitive surface** → run `/security-review` when dev-complete. **Six** path surfaces, plus
   one change-shaped trigger:
   - **API serve layer** — `usvote/api/`, plus `usvote/snapshot.py`: it builds the artifact that
     layer serves, and its `assert_redistributable_only` is the single gate keeping
@@ -145,6 +151,18 @@ Any decision worth recording lands as a new `## D0NN` entry in `.claude/specs/de
     holds `id-token: write` and the Cloudflare token/zone secrets, and `deploy/killswitch/`
     is authorized to change the live service's `max_instance_count`. Enumerated, and found by
     #248's review one axis over from the omission #247 was filed about.
+  - **Public dashboard** — all of `dashboard/`. Decided 2026-09-30 (#290), on four grounds, any
+    one of which would be enough. It is a **deploy root**: `.gcloudignore` decides what reaches
+    App Engine, so a file added there ships. `app.yaml` **names the runtime service account**
+    (`explore-run@uspv-explore`) and the instance cap that is also the cost cap. `explore/api.py`'s
+    `fetch` is the **D070(b) chokepoint** — the one function that opens a connection, which is
+    what keeps the dashboard off `run.app` and off the origin secret. And it is the repo's only
+    hand-written code that **builds HTML from a request**: #277's first review round found a
+    live reflected XSS there, fixed before merge. Its deploy workflow, `.github/workflows/deploy-dashboard.yml`, was already
+    covered by the pattern above and needs no rule of its own. The guards that pin these
+    properties (`tests/unit/test_dashboard_guards.py`) are deliberately **not** listed: a
+    change that weakens one is §2's question ("if this test is wrong, what notices?"), not a
+    security path.
   - **Corpus integrity** — `usvote/corpus.py`: the sha256/manifest provenance code all three
     snapshot stages share. It was extracted *out from under* the `scrape.py` name, so the
     pattern below no longer reaches it — the same migration-out-from-under-a-rule failure this
