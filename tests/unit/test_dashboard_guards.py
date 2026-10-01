@@ -1,4 +1,4 @@
-"""Structural guards for the dashboard: one source of truth (D070(b), #277).
+"""Structural guards for the dashboard: one source of truth (D070(b), #277, #293).
 
 These are the only acceptance guard for three promises the public dashboard makes:
 
@@ -7,43 +7,61 @@ These are the only acceptance guard for three promises the public dashboard make
    whose ``usvote`` finder **records every attempt** and refuses it, drives the app's
    real request paths, and asserts there were no attempts at all. Recording the attempt
    is what catches ``try: import usvote / except ImportError`` and dynamic imports: a
-   refused import never reaches ``sys.modules``, so checking that alone would not.
+   refused import never reaches ``sys.modules``, so checking that alone would not. The
+   audit hook also records the ``import`` event for ``usvote``, a second recorder beside
+   the finder. It complements the finder and cannot replace it:
+   ``importlib.import_module`` raises no ``import`` event for its target (CPython 3.14),
+   so only the finder sees that spelling.
 2. **One data input: HTTPS to one host.** The same interpreter installs an **audit hook**
    on the socket events (``connect``, ``getaddrinfo``, ``gethostbyname``, ``sendto``),
-   which fire for C-level calls too, records each host and refuses it. The recorded
-   hosts are compared with an **independent literal**, not with ``explore.config``, so
-   repointing the config fails the test instead of moving it. Proxy variables are set in
-   that interpreter before the app is imported, so an opener that honoured them would
-   show the proxy's host.
-3. **No data files and no ``run.app``** in the deploy root, plus the exact ``app.yaml``.
+   which fire for C-level calls too, records each host and refuses it. It also refuses
+   ``socket.__new__`` and records the code that asked for the socket: a raw socket is
+   created before its hostname is resolved, so this covers the raw connect to a
+   *hostname* that the ``connect`` event alone would miss (urllib resolves first, so
+   its requests still record their host). A socket created by anything but a named
+   creator in :data:`ALLOWED_SOCKET_CREATORS` fails the test.
+   The recorded hosts are compared with an **independent literal**, not with
+   ``explore.config``, so repointing the config fails the test instead of moving it.
+   Proxy variables are set in that interpreter before the app is imported, so an opener
+   that honoured them would show the proxy's host.
+3. **No data files.** The hook records every ``open`` event, and both runs fail on any
+   file opened outside the interpreter's own library roots and ``dashboard/explore/``,
+   or anywhere under ``tests/``. It also refuses ``sqlite3.connect``, which opens its
+   file in C with no ``open`` event. Beside the behavioural check: no data files and no
+   ``run.app`` in the deploy root, and the exact ``app.yaml``.
 
-**What each layer is for, stated so it is not read as more.** The subprocess is the
-behavioural check; it covers the paths it drives (warmup, the page shell, the page
-render) with the API refused, which is every network path the skeleton has. A path that
-runs only after a *successful* response (prefetching a second path, a fill on a miss) is
-not reached; #293 grows that coverage, before or with #278's second registered path. One
-limit of the audit hook itself: a raw ``connect`` to a *hostname* resolves the name
-before the ``socket.connect`` event fires, so with the network cut it fails unrecorded.
-Raw sockets to a hostname are covered only by the lint's denylist (``socket``, ``http``,
-``ssl``, …), which catches the obvious imports, not every module that can open one. The
-AST pass is a lint against *accidental* regressions: a second HTTP client, a file read,
-a dynamic import. It is not a sandbox against code written to evade it (a name built at
-runtime, say), and it does not claim to be.
+**Two runs, and what each covers.** The *refused* run drives warmup, the page shell and
+every registered page with every connection refused. The *success* run replaces
+``http.client.HTTPSConnection.connect`` with a fake transport that answers the API host
+only, from recorded fixtures; ``fetch``, its proxy and redirect handling, the cache and
+the renders all run as shipped on top of it. It registers at least two prefetch paths,
+renders every registered page from a filled cache, and makes one fill on a miss. So the
+code that runs only after a successful response is under the guard too.
 
-Recorded API responses under ``tests/fixtures/dashboard/`` are test input only; a test
-here asserts no runtime module can name them (the ``ec_state_roster_by_year.json``
-precedent).
+**What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
+other than SQLite's) raises no event and is not seen. The AST pass is a lint against
+*accidental* regressions: a second HTTP client, a file read, a dynamic import. It is not
+a sandbox against code written to evade it (a name built at runtime, say), and it does
+not claim to be.
+
+Recorded API responses under ``tests/fixtures/dashboard/`` are test input only. The
+success run reads them in this process and embeds them in the guard program, so the
+runtime under test never opens them, and the ``open`` check would fail if it did.
 """
 
 from __future__ import annotations
 
 import ast
+import json
+import mimetypes
 import os
 import shlex
 import subprocess
 import sys
+import sysconfig
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -51,6 +69,8 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 DASHBOARD = REPO / "dashboard"
 PACKAGE = DASHBOARD / "explore"
+TESTS = REPO / "tests"
+FIXTURES = TESTS / "fixtures" / "dashboard"
 WORKFLOW = REPO / ".github" / "workflows" / "deploy-dashboard.yml"
 PROBE = REPO / "scripts" / "probe_dashboard.sh"
 #: Contributor guidance (#298), never uploaded: `.gcloudignore` is an allow-list that
@@ -68,14 +88,33 @@ GUARD_PROXY = "http://proxy.guard.invalid:3128"
 
 RUNTIME_MODULES = sorted(p for p in PACKAGE.rglob("*.py") if "__pycache__" not in p.parts)
 
+#: The responses the success run's fake transport serves, by API path. A page that
+#: registers a new prefetch path needs its fixture here, or the success run fails: the
+#: transport answers 404, the refresh fails, and the page renders the degraded state.
+FIXTURE_FILES = {
+    "/v1/meta": "v1_meta.json",
+    "/v1/elections": "v1_elections.json",
+    "/v1/elections/1824": "v1_elections_1824.json",
+}
+
+#: Registered only while the pages register fewer than two prefetch paths, so the
+#: prefetch loop runs past ``/v1/meta`` before #278's pages register real ones.
+SYNTHETIC_PREFETCH = "/v1/elections"
+
+#: Read by no page and prefetched by none: the success run's fill on a miss.
+MISS_PATH = "/v1/elections/1824"
+
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if not k.upper().endswith("_PROXY")}
     for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
         env[name] = GUARD_PROXY
     env["PYTHONPATH"] = str(DASHBOARD)
+    # On stdin, not ``-c``: the program embeds the fixtures, and one argument is
+    # capped (128 KiB on Linux) well below what #278's fixtures will add up to.
     return subprocess.run(
-        [sys.executable, "-c", program],
+        [sys.executable, "-"],
+        input=program,
         capture_output=True,
         text=True,
         cwd=DASHBOARD,
@@ -84,14 +123,21 @@ def _run(program: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-#: Installed before anything else runs: every ``usvote`` import attempt recorded and
-#: refused, and every socket host recorded and refused (so no connection the hook sees
-#: can succeed).
+#: Installed before anything else runs. Every ``usvote`` import attempt is recorded and
+#: refused; every socket host is recorded and refused, and so is creating a socket (so
+#: no connection the hook sees can succeed); ``sqlite3.connect`` is recorded and
+#: refused; ``open`` and ``import`` events are only recorded, since refusing them would
+#: break imports. They are classified after the run, in this process.
 _PRELUDE = """
 import sys
 
 ATTEMPTS = []
+IMPORT_EVENTS = []
 HOSTS = []
+OPENS = []
+SQLITE = []
+SOCKETS = []
+SERVED = []
 
 
 class _BlockUsvote:
@@ -106,6 +152,26 @@ sys.meta_path.insert(0, _BlockUsvote())
 
 
 def _audit(event, args):
+    if event == "open":
+        OPENS.append(args[0])
+        return
+    if event == "import":
+        name = str(args[0])
+        if name == "usvote" or name.startswith("usvote."):
+            IMPORT_EVENTS.append(name)
+        return
+    if event == "sqlite3.connect":
+        SQLITE.append(str(args[0]))
+        raise OSError("sqlite disabled by the guard")
+    if event == "socket.__new__":
+        # Recorded by the code that asked for it, the first frame outside socket.py.
+        frame = sys._getframe(1)
+        while frame is not None and frame.f_code.co_filename.endswith("/socket.py"):
+            frame = frame.f_back
+        where = "?" if frame is None else frame.f_code.co_filename
+        name = "?" if frame is None else frame.f_code.co_name
+        SOCKETS.append(f"{where}:{name}")
+        raise OSError("socket creation disabled by the guard")
     if event in ("socket.getaddrinfo", "socket.gethostbyname"):
         host = args[0]
     elif event in ("socket.connect", "socket.sendto"):
@@ -120,14 +186,130 @@ def _audit(event, args):
 sys.addaudithook(_audit)
 """
 
-_RUNTIME_PROGRAM = (
+
+def _transport(fixtures: dict[str, str], version: str) -> str:
+    """The fake transport: ``HTTPSConnection.connect`` answering the API host only.
+
+    Installed after the prelude and before ``explore`` is imported. Only the connection
+    step is replaced, so the dashboard's real opener (no proxy, no redirects), real
+    ``fetch`` and the stdlib's request and response handling all run on top of it. The socket is an in-memory
+    buffer, never a real one: creating a socket is refused. Every response carries the
+    meta fixture's snapshot version as its ``ETag``, since the cache compares only that.
+    """
+    return f"""
+import http.client
+import io
+
+_FIXTURES = {json.dumps(fixtures)}
+_VERSION = {version!r}
+_API_HOST = {PUBLIC_API_HOST!r}
+
+
+class _FixtureSocket:
+    def __init__(self):
+        self._sent = b""
+
+    def sendall(self, data):
+        self._sent += bytes(data)
+
+    def makefile(self, mode, *args, **kwargs):
+        target = self._sent.split(b" ", 2)[1].decode("ascii")
+        body = _FIXTURES.get(target)
+        if body is None:
+            head = "HTTP/1.1 404 Not Found\\r\\n"
+            payload = b'{{"error": "no fixture"}}'
+        else:
+            SERVED.append(target)
+            head = f'HTTP/1.1 200 OK\\r\\nETag: "{{_VERSION}}"\\r\\n'
+            payload = body.encode("utf-8")
+        head += (
+            "Content-Type: application/json\\r\\n"
+            f"Content-Length: {{len(payload)}}\\r\\nConnection: close\\r\\n\\r\\n"
+        )
+        return io.BytesIO(head.encode("ascii") + payload)
+
+    def close(self):
+        pass
+
+
+def _connect(self):
+    HOSTS.append(self.host)
+    if self.host != _API_HOST:
+        raise OSError(f"the guard's transport answers {{_API_HOST}} only")
+    self.sock = _FixtureSocket()
+
+
+# The method, not the class: the stdlib's __init__ names the class through the module
+# global, so rebinding that global would break every connection.
+http.client.HTTPSConnection.connect = _connect
+"""
+
+
+def _fixture_transport() -> str:
+    fixtures = {
+        path: (FIXTURES / name).read_text(encoding="utf-8")
+        for path, name in FIXTURE_FILES.items()
+    }
+    meta = json.loads(fixtures["/v1/meta"])
+    return _transport(fixtures, meta["provenance"]["snapshot_version"])
+
+
+#: Shared by both runtime runs: drives the routing callback for one page path.
+_ROUTE = """
+def route(client, path):
+    body = {
+        "output": ".._pages_content.children..._pages_store.data..",
+        "outputs": [{"id": "_pages_content", "property": "children"},
+                    {"id": "_pages_store", "property": "data"}],
+        "inputs": [{"id": "_pages_location", "property": "pathname", "value": path},
+                   {"id": "_pages_location", "property": "search", "value": ""}],
+        "changedPropIds": ["_pages_location.pathname"],
+        "state": [],
+    }
+    response = client.post("/_dash-update-component", json=body)
+    assert response.status_code == 200, (path, response.status_code)
+    return response.get_data(as_text=True)
+"""
+
+#: Every runtime module was actually loaded, so none escaped the checks.
+_ALL_MODULES_LOADED = """
+from pathlib import Path
+
+loaded = {Path(m.__file__).resolve() for m in list(sys.modules.values())
+          if getattr(m, "__file__", None)}
+package = Path(api.__file__).resolve().parent
+missing = sorted(str(p) for p in package.rglob("*.py")
+                 if "__pycache__" not in p.parts and p.resolve() not in loaded)
+assert not missing, f"runtime modules never imported: {missing}"
+"""
+
+#: The recorders' contents, as one line of JSON for this process to read.
+_RESULT = """
+import json as _json
+import os as _os
+
+_opened = sorted({_os.fsdecode(_os.fspath(p)) for p in list(OPENS)
+                  if not isinstance(p, int)})
+print("RESULT=" + _json.dumps({
+    "attempts": ATTEMPTS,
+    "import_events": IMPORT_EVENTS,
+    "hosts": sorted(set(HOSTS)),
+    "opens": _opened,
+    "sqlite": SQLITE,
+    "sockets": SOCKETS,
+    "served": SERVED,
+}))
+"""
+
+_REFUSED_PROGRAM = (
     _PRELUDE
+    + _ROUTE
     + """
 import threading
-from pathlib import Path
 
 BASELINE_THREADS = set(threading.enumerate())
 
+import dash
 import explore.app as appmod
 from explore import api
 
@@ -136,78 +318,303 @@ assert api.CLIENT._thread is None, "the refresher started at import"
 assert HOSTS == [], f"importing the app made a network call: {HOSTS}"
 
 client = appmod.server.test_client()
-routing = {
-    "output": ".._pages_content.children..._pages_store.data..",
-    "outputs": [{"id": "_pages_content", "property": "children"},
-                {"id": "_pages_store", "property": "data"}],
-    "inputs": [{"id": "_pages_location", "property": "pathname", "value": "/"},
-               {"id": "_pages_location", "property": "search", "value": ""}],
-    "changedPropIds": ["_pages_location.pathname"],
-    "state": [],
-}
 assert client.get("/_ah/warmup").status_code == 200
 assert client.get("/").status_code == 200
-page = client.post("/_dash-update-component", json=routing)
-assert page.status_code == 200, page.status_code
-assert "isn't responding" in page.get_data(as_text=True)  # offline: the degraded state
-
-# Every runtime module was actually loaded, so none escaped the checks above.
-loaded = {Path(m.__file__).resolve() for m in list(sys.modules.values())
-          if getattr(m, "__file__", None)}
-package = Path(api.__file__).resolve().parent
-missing = sorted(str(p) for p in package.rglob("*.py")
-                 if "__pycache__" not in p.parts and p.resolve() not in loaded)
-assert not missing, f"runtime modules never imported: {missing}"
-
-assert ATTEMPTS == [], f"the runtime tried to import usvote: {ATTEMPTS}"
-print("HOSTS=" + ",".join(sorted(set(HOSTS))))
+paths = sorted(page["path"] for page in dash.page_registry.values())
+assert "/" in paths, paths
+for path in paths:
+    assert "isn't responding" in route(client, path), path  # offline: degraded
 """
+    + _ALL_MODULES_LOADED
+    + _RESULT
 )
 
 
-def test_the_runtime_imports_no_usvote_and_reaches_only_the_public_api() -> None:
-    result = _run(_RUNTIME_PROGRAM)
-    assert result.returncode == 0, result.stderr[-3000:]
-    hosts_line = [ln for ln in result.stdout.splitlines() if ln.startswith("HOSTS=")]
-    assert hosts_line, result.stdout
-    hosts = set(hosts_line[-1].removeprefix("HOSTS=").split(","))
-    # Non-empty: the paths above did try the API, so the host check is not vacuous.
-    assert hosts == {PUBLIC_API_HOST}
-
-
-def test_the_guard_program_can_fail() -> None:
-    """Non-vacuity: each recorder sees what it exists to see."""
-    program = (
+def _success_program() -> str:
+    return (
         _PRELUDE
-        + """
+        + _fixture_transport()
+        + _ROUTE
+        + f"""
+import dash
+import explore.app as appmod
+from explore import api
+
+registered = list(dict.fromkeys(api.registered_prefetch_paths()))
+if len(registered) < 2:
+    home = next(page for page in dash.page_registry.values() if page["path"] == "/")
+    home["prefetch"] = (*home.get("prefetch", ()), {SYNTHETIC_PREFETCH!r})
+    registered = list(dict.fromkeys(api.registered_prefetch_paths()))
+assert len(registered) >= 2, registered
+assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
+
+client = appmod.server.test_client()
+assert client.get("/_ah/warmup").status_code == 200  # refresh: meta, then prefetch
+assert api.CLIENT.snapshot is not None, "warmup did not fill the cache"
+assert api.CLIENT.snapshot.version == _VERSION
+assert client.get("/").status_code == 200
+paths = sorted(page["path"] for page in dash.page_registry.values())
+assert "/" in paths, paths
+for path in paths:
+    text = route(client, path)
+    assert "isn't responding" not in text, path  # rendered from the filled cache
+    if path == "/":
+        assert _VERSION in text
+
+api.CLIENT.get({MISS_PATH!r})  # a fill on a miss, through the real fetch
+
+expected = [api.META_PATH]
+expected += [path for path in registered if path != api.META_PATH]
+expected += [{MISS_PATH!r}]
+assert SERVED == expected, (SERVED, expected)
+"""
+        + _ALL_MODULES_LOADED
+        + _RESULT
+    )
+
+
+def _result(completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    assert completed.returncode == 0, completed.stderr[-3000:]
+    lines = [ln for ln in completed.stdout.splitlines() if ln.startswith("RESULT=")]
+    assert lines, completed.stdout[-3000:]
+    result: dict[str, Any] = json.loads(lines[-1].removeprefix("RESULT="))
+    return result
+
+
+# --- which file opens are allowed ----------------------------------------------------
+
+#: The interpreter's own library roots: the stdlib and the environment's site-packages.
+LIBRARY_ROOTS = tuple(
+    Path(os.path.realpath(sysconfig.get_paths()[key]))
+    for key in ("stdlib", "platstdlib", "purelib", "platlib")
+)
+
+#: Named files outside those roots that the runtime opens, each with its reason. A CI
+#: environment that opens another one adds it here with a reason, never a directory.
+ALLOWED_FILES = frozenset(
+    Path(os.path.realpath(p))
+    for p in (
+        # Dash calls ``mimetypes.add_type`` at import, which reads the system's MIME
+        # tables from the stdlib's own list of locations.
+        *mimetypes.knownfiles,
+        # The OS randomness source.
+        "/dev/urandom",
+        # The zipped stdlib's place on ``sys.path``, which importlib.metadata opens
+        # when it scans the path for distributions.
+        os.path.join(
+            sys.base_prefix,
+            "lib",
+            f"python{sys.version_info.major}{sys.version_info.minor}.zip",
+        ),
+    )
+)
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _open_violation(raw: str) -> bool:
+    """Whether the runtime opening ``raw`` (as the audit event named it) is a violation.
+
+    Relative names are read from the guard program's working directory, and every name
+    is resolved, so ``../tests/x`` or a symlink cannot reach ``tests/`` unnoticed.
+    """
+    if raw.startswith("<") and raw.endswith(">"):
+        return False  # a pseudo-filename (``<unknown>``), as linecache tries
+    path = Path(os.path.realpath(os.path.join(DASHBOARD, raw)))
+    if _is_under(path, TESTS.resolve()):
+        return True
+    if path in ALLOWED_FILES:
+        return False
+    roots = (*LIBRARY_ROOTS, PACKAGE.resolve())
+    return not any(_is_under(path, root) for root in roots)
+
+
+#: Code allowed to create a socket, as (path suffix, function), each with its reason.
+#: Creation is refused either way; these never connect.
+ALLOWED_SOCKET_CREATORS = frozenset(
+    {
+        # urllib3 (imported by a dependency) probes for IPv6 at import by binding
+        # ``::1``. Refused, it reads as no IPv6, which the dashboard never uses.
+        ("/urllib3/util/connection.py", "_has_ipv6"),
+    }
+)
+
+
+def _socket_violation(entry: str) -> bool:
+    """Whether a socket created by ``entry`` (``path:function``) is a violation."""
+    path, _, function = entry.rpartition(":")
+    return not any(
+        path.endswith(suffix) and function == name
+        for suffix, name in ALLOWED_SOCKET_CREATORS
+    )
+
+
+def _assert_runtime_clean(result: dict[str, Any]) -> None:
+    assert result["attempts"] == [], "the runtime tried to import usvote"
+    assert result["import_events"] == [], "the runtime raised a usvote import event"
+    assert result["sqlite"] == [], "the runtime opened a SQLite database"
+    sockets = [entry for entry in result["sockets"] if _socket_violation(entry)]
+    assert sockets == [], f"the runtime created sockets outside the allow-list: {sockets}"
+    violations = [raw for raw in result["opens"] if _open_violation(raw)]
+    assert violations == [], f"the runtime opened files outside the allow-list: {violations}"
+
+
+def test_the_runtime_imports_no_usvote_and_reaches_only_the_public_api() -> None:
+    """The refused run: every connection refused, every registered page driven."""
+    result = _result(_run(_REFUSED_PROGRAM))
+    _assert_runtime_clean(result)
+    assert result["served"] == []
+    # Non-empty: the paths above did try the API, so the host check is not vacuous.
+    assert set(result["hosts"]) == {PUBLIC_API_HOST}
+
+
+def test_the_success_path_reaches_only_the_public_api_and_reads_no_files() -> None:
+    """The success run: the API answers, so prefetch, renders and a miss all execute."""
+    result = _result(_run(_success_program()))
+    _assert_runtime_clean(result)
+    # The program asserted the order; this pins that the run reached all three stages.
+    assert result["served"][0] == "/v1/meta"
+    assert MISS_PATH in result["served"]
+    assert len(result["served"]) >= 3
+    assert set(result["hosts"]) == {PUBLIC_API_HOST}
+
+
+def test_the_guard_program_can_fail(tmp_path: Path) -> None:
+    """Non-vacuity: each recorder sees what it exists to see."""
+    outside = tmp_path / "data.json"
+    outside.write_text("{}", encoding="utf-8")
+    fixture = FIXTURES / "v1_meta.json"
+    program = (
+        # Created before the prelude, so its connect reaches the connect event rather
+        # than being refused at creation.
+        "import socket\n_EARLY = socket.socket()\n"
+        + _PRELUDE
+        + f"""
 import importlib
-import socket
+import sqlite3
 import urllib.request
 
 try:
-    importlib.import_module("usvote")  # a dynamic import, swallowed
+    importlib.import_module("usvote")  # a dynamic import, swallowed: the finder
 except ImportError:
     pass
-try:  # C level, no helper. An IP literal: a hostname would be resolved before the
-    # socket.connect audit event fires, so with the network cut it would fail unrecorded.
-    socket.socket().connect(("203.0.113.7", 443))
+try:
+    import usvote  # the statement form: the import event (and the finder again)
+except ImportError:
+    pass
+try:  # C level, no helper, to an IP literal: the connect event
+    _EARLY.connect(("203.0.113.7", 443))
+except OSError:
+    pass
+try:  # a raw socket to a hostname: refused at creation, before any lookup
+    socket.socket().connect(("raw.guard.invalid", 443))
 except OSError:
     pass
 try:  # urllib's default opener honours the proxy variables the guard sets
     urllib.request.build_opener().open("http://example.invalid/", timeout=5)
 except OSError:
     pass
-print("ATTEMPTS=" + ",".join(ATTEMPTS))
-print("HOSTS=" + ",".join(HOSTS))
+try:
+    sqlite3.connect(":memory:")
+except OSError:
+    pass
+for name in ({str(fixture)!r}, {str(outside)!r}):
+    with open(name, encoding="utf-8") as handle:
+        handle.read()
 """
+        + _RESULT
     )
-    result = _run(program)
-    assert result.returncode == 0, result.stderr
-    assert "ATTEMPTS=usvote" in result.stdout
-    hosts_line = [ln for ln in result.stdout.splitlines() if ln.startswith("HOSTS=")][0]
-    hosts = set(hosts_line.removeprefix("HOSTS=").split(","))
+    result = _result(_run(program))
+    assert result["attempts"] == ["usvote", "usvote"]
+    # The statement form raises the event; whether import_module does is CPython's call.
+    assert "usvote" in result["import_events"]
+    hosts = set(result["hosts"])
     assert "203.0.113.7" in hosts
+    assert any(_socket_violation(entry) for entry in result["sockets"])
     assert "proxy.guard.invalid" in hosts
+    assert result["sqlite"] == [":memory:"]
+    violations = {raw for raw in result["opens"] if _open_violation(raw)}
+    assert {str(fixture), str(outside)} <= violations
+
+
+def test_the_fake_transport_answers_the_api_host_only() -> None:
+    """Non-vacuity for the success run's transport: it serves, and it refuses."""
+    program = (
+        _PRELUDE
+        + _fixture_transport()
+        + f"""
+import json
+import urllib.error
+import urllib.request
+
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({{}}))
+with opener.open("https://{PUBLIC_API_HOST}/v1/meta", timeout=5) as response:
+    assert response.status == 200
+    assert response.headers["ETag"] == f'"{{_VERSION}}"'
+    assert json.loads(response.read())["provenance"]["snapshot_version"] == _VERSION
+try:
+    opener.open("https://{PUBLIC_API_HOST}/v1/no-such-path", timeout=5)
+except urllib.error.HTTPError as exc:
+    assert exc.code == 404
+else:
+    raise AssertionError("an unrecorded path was answered")
+try:
+    opener.open("https://example.invalid/v1/meta", timeout=5)
+except urllib.error.URLError:
+    pass
+else:
+    raise AssertionError("another host was answered")
+"""
+        + _RESULT
+    )
+    result = _result(_run(program))
+    assert result["served"] == ["/v1/meta"]
+    assert set(result["hosts"]) == {PUBLIC_API_HOST, "example.invalid"}
+
+
+@pytest.mark.parametrize(
+    ("raw", "violation"),
+    [
+        (os.path.join(sysconfig.get_paths()["stdlib"], "json", "__init__.py"), False),
+        (str(PACKAGE / "app.py"), False),
+        ("explore/pages/home.py", False),  # relative to the program's directory
+        (mimetypes.knownfiles[0], False),
+        ("/dev/urandom", False),
+        ("<unknown>", False),
+        (str(FIXTURES / "v1_meta.json"), True),
+        ("../tests/fixtures/dashboard/v1_meta.json", True),
+        (str(DASHBOARD / "app.yaml"), True),
+        (str(REPO / "src" / "usvote" / "__init__.py"), True),
+        ("/etc/passwd", True),
+        (os.path.join(sys.base_prefix, "share", "data.json"), True),
+    ],
+)
+def test_the_open_rules_flag_what_they_should(raw: str, violation: bool) -> None:
+    """Non-vacuity at the level of the rules."""
+    assert _open_violation(raw) is violation
+
+
+@pytest.mark.parametrize(
+    ("entry", "violation"),
+    [
+        ("/venv/site-packages/urllib3/util/connection.py:_has_ipv6", False),
+        ("/venv/site-packages/urllib3/util/connection.py:create_connection", True),
+        ("/elsewhere/_has_ipv6.py:_has_ipv6", True),
+        ("<stdin>:<module>", True),
+        ("?:?", True),
+    ],
+)
+def test_the_socket_rules_flag_what_they_should(entry: str, violation: bool) -> None:
+    assert _socket_violation(entry) is violation
+
+
+def test_a_symlink_into_tests_is_a_violation(tmp_path: Path) -> None:
+    """Names are resolved before they are classified."""
+    link = tmp_path / "innocent.json"
+    link.symlink_to(FIXTURES / "v1_meta.json")
+    assert _open_violation(str(link)) is True
 
 
 # --- a lint over the runtime modules --------------------------------------------------
