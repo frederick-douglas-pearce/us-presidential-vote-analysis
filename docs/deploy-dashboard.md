@@ -349,7 +349,11 @@ That is one of D071's flip conditions.
 The MVP target (D071(g)): OG HTML in ≤ 1 s TTFB, and first data in ≤ 3 s for a cold shared
 link at 390 px on 10 Mbps / 100 ms.
 [`scripts/measure_dashboard_cold_start.py`](../scripts/measure_dashboard_cold_start.py)
-measures both from a fresh browser context each run. The server states worth measuring:
+measures both from one navigation in a fresh browser context each run, and reports a run
+that got the plain-language message instead of data as `degraded`. **Nothing else may
+reach the server first**: a `curl` sent ahead of the browser would take the start-up and
+start the cache fill, and the browser would measure the second visitor. The server
+states worth measuring:
 
 - **Warm** (the ordinary case): run it.
 - **Dashboard cold**: right after a deploy (warmup has run), and after a kill-switch

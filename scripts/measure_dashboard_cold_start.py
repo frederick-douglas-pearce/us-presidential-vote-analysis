@@ -7,12 +7,20 @@ browser context with an empty cache. Which *server* state a run measures (dashbo
 restarted, API edge purged) is set up by the operator before running this; the runbook
 (docs/deploy-dashboard.md §12) gives the sequences.
 
-Two numbers per run:
+Each run is ONE browser navigation, and both numbers come from it:
 
-- ``ttfb_s``: time to the first byte of ``GET <url>``, the HTML a link-preview scraper
-  reads (stdlib, no browser);
-- ``first_data_s``: from navigation start until the first provenance line is visible, in
-  headless Chromium under the throttled network.
+- ``ttfb_s``: the navigation's own time to first byte (Navigation Timing
+  ``responseStart``), under the throttled network;
+- ``first_data_s``: from navigation start until the first provenance line is visible;
+- ``outcome``: ``data``, or ``degraded`` when the page showed the plain-language message
+  instead (a cold cache the refresher could not fill within the visitor's wait), which
+  never meets the target.
+
+The browser must be the first request the server sees. A request sent first (a
+``curl`` for the TTFB, say) would absorb the instance's start-up and start the cache
+fill, and the browser would then measure the second visitor. A link-preview scraper
+fetching a shared link before the person clicks it does exactly that; measure that case
+on purpose, by sending the request yourself first, never by accident.
 
 Playwright is not a repo dependency; run it with uvx:
 
@@ -26,7 +34,6 @@ from __future__ import annotations
 import argparse
 import json
 import time
-import urllib.request
 
 from playwright.sync_api import sync_playwright
 
@@ -35,17 +42,11 @@ THROUGHPUT_BYTES_PER_S = 10_000_000 / 8
 LATENCY_MS = 100
 VIEWPORT = {"width": 390, "height": 844}
 FIRST_DATA_SELECTOR = "#provenance li"
+DEGRADED_SELECTOR = "#unavailable"
 
 
-def ttfb(url: str) -> float:
-    request = urllib.request.Request(url, headers={"User-Agent": "usvote-cold-start"})
-    start = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=30) as response:
-        response.read(1)
-        return time.perf_counter() - start
-
-
-def first_data(url: str) -> float:
+def measure(url: str) -> tuple[float, float, bool]:
+    """One cold-browser navigation: (TTFB, time to data or the message, degraded?)."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
@@ -64,8 +65,17 @@ def first_data(url: str) -> float:
             )
             start = time.perf_counter()
             page.goto(url, wait_until="commit")
-            page.wait_for_selector(FIRST_DATA_SELECTOR, state="visible", timeout=30_000)
-            return time.perf_counter() - start
+            page.wait_for_selector(
+                f"{FIRST_DATA_SELECTOR}, {DEGRADED_SELECTOR}",
+                state="visible",
+                timeout=30_000,
+            )
+            elapsed = time.perf_counter() - start
+            degraded = page.locator(DEGRADED_SELECTOR).count() > 0
+            response_start_ms = page.evaluate(
+                "performance.getEntriesByType('navigation')[0].responseStart"
+            )
+            return response_start_ms / 1000, elapsed, degraded
         finally:
             browser.close()
 
@@ -77,14 +87,14 @@ def main() -> None:
     parser.add_argument("--label", default="", help="the server state being measured")
     args = parser.parse_args()
     for run in range(1, args.runs + 1):
-        first_byte = round(ttfb(args.url), 3)
-        data = round(first_data(args.url), 3)
+        first_byte, data, degraded = measure(args.url)
         result = {
             "label": args.label,
             "run": run,
-            "ttfb_s": first_byte,
-            "first_data_s": data,
-            "meets_target": first_byte <= 1.0 and data <= 3.0,
+            "ttfb_s": round(first_byte, 3),
+            "first_data_s": round(data, 3),
+            "outcome": "degraded" if degraded else "data",
+            "meets_target": not degraded and first_byte <= 1.0 and data <= 3.0,
         }
         print(json.dumps(result), flush=True)
 
