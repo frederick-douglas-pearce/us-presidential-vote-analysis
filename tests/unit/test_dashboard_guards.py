@@ -25,10 +25,11 @@ These are the only acceptance guard for three promises the public dashboard make
    Proxy variables are set in that interpreter before the app is imported, so an opener
    that honoured them would show the proxy's host.
 3. **No data files.** The hook records every ``open`` event, and both runs fail on any
-   file opened outside the interpreter's own library roots and ``dashboard/explore/``,
-   or anywhere under ``tests/``. It also refuses ``sqlite3.connect``, which opens its
-   file in C with no ``open`` event. Beside the behavioural check: no data files and no
-   ``run.app`` in the deploy root, and the exact ``app.yaml``.
+   file opened outside :data:`LIBRARY_ROOTS`, ``dashboard/explore/`` and the named
+   files in :data:`ALLOWED_FILES`, and on any file under ``tests/`` whatever those
+   lists allow. It also refuses ``sqlite3.connect``, which opens its file in C with no
+   ``open`` event. Beside the behavioural check: no data files and no ``run.app`` in the
+   deploy root, and the exact ``app.yaml``.
 
 **Two runs, and what each covers.** The *refused* run drives warmup, the page shell and
 every registered page with every connection refused. The *success* run replaces
@@ -39,7 +40,9 @@ renders every registered page from a filled cache, and makes one fill on a miss.
 code that runs only after a successful response is under the guard too.
 
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
-other than SQLite's) raises no event and is not seen. The AST pass is a lint against
+other than SQLite's) raises no event and is not seen. Pages other than ``/`` are pinned
+in the success run only by the absence of the degraded message, so a page that skipped
+its post-success code would still pass; a per-page success contract is S3a's (#278). The AST pass is a lint against
 *accidental* regressions: a second HTTP client, a file read, a dynamic import. It is not
 a sandbox against code written to evade it (a name built at runtime, say), and it does
 not claim to be.
@@ -90,7 +93,8 @@ RUNTIME_MODULES = sorted(p for p in PACKAGE.rglob("*.py") if "__pycache__" not i
 
 #: The responses the success run's fake transport serves, by API path. A page that
 #: registers a new prefetch path needs its fixture here, or the success run fails: the
-#: transport answers 404, the refresh fails, and the page renders the degraded state.
+#: transport answers 404, warmup's refresh fails, and the program stops at its
+#: "warmup did not fill the cache" assertion.
 FIXTURE_FILES = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
@@ -109,11 +113,13 @@ def _run(program: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if not k.upper().endswith("_PROXY")}
     for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
         env[name] = GUARD_PROXY
-    env["PYTHONPATH"] = str(DASHBOARD)
     # On stdin, not ``-c``: the program embeds the fixtures, and one argument is
-    # capped (128 KiB on Linux) well below what #278's fixtures will add up to.
+    # capped (128 KiB on Linux) well below what #278's fixtures will add up to. ``-I``
+    # ignores every PYTHON* variable (a PYTHONPYCACHEPREFIX would move .pyc reads off
+    # the allowed roots), so the app's directory goes on sys.path in the program.
+    program = f"import sys\nsys.path.insert(0, {str(DASHBOARD)!r})\n" + program
     return subprocess.run(
-        [sys.executable, "-"],
+        [sys.executable, "-I", "-"],
         input=program,
         capture_output=True,
         text=True,
@@ -192,15 +198,16 @@ def _transport(fixtures: dict[str, str], version: str) -> str:
 
     Installed after the prelude and before ``explore`` is imported. Only the connection
     step is replaced, so the dashboard's real opener (no proxy, no redirects), real
-    ``fetch`` and the stdlib's request and response handling all run on top of it. The socket is an in-memory
-    buffer, never a real one: creating a socket is refused. Every response carries the
-    meta fixture's snapshot version as its ``ETag``, since the cache compares only that.
+    ``fetch`` and the stdlib's request and response handling all run on top of it. The
+    socket is an in-memory buffer, never a real one: creating a socket is refused. Every
+    200 response carries the meta fixture's snapshot version as its ``ETag``, since the
+    cache compares only that; a 404 carries none.
     """
     return f"""
 import http.client
 import io
 
-_FIXTURES = {json.dumps(fixtures)}
+_FIXTURES = {ascii(fixtures)}
 _VERSION = {version!r}
 _API_HOST = {PUBLIC_API_HOST!r}
 
@@ -347,6 +354,13 @@ if len(registered) < 2:
     registered = list(dict.fromkeys(api.registered_prefetch_paths()))
 assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
+# Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
+# for real, and enough of them run into this subprocess's timeout. Fail fast instead.
+planned = 1 + len([path for path in registered if path != api.META_PATH]) + 1
+assert planned <= api.FILL_BURST, (
+    f"{{planned}} planned fills exceed the bucket's burst of {{api.FILL_BURST}}: replace "
+    "api.CLIENT's bucket here with a permissive one, e.g. TokenBucket(burst=inf)"
+)
 
 client = appmod.server.test_client()
 assert client.get("/_ah/warmup").status_code == 200  # refresh: meta, then prefetch
@@ -362,6 +376,7 @@ for path in paths:
         assert _VERSION in text
 
 api.CLIENT.get({MISS_PATH!r})  # a fill on a miss, through the real fetch
+assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
@@ -399,13 +414,10 @@ ALLOWED_FILES = frozenset(
         *mimetypes.knownfiles,
         # The OS randomness source.
         "/dev/urandom",
-        # The zipped stdlib's place on ``sys.path``, which importlib.metadata opens
-        # when it scans the path for distributions.
-        os.path.join(
-            sys.base_prefix,
-            "lib",
-            f"python{sys.version_info.major}{sys.version_info.minor}.zip",
-        ),
+        # The zipped stdlib's place on ``sys.path`` (its name varies with the
+        # platform's libdir and a free-threaded build), which importlib.metadata
+        # opens when it scans the path for distributions.
+        *(entry for entry in sys.path if entry.endswith(".zip")),
     )
 )
 
@@ -417,18 +429,23 @@ def _is_under(path: Path, root: Path) -> bool:
 def _open_violation(raw: str) -> bool:
     """Whether the runtime opening ``raw`` (as the audit event named it) is a violation.
 
-    Relative names are read from the guard program's working directory, and every name
-    is resolved, so ``../tests/x`` or a symlink cannot reach ``tests/`` unnoticed.
+    Relative names are read from the guard program's working directory. The ``tests/``
+    check uses the resolved name, so ``../tests/x`` or a symlink cannot reach it
+    unnoticed. The allow decision accepts the name either as written or resolved, since
+    an installer may make site-packages entries symlinks into a store (uv's symlink
+    mode, Nix).
     """
     if raw.startswith("<") and raw.endswith(">"):
         return False  # a pseudo-filename (``<unknown>``), as linecache tries
-    path = Path(os.path.realpath(os.path.join(DASHBOARD, raw)))
-    if _is_under(path, TESTS.resolve()):
+    written = Path(os.path.abspath(os.path.join(DASHBOARD, raw)))
+    resolved = Path(os.path.realpath(written))
+    if _is_under(resolved, TESTS.resolve()):
         return True
-    if path in ALLOWED_FILES:
-        return False
     roots = (*LIBRARY_ROOTS, PACKAGE.resolve())
-    return not any(_is_under(path, root) for root in roots)
+    return not any(
+        path in ALLOWED_FILES or any(_is_under(path, root) for root in roots)
+        for path in (written, resolved)
+    )
 
 
 #: Code allowed to create a socket, as (path suffix, function), each with its reason.
@@ -508,10 +525,13 @@ try:  # C level, no helper, to an IP literal: the connect event
     _EARLY.connect(("203.0.113.7", 443))
 except OSError:
     pass
+REFUSED = []
 try:  # a raw socket to a hostname: refused at creation, before any lookup
-    socket.socket().connect(("raw.guard.invalid", 443))
+    raw = socket.socket()
 except OSError:
-    pass
+    REFUSED.append("socket")
+else:
+    raw.connect(("raw.guard.invalid", 443))
 try:  # urllib's default opener honours the proxy variables the guard sets
     urllib.request.build_opener().open("http://example.invalid/", timeout=5)
 except OSError:
@@ -519,7 +539,8 @@ except OSError:
 try:
     sqlite3.connect(":memory:")
 except OSError:
-    pass
+    REFUSED.append("sqlite")
+assert REFUSED == ["socket", "sqlite"], REFUSED
 for name in ({str(fixture)!r}, {str(outside)!r}):
     with open(name, encoding="utf-8") as handle:
         handle.read()
@@ -608,6 +629,16 @@ def test_the_open_rules_flag_what_they_should(raw: str, violation: bool) -> None
 )
 def test_the_socket_rules_flag_what_they_should(entry: str, violation: bool) -> None:
     assert _socket_violation(entry) is violation
+
+
+def test_tests_wins_over_every_allow_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``tests/`` check is not merely the roots' fallback: it beats an allow."""
+    fixture = FIXTURES / "v1_meta.json"
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "LIBRARY_ROOTS", (*LIBRARY_ROOTS, REPO.resolve()))
+    monkeypatch.setattr(module, "ALLOWED_FILES", ALLOWED_FILES | {fixture.resolve()})
+    assert _open_violation(str(REPO / "src" / "usvote" / "__init__.py")) is False
+    assert _open_violation(str(fixture)) is True
 
 
 def test_a_symlink_into_tests_is_a_violation(tmp_path: Path) -> None:
