@@ -13,21 +13,35 @@ Three properties hold here, and the tests pin each one:
   when it does: :meth:`Client.refresh` prefetches every registered URL into a new
   :class:`Snapshot` and swaps it in with one assignment. A failed prefetch leaves the
   old snapshot serving. ``/v1/meta``'s body defines a snapshot's version; every other
-  response is stored only in the snapshot whose version its ``ETag`` names. (What one
-  page render reads is not pinned to one snapshot; that matters once a page reads more
-  than one path, and #278 owns it.)
+  response is stored only in the snapshot whose version its ``ETag`` names.
+- **One snapshot per render.** A page reads through :meth:`Client.view`, which pins the
+  snapshot serving when the render starts. Every read in that render answers from it,
+  even if the refresher swaps in a new one meanwhile. A miss whose response names
+  another version raises :class:`ApiUnavailable` rather than mixing two versions on one
+  page, and wakes the refresher.
 - **Bounded pressure on the API, and a bounded wait for a visitor.** Fills pass a token
   bucket kept well under the API's 60/min/IP rule (App Engine's egress addresses are
-  shared). A visitor's request never refreshes the cache itself: with no snapshot yet it
-  wakes the refresher and waits at most :data:`MAX_REQUEST_WAIT_S` for the first one,
-  then reports the API as unavailable. So a slow or dead API cannot queue visitors on a
-  lock, or hold every server thread behind network timeouts.
+  shared). A visitor's request never refreshes the cache itself. A render gets one
+  deadline, :data:`MAX_REQUEST_WAIT_S` from its start, and everything it waits on draws
+  from it: the first snapshot, a fill token, and the network (each fetch further capped
+  at :data:`VISITOR_FETCH_TIMEOUT_S`). Past it, the page reports the API as unavailable.
+  So a slow or dead API cannot queue visitors on a lock, or hold every server thread
+  behind network timeouts.
 
 The refresher is one daemon thread per process (one gunicorn worker, so one cache),
 started lazily by the app, never at import: an import-time thread would make network
 calls in every test and tool that imports this module. After a failed cycle it backs
 off for :data:`RETRY_BACKOFF_S` whatever wakes it, so visitors arriving while the API is
-down cannot turn into a stream of retries.
+down cannot turn into a stream of retries. After a successful cycle a visitor's wake-up
+is never dropped, but it is answered at most once per :data:`MIN_RECHECK_INTERVAL_S`, so
+a miss path whose edge keeps answering an older version cannot turn every visit into a
+``/v1/meta`` recheck.
+
+Pages declare what they read in ``dash.register_page``: ``prefetch=(...)`` lists the
+canonical paths warmed on every new snapshot version, ``on_miss=(...)`` the paths (or
+templates of the page's path variables, such as ``/v1/elections/{year}``) filled on a
+miss, and ``success=`` the id of an element the page renders only from a successful
+read. The tests check every read against these declarations.
 """
 
 from __future__ import annotations
@@ -53,24 +67,40 @@ log = logging.getLogger(__name__)
 #: How often the refresher rechecks ``/v1/meta`` for a new snapshot version.
 REFRESH_TTL_S = 300.0
 
-#: Per-request network timeout. A cold API origin measured 9.1 s (D071(d)).
+#: The refresher's per-request network timeout. A cold API origin measured 9.1 s
+#: (D071(d)).
 FETCH_TIMEOUT_S = 15.0
+
+#: The cap on a visitor's own fill, shorter than :data:`FETCH_TIMEOUT_S`, so a miss
+#: stays within D071(g)'s 3 s first-data budget. It is further cut to whatever remains
+#: of the render's deadline. urllib applies a timeout to each socket operation, not to
+#: the whole request, and not to the DNS lookup, so the deadline is best-effort.
+VISITOR_FETCH_TIMEOUT_S = 1.5
 
 #: The token bucket: sustained fills per minute, and the burst allowed from rest.
 FILLS_PER_MINUTE = 30.0
 FILL_BURST = 10.0
 
-#: How long a *visitor's* request may wait — for a fill token, or for the refresher's
-#: first snapshot — before the page reports the API unavailable. Within D071(g)'s 3 s
-#: first-data budget. The refresher's own fills wait as long as they need.
+#: The total a render may wait on the API, from the moment it starts: for the
+#: refresher's first snapshot, for fill tokens and for its own fills, together. Past it
+#: the page reports the API unavailable. Within D071(g)'s 3 s first-data budget. The
+#: refresher's own fills wait as long as they need.
 MAX_REQUEST_WAIT_S = 2.0
 
 #: After a failed refresh, the refresher waits this long before retrying, and visitor
 #: wake-ups do not shorten it.
 RETRY_BACKOFF_S = 30.0
 
+#: After a successful refresh, the refresher answers a visitor's wake-up no sooner than
+#: this long after its last ``/v1/meta`` check. A wake-up that arrives sooner waits for
+#: it, and is never dropped.
+MIN_RECHECK_INTERVAL_S = 30.0
+
 #: The one path the cache is versioned on.
 META_PATH = "/v1/meta"
+
+#: The elections index. With ``/v1/meta``, the MVP prefetch extent (D072).
+ELECTIONS_PATH = "/v1/elections"
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")
 
@@ -133,7 +163,7 @@ def etag_version(etag: str | None) -> str | None:
     return value.strip('"') or None
 
 
-def fetch(path: str) -> Response:
+def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
     """GET one API path. The only function in the dashboard that opens a connection."""
     # Outside the try on purpose: a path refused as off-host is a bug to surface, not
     # an unavailable API to paper over.
@@ -142,7 +172,7 @@ def fetch(path: str) -> Response:
         url, headers={"Accept": "application/json", "User-Agent": "usvote-explore"}
     )
     try:
-        with _OPENER.open(request, timeout=FETCH_TIMEOUT_S) as raw:
+        with _OPENER.open(request, timeout=timeout) as raw:
             status = raw.status
             etag = raw.headers.get("ETag")
             payload = raw.read()
@@ -218,17 +248,68 @@ class TokenBucket:
             self._sleep(wait)
 
 
+class View:
+    """One render's reads, all answered from the snapshot serving when it started.
+
+    Obtained from :meth:`Client.view`. Usable as a context manager, which does nothing
+    on exit; the ``with`` block only marks the render's extent.
+    """
+
+    def __init__(self, client: Client, snapshot: Snapshot, deadline: float) -> None:
+        self._client = client
+        self._snapshot = snapshot
+        self._deadline = deadline
+
+    def __enter__(self) -> View:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def version(self) -> str:
+        """The snapshot version every read in this render answers from."""
+        return self._snapshot.version
+
+    def get(self, path: str) -> JsonObject:
+        """A response for ``path`` from the pinned snapshot, filling it on a miss.
+
+        A miss is one throttled fill within the render's deadline. If the response names
+        another snapshot version, the read raises :class:`ApiUnavailable` instead of
+        returning it, and the refresher is woken to catch up.
+        """
+        pinned = self._snapshot
+        cached = pinned.responses.get(path)
+        if cached is not None:
+            return cached
+        response = self._client._visitor_fill(path, self._deadline)
+        if response.version == pinned.version:
+            pinned.responses[path] = response.body
+            return response.body
+        current = self._client.snapshot
+        if current is not None and response.version == current.version:
+            # This render started before the swap; the next one can use the body.
+            current.responses[path] = response.body
+        self._client._wake.set()
+        raise ApiUnavailable(
+            f"{path} answered for snapshot {response.version}, not {pinned.version}"
+        )
+
+
 class Client:
     """The in-process cache over the public API. One instance per process."""
 
     def __init__(
         self,
-        fetch: Callable[[str], Response] = fetch,
+        fetch: Callable[[str, float], Response] = fetch,
         prefetch_paths: Callable[[], Iterable[str]] = lambda: (),
         bucket: TokenBucket | None = None,
         ttl: float = REFRESH_TTL_S,
         max_request_wait: float = MAX_REQUEST_WAIT_S,
+        visitor_fetch_timeout: float = VISITOR_FETCH_TIMEOUT_S,
         retry_backoff: float = RETRY_BACKOFF_S,
+        min_recheck: float = MIN_RECHECK_INTERVAL_S,
+        clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._fetch = fetch
@@ -236,9 +317,14 @@ class Client:
         self._bucket = bucket or TokenBucket()
         self._ttl = ttl
         self._max_request_wait = max_request_wait
+        self._visitor_fetch_timeout = visitor_fetch_timeout
         self._retry_backoff = retry_backoff
+        self._min_recheck = min_recheck
+        self._clock = clock
         self._sleep = sleep
         self._snapshot: Snapshot | None = None
+        # When the last successful refresh started its /v1/meta check.
+        self._last_check: float | None = None
         self._ready = threading.Event()  # set once the first snapshot is serving
         self._refresh_lock = threading.Lock()
         self._thread_lock = threading.Lock()
@@ -250,25 +336,40 @@ class Client:
         """The snapshot currently serving, or ``None`` before the first refresh."""
         return self._snapshot
 
-    def _fill(self, path: str, max_wait: float | None) -> Response:
+    def _fill(self, path: str, max_wait: float | None, timeout: float) -> Response:
         self._bucket.acquire(max_wait)
         # One log line per API call, so the calls a load test causes can be counted.
         log.info("api fetch %s", path)
-        return self._fetch(path)
+        return self._fetch(path, timeout)
+
+    def _remaining(self, deadline: float) -> float:
+        remaining = deadline - self._clock()
+        if remaining <= 0:
+            raise ApiUnavailable("the render's wait on the API ran out")
+        return remaining
+
+    def _visitor_fill(self, path: str, deadline: float) -> Response:
+        """A fill on the request thread. Its token wait and fetch share the deadline."""
+        self._bucket.acquire(self._remaining(deadline))
+        timeout = min(self._visitor_fetch_timeout, self._remaining(deadline))
+        log.info("api fetch %s", path)
+        return self._fetch(path, timeout)
 
     def refresh(self, max_wait: float | None = None) -> Snapshot:
         """Recheck ``/v1/meta``; on a new version, prefetch and swap the cache whole."""
         with self._refresh_lock:
-            meta = self._fill(META_PATH, max_wait)
+            started = self._clock()
+            meta = self._fill(META_PATH, max_wait, FETCH_TIMEOUT_S)
             version = snapshot_version_of(meta.body)
             current = self._snapshot
             if current is not None and current.version == version:
+                self._last_check = started
                 return current
             fresh = Snapshot(version=version, responses={META_PATH: meta.body})
             for path in dict.fromkeys(self._prefetch_paths()):
                 if path in fresh.responses:
                     continue
-                response = self._fill(path, max_wait)
+                response = self._fill(path, max_wait, FETCH_TIMEOUT_S)
                 if response.version != version:
                     # The API moved on mid-prefetch; the next refresh starts over.
                     raise ApiUnavailable(
@@ -277,43 +378,56 @@ class Client:
                     )
                 fresh.responses[path] = response.body
             self._snapshot = fresh  # the atomic swap
+            self._last_check = started
             self._ready.set()
             log.info(
                 "serving snapshot %s (%d responses)", version, len(fresh.responses)
             )
             return fresh
 
-    def get(self, path: str) -> JsonObject:
-        """A response for ``path``: cached if possible, else one throttled fill.
+    def view(self) -> View:
+        """A render-scoped view, pinned to the snapshot serving now.
 
-        Never refreshes on the request thread. With no snapshot yet, it wakes the
-        refresher and waits at most ``max_request_wait`` for the first one.
+        Never refreshes on the request thread. With no snapshot yet, it makes sure the
+        refresher is running and waits for its first snapshot, within the render's
+        deadline. It sets no wake-up: with no snapshot the refresher is mid-refresh, in
+        its unwakeable backoff, or just started, and a wake-up set now would only cost a
+        second ``/v1/meta`` once that cycle succeeds.
         """
+        deadline = self._clock() + self._max_request_wait
         snapshot = self._snapshot
         if snapshot is None:
             self.ensure_refresher()
-            self._wake.set()
-            self._ready.wait(self._max_request_wait)
+            self._ready.wait(max(0.0, deadline - self._clock()))
             snapshot = self._snapshot
             if snapshot is None:
                 raise ApiUnavailable("no snapshot yet; the refresher is retrying")
-        cached = snapshot.responses.get(path)
-        if cached is not None:
-            return cached
-        response = self._fill(path, self._max_request_wait)
-        if response.version == snapshot.version:
-            snapshot.responses[path] = response.body
-        else:
-            self._wake.set()  # a new version is live; let the refresher swap it in
-        return response.body
+        return View(self, snapshot, deadline)
+
+    def get(self, path: str) -> JsonObject:
+        """One read through a fresh :meth:`view`. Pages use a view; tools use this."""
+        return self.view().get(path)
+
+    def _wait_after(self, failed: bool) -> None:
+        """The refresher's wait between cycles."""
+        if failed:
+            # Not wakeable: visitors arriving while the API is down must not turn into
+            # a stream of retries.
+            self._sleep(self._retry_backoff)
+            return
+        # A wake-up set during the cycle that just ran is still set, so it is answered
+        # now rather than at the TTL. It is not cleared here: the next cycle clears it
+        # as it starts, answering every wake-up that arrived meanwhile.
+        if self._wake.wait(self._ttl) and self._last_check is not None:
+            remaining = self._last_check + self._min_recheck - self._clock()
+            if remaining > 0:
+                self._sleep(remaining)  # not wakeable: one recheck per interval
 
     def _run(self) -> None:
         # A snapshot that is already serving (warmup filled it) needs no immediate
         # recheck; start with the wait instead of fetching /v1/meta a second time.
-        failed = False
         if self._snapshot is not None:
-            self._wake.wait(self._ttl)
-            self._wake.clear()
+            self._wait_after(failed=False)
         while True:
             # A wake-up requested before this cycle is answered by it.
             self._wake.clear()
@@ -323,18 +437,7 @@ class Client:
             except Exception:  # never let the refresher die on one bad cycle
                 log.exception("snapshot refresh failed; keeping the current snapshot")
                 failed = True
-            if failed:
-                # Not wakeable: visitors arriving while the API is down must not turn
-                # into a stream of retries.
-                self._sleep(self._retry_backoff)
-            else:
-                # Cleared so a cold start's wake-up (set while this first refresh
-                # ran) does not cost a second /v1/meta. A version-mismatch wake-up set
-                # during the refresh is dropped here too; the next mismatched miss or
-                # the TTL answers it. Reachable only once a page reads a path that is
-                # not prefetched (#278, FU-1).
-                self._wake.clear()
-                self._wake.wait(self._ttl)
+            self._wait_after(failed)
 
     def ensure_refresher(self) -> None:
         """Start the refresher thread if it is not running. Idempotent and cheap."""

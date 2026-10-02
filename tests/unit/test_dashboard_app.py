@@ -9,11 +9,13 @@ runtime, one API host, no data files, ``app.yaml`` pins) are in
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import copy
 import http.client
 import http.server
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -40,6 +42,21 @@ PROCESS_CLIENT = api.CLIENT
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "dashboard" / "v1_meta.json"
 META: dict[str, Any] = json.loads(FIXTURE.read_text(encoding="utf-8"))
 VERSION: str = META["provenance"]["snapshot_version"]
+
+#: Every recorded public API response, by path: what the registry coverage check
+#: serves a page's reads from.
+RECORDED: dict[str, dict[str, Any]] = {
+    path: json.loads((FIXTURE.parent / name).read_text(encoding="utf-8"))
+    for path, name in {
+        "/v1/meta": "v1_meta.json",
+        "/v1/elections": "v1_elections.json",
+        "/v1/elections/1824": "v1_elections_1824.json",
+    }.items()
+}
+
+#: The concrete value each templated page is rendered at, one per path variable. Each
+#: must make the page read a path in :data:`RECORDED`.
+PATH_VALUES = {"year": "1824"}
 
 #: The Pages routing callback — the POST a browser makes to render a page's content.
 ROUTING_POST: dict[str, Any] = {
@@ -95,14 +112,14 @@ def fake_fetch(
 ) -> tuple[Any, list[str]]:
     calls: list[str] = []
 
-    def fetch(path: str) -> api.Response:
+    def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
         calls.append(path)
         return api.Response(body=bodies[path], version=version)
 
     return fetch, calls
 
 
-def failing_fetch(path: str) -> api.Response:
+def failing_fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
     raise api.ApiUnavailable(f"GET {path}: HTTP 503 upstream said SECRET-DETAIL")
 
 
@@ -277,7 +294,7 @@ class TestDegraded:
     def test_an_unreadable_api_shows_a_plain_message(
         self, monkeypatch: pytest.MonkeyPatch, error: Exception
     ) -> None:
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             raise error
 
         monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
@@ -313,7 +330,7 @@ class TestDegraded:
     ) -> None:
         good, _ = fake_fetch({api.META_PATH: META})
         state = {"fetch": good}
-        client = offline_client(lambda path: state["fetch"](path))
+        client = offline_client(lambda path, timeout: state["fetch"](path, timeout))
         client.refresh()
         state["fetch"] = failing_fetch
         monkeypatch.setattr(api, "CLIENT", client)
@@ -452,7 +469,8 @@ class TestFetch:
         opener = _FakeOpener(_FakeRaw(200, b"{}", None))
         monkeypatch.setattr(api, "_OPENER", opener)
         api.fetch("/v1/meta")
-        assert opener.timeouts == [15.0]
+        api.fetch("/v1/meta", timeout=1.5)
+        assert opener.timeouts == [15.0, 1.5]
         assert api.FETCH_TIMEOUT_S == 15.0
 
     def test_an_off_host_path_is_a_loud_error_not_an_unavailable_api(self) -> None:
@@ -541,7 +559,7 @@ class TestCache:
     def test_a_cold_get_is_filled_by_the_refresher_then_served_from_cache(self) -> None:
         threads: list[str] = []
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             threads.append(threading.current_thread().name)
             return api.Response(body=META, version=VERSION)
 
@@ -553,7 +571,7 @@ class TestCache:
     def test_a_cold_get_with_a_dead_api_gives_up_within_the_bound(self) -> None:
         threads: list[str] = []
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             threads.append(threading.current_thread().name)
             raise api.ApiUnavailable("down")
 
@@ -568,7 +586,7 @@ class TestCache:
         """Eight visitors against an API that hangs: each gives up at the bound."""
         release = threading.Event()
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             release.wait(10)
             raise api.ApiUnavailable("slow, then down")
 
@@ -597,7 +615,7 @@ class TestCache:
         state = {"version": VERSION}
         calls: list[str] = []
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             calls.append(path)
             body = copy.deepcopy(bodies[path])
             if path == api.META_PATH:
@@ -624,7 +642,7 @@ class TestCache:
         seen_during_prefetch: list[Any] = []
         holder: dict[str, api.Client] = {}
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             if path != api.META_PATH:
                 seen_during_prefetch.append(holder["client"].snapshot)
                 if path == "/v1/two" and failing["on"]:
@@ -654,7 +672,7 @@ class TestCache:
         state = {"version": VERSION}
         failing = {"on": False}
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             if path == "/v1/elections" and failing["on"]:
                 raise api.ApiUnavailable("boom")
             body = copy.deepcopy(META) if path == api.META_PATH else {"data": []}
@@ -671,7 +689,7 @@ class TestCache:
         assert client.snapshot is first
 
     def test_a_prefetch_answering_for_another_version_is_not_swapped_in(self) -> None:
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             if path == api.META_PATH:
                 return api.Response(body=META, version=VERSION)
             return api.Response(body={"data": []}, version="some-other-version")
@@ -684,7 +702,7 @@ class TestCache:
     def test_a_fill_on_miss_is_stored_only_under_its_own_version(self) -> None:
         state = {"version": VERSION}
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             body = META if path == api.META_PATH else {"path": path}
             return api.Response(body=body, version=state["version"])
 
@@ -695,7 +713,8 @@ class TestCache:
         assert "/v1/elections" in client.snapshot.responses
 
         state["version"] = "next-version"
-        assert client.get("/v1/elections/2000") == {"path": "/v1/elections/2000"}
+        with pytest.raises(api.ApiUnavailable):  # never a foreign-version body
+            client.get("/v1/elections/2000")
         assert "/v1/elections/2000" not in client.snapshot.responses
         assert client._wake.is_set()  # the refresher is nudged to swap in the new version
 
@@ -714,7 +733,11 @@ class TestCache:
         client.refresh()
         assert bucket.waits == [None, None]  # the refresher waits as long as it needs
         client.get("/v1/miss")
-        assert bucket.waits == [None, None, client._max_request_wait]
+        assert bucket.waits[:2] == [None, None]
+        visitor_wait = bucket.waits[2]
+        # What is left of the render's deadline: bounded, never unlimited.
+        assert visitor_wait is not None
+        assert 0 < visitor_wait <= client._max_request_wait
         assert len(bucket.waits) == len(calls)  # one acquire per API call
 
     def test_the_process_client_uses_the_pinned_bucket(self) -> None:
@@ -728,23 +751,449 @@ class TestCache:
         )
 
 
+def component_ids(node: Any) -> set[str]:
+    """Every ``id`` in a rendered component tree."""
+    if isinstance(node, (list, tuple)):
+        return {i for child in node for i in component_ids(child)}
+    if isinstance(node, Component):
+        own = getattr(node, "id", None)
+        return ({own} if isinstance(own, str) else set()) | component_ids(
+            getattr(node, "children", None)
+        )
+    return set()
+
+
+def concrete_values(page: dict[str, Any]) -> dict[str, str]:
+    """The path variables a templated page is rendered with; ``{}`` for a plain page."""
+    names = re.findall(r"<(.*?)>", page.get("path_template") or "")
+    return {name: PATH_VALUES[name] for name in names}
+
+
+class RecordingView:
+    """A view that serves recorded responses by path, and records every read."""
+
+    def __init__(self, reads: list[str]) -> None:
+        self.reads = reads
+
+    def __enter__(self) -> RecordingView:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def get(self, path: str) -> dict[str, Any]:
+        self.reads.append(path)
+        if path not in RECORDED:
+            raise api.ApiUnavailable(f"no recorded response for {path}")
+        return copy.deepcopy(RECORDED[path])
+
+
+class RecordingClient:
+    """Exposes only ``view()``: a page reading ``CLIENT.get`` directly fails here."""
+
+    def __init__(self) -> None:
+        self.reads: list[str] = []
+
+    def view(self) -> RecordingView:
+        return RecordingView(self.reads)
+
+
+def coverage_problems(
+    page: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], list[str]]:
+    """Render one page from recorded responses; return its problems and its reads."""
+    client = RecordingClient()
+    monkeypatch.setattr(api, "CLIENT", client)
+    values = concrete_values(page)
+    rendered = page["layout"](**values)
+    declared = set(page.get("prefetch", ())) | {
+        template.format(**values) for template in page.get("on_miss", ())
+    }
+    problems = [f"undeclared read {path}" for path in client.reads if path not in declared]
+    marker = page.get("success")
+    if not marker:
+        problems.append("no success marker declared")
+    elif marker not in component_ids(rendered):
+        problems.append(f"success marker {marker!r} not rendered")
+    return problems, client.reads
+
+
+def _fake_year_layout(year: str | None = None, **_query: Any) -> Any:
+    with api.CLIENT.view() as view:
+        body = view.get(f"/v1/elections/{year}")
+    return dash.html.Div(str(len(body)), id="fake-year")
+
+
+FAKE_YEAR_PAGE: dict[str, Any] = {
+    "path": "/election/none",
+    "path_template": "/election/<year>",
+    "prefetch": (),
+    "on_miss": ("/v1/elections/{year}",),
+    "success": "fake-year",
+    "layout": _fake_year_layout,
+}
+
+
 class TestRegistryCoverage:
-    def test_every_path_a_page_reads_is_prefetched(
+    """AC5: every path a render reads is declared, as prefetched or filled on a miss."""
+
+    def test_every_registered_page_reads_only_what_it_declares(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A page that forgets to register a path brings back the 9.1 s cold read."""
-        read: list[str] = []
+        reads: list[str] = []
+        for name, page in dash.page_registry.items():
+            problems, page_reads = coverage_problems(page, monkeypatch)
+            assert problems == [], (name, problems)
+            reads += page_reads
+        assert reads, "no page read anything; the check would be vacuous"
 
-        class Recorder:
-            def get(self, path: str) -> dict[str, Any]:
-                read.append(path)
-                return META
-
-        monkeypatch.setattr(api, "CLIENT", Recorder())
+    def test_every_path_variable_has_a_concrete_value(self) -> None:
         for page in dash.page_registry.values():
-            page["layout"]()
-        assert read, "no page read anything; the check would be vacuous"
-        assert set(read) <= set(api.registered_prefetch_paths())
+            names = re.findall(r"<(.*?)>", page.get("path_template") or "")
+            assert set(names) <= set(PATH_VALUES), page["module"]
+
+    def test_the_process_client_prefetches_only_declared_paths(self) -> None:
+        declared = {p for page in dash.page_registry.values() for p in page["prefetch"]}
+        assert set(api.registered_prefetch_paths()) == declared
+
+    def test_a_templated_page_is_rendered_at_a_concrete_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        problems, reads = coverage_problems(FAKE_YEAR_PAGE, monkeypatch)
+        assert problems == []
+        assert reads == ["/v1/elections/1824"]  # rendered, not skipped
+
+    @pytest.mark.parametrize(
+        ("change", "problem"),
+        [
+            ({"on_miss": ()}, "undeclared read /v1/elections/1824"),
+            ({"success": None}, "no success marker declared"),
+            ({"success": "absent-id"}, "success marker 'absent-id' not rendered"),
+        ],
+    )
+    def test_the_check_fails_an_undeclared_read_or_a_missing_marker(
+        self, monkeypatch: pytest.MonkeyPatch, change: dict[str, Any], problem: str
+    ) -> None:
+        problems, _ = coverage_problems({**FAKE_YEAR_PAGE, **change}, monkeypatch)
+        assert problems == [problem]
+
+    def test_a_page_reading_client_get_directly_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def layout(**_query: Any) -> Any:
+            return api.CLIENT.get(api.META_PATH)
+
+        page = {**FAKE_YEAR_PAGE, "path_template": None, "layout": layout}
+        with pytest.raises(AttributeError):
+            coverage_problems(page, monkeypatch)
+
+
+# --- pages read only through a view (AC1) ---------------------------------------------
+
+PAGES = sorted((Path(api.__file__).parent / "pages").rglob("*.py"))
+
+
+def client_misuses(source: str) -> list[int]:
+    """Lines where ``CLIENT`` is anything but the receiver of ``.view``."""
+    tree = ast.parse(source)
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.alias) and "CLIENT" in (node.name, node.asname):
+            lines.append(node.lineno)
+            continue
+        named = (isinstance(node, ast.Name) and node.id == "CLIENT") or (
+            isinstance(node, ast.Attribute) and node.attr == "CLIENT"
+        )
+        if not named:
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.Attribute) and parent.attr == "view":
+            continue
+        lines.append(getattr(node, "lineno", 0))
+    return lines
+
+
+@pytest.mark.parametrize("path", PAGES, ids=lambda p: p.name)
+def test_pages_read_only_through_a_render_scoped_view(path: Path) -> None:
+    assert client_misuses(path.read_text(encoding="utf-8")) == []
+
+
+def test_the_pages_lint_sees_at_least_one_page() -> None:
+    assert any("CLIENT.view" in p.read_text(encoding="utf-8") for p in PAGES)
+
+
+@pytest.mark.parametrize(
+    ("source", "misused"),
+    [
+        ("with api.CLIENT.view() as v:\n    v.get(p)\n", False),
+        ("api.CLIENT.view().get(p)\n", False),
+        ("api.CLIENT.get(p)\n", True),
+        ("c = api.CLIENT\nc.get(p)\n", True),
+        ("from explore.api import CLIENT\n", True),
+        ("getattr(api.CLIENT, 'get')(p)\n", True),
+        ("CLIENT.get(p)\n", True),
+    ],
+)
+def test_the_pages_lint_flags_what_it_should(source: str, misused: bool) -> None:
+    assert bool(client_misuses(source)) is misused
+
+
+# --- one snapshot per render (AC1) and one deadline per render (AC3) ------------------
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def versioned_fetch(
+    state: dict[str, Any], calls: list[tuple[str, float]] | None = None
+) -> Any:
+    """Answers every path for ``state["version"]``; ``/v1/meta`` names it too."""
+
+    def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+        if calls is not None:
+            calls.append((path, timeout))
+        if path == api.META_PATH:
+            body = copy.deepcopy(META)
+            body["provenance"]["snapshot_version"] = state["version"]
+        else:
+            body = {"path": path, "version": state["version"]}
+        return api.Response(body=body, version=state["version"])
+
+    return fetch
+
+
+class TestView:
+    def test_two_reads_answer_from_the_snapshot_the_render_started_with(self) -> None:
+        state = {"version": VERSION}
+        client = offline_client(
+            versioned_fetch(state), prefetch_paths=lambda: ["/v1/a", "/v1/b"]
+        )
+        client.refresh()
+        with client.view() as view:
+            first = view.get("/v1/a")
+            state["version"] = "next-version"
+            client.refresh()  # the swap lands between the render's two reads
+            assert client.snapshot is not None
+            assert client.snapshot.version == "next-version"
+            second = view.get("/v1/b")
+        assert first["version"] == second["version"] == VERSION
+        assert view.version == VERSION
+
+    def test_a_miss_for_the_pinned_version_is_stored_in_the_pinned_snapshot(
+        self,
+    ) -> None:
+        state = {"version": VERSION}
+        client = offline_client(versioned_fetch(state))
+        client.refresh()
+        with client.view() as view:
+            body = view.get("/v1/miss")
+        assert client.snapshot is not None
+        assert client.snapshot.responses["/v1/miss"] is body
+
+    def test_a_miss_answering_another_version_raises_and_wakes_the_refresher(
+        self,
+    ) -> None:
+        state = {"version": VERSION}
+        client = offline_client(versioned_fetch(state))
+        client.refresh()
+        pinned = client.snapshot
+        assert pinned is not None
+        view = client.view()
+        state["version"] = "next-version"  # the edge has moved on; the cache has not
+        with pytest.raises(api.ApiUnavailable):
+            view.get("/v1/miss")
+        assert "/v1/miss" not in pinned.responses
+        assert client._wake.is_set()
+
+    def test_a_render_pinned_before_a_swap_hands_its_miss_to_the_new_snapshot(
+        self,
+    ) -> None:
+        state = {"version": VERSION}
+        client = offline_client(versioned_fetch(state))
+        client.refresh()
+        view = client.view()
+        state["version"] = "next-version"
+        client.refresh()
+        with pytest.raises(api.ApiUnavailable):  # still never mixed into this render
+            view.get("/v1/miss")
+        assert client.snapshot is not None
+        assert client.snapshot.responses["/v1/miss"]["version"] == "next-version"
+        assert client._wake.is_set()  # still woken, as AC1 asks
+
+    def test_a_cold_view_with_a_dead_api_raises_within_the_deadline(self) -> None:
+        client = offline_client(failing_fetch, max_request_wait=0.3)
+        started = time.monotonic()
+        with pytest.raises(api.ApiUnavailable):
+            client.view()
+        assert time.monotonic() - started < 1.0
+
+
+class TestRenderDeadline:
+    def test_misses_in_one_render_share_one_deadline(self) -> None:
+        clock = FakeClock()
+        calls: list[tuple[str, float]] = []
+        state = {"version": VERSION}
+        bucket = RecordingBucket()
+        client = offline_client(
+            versioned_fetch(state, calls),
+            bucket=bucket,
+            clock=clock,
+            max_request_wait=api.MAX_REQUEST_WAIT_S,
+        )
+        client.refresh()
+        calls.clear()
+        bucket.waits.clear()
+
+        view = client.view()  # deadline = 0 + MAX_REQUEST_WAIT_S (2.0)
+        view.get("/v1/one")
+        clock.now = 1.8  # the first miss took most of the budget
+        view.get("/v1/two")
+        clock.now = 2.0
+        with pytest.raises(api.ApiUnavailable):
+            view.get("/v1/three")
+        assert [path for path, _ in calls] == ["/v1/one", "/v1/two"]  # never fetched
+        assert calls[0][1] == api.VISITOR_FETCH_TIMEOUT_S  # the cap, 1.5 < 2.0 left
+        assert calls[1][1] == pytest.approx(0.2)  # what remained of the render
+        assert bucket.waits == [2.0, pytest.approx(0.2)]
+
+    def test_the_refresher_keeps_the_long_timeout(self) -> None:
+        calls: list[tuple[str, float]] = []
+        client = offline_client(
+            versioned_fetch({"version": VERSION}, calls),
+            prefetch_paths=lambda: ["/v1/a"],
+        )
+        client.refresh()
+        assert calls == [
+            (api.META_PATH, api.FETCH_TIMEOUT_S),
+            ("/v1/a", api.FETCH_TIMEOUT_S),
+        ]
+
+    def test_the_visitor_bounds_fit_the_first_data_budget(self) -> None:
+        # D071(g): first data within 3 s, and a visitor's fill gives up sooner than the
+        # refresher's.
+        assert api.VISITOR_FETCH_TIMEOUT_S < api.FETCH_TIMEOUT_S
+        assert api.VISITOR_FETCH_TIMEOUT_S <= api.MAX_REQUEST_WAIT_S < 3.0
+        assert PROCESS_CLIENT._visitor_fetch_timeout == api.VISITOR_FETCH_TIMEOUT_S
+
+
+# --- wake-ups after a successful refresh (AC2, AC6) -----------------------------------
+
+
+class TestWakeInterval:
+    def make(self, clock: FakeClock, sleeps: list[float], **kwargs: Any) -> api.Client:
+        return offline_client(
+            versioned_fetch({"version": VERSION}),
+            clock=clock,
+            sleep=sleeps.append,
+            min_recheck=30.0,
+            **kwargs,
+        )
+
+    def test_refresh_stamps_the_start_of_its_meta_check(self) -> None:
+        clock = FakeClock()
+        sleeps: list[float] = []
+        client = self.make(clock, sleeps)
+        clock.now = 7.0
+        client.refresh()
+        assert client._last_check == 7.0
+        clock.now = 50.0
+        client.refresh()  # same version: still a successful check
+        assert client._last_check == 50.0
+
+    def test_a_failed_refresh_does_not_stamp(self) -> None:
+        clock = FakeClock()
+        client = offline_client(failing_fetch, clock=clock)
+        with pytest.raises(api.ApiUnavailable):
+            client.refresh()
+        assert client._last_check is None
+
+    def test_an_early_wake_waits_out_the_interval_and_is_not_dropped(self) -> None:
+        clock = FakeClock()
+        sleeps: list[float] = []
+        client = self.make(clock, sleeps)
+        client.refresh()  # last check at t=0
+        clock.now = 5.0
+        client._wake.set()  # a visitor's mismatched miss
+        client._wait_after(failed=False)
+        assert sleeps == [25.0]  # one recheck per 30 s, not one per visit
+        assert client._wake.is_set()  # left for the next cycle to answer
+
+    def test_a_wake_after_the_interval_is_answered_at_once(self) -> None:
+        clock = FakeClock()
+        sleeps: list[float] = []
+        client = self.make(clock, sleeps)
+        client.refresh()
+        clock.now = 31.0
+        client._wake.set()
+        client._wait_after(failed=False)
+        assert sleeps == []
+
+    def test_no_wake_waits_for_the_ttl_without_sleeping(self) -> None:
+        clock = FakeClock()
+        sleeps: list[float] = []
+        client = self.make(clock, sleeps, ttl=0.01)
+        client.refresh()
+        client._wait_after(failed=False)
+        assert sleeps == []
+
+    def test_a_failed_cycle_still_backs_off_for_the_retry_interval(self) -> None:
+        clock = FakeClock()
+        sleeps: list[float] = []
+        client = self.make(clock, sleeps, retry_backoff=30.0)
+        client._wake.set()
+        client._wait_after(failed=True)
+        assert sleeps == [30.0]
+
+    def test_a_wake_set_during_a_successful_refresh_is_answered_after_it(self) -> None:
+        """AC6, on the real thread: the wake-up survives the cycle it arrived in."""
+        metas: list[float] = []
+        holder: dict[str, api.Client] = {}
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path == api.META_PATH:
+                metas.append(time.monotonic())
+                if len(metas) == 2:
+                    holder["client"]._wake.set()  # a visitor's miss, mid-refresh
+            return api.Response(body=META, version=VERSION)
+
+        client = offline_client(fetch, ttl=3600, min_recheck=0.05)
+        holder["client"] = client
+        client.ensure_refresher()
+        assert client._ready.wait(5)
+        client._wake.set()  # cycle 2, during which the visitor's wake-up arrives
+        deadline = time.monotonic() + 5
+        while len(metas) < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(metas) >= 3, "the mid-refresh wake-up waited for the TTL"
+
+    def test_repeated_wakes_cost_one_meta_per_interval_on_the_real_thread(self) -> None:
+        metas: list[float] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            metas.append(time.monotonic())
+            return api.Response(body=META, version=VERSION)
+
+        client = offline_client(fetch, ttl=3600, min_recheck=0.3)
+        client.ensure_refresher()
+        assert client._ready.wait(5)
+        stop = time.monotonic() + 1.0
+        while time.monotonic() < stop:  # visitors missing on a stale edge path
+            client._wake.set()
+            time.sleep(0.01)
+        # One cold check, then at most one per 0.3 s over the second of wake-ups.
+        assert 2 <= len(metas) <= 6, len(metas)
+
+    def test_the_process_client_uses_the_pinned_interval(self) -> None:
+        assert api.MIN_RECHECK_INTERVAL_S == 30.0
+        assert PROCESS_CLIENT._min_recheck == api.MIN_RECHECK_INTERVAL_S
 
 
 class TestTokenBucket:
@@ -799,7 +1248,7 @@ class TestRefresher:
     ) -> None:
         threads: list[str] = []
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             threads.append(threading.current_thread().name)
             return api.Response(body=META, version=VERSION)
 
@@ -834,7 +1283,7 @@ class TestRefresher:
         attempts = threading.Semaphore(0)
         calls = {"n": 0}
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             calls["n"] += 1
             attempts.release()
             if calls["n"] == 1:
@@ -854,7 +1303,7 @@ class TestRefresher:
     def test_a_failed_cycle_backs_off_whatever_wakes_it(self) -> None:
         attempts: list[float] = []
 
-        def fetch(path: str) -> api.Response:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
             attempts.append(time.monotonic())
             raise api.ApiUnavailable("down")
 

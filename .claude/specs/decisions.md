@@ -4990,3 +4990,43 @@ If both GCP options fail live, the paid fallbacks are Fly.io (≈ $2–3/month) 
 `.claude/specs/backlog-dashboard.md`, D001, D070.
 
 ---
+
+## D072: The dashboard's MVP prefetch is `/v1/meta` and `/v1/elections`; a year is filled on a miss
+
+**Date:** 2026-10-02
+**Builds on:** D071(d), D071(g) · **Supersedes:** D071(d)'s prefetch-extent clause only ·
+**Decided by:** the owner (2026-10-01), recorded by #305 (E9-S3a)
+
+**Context.** D071(d) made a throttled prefetch of "the canonical `/v1` URLs" required, not an
+optimization, because a never-fetched view took 9.1 s with the dashboard warm and the API idle,
+which fails D071(g)'s 3 s first-data target. Read at full extent, that means prefetching every
+year's `/v1/elections/{year}` on warmup and on every snapshot version change. The first pages to
+read more than one path (#305–#308) raised the question of how far the prefetch must reach before
+anything ships.
+
+**Decision.**
+- **The refresher prefetches `/v1/meta` and the `/v1/elections` index, and nothing else.** Pages
+  declare what is prefetched, so the index joins `/v1/meta` when #306 registers the first page
+  that reads it. A year's response is filled on a cache miss, by the visitor's request, under the render's
+  deadline (`MAX_REQUEST_WAIT_S`, with each fill capped at `VISITOR_FETCH_TIMEOUT_S`, #305).
+- **The cost is accepted, not hidden.** A link to a year that is cold at both the API edge and the
+  origin may show the dashboard's degraded state ("isn't responding") instead of a slow page,
+  against D071(g)'s 3 s target. #310 measures how often, and decides whether to widen the prefetch.
+- **A stale edge has its own window.** If the API edge keeps answering an older snapshot version
+  for a year path after the API moves on, that year's page stays degraded until the edge entry
+  expires. The refresher rechecks `/v1/meta` at most once per `MIN_RECHECK_INTERVAL_S` (#305) on
+  such misses; that bounds the rechecks, not this window.
+- **D071 stays as written.** Only its clause making the full-extent prefetch "required, not an
+  optimization" is superseded, and only for the MVP; the rest of D071(d) (one host, the
+  in-process cache keyed on `snapshot_version`, the throttle, the atomic swap) is unchanged.
+
+**Rationale.** The full extent costs one fill per served year on every API deploy, against a
+30/min bucket shared with visitors' misses, before the dashboard has a single year page or a
+measurement of how often a year link is doubly cold. Prefetching the index keeps the elections
+table (#306) and the year list warm, and leaves widening as a measured decision (#310). The
+mechanism for a body-derived prefetch list moved to #310 with that decision (#305's scope
+amendment, 2026-10-02).
+
+**Related:** D071, #305, #306, #307, #310, #312.
+
+---
