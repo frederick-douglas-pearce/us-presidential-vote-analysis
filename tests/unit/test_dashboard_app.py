@@ -20,7 +20,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -568,6 +568,25 @@ class TestCache:
         assert client.get(api.META_PATH) == META
         assert threads == ["explore-refresher"]  # never on the visitor's thread
 
+    def test_a_cold_view_sets_no_wake_up(self) -> None:
+        """AC6: no wake-up from a cold visitor, so a cold start costs one /v1/meta.
+
+        The test above cannot see a second /v1/meta: after a successful refresh a
+        wake-up is answered only after ``min_recheck`` (30 s). This one watches the
+        wake-up itself.
+        """
+        setters: list[str] = []
+
+        class RecordingEvent(threading.Event):
+            def set(self) -> None:
+                setters.append(threading.current_thread().name)
+                super().set()
+
+        client = offline_client(ttl=3600)
+        client._wake = RecordingEvent()
+        assert client.get(api.META_PATH) == META
+        assert setters == []
+
     def test_a_cold_get_with_a_dead_api_gives_up_within_the_bound(self) -> None:
         threads: list[str] = []
 
@@ -793,8 +812,10 @@ class RecordingClient:
 
     def __init__(self) -> None:
         self.reads: list[str] = []
+        self.views = 0
 
     def view(self) -> RecordingView:
+        self.views += 1
         return RecordingView(self.reads)
 
 
@@ -810,6 +831,8 @@ def coverage_problems(
         template.format(**values) for template in page.get("on_miss", ())
     }
     problems = [f"undeclared read {path}" for path in client.reads if path not in declared]
+    if client.views > 1:  # each view pins its own snapshot: one render, one view
+        problems.append(f"opened {client.views} views")
     marker = page.get("success")
     if not marker:
         problems.append("no success marker declared")
@@ -819,6 +842,8 @@ def coverage_problems(
 
 
 def _fake_year_layout(year: str | None = None, **_query: Any) -> Any:
+    # Formats the path variable unvalidated: fine for a coverage check at a known value,
+    # but not a pattern to copy. A real page validates it first (#312, item 6).
     with api.CLIENT.view() as view:
         body = view.get(f"/v1/elections/{year}")
     return dash.html.Div(str(len(body)), id="fake-year")
@@ -877,6 +902,24 @@ class TestRegistryCoverage:
         problems, _ = coverage_problems({**FAKE_YEAR_PAGE, **change}, monkeypatch)
         assert problems == [problem]
 
+    def test_a_page_opening_two_views_in_one_render_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def layout(**_query: Any) -> Any:
+            first = api.CLIENT.view().get(api.META_PATH)
+            second = api.CLIENT.view().get(api.META_PATH)  # may be another snapshot
+            return dash.html.Div([str(len(first)), str(len(second))], id="two-views")
+
+        page = {
+            "path": "/two-views",
+            "prefetch": (api.META_PATH,),
+            "on_miss": (),
+            "success": "two-views",
+            "layout": layout,
+        }
+        problems, _ = coverage_problems(page, monkeypatch)
+        assert problems == ["opened 2 views"]
+
     def test_a_page_reading_client_get_directly_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -893,16 +936,40 @@ class TestRegistryCoverage:
 PAGES = sorted((Path(api.__file__).parent / "pages").rglob("*.py"))
 
 
+#: The ``api.<name>`` a page may use. None of them reads data except ``CLIENT``, and
+#: that only as the receiver of ``.view``. ``fetch``, ``Client``, ``View``, ``_OPENER``
+#: and ``build_url`` would read past the view, the cache and the throttle.
+PAGE_API_NAMES = {"CLIENT", "ApiUnavailable", "META_PATH", "ELECTIONS_PATH"}
+
+
 def client_misuses(source: str) -> list[int]:
-    """Lines where ``CLIENT`` is anything but the receiver of ``.view``."""
+    """Lines where a page reaches ``explore.api`` other than through ``CLIENT.view``.
+
+    Pages import the module (``from explore import api``) and name what they use as
+    ``api.<name>``; a name outside :data:`PAGE_API_NAMES`, ``CLIENT`` other than as the
+    receiver of ``.view``, or any ``from explore.api import …`` is flagged. A module
+    alias (``import explore.api as x``) is not tracked.
+    """
     tree = ast.parse(source)
     parents = {
         child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
     }
     lines: list[int] = []
     for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        if isinstance(node, ast.ImportFrom) and node.module == "explore.api":
+            lines.append(line)
+            continue
         if isinstance(node, ast.alias) and "CLIENT" in (node.name, node.asname):
-            lines.append(node.lineno)
+            lines.append(line)
+            continue
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "api"
+            and node.attr not in PAGE_API_NAMES
+        ):
+            lines.append(line)
             continue
         named = (isinstance(node, ast.Name) and node.id == "CLIENT") or (
             isinstance(node, ast.Attribute) and node.attr == "CLIENT"
@@ -912,7 +979,7 @@ def client_misuses(source: str) -> list[int]:
         parent = parents.get(node)
         if isinstance(parent, ast.Attribute) and parent.attr == "view":
             continue
-        lines.append(getattr(node, "lineno", 0))
+        lines.append(line)
     return lines
 
 
@@ -935,6 +1002,13 @@ def test_the_pages_lint_sees_at_least_one_page() -> None:
         ("from explore.api import CLIENT\n", True),
         ("getattr(api.CLIENT, 'get')(p)\n", True),
         ("CLIENT.get(p)\n", True),
+        ("try:\n    pass\nexcept api.ApiUnavailable:\n    pass\n", False),
+        ("v.get(api.META_PATH)\n", False),
+        ("api.fetch(p)\n", True),
+        ("api.Client().get(p)\n", True),
+        ("api._OPENER.open(r)\n", True),
+        ("api.build_url(p)\n", True),
+        ("from explore.api import fetch\n", True),
     ],
 )
 def test_the_pages_lint_flags_what_it_should(source: str, misused: bool) -> None:
@@ -954,7 +1028,7 @@ class FakeClock:
 
 def versioned_fetch(
     state: dict[str, Any], calls: list[tuple[str, float]] | None = None
-) -> Any:
+) -> Callable[..., api.Response]:
     """Answers every path for ``state["version"]``; ``/v1/meta`` names it too."""
 
     def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
@@ -1054,15 +1128,91 @@ class TestRenderDeadline:
 
         view = client.view()  # deadline = 0 + MAX_REQUEST_WAIT_S (2.0)
         view.get("/v1/one")
-        clock.now = 1.8  # the first miss took most of the budget
+        clock.now = 1.2  # the first miss took most of the budget
         view.get("/v1/two")
-        clock.now = 2.0
+        clock.now = 1.6  # 0.4 left: under MIN_USEFUL_FETCH_S, so not even tried
         with pytest.raises(api.ApiUnavailable):
             view.get("/v1/three")
         assert [path for path, _ in calls] == ["/v1/one", "/v1/two"]  # never fetched
         assert calls[0][1] == api.VISITOR_FETCH_TIMEOUT_S  # the cap, 1.5 < 2.0 left
-        assert calls[1][1] == pytest.approx(0.2)  # what remained of the render
-        assert bucket.waits == [2.0, pytest.approx(0.2)]
+        assert calls[1][1] == pytest.approx(0.8)  # what remained of the render
+        # Each token wait leaves MIN_USEFUL_FETCH_S of the deadline for its fetch.
+        assert bucket.waits == [pytest.approx(1.5), pytest.approx(0.3)]
+
+    def advancing_client(
+        self, per_minute: float, calls: list[tuple[str, float]]
+    ) -> tuple[api.Client, FakeClock, api.TokenBucket]:
+        """A warm client whose emptied bucket sleeps by advancing the fake clock."""
+        clock = FakeClock()
+        client = offline_client(
+            versioned_fetch({"version": VERSION}, calls),
+            clock=clock,
+            max_request_wait=api.MAX_REQUEST_WAIT_S,
+        )
+        client.refresh()
+        calls.clear()
+
+        def advance(seconds: float) -> None:
+            clock.now += seconds
+
+        bucket = api.TokenBucket(
+            per_minute=per_minute, burst=1, clock=clock, sleep=advance
+        )
+        bucket.acquire(None)  # empty: the next token comes at the bucket's rate
+        client._bucket = bucket
+        return client, clock, bucket
+
+    def test_the_token_wait_and_the_fetch_share_the_deadline(self) -> None:
+        calls: list[tuple[str, float]] = []
+        client, clock, _ = self.advancing_client(60.0, calls)  # a token per second
+        client.view().get("/v1/miss")
+        assert clock.now == pytest.approx(1.0)  # waited for the token
+        assert [path for path, _ in calls] == ["/v1/miss"]
+        assert calls[0][1] == pytest.approx(1.0)  # 2.0 − 1.0, not the 1.5 cap
+
+    def test_a_token_wait_past_the_floor_takes_no_token_and_fetches_nothing(
+        self,
+    ) -> None:
+        calls: list[tuple[str, float]] = []
+        client, clock, bucket = self.advancing_client(20.0, calls)  # one per 3 s
+        with pytest.raises(api.ApiUnavailable):
+            client.view().get("/v1/miss")  # 3 s > 2.0 − MIN_USEFUL_FETCH_S
+        assert calls == []
+        assert clock.now == 0.0  # did not wait
+        assert bucket._tokens == pytest.approx(0.0)  # reserved nothing
+
+    def test_the_cold_wait_draws_on_the_render_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = FakeClock()
+        calls: list[tuple[str, float]] = []
+        client = offline_client(
+            versioned_fetch({"version": VERSION}, calls),
+            clock=clock,
+            max_request_wait=api.MAX_REQUEST_WAIT_S,
+        )
+        waits: list[float | None] = []
+
+        class ColdReady:
+            """The refresher's first snapshot arrives 1.2 s into the render."""
+
+            def wait(self, timeout: float | None = None) -> bool:
+                waits.append(timeout)
+                clock.now += 1.2
+                client.refresh()
+                return True
+
+            def set(self) -> None:
+                pass
+
+        monkeypatch.setattr(client, "_ready", ColdReady())
+        monkeypatch.setattr(client, "ensure_refresher", lambda: None)
+        view = client.view()
+        calls.clear()
+        view.get("/v1/miss")
+        assert waits == [api.MAX_REQUEST_WAIT_S]
+        assert [path for path, _ in calls] == ["/v1/miss"]
+        assert calls[0][1] == pytest.approx(0.8)  # 2.0 − 1.2, not 1.5
 
     def test_the_refresher_keeps_the_long_timeout(self) -> None:
         calls: list[tuple[str, float]] = []
@@ -1082,6 +1232,7 @@ class TestRenderDeadline:
         assert api.VISITOR_FETCH_TIMEOUT_S < api.FETCH_TIMEOUT_S
         assert api.VISITOR_FETCH_TIMEOUT_S <= api.MAX_REQUEST_WAIT_S < 3.0
         assert PROCESS_CLIENT._visitor_fetch_timeout == api.VISITOR_FETCH_TIMEOUT_S
+        assert api.MIN_USEFUL_FETCH_S == 0.5 < api.VISITOR_FETCH_TIMEOUT_S
 
 
 # --- wake-ups after a successful refresh (AC2, AC6) -----------------------------------
@@ -1089,6 +1240,9 @@ class TestRenderDeadline:
 
 class TestWakeInterval:
     def make(self, clock: FakeClock, sleeps: list[float], **kwargs: Any) -> api.Client:
+        # Short, so a regression that drops a wake-up fails at once instead of
+        # blocking for the 300 s TTL. A wake-up that is set returns immediately.
+        kwargs.setdefault("ttl", 0.05)
         return offline_client(
             versioned_fetch({"version": VERSION}),
             clock=clock,
@@ -1100,10 +1254,17 @@ class TestWakeInterval:
     def test_refresh_stamps_the_start_of_its_meta_check(self) -> None:
         clock = FakeClock()
         sleeps: list[float] = []
-        client = self.make(clock, sleeps)
+        inner = versioned_fetch({"version": VERSION})
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path == api.META_PATH:
+                clock.now += 3.0  # the check takes 3 s
+            return inner(path, timeout)
+
+        client = offline_client(fetch, clock=clock, sleep=sleeps.append)
         clock.now = 7.0
         client.refresh()
-        assert client._last_check == 7.0
+        assert client._last_check == 7.0  # its start, not 10.0
         clock.now = 50.0
         client.refresh()  # same version: still a successful check
         assert client._last_check == 50.0
@@ -1147,10 +1308,10 @@ class TestWakeInterval:
     def test_a_failed_cycle_still_backs_off_for_the_retry_interval(self) -> None:
         clock = FakeClock()
         sleeps: list[float] = []
-        client = self.make(clock, sleeps, retry_backoff=30.0)
+        client = self.make(clock, sleeps, retry_backoff=17.0)  # not min_recheck's 30
         client._wake.set()
         client._wait_after(failed=True)
-        assert sleeps == [30.0]
+        assert sleeps == [17.0]
 
     def test_a_wake_set_during_a_successful_refresh_is_answered_after_it(self) -> None:
         """AC6, on the real thread: the wake-up survives the cycle it arrived in."""

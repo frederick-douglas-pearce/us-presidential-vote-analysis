@@ -5012,10 +5012,18 @@ anything ships.
 - **The cost is accepted, not hidden.** A link to a year that is cold at both the API edge and the
   origin may show the dashboard's degraded state ("isn't responding") instead of a slow page,
   against D071(g)'s 3 s target. #310 measures how often, and decides whether to widen the prefetch.
-- **A stale edge has its own window.** If the API edge keeps answering an older snapshot version
-  for a year path after the API moves on, that year's page stays degraded until the edge entry
-  expires. The refresher rechecks `/v1/meta` at most once per `MIN_RECHECK_INTERVAL_S` (#305) on
-  such misses; that bounds the rechecks, not this window.
+- **A stale edge has its own window, in both directions.** A page pins the version `/v1/meta`
+  named when its render started, and refuses a year response that names another (#305). So a
+  year's page stays degraded while the API edge answers that year path with an **older** snapshot
+  version than `/v1/meta`, and equally while the edge answers `/v1/meta` with an older version
+  than a freshly filled year path. Before #305 the second case returned the newer body; now it
+  shows the degraded state. Both windows run from the API's cutover to the deploy's edge purge,
+  plus up to `MIN_RECHECK_INTERVAL_S` for the refresher's next recheck: the purge closes them,
+  not edge expiry. A stale entry written after the purge, or a missed purge, would hold for the
+  Worker's `s-maxage` (30 days) unless purged by hand; #314 asks whether that can happen. The
+  refresher's interval bounds its rechecks, not these windows. Keeping newer-version bodies aside
+  to seed the next snapshot was considered and not adopted; #310 revisits it if its measurements
+  show the windows matter.
 - **D071 stays as written.** Only its clause making the full-extent prefetch "required, not an
   optimization" is superseded, and only for the MVP; the rest of D071(d) (one host, the
   in-process cache keyed on `snapshot_version`, the throttle, the atomic swap) is unchanged.
@@ -5027,6 +5035,6 @@ table (#306) and the year list warm, and leaves widening as a measured decision 
 mechanism for a body-derived prefetch list moved to #310 with that decision (#305's scope
 amendment, 2026-10-02).
 
-**Related:** D071, #305, #306, #307, #310, #312.
+**Related:** D071, #305, #306, #307, #310, #312, #314.
 
 ---

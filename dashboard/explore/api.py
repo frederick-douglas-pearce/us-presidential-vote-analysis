@@ -1,6 +1,8 @@
 """The dashboard's only way to read data: the public API, cached in-process (D071(d)).
 
-Three properties hold here, and the tests pin each one:
+These properties hold here (the tests that pin them are in
+``test_dashboard_app.py``: ``TestFetch`` and ``TestOpener``, ``TestCache``,
+``TestView``, ``TestRenderDeadline`` and ``TestWakeInterval``):
 
 - **One outbound chokepoint.** :func:`fetch` is the only function that opens a
   connection. It accepts ``/v1/`` paths only, builds the URL on the fixed
@@ -24,7 +26,9 @@ Three properties hold here, and the tests pin each one:
   shared). A visitor's request never refreshes the cache itself. A render gets one
   deadline, :data:`MAX_REQUEST_WAIT_S` from its start, and everything it waits on draws
   from it: the first snapshot, a fill token, and the network (each fetch further capped
-  at :data:`VISITOR_FETCH_TIMEOUT_S`). Past it, the page reports the API as unavailable.
+  at :data:`VISITOR_FETCH_TIMEOUT_S`). A fill is not started, and no token is taken,
+  once less than :data:`MIN_USEFUL_FETCH_S` would be left for its fetch. Past the
+  deadline, the page reports the API as unavailable.
   So a slow or dead API cannot queue visitors on a lock, or hold every server thread
   behind network timeouts.
 
@@ -41,7 +45,9 @@ Pages declare what they read in ``dash.register_page``: ``prefetch=(...)`` lists
 canonical paths warmed on every new snapshot version, ``on_miss=(...)`` the paths (or
 templates of the page's path variables, such as ``/v1/elections/{year}``) filled on a
 miss, and ``success=`` the id of an element the page renders only from a successful
-read. The tests check every read against these declarations.
+read. ``TestRegistryCoverage`` checks every read a page's layout makes against these
+declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts
+each page's success marker.
 """
 
 from __future__ import annotations
@@ -77,6 +83,11 @@ FETCH_TIMEOUT_S = 15.0
 #: the whole request, and not to the DNS lookup, so the deadline is best-effort.
 VISITOR_FETCH_TIMEOUT_S = 1.5
 
+#: The least of the render's deadline worth starting a visitor's fill with. A fill that
+#: would be left less than this for its fetch is refused before it takes a token: a
+#: fetch that cannot finish would still spend one, and a request against the API.
+MIN_USEFUL_FETCH_S = 0.5
+
 #: The token bucket: sustained fills per minute, and the burst allowed from rest.
 FILLS_PER_MINUTE = 30.0
 FILL_BURST = 10.0
@@ -99,7 +110,8 @@ MIN_RECHECK_INTERVAL_S = 30.0
 #: The one path the cache is versioned on.
 META_PATH = "/v1/meta"
 
-#: The elections index. With ``/v1/meta``, the MVP prefetch extent (D072).
+#: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; no page
+#: registers it yet, and #306 registers it with the first page that reads it.
 ELECTIONS_PATH = "/v1/elections"
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")
@@ -349,8 +361,15 @@ class Client:
         return remaining
 
     def _visitor_fill(self, path: str, deadline: float) -> Response:
-        """A fill on the request thread. Its token wait and fetch share the deadline."""
-        self._bucket.acquire(self._remaining(deadline))
+        """A fill on the request thread. Its token wait and fetch share the deadline.
+
+        The token wait may use only what leaves :data:`MIN_USEFUL_FETCH_S` for the
+        fetch; a refused wait reserves no token.
+        """
+        token_wait = self._remaining(deadline) - MIN_USEFUL_FETCH_S
+        if token_wait <= 0:
+            raise ApiUnavailable("too little of the render's wait is left for a fill")
+        self._bucket.acquire(token_wait)
         timeout = min(self._visitor_fetch_timeout, self._remaining(deadline))
         log.info("api fetch %s", path)
         return self._fetch(path, timeout)
@@ -377,8 +396,10 @@ class Client:
                         f"not {version}"
                     )
                 fresh.responses[path] = response.body
-            self._snapshot = fresh  # the atomic swap
+            # Stamped before the swap, so a refresher that sees the new snapshot also
+            # sees when it was checked.
             self._last_check = started
+            self._snapshot = fresh  # the atomic swap
             self._ready.set()
             log.info(
                 "serving snapshot %s (%d responses)", version, len(fresh.responses)
@@ -405,7 +426,7 @@ class Client:
         return View(self, snapshot, deadline)
 
     def get(self, path: str) -> JsonObject:
-        """One read through a fresh :meth:`view`. Pages use a view; tools use this."""
+        """One read through a fresh :meth:`view`. Pages use a view; tests use this."""
         return self.view().get(path)
 
     def _wait_after(self, failed: bool) -> None:
@@ -416,8 +437,9 @@ class Client:
             self._sleep(self._retry_backoff)
             return
         # A wake-up set during the cycle that just ran is still set, so it is answered
-        # now rather than at the TTL. It is not cleared here: the next cycle clears it
-        # as it starts, answering every wake-up that arrived meanwhile.
+        # by the next cycle, no sooner than ``min_recheck`` after the last check, rather
+        # than at the TTL. It is not cleared here: the next cycle clears it as it
+        # starts, answering every wake-up that arrived meanwhile.
         if self._wake.wait(self._ttl) and self._last_check is not None:
             remaining = self._last_check + self._min_recheck - self._clock()
             if remaining > 0:

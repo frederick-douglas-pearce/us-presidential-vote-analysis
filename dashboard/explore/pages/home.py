@@ -31,7 +31,8 @@ dash.register_page(
     # snapshot version, so no visitor waits on a cold API) or filled on a miss.
     prefetch=(api.META_PATH,),
     on_miss=(),
-    # Rendered only from a successful read: the guard's per-page success contract.
+    # Rendered only from a successful read: this page's success contract, asserted by
+    # the D070(b) guard in test_dashboard_guards.py.
     success=SNAPSHOT_ID,
 )
 
