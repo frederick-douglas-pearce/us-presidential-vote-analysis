@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import copy
+import html.parser
 import http.client
 import http.server
 import json
@@ -19,6 +20,7 @@ import re
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -26,6 +28,7 @@ from typing import Any
 
 import dash
 import pytest
+from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
 from dash.development.base_component import Component
 
 from explore import api
@@ -235,13 +238,6 @@ class TestRender:
 
 
 class TestIndex:
-    def test_the_index_carries_canonical_link_and_og_url(self) -> None:
-        html = appmod.server.test_client().get("/").get_data(as_text=True)
-        url = f"https://{CANONICAL_HOST}/"
-        assert f'<link rel="canonical" href="{url}">' in html
-        assert f'<meta property="og:url" content="{url}">' in html
-        assert html.count('property="og:title"') == 1  # Pages emits it; we do not repeat
-
     def test_the_index_carries_no_data_and_never_calls_the_api(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -254,29 +250,1001 @@ class TestIndex:
         assert "validation_layout" not in html
         assert calls == []
 
-    @pytest.mark.parametrize(
-        "path",
-        [
-            '/%22%3E%3Cscript%3Ealert(1)%3C/script%3E%3Cx%20a=%22',
-            "/%3Cimg%20src=x%20onerror=alert(1)%3E",
-            "/'%3E%3Csvg%20onload=alert(1)%3E",
-        ],
-    )
-    def test_a_hostile_path_is_never_reflected_as_markup(self, path: str) -> None:
-        response = appmod.server.test_client().get(path)
-        body = response.get_data(as_text=True)
-        # The whole body, so Dash's own tags are covered as well as ours.
-        for marker in ("<script>alert", "<img src=x", "<svg onload", '"><script'):
-            assert marker not in body
-        canonical = [ln for ln in body.splitlines() if 'rel="canonical"' in ln]
-        assert len(canonical) == 1
-        assert canonical[0].count('"') == 4  # rel="…" href="…": no quote broke out
-
     def test_responses_are_compressed(self) -> None:
         response = appmod.server.test_client().get(
             "/", headers={"Accept-Encoding": "gzip"}
         )
         assert response.headers.get("Content-Encoding") == "gzip"
+
+
+# --- the canonical link, og:url and the 404 (#312) -----------------------------------
+
+#: The years the recorded ``/v1/elections`` serves; 1825 is not one of them.
+SERVED_YEARS = {str(row["year"]) for row in RECORDED[api.ELECTIONS_PATH]["data"]}
+
+
+def known_year(path_vars: dict[str, Any], body: dict[str, Any]) -> bool:
+    """The fake year pages' judge: the year is one ``/v1/elections`` lists. Total."""
+    rows = body.get("data")
+    if not isinstance(rows, list):
+        return False
+    return any(
+        isinstance(row, dict) and str(row.get("year")) == path_vars.get("year")
+        for row in rows
+    )
+
+
+FAKE_VALIDATE: api.Validate = (api.ELECTIONS_PATH, known_year)
+
+#: The filters the fake filtered page keeps; everything else is dropped.
+FAKE_FILTERS = ("party", "state")
+
+
+def fake_parser(params: dict[str, Any]) -> list[tuple[str, str]]:
+    """The fake filtered page's query parser: kept keys, every value, de-duplicated."""
+    pairs: set[tuple[str, str]] = set()
+    for key in FAKE_FILTERS:
+        value = params.get(key)
+        values = value if isinstance(value, list) else [value]
+        pairs |= {(key, v) for v in values if isinstance(v, str) and v}
+    return sorted(pairs)
+
+
+def _validated_year_layout(year: Any = None, **query: Any) -> Any:
+    # The pattern a templated page follows: accept what the layout received, then format.
+    with api.CLIENT.view() as view:
+        if not api.accepted(view.get, FAKE_VALIDATE, {"year": year}):
+            return dash.html.P("No such election.", id="fake-year-missing")
+        body = view.get(f"/v1/elections/{year}")
+        filters = fake_parser(query)
+    return dash.html.Div(
+        [dash.html.Span(str(len(body))), dash.html.Code(repr(filters), id="filters")],
+        id="fake-year",
+    )
+
+
+def _unvalidated_year_layout(year: Any = None, **_query: Any) -> Any:
+    # The defect the hostile render exists to catch: the variable formatted unvalidated.
+    with api.CLIENT.view() as view:
+        body = view.get(f"/v1/elections/{year}")
+    return dash.html.Div(str(len(body)), id="fake-year")
+
+
+YEAR_PAGE: dict[str, Any] = {
+    "path_template": "/election/<year>",
+    "layout": _validated_year_layout,
+    "prefetch": (api.ELECTIONS_PATH,),
+    "on_miss": ("/v1/elections/{year}",),
+    "success": "fake-year",
+    "validate": FAKE_VALIDATE,
+}
+
+
+@pytest.fixture
+def register() -> Iterator[Callable[..., dict[str, Any]]]:
+    """Register fake pages for one test, and remove them after it."""
+    modules: list[str] = []
+
+    def add(module: str = "fake_year", **page: Any) -> dict[str, Any]:
+        dash.register_page(module, **page)
+        modules.append(module)
+        registered: dict[str, Any] = dash.page_registry[module]
+        return registered
+
+    yield add
+    for module in modules:
+        dash.page_registry.pop(module, None)
+
+
+def cached_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    elections: bool = True,
+    source: str = api.ELECTIONS_PATH,
+) -> tuple[api.Client, list[str], RecordingBucket]:
+    """A process client already serving a snapshot, with or without ``source``.
+
+    The returned call list and bucket record only what happens after the refresh.
+    """
+    fetch, calls = fake_fetch(RECORDED)
+    bucket = RecordingBucket()
+    client = offline_client(
+        fetch,
+        bucket=bucket,
+        prefetch_paths=lambda: [source] if elections else [],
+    )
+    client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+    client.refresh()
+    calls.clear()
+    bucket.waits.clear()
+    monkeypatch.setattr(api, "CLIENT", client)
+    return client, calls, bucket
+
+
+class Head(html.parser.HTMLParser):
+    """Every start tag of a page, as attribute dicts, values unescaped."""
+
+    def __init__(self, body: str) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+        self.feed(body)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append((tag, dict(attrs)))
+
+    def attrs(self, tag: str, key: str, value: str) -> list[dict[str, str | None]]:
+        return [a for t, a in self.tags if t == tag and a.get(key) == value]
+
+    def one(self, tag: str, key: str, value: str, attr: str) -> str | None:
+        found = self.attrs(tag, key, value)
+        assert len(found) <= 1, found
+        return found[0][attr] if found else None
+
+    @property
+    def canonical(self) -> str | None:
+        return self.one("link", "rel", "canonical", "href")
+
+    @property
+    def og_url(self) -> str | None:
+        return self.one("meta", "property", "og:url", "content")
+
+    @property
+    def twitter_url(self) -> str | None:
+        return self.one("meta", "property", "twitter:url", "content")
+
+    @property
+    def noindex(self) -> bool:
+        return self.one("meta", "name", "robots", "content") == "noindex"
+
+
+def get(path: str, *, unencoded: bool = False, **kwargs: Any) -> tuple[int, Head, str]:
+    """GET ``path``. The test client reports the target as sent (``RAW_URI``), escapes
+    included; ``unencoded`` reports it decoded instead, as a client sending raw bytes
+    would, so the index's encoded-path check passes it."""
+    if unencoded:
+        sent, _, query = path.partition("?")
+        raw = urllib.parse.unquote(sent) + (f"?{query}" if query else "")
+        kwargs["environ_overrides"] = {"RAW_URI": raw, "REQUEST_URI": raw}
+    response = appmod.server.test_client().get(path, **kwargs)
+    body = response.get_data(as_text=True)
+    return response.status_code, Head(body), body
+
+
+def route(pathname: str, search: str = "") -> Any:
+    """The routing POST a browser makes for ``pathname`` and ``search``."""
+    body = copy.deepcopy(ROUTING_POST)
+    body["inputs"][0]["value"] = pathname
+    body["inputs"][1]["value"] = search
+    return appmod.server.test_client().post("/_dash-update-component", json=body)
+
+
+def routed_ids(response: Any) -> set[str]:
+    def walk(node: Any) -> set[str]:
+        found: set[str] = set()
+        if isinstance(node, dict):
+            props = node.get("props")
+            if isinstance(props, dict) and isinstance(props.get("id"), str):
+                found.add(props["id"])
+            for value in node.values():
+                found |= walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                found |= walk(value)
+        return found
+
+    return walk(response.get_json())
+
+
+def url(path: str) -> str:
+    return f"https://{CANONICAL_HOST}{path}"
+
+
+class TestCanonical:
+    """Items 1, 3 and 5: matched paths name one canonical URL; og:url adds the filters."""
+
+    def test_the_root_keeps_the_byte_form_the_deploy_probe_greps(self) -> None:
+        status, _, body = get("/")
+        assert status == 200
+        assert f'<link rel="canonical" href="{url("/")}">' in body
+        assert f'<meta property="og:url" content="{url("/")}">' in body
+        assert body.count('property="og:title"') == 1  # Dash's card, rebuilt once
+
+    @pytest.mark.parametrize("path", ["/?b=2&a=1", "/?a=1"])
+    def test_a_page_without_a_parser_drops_the_query(self, path: str) -> None:
+        status, head, _ = get(path)
+        assert (status, head.canonical, head.og_url) == (200, url("/"), url("/"))
+
+    def test_a_templated_canonical_is_the_template_and_its_variables(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE)
+        for path in ("/election/1860?state=OH", "/election/1860/", "/election/1860"):
+            status, head, _ = get(path)
+            assert status == 200, path
+            assert head.canonical == url("/election/1860"), path
+            assert head.og_url == head.canonical, path  # no parser: no query
+
+    def test_og_url_carries_the_normalized_query_and_the_canonical_does_not(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE, query=fake_parser)
+        expected = url("/election/1860?party=D&state=CA&state=OH")
+        for query in (
+            "state=OH&party=D&junk=1&state=CA",
+            "junk=2&state=CA&state=OH&party=D&state=OH",
+        ):
+            _, head, _ = get(f"/election/1860?{query}")
+            assert head.canonical == url("/election/1860")
+            assert head.og_url == expected, query
+
+    def test_a_parser_that_keeps_nothing_leaves_og_url_bare(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE, query=fake_parser)
+        _, head, _ = get("/election/1860?junk=1")
+        assert head.og_url == url("/election/1860")
+
+    @pytest.mark.parametrize("year", ["1860", "1860/x", "%25", "a%20b"])
+    def test_the_canonical_resolves_back_to_the_same_page(
+        self, register: Callable[..., dict[str, Any]], year: str
+    ) -> None:
+        register(**YEAR_PAGE)  # cold: every well-formed variable counts as matched
+        _, head, _ = get(f"/election/{year}", unencoded=True)
+        assert head.canonical is not None
+        path = urllib.parse.unquote(urllib.parse.urlsplit(head.canonical).path)
+        page, path_vars = dash._pages._path_to_page(path.strip("/"))
+        assert page["module"] == "fake_year"
+        assert path_vars == {"year": urllib.parse.unquote(year)}
+
+    def test_a_filtered_og_url_reopens_the_filtered_view(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        register(**YEAR_PAGE, query=fake_parser)
+        cached_client(monkeypatch)
+        shared = "/election/1824?state=OH&junk=1&party=D&state=CA"
+        _, head, _ = get(shared)
+        assert head.og_url is not None
+        # The attribute was HTML-escaped; Head's parser unescapes it, as a platform would.
+        reopened = urllib.parse.urlsplit(head.og_url)
+        assert reopened.query == "party=D&state=CA&state=OH"
+        original = route("/election/1824", "?state=OH&junk=1&party=D&state=CA")
+        again = route(reopened.path, f"?{reopened.query}")
+        assert "filters" in routed_ids(original)
+        assert original.get_json() == again.get_json()
+
+    def test_twitter_url_is_never_emitted(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        register(**YEAR_PAGE, query=fake_parser)
+        cached_client(monkeypatch)
+        for path in (
+            "/",
+            "/?a=1",
+            "/election/1860?state=OH",  # matched, with a query
+            "/election/1824",  # matched, without one
+            "/no-such-view",  # unmatched
+            "/election/1825",  # rejected
+        ):
+            _, head, body = get(path)
+            assert head.twitter_url is None, path
+            assert "twitter:url" not in body, path
+            assert head.one("meta", "property", "twitter:card", "content"), path
+
+    def test_a_page_with_an_image_renders_its_card(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        # Dash builds an image URL from request.root, which only its adapter carries.
+        register("fake_imaged", path="/imaged", layout=dash.html.P("x"), image="x.png")
+        status, head, _ = get("/imaged")
+        assert status == 200
+        assert head.one("meta", "property", "og:image", "content") == (
+            "http://localhost/assets/x.png"
+        )
+
+
+class TestNotFound:
+    """Item 4: unmatched and rejected paths answer 404, noindex, and name no URL."""
+
+    @staticmethod
+    def assert_not_found(path: str, **kwargs: Any) -> None:
+        status, head, body = get(path, **kwargs)
+        assert status == 404, path
+        assert head.noindex, path
+        assert (head.canonical, head.og_url, head.twitter_url) == (None, None, None)
+        assert 'rel="canonical"' not in body
+        assert "og:url" not in body
+
+    @pytest.mark.parametrize(
+        "path", ["/no-such-view", "/x/y/z", "/_ah/x", "/election"]
+    )
+    def test_an_unmatched_path(self, path: str) -> None:
+        self.assert_not_found(path)
+
+    def test_a_matched_path_says_nothing_about_indexing(self) -> None:
+        _, head, _ = get("/")
+        assert not head.noindex
+
+    def test_a_rejected_path(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        register(**YEAR_PAGE)
+        _, calls, bucket = cached_client(monkeypatch)
+        self.assert_not_found("/election/1825")
+        self.assert_not_found("/election/1860/x")
+        status, head, _ = get("/election/1824")
+        assert (status, head.canonical) == (200, url("/election/1824"))
+        assert (calls, bucket.waits) == ([], [])
+
+    @pytest.mark.parametrize("cold", ["no snapshot", "no source"])
+    def test_a_cold_source_counts_as_matched_and_fetches_nothing(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        cold: str,
+    ) -> None:
+        register(**YEAR_PAGE)
+        if cold == "no snapshot":
+            fetch, calls = fake_fetch(RECORDED)
+            client = offline_client(fetch)
+            client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+            client.view = no_view_allowed  # type: ignore[method-assign]
+            monkeypatch.setattr(api, "CLIENT", client)
+        else:
+            client, calls, _ = cached_client(monkeypatch, elections=False)
+            client.view = no_view_allowed  # type: ignore[method-assign]
+        status, head, _ = get("/election/1825")
+        assert (status, head.canonical) == (200, url("/election/1825"))
+        assert calls == []
+
+    def test_head_answers_404_too(self) -> None:
+        response = appmod.server.test_client().head("/no-such-view")
+        assert response.status_code == 404
+
+    def test_the_vendor_host_still_redirects_before_any_404(self) -> None:
+        response = appmod.server.test_client().get(
+            "/no-such-view", headers={"Host": "uspv-explore.uw.r.appspot.com"}
+        )
+        assert response.status_code == 301
+
+    def test_warmup_is_not_a_page(self) -> None:
+        assert appmod.server.test_client().get("/_ah/warmup").status_code == 200
+
+    def test_each_request_resolves_exactly_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        real = appmod.resolve
+
+        def counting(path: str, *args: Any) -> appmod.Resolution:
+            calls.append(path)
+            return real(path, *args)
+
+        monkeypatch.setattr(appmod, "resolve", counting)
+        assert get("/")[0] == 200
+        assert get("/no-such-view")[0] == 404
+        assert calls == ["/", "/no-such-view"]
+
+    def test_the_tags_are_never_recomputed_outside_index(self) -> None:
+        with appmod.server.test_request_context("/"), pytest.raises(RuntimeError):
+            appmod.app.interpolate_index()
+
+
+def no_view_allowed() -> api.View:
+    raise AssertionError("the index waited on a view")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        '/%22%3E%3Cscript%3Ealert(1)%3C/script%3E%3Cx%20a=%22',
+        "/%3Cimg%20src=x%20onerror=alert(1)%3E",
+        "/'%3E%3Csvg%20onload=alert(1)%3E",
+    ],
+)
+def test_an_unmatched_hostile_path_is_a_404_and_never_markup(path: str) -> None:
+    status, head, body = get(path)
+    assert status == 404
+    assert head.canonical is None
+    assert_no_markup(body)
+
+
+HOSTILE = '"><script>alert(1)</script><x a="'
+
+
+def assert_no_markup(body: str) -> None:
+    # The whole body, so Dash's own tags are covered as well as ours.
+    for marker in ("<script>alert", "<img src=x", "<svg onload", '"><script', "<x a="):
+        assert marker not in body
+
+
+def test_hostile_text_where_a_canonical_is_still_emitted(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    """Item 7: as a templated variable (cold, so matched) and as a kept query value."""
+    register(**YEAR_PAGE, query=lambda params: [("state", str(params.get("state")))])
+    quoted = urllib.parse.quote(HOSTILE, safe="")
+    for path in (f"/election/{quoted}", f"/election/1860?state={quoted}"):
+        status, head, body = get(path, unencoded=True)
+        assert status == 200, path
+        assert head.canonical is not None and head.og_url is not None
+        assert_no_markup(body)
+        # Every link and meta tag parses with exactly its expected attributes: no
+        # quote broke out of a value to add one.
+        assert head.attrs("link", "rel", "canonical") == [
+            {"rel": "canonical", "href": head.canonical}
+        ]
+        assert head.attrs("meta", "property", "og:url") == [
+            {"property": "og:url", "content": head.og_url}
+        ]
+        for tag, attrs in head.tags:
+            if tag == "meta":
+                assert set(attrs) <= {"name", "property", "content", "charset",
+                                      "http-equiv"}, attrs
+    _, head, _ = get(f"/election/1860?state={quoted}")
+    assert head.og_url == url(f"/election/1860?state={quoted}")
+
+
+def test_card_tags_escape_a_callable_title_that_echoes_the_path(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    """Dash calls a callable title with the decoded path variables: only ``_tag``'s
+    escape stands between them and the card tags."""
+    register(
+        **YEAR_PAGE,
+        title=lambda year=None, **_q: f"Election {year}",
+        description=lambda year=None, **_q: f"Results for {year}",
+    )
+    quoted = urllib.parse.quote(HOSTILE, safe="")
+    status, head, body = get(f"/election/{quoted}", unencoded=True)  # cold: matched
+    assert status == 200
+    assert_no_markup(body)
+    assert head.one("meta", "property", "og:title", "content") == f"Election {HOSTILE}"
+    assert head.one("meta", "name", "description", "content") == f"Results for {HOSTILE}"
+    for tag, attrs in head.tags:
+        if tag == "meta":
+            assert set(attrs) <= {"name", "property", "content", "charset", "http-equiv"}
+
+
+def test_tag_escapes_every_character_that_could_leave_an_attribute() -> None:
+    tag = appmod._tag("meta", {"content": "\"'<>&"})
+    assert tag == '<meta content="&quot;&#x27;&lt;&gt;&amp;">'
+
+
+#: Paths whose percent-escapes change them when decoded. Dash's router matches the
+#: browser's still-encoded ``location.pathname``, so on each one the decoded path the
+#: index sees would match differently from the page the router renders.
+ENCODED_PATHS = ("/election%2F1824", "/%2F", "/election/%2F", "/election/182%34")
+
+
+class TestEncodedPath:
+    """Status and render agree on a path decoding would change (D073)."""
+
+    @pytest.mark.parametrize("path", ENCODED_PATHS)
+    def test_a_path_decoding_changes_is_not_found_and_not_rendered(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        path: str,
+    ) -> None:
+        register(**YEAR_PAGE)
+        _, calls, _ = cached_client(monkeypatch)
+        TestNotFound.assert_not_found(path)  # the test client sends it encoded
+        response = route(path)  # what the browser's router is handed
+        assert response.status_code == 200
+        assert "fake-year" not in routed_ids(response)
+        assert calls == []
+
+    def test_a_leading_double_slash_is_not_an_escape(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # gunicorn hands //election/1824 over unnormalized, in RAW_URI and PATH_INFO
+        # alike; Werkzeug's request.path drops the extra slash, and Dash's router
+        # renders the page. (The test client would read //election as a host.)
+        register(**YEAR_PAGE)
+        cached_client(monkeypatch)
+        status, head, _ = get(
+            "/election/1824",
+            environ_overrides={
+                "PATH_INFO": "//election/1824",
+                "RAW_URI": "//election/1824",
+                "REQUEST_URI": "",
+            },
+        )
+        assert (status, head.canonical) == (200, url("/election/1824"))
+        assert "fake-year" in routed_ids(route("//election/1824"))
+
+    def test_without_a_raw_target_the_decoded_path_is_used(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        # The twin: the same request with no RAW_URI or REQUEST_URI is matched, so the
+        # 404 above comes from the raw-path comparison and nothing else.
+        register(**YEAR_PAGE)
+        status, head, _ = get(
+            "/election%2F1824", environ_overrides={"RAW_URI": "", "REQUEST_URI": ""}
+        )
+        assert (status, head.canonical) == (200, url("/election/1824"))
+
+    @pytest.mark.parametrize(
+        ("environ", "expected"),
+        [
+            ({"RAW_URI": "/election/1824?state=OH"}, "/election/1824"),
+            ({"RAW_URI": "/a%2Fb"}, "/a%2Fb"),
+            ({"REQUEST_URI": "/x?y"}, "/x"),
+            ({"RAW_URI": "https://explore.example/x?y"}, "/x"),
+            ({"RAW_URI": "//election/1824"}, "/election/1824"),  # as request.path is
+            ({"RAW_URI": "https://explore.example"}, "/"),
+            ({"RAW_URI": "/election/1824#x"}, "/election/1824"),  # as gunicorn drops it
+            ({"RAW_URI": "/election/1824?a=1#x"}, "/election/1824"),
+            ({"RAW_URI": "", "REQUEST_URI": ""}, None),
+            ({}, None),
+        ],
+    )
+    def test_raw_path(self, environ: dict[str, Any], expected: str | None) -> None:
+        assert appmod.raw_path(environ) == expected
+
+
+class TestNotFoundPage:
+    def test_dash_s_custom_404_page_is_not_served_as_a_page(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register("not_found_404", path="/not-found-404", layout=dash.html.P("gone"))
+        TestNotFound.assert_not_found("/not-found-404")
+        _, head, _ = get("/")
+        assert head.canonical == url("/")
+
+
+def test_a_repeated_filter_names_the_same_og_url_as_a_single_one(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    def keep_every_state(params: dict[str, Any]) -> list[tuple[str, str]]:
+        value = params.get("state", [])
+        return [("state", v) for v in (value if isinstance(value, list) else [value])]
+
+    register(**YEAR_PAGE, query=keep_every_state)
+    _, once, _ = get("/election/1824?state=OH")
+    _, twice, _ = get("/election/1824?state=OH&state=OH")
+    assert once.og_url == twice.og_url == url("/election/1824?state=OH")
+
+
+def in_query_order(params: dict[str, Any]) -> list[tuple[str, str]]:
+    """A parser that keeps the query's own order: the sort must come from the index."""
+    return [(k, v) for k, v in params.items() if k in FAKE_FILTERS and isinstance(v, str)]
+
+
+def test_og_url_sorts_pairs_a_parser_returns_in_query_order(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    register(**YEAR_PAGE, query=in_query_order)
+    _, one, _ = get("/election/1824?state=OH&party=D")
+    _, other, _ = get("/election/1824?party=D&state=OH")
+    assert one.og_url == other.og_url == url("/election/1824?party=D&state=OH")
+
+
+def test_og_url_carries_pairs_a_parser_returns_for_an_empty_query(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    # AC3: og:url is the canonical plus the parser's output pairs, whatever the query.
+    register(**YEAR_PAGE, query=lambda params: [("party", "all")])
+    _, head, _ = get("/election/1824")
+    assert head.og_url == url("/election/1824?party=all")
+
+
+def test_an_empty_variable_in_a_multi_variable_template_is_not_found_even_cold(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    # Dash's greedy matcher gives /pair//b the variables x="" and y="b".
+    register(
+        "fake_pair",
+        path_template="/pair/<x>/<y>",
+        layout=dash.html.P("pair"),
+        prefetch=(api.ELECTIONS_PATH,),
+        validate=(api.ELECTIONS_PATH, lambda path_vars, body: True),
+    )
+    TestNotFound.assert_not_found("/pair//b")
+    assert get("/pair/a/b")[0] == 200
+
+
+@pytest.mark.parametrize("path_vars", [{}, {"year": ""}, {"year": ["1824"]}])
+def test_judge_refuses_malformed_variables_itself(path_vars: dict[str, Any]) -> None:
+    # A judge that accepts anything: only judge's own well-formedness check refuses.
+    accept_all: api.Validate = (api.ELECTIONS_PATH, lambda _vars, _body: True)
+    assert api.judge(accept_all, path_vars, RECORDED[api.ELECTIONS_PATH]) is False
+
+
+def raising_judge(path_vars: dict[str, Any], body: dict[str, Any]) -> bool:
+    raise KeyError("data")
+
+
+class TestAJudgeThatRaises:
+    def test_the_index_answers_404_not_500(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        register(**{**YEAR_PAGE, "validate": (api.ELECTIONS_PATH, raising_judge)})
+        cached_client(monkeypatch)
+        TestNotFound.assert_not_found("/election/1824")
+
+    def test_the_render_refuses_and_fills_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        validate: api.Validate = (api.ELECTIONS_PATH, raising_judge)
+        with api.CLIENT.view() as view:
+            assert api.accepted(view.get, validate, {"year": "1824"}) is False
+        assert (calls, bucket.waits) == ([], [])
+        assert "validate judge raised" in caplog.text
+
+
+class AlternatingClient:
+    """A process client whose snapshot alternates on every read, and counts them."""
+
+    def __init__(self, snapshots: list[api.Snapshot]) -> None:
+        self._snapshots = snapshots
+        self.reads = 0
+
+    @property
+    def snapshot(self) -> api.Snapshot:
+        found = self._snapshots[self.reads % len(self._snapshots)]
+        self.reads += 1
+        return found
+
+    def ensure_refresher(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("cold_first", [True, False])
+def test_status_and_tags_come_from_one_snapshot_read(
+    register: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    cold_first: bool,
+) -> None:
+    """A swap mid-request cannot give a 404 with a canonical, or a 200 without one."""
+    register(**YEAR_PAGE)
+    cold = api.Snapshot(version=VERSION, responses={api.META_PATH: META})
+    warm = api.Snapshot(
+        version=VERSION,
+        responses={api.META_PATH: META, api.ELECTIONS_PATH: RECORDED[api.ELECTIONS_PATH]},
+    )
+    client = AlternatingClient([cold, warm] if cold_first else [warm, cold])
+    monkeypatch.setattr(api, "CLIENT", client)
+    status, head, _ = get("/election/1825")
+    assert client.reads == 1
+    assert (status == 200) is (head.canonical is not None)
+    assert status == (200 if cold_first else 404)
+
+
+def concrete_page_path(page: dict[str, Any]) -> str:
+    template = page.get("path_template")
+    if not template:
+        return str(page["path"])
+    return re.sub(r"<(.*?)>", lambda m: PATH_VALUES[m.group(1)], template)
+
+
+def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
+    register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC2 and the index-time contract, registry-wide: every page Dash renders answers
+    200 with a canonical naming it, with or without a trailing slash, and nothing the
+    index calls (a parser, a callable title or description, a validate) reads the API.
+    Dash's custom-404 module is the one exception: it is never served as a page."""
+    register(**YEAR_PAGE, query=fake_parser)
+    register("not_found_404", path="/not-found-404", layout=dash.html.P("gone"))
+
+    def no_fetch(path: str, timeout: float = 0) -> api.Response:
+        raise AssertionError(f"the index fetched {path}")
+
+    client = offline_client(no_fetch)
+    client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+    client.view = no_view_allowed  # type: ignore[method-assign]
+    # Serving, with every page's validate source cached from its recorded response
+    # (an unrecorded source fails here), so each validate runs and judges.
+    sources = {
+        page["validate"][0]
+        for page in dash.page_registry.values()
+        if page.get("validate")
+    }
+    client._snapshot = api.Snapshot(
+        version=VERSION,
+        responses={api.META_PATH: META} | {path: RECORDED[path] for path in sources},
+    )
+    monkeypatch.setattr(api, "CLIENT", client)
+    checked = 0
+    for page in list(dash.page_registry.values()):
+        concrete = concrete_page_path(page)
+        if page["module"].split(".")[-1] == "not_found_404":
+            TestNotFound.assert_not_found(concrete)
+            continue
+        for path in {concrete, concrete.rstrip("/") + "/"}:
+            status, head, _ = get(f"{path}?state=OH")
+            assert status == 200, (page["module"], path)
+            assert head.canonical == url(concrete), (page["module"], path)
+            found, path_vars = _path_to_page(concrete.strip("/"))
+            assert found["module"] == page["module"]
+            checked += 1
+    assert checked >= 3  # "/", and the fake year page with and without a slash
+
+
+class TestDashPrivates:
+    """Item 2: the three Dash privates app.py relies on, pinned by name and behaviour."""
+
+    def test_the_router_matcher_is_exact_and_greedy(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE)
+        cases = {
+            "": ("pages.home", None),
+            "election/1860": ("fake_year", {"year": "1860"}),
+            "election/1860/x": ("fake_year", {"year": "1860/x"}),  # greedy, as Dash is
+            "election": (None, None),
+            "electionx/1860": (None, None),
+            "no-such-view": (None, None),
+        }
+        for path, (module, path_vars) in cases.items():
+            page, found = _path_to_page(path)
+            assert (page.get("module"), found) == (module, path_vars), path
+
+    def test_the_index_strips_the_path_as_the_router_does(self) -> None:
+        for path in ("/", "/election/1860/", "//a//"):
+            assert appmod.app.strip_relative_path(path) == path.strip("/")
+
+    def test_the_query_parser_collapses_single_values_and_keeps_blanks(self) -> None:
+        assert _parse_query_string("?a=1&a=2&b=&c=%3C") == {
+            "a": ["1", "2"],
+            "b": "",
+            "c": "<",
+        }
+        assert _parse_query_string("") == {}
+
+    def test_the_router_lets_the_query_override_a_path_variable(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        # Why item 6 is enforced at render: the layout receives the query's year.
+        seen: list[Any] = []
+
+        def echo(year: Any = None, **_query: Any) -> Any:
+            seen.append(year)
+            return dash.html.P("x")
+
+        register("fake_echo", path_template="/echo/<year>", layout=echo)
+        route("/echo/1860", "?year=..")
+        assert seen == [".."]
+
+    def test_the_card_tags_are_exactly_these(self) -> None:
+        with appmod.server.test_request_context("/"):
+            tags = _page_meta_tags(appmod.app, appmod.app.backend.request_adapter())
+        keys = [tag.get("property") or tag.get("name") for tag in tags]
+        # A Dash that starts emitting og:url or a canonical from request.url fails here.
+        assert keys == [
+            "description",
+            "twitter:card",
+            "twitter:url",
+            "twitter:title",
+            "twitter:description",
+            "twitter:image",
+            "og:title",
+            "og:type",
+            "og:description",
+            "og:image",
+        ]
+
+    def test_pages_meta_is_off_so_dash_adds_no_second_set(self) -> None:
+        assert appmod.app.config.include_pages_meta is False
+
+
+# --- every templated page validates what its layout receives (#312, item 6) ----------
+
+#: Hostile renders for a page's path variables: (path value, query override). Each
+#: names a value the recorded ``/v1/elections`` does not serve, or one that is not a
+#: plain string at all.
+HOSTILE_RENDERS: tuple[tuple[str, str], ...] = (
+    ("1825", ""),
+    ("1860/x", ""),
+    ("%", ""),
+    ("..", ""),
+    ("<script>", ""),
+    ("1860", "?{name}=.."),
+    ("1860", "?{name}=1&{name}=2"),
+    ("1860", "?{name}="),
+)
+
+
+def hostile_render_problems(
+    page: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Render a templated page through the routing POST at every hostile value.
+
+    With its validation source cached, a page that validates what its layout receives
+    makes no fetch, takes no fill token, answers 200 and renders no success marker.
+    """
+    template = page["path_template"]
+    names = re.findall(r"<(.*?)>", template)
+    problems = []
+    for value, override in HOSTILE_RENDERS:
+        _, calls, bucket = cached_client(monkeypatch, source=page["validate"][0])
+        pathname = re.sub(r"<.*?>", value, template)
+        search = "".join(override.format(name=name) for name in names)
+        try:
+            response = route(pathname, search)
+        except Exception as exc:  # a failing layout may propagate under the test client
+            problems.append(f"{pathname}{search}: raised {type(exc).__name__}")
+            continue
+        case = f"{pathname}{search}"
+        if calls:
+            problems.append(f"{case}: fetched {calls}")
+        if bucket.waits:
+            problems.append(f"{case}: took {len(bucket.waits)} fill tokens")
+        if response.status_code != 200:
+            problems.append(f"{case}: answered {response.status_code}")
+        elif page["success"] in routed_ids(response):
+            problems.append(f"{case}: rendered its success marker")
+    return problems
+
+
+def templated_pages() -> list[dict[str, Any]]:
+    return [page for page in dash.page_registry.values() if page.get("path_template")]
+
+
+class TestValidateBeforeFill:
+    def test_every_registered_templated_page_refuses_every_hostile_value(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        register(**YEAR_PAGE)  # so the check is never vacuous before #307
+        for page in templated_pages():
+            assert hostile_render_problems(page, monkeypatch) == [], page["module"]
+
+    def test_the_check_fails_a_page_that_formats_unvalidated(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        page = register(**{**YEAR_PAGE, "layout": _unvalidated_year_layout})
+        problems = hostile_render_problems(page, monkeypatch)
+        flagged = {p.split(": ")[0] for p in problems if "fetched" in p or "raised" in p}
+        assert len(flagged) == len(HOSTILE_RENDERS), problems
+
+    def test_an_accepted_value_still_fills_on_a_miss(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        register(**YEAR_PAGE)
+        _, calls, _ = cached_client(monkeypatch)
+        assert "fake-year" in routed_ids(route("/election/1824"))
+        assert calls == ["/v1/elections/1824"]
+
+    def test_a_cold_source_costs_one_fill_of_the_source_only(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Approved reading of item 6 (Fred, 2026-10-03): cold, the render may fill the
+        # source itself, never a path built from the variable.
+        register(**YEAR_PAGE)
+        _, calls, _ = cached_client(monkeypatch, elections=False)
+        response = route("/election/1825")
+        assert response.status_code == 200
+        assert "fake-year-missing" in routed_ids(response)
+        assert calls == [api.ELECTIONS_PATH]
+
+    @pytest.mark.parametrize(
+        "path_vars",
+        [{}, {"year": ""}, {"year": ["1824"]}, {"year": None}, {"year": 1824}],
+    )
+    def test_a_malformed_variable_is_refused_without_a_read(
+        self, path_vars: dict[str, Any]
+    ) -> None:
+        def get(path: str) -> dict[str, Any]:
+            raise AssertionError(f"read {path}")
+
+        assert api.accepted(get, FAKE_VALIDATE, path_vars) is False
+
+    def test_anything_but_true_refuses(self) -> None:
+        body = RECORDED[api.ELECTIONS_PATH]
+        for verdict in (None, 1, "yes", [True]):
+
+            def judge(_vars: dict[str, Any], _body: Any, verdict: Any = verdict) -> Any:
+                return verdict
+
+            validate: api.Validate = (api.ELECTIONS_PATH, judge)
+            assert api.accepted(lambda p: body, validate, {"year": "1824"}) is False
+        assert api.accepted(lambda p: body, FAKE_VALIDATE, {"year": "1824"}) is True
+
+
+def validate_problems(page: dict[str, Any]) -> list[str]:
+    validate = page.get("validate")
+    if validate is None:
+        return ["a templated page registers no validate"] if page.get(
+            "path_template"
+        ) else []
+    if not page.get("path_template"):
+        # It would judge empty path variables, refuse them, and 404 the page.
+        return ["a page with no path variables registers validate"]
+    source, judge_fn = validate
+    problems = []
+    if not callable(judge_fn):
+        problems.append("validate's judge is not callable")
+    if source not in page.get("prefetch", ()):
+        problems.append(f"validate source {source} is not prefetched")
+    return problems
+
+
+class TestRegistryContracts:
+    def test_every_validating_page_prefetches_its_source(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE)
+        for page in dash.page_registry.values():
+            assert validate_problems(page) == [], page["module"]
+
+    @pytest.mark.parametrize(
+        ("change", "problem"),
+        [
+            ({"prefetch": ()}, "validate source /v1/elections is not prefetched"),
+            ({"validate": None}, "a templated page registers no validate"),
+            ({"path_template": None}, "a page with no path variables registers validate"),
+        ],
+    )
+    def test_the_check_fails_what_it_should(
+        self, change: dict[str, Any], problem: str
+    ) -> None:
+        assert validate_problems({**YEAR_PAGE, **change}) == [problem]
+
+    def test_every_query_parser_keeps_its_contract(self) -> None:
+        pages = [*dash.page_registry.values(), {**YEAR_PAGE, "query": fake_parser}]
+        checked = 0
+        for page in pages:
+            if page.get("query") is not None:
+                assert parser_problems(page) == [], page.get("module")
+                checked += 1
+        assert checked
+
+    @pytest.mark.parametrize(
+        ("parser", "problem"),
+        [
+            (lambda q: 1 / 0, "raised ZeroDivisionError"),
+            (lambda q: [("state", 1)], "returned a non-str pair"),
+            (lambda q: [("year", "1")], "emits a path-variable key: year"),
+            (lambda q: [("n", str(len(q)))], "is not idempotent"),
+        ],
+    )
+    def test_the_parser_check_fails_what_it_should(
+        self, parser: Callable[..., Any], problem: str
+    ) -> None:
+        assert problem in parser_problems({**YEAR_PAGE, "query": parser})
+
+
+#: Hostile query dicts, in the shape ``_parse_query_string`` hands a parser.
+HOSTILE_QUERIES: tuple[dict[str, Any], ...] = (
+    {},
+    {"state": "OH"},
+    {"state": ["OH", "CA", "OH"]},
+    {"state": ""},
+    {"state": HOSTILE, HOSTILE: HOSTILE},
+    {"year": "1860", "party": "D"},
+    {"state": ["", "%", "&=#"]},
+)
+
+
+def parser_problems(page: dict[str, Any]) -> list[str]:
+    """The ``query=`` contract: total, ``str`` pairs, idempotent, no path variables."""
+    parser = page["query"]
+    names = set(re.findall(r"<(.*?)>", page.get("path_template") or ""))
+    problems: list[str] = []
+    for query in HOSTILE_QUERIES:
+        try:
+            pairs = parser(copy.deepcopy(query))
+        except Exception as exc:
+            problems.append(f"raised {type(exc).__name__}")
+            continue
+        if not all(
+            isinstance(p, tuple) and len(p) == 2 and all(isinstance(x, str) for x in p)
+            for p in pairs
+        ):
+            problems.append("returned a non-str pair")
+            continue
+        problems += [f"emits a path-variable key: {k}" for k, _ in pairs if k in names]
+        encoded = urllib.parse.urlencode(sorted(pairs), quote_via=urllib.parse.quote)
+        again = parser(_parse_query_string(f"?{encoded}") if encoded else {})
+        if sorted(set(again)) != sorted(set(pairs)):
+            problems.append("is not idempotent")
+    return problems
 
 
 # --- the degraded state ------------------------------------------------------------
@@ -841,22 +1809,9 @@ def coverage_problems(
     return problems, client.reads
 
 
-def _fake_year_layout(year: str | None = None, **_query: Any) -> Any:
-    # Formats the path variable unvalidated: fine for a coverage check at a known value,
-    # but not a pattern to copy. A real page validates it first (#312, item 6).
-    with api.CLIENT.view() as view:
-        body = view.get(f"/v1/elections/{year}")
-    return dash.html.Div(str(len(body)), id="fake-year")
-
-
-FAKE_YEAR_PAGE: dict[str, Any] = {
-    "path": "/election/none",
-    "path_template": "/election/<year>",
-    "prefetch": (),
-    "on_miss": ("/v1/elections/{year}",),
-    "success": "fake-year",
-    "layout": _fake_year_layout,
-}
+#: The validating fake year page as the coverage check renders it: unregistered, at
+#: its concrete value.
+FAKE_YEAR_PAGE: dict[str, Any] = {"path": "/election/none", **YEAR_PAGE}
 
 
 class TestRegistryCoverage:
@@ -886,7 +1841,8 @@ class TestRegistryCoverage:
     ) -> None:
         problems, reads = coverage_problems(FAKE_YEAR_PAGE, monkeypatch)
         assert problems == []
-        assert reads == ["/v1/elections/1824"]  # rendered, not skipped
+        # Validated from its prefetched source, then filled: rendered, not skipped.
+        assert reads == [api.ELECTIONS_PATH, "/v1/elections/1824"]
 
     @pytest.mark.parametrize(
         ("change", "problem"),
@@ -937,9 +1893,17 @@ PAGES = sorted((Path(api.__file__).parent / "pages").rglob("*.py"))
 
 
 #: The ``api.<name>`` a page may use. None of them reads data except ``CLIENT``, and
-#: that only as the receiver of ``.view``. ``fetch``, ``Client``, ``View``, ``_OPENER``
-#: and ``build_url`` would read past the view, the cache and the throttle.
-PAGE_API_NAMES = {"CLIENT", "ApiUnavailable", "META_PATH", "ELECTIONS_PATH"}
+#: that only as the receiver of ``.view``; ``accepted`` reads only through the view's
+#: ``get`` it is handed. ``fetch``, ``Client``, ``View``, ``_OPENER`` and ``build_url``
+#: would read past the view, the cache and the throttle.
+PAGE_API_NAMES = {
+    "CLIENT",
+    "ApiUnavailable",
+    "META_PATH",
+    "ELECTIONS_PATH",
+    "Validate",
+    "accepted",
+}
 
 
 def client_misuses(source: str) -> list[int]:

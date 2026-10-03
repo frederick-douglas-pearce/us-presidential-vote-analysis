@@ -287,6 +287,23 @@ nothing to restore (a first deploy), and then fails the job; see §10. If step 5
 the new version is serving and an old one is left behind: the job fails with a message
 naming the cleanup to do by hand.
 
+**After a deploy, check by hand that the raw request path reaches the app** (D073). The index
+404s a path whose percent-escapes change it when decoded, comparing gunicorn's `RAW_URI` with
+the decoded path; if App Engine's front end ever dropped or decoded the raw target, that check
+would silently stop applying. The workflow's probes request no percent-escaped path, so they
+cannot tell:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/%2F  # 404
+curl -s https://explore.us-presidential-election-center.org/%2F | grep -c 'content="noindex"'    # 1
+curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/     # 200
+```
+
+`/%2F` decodes to `//`, which the app reads as `/`: a **200** there means the raw target did
+not arrive, and the check is not running. The `noindex` tag is what shows the 404 is the
+app's own (only its index emits it): a 404 without it came from somewhere in front of the
+app, and the request never reached the check.
+
 `app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
 gunicorn worker (one process, so one cache) as `explore-run`, and carries no
 `env_variables`; `tests/unit/test_dashboard_guards.py` pins each of those.

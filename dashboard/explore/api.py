@@ -47,7 +47,10 @@ templates of the page's path variables, such as ``/v1/elections/{year}``) filled
 miss, and ``success=`` the id of an element the page renders only from a successful
 read. ``TestRegistryCoverage`` checks every read a page's layout makes against these
 declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts
-each page's success marker.
+each page's success marker. A templated page also registers ``validate=(source,
+judge)`` (:data:`Validate`) and calls :func:`accepted` before formatting a path
+variable into an API path; a page that reads filters registers ``query=`` its parser.
+``app.py`` uses both for the canonical link, ``og:url`` and the 404 (#312).
 """
 
 from __future__ import annotations
@@ -216,6 +219,54 @@ def snapshot_version_of(meta: JsonObject) -> str:
     if not isinstance(version, str) or not version:
         raise ApiUnavailable("/v1/meta carries an empty snapshot_version")
     return version
+
+
+#: A templated page's validation, registered as ``validate=(source, judge)``: the one
+#: literal API path it decides from (which the page also prefetches), and a pure,
+#: total function of the path variables and that path's body (#312).
+Validate = tuple[str, Callable[[dict[str, Any], JsonObject], bool]]
+
+
+def well_formed(path_vars: dict[str, Any]) -> bool:
+    """Whether every path variable is a non-empty string.
+
+    Dash's router merges the query string over the path variables, so a layout can be
+    handed a list (``?year=1&year=2``) or an empty string (``?year=``) as well as
+    whatever the path held.
+    """
+    return bool(path_vars) and all(isinstance(v, str) and v for v in path_vars.values())
+
+
+def judge(validate: Validate, path_vars: dict[str, Any], body: JsonObject) -> bool:
+    """A page's verdict on its path variables, given its source's body. Fails closed.
+
+    Anything but ``True`` refuses, and so does a judge that raises: the error is logged,
+    and the path is not found rather than a server error.
+    """
+    if not well_formed(path_vars):
+        return False
+    try:
+        return validate[1](path_vars, body) is True
+    except Exception:
+        log.exception("a page's validate judge raised; refusing %r", path_vars)
+        return False
+
+
+def accepted(
+    get: Callable[[str], JsonObject], validate: Validate, path_vars: dict[str, Any]
+) -> bool:
+    """Whether a render may format ``path_vars`` into an API path (#312, item 6).
+
+    A templated page calls this with its view's ``get`` and the keyword arguments its
+    layout actually received, before it formats any of them into a path. Malformed
+    variables are refused without a read; otherwise the page's source is read through
+    the view (a fixed path, so normally a cache hit) and judged. Anything but ``True``
+    refuses. :class:`ApiUnavailable` from the read propagates to the page's degraded
+    state.
+    """
+    if not well_formed(path_vars):
+        return False
+    return judge(validate, path_vars, get(validate[0]))
 
 
 @dataclass
