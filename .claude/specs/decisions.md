@@ -5056,8 +5056,9 @@ path variables.
 - **Matching is Dash's own.** A path is what `dash._pages._path_to_page` says it is, greedy as Dash
   is, so the server never 404s a path Dash's router would render. Dash's router matches the
   browser's still-encoded `location.pathname`, while the server sees the path percent-decoded; so a
-  path whose escapes change it when decoded (the raw target in gunicorn's `RAW_URI` differs from
-  the decoded path) is not found. No page path needs an escape, so only junk is refused, and
+  path whose escapes change it when decoded (the raw target in gunicorn's `RAW_URI`, normalized to
+  one leading slash as the decoded path is, differs from it) is not found. A deploy confirms the
+  front end passes the raw target through (`docs/deploy-dashboard.md` §9). No page path needs an escape, so only junk is refused, and
   both sides then agree: a 404 here, and nothing or a not-found state from the router.
 - **Dash's custom-404 module** (`pages/not_found_404.py`, whose layout Dash's router renders for an
   unmatched path) is never served as a page of its own.

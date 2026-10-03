@@ -738,6 +738,20 @@ class TestEncodedPath:
         assert "fake-year" not in routed_ids(response)
         assert calls == []
 
+    def test_a_leading_double_slash_is_not_an_escape(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # gunicorn hands //election/1824 over unnormalized in RAW_URI; Werkzeug's
+        # request.path drops the extra slash, and Dash's router renders the page.
+        register(**YEAR_PAGE)
+        cached_client(monkeypatch)
+        status, head, _ = get(
+            "/election/1824",
+            environ_overrides={"RAW_URI": "//election/1824", "REQUEST_URI": ""},
+        )
+        assert (status, head.canonical) == (200, url("/election/1824"))
+        assert "fake-year" in routed_ids(route("//election/1824"))
+
     def test_without_a_raw_target_the_decoded_path_is_used(
         self, register: Callable[..., dict[str, Any]]
     ) -> None:
@@ -756,6 +770,8 @@ class TestEncodedPath:
             ({"RAW_URI": "/a%2Fb"}, "/a%2Fb"),
             ({"REQUEST_URI": "/x?y"}, "/x"),
             ({"RAW_URI": "https://explore.example/x?y"}, "/x"),
+            ({"RAW_URI": "//election/1824"}, "/election/1824"),  # as request.path is
+            ({"RAW_URI": "https://explore.example"}, "/"),
             ({"RAW_URI": "", "REQUEST_URI": ""}, None),
             ({}, None),
         ],
@@ -860,8 +876,10 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
 ) -> None:
     """AC2 and the index-time contract, registry-wide: every page Dash renders answers
     200 with a canonical naming it, with or without a trailing slash, and nothing the
-    index calls (a parser, a callable title or description, a validate) reads the API."""
+    index calls (a parser, a callable title or description, a validate) reads the API.
+    Dash's custom-404 module is the one exception: it is never served as a page."""
     register(**YEAR_PAGE, query=fake_parser)
+    register("not_found_404", path="/not-found-404", layout=dash.html.P("gone"))
 
     def no_fetch(path: str, timeout: float = 0) -> api.Response:
         raise AssertionError(f"the index fetched {path}")
@@ -869,15 +887,24 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
     client = offline_client(no_fetch)
     client.ensure_refresher = lambda: None  # type: ignore[method-assign]
     client.view = no_view_allowed  # type: ignore[method-assign]
-    # Serving, with every validate source cached, so each validate runs and judges.
+    # Serving, with every page's validate source cached from its recorded response
+    # (an unrecorded source fails here), so each validate runs and judges.
+    sources = {
+        page["validate"][0]
+        for page in dash.page_registry.values()
+        if page.get("validate")
+    }
     client._snapshot = api.Snapshot(
         version=VERSION,
-        responses={api.META_PATH: META, api.ELECTIONS_PATH: RECORDED[api.ELECTIONS_PATH]},
+        responses={api.META_PATH: META} | {path: RECORDED[path] for path in sources},
     )
     monkeypatch.setattr(api, "CLIENT", client)
     checked = 0
     for page in list(dash.page_registry.values()):
         concrete = concrete_page_path(page)
+        if page["module"].split(".")[-1] == "not_found_404":
+            TestNotFound.assert_not_found(concrete)
+            continue
         for path in {concrete, concrete.rstrip("/") + "/"}:
             status, head, _ = get(f"{path}?state=OH")
             assert status == 200, (page["module"], path)
