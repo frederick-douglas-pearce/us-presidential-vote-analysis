@@ -850,7 +850,9 @@ def test_an_empty_variable_in_a_multi_variable_template_is_not_found_even_cold(
 
 @pytest.mark.parametrize("path_vars", [{}, {"year": ""}, {"year": ["1824"]}])
 def test_judge_refuses_malformed_variables_itself(path_vars: dict[str, Any]) -> None:
-    assert api.judge(FAKE_VALIDATE, path_vars, RECORDED[api.ELECTIONS_PATH]) is False
+    # A judge that accepts anything: only judge's own well-formedness check refuses.
+    accept_all: api.Validate = (api.ELECTIONS_PATH, lambda _vars, _body: True)
+    assert api.judge(accept_all, path_vars, RECORDED[api.ELECTIONS_PATH]) is False
 
 
 def raising_judge(path_vars: dict[str, Any], body: dict[str, Any]) -> bool:
