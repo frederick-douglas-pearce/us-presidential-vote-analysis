@@ -810,6 +810,49 @@ def test_a_repeated_filter_names_the_same_og_url_as_a_single_one(
     assert once.og_url == twice.og_url == url("/election/1824?state=OH")
 
 
+def in_query_order(params: dict[str, Any]) -> list[tuple[str, str]]:
+    """A parser that keeps the query's own order: the sort must come from the index."""
+    return [(k, v) for k, v in params.items() if k in FAKE_FILTERS and isinstance(v, str)]
+
+
+def test_og_url_sorts_pairs_a_parser_returns_in_query_order(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    register(**YEAR_PAGE, query=in_query_order)
+    _, one, _ = get("/election/1824?state=OH&party=D")
+    _, other, _ = get("/election/1824?party=D&state=OH")
+    assert one.og_url == other.og_url == url("/election/1824?party=D&state=OH")
+
+
+def test_og_url_carries_pairs_a_parser_returns_for_an_empty_query(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    # AC3: og:url is the canonical plus the parser's output pairs, whatever the query.
+    register(**YEAR_PAGE, query=lambda params: [("party", "all")])
+    _, head, _ = get("/election/1824")
+    assert head.og_url == url("/election/1824?party=all")
+
+
+def test_an_empty_variable_in_a_multi_variable_template_is_not_found_even_cold(
+    register: Callable[..., dict[str, Any]],
+) -> None:
+    # Dash's greedy matcher gives /pair//b the variables x="" and y="b".
+    register(
+        "fake_pair",
+        path_template="/pair/<x>/<y>",
+        layout=dash.html.P("pair"),
+        prefetch=(api.ELECTIONS_PATH,),
+        validate=(api.ELECTIONS_PATH, lambda path_vars, body: True),
+    )
+    TestNotFound.assert_not_found("/pair//b")
+    assert get("/pair/a/b")[0] == 200
+
+
+@pytest.mark.parametrize("path_vars", [{}, {"year": ""}, {"year": ["1824"]}])
+def test_judge_refuses_malformed_variables_itself(path_vars: dict[str, Any]) -> None:
+    assert api.judge(FAKE_VALIDATE, path_vars, RECORDED[api.ELECTIONS_PATH]) is False
+
+
 def raising_judge(path_vars: dict[str, Any], body: dict[str, Any]) -> bool:
     raise KeyError("data")
 
