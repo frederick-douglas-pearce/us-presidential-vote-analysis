@@ -46,7 +46,10 @@ none does, so a marker the degraded state also renders is caught. Templated page
 rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. Both runs also
 register a fake templated page, ``/election/<year>``, reading ``/v1/elections/{year}``
 on a miss: rendered at 1824, that render is the success run's fill on a miss, made
-through the render-scoped view pages use. It stands in until #307 registers a real one.
+through the render-scoped view pages use. Like a real templated page it validates the
+year from the ``/v1/elections`` it prefetches before formatting it into a path (#312),
+and the success run renders it at 1825 too and asserts nothing was fetched. It stands in
+until #307 registers a real one.
 
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
 other than SQLite's) raises no event and is not seen. A page's success marker proves its
@@ -109,11 +112,6 @@ FIXTURE_FILES = {
     "/v1/elections": "v1_elections.json",
     "/v1/elections/1824": "v1_elections_1824.json",
 }
-
-#: Registered only while the pages register fewer than two prefetch paths, so the
-#: prefetch loop runs past ``/v1/meta`` before #306 registers ``/v1/elections`` for real
-#: (and deletes this).
-SYNTHETIC_PREFETCH = "/v1/elections"
 
 #: Prefetched by no page: the success run's fill on a miss, read by the fake templated
 #: page rendered at :data:`GUARD_PATH_VALUES`.
@@ -306,9 +304,19 @@ from dash import html as _html
 GUARD_PATH_VALUES = {GUARD_PATH_VALUES!r}
 
 
+def _known_year(path_vars, body):
+    return any(str(row.get("year")) == path_vars["year"] for row in body.get("data", ()))
+
+
+_VALIDATE = (api.ELECTIONS_PATH, _known_year)
+
+
 def _fake_year_layout(year=None, **_query):
     try:
         with api.CLIENT.view() as view:
+            # Validated from the prefetched index before it is formatted (#312).
+            if not api.accepted(view.get, _VALIDATE, {{"year": year}}):
+                return _html.P("No such election.", id="guard-fake-missing")
             body = view.get(f"/v1/elections/{{year}}")
     except api.ApiUnavailable:
         return _html.P("The election data service isn't responding right now.")
@@ -319,9 +327,10 @@ dash.register_page(
     "guard_fake_year",
     path_template="/election/<year>",
     layout=_fake_year_layout,
-    prefetch=(),
+    prefetch=(api.ELECTIONS_PATH,),
     on_miss=("/v1/elections/{{year}}",),
     success="guard-fake-year",
+    validate=_VALIDATE,
 )
 
 
@@ -441,10 +450,8 @@ from explore import api
         + _PAGES
         + f"""
 registered = list(dict.fromkeys(api.registered_prefetch_paths()))
-if len(registered) < 2:
-    home = next(page for page in dash.page_registry.values() if page["path"] == "/")
-    home["prefetch"] = (*home.get("prefetch", ()), {SYNTHETIC_PREFETCH!r})
-    registered = list(dict.fromkeys(api.registered_prefetch_paths()))
+# The fake templated page prefetches its validation source, so the prefetch loop runs
+# past /v1/meta.
 assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
@@ -471,6 +478,13 @@ for page in PAGES:
         assert _VERSION in text
 
 assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
+
+# A year the index does not serve: refused from the cached index, so nothing is fetched.
+served_before = list(SERVED)
+text = route(client, "/election/1825")
+assert "guard-fake-year" not in rendered_ids(text)
+assert "guard-fake-missing" in rendered_ids(text)
+assert SERVED == served_before, (SERVED, served_before)
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]

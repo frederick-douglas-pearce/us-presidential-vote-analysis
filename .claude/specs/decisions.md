@@ -5038,3 +5038,49 @@ amendment, 2026-10-02).
 **Related:** D071, #305, #306, #307, #310, #312, #314.
 
 ---
+
+## D073: A dashboard path names its canonical URL from the page Dash matches; anything else is a 404
+
+**Date:** 2026-10-03
+**Builds on:** D071(a), D071(g), D072 · **Decided by:** the owner, approving the architect's
+rulings at #305's plan gate (2026-10-02) and #312's (2026-10-03); recorded by #312 (E9-S3a's AC4)
+
+**Context.** Dash Pages answers every path with the same index HTML and a 200. Until #312 the
+dashboard wrote a canonical link and `og:url` naming the raw request path into every response, and
+Dash added its own `twitter:url` from the raw request URL, query string included. So `/no-such-view`
+and `/election/1825` (a year the API does not serve) each claimed to be a canonical page, and a
+filtered link's `og:url` dropped its filters. Both matter from #306 on, when views take filters and
+path variables.
+
+**Decision.**
+- **Matching is Dash's own.** A path is what `dash._pages._path_to_page` says it is, greedy as Dash
+  is, so the server never 404s a path Dash's router would render.
+- **A matched path** gets a canonical link built from the page's path template and its variables,
+  with no query string, and an `og:url` that is the canonical URL plus the query normalized by the
+  page's own `query=` parser (sorted, re-encoded, unknown parameters dropped). The canonical link
+  collapses filter variants for search engines; `og:url` keeps them, so a shared filtered card
+  reopens the filtered view. Dash's `twitter:url` is not emitted.
+- **An unmatched path, or one a page's `validate=` rejects,** answers HTTP 404 with
+  `<meta name="robots" content="noindex">` and neither tag. Previously crawled junk paths will show
+  as 404 in Search Console; that is expected.
+- **The index never waits on the API (D071(g)).** `validate` judges from the one source path a page
+  names and prefetches, read from the snapshot already in memory. A source not cached yet counts as
+  matched: a junk year can carry a canonical link until the first refresh.
+- **What a render may fetch is decided at render, never at the index.** Dash's router merges the
+  query string over the path variables, and its routing request never passes through the index. So
+  a templated page validates the variables its layout actually receives (`api.accepted`), before it
+  formats one into an API path. With the source cold, that read may fill the source itself, never a
+  path built from a variable.
+- **Three Dash privates are relied on** (`_path_to_page`, `_parse_query_string`,
+  `_page_meta_tags`), each pinned by name and behaviour in `tests/unit/test_dashboard_app.py`, so a
+  Dash upgrade that moves one fails the build.
+
+**Rationale.** A 404 and `noindex` together keep junk paths out of an index and out of link
+previews; `noindex` alone would still answer them as pages. Reusing Dash's matcher rather than a
+stricter local one keeps the status and the rendered page from disagreeing. Validating at render
+is the only place it protects the API's fill budget, because neither the query override nor the
+routing request passes through the index.
+
+**Related:** D070, D071, D072, #305, #306, #307, #312.
+
+---
