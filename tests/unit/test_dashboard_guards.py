@@ -39,11 +39,19 @@ the renders all run as shipped on top of it. It registers at least two prefetch 
 renders every registered page from a filled cache, and makes one fill on a miss. So the
 code that runs only after a successful response is under the guard too.
 
+**Each page's success contract.** Every registered page declares ``success=``, the id of
+an element it renders only from a successful read. The success run asserts each page's
+render carries that id (and ``/`` its snapshot version too); the refused run asserts
+none does, so a marker the degraded state also renders is caught. Templated pages are
+rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. Both runs also
+register a fake templated page, ``/election/<year>``, reading ``/v1/elections/{year}``
+on a miss: rendered at 1824, that render is the success run's fill on a miss, made
+through the render-scoped view pages use. It stands in until #307 registers a real one.
+
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
-other than SQLite's) raises no event and is not seen. Pages other than ``/`` are pinned
-in the success run only by the absence of the degraded message, so a page that skipped
-its post-success code would still pass. A per-page success contract is deferred to #278,
-as recorded in PR #304's review. The AST pass is a lint against *accidental*
+other than SQLite's) raises no event and is not seen. A page's success marker proves its
+post-success code ran, not that what it rendered is right; that is the page's own
+tests' job. The AST pass is a lint against *accidental*
 regressions: a second HTTP client, a file read, a dynamic import. It is not a sandbox
 against code written to evade it (a name built at runtime, say), and it does not claim
 to be.
@@ -103,11 +111,19 @@ FIXTURE_FILES = {
 }
 
 #: Registered only while the pages register fewer than two prefetch paths, so the
-#: prefetch loop runs past ``/v1/meta`` before #278's pages register real ones.
+#: prefetch loop runs past ``/v1/meta`` before #306 registers ``/v1/elections`` for real
+#: (and deletes this).
 SYNTHETIC_PREFETCH = "/v1/elections"
 
-#: Read by no page and prefetched by none: the success run's fill on a miss.
+#: Prefetched by no page: the success run's fill on a miss, read by the fake templated
+#: page rendered at :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
+
+#: The concrete value each path variable is rendered at, in both runs. Every templated
+#: page's variables need an entry (the programs assert it), or Dash would render it at
+#: its inferred ``/…/none`` path and the run would check nothing. Each value must make
+#: the page read a path in :data:`FIXTURE_FILES`.
+GUARD_PATH_VALUES = {"year": "1824"}
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
@@ -115,7 +131,7 @@ def _run(program: str) -> subprocess.CompletedProcess[str]:
     for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
         env[name] = GUARD_PROXY
     # On stdin, not ``-c``: the program embeds the fixtures, and one argument is
-    # capped (128 KiB on Linux) well below what #278's fixtures will add up to. ``-I``
+    # capped (128 KiB on Linux) well below what the table pages' fixtures add up to. ``-I``
     # ignores every PYTHON* variable (a PYTHONPYCACHEPREFIX would move .pyc reads off
     # the allowed roots), so the app's directory goes on sys.path in the program.
     program = f"import sys\nsys.path.insert(0, {str(DASHBOARD)!r})\n" + program
@@ -279,6 +295,70 @@ def route(client, path):
     return response.get_data(as_text=True)
 """
 
+#: Shared by both runtime runs, after the app is imported: registers the fake templated
+#: page, checks every page's declarations, and finds the ids a routed render carries.
+_PAGES = f"""
+import json as _json
+import re as _re
+
+from dash import html as _html
+
+GUARD_PATH_VALUES = {GUARD_PATH_VALUES!r}
+
+
+def _fake_year_layout(year=None, **_query):
+    try:
+        with api.CLIENT.view() as view:
+            body = view.get(f"/v1/elections/{{year}}")
+    except api.ApiUnavailable:
+        return _html.P("The election data service isn't responding right now.")
+    return _html.Div(str(len(body)), id="guard-fake-year")
+
+
+dash.register_page(
+    "guard_fake_year",
+    path_template="/election/<year>",
+    layout=_fake_year_layout,
+    prefetch=(),
+    on_miss=("/v1/elections/{{year}}",),
+    success="guard-fake-year",
+)
+
+
+def concrete(page):
+    template = page.get("path_template")
+    if not template:
+        return page["path"]
+    path = template
+    for name in _re.findall("<(.*?)>", template):
+        assert name in GUARD_PATH_VALUES, (page["module"], name)
+        path = path.replace(f"<{{name}}>", GUARD_PATH_VALUES[name])
+    return path
+
+
+def _ids(node):
+    found = set()
+    if isinstance(node, dict):
+        props = node.get("props")
+        if isinstance(props, dict) and isinstance(props.get("id"), str):
+            found.add(props["id"])
+        for value in node.values():
+            found |= _ids(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _ids(value)
+    return found
+
+
+def rendered_ids(text):
+    return _ids(_json.loads(text)["response"]["_pages_content"])
+
+
+PAGES = sorted(dash.page_registry.values(), key=concrete)
+for page in PAGES:
+    assert page.get("success"), f"{{page['module']}} declares no success marker"
+"""
+
 #: Every runtime module was actually loaded, so none escaped the checks.
 _ALL_MODULES_LOADED = """
 from pathlib import Path
@@ -309,10 +389,12 @@ print("RESULT=" + _json.dumps({
 }))
 """
 
-_REFUSED_PROGRAM = (
-    _PRELUDE
-    + _ROUTE
-    + """
+def _refused_program(extra: str = "") -> str:
+    """Every connection refused. ``extra`` registers a twin's page before the run."""
+    return (
+        _PRELUDE
+        + _ROUTE
+        + """
 import threading
 
 BASELINE_THREADS = set(threading.enumerate())
@@ -324,30 +406,40 @@ from explore import api
 assert set(threading.enumerate()) == BASELINE_THREADS, "a thread started at import"
 assert api.CLIENT._thread is None, "the refresher started at import"
 assert HOSTS == [], f"importing the app made a network call: {HOSTS}"
-
+"""
+        + extra
+        + _PAGES
+        + """
 client = appmod.server.test_client()
 assert client.get("/_ah/warmup").status_code == 200
 assert client.get("/").status_code == 200
-paths = sorted(page["path"] for page in dash.page_registry.values())
-assert "/" in paths, paths
-for path in paths:
-    assert "isn't responding" in route(client, path), path  # offline: degraded
+assert "/" in [concrete(page) for page in PAGES]
+for page in PAGES:
+    path = concrete(page)
+    text = route(client, path)
+    assert "isn't responding" in text, path  # offline: degraded
+    # The marker is a success signal only if the degraded state never carries it.
+    assert page["success"] not in rendered_ids(text), (path, page["success"])
 """
-    + _ALL_MODULES_LOADED
-    + _RESULT
-)
+        + _ALL_MODULES_LOADED
+        + _RESULT
+    )
 
 
-def _success_program() -> str:
+def _success_program(extra: str = "") -> str:
+    """The API answers from fixtures. ``extra`` registers a twin's page before the run."""
     return (
         _PRELUDE
         + _fixture_transport()
         + _ROUTE
-        + f"""
+        + """
 import dash
 import explore.app as appmod
 from explore import api
-
+"""
+        + extra
+        + _PAGES
+        + f"""
 registered = list(dict.fromkeys(api.registered_prefetch_paths()))
 if len(registered) < 2:
     home = next(page for page in dash.page_registry.values() if page["path"] == "/")
@@ -368,15 +460,16 @@ assert client.get("/_ah/warmup").status_code == 200  # refresh: meta, then prefe
 assert api.CLIENT.snapshot is not None, "warmup did not fill the cache"
 assert api.CLIENT.snapshot.version == _VERSION
 assert client.get("/").status_code == 200
-paths = sorted(page["path"] for page in dash.page_registry.values())
-assert "/" in paths, paths
-for path in paths:
+assert "/" in [concrete(page) for page in PAGES]
+for page in PAGES:
+    path = concrete(page)
+    # The fake templated page's render, at 1824, is the fill on a miss.
     text = route(client, path)
     assert "isn't responding" not in text, path  # rendered from the filled cache
+    assert page["success"] in rendered_ids(text), (path, page["success"])
     if path == "/":
         assert _VERSION in text
 
-api.CLIENT.get({MISS_PATH!r})  # a fill on a miss, through the real fetch
 assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
 
 expected = [api.META_PATH]
@@ -488,7 +581,7 @@ def _assert_runtime_clean(result: dict[str, Any]) -> None:
 
 def test_the_runtime_imports_no_usvote_and_reaches_only_the_public_api() -> None:
     """The refused run: every connection refused, every registered page driven."""
-    result = _result(_run(_REFUSED_PROGRAM))
+    result = _result(_run(_refused_program()))
     _assert_runtime_clean(result)
     assert result["served"] == []
     # Non-empty: the paths above did try the API, so the host check is not vacuous.
@@ -504,6 +597,70 @@ def test_the_success_path_reaches_only_the_public_api_and_reads_no_files() -> No
     assert MISS_PATH in result["served"]
     assert len(result["served"]) >= 3
     assert set(result["hosts"]) == {PUBLIC_API_HOST}
+
+
+#: A twin's page: reads ``/v1/meta`` through a view and declares ``success="twin-ok"``.
+#: ``{ok}`` and ``{degraded}`` are the ids its two branches render.
+_TWIN_PAGE = """
+from dash import html as _twin_html
+
+
+def _twin_layout(**_query):
+    try:
+        with api.CLIENT.view() as view:
+            view.get(api.META_PATH)
+    except api.ApiUnavailable:
+        return _twin_html.P("The service isn't responding.", id={degraded!r})
+    return _twin_html.Div("rendered", id={ok!r})
+
+
+dash.register_page(
+    "guard_twin", path="/guard-twin", layout=_twin_layout,
+    prefetch=(api.META_PATH,), on_miss=(), success="twin-ok",
+)
+"""
+
+
+def test_the_success_run_fails_a_page_that_skips_its_post_success_content() -> None:
+    """Non-vacuity: a page rendering without its marker fails the success run."""
+    twin = _TWIN_PAGE.format(ok="something-else", degraded="twin-degraded")
+    completed = _run(_success_program(twin))
+    assert completed.returncode != 0
+    assert "twin-ok" in completed.stderr
+
+
+def test_the_refused_run_fails_a_marker_the_degraded_state_carries() -> None:
+    """Non-vacuity: a marker that also appears when the API is down is no signal."""
+    twin = _TWIN_PAGE.format(ok="twin-ok", degraded="twin-ok")
+    completed = _run(_refused_program(twin))
+    assert completed.returncode != 0
+    assert "twin-ok" in completed.stderr
+
+
+def test_the_twin_page_passes_both_runs_when_it_keeps_its_contract() -> None:
+    """The twins above fail for their defect alone: the same page, kept honest, passes."""
+    twin = _TWIN_PAGE.format(ok="twin-ok", degraded="twin-degraded")
+    _assert_runtime_clean(_result(_run(_refused_program(twin))))
+    _assert_runtime_clean(_result(_run(_success_program(twin))))
+
+
+def test_a_path_variable_with_no_guard_value_fails_the_run() -> None:
+    """Non-vacuity: a templated page the guard cannot render concretely is refused."""
+    twin = """
+dash.register_page(
+    "guard_twin_state", path_template="/state/<state>",
+    layout=lambda state=None, **_q: None, prefetch=(), on_miss=(), success="x",
+)
+"""
+    completed = _run(_refused_program(twin))
+    assert completed.returncode != 0
+    assert "'state'" in completed.stderr
+
+
+def test_the_guard_values_render_the_miss_path() -> None:
+    """The fake templated page at :data:`GUARD_PATH_VALUES` reads exactly the miss."""
+    assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
+    assert MISS_PATH in FIXTURE_FILES
 
 
 def test_the_guard_program_can_fail(tmp_path: Path) -> None:

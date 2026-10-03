@@ -15,6 +15,9 @@ from dash import html
 from explore import api
 from explore.config import SITE_TITLE
 
+#: The element only a successful render carries, holding the snapshot version.
+SNAPSHOT_ID = "snapshot-version"
+
 dash.register_page(
     __name__,
     path="/",
@@ -24,9 +27,13 @@ dash.register_page(
     description=(
         "Where the US presidential election data comes from and which years it covers."
     ),
-    # Every canonical API path this page reads. The refresher prefetches these on each
-    # new snapshot version, so no visitor waits on a cold API (D071(d)).
+    # Every canonical API path this page reads, as prefetched (warmed on each new
+    # snapshot version, so no visitor waits on a cold API) or filled on a miss.
     prefetch=(api.META_PATH,),
+    on_miss=(),
+    # Rendered only from a successful read: this page's success contract, asserted by
+    # the D070(b) guard in test_dashboard_guards.py.
+    success=SNAPSHOT_ID,
 )
 
 #: The three sources, in display order: what each supplies, and the provenance keys
@@ -94,7 +101,7 @@ def render(meta: dict[str, Any]) -> html.Div:
             html.P(
                 ["Data snapshot ", html.Code(str(provenance["snapshot_version"]))],
                 className="snapshot",
-                id="snapshot-version",
+                id=SNAPSHOT_ID,
             ),
         ]
     )
@@ -109,7 +116,8 @@ def unavailable() -> html.Div:
 
 def layout(**_query: Any) -> html.Div:
     try:
-        body = render(api.CLIENT.get(api.META_PATH))
+        with api.CLIENT.view() as view:
+            body = render(view.get(api.META_PATH))
     except (api.ApiUnavailable, KeyError, TypeError):
         body = unavailable()
     return html.Div(
