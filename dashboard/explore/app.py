@@ -98,13 +98,14 @@ def raw_path(environ: dict[str, Any]) -> str | None:
 
     gunicorn (``app.yaml``'s entrypoint) keeps the request target in ``RAW_URI``;
     other servers may set ``REQUEST_URI``. Either carries the query string, and may be
-    in absolute form. The result is normalized as Werkzeug normalizes ``request.path``
-    (one leading slash), so only a percent-escape can make the two differ.
+    in absolute form. A fragment is dropped, as gunicorn drops it from ``PATH_INFO``,
+    and the result is normalized as Werkzeug normalizes ``request.path`` (one leading
+    slash), so only a percent-escape can make the two differ.
     """
     sent = environ.get("RAW_URI") or environ.get("REQUEST_URI")
     if not isinstance(sent, str) or not sent:
         return None
-    target = sent.partition("?")[0]
+    target = sent.partition("#")[0].partition("?")[0]
     if not target.startswith("/"):
         target = urlsplit(target).path
     return "/" + target.lstrip("/")

@@ -741,13 +741,18 @@ class TestEncodedPath:
     def test_a_leading_double_slash_is_not_an_escape(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # gunicorn hands //election/1824 over unnormalized in RAW_URI; Werkzeug's
-        # request.path drops the extra slash, and Dash's router renders the page.
+        # gunicorn hands //election/1824 over unnormalized, in RAW_URI and PATH_INFO
+        # alike; Werkzeug's request.path drops the extra slash, and Dash's router
+        # renders the page. (The test client would read //election as a host.)
         register(**YEAR_PAGE)
         cached_client(monkeypatch)
         status, head, _ = get(
             "/election/1824",
-            environ_overrides={"RAW_URI": "//election/1824", "REQUEST_URI": ""},
+            environ_overrides={
+                "PATH_INFO": "//election/1824",
+                "RAW_URI": "//election/1824",
+                "REQUEST_URI": "",
+            },
         )
         assert (status, head.canonical) == (200, url("/election/1824"))
         assert "fake-year" in routed_ids(route("//election/1824"))
@@ -772,6 +777,8 @@ class TestEncodedPath:
             ({"RAW_URI": "https://explore.example/x?y"}, "/x"),
             ({"RAW_URI": "//election/1824"}, "/election/1824"),  # as request.path is
             ({"RAW_URI": "https://explore.example"}, "/"),
+            ({"RAW_URI": "/election/1824#x"}, "/election/1824"),  # as gunicorn drops it
+            ({"RAW_URI": "/election/1824?a=1#x"}, "/election/1824"),
             ({"RAW_URI": "", "REQUEST_URI": ""}, None),
             ({}, None),
         ],
