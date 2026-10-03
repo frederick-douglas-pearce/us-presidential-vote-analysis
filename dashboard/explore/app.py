@@ -13,8 +13,9 @@ Beyond Dash itself this module adds four things, all host-level:
   is. A matched path gets a canonical link built from the page's path template and its
   variables, with no query string, and an ``og:url`` that adds the query normalized by
   the page's own ``query=`` parser, so a shared filtered card reopens the filtered view.
-  A path no page matches, or one a page's ``validate=`` rejects from the already-cached
-  source it names, answers 404 with ``noindex`` and neither tag. A source not cached yet
+  A path no page matches, one a page's ``validate=`` rejects from the already-cached
+  source it names, one whose percent-escapes change it when decoded, or Dash's custom
+  404 page, answers 404 with ``noindex`` and neither tag. A source not cached yet
   counts as matched: the index never waits on the API (D071(g)). Dash's own page
   meta tags are rebuilt here without its ``twitter:url``, which is the raw request URL.
   The index never decides what a render may fetch: Dash's router merges the query
@@ -38,7 +39,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import dash
 import flask
@@ -92,14 +93,38 @@ NOT_FOUND = Resolution(canonical=None, og_url=None)
 _VARIABLE_RE = re.compile("<(.*?)>")
 
 
-def resolve(path: str, query: str, snapshot: api.Snapshot | None) -> Resolution:
+def raw_path(environ: dict[str, Any]) -> str | None:
+    """The request path as the client sent it, before percent-decoding, if known.
+
+    gunicorn (``app.yaml``'s entrypoint) keeps the request target in ``RAW_URI``;
+    other servers may set ``REQUEST_URI``. Either carries the query string, and may be
+    in absolute form.
+    """
+    sent = environ.get("RAW_URI") or environ.get("REQUEST_URI")
+    if not isinstance(sent, str) or not sent:
+        return None
+    target = sent.partition("?")[0]
+    return target if target.startswith("/") else urlsplit(target).path
+
+
+def resolve(
+    path: str, query: str, snapshot: api.Snapshot | None, raw: str | None = None
+) -> Resolution:
     """Resolve a request path against the page registry, with Dash's router matcher.
 
-    ``snapshot`` is read once by the caller and never waited on: a page's ``validate``
-    source missing from it counts as matched, never as rejected.
+    ``path`` is the decoded request path and ``raw`` the path as sent, when known.
+    Dash's router matches the browser's still-encoded ``location.pathname``, so a path
+    that decoding changes would match differently there; no page path needs an escape,
+    so such a path is junk and is not found. ``snapshot`` is read once by the caller
+    and never waited on: a page's ``validate`` source missing from it counts as
+    matched, never as rejected.
     """
+    if raw is not None and raw != path:
+        return NOT_FOUND
     page, path_vars = _path_to_page(path.strip("/"))
-    if not page:
+    # Dash's own custom-404 convention: its router renders this module for a path no
+    # page matches, and it must not be served as a page of its own.
+    if not page or page["module"].split(".")[-1] == "not_found_404":
         return NOT_FOUND
     path_vars = path_vars or {}
     validate: api.Validate | None = page.get("validate")
@@ -121,7 +146,8 @@ def resolve(path: str, query: str, snapshot: api.Snapshot | None) -> Resolution:
     if parser is not None:
         pairs = parser(_parse_query_string(f"?{query}") if query else {})
         if pairs:
-            og_url += "?" + urlencode(sorted(pairs), quote_via=quote)
+            # De-duplicated, so a repeated filter names the same URL as a single one.
+            og_url += "?" + urlencode(sorted(set(pairs)), quote_via=quote)
     return Resolution(canonical=canonical, og_url=og_url)
 
 
@@ -148,6 +174,7 @@ class ExploreDash(dash.Dash):
             flask.request.path,
             flask.request.query_string.decode("utf-8", "replace"),
             api.CLIENT.snapshot,
+            raw_path(flask.request.environ),
         )
         cards = [
             meta

@@ -238,8 +238,18 @@ def well_formed(path_vars: dict[str, Any]) -> bool:
 
 
 def judge(validate: Validate, path_vars: dict[str, Any], body: JsonObject) -> bool:
-    """A page's verdict on its path variables, given its source's body. Fails closed."""
-    return well_formed(path_vars) and validate[1](path_vars, body) is True
+    """A page's verdict on its path variables, given its source's body. Fails closed.
+
+    Anything but ``True`` refuses, and so does a judge that raises: the error is logged,
+    and the path is not found rather than a server error.
+    """
+    if not well_formed(path_vars):
+        return False
+    try:
+        return validate[1](path_vars, body) is True
+    except Exception:
+        log.exception("a page's validate judge raised; refusing %r", path_vars)
+        return False
 
 
 def accepted(

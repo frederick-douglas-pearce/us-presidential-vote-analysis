@@ -48,7 +48,8 @@ register a fake templated page, ``/election/<year>``, reading ``/v1/elections/{y
 on a miss: rendered at 1824, that render is the success run's fill on a miss, made
 through the render-scoped view pages use. Like a real templated page it validates the
 year from the ``/v1/elections`` it prefetches before formatting it into a path (#312),
-and the success run renders it at 1825 too and asserts nothing was fetched. It stands in
+and the success run renders it at 1825 too and asserts the transport received no request
+at all (``REQUESTED``, which records every request, fixture or not). It stands in
 until #307 registers a real one.
 
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
@@ -159,6 +160,7 @@ OPENS = []
 SQLITE = []
 SOCKETS = []
 SERVED = []
+REQUESTED = []
 
 
 class _BlockUsvote:
@@ -236,6 +238,7 @@ class _FixtureSocket:
 
     def makefile(self, mode, *args, **kwargs):
         target = self._sent.split(b" ", 2)[1].decode("ascii")
+        REQUESTED.append(target)  # every request, answered from a fixture or not
         body = _FIXTURES.get(target)
         if body is None:
             head = "HTTP/1.1 404 Not Found\\r\\n"
@@ -479,12 +482,14 @@ for page in PAGES:
 
 assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
 
-# A year the index does not serve: refused from the cached index, so nothing is fetched.
-served_before = list(SERVED)
+# A year the index does not serve: refused from the cached index, so nothing is
+# requested at all (a request for a path with no fixture would answer 404 and never
+# reach SERVED, so REQUESTED is what sees it).
+requested_before = list(REQUESTED)
 text = route(client, "/election/1825")
 assert "guard-fake-year" not in rendered_ids(text)
 assert "guard-fake-missing" in rendered_ids(text)
-assert SERVED == served_before, (SERVED, served_before)
+assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]

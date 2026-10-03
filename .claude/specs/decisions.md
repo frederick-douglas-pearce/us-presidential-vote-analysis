@@ -5054,10 +5054,16 @@ path variables.
 
 **Decision.**
 - **Matching is Dash's own.** A path is what `dash._pages._path_to_page` says it is, greedy as Dash
-  is, so the server never 404s a path Dash's router would render.
+  is, so the server never 404s a path Dash's router would render. Dash's router matches the
+  browser's still-encoded `location.pathname`, while the server sees the path percent-decoded; so a
+  path whose escapes change it when decoded (the raw target in gunicorn's `RAW_URI` differs from
+  the decoded path) is not found. No page path needs an escape, so only junk is refused, and
+  both sides then agree: a 404 here, and nothing or a not-found state from the router.
+- **Dash's custom-404 module** (`pages/not_found_404.py`, whose layout Dash's router renders for an
+  unmatched path) is never served as a page of its own.
 - **A matched path** gets a canonical link built from the page's path template and its variables,
   with no query string, and an `og:url` that is the canonical URL plus the query normalized by the
-  page's own `query=` parser (sorted, re-encoded, unknown parameters dropped). The canonical link
+  page's own `query=` parser (de-duplicated, sorted, re-encoded, unknown parameters dropped). The canonical link
   collapses filter variants for search engines; `og:url` keeps them, so a shared filtered card
   reopens the filtered view. Dash's `twitter:url` is not emitted.
 - **An unmatched path, or one a page's `validate=` rejects,** answers HTTP 404 with
@@ -5065,7 +5071,8 @@ path variables.
   as 404 in Search Console; that is expected.
 - **The index never waits on the API (D071(g)).** `validate` judges from the one source path a page
   names and prefetches, read from the snapshot already in memory. A source not cached yet counts as
-  matched: a junk year can carry a canonical link until the first refresh.
+  matched: a junk year can carry a canonical link until the first refresh. A judge that raises
+  refuses (logged), so a bug in one is a 404, never a server error.
 - **What a render may fetch is decided at render, never at the index.** Dash's router merges the
   query string over the path variables, and its routing request never passes through the index. So
   a templated page validates the variables its layout actually receives (`api.accepted`), before it
