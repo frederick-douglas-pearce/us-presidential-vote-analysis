@@ -946,9 +946,11 @@ def client_misuses(source: str) -> list[int]:
     """Lines where a page reaches ``explore.api`` other than through ``CLIENT.view``.
 
     Pages import the module (``from explore import api``) and name what they use as
-    ``api.<name>``; a name outside :data:`PAGE_API_NAMES`, ``CLIENT`` other than as the
-    receiver of ``.view``, or any ``from explore.api import …`` is flagged. A module
-    alias (``import explore.api as x``) is not tracked.
+    ``api.<name>``. Flagged: a name outside :data:`PAGE_API_NAMES`; ``CLIENT`` other
+    than as the receiver of ``.view``; ``api`` other than as the receiver of an
+    attribute (``getattr(api, …)``, ``f = api``); any ``from explore.api import …``,
+    absolute or relative; and any ``import explore.api``. A module imported under
+    another name (``from explore import api as x``) is not tracked.
     """
     tree = ast.parse(source)
     parents = {
@@ -957,7 +959,22 @@ def client_misuses(source: str) -> list[int]:
     lines: list[int] = []
     for node in ast.walk(tree):
         line = getattr(node, "lineno", 0)
-        if isinstance(node, ast.ImportFrom) and node.module == "explore.api":
+        if isinstance(node, ast.ImportFrom) and (
+            node.module == "explore.api"
+            or (node.level > 0 and (node.module or "").split(".")[-1] == "api")
+        ):
+            lines.append(line)
+            continue
+        if isinstance(node, ast.Import) and any(
+            alias.name == "explore.api" for alias in node.names
+        ):
+            lines.append(line)
+            continue
+        if (
+            isinstance(node, ast.Name)
+            and node.id == "api"
+            and not isinstance(parents.get(node), ast.Attribute)
+        ):
             lines.append(line)
             continue
         if isinstance(node, ast.alias) and "CLIENT" in (node.name, node.asname):
@@ -1009,6 +1026,11 @@ def test_the_pages_lint_sees_at_least_one_page() -> None:
         ("api._OPENER.open(r)\n", True),
         ("api.build_url(p)\n", True),
         ("from explore.api import fetch\n", True),
+        ("from explore import api\n", False),
+        ("from ..api import fetch\n", True),
+        ("import explore.api\nexplore.api.fetch(p)\n", True),
+        ("getattr(api, 'fetch')(p)\n", True),
+        ("f = api\nf.fetch(p)\n", True),
     ],
 )
 def test_the_pages_lint_flags_what_it_should(source: str, misused: bool) -> None:
@@ -1174,9 +1196,10 @@ class TestRenderDeadline:
         self,
     ) -> None:
         calls: list[tuple[str, float]] = []
-        client, clock, bucket = self.advancing_client(20.0, calls)  # one per 3 s
+        # One token per 1.67 s: inside the render's 2.0 s, so only the floor refuses it.
+        client, clock, bucket = self.advancing_client(36.0, calls)
         with pytest.raises(api.ApiUnavailable):
-            client.view().get("/v1/miss")  # 3 s > 2.0 − MIN_USEFUL_FETCH_S
+            client.view().get("/v1/miss")  # 1.67 s > 2.0 − MIN_USEFUL_FETCH_S
         assert calls == []
         assert clock.now == 0.0  # did not wait
         assert bucket._tokens == pytest.approx(0.0)  # reserved nothing
