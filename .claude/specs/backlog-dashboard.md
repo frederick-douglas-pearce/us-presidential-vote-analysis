@@ -365,6 +365,18 @@ _Story of epic #N (E9 — public dashboard)._
 
 ### E9-S3: Phase 1a — elections index and one-election tables
 
+> **Filed as #278, then split (2026-10-02).** #278 is closed as superseded; the body below is
+> the pre-split text, kept for reference. The live stories are:
+> - #305 (S3a): cache and routing for pages that read more than one path. Merged via PR #313.
+>   Its canonical-link item moved to #312, and its function-derived prefetch to #310.
+> - #312: canonical link, `og:url` and 404 from the matched page, and validating a path
+>   variable before it reaches an API path. Lands before #306 and #307.
+> - #306 (S3b): the elections index (T1) and the shared table conventions.
+> - #307 (S3c): the one-election view (T2 + T3) at `/election/<year>`.
+> - #308 (S3d): the election panel and T3's hybrid columns.
+> - #309: CSV download of the filtered table, for every table.
+> - #310: measure cold year-page links, and widen the prefetch if they miss D071(g).
+
 **Issue title:** Add filterable election tables: the elections index and the one-election view
 **Labels:** `epic:dashboard`, `enhancement`, `priority:medium`
 
