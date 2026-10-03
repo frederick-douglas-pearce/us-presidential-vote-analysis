@@ -948,9 +948,10 @@ def client_misuses(source: str) -> list[int]:
     Pages import the module (``from explore import api``) and name what they use as
     ``api.<name>``. Flagged: a name outside :data:`PAGE_API_NAMES`; ``CLIENT`` other
     than as the receiver of ``.view``; ``api`` other than as the receiver of an
-    attribute (``getattr(api, …)``, ``f = api``); any ``from explore.api import …``,
-    absolute or relative; and any ``import explore.api``. A module imported under
-    another name (``from explore import api as x``) is not tracked.
+    attribute (``getattr(api, …)``, ``f = api``); the module reached as an attribute
+    (``explore.api``, ``e.api``); any ``from explore.api import …``, absolute or
+    relative; and any ``import explore.api``. A module imported under another name
+    (``from explore import api as x``) is not tracked.
     """
     tree = ast.parse(source)
     parents = {
@@ -976,6 +977,9 @@ def client_misuses(source: str) -> list[int]:
             and not isinstance(parents.get(node), ast.Attribute)
         ):
             lines.append(line)
+            continue
+        if isinstance(node, ast.Attribute) and node.attr == "api":
+            lines.append(line)  # explore.api.<name>, past the import rules
             continue
         if isinstance(node, ast.alias) and "CLIENT" in (node.name, node.asname):
             lines.append(line)
@@ -1031,6 +1035,8 @@ def test_the_pages_lint_sees_at_least_one_page() -> None:
         ("import explore.api\nexplore.api.fetch(p)\n", True),
         ("getattr(api, 'fetch')(p)\n", True),
         ("f = api\nf.fetch(p)\n", True),
+        ("import explore\nexplore.api.fetch(p)\n", True),
+        ("import explore as e\ne.api.fetch(p)\n", True),
     ],
 )
 def test_the_pages_lint_flags_what_it_should(source: str, misused: bool) -> None:
