@@ -12,8 +12,7 @@ test can vary responses across tries. It logs every call, and every test asserts
 calls it expected, so a fake that was bypassed fails the test instead of letting it pass
 on the exit status alone. The script inherits only the developer's ``PATH`` (behind
 the fake), with a temporary ``HOME``, ``LC_ALL=C.UTF-8`` and the fake's own variables:
-a ``BASH_ENV`` that reset ``PATH`` would otherwise send these
-requests to the real API.
+a ``BASH_ENV`` that reset ``PATH`` would otherwise send these requests to the real API.
 """
 
 from __future__ import annotations
