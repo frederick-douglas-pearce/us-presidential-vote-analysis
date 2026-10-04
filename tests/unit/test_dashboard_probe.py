@@ -243,3 +243,25 @@ def test_the_final_error_names_the_last_try(fake_bin: Path) -> None:
     assert f"canonical link names {CANONICAL}: yes" in error
     assert "page carries the API's snapshot: no" in error
     assert SNAPSHOT[:12] in error
+
+
+def test_a_later_try_judges_its_own_canonical_link(fake_bin: Path) -> None:
+    # Try 1's shell names explore. but its page lacks the snapshot; try 2's page carries
+    # it but its shell names another host. Try 2 must not carry try 1's canonical "yes"
+    # forward and pass a deploy whose canonical link is wrong.
+    run = probe(
+        fake_bin, shells=(GOOD_SHELL, DRILL_SHELL), pages=(NO_VERSION_PAGE, GOOD_PAGE)
+    )
+    assert run.returncode == 1, run.stdout
+    first, second = run.try_lines(2)
+    assert f"canonical link names {CANONICAL}: yes" in first
+    assert f"canonical link names {CANONICAL}: no" in second
+
+
+def test_a_page_request_that_recovers_passes(fake_bin: Path) -> None:
+    # Try 1's page request fails; try 2's succeeds. One failed request must not mark
+    # every later try unfetched, which would roll back a good deploy.
+    run = probe(fake_bin, pages=(None, GOOD_PAGE))
+    assert run.returncode == 0, run.stdout
+    assert f"serves snapshot {SNAPSHOT[:12]}… (try 2)" in run.stdout
+    assert run.calls == Counter(meta=3, shell=2, page=2)
