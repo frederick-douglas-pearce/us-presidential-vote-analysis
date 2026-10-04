@@ -287,6 +287,16 @@ nothing to restore (a first deploy), and then fails the job; see §10. If step 5
 the new version is serving and an old one is left behind: the job fails with a message
 naming the cleanup to do by hand.
 
+Both rollback paths were drilled in #294, against production: a version-host probe that
+failed, and a run cancelled from the Actions tab (or `gh run cancel`) during that probe.
+Each time, traffic never left the previous version, the new version was deleted, and
+exactly one version remained, with no hand cleanup. So **cancelling a run before traffic
+moves is a safe way to stop a deploy**. The Roll back message reads "deploy of … failed;
+rolled back to … and deleted …" for a cancelled run too. Each failing probe try names
+the check that failed: the shell's status, whether the canonical link names `explore.`,
+and whether the page carries the API's snapshot (`yes`, `no` or `degraded`). Not drilled:
+a cancel during the build, and a cancel after traffic has moved.
+
 **After a deploy, check by hand that the raw request path reaches the app** (D073). The index
 404s a path whose percent-escapes change it when decoded, comparing gunicorn's `RAW_URI` with
 the decoded path; if App Engine's front end ever dropped or decoded the raw target, that check
