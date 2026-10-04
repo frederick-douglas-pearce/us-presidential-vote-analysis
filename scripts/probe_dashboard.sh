@@ -44,15 +44,26 @@ fi
 result="no try ran"
 for i in $(seq 1 "$TRIES"); do
   current=$(api_version)
+  # Truncate first: a failed curl leaves its -o file untouched, so an earlier try's
+  # shell would be read as this one's.
+  : > "$SHELL_HTML"
   code=$(curl -sS -o "$SHELL_HTML" -w '%{http_code}' --max-time 15 "${BASE}/") || code=000
+  fetched=yes
   page=$(curl -sS --max-time 15 -H 'Content-Type: application/json' \
-    --data "$ROUTING" "${BASE}/_dash-update-component") || page=""
-  # Each condition is judged on its own, so a failing try names the one that failed
-  # (#294's drill: a wrong canonical link was reported as a missing snapshot).
-  canonical=no
-  grep -q "rel=\"canonical\" href=\"https://${CANONICAL_HOST}/\"" "$SHELL_HTML" && canonical=yes
+    --data "$ROUTING" "${BASE}/_dash-update-component") || { page=""; fetched=no; }
+  # Each check is judged on its own and every try reports all three results, so a
+  # failing try shows which check failed (#294's drill: a wrong canonical link was
+  # reported as a missing snapshot). A request that failed reports `unfetched`.
+  if [ "$code" = "000" ]; then
+    canonical=unfetched
+  else
+    canonical=no
+    grep -q "rel=\"canonical\" href=\"https://${CANONICAL_HOST}/\"" "$SHELL_HTML" && canonical=yes
+  fi
   snapshot=no
-  if grep -q "isn't responding" <<<"$page"; then
+  if [ "$fetched" = no ]; then
+    snapshot=unfetched
+  elif grep -q "isn't responding" <<<"$page"; then
     snapshot=degraded
   else
     for want in "$first" ${current:+"$current"}; do
