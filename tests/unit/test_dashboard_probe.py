@@ -10,8 +10,9 @@ The fake answers each kind of request (the API's ``/v1/meta``, the page shell, t
 routing callback) from a per-kind list, by call number, repeating the last entry, so a
 test can vary responses across tries. It logs every call, and every test asserts the
 calls it expected, so a fake that was bypassed fails the test instead of letting it pass
-on the exit status alone. The script runs with only ``PATH`` and ``HOME`` from the
-developer's environment: a ``BASH_ENV`` that reset ``PATH`` would otherwise send these
+on the exit status alone. The script inherits only the developer's ``PATH`` (behind
+the fake), with a temporary ``HOME``, ``LC_ALL=C.UTF-8`` and the fake's own variables:
+a ``BASH_ENV`` that reset ``PATH`` would otherwise send these
 requests to the real API.
 """
 
@@ -115,7 +116,7 @@ def fake_bin(tmp_path: Path) -> Path:
     script = tmp_path / "fake_curl.py"
     script.write_text(FAKE_CURL)
     # A /bin/sh wrapper rather than a #! line naming the interpreter, which the kernel
-    # splits at a space and truncates past its length limit.
+    # ends at the first space and refuses past its length limit (older kernels truncate).
     curl = bin_dir / "curl"
     curl.write_text(
         f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n'
@@ -211,8 +212,9 @@ def test_a_non_200_shell_fails(fake_bin: Path) -> None:
 
 
 def test_a_failed_shell_request_does_not_report_the_last_trys_shell(fake_bin: Path) -> None:
-    # Try 1 fetches a good shell with a 503; try 2's request fails, leaving curl's -o
-    # file untouched. Try 2 must not read try 1's shell as its own.
+    # Try 1 fetches a good shell with a 503; try 2's request gets no response. Pins
+    # the code-000 report: try 2 says its canonical check was unfetched, never try 1's
+    # result.
     run = probe(fake_bin, codes=("503", "000"))
     assert run.returncode == 1
     first, second = run.try_lines(2)

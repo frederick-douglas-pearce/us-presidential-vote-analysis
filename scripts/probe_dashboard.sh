@@ -44,8 +44,9 @@ fi
 result="no try ran"
 for i in $(seq 1 "$TRIES"); do
   current=$(api_version)
-  # Truncate first: a failed curl leaves its -o file untouched, so an earlier try's
-  # shell would be read as this one's.
+  # Truncate first, as a backstop: a failed curl leaves its -o file untouched. The
+  # code-000 branch below already never reads it, but no path should be able to read
+  # an earlier try's shell as this one's.
   : > "$SHELL_HTML"
   code=$(curl -sS -o "$SHELL_HTML" -w '%{http_code}' --max-time 15 "${BASE}/") || code=000
   fetched=yes
@@ -53,7 +54,9 @@ for i in $(seq 1 "$TRIES"); do
     --data "$ROUTING" "${BASE}/_dash-update-component") || { page=""; fetched=no; }
   # Each check is judged on its own and every try reports all three results, so a
   # failing try shows which check failed (#294's drill: a wrong canonical link was
-  # reported as a missing snapshot). A request that failed reports `unfetched`.
+  # reported as a missing snapshot). A request that got no response (curl itself
+  # failed: a timeout, a refused connection, DNS) reports `unfetched`; an HTTP error
+  # response is judged like any other.
   if [ "$code" = "000" ]; then
     canonical=unfetched
   else

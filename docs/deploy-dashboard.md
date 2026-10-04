@@ -300,8 +300,9 @@ move traffic back.
 
 Each failing probe try reports every check's result: the shell's HTTP status, whether
 the canonical link names `explore.` (`yes` or `no`), and whether the page carries the
-API's snapshot (`yes`, `no` or `degraded`). A request that failed reports `unfetched`
-for its check rather than a result.
+API's snapshot (`yes`, `no` or `degraded`). A request that got no response (curl itself
+failed: a timeout, a refused connection, DNS) reports `unfetched` for its check; an HTTP
+error response is judged like any other.
 
 **After a deploy, check by hand that the raw request path reaches the app** (D073). The index
 404s a path whose percent-escapes change it when decoded, comparing gunicorn's `RAW_URI` with
