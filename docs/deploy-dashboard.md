@@ -287,6 +287,24 @@ nothing to restore (a first deploy), and then fails the job; see §10. If step 5
 the new version is serving and an old one is left behind: the job fails with a message
 naming the cleanup to do by hand.
 
+#294 drilled Roll back against production, on both of its triggers, after a deploy that
+succeeded and before traffic moved: a version-host probe that failed, and a run
+cancelled with `gh run cancel` during that probe. Each time, traffic never left the
+previous version, the new version was deleted, and exactly one version remained, with
+no hand cleanup. So **cancelling a run during the version-host probe is a safe way to
+stop a deploy**. The Roll back message reads "deploy of … failed; rolled back to … and
+deleted …" for a cancelled run too. Not drilled: a failure or cancel during the build
+(Roll back's other branch, which can leave the new version to delete by hand, §10), and
+any failure or cancel after traffic has moved, so the restore has not yet been seen to
+move traffic back.
+
+Each failing probe try reports every check's result: the shell's HTTP status, whether
+the canonical link names `explore.` (`yes` or `no`), and whether the page carries the
+API's snapshot (`yes`, `no` or `degraded`). A request curl could not complete (a
+timeout, a refused connection, DNS) reports `unfetched` for its check, and a failed
+shell request's status shows as 000; an HTTP error response that arrives whole is
+judged like any other.
+
 **After a deploy, check by hand that the raw request path reaches the app** (D073). The index
 404s a path whose percent-escapes change it when decoded, comparing gunicorn's `RAW_URI` with
 the decoded path; if App Engine's front end ever dropped or decoded the raw target, that check

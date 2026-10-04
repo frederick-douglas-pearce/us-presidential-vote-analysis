@@ -41,23 +41,49 @@ if [ -z "$first" ]; then
   exit 1
 fi
 
+result="no try ran"
 for i in $(seq 1 "$TRIES"); do
   current=$(api_version)
+  # Truncate first, as a backstop: a curl that fails before any body arrives leaves
+  # its -o file untouched. The code-000 branch below already never reads it, but no
+  # path should be able to read an earlier try's shell as this one's.
+  : > "$SHELL_HTML"
   code=$(curl -sS -o "$SHELL_HTML" -w '%{http_code}' --max-time 15 "${BASE}/") || code=000
+  fetched=yes
   page=$(curl -sS --max-time 15 -H 'Content-Type: application/json' \
-    --data "$ROUTING" "${BASE}/_dash-update-component") || page=""
-  if [ "$code" = "200" ] \
-    && grep -q "rel=\"canonical\" href=\"https://${CANONICAL_HOST}/\"" "$SHELL_HTML" \
-    && ! grep -q "isn't responding" <<<"$page"; then
+    --data "$ROUTING" "${BASE}/_dash-update-component") || { page=""; fetched=no; }
+  # Each check is judged on its own and every try reports all three results, so a
+  # failing try shows which check failed (#294's drill: a wrong canonical link was
+  # reported as a missing snapshot). A request curl could not complete (a timeout, a
+  # refused connection, DNS) reports `unfetched` for its check, and a failed shell
+  # request's status shows as 000; an HTTP error response that arrives whole is
+  # judged like any other.
+  if [ "$code" = "000" ]; then
+    canonical=unfetched
+  else
+    canonical=no
+    grep -q "rel=\"canonical\" href=\"https://${CANONICAL_HOST}/\"" "$SHELL_HTML" && canonical=yes
+  fi
+  snapshot=no
+  if [ "$fetched" = no ]; then
+    snapshot=unfetched
+  elif grep -q "isn't responding" <<<"$page"; then
+    snapshot=degraded
+  else
     for want in "$first" ${current:+"$current"}; do
       if grep -q "$want" <<<"$page"; then
-        echo "  ✓ ${BASE} serves snapshot ${want:0:12}… (try ${i})"
-        exit 0
+        snapshot=yes
+        break
       fi
     done
   fi
-  echo "  … ${BASE}: shell HTTP ${code}; page carries the API's snapshot: no (try ${i}); retrying"
+  if [ "$code" = "200" ] && [ "$canonical" = yes ] && [ "$snapshot" = yes ]; then
+    echo "  ✓ ${BASE} serves snapshot ${want:0:12}… (try ${i})"
+    exit 0
+  fi
+  result="shell HTTP ${code}; canonical link names ${CANONICAL_HOST}: ${canonical}; page carries the API's snapshot: ${snapshot}"
+  echo "  … ${BASE}: ${result} (try ${i}); retrying"
   sleep 5
 done
-echo "::error::${BASE} never served the API's snapshot (${first})"
+echo "::error::${BASE} failed the probe in ${TRIES} tries (last try: ${result}; API snapshot ${first:0:12}…)"
 exit 1
