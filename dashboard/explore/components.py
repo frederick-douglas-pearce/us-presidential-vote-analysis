@@ -1,8 +1,10 @@
 """View pieces every page shares: the provenance footer and the degraded state (#306).
 
-Pure functions of a response body, so they read no API: a page reads through its own
-render-scoped view and hands them what it read. ``test_dashboard_elections.py`` checks
-that this module never imports ``explore.api``.
+Pure functions of what a page already read, so they read no API: a page reads through
+its own render-scoped view and hands them what it read.
+``TestSharedPieces.test_the_shared_modules_read_no_api`` (in
+``test_dashboard_elections.py``) checks that this module imports nothing from
+``explore`` and names no ``api`` or ``CLIENT``.
 """
 
 from __future__ import annotations

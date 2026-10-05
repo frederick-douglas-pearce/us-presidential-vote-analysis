@@ -217,9 +217,14 @@ class TestRender:
     def test_shows_the_snapshot_version(self) -> None:
         assert "SENTINEL-version" in texts(home_module()["render"](sentinel_meta()))
 
-    @pytest.mark.parametrize("module", sorted(dash.page_registry))
+    @pytest.mark.parametrize(
+        "module",
+        sorted(m for m, p in dash.page_registry.items() if not p.get("path_template")),
+    )
     def test_the_link_preview_text_states_no_years(self, module: str) -> None:
-        """The index never waits on the API, so it cannot carry a second coverage copy."""
+        """An untemplated page's card text is static, and the index never waits on the
+        API, so it cannot carry a second coverage copy. (A templated page's callable
+        title may name its own path variable, such as a year.)"""
         page = dash.page_registry[module]
         for text in (page["description"], page["title"]):
             assert isinstance(text, str), module

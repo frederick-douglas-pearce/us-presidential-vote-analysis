@@ -102,21 +102,33 @@ class Filters(NamedTuple):
     pv_only: bool
 
 
-def _coverage_year(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"coverage year is not an integer: {value!r}")
-    return value
+def span(coverage: dict[str, Any]) -> tuple[int, int]:
+    """The served span, ``(year_min, year_max)``, or ``TypeError`` for a malformed one.
+
+    Both are four-digit years, the parser's own domain, with the first no later than
+    the last. That also bounds the slider's labels (:func:`_marks`): an unchecked span
+    would make their count, and the work of every render, as large as the body said.
+    ``TypeError`` because that is what the layout turns into the degraded state.
+    """
+    first, last = coverage["year_min"], coverage["year_max"]
+    for year in (first, last):
+        if isinstance(year, bool) or not isinstance(year, int):
+            raise TypeError(f"coverage year is not an integer: {year!r}")
+    if not 1000 <= first <= last <= 9999:
+        raise TypeError(f"coverage span is not a range of years: {first}–{last}")
+    return first, last
 
 
 def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
     """The filters to apply; a bound outside the served span falls back to its default.
 
-    Fallback is per parameter, as ``og:url`` keeps the valid parameters and drops the
-    rest. The result is never inverted: :func:`parse_filters` already dropped an
-    inverted pair, and a bound replaced by its default cannot pass the other bound.
+    Fallback is per parameter, as ``og:url``'s is: ``og:url`` keeps each syntactically
+    valid parameter (an out-of-span year included, which this replaces with its
+    default) and drops the rest. The result is never inverted: :func:`parse_filters`
+    already dropped an inverted pair, and a bound replaced by its default cannot pass
+    the other bound.
     """
-    first = _coverage_year(coverage["year_min"])
-    last = _coverage_year(coverage["year_max"])
+    first, last = span(coverage)
     given = dict(pairs)
     year_from = int(given.get(YEAR_FROM, first))
     year_to = int(given.get(YEAR_TO, last))
@@ -201,13 +213,17 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
     coverage = provenance["coverage"]
     chosen = filters(pairs, coverage)
     elections = body["data"]
+    # A served snapshot always has elections: anything else is a malformed body, and
+    # rendering it would show the success marker over "no elections match".
+    if not isinstance(elections, list) or not elections:
+        raise TypeError("/v1/elections carries no list of elections")
     shown = [
         e
         for e in elections
         if chosen.year_from <= e["year"] <= chosen.year_to
         and (e["has_popular_vote"] is True or not chosen.pv_only)
     ]
-    first, last = coverage["year_min"], coverage["year_max"]
+    first, last = span(coverage)
     controls = html.Div(
         [
             html.Label("Years", htmlFor=YEARS_ID, className="label"),

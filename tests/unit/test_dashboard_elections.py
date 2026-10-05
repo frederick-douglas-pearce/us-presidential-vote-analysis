@@ -1,10 +1,12 @@
 """The elections index (T1) and the shared table conventions it sets (#306).
 
 Offline, against the recorded ``/v1/elections`` fixture, through the helpers and the
-autouse offline process client of ``test_dashboard_app.py``. The generic checks there
-(``TestRegistryCoverage``, the ``query=`` parser contract, the index and 404 checks) and
-the D070(b) guard's two runs pick this page up from the registry; these tests cover what
-is particular to it.
+autouse offline process client of ``test_dashboard_app.py``. Its registry-wide checks
+pick this page up from the registry: ``TestRegistryCoverage``,
+``TestRegistryContracts.test_every_query_parser_keeps_its_contract`` and
+``test_every_registered_page_is_found_at_the_index_and_reads_nothing``; so do the D070(b)
+guard's two runs in ``test_dashboard_guards.py``. These tests cover what is particular
+to this page.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from tests.unit.test_dashboard_app import (
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     cached_client,
     component_ids,
+    concrete_page_path,
     fake_fetch,
     get,
     home_module,
@@ -97,6 +100,37 @@ def shown_years(tree: Any) -> list[int]:
     return [int(row[0]) for row in rows(tree)]
 
 
+def json_node(node: Any, wanted: str) -> Any:
+    """The component with ``id`` ``wanted`` in a routed response's JSON, or ``None``."""
+    if isinstance(node, list):
+        for child in node:
+            found = json_node(child, wanted)
+            if found is not None:
+                return found
+    elif isinstance(node, dict):
+        props = node.get("props")
+        if isinstance(props, dict) and props.get("id") == wanted:
+            return node
+        for value in node.values():
+            found = json_node(value, wanted)
+            if found is not None:
+                return found
+    return None
+
+
+def routed_years(response: Any) -> list[int]:
+    """The year column of the table a routed render carries; ``[]`` with no table."""
+    table = json_node(response.get_json(), TABLE_ID)
+    if table is None:
+        return []
+    head, body = table["props"]["children"]
+    assert body["type"] == "Tbody"
+    return [
+        int(tr["props"]["children"][0]["props"]["children"])
+        for tr in body["props"]["children"]
+    ]
+
+
 def parse(query: str) -> dict[str, Any]:
     """A query string as Dash's router hands it to a layout."""
     return dash._pages._parse_query_string(f"?{query}") if query else {}
@@ -131,8 +165,12 @@ class TestTable:
         years, _ = controls(tree)
         assert (years.min, years.max, years.value) == (1788, 2032, [1788, 2032])
         assert not any("1824" in t or "2024" in t for t in texts(tree))
+        # The slider's labels are props, not children, so texts() cannot see them.
+        assert (min(years.marks), max(years.marks)) == (1788, 2032)
+        assert 1824 not in years.marks and 2024 not in years.marks
 
     def test_every_false_has_popular_vote_reads_not_in_this_dataset(self) -> None:
+        assert labels.NOT_IN_DATASET == "Not in this dataset"  # the AC's wording
         cells = {row[0]: row[2] for row in rows(render())}
         for record in BODY["data"]:
             expected = "Yes" if record["has_popular_vote"] else labels.NOT_IN_DATASET
@@ -183,7 +221,18 @@ class TestFilters:
         marks = sorted(MOD["_marks"](first, last))
         assert marks[0] == first and marks[-1] == last
         gaps = [b - a for a, b in zip(marks, marks[1:], strict=False)]
-        assert all(gap >= MOD["MARK_STEP"] // 2 for gap in gaps), marks
+        # A literal, not the module's own constant: 16 years (1824 to 1840) crowded.
+        assert all(gap >= 20 for gap in gaps), marks
+
+    def test_the_served_span_s_slider_labels(self) -> None:
+        assert sorted(MOD["_marks"](FIRST, LAST)) == [
+            1824,
+            1880,
+            1920,
+            1960,
+            2000,
+            2024,
+        ]
 
     def test_the_controls_show_the_filters_in_force(self) -> None:
         years, pv = controls(render({"year_from": "1900", "pv": "1"}))
@@ -282,17 +331,19 @@ class TestParser:
 
         def spy(params: dict[str, Any]) -> list[tuple[str, str]]:
             seen.append(dict(params))
-            return list(original(params))
+            return [("pv", "1")]  # not what the query says: the render must follow it
 
         monkeypatch.setitem(MOD, "parse_filters", spy)
-        PAGE["layout"](**{"pv": "1", "year_from": "1900"})
-        assert seen == [{"pv": "1", "year_from": "1900"}]
+        tree = PAGE["layout"](**{"year_from": "1900"})
+        assert seen == [{"year_from": "1900"}]
+        assert shown_years(tree) == PV_YEARS
+        assert original({"year_from": "1900"}) == [("year_from", "1900")]
 
 
 # --- shareable URL state: og:url, and the callback that writes the URL ---------------
 
 SHARED = (
-    "year_to=1950&junk=x&pv=1&year_from=1900&year_from=1900",
+    "year_to=1990&junk=x&pv=1&year_from=1976&year_from=1976",
     "pv=1&year_from=1900&year_from=1904",  # a repeated, differing value is dropped
     "year_from=2000&year_to=1900&pv=1",  # an inverted range is dropped
     "year_from=1700&pv=1",  # syntactically kept; outside the span in the layout
@@ -316,11 +367,22 @@ class TestShareableUrl:
         again = route(reopened.path, f"?{reopened.query}" if reopened.query else "")
         assert PAGE_ID in routed_ids(original)
         assert original.get_json() == again.get_json()
+        # The renders are the filtered view, not two copies of the default one.
+        assert routed_years(original) == shown_years(render(parse(query)))
+
+    def test_the_round_trip_check_sees_a_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity: SHARED[0] filters, so a router that dropped the query fails."""
+        cached_client(monkeypatch)
+        filtered = routed_years(route("/elections", f"?{SHARED[0]}"))
+        assert filtered == [1976, 1980, 1984, 1988]
+        assert filtered != YEARS
 
     def test_the_og_url_query_is_the_normal_form(self) -> None:
         resolution = appmod.resolve("/elections", SHARED[0], None)
         assert resolution.og_url is not None
-        assert resolution.og_url.endswith("/elections?pv=1&year_from=1900&year_to=1950")
+        assert resolution.og_url.endswith("/elections?pv=1&year_from=1976&year_to=1990")
 
     @pytest.mark.parametrize("query", [SHARED[0], SHARED[1], "", "year_to=1990"])
     def test_the_callback_writes_the_og_url_s_query_byte_for_byte(
@@ -349,10 +411,59 @@ class TestShareableUrl:
         og_url = appmod.resolve("/elections", query, None).og_url
         assert og_url is not None
         shared = urllib.parse.urlsplit(og_url).query
-        assert (
-            route("/elections", written).get_json()
-            == route("/elections", f"?{shared}" if shared else "").get_json()
-        )
+        by_callback = route("/elections", written)
+        by_og_url = route("/elections", f"?{shared}" if shared else "")
+        assert by_callback.get_json() == by_og_url.get_json()
+        assert routed_years(by_callback) == shown_years(render(parse(query)))
+
+    def test_the_callback_is_wired_to_the_page_s_location(self) -> None:
+        # What a browser is told, from the endpoint it reads the callback graph from.
+        graph = appmod.server.test_client().get("/_dash-dependencies").get_json()
+        entries = [c for c in graph if c["output"] == "elections-url.search"]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["inputs"] == [
+            {"id": YEARS_ID, "property": "value"},
+            {"id": PV_ID, "property": "value"},
+        ]
+        assert entry["state"] == [
+            {"id": YEARS_ID, "property": "min"},
+            {"id": YEARS_ID, "property": "max"},
+            {"id": MOD["URL_ID"], "property": "search"},
+        ]
+        assert entry["prevent_initial_call"] is True
+        location = find(render(), MOD["URL_ID"])
+        assert type(location).__name__ == "Location"
+        # callback-nav: the router navigates to the new search without a reload.
+        assert location.refresh == "callback-nav"
+
+    def test_a_filter_change_posted_by_a_browser_writes_the_url_and_reads_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        body = {
+            "output": "elections-url.search",
+            "outputs": {"id": MOD["URL_ID"], "property": "search"},
+            "inputs": [
+                {"id": YEARS_ID, "property": "value", "value": [1900, LAST]},
+                {"id": PV_ID, "property": "value", "value": ["1"]},
+            ],
+            "state": [
+                {"id": YEARS_ID, "property": "min", "value": FIRST},
+                {"id": YEARS_ID, "property": "max", "value": LAST},
+                {"id": MOD["URL_ID"], "property": "search", "value": ""},
+            ],
+            "changedPropIds": [f"{PV_ID}.value"],
+        }
+        client = appmod.server.test_client()
+        response = client.post("/_dash-update-component", json=body)
+        assert response.status_code == 200
+        written = response.get_json()["response"][MOD["URL_ID"]]["search"]
+        assert written == "?pv=1&year_from=1900"
+        assert routed_years(route("/elections", written)) == [
+            y for y in PV_YEARS if y >= 1900
+        ]
+        assert calls == [] and bucket.waits == []
 
     def test_the_callback_leaves_an_unchanged_url_alone(self) -> None:
         callback = MOD["on_filter_change"]
@@ -389,7 +500,8 @@ class TestRequestBudget:
         _, calls, bucket = cached_client(monkeypatch)
         for search in ("", "?pv=1", "?year_from=1900", "?year_from=1900&year_to=1950"):
             response = route("/elections", search)
-            assert TABLE_ID in routed_ids(response)
+            # Each render is the filtered one, answered from the cache.
+            assert routed_years(response) == shown_years(render(parse(search[1:])))
         for years, pv in (([1900, LAST], ["1"]), ([FIRST, 1950], [])):
             MOD["on_filter_change"](years, pv, FIRST, LAST, "")
         assert calls == []
@@ -411,7 +523,10 @@ class TestRequestBudget:
         state = {"version": "version-A"}
         later = [row for row in BODY["data"] if row["year"] >= 2000]
 
+        calls: list[str] = []
+
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            calls.append(path)
             if path == api.META_PATH:
                 body = copy.deepcopy(META)
                 provenance = body["provenance"]
@@ -427,15 +542,22 @@ class TestRequestBudget:
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
         monkeypatch.setattr(api, "CLIENT", client)
         client.refresh()
+        calls.clear()
         before = PAGE["layout"]()
         assert shown_years(before) == YEARS
         assert "version-A" in texts(before)
         state["version"] = "version-B"
+        # Until the refresher runs, renders keep serving A from the cache.
+        assert shown_years(PAGE["layout"]()) == YEARS
+        assert calls == []
         client.refresh()  # the refresher's cycle: /v1/meta names B, so prefetch + swap
+        assert calls == [api.META_PATH, api.ELECTIONS_PATH]
+        calls.clear()
         after = PAGE["layout"]()
         assert shown_years(after) == [row["year"] for row in later]
         assert "version-B" in texts(after)
         assert "version-A" not in texts(after)
+        assert calls == []  # the new body came with the swap, not a fill on a miss
 
 
 # --- labels -----------------------------------------------------------------------
@@ -512,21 +634,41 @@ class TestLabels:
 # --- the shared pieces: footer, degraded state, purity -------------------------------
 
 SHARED_MODULES = ("components.py", "labels.py")
+
+
+def with_span(first: Any, last: Any) -> dict[str, Any]:
+    """The recorded body with its coverage span replaced."""
+    body = copy.deepcopy(BODY)
+    body["meta"]["provenance"]["coverage"].update(year_min=first, year_max=last)
+    return body
+
+
 PACKAGE = Path(api.__file__).parent
 
 
 def imports_api(source: str) -> bool:
-    """Whether a module imports ``explore.api`` in any spelling."""
+    """Whether a module could reach ``explore.api``.
+
+    Flagged: any import from ``explore`` (``explore.app`` and the pages import ``api``,
+    so any of them is a way in), any relative import, any name or attribute ``api`` or
+    ``CLIENT``, and ``__import__`` / ``importlib``.
+    """
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if module == "explore.api" or module.split(".")[-1] == "api":
+            if node.level > 0 or module == "explore" or module.startswith("explore."):
                 return True
-            if any(alias.name == "api" for alias in node.names):
+            if module == "importlib":
                 return True
         if isinstance(node, ast.Import) and any(
-            alias.name.split(".")[-1] == "api" for alias in node.names
+            alias.name in ("explore", "importlib")
+            or alias.name.startswith(("explore.", "importlib."))
+            for alias in node.names
         ):
+            return True
+        if isinstance(node, ast.Name) and node.id in ("api", "CLIENT", "__import__"):
+            return True
+        if isinstance(node, ast.Attribute) and node.attr in ("api", "CLIENT"):
             return True
     return False
 
@@ -543,7 +685,15 @@ class TestSharedPieces:
             ("from explore.api import CLIENT\n", True),
             ("import explore.api\n", True),
             ("from . import api\n", True),
+            ("import explore\nexplore.api.CLIENT.view()\n", True),
+            ("from explore import app\napp.api.CLIENT.view()\n", True),
+            ("from explore.pages import elections\n", True),
+            ("from .config import X\n", True),
+            ("x = __import__('explore.api')\n", True),
+            ("import importlib\n", True),
+            ("CLIENT.view()\n", True),
             ("from dash import html\n", False),
+            ("from typing import Any\n", False),
         ],
     )
     def test_the_purity_check_fails_what_it_should(
@@ -552,13 +702,26 @@ class TestSharedPieces:
         assert imports_api(source) is imports
 
     @pytest.mark.parametrize("module", sorted(dash.page_registry))
-    def test_every_page_carries_the_provenance_footer(
+    def test_every_page_renders_the_shared_footer(
         self, monkeypatch: pytest.MonkeyPatch, module: str
     ) -> None:
+        """Through the component itself, with the provenance the page read."""
         cached_client(monkeypatch)
-        ids = component_ids(dash.page_registry[module]["layout"]())
-        assert {components.PROVENANCE_ID, components.SNAPSHOT_ID} <= ids
-        assert dash.page_registry[module]["success"] in ids
+        given: list[Any] = []
+        real = components.provenance_footer
+
+        def spy(provenance: dict[str, Any]) -> Any:
+            given.append(provenance)
+            return dash.html.Footer(real(provenance), id="footer-spy")
+
+        monkeypatch.setattr(components, "provenance_footer", spy)
+        page = dash.page_registry[module]
+        response = route(concrete_page_path(page))
+        ids = routed_ids(response)
+        assert {"footer-spy", page["success"]} <= ids
+        assert len(given) == 1
+        assert given[0]["snapshot_version"] == VERSION
+        assert given[0]["coverage"] == COVERAGE
 
     def test_the_footer_is_built_from_the_response_s_provenance(self) -> None:
         body = copy.deepcopy(BODY)
@@ -569,8 +732,10 @@ class TestSharedPieces:
         assert "SENTINEL-license" in text
 
     def test_home_keeps_no_second_copy_of_the_footer(self) -> None:
+        source = (PACKAGE / "pages" / "home.py").read_text(encoding="utf-8")
         assert "SOURCES" not in home_module()
-        assert home_module()["components"] is components
+        for key in ("ec_license_url", "census_source_name", "snapshot_version"):
+            assert key not in source, key  # provenance keys are the component's alone
 
     def test_an_unreadable_api_shows_the_plain_message_and_no_marker(
         self, monkeypatch: pytest.MonkeyPatch
@@ -595,6 +760,12 @@ class TestSharedPieces:
                 },
                 "data": [],
             },
+            {**BODY, "data": {}},
+            {**BODY, "data": ""},
+            {**BODY, "data": []},  # a served snapshot always has elections
+            with_span(2024, 1824),  # inverted
+            with_span(0, 400_000_000),  # unbounded slider labels
+            with_span(824, 2024),  # outside the parser's four-digit domain
         ],
     )
     def test_a_malformed_body_shows_the_plain_message(

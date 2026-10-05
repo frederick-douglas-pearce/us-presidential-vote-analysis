@@ -2,10 +2,12 @@
 
 Every table labels its columns from :data:`LABELS`, keyed by the field name the public
 ``/v1`` API returns, never by a snapshot column name. Later tables add rows here rather
-than labelling inline. The table is flat, so a field name must mean the same thing in
-every table that shows it; a name that does not (``coverage`` is the first likely case:
-a per-capita row's and the provenance block's differ) needs a qualified key, not a
-second meaning for this one.
+than labelling inline. The table is flat, so a key means one thing in every table that
+shows it, and a field name the API uses with two meanings needs a qualified key for the
+second. ``candidate_count`` already is one: here it is a ``/v1/elections`` row's count
+of one year's candidates, while ``/v1/meta``'s counts the snapshot's distinct
+candidates, so a table showing the latter needs its own key. ``coverage`` is next: a
+per-capita row's and the provenance block's differ.
 
 The raw field name stays on hand because these tables double as the debugging view: as
 each header's tooltip, and in a "Column names" glossary under the table, which works
