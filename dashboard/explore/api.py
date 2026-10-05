@@ -113,8 +113,8 @@ MIN_RECHECK_INTERVAL_S = 30.0
 #: The one path the cache is versioned on.
 META_PATH = "/v1/meta"
 
-#: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; no page
-#: registers it yet, and #306 registers it with the first page that reads it.
+#: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; the
+#: elections page (#306) registers it.
 ELECTIONS_PATH = "/v1/elections"
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")

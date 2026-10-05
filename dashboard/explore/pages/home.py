@@ -1,8 +1,8 @@
-"""The landing page: where the data comes from and what it covers (#277).
+"""The landing page: what the data covers and where it comes from (#277, #306).
 
-The walking skeleton carries no tables. It proves the path a real view will take: one
-canonical API URL, read through the in-process cache, rendered server-side, with a
-plain-language message when the API cannot be read.
+It reads ``/v1/meta`` through the in-process cache, renders server-side, and shows a
+plain-language message when the API cannot be read. The sources and the snapshot version
+are the shared provenance footer (:mod:`explore.components`).
 """
 
 from __future__ import annotations
@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import dash
-from dash import html
+from dash import dcc, html
 
-from explore import api
+from explore import api, components
 from explore.config import SITE_TITLE
 
-#: The element only a successful render carries, holding the snapshot version.
-SNAPSHOT_ID = "snapshot-version"
+#: The element only a successful render carries: the coverage list, home's own content.
+COVERAGE_ID = "coverage"
 
 dash.register_page(
     __name__,
@@ -33,20 +33,7 @@ dash.register_page(
     on_miss=(),
     # Rendered only from a successful read: this page's success contract, asserted by
     # the D070(b) guard in test_dashboard_guards.py.
-    success=SNAPSHOT_ID,
-)
-
-#: The three sources, in display order: what each supplies, and the provenance keys
-#: naming it and its license.
-SOURCES: tuple[tuple[str, str, str, str], ...] = (
-    ("Electoral votes", "ec_source_name", "ec_license", "ec_license_url"),
-    ("Popular votes", "source_name", "license", "license_url"),
-    ("Population", "census_source_name", "census_license", "census_license_url"),
-)
-
-UNAVAILABLE_MESSAGE = (
-    "The election data service isn't responding right now, so there is nothing to "
-    "show yet. Please try again in a minute."
+    success=COVERAGE_ID,
 )
 
 
@@ -60,26 +47,6 @@ def render(meta: dict[str, Any]) -> html.Div:
     coverage = provenance["coverage"]
     return html.Div(
         [
-            html.H2("Where the data comes from"),
-            html.Ul(
-                [
-                    html.Li(
-                        [
-                            html.Span(f"{label}: ", className="label"),
-                            f"{provenance[name]} (",
-                            # str(): a value of an unexpected type renders as text,
-                            # rather than failing in Dash's serializer, outside
-                            # layout()'s try.
-                            html.A(
-                                str(provenance[lic]), href=str(provenance[url])
-                            ),
-                            ")",
-                        ]
-                    )
-                    for label, name, lic, url in SOURCES
-                ],
-                id="provenance",
-            ),
             html.H2("What it covers"),
             html.Ul(
                 [
@@ -96,21 +63,14 @@ def render(meta: dict[str, Any]) -> html.Div:
                         ]
                     ),
                 ],
-                id="coverage",
+                id=COVERAGE_ID,
             ),
             html.P(
-                ["Data snapshot ", html.Code(str(provenance["snapshot_version"]))],
-                className="snapshot",
-                id=SNAPSHOT_ID,
+                dcc.Link("Browse every election in the dataset", href="/elections"),
+                className="next",
             ),
+            components.provenance_footer(provenance),
         ]
-    )
-
-
-def unavailable() -> html.Div:
-    """The degraded state: a plain sentence, never an exception or a blank page."""
-    return html.Div(
-        html.P(UNAVAILABLE_MESSAGE), className="unavailable", id="unavailable"
     )
 
 
@@ -119,13 +79,13 @@ def layout(**_query: Any) -> html.Div:
         with api.CLIENT.view() as view:
             body = render(view.get(api.META_PATH))
     except (api.ApiUnavailable, KeyError, TypeError):
-        body = unavailable()
+        body = components.unavailable()
     return html.Div(
         [
             html.H1("US Presidential Election Center"),
             html.P(
-                "Tables and charts over the public election data are on their way. "
-                "For now, this page shows what the data is and where it comes from.",
+                "Tables and charts over the public election data. Start with the list "
+                "of elections; more views are on their way.",
                 className="lede",
             ),
             body,
