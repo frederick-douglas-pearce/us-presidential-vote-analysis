@@ -181,6 +181,9 @@ class TestTable:
     def test_an_unexpected_has_popular_vote_renders_as_text_not_a_claim(self) -> None:
         assert labels.has_popular_vote(None) == "None"
         assert labels.has_popular_vote(0) == "0"
+        # Truthy non-bools too: only True itself may claim the dataset holds it.
+        assert labels.has_popular_vote(1) == "1"
+        assert labels.has_popular_vote("false") == "false"
 
 
 # --- filters ---------------------------------------------------------------------
@@ -606,6 +609,7 @@ class TestLabels:
             labels.LABELS[f] for f in MOD["FIELDS"]
         ]
         assert [h.title for h in headers] == list(MOD["FIELDS"])
+        assert [h.scope for h in headers] == ["col"] * len(MOD["FIELDS"])
         glossary = of_type(tree, "Details")
         assert len(glossary) == 1
         pairs = list(zip(of_type(glossary, "Dt"), of_type(glossary, "Dd"), strict=True))
@@ -730,6 +734,23 @@ class TestSharedPieces:
         text = texts(render(body=body))
         assert "SENTINEL-version" in text
         assert "SENTINEL-license" in text
+
+    def test_no_page_s_success_marker_is_the_shared_footer_s(self) -> None:
+        """A page's marker is its own content: the footer renders on every success,
+        so its ids would prove only that the footer did."""
+        footer_ids = component_ids(components.provenance_footer(META["provenance"]))
+        assert {components.PROVENANCE_ID, components.SNAPSHOT_ID} <= footer_ids
+        for module, page in dash.page_registry.items():
+            assert page["success"] not in footer_ids, module
+        assert (
+            dash.page_registry["pages.home"]["success"] == home_module()["COVERAGE_ID"]
+        )
+
+    def test_home_links_to_the_elections_page(self) -> None:
+        tree = home_module()["render"](copy.deepcopy(META))
+        links = [link.href for link in of_type(tree, "Link")]
+        assert links == [PAGE["path"]]
+        assert links[0] in {p["path"] for p in dash.page_registry.values()}
 
     def test_home_keeps_no_second_copy_of_the_footer(self) -> None:
         source = (PACKAGE / "pages" / "home.py").read_text(encoding="utf-8")
