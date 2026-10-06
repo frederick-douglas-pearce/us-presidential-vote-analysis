@@ -426,8 +426,8 @@ registered = list(dict.fromkeys(api.registered_prefetch_paths()))
 assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
 # Named, so a page that stops declaring the miss in on_miss fails here; one that
-# still declares it but stops reading it fails at "the miss was not stored" and at
-# SERVED below.
+# still declares it but stops reading it fails no later than "the miss was not
+# stored" below.
 misses = [
     template.format(**GUARD_PATH_VALUES)
     for page in PAGES

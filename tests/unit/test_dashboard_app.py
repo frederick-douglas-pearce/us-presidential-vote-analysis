@@ -28,7 +28,12 @@ from typing import Any
 
 import dash
 import pytest
-from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
+from dash._pages import (
+    _page_meta_tags,
+    _parse_path_variables,
+    _parse_query_string,
+    _path_to_page,
+)
 from dash.development.base_component import Component
 
 from explore import api, components
@@ -266,6 +271,11 @@ class TestRender:
         with pytest.raises(AssertionError, match="pages.election"):
             register("fake_shadow", **{**YEAR_PAGE, "path_template": "/election/<yr>"})
         assert "fake_shadow" not in dash.page_registry
+        # A variable where the real page has a fixed segment: "x/x" routes nowhere,
+        # yet the template matches /election/1824.
+        with pytest.raises(AssertionError, match="pages.election"):
+            register("fake_wide", **{**YEAR_PAGE, "path_template": "/<kind>/<year>"})
+        assert "fake_wide" not in dash.page_registry
 
     def test_a_value_of_an_unexpected_type_renders_as_text(self) -> None:
         meta = copy.deepcopy(META)
@@ -371,14 +381,23 @@ def register() -> Iterator[Callable[..., dict[str, Any]]]:
     modules: list[str] = []
 
     def add(module: str = "fake_year", **page: Any) -> dict[str, Any]:
-        # Dash's router takes the first match, so a fake page whose path a registered
-        # page already routes would silently test that page instead (#307). Checked
-        # by route, not by string: ``/election/<yr>`` matches what ``<year>`` does.
+        # Dash's router takes the first match, so a fake page sharing any URL with a
+        # registered page would silently test that page instead (#307). Checked by
+        # route, not by string, both ways: the fake's own path must route nowhere
+        # (``/election/<yr>`` matches what ``<year>`` does), and no registered page's
+        # concrete path may match the fake's template (``/<kind>/<year>`` matches
+        # ``/election/1824``).
         template = page.get("path_template") or page.get("path") or ""
         # Any value: Dash's matcher is greedy, so a variable matches any segment.
         concrete = re.sub(r"<(.*?)>", "x", template)
         routed, _ = _path_to_page(concrete.strip("/"))
         assert not routed, (concrete, routed.get("module"))
+        for other in dash.page_registry.values():
+            if other["module"].split(".")[-1] == "not_found_404":
+                continue
+            taken = concrete_page_path(other).strip("/")
+            shared = _parse_path_variables(taken, template.strip("/"))
+            assert shared is None, (template, other["module"], taken)
         dash.register_page(module, **page)
         modules.append(module)
         registered: dict[str, Any] = dash.page_registry[module]
