@@ -31,7 +31,7 @@ import pytest
 from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
 from dash.development.base_component import Component
 
-from explore import api
+from explore import api, components
 from explore import app as appmod
 
 #: Written out rather than imported from ``explore.config``: a test that read the host
@@ -217,10 +217,18 @@ class TestRender:
     def test_shows_the_snapshot_version(self) -> None:
         assert "SENTINEL-version" in texts(home_module()["render"](sentinel_meta()))
 
-    def test_the_link_preview_text_states_no_years(self) -> None:
-        """The index never waits on the API, so it cannot carry a second coverage copy."""
-        description = dash.page_registry["pages.home"]["description"]
-        assert not any(ch.isdigit() for ch in description)
+    @pytest.mark.parametrize(
+        "module",
+        sorted(m for m, p in dash.page_registry.items() if not p.get("path_template")),
+    )
+    def test_the_link_preview_text_states_no_years(self, module: str) -> None:
+        """An untemplated page's card text is static, and the index never waits on the
+        API, so it cannot carry a second coverage copy. (A templated page's callable
+        title may name its own path variable, such as a year.)"""
+        page = dash.page_registry[module]
+        for text in (page["description"], page["title"]):
+            assert isinstance(text, str), module
+            assert not any(ch.isdigit() for ch in text), (module, text)
 
     def test_a_value_of_an_unexpected_type_renders_as_text(self) -> None:
         meta = copy.deepcopy(META)
@@ -1219,6 +1227,15 @@ HOSTILE_QUERIES: tuple[dict[str, Any], ...] = (
     {"state": HOSTILE, HOSTILE: HOSTILE},
     {"year": "1860", "party": "D"},
     {"state": ["", "%", "&=#"]},
+    # The elections index's keys (#306): repeats, an inverted range, a trailing line
+    # break, a value outside the vocabulary, a blank, and non-ASCII digits.
+    {"year_from": ["1976", "1980"], "year_to": "1900"},
+    {"year_from": "2000", "year_to": "1900"},
+    {"year_from": "1976\n"},
+    {"pv": ["1", "1"]},
+    {"pv": "true"},
+    {"year_to": ""},
+    {"year_from": "١٩٧٦"},
 )
 
 
@@ -1267,7 +1284,7 @@ class TestDegraded:
 
         monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
         text = " ".join(texts(home_layout()()))
-        assert home_module()["UNAVAILABLE_MESSAGE"] in text
+        assert components.UNAVAILABLE_MESSAGE in text
         assert "SECRET-DETAIL" not in text
         assert "Traceback" not in text
 
@@ -1277,7 +1294,7 @@ class TestDegraded:
         broken = {"provenance": {"snapshot_version": VERSION}}  # no sources, no coverage
         fetch, _ = fake_fetch({api.META_PATH: broken})
         monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
-        assert home_module()["UNAVAILABLE_MESSAGE"] in " ".join(texts(home_layout()()))
+        assert components.UNAVAILABLE_MESSAGE in " ".join(texts(home_layout()()))
 
     def test_the_routing_callback_answers_200_with_the_message(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1707,7 +1724,9 @@ class TestCache:
 
     def test_the_process_client_prefetches_what_pages_register(self) -> None:
         assert PROCESS_CLIENT._prefetch_paths is api.registered_prefetch_paths
-        assert api.registered_prefetch_paths() == [api.META_PATH]
+        # D072's MVP prefetch extent, exactly: /v1/meta and the elections index (#306).
+        paths = api.registered_prefetch_paths()
+        assert sorted(paths) == sorted([api.META_PATH, api.ELECTIONS_PATH])
 
     def test_every_fill_passes_the_bucket_with_the_right_wait(self) -> None:
         bucket = RecordingBucket()
