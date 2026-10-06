@@ -765,7 +765,7 @@ class TestSharedPieces:
             {**BODY, "data": []},  # a served snapshot always has elections
             with_span(2024, 1824),  # inverted
             with_span(0, 400_000_000),  # unbounded slider labels
-            with_span(824, 2024),  # outside the parser's four-digit domain
+            with_span(824, 2024),  # below 1000
         ],
     )
     def test_a_malformed_body_shows_the_plain_message(

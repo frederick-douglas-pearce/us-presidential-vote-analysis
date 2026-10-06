@@ -105,10 +105,11 @@ class Filters(NamedTuple):
 def span(coverage: dict[str, Any]) -> tuple[int, int]:
     """The served span, ``(year_min, year_max)``, or ``TypeError`` for a malformed one.
 
-    Both are four-digit years, the parser's own domain, with the first no later than
-    the last. That also bounds the slider's labels (:func:`_marks`): an unchecked span
-    would make their count, and the work of every render, as large as the body said.
-    ``TypeError`` because that is what the layout turns into the degraded state.
+    Both lie in 1000–9999, the four-digit years without a leading zero, within the
+    parser's four-ASCII-digit domain, with the first no later than the last. That also
+    bounds the slider's labels (:func:`_marks`): an unchecked span would make their
+    count, and the work of every render, as large as the body said. ``TypeError``
+    because that is what the layout turns into the degraded state.
     """
     first, last = coverage["year_min"], coverage["year_max"]
     for year in (first, last):
@@ -123,10 +124,10 @@ def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
     """The filters to apply; a bound outside the served span falls back to its default.
 
     Fallback is per parameter, as ``og:url``'s is: ``og:url`` keeps each syntactically
-    valid parameter (an out-of-span year included, which this replaces with its
-    default) and drops the rest. The result is never inverted: :func:`parse_filters`
-    already dropped an inverted pair, and a bound replaced by its default cannot pass
-    the other bound.
+    valid parameter except both bounds of an inverted pair (an out-of-span year
+    included, which this replaces with its default) and drops the rest. The result is
+    never inverted: :func:`parse_filters` already dropped an inverted pair, and a bound
+    replaced by its default cannot pass the other bound.
     """
     first, last = span(coverage)
     given = dict(pairs)
