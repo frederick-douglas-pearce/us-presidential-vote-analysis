@@ -30,6 +30,11 @@ a { color: #0b5cad; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #ddd; }
 th { font-weight: 600; cursor: help; }
+.filters .filter { margin-bottom: 0.5rem; }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { min-width: 36rem; }
+.note { color: #444; font-size: 0.875rem; }
+.reason { font-size: 0.875rem; color: #444; }
 .glossary { margin-top: 1rem; font-size: 0.875rem; }
 .glossary dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
 .glossary dd { margin: 0; }
@@ -40,6 +45,6 @@ th { font-weight: 600; cursor: help; }
   .lede { color: #bbb; }
   .snapshot { color: #999; }
   .unavailable { background: #2b2610; }
-  .count, .empty { color: #bbb; }
+  .count, .empty, .note, .reason { color: #bbb; }
   th, td, .provenance-footer { border-color: #333; }
 }

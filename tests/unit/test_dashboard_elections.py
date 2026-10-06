@@ -125,10 +125,12 @@ def routed_years(response: Any) -> list[int]:
         return []
     head, body = table["props"]["children"]
     assert body["type"] == "Tbody"
-    return [
-        int(tr["props"]["children"][0]["props"]["children"])
-        for tr in body["props"]["children"]
-    ]
+    years = []
+    for tr in body["props"]["children"]:
+        link = tr["props"]["children"][0]["props"]["children"]  # the year's Link (#307)
+        assert link["type"] == "Link"
+        years.append(int(link["props"]["children"]))
+    return years
 
 
 def parse(query: str) -> dict[str, Any]:
@@ -168,6 +170,19 @@ class TestTable:
         # The slider's labels are props, not children, so texts() cannot see them.
         assert (min(years.marks), max(years.marks)) == (1788, 2032)
         assert 1824 not in years.marks and 2024 not in years.marks
+
+    def test_each_year_links_to_its_one_election_view(self) -> None:
+        """Clicking a year in T1 opens that year's /election/<year> (#307)."""
+        table = find(render(), TABLE_ID)
+        links = of_type(table, "Link")
+        assert [(link.children, link.href) for link in links] == [
+            (str(y), f"/election/{y}") for y in YEARS
+        ]
+        election = dash.page_registry["pages.election"]
+        for link in links:
+            page, path_vars = dash._pages._path_to_page(link.href.strip("/"))
+            assert page["module"] == election["module"], link.href
+            assert election["validate"][1](path_vars, BODY) is True, link.href
 
     def test_every_false_has_popular_vote_reads_not_in_this_dataset(self) -> None:
         assert labels.NOT_IN_DATASET == "Not in this dataset"  # the AC's wording
@@ -637,7 +652,7 @@ class TestLabels:
 
 # --- the shared pieces: footer, degraded state, purity -------------------------------
 
-SHARED_MODULES = ("components.py", "labels.py")
+SHARED_MODULES = ("components.py", "labels.py", "query.py")
 
 
 def with_span(first: Any, last: Any) -> dict[str, Any]:

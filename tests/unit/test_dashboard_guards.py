@@ -43,14 +43,15 @@ code that runs only after a successful response is under the guard too.
 an element it renders only from a successful read. The success run asserts each page's
 render carries that id (and ``/`` its snapshot version too); the refused run asserts
 none does, so a marker the degraded state also renders is caught. Templated pages are
-rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. Both runs also
-register a fake templated page, ``/election/<year>``, reading ``/v1/elections/{year}``
-on a miss: rendered at 1824, that render is the success run's fill on a miss, made
-through the render-scoped view pages use. Like a real templated page it validates the
-year from the ``/v1/elections`` it prefetches before formatting it into a path (#312),
-and the success run renders it at 1825 too and asserts the transport received no request
-at all (``REQUESTED``, which records every request, fixture or not). It stands in
-until #307 registers a real one.
+rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. The
+one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` on a miss:
+rendered at 1824, its render is the success run's fill on a miss, made through the
+render-scoped view pages use, and the run asserts by name that some registered page's
+``on_miss`` reads :data:`MISS_PATH`. It validates the year from the ``/v1/elections`` it
+prefetches before formatting it into a path (#312), and the success run renders it at
+1825 too: the page's not-found state, neither its success marker nor the degraded
+state, with no request reaching the transport at all (``REQUESTED``, which records
+every request, fixture or not). Until #307 a fake page the guard registered stood in.
 
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
 other than SQLite's) raises no event and is not seen. A page's success marker proves its
@@ -114,8 +115,8 @@ FIXTURE_FILES = {
     "/v1/elections/1824": "v1_elections_1824.json",
 }
 
-#: Prefetched by no page: the success run's fill on a miss, read by the fake templated
-#: page rendered at :data:`GUARD_PATH_VALUES`.
+#: Prefetched by no page: the success run's fill on a miss, read by the one-election
+#: view (#307) rendered at :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
 
 #: The concrete value each path variable is rendered at, in both runs. Every templated
@@ -296,45 +297,13 @@ def route(client, path):
     return response.get_data(as_text=True)
 """
 
-#: Shared by both runtime runs, after the app is imported: registers the fake templated
-#: page, checks every page's declarations, and finds the ids a routed render carries.
+#: Shared by both runtime runs, after the app is imported: checks every page's
+#: declarations, and finds the ids a routed render carries.
 _PAGES = f"""
 import json as _json
 import re as _re
 
-from dash import html as _html
-
 GUARD_PATH_VALUES = {GUARD_PATH_VALUES!r}
-
-
-def _known_year(path_vars, body):
-    return any(str(row.get("year")) == path_vars["year"] for row in body.get("data", ()))
-
-
-_VALIDATE = (api.ELECTIONS_PATH, _known_year)
-
-
-def _fake_year_layout(year=None, **_query):
-    try:
-        with api.CLIENT.view() as view:
-            # Validated from the prefetched index before it is formatted (#312).
-            if not api.accepted(view.get, _VALIDATE, {{"year": year}}):
-                return _html.P("No such election.", id="guard-fake-missing")
-            body = view.get(f"/v1/elections/{{year}}")
-    except api.ApiUnavailable:
-        return _html.P("The election data service isn't responding right now.")
-    return _html.Div(str(len(body)), id="guard-fake-year")
-
-
-dash.register_page(
-    "guard_fake_year",
-    path_template="/election/<year>",
-    layout=_fake_year_layout,
-    prefetch=(api.ELECTIONS_PATH,),
-    on_miss=("/v1/elections/{{year}}",),
-    success="guard-fake-year",
-    validate=_VALIDATE,
-)
 
 
 def concrete(page):
@@ -453,10 +422,18 @@ from explore import api
         + _PAGES
         + f"""
 registered = list(dict.fromkeys(api.registered_prefetch_paths()))
-# The fake templated page prefetches its validation source, so the prefetch loop runs
-# past /v1/meta.
+# The elections pages prefetch their index, so the prefetch loop runs past /v1/meta.
 assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
+# Named, so a page that stops reading the miss fails here rather than as a missing
+# response below.
+misses = [
+    template.format(**GUARD_PATH_VALUES)
+    for page in PAGES
+    for template in page.get("on_miss", ())
+    if set(_re.findall("{{(.*?)}}", template)) <= set(GUARD_PATH_VALUES)
+]
+assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
 # for real, and enough of them run into this subprocess's timeout. Fail fast instead.
 planned = 1 + len([path for path in registered if path != api.META_PATH]) + 1
@@ -473,7 +450,7 @@ assert client.get("/").status_code == 200
 assert "/" in [concrete(page) for page in PAGES]
 for page in PAGES:
     path = concrete(page)
-    # The fake templated page's render, at 1824, is the fill on a miss.
+    # The one-election view's render, at 1824, is the fill on a miss.
     text = route(client, path)
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])
@@ -484,11 +461,13 @@ assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
 
 # A year the index does not serve: refused from the cached index, so nothing is
 # requested at all (a request for a path with no fixture would answer 404 and never
-# reach SERVED, so REQUESTED is what sees it).
+# reach SERVED, so REQUESTED is what sees it). Its not-found state, written here as a
+# literal: neither the page's success marker nor the degraded state.
 requested_before = list(REQUESTED)
 text = route(client, "/election/1825")
-assert "guard-fake-year" not in rendered_ids(text)
-assert "guard-fake-missing" in rendered_ids(text)
+assert "election" not in rendered_ids(text)
+assert "election-not-found" in rendered_ids(text)
+assert "isn't responding" not in text
 assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
 expected = [api.META_PATH]
@@ -677,7 +656,8 @@ dash.register_page(
 
 
 def test_the_guard_values_render_the_miss_path() -> None:
-    """The fake templated page at :data:`GUARD_PATH_VALUES` reads exactly the miss."""
+    """The one-election view's miss template at :data:`GUARD_PATH_VALUES` is exactly
+    the miss, and its response is recorded (the success run checks the page itself)."""
     assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
     assert MISS_PATH in FIXTURE_FILES
 

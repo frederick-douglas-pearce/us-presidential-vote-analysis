@@ -16,14 +16,12 @@ The first table, and the one that sets the conventions later tables reuse (#306)
 
 from __future__ import annotations
 
-import re
 from typing import Any, NamedTuple
-from urllib.parse import quote, urlencode
 
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, labels
+from explore import api, components, labels, query
 from explore.config import SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in the table.
@@ -42,8 +40,6 @@ YEAR_FROM = "year_from"
 YEAR_TO = "year_to"
 PV = "pv"
 
-_YEAR_RE = re.compile(r"[0-9]{4}")  # ASCII only: \d and int() accept other digits
-
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
     """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
@@ -59,22 +55,14 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
         return []
     kept: dict[str, str] = {}
     for key in (YEAR_FROM, YEAR_TO):
-        value = _single(params.get(key))
-        if value is not None and _YEAR_RE.fullmatch(value):
+        value = query.single(params.get(key))
+        if value is not None and query.YEAR_RE.fullmatch(value):
             kept[key] = value
-    if _single(params.get(PV)) == "1":
+    if query.single(params.get(PV)) == "1":
         kept[PV] = "1"
     if YEAR_FROM in kept and YEAR_TO in kept and kept[YEAR_FROM] > kept[YEAR_TO]:
         del kept[YEAR_FROM], kept[YEAR_TO]
     return sorted(kept.items())
-
-
-def _single(value: Any) -> str | None:
-    """A query value, if it is one string or the same string repeated."""
-    values = value if isinstance(value, list) else [value]
-    if not values or any(v != values[0] for v in values):
-        return None
-    return values[0] if isinstance(values[0], str) else None
 
 
 dash.register_page(
@@ -164,8 +152,7 @@ def search_for(years: Any, pv: Any, first: Any, last: Any) -> str:
             params[YEAR_TO] = str(high)
     if isinstance(pv, list) and "1" in pv:
         params[PV] = "1"
-    pairs = parse_filters(params)
-    return "?" + urlencode(pairs, quote_via=quote) if pairs else ""
+    return query.encode_search(parse_filters(params))
 
 
 @callback(
@@ -199,9 +186,11 @@ def _marks(first: int, last: int) -> dict[int, str]:
 
 
 def _row(election: dict[str, Any]) -> html.Tr:
+    year = election["year"]
     return html.Tr(
         [
-            html.Td(str(election["year"])),
+            # A year links to its one-election view (#307).
+            html.Td(dcc.Link(str(year), href=f"/election/{year}")),
             html.Td(str(election["candidate_count"])),
             html.Td(labels.has_popular_vote(election["has_popular_vote"])),
         ]
