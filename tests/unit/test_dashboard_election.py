@@ -152,7 +152,9 @@ def test_every_recorded_response_is_one_snapshot(path: str) -> None:
 class TestServedYear:
     def test_every_year_the_index_serves_is_accepted(self) -> None:
         judge = MOD["served_year"]
-        assert len(YEARS) == 51
+        # The served years span exactly the snapshot's coverage, read from the
+        # response rather than a literal count (AC: the span from coverage).
+        assert (min(YEARS), max(YEARS)) == (COVERAGE["year_min"], COVERAGE["year_max"])
         for year in YEARS:
             assert judge({"year": str(year)}, INDEX) is True, year
 
@@ -171,6 +173,17 @@ class TestServedYear:
         added = copy.deepcopy(INDEX)
         added["data"].append({**added["data"][0], "year": 1825})
         assert judge({"year": "1825"}, added) is True
+
+    @pytest.mark.parametrize(
+        ("path_year", "row_year"), [("0001", True), ("0000", False)]
+    )
+    def test_a_boolean_row_year_serves_nothing(
+        self, path_year: str, row_year: bool
+    ) -> None:
+        """A bool is an int to Python (True == 1): the index's year must be a real
+        integer, or a malformed row would serve /election/0001."""
+        body = {"data": [{"year": row_year}]}
+        assert MOD["served_year"]({"year": path_year}, body) is False
 
     @pytest.mark.parametrize(
         "body",
@@ -218,6 +231,9 @@ class TestNotFound:
             "1825" not in json_node(response.get_json(), MOD["NOT_FOUND_ID"]).__str__()
         )
         assert calls == []
+        # The way back leads to the elections index.
+        links = of_type(MOD["not_found"](), "Link")
+        assert [link.href for link in links] == ["/elections"]
 
     def test_the_index_s_404_follows_the_index_served(
         self, monkeypatch: pytest.MonkeyPatch
@@ -356,6 +372,9 @@ class TestRender:
             lambda b: b["data"][0].update(year="1872"),  # a year that is no integer
             lambda b: b["data"][0].update(year=True),
             lambda b: b["summary"][0].update(year=1868),
+            # Every row is checked, not only the first.
+            lambda b: b["data"][-1].update(year=1864),
+            lambda b: b["summary"][-1].update(year=1868),
             lambda b: b.pop("meta"),
         ],
     )
@@ -561,6 +580,14 @@ class TestNullCells:
             "1900–2000."
         )
 
+    @pytest.mark.parametrize("flag", ["false", 1, None])
+    def test_only_a_true_flag_claims_a_popular_vote(self, flag: Any) -> None:
+        """A malformed index flag never makes T3 claim the year has a popular vote."""
+        tree = MOD["render"](
+            year_body(1872), {**index_row(1872), "has_popular_vote": flag}, []
+        )
+        assert find(tree, MOD["NO_PV_ID"]) is not None
+
     def test_the_index_s_flag_and_the_window_agree(self) -> None:
         """A check of the recorded data, not of the page: the index's flag and the
         coverage window name the same years, so T2 (window from coverage) and T3 (flag
@@ -684,6 +711,8 @@ class TestParser:
             ({"candidate": "abraham-lincoln"}, [("candidate", "abraham-lincoln")]),
             ({"candidate": "Abraham Lincoln"}, []),
             ({"candidate": "a-" * 40}, []),
+            ({"candidate": "a" * 64}, [("candidate", "a" * 64)]),
+            ({"candidate": "a" * 65}, []),  # a valid slug, over the length cap
             ({"candidate": "-a"}, []),
             (
                 {"pv_status": "legislature_chosen"},
