@@ -126,15 +126,24 @@ def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
     assert PAGE["on_miss"] == ("/v1/elections/{year}",)
     assert PAGE["success"] == PAGE_ID
-    assert PAGE["validate"][0] == api.ELECTIONS_PATH
+    # The registered judge is the one the layout calls, so the index's 404 and the
+    # page's not-found state decide alike.
+    assert PAGE["validate"] is MOD["VALIDATE"]
+    assert PAGE["validate"] == (api.ELECTIONS_PATH, MOD["served_year"])
     assert PAGE["query"] is MOD["parse_filters"]
 
 
-@pytest.mark.parametrize("year", RECORDED_YEARS)
-def test_every_recorded_response_is_one_snapshot(year: int) -> None:
-    """The fixtures were recorded from one snapshot, the one ``v1_meta.json`` names."""
-    assert year_body(year)["meta"]["provenance"]["snapshot_version"] == VERSION
-    assert year_body(year)["election"]["year"] == year
+@pytest.mark.parametrize("path", sorted(RECORDED))
+def test_every_recorded_response_is_one_snapshot(path: str) -> None:
+    """Every recorded response (``/v1/meta``, ``/v1/elections`` and each year) was
+    recorded from one snapshot, the one ``v1_meta.json`` names."""
+    body = RECORDED[path]
+    provenance = (
+        body["provenance"] if path == api.META_PATH else body["meta"]["provenance"]
+    )
+    assert provenance["snapshot_version"] == VERSION
+    if path.startswith("/v1/elections/"):
+        assert body["election"]["year"] == int(path.rsplit("/", 1)[1])
 
 
 # --- validation: served years come from /v1/elections, never literals ---------------
@@ -210,6 +219,38 @@ class TestNotFound:
         )
         assert calls == []
 
+    def test_the_index_s_404_follows_the_index_served(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        without = copy.deepcopy(INDEX)
+        without["data"] = [r for r in without["data"] if r["year"] != 1860]
+        cached_client(monkeypatch)
+        api.CLIENT.snapshot.responses[api.ELECTIONS_PATH] = without  # type: ignore[union-attr]
+        status, head, _ = get("/election/1860")
+        assert (status, head.canonical) == (404, None)
+
+    def test_a_year_the_index_adds_is_served(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No literal sits beside the index: a year it adds renders, at the index and
+        in the page."""
+        added = copy.deepcopy(INDEX)
+        added["data"].append({**added["data"][0], "year": 1825})
+        body = year_body(1824)
+        for row in (*body["data"], *body["summary"]):
+            row["year"] = 1825
+        fetch, calls = fake_fetch(
+            {**RECORDED, api.ELECTIONS_PATH: added, "/v1/elections/1825": body}
+        )
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        status, head, _ = get("/election/1825")
+        assert (status, head.canonical) == (200, url("/election/1825"))
+        assert PAGE_ID in routed_ids(route("/election/1825"))
+        assert "/v1/elections/1825" in calls
+
     def test_the_not_found_state_follows_the_index_served(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -253,12 +294,57 @@ class TestRender:
         assert [h.children for h in missing] == ["Election"]
 
     def test_the_window_is_read_from_coverage_not_literals(self) -> None:
-        body = year_body(1860)
-        body["meta"]["provenance"]["coverage"].update(pv_year_min=1800)
-        ny = [
-            r for r in state_rows(render(1860, body=body)) if r["state"] == "New York"
-        ]
-        assert {r["popular_votes"] for r in ny} == {labels.NO_FIGURE}
+        def new_york(pv_year_min: int) -> set[str]:
+            body = year_body(1860)
+            body["meta"]["provenance"]["coverage"].update(pv_year_min=pv_year_min)
+            rows = state_rows(render(1860, body=body))
+            return {r["popular_votes"] for r in rows if r["state"] == "New York"}
+
+        assert new_york(1800) == {
+            "No popular-vote figure for this candidate in this state"
+        }
+        assert new_york(1900) == {"Popular vote held; not in this dataset before 1900"}
+
+    def test_the_window_s_end_is_read_from_coverage_not_literals(self) -> None:
+        ended = {**COVERAGE, "pv_year_max": 2012}
+        assert labels.popular_votes(None, "popular_vote", 2016, ended) == (
+            "Popular vote held; not in this dataset yet"
+        )
+        assert labels.popular_votes(None, "popular_vote", 2012, ended) == (
+            labels.NO_FIGURE
+        )
+
+    def test_a_null_election_block_still_renders(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The API serves ``election: null`` on a build gap while the rows beside it
+        stay correct; the page shows none of the block, so it renders."""
+        body = year_body(1872)
+        body["election"] = None
+        fetch, _ = fake_fetch({**RECORDED, "/v1/elections/1872": body})
+        monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
+        tree = PAGE["layout"](year="1872")
+        assert PAGE_ID in component_ids(tree)
+        assert len(table_rows(tree, STATES)) == 222
+
+    def test_an_unformattable_share_renders_as_text_not_a_server_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = year_body(1872)
+        body["summary"][0]["ec_share_full"] = 10**400
+        body["summary"][1]["ec_share_full"] = None
+        fetch, _ = fake_fetch({**RECORDED, "/v1/elections/1872": body})
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        response = route("/election/1872")
+        assert response.status_code == 200
+        assert PAGE_ID in routed_ids(response)
+        tree = PAGE["layout"](year="1872")
+        shares = column(tree, NATION, MOD["NATION_FIELDS"], "ec_share_full")
+        assert shares[0] == str(10**400)
+        assert shares[1] == "Not in this dataset"  # nullable in the schema: labelled
 
     @pytest.mark.parametrize(
         "change",
@@ -266,7 +352,10 @@ class TestRender:
             lambda b: b.update(data=[]),
             lambda b: b.update(summary=[]),
             lambda b: b.update(data={}),
-            lambda b: b["election"].update(year=1864),
+            lambda b: b["data"][0].update(year=1864),  # a row of another year
+            lambda b: b["data"][0].update(year="1872"),  # a year that is no integer
+            lambda b: b["data"][0].update(year=True),
+            lambda b: b["summary"][0].update(year=1868),
             lambda b: b.pop("meta"),
         ],
     )
@@ -365,15 +454,38 @@ class TestNullCells:
         assert cell in shown
         assert shown not in ("", "None")
 
+    def test_the_approved_cell_wording(self) -> None:
+        """The issue's null table and help text, as written there."""
+        cells = {
+            "legislature_chosen": "No popular vote: the state legislature chose the electors",
+            "not_participating": "Took no part in this election",
+        }
+        for status, text in cells.items():
+            assert labels.popular_votes(None, status, 1860, COVERAGE) == text
+        assert labels.popular_votes(None, "popular_vote", 1860, COVERAGE) == (
+            "Popular vote held; not in this dataset before 1976"
+        )
+        assert labels.popular_votes(None, "popular_vote", 2016, COVERAGE) == (
+            "No popular-vote figure for this candidate in this state"
+        )
+        assert labels.NOT_IN_DATASET == "Not in this dataset"
+        assert labels.PARTY_NOTE == (
+            "Party comes from the popular-vote source, so it is recorded only where a "
+            "popular-vote figure is."
+        )
+        assert labels.COUNT_STATUS == {
+            "counted": ("Counted", None),
+            "not_counted": ("Not counted", "Congress refused the votes"),
+            "disputed": ("Disputed", "Congress never resolved the question"),
+        }
+
     def test_1860_reads_the_legislature_and_the_window_differently(self) -> None:
         rows = state_rows(render(1860))
-        sc = [r for r in rows if r["state"] == "South Carolina"]
-        ny = [r for r in rows if r["state"] == "New York"]
-        assert len(sc) == len(ny) == 4
-        assert {r["popular_votes"] for r in sc} == {labels.LEGISLATURE_CHOSE}
-        assert {r["popular_votes"] for r in ny} == {
-            labels.BEFORE_WINDOW.format(pv_year_min=PV_MIN)
-        }
+        sc = {r["popular_votes"] for r in rows if r["state"] == "South Carolina"}
+        ny = {r["popular_votes"] for r in rows if r["state"] == "New York"}
+        assert sc == {"No popular vote: the state legislature chose the electors"}
+        assert ny == {"Popular vote held; not in this dataset before 1976"}
+        assert sc != ny
 
     def test_2016_electoral_votes_without_a_figure_read_inside_the_window(self) -> None:
         body = year_body(2016)
@@ -424,8 +536,35 @@ class TestNullCells:
         assert trump["pv_share"] == "46.0%"
         assert trump["party"] == "REPUBLICAN"
 
+    def test_t3_reads_the_index_s_flag_and_the_coverage_years(self) -> None:
+        """Doctored inputs, so a literal window in the page fails: the year-level
+        decision comes from the index row, the sentence's years from coverage."""
+        held = MOD["render"](
+            year_body(1872), {**index_row(1872), "has_popular_vote": True}, []
+        )
+        assert find(held, MOD["NO_PV_ID"]) is None
+        grant = nation_rows(held)["Ulysses S. Grant"]
+        assert grant["national_pv_votes"] == "No popular-vote figure for this candidate"
+        missing = MOD["render"](
+            year_body(2016), {**index_row(2016), "has_popular_vote": False}, []
+        )
+        assert find(missing, MOD["NO_PV_ID"]) is not None
+        trump = nation_rows(missing)["Donald J. Trump"]
+        assert trump["national_pv_votes"] == trump["pv_share"] == "Not in this dataset"
+        body = year_body(1860)
+        body["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1900, pv_year_max=2000
+        )
+        note = find(render(1860, body=body), MOD["NO_PV_ID"])
+        assert note.children == (
+            "This dataset has no popular vote for 1860; its popular-vote figures cover "
+            "1900–2000."
+        )
+
     def test_the_index_s_flag_and_the_window_agree(self) -> None:
-        """T2 decides the window from coverage, T3 from has_popular_vote: one fact."""
+        """A check of the recorded data, not of the page: the index's flag and the
+        coverage window name the same years, so T2 (window from coverage) and T3 (flag
+        from the index) cannot disagree on this snapshot."""
         for row in INDEX["data"]:
             inside = PV_MIN <= row["year"] <= PV_MAX
             assert row["has_popular_vote"] is inside, row["year"]
@@ -444,6 +583,14 @@ class TestNullCells:
             assert cell.title == labels.PARTY_NOTE
         notes = [p for p in of_type(tree, "P") if p.children == labels.PARTY_NOTE]
         assert len(notes) == 2  # under T2 and under T3
+        # The page's party cells are what the shared cell builds (S4 reuses it).
+        shared = labels.party_cell(None)
+        assert (shared.children, getattr(shared, "title", None)) == (
+            cells[0].children,
+            cells[0].title,
+        )
+        assert labels.party_cell("WHIG").children == "WHIG"
+        assert getattr(labels.party_cell("WHIG"), "title", None) is None
 
     @pytest.mark.parametrize(
         ("fn", "value", "shown"),
@@ -458,6 +605,8 @@ class TestNullCells:
             (labels.number, 1234567, "1,234,567"),
             (labels.number, False, "False"),
             (labels.party, None, labels.NOT_IN_DATASET),
+            (labels.share, 10**400, str(10**400)),  # no float holds it
+            (labels.share, float("inf"), "inf"),
             (labels.pv_status, "legislature_chosen", "State legislature chose"),
             (labels.pv_status, "mystery", "mystery"),
             (labels.pv_status, None, "None"),
@@ -649,7 +798,17 @@ class TestShareableUrl:
         filtered = routed_states(route("/election/1872", f"?{SHARED[0]}"))
         assert filtered == [["Georgia", "Horace Greeley"]]
 
-    @pytest.mark.parametrize("query", [SHARED[0], SHARED[1], "state=ZZ", ""])
+    @pytest.mark.parametrize(
+        "query",
+        [
+            SHARED[0],
+            SHARED[1],
+            "pv_status=legislature_chosen",
+            "electoral_count_status=disputed&pv_status=popular_vote",
+            "state=ZZ",
+            "",
+        ],
+    )
     def test_the_callback_writes_the_og_url_s_query_byte_for_byte(
         self, query: str
     ) -> None:
@@ -689,6 +848,10 @@ class TestShareableUrl:
         assert callback("GA", None, None, None, "?state=GA") is no_update
         assert callback(None, None, None, None, None) is no_update
         assert callback(None, None, None, None, "?state=GA") == ""
+        # Each control writes its own key, in the normal form.
+        assert callback(None, None, "legislature_chosen", "disputed", "") == (
+            "?electoral_count_status=disputed&pv_status=legislature_chosen"
+        )
         # Syntactically bad values are dropped.
         assert callback("ga", ["x"], "nope", "", "?state=GA") == ""
 

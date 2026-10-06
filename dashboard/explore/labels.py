@@ -21,6 +21,7 @@ a null is never bare, and each closed value of ``pv_status`` and
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -129,9 +130,18 @@ def number(value: object) -> str:
 
 
 def share(value: object) -> str:
-    """A share as a percentage to one decimal place; anything else as text."""
+    """A share as a percentage to one decimal place; anything else as text.
+
+    Total: a number no float can hold (``json`` parses integers of any size) renders
+    as text too, rather than raising ``OverflowError`` past the page's degraded state.
+    """
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return f"{value * 100:.1f}%"
+        try:
+            percent = float(value) * 100
+        except OverflowError:
+            return str(value)
+        if math.isfinite(percent):
+            return f"{percent:.1f}%"
     return str(value)
 
 
@@ -147,6 +157,14 @@ def yes_no(value: object) -> str:
 def party(value: object) -> str:
     """A party, or :data:`NOT_IN_DATASET` for a null one (see :data:`PARTY_NOTE`)."""
     return NOT_IN_DATASET if value is None else str(value)
+
+
+def party_cell(value: object) -> html.Td:
+    """A party cell: :func:`party`, and for a null one :data:`PARTY_NOTE` as its help
+    text."""
+    if value is None:
+        return html.Td(party(value), title=PARTY_NOTE)
+    return html.Td(party(value))
 
 
 def popular_votes(

@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import quote, urlencode
 
-#: A year as the API writes one. ASCII only: ``\\d`` and ``int()`` accept other digits.
+#: A year as the API writes one. ASCII only: ``\d`` and ``int()`` accept other digits.
 YEAR_RE = re.compile(r"[0-9]{4}")
 
 #: A USPS state code, the API's ``state`` filter (``/v1/elections/{year}?state=``).

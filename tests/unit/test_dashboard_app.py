@@ -250,13 +250,22 @@ class TestRender:
             assert isinstance(text, str), module
             assert not any(ch.isdigit() for ch in text), (module, text)
 
-    def test_no_two_pages_share_a_path(self) -> None:
-        """Dash's router takes the first match, so a second page at a taken path is
-        never rendered (#307)."""
-        paths = [
-            p.get("path_template") or p["path"] for p in dash.page_registry.values()
-        ]
-        assert len(paths) == len(set(paths)), paths
+    def test_every_page_s_path_routes_to_that_page(self) -> None:
+        """Dash's router takes the first match, so a page whose concrete path routes
+        to another page is never rendered (#307)."""
+        for module, page in dash.page_registry.items():
+            if page["module"].split(".")[-1] == "not_found_404":
+                continue
+            routed, _ = _path_to_page(concrete_page_path(page).strip("/"))
+            assert routed.get("module") == page["module"], module
+
+    def test_the_register_fixture_refuses_a_fake_at_a_routed_path(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        # A different template string, the same URLs as the real /election/<year>.
+        with pytest.raises(AssertionError, match="pages.election"):
+            register("fake_shadow", **{**YEAR_PAGE, "path_template": "/election/<yr>"})
+        assert "fake_shadow" not in dash.page_registry
 
     def test_a_value_of_an_unexpected_type_renders_as_text(self) -> None:
         meta = copy.deepcopy(META)
@@ -362,12 +371,14 @@ def register() -> Iterator[Callable[..., dict[str, Any]]]:
     modules: list[str] = []
 
     def add(module: str = "fake_year", **page: Any) -> dict[str, Any]:
-        # Dash's router takes the first match, so a fake page at a real page's path
-        # would silently test the real one (#307).
-        taken = {
-            p.get("path_template") or p["path"] for p in dash.page_registry.values()
-        }
-        assert (page.get("path_template") or page.get("path")) not in taken, page
+        # Dash's router takes the first match, so a fake page whose path a registered
+        # page already routes would silently test that page instead (#307). Checked
+        # by route, not by string: ``/election/<yr>`` matches what ``<year>`` does.
+        template = page.get("path_template") or page.get("path") or ""
+        # Any value: Dash's matcher is greedy, so a variable matches any segment.
+        concrete = re.sub(r"<(.*?)>", "x", template)
+        routed, _ = _path_to_page(concrete.strip("/"))
+        assert not routed, (concrete, routed.get("module"))
         dash.register_page(module, **page)
         modules.append(module)
         registered: dict[str, Any] = dash.page_registry[module]
@@ -1488,6 +1499,8 @@ class TestFetch:
             TimeoutError("timed out"),
             _FakeRaw(200, b"<html>not json</html>", None),
             _FakeRaw(200, b"[1, 2]", None),
+            # Nested past the parser's recursion limit: RecursionError, not ValueError.
+            _FakeRaw(200, b"[" * 200_000, None),
             _FakeRaw(204, b"", None),
             # http.client errors urllib re-raises unwrapped (not OSError):
             http.client.BadStatusLine("garbage"),

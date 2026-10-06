@@ -425,8 +425,9 @@ registered = list(dict.fromkeys(api.registered_prefetch_paths()))
 # The elections pages prefetch their index, so the prefetch loop runs past /v1/meta.
 assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
-# Named, so a page that stops reading the miss fails here rather than as a missing
-# response below.
+# Named, so a page that stops declaring the miss in on_miss fails here; one that
+# still declares it but stops reading it fails at "the miss was not stored" and at
+# SERVED below.
 misses = [
     template.format(**GUARD_PATH_VALUES)
     for page in PAGES
@@ -465,6 +466,9 @@ assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
 # literal: neither the page's success marker nor the degraded state.
 requested_before = list(REQUESTED)
 text = route(client, "/election/1825")
+# The literal below is the page's marker; pinned, so a rename cannot leave it vacuous.
+(election_page,) = [p for p in PAGES if p.get("path_template") == "/election/<year>"]
+assert election_page["success"] == "election", election_page["success"]
 assert "election" not in rendered_ids(text)
 assert "election-not-found" in rendered_ids(text)
 assert "isn't responding" not in text
@@ -656,8 +660,9 @@ dash.register_page(
 
 
 def test_the_guard_values_render_the_miss_path() -> None:
-    """The one-election view's miss template at :data:`GUARD_PATH_VALUES` is exactly
-    the miss, and its response is recorded (the success run checks the page itself)."""
+    """The literal miss template, at :data:`GUARD_PATH_VALUES`, is exactly the miss,
+    and its response is recorded. The page's own ``on_miss`` is checked by name in
+    the success run."""
     assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
     assert MISS_PATH in FIXTURE_FILES
 

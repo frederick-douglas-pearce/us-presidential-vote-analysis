@@ -76,7 +76,8 @@ COUNT_STATUS = "electoral_count_status"
 
 #: The year's popular-vote sentence above T3, when the dataset holds none for it.
 NO_PV_SENTENCE = (
-    "This dataset has no popular vote for {year}; it covers {first}–{last}."
+    "This dataset has no popular vote for {year}; its popular-vote figures cover "
+    "{first}–{last}."
 )
 
 #: The not-found state's sentence. The raw path value is never echoed.
@@ -252,10 +253,10 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     states = {r["state_usps"]: r["state"] for r in rows}
     candidates = {r["candidate_slug"]: r["candidate"] for r in rows}
     dropdowns = (
-        (STATE_ID, "State", _options(states), chosen.state, "All states"),
+        (STATE_ID, labels.LABELS[STATE], _options(states), chosen.state, "All states"),
         (
             CANDIDATE_ID,
-            "Candidate",
+            labels.LABELS[CANDIDATE],
             _options(candidates),
             chosen.candidate,
             "All candidates",
@@ -296,18 +297,12 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     )
 
 
-def _party_cell(value: Any) -> html.Td:
-    if value is None:
-        return html.Td(labels.NOT_IN_DATASET, title=labels.PARTY_NOTE)
-    return html.Td(str(value))
-
-
-def _state_row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
+def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html.Tr:
     return html.Tr(
         [
             html.Td(str(row["state"])),
             html.Td(str(row["candidate"])),
-            _party_cell(row["party"]),
+            labels.party_cell(row["party"]),
             html.Td(labels.number(row["state_electoral_votes"])),
             html.Td(labels.number(row["electoral_votes"])),
             html.Td(labels.number(row["electoral_votes_counted"])),
@@ -319,7 +314,7 @@ def _state_row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
             html.Td(labels.pv_status(row["pv_status"])),
             html.Td(
                 labels.popular_votes(
-                    row["popular_votes"], row["pv_status"], row["year"], coverage
+                    row["popular_votes"], row["pv_status"], year, coverage
                 )
             ),
         ]
@@ -338,14 +333,19 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
     return html.Tr(
         [
             html.Td(str(row["candidate"])),
-            _party_cell(row["party"]),
+            labels.party_cell(row["party"]),
             html.Td(labels.number(row["national_electoral_votes"])),
             html.Td(labels.number(row["national_electoral_votes_counted"])),
             html.Td(labels.number(row["national_electoral_denominator"])),
             html.Td(labels.number(row["electoral_rank"])),
             html.Td(labels.yes_no(row["took_office"])),
             html.Td(_national_pv(row["national_pv_votes"], has_popular_vote, False)),
-            html.Td(labels.share(row["ec_share_full"])),
+            # Nullable in the API's schema, though real for every served year.
+            html.Td(
+                labels.NOT_IN_DATASET
+                if row["ec_share_full"] is None
+                else labels.share(row["ec_share_full"])
+            ),
             html.Td(_national_pv(row["pv_share"], has_popular_vote, True)),
         ]
     )
@@ -365,11 +365,19 @@ def _table(fields: tuple[str, ...], rows: list[html.Tr], table_id: str) -> html.
     )
 
 
-def _list(value: Any, name: str) -> list[Any]:
-    # A served year always has rows: anything else is a malformed body, and rendering
-    # it would show the success marker over empty tables.
+def _rows(value: Any, year: int, name: str) -> list[Any]:
+    """A non-empty list of the year's rows, each naming that year, or ``TypeError``.
+
+    A served year always has state rows, and the API treats a year with no national
+    summary as a build regression, so an empty list is a malformed body: rendering it
+    would show the success marker over an empty table. Each row's year is checked
+    against the validated one, so no row of another year (or of no year) is shown,
+    and the cells read the validated year rather than the row's.
+    """
     if not isinstance(value, list) or not value:
-        raise TypeError(f"/v1/elections/{{year}} carries no list of {name}")
+        raise TypeError(f"/v1/elections/{year} carries no list of {name}")
+    if any(_row_year(row) != year for row in value):
+        raise TypeError(f"/v1/elections/{year} carries {name} of another year")
     return value
 
 
@@ -381,10 +389,12 @@ def render(
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     year = _row_year(index_row)
-    if year is None or body["election"]["year"] != year:
-        raise TypeError("the response is not the requested year's")
-    rows = _list(body["data"], "state rows")
-    summary = _list(body["summary"], "candidates")
+    if year is None:
+        raise TypeError("the index row names no year")
+    # Every row, not the ``election`` block: the API serves ``election: null`` on a
+    # build gap while the rows beside it stay correct, and this page shows none of it.
+    rows = _rows(body["data"], year, "state rows")
+    summary = _rows(body["summary"], year, "candidates")
     has_popular_vote = index_row["has_popular_vote"] is True
     chosen = filters(pairs, rows)
     shown = select(rows, chosen)
@@ -418,7 +428,7 @@ def render(
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
             _table(
                 STATE_FIELDS,
-                [_state_row(r, coverage) for r in shown],
+                [_state_row(r, year, coverage) for r in shown],
                 STATES_TABLE_ID,
             )
             if shown
