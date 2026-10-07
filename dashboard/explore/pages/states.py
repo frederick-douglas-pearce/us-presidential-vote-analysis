@@ -3,9 +3,9 @@
 The roster comes from the latest election's rows, ``/v1/elections/{year_max}``
 (:data:`explore.api.ROSTER_PATH`), since every state and DC takes part in it; there is
 no second copy of it (D006). ``year_max`` is read from the prefetched ``/v1/elections``
-and checked to be a year it serves (:func:`explore.api.coverage_vars`), never from the
-request. The roster is filled on a miss and shared with every ``/state/<usps>`` page,
-which validates its code against it.
+and checked to be the latest year it serves (:func:`explore.api.coverage_vars`), never
+from the request. The roster is filled on a miss and shared with every
+``/state/<usps>`` page, which validates its code against it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 import dash
 from dash import dcc, html
 
-from explore import api, components, query
+from explore import api, components
 from explore.config import SITE_TITLE
 
 #: The wrapper every successful render carries: the list of states.
@@ -28,7 +28,7 @@ dash.register_page(
     title=f"States — {SITE_TITLE}",
     description=(
         "Every US state and DC in the dataset, each linked to its electoral votes "
-        "in every presidential election."
+        "in every presidential election in this dataset."
     ),
     prefetch=(api.ELECTIONS_PATH,),
     on_miss=(api.ROSTER_PATH,),
@@ -37,23 +37,15 @@ dash.register_page(
 
 
 def roster(body: Any, year: int) -> list[tuple[str, str]]:
-    """``(usps, name)`` for each state the roster's rows name, sorted by name, or
+    """``(usps, name)`` for each state the roster names, sorted by name, or
     ``TypeError``.
 
-    Every row must name the year it was read for and carry a USPS code (two ASCII
-    capitals), or the body is malformed: a link is built from the code.
+    Read by :func:`explore.api.roster`, the reading the state page judges from too, and
+    the rows must name the year the roster was read for.
     """
-    rows = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(rows, list) or not rows:
-        raise TypeError(f"/v1/elections/{year} carries no list of state rows")
-    states: dict[str, str] = {}
-    for row in rows:
-        if not isinstance(row, dict) or query.checked_year(row.get("year")) != year:
-            raise TypeError(f"/v1/elections/{year} carries a row of another year")
-        usps = row.get("state_usps")
-        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
-            raise TypeError(f"/v1/elections/{year} carries a malformed state code")
-        states[usps] = str(row["state"])
+    named, states = api.roster(body)
+    if named != year:
+        raise TypeError(f"/v1/elections/{year} carries rows of {named}")
     return sorted(states.items(), key=lambda kv: kv[1])
 
 
@@ -90,7 +82,7 @@ def layout(**_query: Any) -> html.Div:
             html.H1("States"),
             html.P(
                 "Every state and DC in this dataset. Open one to see its electoral "
-                "votes in every election it took part in.",
+                "votes in every election this dataset holds for it.",
                 className="lede",
             ),
             content,

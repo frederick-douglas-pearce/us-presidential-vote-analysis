@@ -1,4 +1,4 @@
-"""One state's history (#279): T4, its rows across every election it took part in.
+"""One state's history (#279): T4, its rows in every election this dataset holds for it.
 
 The rows come from one response, ``/v1/states/{usps}``, filled on a miss. The state is
 the path (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case
@@ -6,15 +6,18 @@ as the API writes a USPS code. It is validated against the state roster before i
 formatted into an API path: the latest election's rows (``/v1/elections/{year_max}``,
 :data:`explore.api.ROSTER_PATH`), since every state and DC takes part in it. That
 source is declared in ``on_miss`` and built from the index's coverage, never from the
-path, so a code the dataset does not serve costs at most one fill per snapshot, of the
-roster itself, and 404s at the index once the roster is cached (#279, D073).
+path, so a code the dataset does not serve never fills a path built from it: the most it
+costs is a fill of the shared roster, once per render until one succeeds, and it 404s
+at the index once the roster is cached (#279, D074).
 
 It follows the one-election view's conventions (``pages/election.py``): labels and
 null cells from :mod:`explore.labels`, filters only in the query string through the
 page's one parser, a filter change written to a page-local ``dcc.Location`` and
 re-rendered from the cache, and the provenance footer from the response's own
 ``meta.provenance``. The filters are the shared year range (``year_from`` /
-``year_to``), ``candidate`` (a slug) and ``pv_status``.
+``year_to``, judged against the dataset's span as on ``/elections``, so a range before
+the state's first election is an honest empty result), ``candidate`` (a slug) and
+``pv_status``.
 """
 
 from __future__ import annotations
@@ -89,18 +92,20 @@ def _rows_of(body: Any) -> list[Any]:
 
 
 def on_roster(path_vars: dict[str, Any], body: Any) -> bool:
-    """Whether ``path_vars["usps"]`` is a state the roster's rows name.
+    """Whether ``path_vars["usps"]`` is a state the roster names.
 
-    Pure and total: a USPS code (two ASCII capitals) equal to a row's ``state_usps`` in
-    the latest election, never a literal. A malformed body names no state.
+    Pure and total: a USPS code (two ASCII capitals) among the states
+    :func:`explore.api.roster` reads from the latest election, never a literal. A
+    malformed roster, which the picker would refuse too, names no state.
     """
     usps = path_vars.get("usps")
     if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
         return False
-    return any(
-        isinstance(row, dict) and row.get("state_usps") == usps
-        for row in _rows_of(body)
-    )
+    try:
+        _, states = api.roster(body)
+    except TypeError:
+        return False
+    return usps in states
 
 
 VALIDATE: api.Validate = (api.ROSTER_PATH, on_roster)
@@ -120,7 +125,9 @@ dash.register_page(
     path_template="/state/<usps>",
     title=title,
     # No names: the index HTML never waits on the API, so this cannot read the state.
-    description="One US state's electoral votes in every presidential election.",
+    description=(
+        "One US state's electoral votes in every presidential election in this dataset."
+    ),
     prefetch=(api.ELECTIONS_PATH,),
     on_miss=(api.ROSTER_PATH, "/v1/states/{usps}"),
     success=PAGE_ID,
@@ -142,14 +149,19 @@ class Filters(NamedTuple):
     pv_status: str | None
 
 
-def filters(pairs: list[tuple[str, str]], rows: list[dict[str, Any]]) -> Filters:
-    """The filters to apply to this state's rows, sorted by year.
+def filters(
+    pairs: list[tuple[str, str]], rows: list[dict[str, Any]], span: tuple[int, int]
+) -> Filters:
+    """The filters to apply to this state's rows.
 
-    Per parameter, as ``og:url`` is: a bound outside the state's own span falls back to
-    that end of it, and a candidate absent from its rows to "all". A status is a closed
-    value, so it is kept even when no row has it: an empty result is the honest answer.
+    Per parameter, as ``og:url`` is. A year bound is judged against the dataset's span,
+    as on ``/elections``: one outside it falls back to that end of it, while one inside
+    it is kept even where the state has no election, so a range before its first is an
+    honest empty result rather than its whole history. A candidate absent from its rows
+    falls back to "all". A status is a closed value, so it is kept even when no row has
+    it.
     """
-    year_from, year_to = query.year_range(pairs, rows[0]["year"], rows[-1]["year"])
+    year_from, year_to = query.year_range(pairs, *span)
     given = dict(pairs)
     candidate = given.get(CANDIDATE)
     return Filters(
@@ -243,8 +255,12 @@ def _options(pairs: dict[str, str]) -> list[dict[str, str]]:
     ]
 
 
-def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
-    first, last = rows[0]["year"], rows[-1]["year"]
+def _controls(
+    rows: list[dict[str, Any]], chosen: Filters, span: tuple[int, int]
+) -> html.Div:
+    # The dataset's span, as on /elections: the slider's value is then the selection,
+    # so the callback never writes back a bound the reader did not move.
+    first, last = span
     candidates = {r["candidate_slug"]: str(r["candidate"]) for r in rows}
     dropdowns = (
         (
@@ -330,13 +346,14 @@ def render(
     ``/v1/elections`` index read through the same view, and this page's filter pairs."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
+    span = query.year_span(coverage["year_min"], coverage["year_max"])
     rows = _rows(body, usps, _served_years(index))
-    chosen = filters(pairs, rows)
+    chosen = filters(pairs, rows, span)
     shown = select(rows, chosen)
     content = html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            _controls(rows, chosen),
+            _controls(rows, chosen, span),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
             html.Div(
                 html.Table(
@@ -376,7 +393,7 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
     heading = "State history"
     try:
         with api.CLIENT.view() as view:
-            # Validated from the roster before it is formatted (#279, D073).
+            # Validated from the roster before it is formatted (#279, D074).
             if not api.accepted(view.get, VALIDATE, {"usps": usps}):
                 content = not_found()
             else:
@@ -389,9 +406,9 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
         [
             html.H1(heading),
             html.P(
-                "This state's electoral votes for each candidate in every election it "
-                "took part in, with the popular vote where this dataset has it. Narrow "
-                "the rows by year, candidate or popular-vote status.",
+                "This state's electoral votes for each candidate in every election "
+                "this dataset holds for it, with the popular vote where the dataset "
+                "has it. Narrow the rows by year, candidate or popular-vote status.",
                 className="lede",
             ),
             content,

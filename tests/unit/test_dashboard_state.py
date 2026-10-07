@@ -125,10 +125,27 @@ class TestOnRoster:
         assert MOD["on_roster"]({"usps": usps}, ROSTER) is False
 
     @pytest.mark.parametrize(
-        "body", [{}, [], None, "GA", {"data": "GA"}, {"data": [1]}]
+        "body", [{}, [], None, "GA", {"data": "GA"}, {"data": [1]}, {"data": []}]
     )
     def test_a_malformed_roster_names_no_state(self, body: Any) -> None:
         assert MOD["on_roster"]({"usps": "GA"}, body) is False
+
+    @pytest.mark.parametrize("position", [0, 50, -1])
+    @pytest.mark.parametrize(
+        "change",
+        [{"year": 1824}, {"year": "2024"}, {"state_usps": "ga"}, {"state": None}],
+        ids=repr,
+    )
+    def test_a_roster_the_picker_would_refuse_names_no_state(
+        self, position: int, change: dict[str, Any]
+    ) -> None:
+        # One reading of the roster for both pages (api.roster): a row of another
+        # year, a malformed code or a missing name refuses every code, GA included.
+        body = copy.deepcopy(ROSTER)
+        body["data"][position].update(change)
+        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        with pytest.raises(TypeError):
+            PICKER_MOD["roster"](body, 2024)
 
 
 # --- the Georgia acceptance criterion ------------------------------------------------
@@ -194,7 +211,8 @@ def mutated(index: int, **change: Any) -> dict[str, Any]:
 def test_a_row_of_another_state_or_no_served_year_is_malformed(
     position: int, change: dict[str, Any]
 ) -> None:
-    with pytest.raises(TypeError):
+    # Matched, so the check under test raises, not a later comparison of the rows.
+    with pytest.raises(TypeError, match="another state|no served year"):
         render(body=mutated(position, **change))
 
 
@@ -209,16 +227,18 @@ def test_a_body_with_no_rows_is_malformed(data: Any) -> None:
 def test_an_index_serving_no_year_is_malformed() -> None:
     index = copy.deepcopy(INDEX)
     index["data"] = [{"year": "1868"}]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="serves no year"):
         render(index=index)
 
 
 def test_rows_are_sorted_by_the_page_not_trusted_in_api_order() -> None:
     body = ga_body()
     random.Random(279).shuffle(body["data"])
-    shown = years_shown(render(body=body))
+    shown = [(int(row[0]), row[1]) for row in row_texts(render(body=body))]
+    # By year, then by candidate within a year.
     assert shown == sorted(shown)
-    assert shown[0] == 1824 and shown[-1] == 2024
+    assert shown[0][0] == 1824 and shown[-1][0] == 2024
+    assert len({year for year, _ in shown}) < len(shown)  # some year has several
 
 
 # --- filters --------------------------------------------------------------------------
@@ -259,19 +279,42 @@ class TestFilters:
         shown = years_shown(render("year_from=1860&year_to=1872"))
         assert sorted(set(shown)) == [1860, 1864, 1868, 1872]
 
-    def test_a_bound_outside_the_states_span_falls_back_per_parameter(self) -> None:
-        # Georgia's own span: a state admitted later gets its own (below).
+    def test_a_bound_outside_the_datasets_span_falls_back_per_parameter(self) -> None:
         shown = years_shown(render("year_from=1700&year_to=1832"))
         assert sorted(set(shown)) == [1824, 1828, 1832]
 
-    def test_the_span_is_the_states_own(self) -> None:
+    @staticmethod
+    def admitted_1912() -> dict[str, Any]:
+        """Georgia's body cut to 1912 on: a state admitted that year, as Arizona was."""
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] >= 1912]
-        tree = render("year_from=1900", body=body)
+        return body
+
+    def test_a_range_before_the_states_first_election_is_an_honest_empty_result(
+        self,
+    ) -> None:
+        # The dataset's span judges the bound (Fred, option (i)): 1900 is a year the
+        # dataset holds, so it is kept, and the state has no election in range.
+        for query in ("year_to=1900", "year_from=1824&year_to=1900"):
+            tree = render(query, body=self.admitted_1912())
+            assert table_rows(tree) == [], query
+            assert "No rows match these filters." in texts(tree)
+            (slider,) = of_type(tree, "RangeSlider")
+            assert slider.value == [1824, 1900]
+
+    def test_the_slider_spans_the_dataset_and_shows_the_selection(self) -> None:
+        tree = render("year_from=1900", body=self.admitted_1912())
         (slider,) = of_type(tree, "RangeSlider")
-        assert (slider.min, slider.max) == (1912, 2024)
-        assert slider.value == [1912, 2024]
+        assert (slider.min, slider.max) == (1824, 2024)
+        assert slider.value == [1900, 2024]
         assert min(years_shown(tree)) == 1912
+        # So the callback writes back exactly what the URL said.
+        assert (
+            MOD["on_filter_change"](
+                slider.value, None, None, slider.min, slider.max, "?year_from=1900"
+            )
+            is no_update
+        )
 
     def test_a_candidate_narrows_and_one_absent_falls_back_to_all(self) -> None:
         shown = row_texts(render("candidate=horatio-seymour"))
@@ -426,7 +469,12 @@ class TestRoster:
         assert "unavailable" in routed_ids(route("/state/GA"))
         assert calls == [ROSTER_PATH]  # never started
 
-    @pytest.mark.parametrize("search", ["?year_max=1825", "?year_max=2028&year_max=x"])
+    @pytest.mark.parametrize(
+        "search",
+        # 1860 is served (and recorded): a page reading a served year from the query
+        # would fill it, and the call list would show it.
+        ["?year_max=1825", "?year_max=2028&year_max=x", "?year_max=1860"],
+    )
     def test_the_roster_year_is_never_read_from_the_query(
         self, monkeypatch: pytest.MonkeyPatch, search: str
     ) -> None:
@@ -439,6 +487,7 @@ class TestRoster:
         "coverage",
         [
             {"year_max": 2028},
+            {"year_max": 1860},  # served, but not the latest
             {"year_max": True},
             {"year_max": "2024"},
             {"year_max": 2024.0},

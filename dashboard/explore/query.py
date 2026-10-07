@@ -70,7 +70,8 @@ def checked_year(value: Any) -> int | None:
 
     The one check of a year read from a body (#279): an ``int`` (never a ``bool``, which
     is one) from :data:`YEAR_MIN` to :data:`YEAR_MAX`. A float, a string or an
-    out-of-range number is not a year, so it never reaches a path or a label.
+    out-of-range number is not a year, so it never reaches a path or a label built
+    from a checked year. (The elections index's rows are not yet checked: #334.)
     """
     if isinstance(value, bool) or not isinstance(value, int):
         return None

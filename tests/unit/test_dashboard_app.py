@@ -1152,12 +1152,11 @@ class TestDashPrivates:
 
 # --- every templated page validates what its layout receives (#312, item 6) ----------
 
-#: Hostile renders for a page's path variables: (path value, query override). Each
-#: names a value the recorded ``/v1/elections`` does not serve, or one that is not a
-#: plain string at all.
-#: Each hostile path value and query override, rendered for every path variable:
-#: ``{unserved}`` is the variable's :data:`UNSERVED_VALUES` entry and ``{served}`` its
-#: :data:`PATH_VALUES` one, so an override always sits on a value the page serves.
+#: Hostile renders for a page's path variables: (path value, query override), each
+#: rendered for every path variable. Each names a value the page does not serve, or one
+#: that is not a plain string at all. ``{unserved}`` is the variable's
+#: :data:`UNSERVED_VALUES` entry and ``{served}`` its :data:`PATH_VALUES` one, so an
+#: override always sits on a value the page serves.
 HOSTILE_RENDERS: tuple[tuple[str, str], ...] = (
     ("{unserved}", ""),
     ("{served}/x", ""),
@@ -1325,7 +1324,7 @@ def template_problems(page: dict[str, Any]) -> list[str]:
 
 
 class TestRegistryContracts:
-    def test_every_validating_page_prefetches_its_source(
+    def test_every_validating_page_declares_its_source(
         self, register: Callable[..., dict[str, Any]]
     ) -> None:
         register(**YEAR_PAGE)
@@ -1402,6 +1401,15 @@ class TestRegistryContracts:
             (
                 {"prefetch": (), "on_miss": (api.ROSTER_PATH,)},
                 "a page naming a coverage variable does not prefetch the index",
+            ),
+            # An unknown name in the validate source alone, which on_miss does not list.
+            (
+                {
+                    "prefetch": (api.ELECTIONS_PATH, "/v1/elections/{year_min}"),
+                    "validate": ("/v1/elections/{year_min}", known_year),
+                },
+                "/v1/elections/{year_min} names year_min, neither a path nor a "
+                "coverage variable",
             ),
         ],
     )
@@ -2105,6 +2113,9 @@ class TestCoverageVars:
             # In range and four digits, but not a year this index serves.
             index_with(year_max=2028),
             index_with(year_max=1826),
+            # Served, but not the latest: the roster would not be every state.
+            index_with(year_max=1824),
+            index_with(year_max=2020),
         ],
         ids=repr,
     )
@@ -2259,8 +2270,9 @@ PAGE_API_NAMES = {
     "ROSTER_PATH",
     "Validate",
     "accepted",
-    # A pure function of a body the page already read through its view.
+    # Pure functions of a body the page already read through its view.
     "coverage_vars",
+    "roster",
 }
 
 

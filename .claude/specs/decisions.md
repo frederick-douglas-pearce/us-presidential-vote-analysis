@@ -5092,6 +5092,7 @@ routing request passes through the index.
 **Related:** D070, D071, D072, #305, #306, #307, #312.
 
 ---
+
 ## D074: A page's `validate` source may be filled on a miss, from a coverage variable, but never from the value it judges
 
 **Date:** 2026-10-07
@@ -5103,8 +5104,9 @@ prefetches" · **Decided by:** the owner, approving the architect's rulings at #
 prefetches. The state history (`/state/<usps>`, #279) has no such source: the state roster lives in
 the latest election's rows, `/v1/elections/{year_max}`, which D072 leaves filled on a miss and
 whose year is data, not a path variable. Validating syntax alone and checking the roster in the
-page would have let `/state/ZZ` keep a canonical link and a 200 for good, not only until the first
-refresh. The candidate history (`/candidate/<slug>`) has no roster at all; filling
+page would have let `/state/ZZ` keep a canonical link and a 200 for good. (Under this decision
+that window still reopens with every new snapshot version, until a render fills the roster, since
+the roster is not prefetched.) The candidate history (`/candidate/<slug>`) has no roster at all; filling
 `/v1/candidates/{slug}` and reading its 404 as not-found was considered and rejected (below).
 
 **Decision.**
@@ -5114,13 +5116,17 @@ refresh. The candidate history (`/candidate/<slug>`) has no roster at all; filli
   variable, so judging a value never fills a path made from it. `TestRegistryContracts` enforces
   this, and that every `on_miss` placeholder is a path or coverage variable.
 - **A coverage variable is validated as a path variable is.** `api.coverage_vars` reads it from
-  the prefetched `/v1/elections` and accepts `year_max` only if that same body serves the year as
-  a row; otherwise the render degrades with no fill. It is never read from the request, so
+  the prefetched `/v1/elections` and accepts `year_max` only if it is the latest year that same
+  body serves as a row (the roster means "every state in the latest election" only then);
+  otherwise the render degrades with no fill. It is never read from the request, so
   `?year_max=` changes nothing.
 - **At the index**, `app.resolve` judges a template source when the index and the resolved source
   are both cached, and counts it matched otherwise, as D073 does for a cold literal. **At render**,
-  `api.accepted` resolves the template and reads the source, filling it at most once per snapshot:
-  D073's "the render may fill the source itself".
+  `api.accepted` resolves the template and reads the source, which D073 allows ("that read may fill
+  the source itself"). The source is an `on_miss` path like any other: once cached, a refused value
+  costs nothing for the rest of the snapshot; until then each render that misses it fills it, at
+  most once per render, concurrent renders may each fill it, and a failed fill caches nothing, all
+  under the shared token bucket (single-flight is #333).
 - **A variable with no roster source is not validated by fetching it.** Filling an unvalidated
   slug and treating its 404 as not-found breaks D073's fill bound: distinct junk values are
   unbounded, and the API's 404 carries no `ETag`, so it cannot be pinned to a snapshot or safely
