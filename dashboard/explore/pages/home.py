@@ -69,6 +69,10 @@ def render(meta: dict[str, Any]) -> html.Div:
                 dcc.Link("Browse every election in the dataset", href="/elections"),
                 className="next",
             ),
+            html.P(
+                dcc.Link("Browse by state", href="/states"),
+                className="next",
+            ),
             components.provenance_footer(provenance),
         ]
     )
@@ -85,7 +89,7 @@ def layout(**_query: Any) -> html.Div:
             html.H1("US Presidential Election Center"),
             html.P(
                 "Tables and charts over the public election data. Start with the list "
-                "of elections; more views are on their way.",
+                "of elections, or a state's history; more views are on their way.",
                 className="lede",
             ),
             body,

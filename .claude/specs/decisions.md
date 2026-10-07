@@ -5092,3 +5092,45 @@ routing request passes through the index.
 **Related:** D070, D071, D072, #305, #306, #307, #312.
 
 ---
+## D074: A page's `validate` source may be filled on a miss, from a coverage variable, but never from the value it judges
+
+**Date:** 2026-10-07
+**Builds on:** D072, D073 · **Amends:** D073's "judges from the one source path a page names and
+prefetches" · **Decided by:** the owner, approving the architect's rulings at #279's plan gate
+(2026-10-07); recorded by #279 (E9-S4)
+
+**Context.** D073 lets a templated page validate its path variables only from a literal source it
+prefetches. The state history (`/state/<usps>`, #279) has no such source: the state roster lives in
+the latest election's rows, `/v1/elections/{year_max}`, which D072 leaves filled on a miss and
+whose year is data, not a path variable. Validating syntax alone and checking the roster in the
+page would have let `/state/ZZ` keep a canonical link and a 200 for good, not only until the first
+refresh. The candidate history (`/candidate/<slug>`) has no roster at all; filling
+`/v1/candidates/{slug}` and reading its 404 as not-found was considered and rejected (below).
+
+**Decision.**
+- **A `validate` source may be (i) a literal the page prefetches, as before; (ii) a literal it
+  declares in `on_miss`; or (iii) a template over a closed set of coverage variables,
+  `api.COVERAGE_VARS` (today `year_max`), declared in `on_miss`.** It is never built from a path
+  variable, so judging a value never fills a path made from it. `TestRegistryContracts` enforces
+  this, and that every `on_miss` placeholder is a path or coverage variable.
+- **A coverage variable is validated as a path variable is.** `api.coverage_vars` reads it from
+  the prefetched `/v1/elections` and accepts `year_max` only if that same body serves the year as
+  a row; otherwise the render degrades with no fill. It is never read from the request, so
+  `?year_max=` changes nothing.
+- **At the index**, `app.resolve` judges a template source when the index and the resolved source
+  are both cached, and counts it matched otherwise, as D073 does for a cold literal. **At render**,
+  `api.accepted` resolves the template and reads the source, filling it at most once per snapshot:
+  D073's "the render may fill the source itself".
+- **A variable with no roster source is not validated by fetching it.** Filling an unvalidated
+  slug and treating its 404 as not-found breaks D073's fill bound: distinct junk values are
+  unbounded, and the API's 404 carries no `ETag`, so it cannot be pinned to a snapshot or safely
+  cached. The candidate history waits for a `/v1/candidates` index to validate against (#330,
+  #331), which is D070(c)'s concrete need.
+
+**Rationale.** One mechanism serves every source a page cannot prefetch, so the state roster and
+the later candidate index need no per-page special case, and a warm junk code 404s at the index as
+D073 intends. Widening the prefetch to include the roster stays #310's measured decision (D072).
+
+**Related:** D070, D072, D073, #279, #310, #330, #331.
+
+---

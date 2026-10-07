@@ -36,8 +36,8 @@ FIELDS = ("year", "candidate_count", "has_popular_vote")
 
 #: The query keys this page reads. ``year_from`` and ``year_to`` are the API's own names
 #: for a year range, so later tables with a year range share them.
-YEAR_FROM = "year_from"
-YEAR_TO = "year_to"
+YEAR_FROM = query.YEAR_FROM
+YEAR_TO = query.YEAR_TO
 PV = "pv"
 
 
@@ -53,15 +53,9 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
     """
     if not isinstance(params, dict):
         return []
-    kept: dict[str, str] = {}
-    for key in (YEAR_FROM, YEAR_TO):
-        value = query.single(params.get(key))
-        if value is not None and query.YEAR_RE.fullmatch(value):
-            kept[key] = value
+    kept = query.parse_year_range(params)
     if query.single(params.get(PV)) == "1":
         kept[PV] = "1"
-    if YEAR_FROM in kept and YEAR_TO in kept and kept[YEAR_FROM] > kept[YEAR_TO]:
-        del kept[YEAR_FROM], kept[YEAR_TO]
     return sorted(kept.items())
 
 
@@ -91,21 +85,10 @@ class Filters(NamedTuple):
 
 
 def span(coverage: dict[str, Any]) -> tuple[int, int]:
-    """The served span, ``(year_min, year_max)``, or ``TypeError`` for a malformed one.
-
-    Both lie in 1000–9999, the four-digit years without a leading zero, within the
-    parser's four-ASCII-digit domain, with the first no later than the last. That also
-    bounds the slider's labels (:func:`_marks`): an unchecked span would make their
-    count, and the work of every render, as large as the body said. ``TypeError``
-    because that is what the layout turns into the degraded state.
-    """
-    first, last = coverage["year_min"], coverage["year_max"]
-    for year in (first, last):
-        if isinstance(year, bool) or not isinstance(year, int):
-            raise TypeError(f"coverage year is not an integer: {year!r}")
-    if not 1000 <= first <= last <= 9999:
-        raise TypeError(f"coverage span is not a range of years: {first}–{last}")
-    return first, last
+    """The served span, ``(year_min, year_max)``, or ``TypeError`` for a malformed one
+    (:func:`explore.query.year_span`), which the layout turns into the degraded
+    state."""
+    return query.year_span(coverage["year_min"], coverage["year_max"])
 
 
 def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
@@ -118,22 +101,12 @@ def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
     replaced by its default cannot pass the other bound.
     """
     first, last = span(coverage)
-    given = dict(pairs)
-    year_from = int(given.get(YEAR_FROM, first))
-    year_to = int(given.get(YEAR_TO, last))
+    year_from, year_to = query.year_range(pairs, first, last)
     return Filters(
-        year_from=year_from if first <= year_from <= last else first,
-        year_to=year_to if first <= year_to <= last else last,
-        pv_only=given.get(PV) == "1",
+        year_from=year_from,
+        year_to=year_to,
+        pv_only=dict(pairs).get(PV) == "1",
     )
-
-
-def _as_year(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    return value if isinstance(value, int) else None
 
 
 def search_for(years: Any, pv: Any, first: Any, last: Any) -> str:
@@ -143,13 +116,7 @@ def search_for(years: Any, pv: Any, first: Any, last: Any) -> str:
     is ``""`` or starts with ``?`` (a ``dcc.Location`` joins pathname and search
     verbatim).
     """
-    params: dict[str, str] = {}
-    if isinstance(years, list) and len(years) == 2:
-        low, high = (_as_year(v) for v in years)
-        if low is not None and low != first:
-            params[YEAR_FROM] = str(low)
-        if high is not None and high != last:
-            params[YEAR_TO] = str(high)
+    params = query.year_range_search(years, first, last)
     if isinstance(pv, list) and "1" in pv:
         params[PV] = "1"
     return query.encode_search(parse_filters(params))
@@ -172,17 +139,6 @@ def on_filter_change(years: Any, pv: Any, first: Any, last: Any, current: Any) -
     """
     search = search_for(years, pv, first, last)
     return no_update if search == (current or "") else search
-
-
-#: Years between slider labels; an interior label nearer an end than half of this is
-#: dropped, so the end labels never run into it on a phone.
-MARK_STEP = 40
-
-
-def _marks(first: int, last: int) -> dict[int, str]:
-    interior = range((first // MARK_STEP + 1) * MARK_STEP, last, MARK_STEP)
-    keep = [y for y in interior if min(y - first, last - y) >= MARK_STEP // 2]
-    return {year: str(year) for year in sorted({first, last, *keep})}
 
 
 def _row(election: dict[str, Any]) -> html.Tr:
@@ -217,16 +173,8 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
     controls = html.Div(
         [
             html.Label("Years", htmlFor=YEARS_ID, className="label"),
-            dcc.RangeSlider(
-                id=YEARS_ID,
-                min=first,
-                max=last,
-                step=1,
-                value=[chosen.year_from, chosen.year_to],
-                allowCross=False,
-                allow_direct_input=False,
-                marks=_marks(first, last),
-                tooltip={"placement": "bottom"},
+            components.year_slider(
+                YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
             ),
             dcc.Checklist(
                 id=PV_ID,
