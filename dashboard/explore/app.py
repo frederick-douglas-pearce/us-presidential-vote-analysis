@@ -39,7 +39,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlsplit
 
 import dash
 import flask
@@ -52,6 +52,7 @@ from dash import html
 from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
 
 from explore import api
+from explore import query as query_syntax  # `query` is resolve's parameter
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 log = logging.getLogger(__name__)
@@ -149,9 +150,8 @@ def resolve(
     parser = page.get("query")
     if parser is not None:
         pairs = parser(_parse_query_string(f"?{query}") if query else {})
-        if pairs:
-            # De-duplicated, so a repeated filter names the same URL as a single one.
-            og_url += "?" + urlencode(sorted(set(pairs)), quote_via=quote)
+        # De-duplicated, so a repeated filter names the same URL as a single one.
+        og_url += query_syntax.encode_search(pairs)
     return Resolution(canonical=canonical, og_url=og_url)
 
 

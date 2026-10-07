@@ -203,7 +203,9 @@ def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
         raise ApiUnavailable(f"GET {path}: HTTP {status}")
     try:
         body = json.loads(payload)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: a deeply nested body is not a ValueError, and a fill on a
+        # visitor's request (a page's on_miss) would otherwise answer a server error.
         raise ApiUnavailable(f"GET {path}: invalid JSON") from exc
     if not isinstance(body, dict):
         raise ApiUnavailable(f"GET {path}: expected a JSON object")
