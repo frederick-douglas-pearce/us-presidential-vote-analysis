@@ -2089,7 +2089,8 @@ def index_with(**coverage: Any) -> dict[str, Any]:
 
 class TestCoverageVars:
     """#279: a coverage variable is formatted into a path, so it is validated as a path
-    variable is: only a year the index itself serves, never a value from a request."""
+    variable is: only the latest year the index itself serves, never a value from a
+    request."""
 
     def test_the_recorded_index_names_its_latest_served_year(self) -> None:
         years = [row["year"] for row in RECORDED[api.ELECTIONS_PATH]["data"]]
@@ -2119,7 +2120,7 @@ class TestCoverageVars:
         ],
         ids=repr,
     )
-    def test_anything_but_a_served_year_is_a_type_error(self, index: Any) -> None:
+    def test_anything_but_the_latest_served_year_is_a_type_error(self, index: Any) -> None:
         with pytest.raises(TypeError):
             api.coverage_vars(index)
 

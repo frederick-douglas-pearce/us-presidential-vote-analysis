@@ -147,6 +147,28 @@ class TestOnRoster:
         with pytest.raises(TypeError):
             PICKER_MOD["roster"](body, 2024)
 
+    @pytest.mark.parametrize("year", [2020, 1824])
+    def test_a_roster_whose_rows_all_name_another_year_names_no_state(
+        self, year: int
+    ) -> None:
+        # Consistent rows, so api.roster reads it; but not the latest election, which
+        # the judge checks against the roster's own coverage and the picker against
+        # the year it read the roster for.
+        body = copy.deepcopy(ROSTER)
+        for row in body["data"]:
+            row["year"] = year
+        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        with pytest.raises(TypeError):
+            PICKER_MOD["roster"](body, 2024)
+
+    @pytest.mark.parametrize("coverage", [{}, {"year_max": "2024"}, {"year_max": None}])
+    def test_a_roster_with_no_checked_latest_year_names_no_state(
+        self, coverage: dict[str, Any]
+    ) -> None:
+        body = copy.deepcopy(ROSTER)
+        body["meta"]["provenance"]["coverage"] = coverage
+        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+
 
 # --- the Georgia acceptance criterion ------------------------------------------------
 

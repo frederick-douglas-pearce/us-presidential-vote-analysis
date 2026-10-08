@@ -284,9 +284,9 @@ def roster(body: Any) -> tuple[int, dict[str, str]]:
     ``TypeError``.
 
     The one reading of :data:`ROSTER_PATH`'s body, shared by the state page's judge and
-    the picker, so a body one refuses the other refuses too (#279): a non-empty list of
-    rows, every one naming the same checked year and a USPS code (two ASCII capitals)
-    with a state name.
+    the picker, so a body this refuses both refuse (#279): a non-empty list of rows,
+    every one naming the same checked year and a USPS code (two ASCII capitals) with a
+    state name. Each caller also requires that year to be the latest election.
     """
     rows = body.get("data") if isinstance(body, dict) else None
     if not isinstance(rows, list) or not rows:

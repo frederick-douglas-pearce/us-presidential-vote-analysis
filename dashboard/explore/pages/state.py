@@ -95,17 +95,20 @@ def on_roster(path_vars: dict[str, Any], body: Any) -> bool:
     """Whether ``path_vars["usps"]`` is a state the roster names.
 
     Pure and total: a USPS code (two ASCII capitals) among the states
-    :func:`explore.api.roster` reads from the latest election, never a literal. A
-    malformed roster, which the picker would refuse too, names no state.
+    :func:`explore.api.roster` reads, never a literal. A malformed roster names no
+    state, and neither does one whose rows name another year than its own
+    ``coverage.year_max``: the judge has only the roster's body, so that is the latest
+    election it can check against (the picker checks the index's, the same snapshot).
     """
     usps = path_vars.get("usps")
     if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
         return False
     try:
-        _, states = api.roster(body)
-    except TypeError:
+        named, states = api.roster(body)
+        latest = query.checked_year(body["meta"]["provenance"]["coverage"]["year_max"])
+    except (KeyError, TypeError):
         return False
-    return usps in states
+    return named == latest and usps in states
 
 
 VALIDATE: api.Validate = (api.ROSTER_PATH, on_roster)
