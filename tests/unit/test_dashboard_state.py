@@ -19,7 +19,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, labels
+from explore import api, labels, query
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -317,9 +317,9 @@ class TestFilters:
     ) -> None:
         # The dataset's span judges the bound (Fred, option (i)): 1900 is a year the
         # dataset holds, so it is kept, and the state has no election in range.
-        for query in ("year_to=1900", "year_from=1824&year_to=1900"):
-            tree = render(query, body=self.admitted_1912())
-            assert table_rows(tree) == [], query
+        for search in ("year_to=1900", "year_from=1824&year_to=1900"):
+            tree = render(search, body=self.admitted_1912())
+            assert table_rows(tree) == [], search
             assert "No rows match these filters." in texts(tree)
             (slider,) = of_type(tree, "RangeSlider")
             assert slider.value == [1824, 1900]
@@ -337,6 +337,17 @@ class TestFilters:
             )
             is no_update
         )
+
+    def test_the_span_is_read_from_the_bodys_coverage(self) -> None:
+        # Not a constant: a snapshot whose coverage starts in 1860 moves the slider's
+        # floor and the fallback of a bound before it.
+        body = ga_body()
+        body["meta"]["provenance"]["coverage"]["year_min"] = 1860
+        tree = render("year_from=1840", body=body)
+        (slider,) = of_type(tree, "RangeSlider")
+        assert (slider.min, slider.max) == (1860, 2024)
+        assert slider.value == [1860, 2024]
+        assert min(years_shown(tree)) == 1860
 
     def test_a_candidate_narrows_and_one_absent_falls_back_to_all(self) -> None:
         shown = row_texts(render("candidate=horatio-seymour"))
@@ -365,6 +376,18 @@ class TestCallback:
 
     def test_the_full_span_and_cleared_controls_are_no_query(self) -> None:
         assert MOD["on_filter_change"]([1824, 2024], None, "", 1824, 2024, "?x") == ""
+
+    def test_hostile_control_values_are_written_in_the_normal_form(self) -> None:
+        # A callback payload is client-controlled: an inverted range, a non-slug
+        # candidate and an unknown status all pass through the page's one parser.
+        assert (
+            MOD["on_filter_change"]([1880, 1860], "Horatio", "held", 1824, 2024, "?x")
+            == ""
+        )
+        assert (
+            MOD["on_filter_change"]([1824, 1860], "a b", "popular_vote", 1824, 2024, "")
+            == "?pv_status=popular_vote&year_to=1860"
+        )
 
     def test_an_unchanged_search_is_left_alone(self) -> None:
         current = "?pv_status=popular_vote"
@@ -530,6 +553,44 @@ class TestRoster:
         assert "unavailable" in routed_ids(route("/state/GA"))
         assert "unavailable" in routed_ids(route("/states"))
         assert calls == []
+
+
+class TestMalformedBodies:
+    @staticmethod
+    def client_with(monkeypatch: pytest.MonkeyPatch, path: str) -> list[str]:
+        bodies = copy.deepcopy(RECORDED)
+        del bodies[path]["meta"]
+        fetch, calls = fake_fetch(bodies)
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        calls.clear()
+        monkeypatch.setattr(api, "CLIENT", client)
+        return calls
+
+    def test_a_state_body_without_meta_degrades(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.client_with(monkeypatch, GA_PATH)
+        ids = routed_ids(route("/state/GA"))
+        assert "unavailable" in ids and PAGE_ID not in ids
+
+    def test_a_roster_body_without_meta_degrades_the_picker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.client_with(monkeypatch, ROSTER_PATH)
+        ids = routed_ids(route("/states"))
+        assert "unavailable" in ids and PICKER["success"] not in ids
+
+
+@pytest.mark.parametrize(
+    ("value", "year"),
+    [(1000, 1000), (9999, 9999), (999, None), (10000, None), (True, None)],
+)
+def test_checked_year_accepts_exactly_the_four_digit_years(
+    value: Any, year: int | None
+) -> None:
+    assert query.checked_year(value) == year
 
 
 class TestIndex:

@@ -2124,6 +2124,28 @@ class TestCoverageVars:
         with pytest.raises(TypeError):
             api.coverage_vars(index)
 
+    def test_the_latest_year_is_taken_from_checked_row_years_only(self) -> None:
+        # A float row year is not a served year, so the latest checked one is 2020
+        # and coverage's 2024 is refused, though 2024.0 == 2024.
+        index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+        for row in index["data"]:
+            if row["year"] == 2024:
+                row["year"] = 2024.0
+        with pytest.raises(TypeError):
+            api.coverage_vars(index)
+
+    @pytest.mark.parametrize(
+        "junk", [{"year": "2030"}, {"year": 99999}, {"year": True}, 7, "row", None]
+    )
+    def test_a_malformed_index_row_is_skipped_not_fatal(self, junk: Any) -> None:
+        # A row that is not an object, or names no checked year, serves nothing:
+        # it neither becomes the latest year nor raises past the page's except.
+        index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+        index["data"].append(junk)
+        assert api.coverage_vars(index) == {"year_max": "2024"}
+        both = {api.ELECTIONS_PATH: index, "/v1/elections/2024": {"data": []}}
+        assert api.cached_source(api.ROSTER_PATH, both) == {"data": []}
+
     def test_a_served_year_needs_a_served_row_not_only_the_coverage_block(
         self,
     ) -> None:
