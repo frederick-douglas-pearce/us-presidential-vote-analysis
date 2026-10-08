@@ -36,7 +36,7 @@ every registered page with every connection refused. The *success* run replaces
 ``http.client.HTTPSConnection.connect`` with a fake transport that answers the API host
 only, from recorded fixtures; ``fetch``, its proxy and redirect handling, the cache and
 the renders all run as shipped on top of it. It registers at least two prefetch paths,
-renders every registered page from a filled cache, and makes one fill on a miss. So the
+renders every registered page from a filled cache, and makes fills on a miss. So the
 code that runs only after a successful response is under the guard too.
 
 **Each page's success contract.** Every registered page declares ``success=``, the id of
@@ -47,7 +47,8 @@ rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. The
 one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` on a miss:
 rendered at 1824, its render is the success run's fill on a miss, made through the
 render-scoped view pages use, and the run asserts by name that some registered page's
-``on_miss`` reads :data:`MISS_PATH`. It validates the year from the ``/v1/elections`` it
+``on_miss`` reads :data:`MISS_PATH`, and then its per-capita table (#280), the rest of
+:data:`ELECTION_MISSES`. It validates the year from the ``/v1/elections`` it
 prefetches before formatting it into a path (#312), and the success run renders it at
 1825 too: the page's not-found state, neither its success marker nor the degraded
 state, with no request reaching the transport at all (``REQUESTED``, which records
@@ -116,6 +117,9 @@ FIXTURE_FILES = {
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
+    # The per-capita tables (#280): each page's second fill.
+    "/v1/elections/1824/per-capita": "v1_elections_1824_per_capita.json",
+    "/v1/states/GA/per-capita": "v1_states_GA_per_capita.json",
 }
 
 #: Prefetched by no page: the success run's fill on a miss, read by the one-election
@@ -128,10 +132,15 @@ MISS_PATH = "/v1/elections/1824"
 #: the page read a path in :data:`FIXTURE_FILES`.
 GUARD_PATH_VALUES = {"year": "1824", "usps": "GA"}
 
-#: The fills on a miss after :data:`MISS_PATH`, in the order the success run renders
-#: the pages that make them: the state page's roster, ``/v1/elections/{year_max}``
-#: resolved from the recorded index (shared with ``/states``), then its own rows.
-STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA"]
+#: The one-election view's fills on a miss, in the order its render makes them: the
+#: year's rows (:data:`MISS_PATH`), then its per-capita table (#280).
+ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
+
+#: The fills on a miss after :data:`ELECTION_MISSES`, in the order the success run
+#: renders the pages that make them: the state page's roster,
+#: ``/v1/elections/{year_max}`` resolved from the recorded index (shared with
+#: ``/states``), then its own rows, then its per-capita table (#280).
+STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA", "/v1/states/GA/per-capita"]
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
@@ -448,7 +457,8 @@ for page in PAGES:
         assert not unresolved, (page["module"], template, unresolved)
         misses.append(template.format(**values))
 assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
-assert set({STATE_MISSES!r}) <= set(misses), misses
+# Every named fill, so a page that stops declaring one in on_miss fails by name.
+assert set({ELECTION_MISSES!r} + {STATE_MISSES!r}) <= set(misses), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
 # for real, and enough of them run into this subprocess's timeout. Fail fast instead.
 planned = 1 + len([path for path in registered if path != api.META_PATH])
@@ -473,7 +483,8 @@ for page in PAGES:
     if path == "/":
         assert _VERSION in text
 
-assert {MISS_PATH!r} in api.CLIENT.snapshot.responses, "the miss was not stored"
+for miss in {ELECTION_MISSES!r} + {STATE_MISSES!r}:
+    assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)
 
 # A year the index does not serve: refused from the cached index, so nothing is
 # requested at all (a request for a path with no fixture would answer 404 and never
@@ -503,7 +514,7 @@ assert states_page["success"] == "states", states_page["success"]
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
-expected += [{MISS_PATH!r}, *{STATE_MISSES!r}]
+expected += [*{ELECTION_MISSES!r}, *{STATE_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
 """
         + _ALL_MODULES_LOADED
@@ -706,7 +717,9 @@ def test_the_guard_values_render_the_miss_path() -> None:
     and its response is recorded. The page's own ``on_miss`` is checked by name in
     the success run."""
     assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
-    assert MISS_PATH in FIXTURE_FILES
+    assert ELECTION_MISSES[0] == MISS_PATH
+    # Every fill on a miss the success run expects is answered from a recording.
+    assert set(ELECTION_MISSES + STATE_MISSES) <= set(FIXTURE_FILES)
 
 
 def test_the_guard_program_can_fail(tmp_path: Path) -> None:

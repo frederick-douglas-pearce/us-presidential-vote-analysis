@@ -1,6 +1,9 @@
-"""One election in full (#307): T2, results by state, and T3, national results.
+"""One election in full (#307): T2, results by state, T3, national results, and T6,
+every state's persons per electoral vote (#280).
 
-Both tables come from one response, ``/v1/elections/{year}``, filled on a miss. The year
+T2 and T3 come from one response, ``/v1/elections/{year}``, and T6 from a second,
+``/v1/elections/{year}/per-capita``; both are filled on a miss, in the same render, so
+the page's success marker renders only when all three tables did. The year
 is the path (``/election/<year>``, an item singular as the index is plural); it is
 validated from the ``/v1/elections`` the page prefetches before it is formatted into an
 API path (#312), so a year the dataset does not serve is not found, at the index (404)
@@ -12,7 +15,8 @@ a filter change written to a page-local ``dcc.Location`` and re-rendered from th
 cache, and the provenance footer from the response's own ``meta.provenance``. T2's
 filters are the API's own query names, ``state`` (a USPS code) and ``candidate`` (a
 slug), and the field names ``pv_status`` and ``electoral_count_status``. T3 is never
-filtered: it is the year's national result, as the API's ``summary`` is.
+filtered: it is the year's national result, as the API's ``summary`` is. T6 is narrowed
+by the same ``state`` filter, as T2 resolves it, and by nothing else.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ NOT_FOUND_ID = "election-not-found"
 STATES_TABLE_ID = "election-states"
 NATION_TABLE_ID = "election-nation"
 NO_PV_ID = "election-no-pv"
+PER_CAPITA_TABLE_ID = "election-per-capita"
 URL_ID = "election-url"
 STATE_ID = "election-state"
 CANDIDATE_ID = "election-candidate"
@@ -65,6 +70,15 @@ NATION_FIELDS = (
     "national_pv_votes",
     "ec_share_full",
     "pv_share",
+)
+
+#: T6's columns, in display order, by public field name (#280).
+PER_CAPITA_FIELDS = ("state", *labels.PER_CAPITA_FIELDS)
+
+#: Which of the page's filters T6 follows: the state, and not the others.
+PER_CAPITA_FILTER_NOTE = (
+    "The state filter above applies to this table; the candidate and status filters "
+    "do not."
 )
 
 #: The query keys this page reads: the API's own filter names for a state and a
@@ -153,7 +167,7 @@ dash.register_page(
     # No years: the index HTML never waits on the API, so this cannot read the span.
     description="One US presidential election: results by state and nationally.",
     prefetch=(api.ELECTIONS_PATH,),
-    on_miss=("/v1/elections/{year}",),
+    on_miss=("/v1/elections/{year}", "/v1/elections/{year}/per-capita"),
     success=PAGE_ID,
     validate=VALIDATE,
     query=parse_filters,
@@ -389,11 +403,51 @@ def _rows(value: Any, year: int, name: str) -> list[Any]:
     return value
 
 
+def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
+    """T6's rows sorted by state name, or ``TypeError``.
+
+    As :func:`_rows` reads the year's rows: a non-empty list, each naming the validated
+    year, so an empty list or a row of another year is a malformed body. Each must name
+    a USPS code too, which the state filter and the state link read. A null cell is not
+    malformed: :func:`explore.labels.per_capita_cells` says why it is null.
+    """
+    rows = _rows(value, year, "per-capita rows")
+    for row in rows:
+        usps = row.get("state_usps")
+        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
+            raise TypeError(f"/v1/elections/{year}/per-capita carries a bad state code")
+    return sorted(rows, key=lambda r: str(r["state"]))
+
+
+def _per_capita_section(rows: list[dict[str, Any]], chosen: Filters) -> list[Any]:
+    """T6: every state's persons per electoral vote, narrowed by T2's resolved state."""
+    shown = [r for r in rows if chosen.state in (None, r["state_usps"])]
+    return [
+        html.H2("People per electoral vote"),
+        html.P(PER_CAPITA_FILTER_NOTE, className="note"),
+        html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
+        _table(
+            PER_CAPITA_FIELDS,
+            [html.Tr([_state_cell(r), *labels.per_capita_cells(r)]) for r in shown],
+            PER_CAPITA_TABLE_ID,
+        )
+        if shown
+        else html.P("No rows match these filters.", className="empty"),
+        html.P(labels.GOVERNING_CENSUS_NOTE, className="note"),
+        html.P(labels.BOUNDARY_NOTE, className="note"),
+        labels.glossary(PER_CAPITA_FIELDS),
+    ]
+
+
 def render(
-    body: dict[str, Any], index_row: dict[str, Any], pairs: list[tuple[str, str]]
+    body: dict[str, Any],
+    index_row: dict[str, Any],
+    pairs: list[tuple[str, str]],
+    per_capita: dict[str, Any],
 ) -> html.Div:
     """The page body for one ``/v1/elections/{year}`` response, the year's row of
-    ``/v1/elections`` (read through the same view), and this page's filter pairs."""
+    ``/v1/elections`` and its ``/per-capita`` response (all read through the same
+    view), and this page's filter pairs."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     year = _row_year(index_row)
@@ -403,6 +457,7 @@ def render(
     # build gap while the rows beside it stay correct, and this page shows none of it.
     rows = _rows(body["data"], year, "state rows")
     summary = _rows(body["summary"], year, "candidates")
+    per_capita_rows = _per_capita_rows(per_capita["data"], year)
     has_popular_vote = index_row["has_popular_vote"] is True
     chosen = filters(pairs, rows)
     shown = select(rows, chosen)
@@ -444,6 +499,7 @@ def render(
             html.P(labels.PARTY_NOTE, className="note"),
             labels.glossary(STATE_GLOSSARY),
             *nation,
+            *_per_capita_section(per_capita_rows, chosen),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
@@ -478,8 +534,11 @@ def layout(year: Any = None, **params: Any) -> html.Div:
                 content = not_found()
             else:
                 body = view.get(f"/v1/elections/{year}")
+                per_capita = view.get(f"/v1/elections/{year}/per-capita")
                 index = view.get(api.ELECTIONS_PATH)
-                content = render(body, index_row(index, year), parse_filters(params))
+                content = render(
+                    body, index_row(index, year), parse_filters(params), per_capita
+                )
                 heading = f"The {year} election"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
@@ -488,8 +547,9 @@ def layout(year: Any = None, **params: Any) -> html.Div:
             html.H1(heading),
             html.P(
                 "Every state's electoral votes for each candidate, with the popular "
-                "vote where this dataset has it, and the national result. Narrow the "
-                "state results by state, candidate or status.",
+                "vote where this dataset has it, the national result, and how many "
+                "people each state's electoral votes stood for. Narrow the state "
+                "results by state, candidate or status.",
                 className="lede",
             ),
             content,

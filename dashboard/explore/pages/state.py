@@ -1,6 +1,9 @@
-"""One state's history (#279): T4, its rows in every election this dataset holds for it.
+"""One state's history (#279): T4, its rows in every election this dataset holds for it,
+and T7, its persons per electoral vote in each of them (#280).
 
-The rows come from one response, ``/v1/states/{usps}``, filled on a miss. The state is
+T4 comes from one response, ``/v1/states/{usps}``, and T7 from a second,
+``/v1/states/{usps}/per-capita``; both are filled on a miss, in the same render, so the
+page's success marker renders only when both tables did. The state is
 the path (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case
 as the API writes a USPS code. It is validated against the state roster before it is
 formatted into an API path: the latest election's rows (``/v1/elections/{year_max}``,
@@ -17,7 +20,7 @@ re-rendered from the cache, and the provenance footer from the response's own
 ``meta.provenance``. The filters are the shared year range (``year_from`` /
 ``year_to``, judged against the dataset's span as on ``/elections``, so a range before
 the state's first election is an honest empty result), ``candidate`` (a slug) and
-``pv_status``.
+``pv_status``. T7 is narrowed by the year range only.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ URL_ID = "state-url"
 YEARS_ID = "state-years"
 CANDIDATE_ID = "state-candidate"
 PV_STATUS_ID = "state-pv-status"
+PER_CAPITA_TABLE_ID = "state-per-capita"
 
 #: T4's columns, in display order, by public field name.
 FIELDS = (
@@ -54,6 +58,15 @@ FIELDS = (
 )
 #: The fields T4's glossary names: its columns, and the reason its count cell shows.
 GLOSSARY = (*FIELDS, "electoral_count_status_reason")
+
+#: T7's columns, in display order, by public field name (#280).
+PER_CAPITA_FIELDS = ("year", *labels.PER_CAPITA_FIELDS)
+
+#: Which of the page's filters T7 follows: the year range, and not the others.
+PER_CAPITA_FILTER_NOTE = (
+    "The year range above applies to this table; the candidate and popular-vote "
+    "filters do not."
+)
 
 #: The query keys this page reads besides the shared year range: the API's filter name
 #: for a candidate, and the field name of the closed popular-vote vocabulary.
@@ -132,7 +145,7 @@ dash.register_page(
         "One US state's electoral votes in every presidential election in this dataset."
     ),
     prefetch=(api.ELECTIONS_PATH,),
-    on_miss=(api.ROSTER_PATH, "/v1/states/{usps}"),
+    on_miss=(api.ROSTER_PATH, "/v1/states/{usps}", "/v1/states/{usps}/per-capita"),
     success=PAGE_ID,
     validate=VALIDATE,
     query=parse_filters,
@@ -232,23 +245,28 @@ def _served_years(index: Any) -> set[int]:
     return years
 
 
-def _rows(body: Any, usps: str, served: set[int]) -> list[dict[str, Any]]:
-    """The state's rows sorted by year then candidate, or ``TypeError``.
+def _rows(
+    body: Any, usps: str, served: set[int], path: str | None = None
+) -> list[dict[str, Any]]:
+    """The state's rows from ``path`` (``/v1/states/{usps}`` by default), sorted by
+    year then candidate, or ``TypeError``.
 
     A served state always has rows, so an empty list is a malformed body: rendering it
     would show the success marker over an empty table. Each row must name this state
     and a year the index serves (checked by :func:`explore.query.checked_year`), so no
-    row of another state, or of a year the dataset does not hold, is shown.
+    row of another state, or of a year the dataset does not hold, is shown. The same
+    rule reads T7's ``/per-capita`` rows (#280), which name no candidate.
     """
+    path = path or f"/v1/states/{usps}"
     rows = _rows_of(body)
     if not rows:
-        raise TypeError(f"/v1/states/{usps} carries no list of rows")
+        raise TypeError(f"{path} carries no list of rows")
     for row in rows:
         if not isinstance(row, dict) or row.get("state_usps") != usps:
-            raise TypeError(f"/v1/states/{usps} carries a row of another state")
+            raise TypeError(f"{path} carries a row of another state")
         if query.checked_year(row.get("year")) not in served:
-            raise TypeError(f"/v1/states/{usps} carries a row of no served year")
-    return sorted(rows, key=lambda r: (r["year"], str(r["candidate"])))
+            raise TypeError(f"{path} carries a row of no served year")
+    return sorted(rows, key=lambda r: (r["year"], str(r.get("candidate", ""))))
 
 
 def _options(pairs: dict[str, str]) -> list[dict[str, str]]:
@@ -339,18 +357,60 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
     )
 
 
+def _per_capita_row(row: dict[str, Any]) -> html.Tr:
+    year = row["year"]
+    # A year links to its one-election view (#307), as in T4.
+    return html.Tr(
+        [
+            html.Td(dcc.Link(str(year), href=f"/election/{year}")),
+            *labels.per_capita_cells(row),
+        ]
+    )
+
+
+def _per_capita_section(rows: list[dict[str, Any]], chosen: Filters) -> list[Any]:
+    """T7: the state's persons per electoral vote, narrowed by the year range only."""
+    shown = [r for r in rows if chosen.year_from <= r["year"] <= chosen.year_to]
+    return [
+        html.H2("People per electoral vote"),
+        html.P(PER_CAPITA_FILTER_NOTE, className="note"),
+        html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
+        html.Div(
+            html.Table(
+                [
+                    html.Thead(
+                        html.Tr([labels.header(field) for field in PER_CAPITA_FIELDS])
+                    ),
+                    html.Tbody([_per_capita_row(r) for r in shown]),
+                ],
+                id=PER_CAPITA_TABLE_ID,
+            ),
+            className="table-scroll",
+        )
+        if shown
+        else html.P("No rows match these filters.", className="empty"),
+        html.P(labels.GOVERNING_CENSUS_NOTE, className="note"),
+        html.P(labels.BOUNDARY_NOTE, className="note"),
+        labels.glossary(PER_CAPITA_FIELDS),
+    ]
+
+
 def render(
     body: dict[str, Any],
     index: dict[str, Any],
     usps: str,
     pairs: list[tuple[str, str]],
+    per_capita: dict[str, Any],
 ) -> tuple[html.Div, str]:
     """The page body and the state's name, for one ``/v1/states/{usps}`` response, the
-    ``/v1/elections`` index read through the same view, and this page's filter pairs."""
+    ``/v1/elections`` index and the state's ``/per-capita`` response (all read through
+    the same view), and this page's filter pairs."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
-    rows = _rows(body, usps, _served_years(index))
+    served = _served_years(index)
+    rows = _rows(body, usps, served)
+    per_capita_rows = _rows(per_capita, usps, served, f"/v1/states/{usps}/per-capita")
     chosen = filters(pairs, rows, span)
     shown = select(rows, chosen)
     content = html.Div(
@@ -374,6 +434,7 @@ def render(
             else html.P("No rows match these filters.", className="empty"),
             html.P(labels.PARTY_NOTE, className="note"),
             labels.glossary(GLOSSARY),
+            *_per_capita_section(per_capita_rows, chosen),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
@@ -402,7 +463,10 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/states/{usps}")
-                content, heading = render(body, index, usps, parse_filters(params))
+                per_capita = view.get(f"/v1/states/{usps}/per-capita")
+                content, heading = render(
+                    body, index, usps, parse_filters(params), per_capita
+                )
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div(
@@ -411,7 +475,8 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
             html.P(
                 "This state's electoral votes for each candidate in every election "
                 "this dataset holds for it, with the popular vote where the dataset "
-                "has it. Narrow the rows by year, candidate or popular-vote status.",
+                "has it, and how many people its electoral votes stood for. Narrow "
+                "the rows by year, candidate or popular-vote status.",
                 className="lede",
             ),
             content,

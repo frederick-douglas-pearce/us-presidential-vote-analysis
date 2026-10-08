@@ -12,6 +12,7 @@ tests cover what is particular to this page.
 from __future__ import annotations
 
 import copy
+import re
 import urllib.parse
 from typing import Any
 
@@ -39,6 +40,10 @@ from tests.unit.test_dashboard_app import (
 from tests.unit.test_dashboard_elections import find, json_node, of_type, parse
 from usvote.count_status import COUNT_STATUS_VALUES
 from usvote.pv.status import PV_STATUS_VALUES
+from usvote.snapshot_schema import (
+    PER_CAPITA_BOUNDARY_BASIS_VALUES,
+    PER_CAPITA_COVERAGE_VALUES,
+)
 
 PAGE: dict[str, Any] = dash.page_registry["pages.election"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -64,10 +69,17 @@ def index_row(year: int, index: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
-def render(year: int, query: str = "", body: Any = None) -> Any:
+def per_capita_body(year: int) -> dict[str, Any]:
+    return copy.deepcopy(RECORDED[f"/v1/elections/{year}/per-capita"])
+
+
+def render(year: int, query: str = "", body: Any = None, per_capita: Any = None) -> Any:
     """The page body for ``year`` and ``query``, as the layout builds it."""
     body = year_body(year) if body is None else body
-    return MOD["render"](body, index_row(year), MOD["parse_filters"](parse(query)))
+    per_capita = per_capita_body(year) if per_capita is None else per_capita
+    return MOD["render"](
+        body, index_row(year), MOD["parse_filters"](parse(query)), per_capita
+    )
 
 
 def table_rows(tree: Any, table_id: str) -> list[list[Any]]:
@@ -131,7 +143,10 @@ def _cell_text(child: Any) -> Any:
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path_template"] == "/election/<year>"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PAGE["on_miss"] == ("/v1/elections/{year}",)
+    assert PAGE["on_miss"] == (
+        "/v1/elections/{year}",
+        "/v1/elections/{year}/per-capita",
+    )
     assert PAGE["success"] == PAGE_ID
     # The registered judge is the one the layout calls, so the index's 404 and the
     # page's not-found state decide alike.
@@ -142,15 +157,23 @@ def test_the_page_is_registered_as_planned() -> None:
 
 @pytest.mark.parametrize("path", sorted(RECORDED))
 def test_every_recorded_response_is_one_snapshot(path: str) -> None:
-    """Every recorded response (``/v1/meta``, ``/v1/elections`` and each year) was
-    recorded from one snapshot, the one ``v1_meta.json`` names."""
+    """Every recorded response (``/v1/meta``, ``/v1/elections``, each year, each state
+    and each per-capita table) was recorded from one snapshot, the one ``v1_meta.json``
+    names, and each answers the path it is recorded under."""
     body = RECORDED[path]
     provenance = (
         body["provenance"] if path == api.META_PATH else body["meta"]["provenance"]
     )
     assert provenance["snapshot_version"] == VERSION
-    if path.startswith("/v1/elections/"):
-        assert body["election"]["year"] == int(path.rsplit("/", 1)[1])
+    if year_path := re.fullmatch(r"/v1/elections/([0-9]{4})", path):
+        assert body["election"]["year"] == int(year_path[1])
+    # The per-capita tables (#280): every row names the path's year, or its state.
+    if per_year := re.fullmatch(r"/v1/elections/([0-9]{4})/per-capita", path):
+        assert body["data"]
+        assert {row["year"] for row in body["data"]} == {int(per_year[1])}
+    if per_state := re.fullmatch(r"/v1/states/([A-Z]{2})/per-capita", path):
+        assert body["data"]
+        assert {row["state_usps"] for row in body["data"]} == {per_state[1]}
 
 
 # --- validation: served years come from /v1/elections, never literals ---------------
@@ -262,8 +285,16 @@ class TestNotFound:
         body = year_body(1824)
         for row in (*body["data"], *body["summary"]):
             row["year"] = 1825
+        per_capita = per_capita_body(1824)
+        for row in per_capita["data"]:
+            row["year"] = 1825
         fetch, calls = fake_fetch(
-            {**RECORDED, api.ELECTIONS_PATH: added, "/v1/elections/1825": body}
+            {
+                **RECORDED,
+                api.ELECTIONS_PATH: added,
+                "/v1/elections/1825": body,
+                "/v1/elections/1825/per-capita": per_capita,
+            }
         )
         client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
@@ -273,6 +304,7 @@ class TestNotFound:
         assert (status, head.canonical) == (200, url("/election/1825"))
         assert PAGE_ID in routed_ids(route("/election/1825"))
         assert "/v1/elections/1825" in calls
+        assert "/v1/elections/1825/per-capita" in calls
 
     def test_the_not_found_state_follows_the_index_served(
         self, monkeypatch: pytest.MonkeyPatch
@@ -425,7 +457,11 @@ class TestHeaders:
 
     @pytest.mark.parametrize(
         ("table_id", "fields"),
-        [(STATES, "STATE_FIELDS"), (NATION, "NATION_FIELDS")],
+        [
+            (STATES, "STATE_FIELDS"),
+            (NATION, "NATION_FIELDS"),
+            (MOD["PER_CAPITA_TABLE_ID"], "PER_CAPITA_FIELDS"),
+        ],
     )
     def test_each_header_is_its_label_with_the_raw_field_name(
         self, table_id: str, fields: str
@@ -442,10 +478,11 @@ class TestHeaders:
 
     def test_the_glossaries_name_every_column_and_the_count_reason(self) -> None:
         glossaries = of_type(render(1872), "Details")
-        assert len(glossaries) == 2
+        assert len(glossaries) == 3
         named = [[texts(dd.children)[0] for dd in of_type(g, "Dd")] for g in glossaries]
         assert named[0] == list(MOD["STATE_FIELDS"]) + ["electoral_count_status_reason"]
         assert named[1] == list(MOD["NATION_FIELDS"])
+        assert named[2] == list(MOD["PER_CAPITA_FIELDS"])
 
     def test_every_closed_value_has_a_label(self) -> None:
         assert set(labels.PV_STATUS) == set(PV_STATUS_VALUES)
@@ -566,13 +603,19 @@ class TestNullCells:
         """Doctored inputs, so a literal window in the page fails: the year-level
         decision comes from the index row, the sentence's years from coverage."""
         held = MOD["render"](
-            year_body(1872), {**index_row(1872), "has_popular_vote": True}, []
+            year_body(1872),
+            {**index_row(1872), "has_popular_vote": True},
+            [],
+            per_capita_body(1872),
         )
         assert find(held, MOD["NO_PV_ID"]) is None
         grant = nation_rows(held)["Ulysses S. Grant"]
         assert grant["national_pv_votes"] == "No popular-vote figure for this candidate"
         missing = MOD["render"](
-            year_body(2016), {**index_row(2016), "has_popular_vote": False}, []
+            year_body(2016),
+            {**index_row(2016), "has_popular_vote": False},
+            [],
+            per_capita_body(2016),
         )
         assert find(missing, MOD["NO_PV_ID"]) is not None
         trump = nation_rows(missing)["Donald J. Trump"]
@@ -591,7 +634,10 @@ class TestNullCells:
     def test_only_a_true_flag_claims_a_popular_vote(self, flag: Any) -> None:
         """A malformed index flag never makes T3 claim the year has a popular vote."""
         tree = MOD["render"](
-            year_body(1872), {**index_row(1872), "has_popular_vote": flag}, []
+            year_body(1872),
+            {**index_row(1872), "has_popular_vote": flag},
+            [],
+            per_capita_body(1872),
         )
         assert find(tree, MOD["NO_PV_ID"]) is not None
 
@@ -896,13 +942,14 @@ class TestShareableUrl:
 
 
 class TestRequestBudget:
-    def test_opening_a_year_makes_at_most_one_request(
+    def test_opening_a_year_makes_at_most_two_requests(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The year's rows, then its per-capita table (#280)."""
         _, calls, bucket = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/election/1872"))
-        assert calls == ["/v1/elections/1872"]
-        assert len(bucket.waits) == 1
+        assert calls == ["/v1/elections/1872", "/v1/elections/1872/per-capita"]
+        assert len(bucket.waits) == 2
         calls.clear()
         assert PAGE_ID in routed_ids(route("/election/1872"))  # cached: none
         assert calls == []
@@ -933,7 +980,11 @@ class TestRequestBudget:
         with the prefetched index cached; cold, the index is filled first."""
         _, calls, _ = cached_client(monkeypatch, elections=False)
         assert PAGE_ID in routed_ids(route("/election/1872"))
-        assert calls == [api.ELECTIONS_PATH, "/v1/elections/1872"]
+        assert calls == [
+            api.ELECTIONS_PATH,
+            "/v1/elections/1872",
+            "/v1/elections/1872/per-capita",
+        ]
 
 
 # --- the title ------------------------------------------------------------------------
@@ -965,3 +1016,293 @@ def test_the_footer_carries_the_response_s_provenance() -> None:
     body["meta"]["provenance"]["snapshot_version"] = "SENTINEL-version"
     assert "SENTINEL-version" in texts(render(1872, body=body))
     assert f"{META['provenance']['source_name']} (" in texts(render(1872))
+
+
+# --- the per-capita table, T6 (#280) --------------------------------------------------
+
+PER_CAPITA = MOD["PER_CAPITA_TABLE_ID"]
+NO_FIGURE = "No census figure governs this election"
+NO_VOTES = "No electoral votes this election"
+
+
+def per_capita_rows(tree: Any) -> dict[str, dict[str, str]]:
+    """T6's rows as ``{state: {field: cell text}}``."""
+    fields = MOD["PER_CAPITA_FIELDS"]
+    rows = [
+        dict(zip(fields, (cell_text(c) for c in row), strict=True))
+        for row in table_rows(tree, PER_CAPITA)
+    ]
+    return {row["state"]: row for row in rows}
+
+
+def section(year: int, body: Any = None, **chosen: Any) -> Any:
+    """T6 alone, for a year whose rows (``/v1/elections/{year}``) are not recorded:
+    its section built from the per-capita response, with the filters ``chosen``."""
+    body = per_capita_body(year) if body is None else body
+    filters = MOD["Filters"](
+        **{"state": None, "candidate": None, "pv_status": None, "count_status": None}
+        | chosen
+    )
+    return MOD["_per_capita_section"](MOD["_per_capita_rows"](body["data"], year), filters)
+
+
+def all_cells(tree: Any) -> list[str]:
+    return [cell_text(c) for row in table_rows(tree, PER_CAPITA) for c in row]
+
+
+def test_t6_reads_every_field_from_its_response() -> None:
+    row = per_capita_body(1872)["data"][0]
+    assert set(MOD["PER_CAPITA_FIELDS"]) <= set(row)
+    assert MOD["PER_CAPITA_FIELDS"] == (
+        "state",
+        "governing_census_year",
+        "state_electoral_votes",
+        "population",
+        "boundary_basis",
+        "coverage",
+        "persons_per_electoral_vote",
+    )
+
+
+def test_1848_texas_says_no_census_figure_governs_the_election() -> None:
+    texas = per_capita_rows(section(1848))["Texas"]
+    assert texas["population"] == NO_FIGURE
+    assert texas["coverage"] == NO_FIGURE
+    assert texas["persons_per_electoral_vote"] == NO_FIGURE
+    # The only such cell that year; every other state has its figure.
+    rows = per_capita_rows(section(1848))
+    assert [s for s, r in rows.items() if r["persons_per_electoral_vote"] == NO_FIGURE] == [
+        "Texas"
+    ]
+
+
+def test_1864_every_zero_allotment_says_it_had_no_electoral_votes() -> None:
+    body = per_capita_body(1864)
+    zero = {r["state"] for r in body["data"] if r["state_electoral_votes"] == 0}
+    assert len(zero) == 11  # read from the response, checked against F10
+    rows = per_capita_rows(section(1864))
+    assert {s for s, r in rows.items() if r["persons_per_electoral_vote"] == NO_VOTES} == zero
+    for state in zero:
+        assert rows[state]["state_electoral_votes"] == "0"
+        # Its population is still shown: only the ratio has no denominator.
+        assert rows[state]["population"] not in (NO_FIGURE, "None", "")
+
+
+@pytest.mark.parametrize("year", [1848, 1864, 1868, 1872, 2024])
+def test_no_t6_cell_is_ever_bare_or_infinite(year: int) -> None:
+    for text in all_cells(section(year)):
+        assert text.strip()
+        assert text not in ("None", "null")
+        assert "inf" not in text.lower() and "nan" not in text.lower()
+
+
+def test_a_ratio_is_shown_to_a_whole_person() -> None:
+    body = per_capita_body(2024)
+    california = next(r for r in body["data"] if r["state_usps"] == "CA")
+    shown = per_capita_rows(section(2024))["California"]
+    assert shown["persons_per_electoral_vote"] == (
+        f"{round(california['persons_per_electoral_vote']):,}"
+    )
+    assert shown["population"] == f"{california['population']:,}"
+    assert shown["governing_census_year"] == str(california["governing_census_year"])
+
+
+def test_the_governing_census_is_shown_with_its_reason() -> None:
+    tree = section(1872)
+    assert {r["governing_census_year"] for r in per_capita_rows(tree).values()} == {
+        "1870"
+    }
+    assert labels.GOVERNING_CENSUS_NOTE in texts(tree)
+    assert "2010" in labels.GOVERNING_CENSUS_NOTE and "1910" in labels.GOVERNING_CENSUS_NOTE
+
+
+def test_each_boundary_basis_cell_carries_its_help_text() -> None:
+    tree = section(1848)
+    basis = MOD["PER_CAPITA_FIELDS"].index("boundary_basis")
+    cells = [row[basis] for row in table_rows(tree, PER_CAPITA)]
+    assert {c.title for c in cells} == {labels.BOUNDARY_NOTE}
+    assert {cell_text(c) for c in cells} == {
+        "Borders at the election",
+        "Present-day footprint",
+    }
+    assert labels.BOUNDARY_NOTE in texts(tree)
+
+
+def test_every_recorded_year_renders_t6_beside_t2_and_t3() -> None:
+    for year in RECORDED_YEARS:
+        tree = render(year)
+        states = {r["state"] for r in per_capita_body(year)["data"]}
+        assert set(per_capita_rows(tree)) == states
+        assert find(tree, STATES) is not None and find(tree, NATION) is not None
+
+
+def test_t6_is_sorted_by_the_page_not_trusted_in_api_order() -> None:
+    body = per_capita_body(1872)
+    body["data"].reverse()
+    names = list(per_capita_rows(render(1872, per_capita=body)))
+    assert names == sorted(names)
+
+
+class TestT6Filters:
+    def test_the_state_filter_narrows_t6(self) -> None:
+        assert list(per_capita_rows(render(1872, "state=GA"))) == ["Georgia"]
+
+    def test_t6_follows_the_state_t2_resolved(self) -> None:
+        """T2 falls back to "all" for a state absent from its rows, and T6 applies T2's
+        resolved filter rather than re-resolving: one URL never shows T2 unfiltered
+        and T6 filtered."""
+        body = year_body(1872)
+        body["data"] = [r for r in body["data"] if r["state_usps"] != "GA"]
+        tree = render(1872, "state=GA", body=body)
+        assert len(per_capita_rows(tree)) == len(per_capita_body(1872)["data"])
+        # And a state T2 resolves that T6 lacks is an honest empty result.
+        per_capita = per_capita_body(1872)
+        per_capita["data"] = [r for r in per_capita["data"] if r["state_usps"] != "GA"]
+        tree = render(1872, "state=GA", per_capita=per_capita)
+        assert per_capita_rows(tree) == {}
+        assert "No rows match these filters." in texts(tree)
+
+    @pytest.mark.parametrize(
+        "search",
+        ["candidate=horace-greeley", "pv_status=legislature_chosen",
+         "electoral_count_status=not_counted"],
+    )
+    def test_the_other_filters_do_not_narrow_t6(self, search: str) -> None:
+        tree = render(1872, search)
+        assert len(per_capita_rows(tree)) == len(per_capita_body(1872)["data"])
+
+    def test_t6_says_which_filter_applies_and_counts_its_rows(self) -> None:
+        tree = render(1872, "state=GA")
+        total = len(per_capita_body(1872)["data"])
+        assert MOD["PER_CAPITA_FILTER_NOTE"] in texts(tree)
+        assert f"Showing 1 of {total} rows" in texts(tree)
+
+
+class TestT6Bodies:
+    @pytest.mark.parametrize("data", [[], None, "rows"])
+    def test_a_body_with_no_rows_is_malformed(self, data: Any) -> None:
+        body = per_capita_body(1872)
+        body["data"] = data
+        with pytest.raises(TypeError):
+            render(1872, per_capita=body)
+
+    @pytest.mark.parametrize(
+        "change",
+        [{"year": 1868}, {"year": "1872"}, {"year": None}, {"state_usps": "ga"},
+         {"state_usps": None}],
+    )
+    def test_a_row_of_another_year_or_no_state_code_is_malformed(
+        self, change: dict[str, Any]
+    ) -> None:
+        body = per_capita_body(1872)
+        body["data"][3].update(change)
+        with pytest.raises(TypeError):
+            render(1872, per_capita=body)
+
+    def test_a_malformed_body_degrades_the_whole_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The page's success marker covers T6: no marker without it."""
+        body = per_capita_body(1872)
+        body["data"] = []
+        fetch, _ = fake_fetch({**RECORDED, "/v1/elections/1872/per-capita": body})
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        ids = routed_ids(route("/election/1872"))
+        assert "unavailable" in ids
+        assert PAGE_ID not in ids
+
+    def test_an_unexplained_null_names_no_cause_and_does_not_degrade(self) -> None:
+        body = per_capita_body(1872)
+        row = next(r for r in body["data"] if r["state_usps"] == "GA")
+        row["persons_per_electoral_vote"] = None
+        row["population"] = None
+        shown = per_capita_rows(render(1872, per_capita=body))["Georgia"]
+        assert shown["persons_per_electoral_vote"] == labels.NOT_IN_DATASET
+        assert shown["population"] == labels.NOT_IN_DATASET
+
+    def test_an_unknown_coverage_value_renders_as_text(self) -> None:
+        body = per_capita_body(1872)
+        row = next(r for r in body["data"] if r["state_usps"] == "GA")
+        row.update(coverage="estimated", persons_per_electoral_vote=None)
+        shown = per_capita_rows(render(1872, per_capita=body))["Georgia"]
+        assert shown["coverage"] == "estimated"
+        assert shown["persons_per_electoral_vote"] == "estimated"
+
+
+def test_the_routed_page_shows_t6_and_reads_its_own_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, calls, _ = cached_client(monkeypatch)
+    ids = routed_ids(route("/election/1868"))
+    assert {PAGE_ID, PER_CAPITA} <= ids
+    assert "/v1/elections/1868/per-capita" in calls
+
+
+def test_the_footer_names_the_census_bureau_and_its_license() -> None:
+    provenance = per_capita_body(1872)["meta"]["provenance"]
+    footer = of_type(render(1872), "Footer")
+    (footer_node,) = footer
+    assert provenance["census_source_name"] == "U.S. Census Bureau"
+    assert f"{provenance['census_source_name']} (" in texts(footer_node)
+    links = {a.href: a.children for a in of_type(footer_node, "A")}
+    assert links[provenance["census_license_url"]] == provenance["census_license"]
+
+
+def test_every_per_capita_closed_value_has_a_label() -> None:
+    assert set(labels.BOUNDARY_BASIS) == set(PER_CAPITA_BOUNDARY_BASIS_VALUES)
+    assert set(labels.PER_CAPITA_COVERAGE) == set(PER_CAPITA_COVERAGE_VALUES)
+    assert labels.NO_GOVERNING_FIGURE in PER_CAPITA_COVERAGE_VALUES
+
+
+class TestPerCapitaCells:
+    """The null rule's single source, :func:`explore.labels.persons_per_electoral_vote`
+    and :func:`explore.labels.population` (#280)."""
+
+    def test_a_missing_census_figure_wins_over_a_zero_allotment(self) -> None:
+        cell = labels.persons_per_electoral_vote(None, "no_governing_figure", 0)
+        assert cell == NO_FIGURE
+
+    @pytest.mark.parametrize(
+        ("value", "coverage", "allotment", "shown"),
+        [
+            (None, "covered", 0, NO_VOTES),
+            (None, "covered", 0.0, NO_VOTES),
+            (None, "covered", False, labels.NOT_IN_DATASET),  # a bool is no allotment
+            (None, "covered", 3, labels.NOT_IN_DATASET),
+            (None, "estimated", 3, "estimated"),
+            (None, None, 3, "None"),
+            (677344.6545454545, "covered", 55, "677,345"),
+            (12, "covered", 1, "12"),
+            (float("inf"), "covered", 1, "inf"),
+            (float("nan"), "covered", 1, "nan"),
+            (10**400, "covered", 1, str(10**400)),
+            (True, "covered", 1, "True"),
+            ("many", "covered", 1, "many"),
+        ],
+    )
+    def test_the_ratio_cell_is_total(
+        self, value: Any, coverage: Any, allotment: Any, shown: str
+    ) -> None:
+        assert labels.persons_per_electoral_vote(value, coverage, allotment) == shown
+
+    @pytest.mark.parametrize(
+        ("value", "coverage", "shown"),
+        [
+            (None, "no_governing_figure", NO_FIGURE),
+            (None, "covered", labels.NOT_IN_DATASET),
+            (None, "estimated", "estimated"),
+            (37253956, "covered", "37,253,956"),
+        ],
+    )
+    def test_the_population_cell_is_total(
+        self, value: Any, coverage: Any, shown: str
+    ) -> None:
+        assert labels.population(value, coverage) == shown
+
+    def test_a_closed_value_s_unknown_value_renders_as_text(self) -> None:
+        assert labels.boundary_basis("county") == "county"
+        assert labels.boundary_basis(None) == "None"
+        assert labels.per_capita_coverage(7) == "7"

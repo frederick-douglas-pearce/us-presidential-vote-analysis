@@ -6,8 +6,9 @@ than labelling inline. The table is flat, so a key means one thing in every tabl
 shows it, and a field name the API uses with two meanings needs a qualified key for the
 second. ``candidate_count`` already is one: here it is a ``/v1/elections`` row's count
 of one year's candidates, while ``/v1/meta``'s counts the snapshot's distinct
-candidates, so a table showing the latter needs its own key. ``coverage`` is next: a
-per-capita row's and the provenance block's differ.
+candidates, so a table showing the latter needs its own key. ``coverage`` is another:
+the plain key is a per-capita row's (#280), whether a census figure governs that
+election, so a table showing the provenance block's year windows needs its own key.
 
 The raw field name stays on hand because these tables double as the debugging view: as
 each header's tooltip, and in a "Column names" glossary under the table, which works
@@ -16,7 +17,8 @@ where hovering does not. Like ``components``, this module reads no API.
 The cells a null or a closed value can reach live here too (#307), so a later table
 (S4's state and candidate histories) shows the same thing the one-election view does:
 a null is never bare, and each closed value of ``pv_status`` and
-``electoral_count_status`` has its plain label.
+``electoral_count_status`` has its plain label. The per-capita tables' cells and help
+text (#280) follow the same rule: each null ratio or population says why it is null.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ from typing import Any
 
 from dash import html
 
-#: Plain label for each public field name (approved by the owner, 2026-10-01).
+#: Plain label for each public field name (approved by the owner, 2026-10-01; the
+#: per-capita rows, 2026-10-08).
 LABELS: dict[str, str] = {
     "year": "Election year",
     "candidate_count": "Candidates",
@@ -51,6 +54,13 @@ LABELS: dict[str, str] = {
     "national_pv_votes": "Popular votes (nation)",
     "ec_share_full": "Electoral share (counted ÷ appointed)",
     "pv_share": "Popular-vote share",
+    # The per-capita tables (#280). ``state_electoral_votes`` above is the same
+    # appointed allotment, so it keeps its label.
+    "governing_census_year": "Census in force",
+    "population": "Population (census in force)",
+    "boundary_basis": "Borders counted",
+    "coverage": "Census figure",
+    "persons_per_electoral_vote": "People per electoral vote",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -67,6 +77,40 @@ COUNT_STATUS: dict[str, tuple[str, str | None]] = {
     "not_counted": ("Not counted", "Congress refused the votes"),
     "disputed": ("Disputed", "Congress never resolved the question"),
 }
+
+#: Each closed ``boundary_basis`` value of a per-capita row (#280).
+BOUNDARY_BASIS: dict[str, str] = {
+    "at_election": "Borders at the election",
+    "present_day": "Present-day footprint",
+}
+
+#: The per-capita ``coverage`` value that explains a null population and ratio.
+NO_GOVERNING_FIGURE = "no_governing_figure"
+
+#: Each closed ``coverage`` value of a per-capita row (#280).
+PER_CAPITA_COVERAGE: dict[str, str] = {
+    "covered": "Available",
+    NO_GOVERNING_FIGURE: "No census figure governs this election",
+}
+
+#: A null ratio's cell when the state's allotment is zero (its votes were withheld).
+NO_ELECTORAL_VOTES = "No electoral votes this election"
+
+#: Why each election reads the census it does: one line under each per-capita table.
+GOVERNING_CENSUS_NOTE = (
+    "Each election uses the census whose apportionment set its electoral votes, not "
+    "the nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
+    "Congress made no apportionment from the 1920 census."
+)
+
+#: What each ``boundary_basis`` value describes. Neutral about the Census Bureau's
+#: tabulation, which this dataset reports as published.
+BOUNDARY_NOTE = (
+    "At the election: the people inside the state's borders when the election was "
+    "held. Present-day footprint: the Census Bureau's figure for the state as its "
+    "table reports it, which this dataset does not claim matches the state's borders "
+    "at that election."
+)
 
 #: The popular-vote cells for a null figure (the null table in #307).
 LEGISLATURE_CHOSE = "No popular vote: the state legislature chose the electors"
@@ -211,3 +255,98 @@ def count_status(status: object, reason: object) -> list[Any]:
     if reason is not None:
         cell += [html.Br(), html.Span(str(reason), className="reason")]
     return cell
+
+
+def boundary_basis(value: object) -> str:
+    """A ``boundary_basis`` value's label; an unknown value as text."""
+    if isinstance(value, str):
+        return BOUNDARY_BASIS.get(value, value)
+    return str(value)
+
+
+def per_capita_coverage(value: object) -> str:
+    """A per-capita ``coverage`` value's label; an unknown value as text."""
+    if isinstance(value, str):
+        return PER_CAPITA_COVERAGE.get(value, value)
+    return str(value)
+
+
+def _null_per_capita(coverage: object) -> str:
+    """Why a per-capita figure is null, as far as ``coverage`` says.
+
+    No governing census figure reads as such; an unknown value renders as text rather
+    than as a claim; ``covered`` gives no cause, so the cell names none.
+    """
+    if coverage == NO_GOVERNING_FIGURE:
+        return PER_CAPITA_COVERAGE[NO_GOVERNING_FIGURE]
+    if isinstance(coverage, str) and coverage not in PER_CAPITA_COVERAGE:
+        return coverage
+    if not isinstance(coverage, str):
+        return str(coverage)
+    return NOT_IN_DATASET
+
+
+def population(value: object, coverage: object) -> str:
+    """A per-capita population cell: the figure, or why there is none (#280)."""
+    return _null_per_capita(coverage) if value is None else number(value)
+
+
+def persons_per_electoral_vote(
+    value: object, coverage: object, allotment: object
+) -> str:
+    """A persons-per-electoral-vote cell: the figure to a whole person, or why there is
+    none (#280). Never bare, never infinite.
+
+    The single statement of which cause explains a null ratio. A missing census figure
+    comes first, so a row carrying both causes reads as that; then a zero allotment (the
+    state's votes were withheld). A null with neither cause names none. Total, as
+    :func:`share` is: a number no float can hold, or a non-finite one, renders as text.
+    """
+    if value is None:
+        if coverage == NO_GOVERNING_FIGURE:
+            return PER_CAPITA_COVERAGE[NO_GOVERNING_FIGURE]
+        if allotment == 0 and not isinstance(allotment, bool):
+            return NO_ELECTORAL_VOTES
+        return _null_per_capita(coverage)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            rounded = round(float(value))
+        except (OverflowError, ValueError):
+            return str(value)
+        return f"{rounded:,}"
+    return str(value)
+
+
+#: The per-capita columns both tables share, in display order, after each table's own
+#: first column (T6 the state, T7 the year).
+PER_CAPITA_FIELDS = (
+    "governing_census_year",
+    "state_electoral_votes",
+    "population",
+    "boundary_basis",
+    "coverage",
+    "persons_per_electoral_vote",
+)
+
+
+def per_capita_cells(row: dict[str, Any]) -> list[html.Td]:
+    """A per-capita row's cells for :data:`PER_CAPITA_FIELDS` (#280).
+
+    The boundary-basis cell carries :data:`BOUNDARY_NOTE` as its help text, as a null
+    party cell carries its note.
+    """
+    coverage = row["coverage"]
+    allotment = row["state_electoral_votes"]
+    return [
+        # A year, so no thousands separator.
+        html.Td(str(row["governing_census_year"])),
+        html.Td(number(allotment)),
+        html.Td(population(row["population"], coverage)),
+        html.Td(boundary_basis(row["boundary_basis"]), title=BOUNDARY_NOTE),
+        html.Td(per_capita_coverage(coverage)),
+        html.Td(
+            persons_per_electoral_vote(
+                row["persons_per_electoral_vote"], coverage, allotment
+            )
+        ),
+    ]
