@@ -1,6 +1,8 @@
-"""The state history, T4, and the state picker (#279).
+"""The state history, T4, and the state picker (#279), and T7, the state's persons per
+electoral vote (#280).
 
-Offline, against the recorded ``/v1/states/GA`` and the roster ``/v1/elections/2024``
+Offline, against the recorded ``/v1/states/GA`` and the roster ``/v1/elections/2024``,
+and ``/v1/states/GA/per-capita`` and ``/v1/states/TX/per-capita``
 (the same snapshot as every other fixture, ``test_every_recorded_response_is_one_
 snapshot``), through the helpers and the autouse offline process client of
 ``test_dashboard_app.py``. The registry-wide checks there pick both pages up
@@ -755,6 +757,15 @@ class TestGeorgiaPerCapita:
         rows = per_capita_rows(render())
         assert list(rows) == sorted(r["year"] for r in body["data"])
 
+    def test_rows_are_sorted_by_the_page_not_trusted_in_api_order(self) -> None:
+        body = ga_per_capita()
+        random.Random(280).shuffle(body["data"])
+        assert [r["year"] for r in body["data"]] != sorted(
+            r["year"] for r in body["data"]
+        )
+        rows = per_capita_rows(render(per_capita=body))
+        assert list(rows) == sorted(r["year"] for r in body["data"])
+
     def test_the_governing_census_is_the_apportionment_s_not_the_nearest(self) -> None:
         rows = per_capita_rows(render())
         assert rows[2020]["governing_census_year"] == "2010"
@@ -847,6 +858,44 @@ class TestT7Bodies:
         ids = routed_ids(route("/state/GA"))
         assert "unavailable" in ids
         assert PAGE_ID not in ids
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        api.ApiUnavailable("GET /v1/states/GA/per-capita: HTTP 503"),
+        api.Response(body={}, version="another-snapshot"),
+    ],
+    ids=["unavailable", "another-version"],
+)
+def test_a_failed_per_capita_read_degrades_the_whole_page(
+    monkeypatch: pytest.MonkeyPatch, answer: api.Response | Exception
+) -> None:
+    """The read itself failing, not only a malformed body: the page's success marker
+    covers T7, so T4 does not render without it, and a response of another snapshot
+    is never mixed into the render."""
+    recorded, _ = fake_fetch(RECORDED)
+    calls: list[str] = []
+
+    def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+        calls.append(path)
+        if path == GA_PER_CAPITA_PATH:
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        response: api.Response = recorded(path, timeout)
+        return response
+
+    client = offline_client(
+        fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, ROSTER_PATH]
+    )
+    client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+    client.refresh()
+    monkeypatch.setattr(api, "CLIENT", client)
+    ids = routed_ids(route("/state/GA"))
+    assert "unavailable" in ids
+    assert PAGE_ID not in ids and TABLE not in ids
+    assert GA_PER_CAPITA_PATH in calls
 
 
 def test_the_routed_page_shows_t7(monkeypatch: pytest.MonkeyPatch) -> None:

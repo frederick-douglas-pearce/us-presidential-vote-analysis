@@ -18,7 +18,8 @@ The cells a null or a closed value can reach live here too (#307), so a later ta
 (S4's state and candidate histories) shows the same thing the one-election view does:
 a null is never bare, and each closed value of ``pv_status`` and
 ``electoral_count_status`` has its plain label. The per-capita tables' cells and help
-text (#280) follow the same rule: each null ratio or population says why it is null.
+text (#280) follow the same rule: a null ratio or population is never bare: it says
+why it is null where the row explains it, and names no cause where it does not.
 """
 
 from __future__ import annotations
@@ -257,33 +258,35 @@ def count_status(status: object, reason: object) -> list[Any]:
     return cell
 
 
+def _closed_value(value: object, table: dict[str, str]) -> str:
+    """A closed value's label. An unknown non-blank string renders as text rather than
+    as a claim; anything else (a null, a blank, a non-string) is no value the row
+    explains, so it names none: :data:`NOT_IN_DATASET`, never a bare cell."""
+    if isinstance(value, str) and value.strip():
+        return table.get(value, value)
+    return NOT_IN_DATASET
+
+
 def boundary_basis(value: object) -> str:
-    """A ``boundary_basis`` value's label; an unknown value as text."""
-    if isinstance(value, str):
-        return BOUNDARY_BASIS.get(value, value)
-    return str(value)
+    """A ``boundary_basis`` value's label (#280); see :func:`_closed_value`."""
+    return _closed_value(value, BOUNDARY_BASIS)
 
 
 def per_capita_coverage(value: object) -> str:
-    """A per-capita ``coverage`` value's label; an unknown value as text."""
-    if isinstance(value, str):
-        return PER_CAPITA_COVERAGE.get(value, value)
-    return str(value)
+    """A per-capita ``coverage`` value's label (#280); see :func:`_closed_value`."""
+    return _closed_value(value, PER_CAPITA_COVERAGE)
 
 
 def _null_per_capita(coverage: object) -> str:
     """Why a per-capita figure is null, as far as ``coverage`` says.
 
-    No governing census figure reads as such; an unknown value renders as text rather
-    than as a claim; ``covered`` gives no cause, so the cell names none.
+    No governing census figure reads as such; an unknown non-blank value renders as
+    text rather than as a claim; ``covered``, a blank or a non-string gives no cause,
+    so the cell names none (:data:`NOT_IN_DATASET`).
     """
-    if coverage == NO_GOVERNING_FIGURE:
-        return PER_CAPITA_COVERAGE[NO_GOVERNING_FIGURE]
-    if isinstance(coverage, str) and coverage not in PER_CAPITA_COVERAGE:
-        return coverage
-    if not isinstance(coverage, str):
-        return str(coverage)
-    return NOT_IN_DATASET
+    if coverage == "covered":
+        return NOT_IN_DATASET
+    return per_capita_coverage(coverage)
 
 
 def population(value: object, coverage: object) -> str:
@@ -295,12 +298,13 @@ def persons_per_electoral_vote(
     value: object, coverage: object, allotment: object
 ) -> str:
     """A persons-per-electoral-vote cell: the figure to a whole person, or why there is
-    none (#280). Never bare, never infinite.
+    none (#280). Never bare, and never an infinity: a zero allotment reads as such.
 
     The single statement of which cause explains a null ratio. A missing census figure
     comes first, so a row carrying both causes reads as that; then a zero allotment (the
-    state's votes were withheld). A null with neither cause names none. Total, as
-    :func:`share` is: a number no float can hold, or a non-finite one, renders as text.
+    state's votes were withheld). A null with neither cause names none. A non-finite
+    number is no figure either, so it names none too. Total, as :func:`share` is: an
+    integer no float can hold, or a value that is not a number, renders as text.
     """
     if value is None:
         if coverage == NO_GOVERNING_FIGURE:
@@ -310,10 +314,12 @@ def persons_per_electoral_vote(
         return _null_per_capita(coverage)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
-            rounded = round(float(value))
-        except (OverflowError, ValueError):
+            number_ = float(value)
+        except OverflowError:
             return str(value)
-        return f"{rounded:,}"
+        if not math.isfinite(number_):
+            return NOT_IN_DATASET
+        return f"{round(number_):,}"
     return str(value)
 
 

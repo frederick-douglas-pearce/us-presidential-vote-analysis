@@ -387,8 +387,9 @@ def _table(fields: tuple[str, ...], rows: list[html.Tr], table_id: str) -> html.
     )
 
 
-def _rows(value: Any, year: int, name: str) -> list[Any]:
-    """A non-empty list of the year's rows, each naming that year, or ``TypeError``.
+def _rows(value: Any, year: int, name: str, path: str | None = None) -> list[Any]:
+    """A non-empty list of the year's rows from ``path`` (``/v1/elections/{year}`` by
+    default), each naming that year, or ``TypeError``.
 
     A served year always has state rows, and the API treats a year with no national
     summary as a build regression, so an empty list is a malformed body: rendering it
@@ -396,10 +397,11 @@ def _rows(value: Any, year: int, name: str) -> list[Any]:
     against the validated one, so no row of another year (or of no year) is shown,
     and the cells read the validated year rather than the row's.
     """
+    path = path or f"/v1/elections/{year}"
     if not isinstance(value, list) or not value:
-        raise TypeError(f"/v1/elections/{year} carries no list of {name}")
+        raise TypeError(f"{path} carries no list of {name}")
     if any(_row_year(row) != year for row in value):
-        raise TypeError(f"/v1/elections/{year} carries {name} of another year")
+        raise TypeError(f"{path} carries {name} of another year")
     return value
 
 
@@ -411,11 +413,12 @@ def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
     a USPS code too, which the state filter and the state link read. A null cell is not
     malformed: :func:`explore.labels.per_capita_cells` says why it is null.
     """
-    rows = _rows(value, year, "per-capita rows")
+    path = f"/v1/elections/{year}/per-capita"
+    rows = _rows(value, year, "rows", path)
     for row in rows:
         usps = row.get("state_usps")
         if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
-            raise TypeError(f"/v1/elections/{year}/per-capita carries a bad state code")
+            raise TypeError(f"{path} carries a bad state code")
     return sorted(rows, key=lambda r: str(r["state"]))
 
 

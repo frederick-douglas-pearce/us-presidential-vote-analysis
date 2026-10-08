@@ -1,11 +1,14 @@
-"""The one-election view, T2 and T3 (#307).
+"""The one-election view, T2 and T3 (#307), and T6, every state's persons per
+electoral vote (#280).
 
-Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872
-and 2016 (one snapshot, ``v1_meta.json``'s), through the helpers and the autouse offline
+Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872,
+2016 and 2024, and ``/v1/elections/{year}/per-capita`` for those years and 1848 and 1864
+(one snapshot, ``v1_meta.json``'s), through the helpers and the autouse offline
 process client of ``test_dashboard_app.py``. Its registry-wide checks pick this page up
 from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
 ``TestRegistryContracts`` and ``test_every_registered_page_is_found_at_the_index_and_
-reads_nothing``), and the D070(b) guard renders it at 1824 as its fill on a miss. These
+reads_nothing``), and the D070(b) guard renders it at 1824 as its first fills on a
+miss. These
 tests cover what is particular to this page.
 """
 
@@ -1036,8 +1039,9 @@ def per_capita_rows(tree: Any) -> dict[str, dict[str, str]]:
 
 
 def section(year: int, body: Any = None, **chosen: Any) -> Any:
-    """T6 alone, for a year whose rows (``/v1/elections/{year}``) are not recorded:
-    its section built from the per-capita response, with the filters ``chosen``."""
+    """T6 alone, built from the per-capita response only (so it also serves 1848 and
+    1864, whose ``/v1/elections/{year}`` is not recorded), with the filters
+    ``chosen``."""
     body = per_capita_body(year) if body is None else body
     filters = MOD["Filters"](
         **{"state": None, "candidate": None, "pv_status": None, "count_status": None}
@@ -1082,14 +1086,15 @@ def test_1864_every_zero_allotment_says_it_had_no_electoral_votes() -> None:
     assert len(zero) == 11  # read from the response, checked against F10
     rows = per_capita_rows(section(1864))
     assert {s for s, r in rows.items() if r["persons_per_electoral_vote"] == NO_VOTES} == zero
-    for state in zero:
-        assert rows[state]["state_electoral_votes"] == "0"
+    for row in (r for r in body["data"] if r["state_electoral_votes"] == 0):
+        shown = rows[row["state"]]
+        assert shown["state_electoral_votes"] == "0"
         # Its population is still shown: only the ratio has no denominator.
-        assert rows[state]["population"] not in (NO_FIGURE, "None", "")
+        assert shown["population"] == f"{row['population']:,}"
 
 
 @pytest.mark.parametrize("year", [1848, 1864, 1868, 1872, 2024])
-def test_no_t6_cell_is_ever_bare_or_infinite(year: int) -> None:
+def test_no_recorded_t6_cell_is_bare_or_infinite(year: int) -> None:
     for text in all_cells(section(year)):
         assert text.strip()
         assert text not in ("None", "null")
@@ -1183,7 +1188,7 @@ class TestT6Bodies:
     def test_a_body_with_no_rows_is_malformed(self, data: Any) -> None:
         body = per_capita_body(1872)
         body["data"] = data
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="/v1/elections/1872/per-capita"):
             render(1872, per_capita=body)
 
     @pytest.mark.parametrize(
@@ -1196,7 +1201,7 @@ class TestT6Bodies:
     ) -> None:
         body = per_capita_body(1872)
         body["data"][3].update(change)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="/v1/elections/1872/per-capita"):
             render(1872, per_capita=body)
 
     def test_a_malformed_body_degrades_the_whole_page(
@@ -1213,6 +1218,49 @@ class TestT6Bodies:
         ids = routed_ids(route("/election/1872"))
         assert "unavailable" in ids
         assert PAGE_ID not in ids
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            api.ApiUnavailable("GET /v1/elections/1872/per-capita: HTTP 503"),
+            api.Response(body={}, version="another-snapshot"),
+        ],
+        ids=["unavailable", "another-version"],
+    )
+    def test_a_failed_per_capita_read_degrades_the_whole_page(
+        self, monkeypatch: pytest.MonkeyPatch, answer: api.Response | Exception
+    ) -> None:
+        """The read itself failing, not only a malformed body: the page's success
+        marker covers T6, so T2 and T3 do not render without it, and a response of
+        another snapshot is never mixed into the render."""
+        target = "/v1/elections/1872/per-capita"
+        recorded, _ = fake_fetch(RECORDED)
+        calls: list[str] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            calls.append(path)
+            if path == target:
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+            response: api.Response = recorded(path, timeout)
+            return response
+
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        ids = routed_ids(route("/election/1872"))
+        assert "unavailable" in ids
+        assert PAGE_ID not in ids and STATES not in ids
+        assert target in calls
+
+    def test_a_non_finite_ratio_names_no_cause(self) -> None:
+        body = per_capita_body(1872)
+        row = next(r for r in body["data"] if r["state_usps"] == "GA")
+        row["persons_per_electoral_vote"] = float("inf")
+        shown = per_capita_rows(render(1872, per_capita=body))["Georgia"]
+        assert shown["persons_per_electoral_vote"] == labels.NOT_IN_DATASET
 
     def test_an_unexplained_null_names_no_cause_and_does_not_degrade(self) -> None:
         body = per_capita_body(1872)
@@ -1273,11 +1321,15 @@ class TestPerCapitaCells:
             (None, "covered", False, labels.NOT_IN_DATASET),  # a bool is no allotment
             (None, "covered", 3, labels.NOT_IN_DATASET),
             (None, "estimated", 3, "estimated"),
-            (None, None, 3, "None"),
+            (None, None, 3, labels.NOT_IN_DATASET),
+            (None, "", 3, labels.NOT_IN_DATASET),
+            (None, "  ", 3, labels.NOT_IN_DATASET),
+            (None, 7, 3, labels.NOT_IN_DATASET),
             (677344.6545454545, "covered", 55, "677,345"),
             (12, "covered", 1, "12"),
-            (float("inf"), "covered", 1, "inf"),
-            (float("nan"), "covered", 1, "nan"),
+            (float("inf"), "covered", 1, labels.NOT_IN_DATASET),
+            (float("-inf"), "covered", 0, labels.NOT_IN_DATASET),
+            (float("nan"), "covered", 1, labels.NOT_IN_DATASET),
             (10**400, "covered", 1, str(10**400)),
             (True, "covered", 1, "True"),
             ("many", "covered", 1, "many"),
@@ -1294,6 +1346,8 @@ class TestPerCapitaCells:
             (None, "no_governing_figure", NO_FIGURE),
             (None, "covered", labels.NOT_IN_DATASET),
             (None, "estimated", "estimated"),
+            (None, None, labels.NOT_IN_DATASET),
+            (None, "", labels.NOT_IN_DATASET),
             (37253956, "covered", "37,253,956"),
         ],
     )
@@ -1304,5 +1358,9 @@ class TestPerCapitaCells:
 
     def test_a_closed_value_s_unknown_value_renders_as_text(self) -> None:
         assert labels.boundary_basis("county") == "county"
-        assert labels.boundary_basis(None) == "None"
-        assert labels.per_capita_coverage(7) == "7"
+        assert labels.per_capita_coverage("estimated") == "estimated"
+
+    @pytest.mark.parametrize("value", [None, "", "  ", 7, ["at_election"]])
+    def test_a_closed_value_that_is_no_value_is_never_bare(self, value: Any) -> None:
+        assert labels.boundary_basis(value) == labels.NOT_IN_DATASET
+        assert labels.per_capita_coverage(value) == labels.NOT_IN_DATASET

@@ -45,10 +45,10 @@ render carries that id (and ``/`` its snapshot version too); the refused run ass
 none does, so a marker the degraded state also renders is caught. Templated pages are
 rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. The
 one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` on a miss:
-rendered at 1824, its render is the success run's fill on a miss, made through the
-render-scoped view pages use, and the run asserts by name that some registered page's
-``on_miss`` reads :data:`MISS_PATH`, and then its per-capita table (#280), the rest of
-:data:`ELECTION_MISSES`. It validates the year from the ``/v1/elections`` it
+rendered at 1824, its render makes the success run's first fills on a miss,
+:data:`ELECTION_MISSES` (the year, :data:`MISS_PATH`, then its per-capita table, #280),
+through the render-scoped view pages use; the run checks every named miss, in some
+registered page's ``on_miss`` and in the snapshot. It validates the year from the ``/v1/elections`` it
 prefetches before formatting it into a path (#312), and the success run renders it at
 1825 too: the page's not-found state, neither its success marker nor the degraded
 state, with no request reaching the transport at all (``REQUESTED``, which records
@@ -117,13 +117,13 @@ FIXTURE_FILES = {
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
-    # The per-capita tables (#280): each page's second fill.
+    # The per-capita tables (#280): each page's last fill on a miss.
     "/v1/elections/1824/per-capita": "v1_elections_1824_per_capita.json",
     "/v1/states/GA/per-capita": "v1_states_GA_per_capita.json",
 }
 
-#: Prefetched by no page: the success run's fill on a miss, read by the one-election
-#: view (#307) rendered at :data:`GUARD_PATH_VALUES`.
+#: Prefetched by no page: the success run's first fill on a miss, read by the
+#: one-election view (#307) rendered at :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
 
 #: The concrete value each path variable is rendered at, in both runs. Every templated
