@@ -349,6 +349,17 @@ class TestFilters:
         assert slider.value == [1860, 2024]
         assert min(years_shown(tree)) == 1860
 
+    def test_the_spans_ceiling_is_read_from_the_bodys_coverage_too(self) -> None:
+        # The ceiling, not only the floor: a hardcoded 2024 would go stale when a
+        # later election lands, and this coverage ending in 2020 would show it.
+        body = ga_body()
+        body["meta"]["provenance"]["coverage"]["year_max"] = 2020
+        tree = render("year_to=2030", body=body)
+        (slider,) = of_type(tree, "RangeSlider")
+        assert (slider.min, slider.max) == (1824, 2020)
+        assert slider.value == [1824, 2020]
+        assert max(years_shown(tree)) == 2020
+
     def test_a_candidate_narrows_and_one_absent_falls_back_to_all(self) -> None:
         shown = row_texts(render("candidate=horatio-seymour"))
         assert {row[1] for row in shown} == {"Horatio Seymour"}
