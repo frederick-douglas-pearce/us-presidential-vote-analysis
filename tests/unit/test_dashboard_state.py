@@ -864,7 +864,12 @@ class TestT7Bodies:
     "answer",
     [
         api.ApiUnavailable("GET /v1/states/GA/per-capita: HTTP 503"),
-        api.Response(body={}, version="another-snapshot"),
+        # The real recorded body: only its version is wrong, so this degrades only
+        # through View.get's version check.
+        api.Response(
+            body=copy.deepcopy(RECORDED[GA_PER_CAPITA_PATH]),
+            version="another-snapshot",
+        ),
     ],
     ids=["unavailable", "another-version"],
 )

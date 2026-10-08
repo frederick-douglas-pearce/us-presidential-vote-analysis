@@ -48,9 +48,9 @@ one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` o
 rendered at 1824, its render makes the success run's first fills on a miss,
 :data:`ELECTION_MISSES` (the year, :data:`MISS_PATH`, then its per-capita table, #280),
 through the render-scoped view pages use; the run checks every named miss, in some
-registered page's ``on_miss`` and in the snapshot. It validates the year from the ``/v1/elections`` it
-prefetches before formatting it into a path (#312), and the success run renders it at
-1825 too: the page's not-found state, neither its success marker nor the degraded
+registered page's ``on_miss`` and in the snapshot. It validates the year from the
+``/v1/elections`` it prefetches before formatting it into a path (#312), and the
+success run renders it at 1825 too: the page's not-found state, neither its success marker nor the degraded
 state, with no request reaching the transport at all (``REQUESTED``, which records
 every request, fixture or not). Until #307 a fake page the guard registered stood in.
 
@@ -476,7 +476,8 @@ assert client.get("/").status_code == 200
 assert "/" in [concrete(page) for page in PAGES]
 for page in PAGES:
     path = concrete(page)
-    # The one-election view's render, at 1824, is the fill on a miss.
+    # The one-election view's render, at 1824, makes its fills on a miss
+    # (ELECTION_MISSES).
     text = route(client, path)
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])

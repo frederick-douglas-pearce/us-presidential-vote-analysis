@@ -298,13 +298,15 @@ def persons_per_electoral_vote(
     value: object, coverage: object, allotment: object
 ) -> str:
     """A persons-per-electoral-vote cell: the figure to a whole person, or why there is
-    none (#280). Never bare, and never an infinity: a zero allotment reads as such.
+    none (#280). Never bare, and never an infinity: a null ratio over a zero allotment
+    reads as such, and a non-finite figure names no cause.
 
     The single statement of which cause explains a null ratio. A missing census figure
     comes first, so a row carrying both causes reads as that; then a zero allotment (the
     state's votes were withheld). A null with neither cause names none. A non-finite
     number is no figure either, so it names none too. Total, as :func:`share` is: an
-    integer no float can hold, or a value that is not a number, renders as text.
+    integer no float can hold, or a value of no numeric type (a bool, a string), renders
+    as text.
     """
     if value is None:
         if coverage == NO_GOVERNING_FIGURE:

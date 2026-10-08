@@ -8,8 +8,7 @@ process client of ``test_dashboard_app.py``. Its registry-wide checks pick this 
 from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
 ``TestRegistryContracts`` and ``test_every_registered_page_is_found_at_the_index_and_
 reads_nothing``), and the D070(b) guard renders it at 1824 as its first fills on a
-miss. These
-tests cover what is particular to this page.
+miss. These tests cover what is particular to this page.
 """
 
 from __future__ import annotations
@@ -1223,7 +1222,12 @@ class TestT6Bodies:
         "answer",
         [
             api.ApiUnavailable("GET /v1/elections/1872/per-capita: HTTP 503"),
-            api.Response(body={}, version="another-snapshot"),
+            # The real recorded body: only its version is wrong, so this degrades only
+            # through View.get's version check.
+            api.Response(
+                body=copy.deepcopy(RECORDED["/v1/elections/1872/per-capita"]),
+                version="another-snapshot",
+            ),
         ],
         ids=["unavailable", "another-version"],
     )
