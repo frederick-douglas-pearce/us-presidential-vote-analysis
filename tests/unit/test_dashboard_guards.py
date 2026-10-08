@@ -113,6 +113,9 @@ FIXTURE_FILES = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
     "/v1/elections/1824": "v1_elections_1824.json",
+    # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
+    "/v1/elections/2024": "v1_elections_2024.json",
+    "/v1/states/GA": "v1_states_GA.json",
 }
 
 #: Prefetched by no page: the success run's fill on a miss, read by the one-election
@@ -123,7 +126,12 @@ MISS_PATH = "/v1/elections/1824"
 #: page's variables need an entry (the programs assert it), or Dash would render it at
 #: its inferred ``/…/none`` path and the run would check nothing. Each value must make
 #: the page read a path in :data:`FIXTURE_FILES`.
-GUARD_PATH_VALUES = {"year": "1824"}
+GUARD_PATH_VALUES = {"year": "1824", "usps": "GA"}
+
+#: The fills on a miss after :data:`MISS_PATH`, in the order the success run renders
+#: the pages that make them: the state page's roster, ``/v1/elections/{year_max}``
+#: resolved from the recorded index (shared with ``/states``), then its own rows.
+STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA"]
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
@@ -427,17 +435,24 @@ assert len(registered) >= 2, registered
 assert {MISS_PATH!r} not in registered, "the miss path must not be prefetched"
 # Named, so a page that stops declaring the miss in on_miss fails here; one that
 # still declares it but stops reading it fails no later than "the miss was not
-# stored" below.
-misses = [
-    template.format(**GUARD_PATH_VALUES)
-    for page in PAGES
-    for template in page.get("on_miss", ())
-    if set(_re.findall("{{(.*?)}}", template)) <= set(GUARD_PATH_VALUES)
-]
+# stored" below. Every template resolves, from a path value or a coverage variable
+# (#279) read from the recorded index: one that cannot fails here, never skipped.
+values = {{
+    **api.coverage_vars(_json.loads(_FIXTURES[api.ELECTIONS_PATH])),
+    **GUARD_PATH_VALUES,
+}}
+misses = []
+for page in PAGES:
+    for template in page.get("on_miss", ()):
+        unresolved = set(_re.findall("{{(.*?)}}", template)) - set(values)
+        assert not unresolved, (page["module"], template, unresolved)
+        misses.append(template.format(**values))
 assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
+assert set({STATE_MISSES!r}) <= set(misses), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
 # for real, and enough of them run into this subprocess's timeout. Fail fast instead.
-planned = 1 + len([path for path in registered if path != api.META_PATH]) + 1
+planned = 1 + len([path for path in registered if path != api.META_PATH])
+planned += len(set(misses))
 assert planned <= api.FILL_BURST, (
     f"{{planned}} planned fills exceed the bucket's burst of {{api.FILL_BURST}}: replace "
     "api.CLIENT's bucket here with a permissive one, e.g. TokenBucket(burst=inf)"
@@ -474,9 +489,21 @@ assert "election-not-found" in rendered_ids(text)
 assert "isn't responding" not in text
 assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
+# A code the roster does not name (#279): refused from the roster the /state/GA render
+# above filled, so nothing is requested, and never /v1/states/ZZ.
+text = route(client, "/state/ZZ")
+(state_page,) = [p for p in PAGES if p.get("path_template") == "/state/<usps>"]
+assert state_page["success"] == "state", state_page["success"]
+assert "state" not in rendered_ids(text)
+assert "state-not-found" in rendered_ids(text)
+assert "isn't responding" not in text
+assert REQUESTED == requested_before, (REQUESTED, requested_before)
+(states_page,) = [p for p in PAGES if p.get("path") == "/states"]
+assert states_page["success"] == "states", states_page["success"]
+
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
-expected += [{MISS_PATH!r}]
+expected += [{MISS_PATH!r}, *{STATE_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
 """
         + _ALL_MODULES_LOADED
@@ -650,13 +677,28 @@ def test_a_path_variable_with_no_guard_value_fails_the_run() -> None:
     """Non-vacuity: a templated page the guard cannot render concretely is refused."""
     twin = """
 dash.register_page(
-    "guard_twin_state", path_template="/state/<state>",
+    "guard_twin_state", path_template="/guard-state/<state>",
     layout=lambda state=None, **_q: None, prefetch=(), on_miss=(), success="x",
 )
 """
     completed = _run(_refused_program(twin))
     assert completed.returncode != 0
     assert "'state'" in completed.stderr
+
+
+def test_an_on_miss_template_the_guard_cannot_resolve_fails_the_run() -> None:
+    """Non-vacuity (#279): a template naming neither a guard path value nor a coverage
+    variable fails the success run, where it was once skipped unchecked."""
+    twin = """
+dash.register_page(
+    "guard_twin_unresolved", path="/guard-twin-unresolved",
+    layout=lambda **_q: None, prefetch=(api.ELECTIONS_PATH,),
+    on_miss=("/v1/elections/{year_min}",), success="x",
+)
+"""
+    completed = _run(_success_program(twin))
+    assert completed.returncode != 0
+    assert "{year_min}" in completed.stderr
 
 
 def test_the_guard_values_render_the_miss_path() -> None:

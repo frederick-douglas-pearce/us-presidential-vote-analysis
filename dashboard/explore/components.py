@@ -1,4 +1,5 @@
-"""View pieces every page shares: the provenance footer and the degraded state (#306).
+"""View pieces every page shares: the provenance footer, the degraded state (#306) and
+the year-range slider every year-filtered table uses (#279).
 
 Pure functions of what a page already read, so they read no API: a page reads through
 its own render-scoped view and hands them what it read.
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dash import html
+from dash import dcc, html
 
 #: The id of the paragraph carrying the snapshot version.
 SNAPSHOT_ID = "snapshot-version"
@@ -75,4 +76,36 @@ def unavailable() -> html.Div:
     """The degraded state: a plain sentence, never an exception or a blank page."""
     return html.Div(
         html.P(UNAVAILABLE_MESSAGE), className="unavailable", id="unavailable"
+    )
+
+
+#: Years between slider labels; an interior label nearer an end than half of this is
+#: dropped, so the end labels never run into it on a phone.
+MARK_STEP = 40
+
+
+def year_marks(first: int, last: int) -> dict[int, str]:
+    """A range slider's labels: both ends, and every :data:`MARK_STEP` years between."""
+    interior = range((first // MARK_STEP + 1) * MARK_STEP, last, MARK_STEP)
+    keep = [y for y in interior if min(y - first, last - y) >= MARK_STEP // 2]
+    return {year: str(year) for year in sorted({first, last, *keep})}
+
+
+def year_slider(
+    slider_id: str, first: int, last: int, chosen: tuple[int, int]
+) -> dcc.RangeSlider:
+    """The year-range control over a served span ``first``–``last``.
+
+    No ``persistence``: it would override the URL, which is where the range lives.
+    """
+    return dcc.RangeSlider(
+        id=slider_id,
+        min=first,
+        max=last,
+        step=1,
+        value=list(chosen),
+        allowCross=False,
+        allow_direct_input=False,
+        marks=year_marks(first, last),
+        tooltip={"placement": "bottom"},
     )

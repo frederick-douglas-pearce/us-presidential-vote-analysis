@@ -236,14 +236,14 @@ class TestFilters:
     )
     def test_slider_labels_never_crowd_each_other(self, first: int, last: int) -> None:
         """The 390 px smoke test found "1824" and "1840" printed as one word."""
-        marks = sorted(MOD["_marks"](first, last))
+        marks = sorted(components.year_marks(first, last))
         assert marks[0] == first and marks[-1] == last
         gaps = [b - a for a, b in zip(marks, marks[1:], strict=False)]
         # A literal, not the module's own constant: 16 years (1824 to 1840) crowded.
         assert all(gap >= 20 for gap in gaps), marks
 
     def test_the_served_span_s_slider_labels(self) -> None:
-        assert sorted(MOD["_marks"](FIRST, LAST)) == [
+        assert sorted(components.year_marks(FIRST, LAST)) == [
             1824,
             1880,
             1920,
@@ -761,11 +761,11 @@ class TestSharedPieces:
             dash.page_registry["pages.home"]["success"] == home_module()["COVERAGE_ID"]
         )
 
-    def test_home_links_to_the_elections_page(self) -> None:
+    def test_home_links_to_the_elections_and_states_pages(self) -> None:
         tree = home_module()["render"](copy.deepcopy(META))
         links = [link.href for link in of_type(tree, "Link")]
-        assert links == [PAGE["path"]]
-        assert links[0] in {p["path"] for p in dash.page_registry.values()}
+        assert links == [PAGE["path"], "/states"]
+        assert set(links) <= {p["path"] for p in dash.page_registry.values()}
 
     def test_home_keeps_no_second_copy_of_the_footer(self) -> None:
         source = (PACKAGE / "pages" / "home.py").read_text(encoding="utf-8")

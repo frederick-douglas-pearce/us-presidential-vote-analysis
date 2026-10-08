@@ -43,14 +43,15 @@ a miss path whose edge keeps answering an older version cannot turn every visit 
 
 Pages declare what they read in ``dash.register_page``: ``prefetch=(...)`` lists the
 canonical paths warmed on every new snapshot version, ``on_miss=(...)`` the paths (or
-templates of the page's path variables, such as ``/v1/elections/{year}``) filled on a
-miss, and ``success=`` the id of an element the page renders only from a successful
-read. ``TestRegistryCoverage`` checks every read a page's layout makes against these
-declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts
-each page's success marker. A templated page also registers ``validate=(source,
-judge)`` (:data:`Validate`) and calls :func:`accepted` before formatting a path
-variable into an API path; a page that reads filters registers ``query=`` its parser.
-``app.py`` uses both for the canonical link, ``og:url`` and the 404 (#312).
+templates of the page's path variables or of :data:`COVERAGE_VARS`, such as
+``/v1/elections/{year}`` or ``/v1/elections/{year_max}``) filled on a miss, and
+``success=`` the id of an element the page renders only from a successful read.
+``TestRegistryCoverage`` checks every read a page's layout makes against these
+declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts each page's
+success marker. A templated page also registers ``validate=(source, judge)``
+(:data:`Validate`) and calls :func:`accepted` before formatting a path variable into an
+API path; a page that reads filters registers ``query=`` its parser. ``app.py`` uses
+both for the canonical link, ``og:url`` and the 404 (#312).
 """
 
 from __future__ import annotations
@@ -69,6 +70,7 @@ from urllib.parse import urlsplit
 
 import dash
 
+from explore import query
 from explore.config import API_BASE, API_HOST
 
 log = logging.getLogger(__name__)
@@ -113,9 +115,21 @@ MIN_RECHECK_INTERVAL_S = 30.0
 #: The one path the cache is versioned on.
 META_PATH = "/v1/meta"
 
-#: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; the
-#: elections page (#306) registers it.
+#: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; the pages
+#: that read it register it (#306, #307, #279).
 ELECTIONS_PATH = "/v1/elections"
+
+#: The variables a page may name in an ``on_miss`` template or a ``validate`` source
+#: besides its own path variables (#279). Each is read from the prefetched
+#: :data:`ELECTIONS_PATH` by :func:`coverage_vars`, never from a request: a closed set,
+#: so a template naming anything else fails ``TestRegistryContracts``.
+COVERAGE_VARS = ("year_max",)
+
+#: The latest election, whose rows name every state and DC: the state roster (#279).
+#: Filled on a miss; whether to warm it is #310's question (D072).
+ROSTER_PATH = "/v1/elections/{year_max}"
+
+_PLACEHOLDER_RE = re.compile(r"{(.*?)}")
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")
 
@@ -224,9 +238,101 @@ def snapshot_version_of(meta: JsonObject) -> str:
 
 
 #: A templated page's validation, registered as ``validate=(source, judge)``: the one
-#: literal API path it decides from (which the page also prefetches), and a pure,
-#: total function of the path variables and that path's body (#312).
+#: API path it decides from, and a pure, total function of the path variables and that
+#: path's body (#312). The source is a literal the page prefetches, or one it declares
+#: in ``on_miss`` — a literal, or a template over :data:`COVERAGE_VARS` (#279) — and is
+#: never built from a path variable, so judging a value never fills a path made from it.
 Validate = tuple[str, Callable[[dict[str, Any], JsonObject], bool]]
+
+
+def placeholders(template: str) -> set[str]:
+    """The ``{name}`` variables a path template names."""
+    return set(_PLACEHOLDER_RE.findall(template))
+
+
+def coverage_vars(index: Any) -> dict[str, str]:
+    """:data:`COVERAGE_VARS` from a ``/v1/elections`` body, or ``TypeError``.
+
+    ``year_max`` is the body's ``meta.provenance.coverage.year_max``, and only if it is
+    the latest year the same body serves (its greatest row year, each checked by
+    :func:`explore.query.checked_year`): a value derived from a response is formatted
+    into a path, so it is validated as a path variable is, and the roster means "every
+    state in the latest election" only if it is the latest. ``TypeError`` because that
+    is what a layout turns into the degraded state.
+    """
+    try:
+        year_max = index["meta"]["provenance"]["coverage"]["year_max"]
+        rows = index["data"]
+    except (KeyError, TypeError) as exc:
+        raise TypeError("/v1/elections carries no coverage.year_max") from exc
+    year = query.checked_year(year_max)
+    served = [
+        query.checked_year(row.get("year"))
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict)
+    ]
+    latest = max((y for y in served if y is not None), default=None)
+    if year is None or year != latest:
+        raise TypeError(
+            f"coverage.year_max is not the latest served year: {year_max!r}"
+        )
+    return {"year_max": str(year)}
+
+
+def roster(body: Any) -> tuple[int, dict[str, str]]:
+    """The year a roster response names and each state in it, ``{usps: name}``, or
+    ``TypeError``.
+
+    The one reading of :data:`ROSTER_PATH`'s body, shared by the state page's judge and
+    the picker, so a body this refuses both refuse (#279): a non-empty list of rows,
+    every one naming the same checked year and a USPS code (two ASCII capitals) with a
+    state name. Each caller also requires that year to be the latest election.
+    """
+    rows = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise TypeError("the roster carries no list of state rows")
+    years: set[int | None] = set()
+    states: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise TypeError("the roster carries a row that is not an object")
+        years.add(query.checked_year(row.get("year")))
+        usps, name = row.get("state_usps"), row.get("state")
+        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
+            raise TypeError("the roster carries a malformed state code")
+        if not isinstance(name, str):
+            raise TypeError("the roster carries a malformed state name")
+        states[usps] = name
+    year = years.pop() if len(years) == 1 else None
+    if year is None:
+        raise TypeError("the roster's rows do not name one election year")
+    return year, states
+
+
+def source_path(source: str, get: Callable[[str], JsonObject]) -> str:
+    """The concrete path a ``validate`` source names, reading the index only if the
+    source is a template. ``TypeError`` from :func:`coverage_vars` propagates."""
+    if not placeholders(source):
+        return source
+    return source.format(**coverage_vars(get(ELECTIONS_PATH)))
+
+
+def cached_source(source: str, responses: dict[str, JsonObject]) -> JsonObject | None:
+    """A ``validate`` source's body from ``responses`` (a snapshot's), never filling.
+
+    ``None`` when it is not cached, or its template cannot be resolved from what is:
+    the index then counts the path as matched (D073), and the render decides.
+    """
+    if not placeholders(source):
+        return responses.get(source)
+    index = responses.get(ELECTIONS_PATH)
+    if index is None:
+        return None
+    try:
+        path = source.format(**coverage_vars(index))
+    except TypeError:
+        return None
+    return responses.get(path)
 
 
 def well_formed(path_vars: dict[str, Any]) -> bool:
@@ -262,13 +368,18 @@ def accepted(
     A templated page calls this with its view's ``get`` and the keyword arguments its
     layout actually received, before it formats any of them into a path. Malformed
     variables are refused without a read; otherwise the page's source is read through
-    the view (a fixed path, so normally a cache hit) and judged. Anything but ``True``
-    refuses. :class:`ApiUnavailable` from the read propagates to the page's degraded
-    state.
+    the view and judged. A prefetched source is normally a cache hit; one declared in
+    ``on_miss`` is filled on a miss like any other path, at most once per render and
+    cached for the snapshot once a fill succeeds (concurrent renders may each fill it,
+    and a failed fill caches nothing: #333), and a template over
+    :data:`COVERAGE_VARS` reads the index first (:func:`source_path`). Neither is built
+    from a path variable, so a refused value never fills anything made from it.
+    Anything but ``True`` refuses. :class:`ApiUnavailable` from a read, and
+    ``TypeError`` from an unresolvable template, propagate to the page's degraded state.
     """
     if not well_formed(path_vars):
         return False
-    return judge(validate, path_vars, get(validate[0]))
+    return judge(validate, path_vars, get(source_path(validate[0], get)))
 
 
 @dataclass

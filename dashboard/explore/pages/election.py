@@ -118,15 +118,15 @@ def _year_rows(body: Any) -> list[Any]:
 
 
 def _row_year(row: Any) -> int | None:
-    year = row.get("year") if isinstance(row, dict) else None
-    return year if isinstance(year, int) and not isinstance(year, bool) else None
+    return query.checked_year(row.get("year")) if isinstance(row, dict) else None
 
 
 def served_year(path_vars: dict[str, Any], body: Any) -> bool:
     """Whether ``path_vars["year"]`` is a year ``/v1/elections`` serves.
 
-    Pure and total: four ASCII digits, equal to an integer row year in the index,
-    never a literal. A malformed body serves nothing.
+    Pure and total: four ASCII digits, equal to a row year of the index (each checked
+    by :func:`explore.query.checked_year`), never a literal. A malformed body serves
+    nothing.
     """
     year = path_vars.get("year")
     if not isinstance(year, str) or not query.YEAR_RE.fullmatch(year):
@@ -297,10 +297,18 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     )
 
 
+def _state_cell(row: dict[str, Any]) -> html.Td:
+    """The state's name, linked to its history (#279) when its code is a USPS code."""
+    usps = row["state_usps"]
+    if isinstance(usps, str) and query.USPS_RE.fullmatch(usps):
+        return html.Td(dcc.Link(str(row["state"]), href=f"/state/{usps}"))
+    return html.Td(str(row["state"]))
+
+
 def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html.Tr:
     return html.Tr(
         [
-            html.Td(str(row["state"])),
+            _state_cell(row),
             html.Td(str(row["candidate"])),
             labels.party_cell(row["party"]),
             html.Td(labels.number(row["state_electoral_votes"])),

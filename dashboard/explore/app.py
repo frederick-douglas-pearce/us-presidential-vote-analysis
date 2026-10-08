@@ -14,10 +14,11 @@ Beyond Dash itself this module adds four things, all host-level:
   variables, with no query string, and an ``og:url`` that adds the query normalized by
   the page's own ``query=`` parser, so a shared filtered card reopens the filtered view.
   A path no page matches, one a page's ``validate=`` rejects from the already-cached
-  source it names, one whose percent-escapes change it when decoded, or Dash's custom
-  404 page, answers 404 with ``noindex`` and neither tag. A source not cached yet
-  counts as matched: the index never waits on the API (D071(g)). Dash's own page
-  meta tags are rebuilt here without its ``twitter:url``, which is the raw request URL.
+  source it names (a template source resolved from the cached index, #279), one whose
+  percent-escapes change it when decoded, or Dash's custom 404 page, answers 404 with
+  ``noindex`` and neither tag. A source not cached yet counts as matched: the index
+  never waits on the API (D071(g)). Dash's own page meta tags are rebuilt here
+  without its ``twitter:url``, which is the raw request URL.
   The index never decides what a render may fetch: Dash's router merges the query
   string over the path variables, so a templated page validates what its layout
   receives, through ``api.accepted``.
@@ -136,7 +137,11 @@ def resolve(
     if validate is not None:
         if not api.well_formed(path_vars):
             return NOT_FOUND
-        body = snapshot.responses.get(validate[0]) if snapshot is not None else None
+        body = (
+            api.cached_source(validate[0], snapshot.responses)
+            if snapshot is not None
+            else None
+        )
         if body is not None and not api.judge(validate, path_vars, body):
             return NOT_FOUND
     template = page.get("path_template")

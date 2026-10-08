@@ -113,9 +113,16 @@ def routed_states(response: Any) -> list[list[str]]:
         return []
     _, body = table["props"]["children"]
     return [
-        [td["props"]["children"] for td in tr["props"]["children"][:2]]
+        [_cell_text(td["props"]["children"]) for td in tr["props"]["children"][:2]]
         for tr in body["props"]["children"]
     ]
+
+
+def _cell_text(child: Any) -> Any:
+    # A linked cell (#279's state links) serializes as a Link node.
+    if isinstance(child, dict) and child.get("type") == "Link":
+        return child["props"]["children"]
+    return child
 
 
 # --- registration and the recorded responses -----------------------------------------

@@ -60,14 +60,36 @@ RECORDED: dict[str, dict[str, Any]] = {
         "/v1/elections": "v1_elections.json",
         **{
             f"/v1/elections/{year}": f"v1_elections_{year}.json"
-            for year in (1824, 1860, 1868, 1872, 2016)
+            for year in (1824, 1860, 1868, 1872, 2016, 2024)
         },
+        "/v1/states/GA": "v1_states_GA.json",
     }.items()
 }
 
 #: The concrete value each templated page is rendered at, one per path variable. Each
 #: must make the page read a path in :data:`RECORDED`.
-PATH_VALUES = {"year": "1824"}
+PATH_VALUES = {"year": "1824", "usps": "GA"}
+
+#: The coverage variables (``api.COVERAGE_VARS``) as the recorded index resolves them:
+#: what an ``on_miss`` template or a ``validate`` source naming one is formatted with.
+COVERAGE_VALUES = api.coverage_vars(RECORDED["/v1/elections"])
+
+#: A well-formed value each path variable's page does not serve: what the hostile
+#: renders put in the path (#279, so a page validating only syntax is caught).
+UNSERVED_VALUES = {"year": "1825", "usps": "ZZ"}
+
+
+def resolved(source: str) -> str:
+    """A ``validate`` source or ``on_miss`` path with its coverage variables filled."""
+    return source.format(**COVERAGE_VALUES) if api.placeholders(source) else source
+
+
+def source_paths(source: str) -> list[str]:
+    """What must be cached for a ``validate`` source to judge: the source and, for a
+    template, the index it is resolved from."""
+    path = resolved(source)
+    return [api.ELECTIONS_PATH, path] if path != source else [source]
+
 
 #: The Pages routing callback — the POST a browser makes to render a page's content.
 ROUTING_POST: dict[str, Any] = {
@@ -423,7 +445,7 @@ def cached_client(
     client = offline_client(
         fetch,
         bucket=bucket,
-        prefetch_paths=lambda: [source] if elections else [],
+        prefetch_paths=lambda: source_paths(source) if elections else [],
     )
     client.ensure_refresher = lambda: None  # type: ignore[method-assign]
     client.refresh()
@@ -1032,9 +1054,10 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
     # Serving, with every page's validate source cached from its recorded response
     # (an unrecorded source fails here), so each validate runs and judges.
     sources = {
-        page["validate"][0]
+        path
         for page in dash.page_registry.values()
         if page.get("validate")
+        for path in source_paths(page["validate"][0])
     }
     client._snapshot = api.Snapshot(
         version=VERSION,
@@ -1129,18 +1152,20 @@ class TestDashPrivates:
 
 # --- every templated page validates what its layout receives (#312, item 6) ----------
 
-#: Hostile renders for a page's path variables: (path value, query override). Each
-#: names a value the recorded ``/v1/elections`` does not serve, or one that is not a
-#: plain string at all.
+#: Hostile renders for a page's path variables: (path value, query override), each
+#: rendered for every path variable. Each names a value the page does not serve, or one
+#: that is not a plain string at all. ``{unserved}`` is the variable's
+#: :data:`UNSERVED_VALUES` entry and ``{served}`` its :data:`PATH_VALUES` one, so an
+#: override always sits on a value the page serves.
 HOSTILE_RENDERS: tuple[tuple[str, str], ...] = (
-    ("1825", ""),
-    ("1860/x", ""),
+    ("{unserved}", ""),
+    ("{served}/x", ""),
     ("%", ""),
     ("..", ""),
     ("<script>", ""),
-    ("1860", "?{name}=.."),
-    ("1860", "?{name}=1&{name}=2"),
-    ("1860", "?{name}="),
+    ("{served}", "?{name}=.."),
+    ("{served}", "?{name}=1&{name}=2"),
+    ("{served}", "?{name}="),
 )
 
 
@@ -1157,7 +1182,12 @@ def hostile_render_problems(
     problems = []
     for value, override in HOSTILE_RENDERS:
         _, calls, bucket = cached_client(monkeypatch, source=page["validate"][0])
-        pathname = re.sub(r"<.*?>", value, template)
+        pathname = template
+        for name in names:
+            concrete = value.format(
+                served=PATH_VALUES[name], unserved=UNSERVED_VALUES[name]
+            )
+            pathname = pathname.replace(f"<{name}>", concrete)
         search = "".join(override.format(name=name) for name in names)
         try:
             response = route(pathname, search)
@@ -1253,13 +1283,48 @@ def validate_problems(page: dict[str, Any]) -> list[str]:
     problems = []
     if not callable(judge_fn):
         problems.append("validate's judge is not callable")
-    if source not in page.get("prefetch", ()):
-        problems.append(f"validate source {source} is not prefetched")
+    # Prefetched, or declared in on_miss and built from no path variable (#279): a
+    # source made from the variable it judges would fill a path from an unjudged value.
+    path_vars = set(re.findall(r"<(.*?)>", page.get("path_template") or ""))
+    if source not in page.get("prefetch", ()) and source not in page.get(
+        "on_miss", ()
+    ):
+        problems.append(f"validate source {source} is neither prefetched nor on_miss")
+    if api.placeholders(source) & path_vars:
+        problems.append(f"validate source {source} is built from a path variable")
+    return problems
+
+
+def template_problems(page: dict[str, Any]) -> list[str]:
+    """What is wrong with a page's ``on_miss`` templates and ``validate`` source names.
+
+    Each placeholder is a path variable or one of ``api.COVERAGE_VARS`` (resolved from
+    the index, never from a request); a page naming a coverage variable prefetches the
+    index it is resolved from; and no path variable shares a coverage variable's name.
+    """
+    path_vars = set(re.findall(r"<(.*?)>", page.get("path_template") or ""))
+    coverage = set(api.COVERAGE_VARS)
+    problems = [
+        f"path variable {n} shadows a coverage variable"
+        for n in sorted(path_vars & coverage)
+    ]
+    validate = page.get("validate")
+    templates = [*page.get("on_miss", ()), *([validate[0]] if validate else [])]
+    named: set[str] = set()
+    for template in templates:
+        names = api.placeholders(template)
+        named |= names
+        problems += [
+            f"{template} names {n}, neither a path nor a coverage variable"
+            for n in sorted(names - path_vars - coverage)
+        ]
+    if named & coverage and api.ELECTIONS_PATH not in page.get("prefetch", ()):
+        problems.append("a page naming a coverage variable does not prefetch the index")
     return problems
 
 
 class TestRegistryContracts:
-    def test_every_validating_page_prefetches_its_source(
+    def test_every_validating_page_declares_its_source(
         self, register: Callable[..., dict[str, Any]]
     ) -> None:
         register(**YEAR_PAGE)
@@ -1269,7 +1334,10 @@ class TestRegistryContracts:
     @pytest.mark.parametrize(
         ("change", "problem"),
         [
-            ({"prefetch": ()}, "validate source /v1/elections is not prefetched"),
+            (
+                {"prefetch": ()},
+                "validate source /v1/elections is neither prefetched nor on_miss",
+            ),
             ({"validate": None}, "a templated page registers no validate"),
             ({"path_template": None}, "a page with no path variables registers validate"),
         ],
@@ -1278,6 +1346,77 @@ class TestRegistryContracts:
         self, change: dict[str, Any], problem: str
     ) -> None:
         assert validate_problems({**YEAR_PAGE, **change}) == [problem]
+
+    @pytest.mark.parametrize(
+        ("change", "problems"),
+        [
+            # A source declared in on_miss, built from coverage alone: accepted (#279).
+            (
+                {
+                    "validate": (api.ROSTER_PATH, known_year),
+                    "on_miss": (api.ROSTER_PATH, "/v1/elections/{year}"),
+                },
+                [],
+            ),
+            (
+                {"validate": (api.ROSTER_PATH, known_year)},
+                [f"validate source {api.ROSTER_PATH} is neither prefetched nor on_miss"],
+            ),
+            (
+                {"validate": ("/v1/elections/{year}", known_year)},
+                ["validate source /v1/elections/{year} is built from a path variable"],
+            ),
+        ],
+    )
+    def test_a_validate_source_may_be_filled_on_a_miss_but_never_from_the_variable(
+        self, change: dict[str, Any], problems: list[str]
+    ) -> None:
+        assert validate_problems({**YEAR_PAGE, **change}) == problems
+
+    def test_every_page_names_only_path_and_coverage_variables(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        register(**YEAR_PAGE)
+        coverage = set(api.COVERAGE_VARS)
+        naming = 0
+        for page in dash.page_registry.values():
+            assert template_problems(page) == [], page["module"]
+            naming += any(
+                api.placeholders(t) & coverage for t in page.get("on_miss", ())
+            )
+        assert naming >= 2, "the state page and the picker name {year_max}"
+
+    @pytest.mark.parametrize(
+        ("change", "problem"),
+        [
+            (
+                {"on_miss": ("/v1/elections/{year_min}",)},
+                "/v1/elections/{year_min} names year_min, neither a path nor a "
+                "coverage variable",
+            ),
+            (
+                {"path_template": "/fake-x/<year_max>", "on_miss": ()},
+                "path variable year_max shadows a coverage variable",
+            ),
+            (
+                {"prefetch": (), "on_miss": (api.ROSTER_PATH,)},
+                "a page naming a coverage variable does not prefetch the index",
+            ),
+            # An unknown name in the validate source alone, which on_miss does not list.
+            (
+                {
+                    "prefetch": (api.ELECTIONS_PATH, "/v1/elections/{year_min}"),
+                    "validate": ("/v1/elections/{year_min}", known_year),
+                },
+                "/v1/elections/{year_min} names year_min, neither a path nor a "
+                "coverage variable",
+            ),
+        ],
+    )
+    def test_the_template_check_fails_what_it_should(
+        self, change: dict[str, Any], problem: str
+    ) -> None:
+        assert template_problems({**YEAR_PAGE, **change}) == [problem]
 
     def test_every_query_parser_keeps_its_contract(self) -> None:
         pages = [*dash.page_registry.values(), {**YEAR_PAGE, "query": fake_parser}]
@@ -1877,6 +2016,12 @@ def concrete_values(page: dict[str, Any]) -> dict[str, str]:
     return {name: PATH_VALUES[name] for name in names}
 
 
+def template_values(page: dict[str, Any]) -> dict[str, str]:
+    """What a page's ``on_miss`` templates are formatted with: its path variables and
+    the coverage variables, which share no name (``TestRegistryContracts``)."""
+    return {**COVERAGE_VALUES, **concrete_values(page)}
+
+
 class RecordingView:
     """A view that serves recorded responses by path, and records every read."""
 
@@ -1917,7 +2062,7 @@ def coverage_problems(
     values = concrete_values(page)
     rendered = page["layout"](**values)
     declared = set(page.get("prefetch", ())) | {
-        template.format(**values) for template in page.get("on_miss", ())
+        template.format(**template_values(page)) for template in page.get("on_miss", ())
     }
     problems = [f"undeclared read {path}" for path in client.reads if path not in declared]
     if client.views > 1:  # each view pins its own snapshot: one render, one view
@@ -1933,6 +2078,129 @@ def coverage_problems(
 #: The validating fake year page as the coverage check renders it: unregistered, at
 #: its concrete value.
 FAKE_YEAR_PAGE: dict[str, Any] = {"path": "/fake-election/none", **YEAR_PAGE}
+
+
+def index_with(**coverage: Any) -> dict[str, Any]:
+    """The recorded index with its coverage block changed."""
+    index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+    index["meta"]["provenance"]["coverage"].update(coverage)
+    return index
+
+
+class TestCoverageVars:
+    """#279: a coverage variable is formatted into a path, so it is validated as a path
+    variable is: only the latest year the index itself serves, never a value from a
+    request."""
+
+    def test_the_recorded_index_names_its_latest_served_year(self) -> None:
+        years = [row["year"] for row in RECORDED[api.ELECTIONS_PATH]["data"]]
+        assert api.coverage_vars(RECORDED[api.ELECTIONS_PATH]) == {
+            "year_max": str(max(years))
+        }
+
+    @pytest.mark.parametrize(
+        "index",
+        [
+            {},
+            [],
+            "2024",
+            {"meta": {"provenance": {}}, "data": []},
+            index_with(year_max=True),
+            index_with(year_max=2024.0),
+            index_with(year_max="2024"),
+            index_with(year_max=None),
+            index_with(year_max=99999),
+            index_with(year_max=999),
+            # In range and four digits, but not a year this index serves.
+            index_with(year_max=2028),
+            index_with(year_max=1826),
+            # Served, but not the latest: the roster would not be every state.
+            index_with(year_max=1824),
+            index_with(year_max=2020),
+        ],
+        ids=repr,
+    )
+    def test_anything_but_the_latest_served_year_is_a_type_error(self, index: Any) -> None:
+        with pytest.raises(TypeError):
+            api.coverage_vars(index)
+
+    def test_the_latest_year_is_taken_from_checked_row_years_only(self) -> None:
+        # A float row year is not a served year, so the latest checked one is 2020
+        # and coverage's 2024 is refused, though 2024.0 == 2024.
+        index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+        for row in index["data"]:
+            if row["year"] == 2024:
+                row["year"] = 2024.0
+        with pytest.raises(TypeError):
+            api.coverage_vars(index)
+
+    @pytest.mark.parametrize(
+        "junk", [{"year": "2030"}, {"year": 99999}, {"year": True}, 7, "row", None]
+    )
+    def test_a_malformed_index_row_is_skipped_not_fatal(self, junk: Any) -> None:
+        # A row that is not an object, or names no checked year, serves nothing:
+        # it neither becomes the latest year nor raises past the page's except.
+        index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+        index["data"].append(junk)
+        assert api.coverage_vars(index) == {"year_max": "2024"}
+        both = {api.ELECTIONS_PATH: index, "/v1/elections/2024": {"data": []}}
+        assert api.cached_source(api.ROSTER_PATH, both) == {"data": []}
+
+    def test_a_served_year_needs_a_served_row_not_only_the_coverage_block(
+        self,
+    ) -> None:
+        index = copy.deepcopy(RECORDED[api.ELECTIONS_PATH])
+        index["data"] = [r for r in index["data"] if r["year"] != 2024]
+        with pytest.raises(TypeError):
+            api.coverage_vars(index)
+
+    def test_a_literal_source_is_read_as_it_is(self) -> None:
+        reads: list[str] = []
+
+        def get(path: str) -> dict[str, Any]:
+            reads.append(path)
+            return RECORDED[path]
+
+        assert api.source_path(api.ELECTIONS_PATH, get) == api.ELECTIONS_PATH
+        assert reads == []
+
+    def test_a_template_source_is_resolved_from_the_index_only(self) -> None:
+        reads: list[str] = []
+
+        def get(path: str) -> dict[str, Any]:
+            reads.append(path)
+            return RECORDED[path]
+
+        assert api.source_path(api.ROSTER_PATH, get) == "/v1/elections/2024"
+        assert reads == [api.ELECTIONS_PATH]
+
+    def test_accepted_judges_a_template_source_after_resolving_it(self) -> None:
+        reads: list[str] = []
+        seen: list[Any] = []
+
+        def get(path: str) -> dict[str, Any]:
+            reads.append(path)
+            return RECORDED[path]
+
+        def judge_fn(path_vars: dict[str, Any], body: Any) -> bool:
+            seen.append(body)
+            return True
+
+        assert api.accepted(get, (api.ROSTER_PATH, judge_fn), {"usps": "GA"})
+        assert reads == [api.ELECTIONS_PATH, "/v1/elections/2024"]
+        assert seen == [RECORDED["/v1/elections/2024"]]
+
+    def test_the_index_resolves_a_cached_source_and_never_fills(self) -> None:
+        roster = RECORDED["/v1/elections/2024"]
+        index = RECORDED[api.ELECTIONS_PATH]
+        both = {api.ELECTIONS_PATH: index, "/v1/elections/2024": roster}
+        assert api.cached_source(api.ROSTER_PATH, both) is roster
+        assert api.cached_source(api.ELECTIONS_PATH, both) is index
+        # Cold, or unresolvable: matched (None), never an error and never a read.
+        assert api.cached_source(api.ROSTER_PATH, {api.ELECTIONS_PATH: index}) is None
+        assert api.cached_source(api.ROSTER_PATH, {"/v1/elections/2024": roster}) is None
+        malformed = {**both, api.ELECTIONS_PATH: index_with(year_max=2028)}
+        assert api.cached_source(api.ROSTER_PATH, malformed) is None
 
 
 class TestRegistryCoverage:
@@ -2022,8 +2290,12 @@ PAGE_API_NAMES = {
     "ApiUnavailable",
     "META_PATH",
     "ELECTIONS_PATH",
+    "ROSTER_PATH",
     "Validate",
     "accepted",
+    # Pure functions of a body the page already read through its view.
+    "coverage_vars",
+    "roster",
 }
 
 
