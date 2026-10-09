@@ -151,7 +151,9 @@ PARTY_NOTE = (
 NOT_IN_DATASET = "Not in this dataset"
 
 
-#: A popular-vote or hybrid figure for a year outside the popular-vote window (#308).
+#: A popular-vote or hybrid cell with no figure because the year lies outside the
+#: popular-vote window (#308): the panel's null there, and T3's in a year with no
+#: popular vote.
 NOT_APPLICABLE = "Not applicable: no popular vote in this dataset for this year"
 
 #: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``.
