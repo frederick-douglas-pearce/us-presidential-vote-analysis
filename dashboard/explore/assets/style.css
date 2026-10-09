@@ -38,6 +38,13 @@ th { font-weight: 600; cursor: help; }
 .glossary { margin-top: 1rem; font-size: 0.875rem; }
 .glossary dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
 .glossary dd { margin: 0; }
+/* The label column stops at half the width and wraps, so a long label never widens the page on a phone. */
+.panel dl { display: grid; grid-template-columns: fit-content(50%) 1fr; gap: 0.35rem 1rem; margin: 0.5rem 0; }
+.panel .glossary dl { grid-template-columns: fit-content(60%) 1fr; }
+.panel dt, .panel dd { overflow-wrap: anywhere; }
+.panel dt { font-weight: 600; cursor: help; }
+.panel dd { margin: 0; }
+.panel .glossary dt { font-weight: normal; cursor: auto; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid #ddd; }
 @media (prefers-color-scheme: dark) {
   body { color: #e8e8e8; background: #121212; }
