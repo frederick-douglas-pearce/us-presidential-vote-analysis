@@ -1,9 +1,12 @@
-"""One election in full (#307): T2, results by state, T3, national results, and T6,
-every state's persons per electoral vote (#280).
+"""One election in full (#307): the election panel (#308), the winner under each
+method, T2, results by state, T3, national results, and T6, every state's persons per
+electoral vote (#280).
 
-T2 and T3 come from one response, ``/v1/elections/{year}``, and T6 from a second,
+The panel, T2 and T3 come from one response, ``/v1/elections/{year}`` (its
+``election`` block, ``data`` and ``summary``), and T6 from a second,
 ``/v1/elections/{year}/per-capita``; both are filled on a miss, in the same render, so
-the page's success marker renders only when all three tables did. The year
+the page's success marker renders only when the panel and all three tables did. The
+year
 is the path (``/election/<year>``, an item singular as the index is plural); it is
 validated from the ``/v1/elections`` the page prefetches before it is formatted into an
 API path (#312), so a year the dataset does not serve is not found, at the index (404)
@@ -16,7 +19,8 @@ cache, and the provenance footer from the response's own ``meta.provenance``. T2
 filters are the API's own query names, ``state`` (a USPS code) and ``candidate`` (a
 slug), and the field names ``pv_status`` and ``electoral_count_status``. T3 is never
 filtered: it is the year's national result, as the API's ``summary`` is. T6 is narrowed
-by the same ``state`` filter, as T2 resolves it, and by nothing else.
+by the same ``state`` filter, as T2 resolves it, and by nothing else. The panel is
+never filtered either.
 """
 
 from __future__ import annotations
@@ -37,6 +41,9 @@ STATES_TABLE_ID = "election-states"
 NATION_TABLE_ID = "election-nation"
 NO_PV_ID = "election-no-pv"
 PER_CAPITA_TABLE_ID = "election-per-capita"
+PANEL_ID = "election-panel"
+#: The panel's place when the API serves ``election: null`` (a build gap).
+PANEL_UNAVAILABLE_ID = "election-panel-unavailable"
 URL_ID = "election-url"
 STATE_ID = "election-state"
 CANDIDATE_ID = "election-candidate"
@@ -70,7 +77,29 @@ NATION_FIELDS = (
     "national_pv_votes",
     "ec_share_full",
     "pv_share",
+    "ec_share_hybrid",
+    "hybrid_score",
 )
+
+#: The election panel's fields, in display order, by public field name (#308): who led
+#: under each method, whether either other method changes the winner, the three
+#: margins, whether anyone won a majority of electors, and the share of electors
+#: appointed by states that held a popular vote.
+PANEL_FIELDS = (
+    "ec_winner",
+    "pv_winner",
+    "hybrid_winner",
+    "pv_flip",
+    "hybrid_flip",
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
+    "ec_determinative",
+    "pv_coverage",
+)
+
+#: The panel's sentence when the API serves no ``election`` block for the year.
+PANEL_UNAVAILABLE = "The comparison across methods is not available for this year."
 
 #: T6's columns, in display order, by public field name (#280).
 PER_CAPITA_FIELDS = ("state", *labels.PER_CAPITA_FIELDS)
@@ -351,6 +380,17 @@ def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
     return labels.share(value) if as_share else labels.number(value)
 
 
+def _hybrid_score(value: Any, has_popular_vote: bool) -> str:
+    """T3's hybrid score: not applicable in a year with no popular vote (T3's year
+    rule, so it agrees with the row's popular-vote cells); a null inside it is a
+    candidate with no popular-vote figure, so no score."""
+    if not has_popular_vote:
+        return labels.NOT_APPLICABLE
+    if value is None:
+        return labels.NO_NATIONAL_FIGURE
+    return labels.share(value)
+
+
 def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
     return html.Tr(
         [
@@ -363,12 +403,10 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
             html.Td(labels.yes_no(row["took_office"])),
             html.Td(_national_pv(row["national_pv_votes"], has_popular_vote, False)),
             # Nullable in the API's schema, though real for every served year.
-            html.Td(
-                labels.NOT_IN_DATASET
-                if row["ec_share_full"] is None
-                else labels.share(row["ec_share_full"])
-            ),
+            html.Td(labels.share_cell(row["ec_share_full"])),
             html.Td(_national_pv(row["pv_share"], has_popular_vote, True)),
+            html.Td(labels.share_cell(row["ec_share_hybrid"])),
+            html.Td(_hybrid_score(row["hybrid_score"], has_popular_vote)),
         ]
     )
 
@@ -403,6 +441,74 @@ def _rows(value: Any, year: int, name: str, path: str | None = None) -> list[Any
     if any(_row_year(row) != year for row in value):
         raise TypeError(f"{path} carries {name} of another year")
     return value
+
+
+def _election(value: Any, year: int) -> dict[str, Any] | None:
+    """The year's ``election`` block, ``None`` where the API serves none, or
+    ``TypeError``.
+
+    The API serves ``election: null`` on a build gap while the rows beside it stay
+    correct, so a null is the panel's own unavailable state, never the page's. Any
+    other shape, or a block naming another year (checked as :func:`_rows` checks a
+    row's), is a malformed body.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict) or _row_year(value) != year:
+        raise TypeError(f"/v1/elections/{year} carries no election block of that year")
+    return value
+
+
+def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, str]:
+    """Each panel field's cell. The Electoral College fields and ``pv_coverage`` exist
+    for every year, so a null there names no cause; a popular-vote or hybrid field
+    outside the window (from ``coverage``) is not applicable."""
+    applicable = labels.in_pv_window(year, coverage)
+    return {
+        "ec_winner": labels.winner(block["ec_winner"], True),
+        "pv_winner": labels.winner(block["pv_winner"], applicable),
+        "hybrid_winner": labels.winner(block["hybrid_winner"], applicable),
+        "pv_flip": labels.flip(block["pv_flip"], "popular-vote", applicable),
+        "hybrid_flip": labels.flip(block["hybrid_flip"], "hybrid", applicable),
+        "ec_margin": labels.margin(block["ec_margin"], True),
+        "pv_margin": labels.margin(block["pv_margin"], applicable),
+        "hybrid_margin": labels.margin(block["hybrid_margin"], applicable),
+        "ec_determinative": labels.ec_majority(block["ec_determinative"]),
+        "pv_coverage": labels.share_cell(block["pv_coverage"]),
+    }
+
+
+def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
+    """The election panel (#308): each field's label (its raw name as the tooltip, as
+    a column header's is) beside its cell, the hybrid's help text, and a glossary."""
+    heading = html.H2("Under each method")
+    if block is None:
+        return [
+            heading,
+            html.P(PANEL_UNAVAILABLE, id=PANEL_UNAVAILABLE_ID, className="note"),
+        ]
+    cells = _panel_cells(block, year, coverage)
+    return [
+        heading,
+        html.Div(
+            [
+                html.Dl(
+                    [
+                        item
+                        for field in PANEL_FIELDS
+                        for item in (
+                            html.Dt(labels.LABELS[field], title=field),
+                            html.Dd(cells[field]),
+                        )
+                    ]
+                ),
+                html.P(labels.HYBRID_NOTE, className="note"),
+                labels.glossary(PANEL_FIELDS, "Field names"),
+            ],
+            id=PANEL_ID,
+            className="panel",
+        ),
+    ]
 
 
 def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
@@ -450,17 +556,17 @@ def render(
 ) -> html.Div:
     """The page body for one ``/v1/elections/{year}`` response, the year's row of
     ``/v1/elections`` and its ``/per-capita`` response (all read through the same
-    view), and this page's filter pairs."""
+    view), and this page's filter pairs. The response's ``election`` key is required,
+    though its value may be null (:func:`_election`)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     year = _row_year(index_row)
     if year is None:
         raise TypeError("the index row names no year")
-    # Every row, not the ``election`` block: the API serves ``election: null`` on a
-    # build gap while the rows beside it stay correct, and this page shows none of it.
     rows = _rows(body["data"], year, "state rows")
     summary = _rows(body["summary"], year, "candidates")
     per_capita_rows = _per_capita_rows(per_capita["data"], year)
+    block = _election(body["election"], year)
     has_popular_vote = index_row["has_popular_vote"] is True
     chosen = filters(pairs, rows)
     shown = select(rows, chosen)
@@ -484,11 +590,13 @@ def render(
             NATION_TABLE_ID,
         ),
         html.P(labels.PARTY_NOTE, className="note"),
+        html.P(labels.HYBRID_NOTE, className="note"),
         labels.glossary(NATION_FIELDS),
     ]
     return html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
+            *_panel(block, year, coverage),
             html.H2("Results by state"),
             _controls(rows, chosen),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
@@ -549,9 +657,10 @@ def layout(year: Any = None, **params: Any) -> html.Div:
         [
             html.H1(heading),
             html.P(
-                "Every state's electoral votes for each candidate, with the popular "
-                "vote where this dataset has it, the national result, and how many "
-                "people each state's electoral votes stood for. Narrow the state "
+                "Who led under the Electoral College, the popular vote and the "
+                "hybrid; every state's electoral votes for each candidate, with the "
+                "popular vote where this dataset has it; the national result; and how "
+                "many people each state's electoral votes stood for. Narrow the state "
                 "results by state, candidate or status.",
                 className="lede",
             ),

@@ -1,5 +1,5 @@
-"""The one-election view, T2 and T3 (#307), and T6, every state's persons per
-electoral vote (#280).
+"""The one-election view, T2 and T3 (#307), T6, every state's persons per electoral
+vote (#280), and the election panel with T3's hybrid columns (#308).
 
 Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872,
 2016 and 2024, and ``/v1/elections/{year}/per-capita`` for those years and 1848 and 1864
@@ -285,7 +285,7 @@ class TestNotFound:
         added = copy.deepcopy(INDEX)
         added["data"].append({**added["data"][0], "year": 1825})
         body = year_body(1824)
-        for row in (*body["data"], *body["summary"]):
+        for row in (*body["data"], *body["summary"], body["election"]):
             row["year"] = 1825
         per_capita = per_capita_body(1824)
         for row in per_capita["data"]:
@@ -375,7 +375,7 @@ class TestRender:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The API serves ``election: null`` on a build gap while the rows beside it
-        stay correct; the page shows none of the block, so it renders."""
+        stay correct; the panel says it is unavailable and the tables render (#308)."""
         body = year_body(1872)
         body["election"] = None
         fetch, _ = fake_fetch({**RECORDED, "/v1/elections/1872": body})
@@ -383,6 +383,12 @@ class TestRender:
         tree = PAGE["layout"](year="1872")
         assert PAGE_ID in component_ids(tree)
         assert len(table_rows(tree, STATES)) == 222
+        assert len(table_rows(tree, NATION)) == len(body["summary"])
+        assert MOD["PANEL_ID"] not in component_ids(tree)
+        unavailable = find(tree, MOD["PANEL_UNAVAILABLE_ID"])
+        assert unavailable.children == (
+            "The comparison across methods is not available for this year."
+        )
 
     def test_an_unformattable_share_renders_as_text_not_a_server_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -417,6 +423,17 @@ class TestRender:
             lambda b: b["data"][-1].update(year=1864),
             lambda b: b["summary"][-1].update(year=1868),
             lambda b: b.pop("meta"),
+            # The election block (#308): required, a dict, naming the validated year.
+            lambda b: b.pop("election"),
+            lambda b: b.update(election=[]),
+            lambda b: b.update(election="1872"),
+            lambda b: b["election"].update(year=1868),
+            lambda b: b["election"].update(year="1872"),
+            lambda b: b["election"].update(year=True),
+            lambda b: b["election"].pop("year"),
+            lambda b: b["election"].pop("hybrid_margin"),
+            lambda b: b["meta"]["provenance"]["coverage"].pop("pv_year_max"),
+            lambda b: b["meta"]["provenance"]["coverage"].update(pv_year_min="1976"),
         ],
     )
     def test_a_malformed_body_shows_the_plain_message(
@@ -454,6 +471,21 @@ class TestHeaders:
             "national_pv_votes": "Popular votes (nation)",
             "ec_share_full": "Electoral share (counted ÷ appointed)",
             "pv_share": "Popular-vote share",
+            # The election panel and T3's hybrid columns (#308), approved 2026-10-08.
+            "ec_winner": "Most electoral votes counted",
+            "pv_winner": "Winner: popular vote",
+            "hybrid_winner": "Winner: hybrid",
+            "pv_flip": "Popular vote changes the winner",
+            "hybrid_flip": "Hybrid changes the winner",
+            "ec_margin": "Electoral margin (percentage points)",
+            "pv_margin": "Popular-vote margin (percentage points)",
+            "hybrid_margin": "Hybrid margin (percentage points)",
+            "ec_determinative": "Electoral College majority",
+            "pv_coverage": (
+                "Share of electors appointed by states that held a popular vote"
+            ),
+            "ec_share_hybrid": "Electoral share in the hybrid",
+            "hybrid_score": "Hybrid score",
         }
         assert {k: labels.LABELS[k] for k in expected} == expected
 
@@ -477,14 +509,18 @@ class TestHeaders:
         body = year_body(2016)
         assert set(MOD["STATE_GLOSSARY"]) <= set(body["data"][0])
         assert set(MOD["NATION_FIELDS"]) <= set(body["summary"][0])
+        assert set(MOD["PANEL_FIELDS"]) <= set(body["election"])
 
     def test_the_glossaries_name_every_column_and_the_count_reason(self) -> None:
         glossaries = of_type(render(1872), "Details")
-        assert len(glossaries) == 3
+        assert len(glossaries) == 4
         named = [[texts(dd.children)[0] for dd in of_type(g, "Dd")] for g in glossaries]
-        assert named[0] == list(MOD["STATE_FIELDS"]) + ["electoral_count_status_reason"]
-        assert named[1] == list(MOD["NATION_FIELDS"])
-        assert named[2] == list(MOD["PER_CAPITA_FIELDS"])
+        assert named[0] == list(MOD["PANEL_FIELDS"])
+        assert named[1] == list(MOD["STATE_FIELDS"]) + ["electoral_count_status_reason"]
+        assert named[2] == list(MOD["NATION_FIELDS"])
+        assert named[3] == list(MOD["PER_CAPITA_FIELDS"])
+        summaries = [g.children[0].children for g in glossaries]
+        assert summaries == ["Field names"] + ["Column names"] * 3
 
     def test_every_closed_value_has_a_label(self) -> None:
         assert set(labels.PV_STATUS) == set(PV_STATUS_VALUES)
@@ -1368,3 +1404,375 @@ class TestPerCapitaCells:
     def test_a_closed_value_that_is_no_value_is_never_bare(self, value: Any) -> None:
         assert labels.boundary_basis(value) == labels.NOT_IN_DATASET
         assert labels.per_capita_coverage(value) == labels.NOT_IN_DATASET
+
+
+# --- the election panel and T3's hybrid columns (#308) --------------------------------
+
+PANEL = MOD["PANEL_ID"]
+PANEL_FIELDS: tuple[str, ...] = MOD["PANEL_FIELDS"]
+#: The panel's fields with no value outside the popular-vote window.
+PV_FIELDS = (
+    "pv_winner",
+    "hybrid_winner",
+    "pv_flip",
+    "hybrid_flip",
+    "pv_margin",
+    "hybrid_margin",
+)
+#: The panel's fields the API fills for every year.
+EC_FIELDS = ("ec_winner", "ec_margin", "ec_determinative", "pv_coverage")
+NOT_APPLICABLE = "Not applicable: no popular vote in this dataset for this year"
+PANEL_YEARS = (*RECORDED_YEARS, 2024)
+
+
+def panel(tree: Any) -> dict[str, str]:
+    """The panel's cells as ``{field: text}``: each ``Dd`` with the ``Dt`` before it,
+    keyed by that ``Dt``'s raw field name."""
+    node = find(tree, PANEL)
+    assert node is not None
+    items = list(of_type(node, "Dl")[0].children)
+    assert [type(i).__name__ for i in items] == ["Dt", "Dd"] * (len(items) // 2)
+    return {
+        dt.title: "".join(texts(dd.children))
+        for dt, dd in zip(items[::2], items[1::2], strict=True)
+    }
+
+
+def panel_of(year: int, change: Any = None) -> dict[str, str]:
+    body = year_body(year)
+    if change is not None:
+        change(body)
+    return panel(render(year, body=body))
+
+
+def ids_in_order(node: Any) -> list[str]:
+    """Every ``id`` in a rendered tree, in document order."""
+    if isinstance(node, (list, tuple)):
+        return [i for child in node for i in ids_in_order(child)]
+    own = getattr(node, "id", None)
+    children = getattr(node, "children", None)
+    if own is None and children is None:
+        return []
+    return ([own] if isinstance(own, str) else []) + ids_in_order(children)
+
+
+class TestPanel:
+    def test_1824_reads_not_applicable_and_no_majority(self) -> None:
+        cells = panel_of(1824)
+        assert {f: cells[f] for f in PV_FIELDS} == dict.fromkeys(
+            PV_FIELDS, NOT_APPLICABLE
+        )
+        assert cells["ec_determinative"] == (
+            "No candidate reached a majority of electors appointed"
+        )
+        # Below 1 while the popular-vote fields are not applicable (AC).
+        assert year_body(1824)["election"]["pv_coverage"] < 1
+        assert cells["pv_coverage"] == "72.8%"
+        assert cells["ec_winner"] == "Andrew Jackson"
+        assert cells["ec_margin"] == "5.7 percentage points"
+
+    def test_2016_the_popular_vote_flips_and_the_hybrid_does_not(self) -> None:
+        assert panel_of(2016) == {
+            "ec_winner": "Donald J. Trump",
+            "pv_winner": "Hillary Clinton",
+            "hybrid_winner": "Donald J. Trump",
+            "pv_flip": (
+                "Yes: the popular-vote winner differs from the Electoral College "
+                "winner"
+            ),
+            "hybrid_flip": "No",
+            "ec_margin": "14.3 percentage points",
+            "pv_margin": "2.1 percentage points",
+            "hybrid_margin": "6.1 percentage points",
+            "ec_determinative": "A candidate won a majority of electors appointed",
+            "pv_coverage": "100.0%",
+        }
+
+    def test_2024_inside_the_window_with_no_flip(self) -> None:
+        cells = panel_of(2024)
+        assert (cells["pv_flip"], cells["hybrid_flip"]) == ("No", "No")
+        # Exact, so a margin scaled as a share (×100) fails.
+        assert [cells[f] for f in ("ec_margin", "pv_margin", "hybrid_margin")] == [
+            "16.0 percentage points",
+            "1.5 percentage points",
+            "8.7 percentage points",
+        ]
+
+    def test_1860_a_majority_reads_as_one(self) -> None:
+        assert panel_of(1860)["ec_determinative"] == (
+            "A candidate won a majority of electors appointed"
+        )
+
+    def test_a_hybrid_flip_reads_its_own_sentence(self) -> None:
+        cells = panel_of(2016, lambda b: b["election"].update(hybrid_flip=True))
+        assert cells["hybrid_flip"] == (
+            "Yes: the hybrid winner differs from the Electoral College winner"
+        )
+
+    @pytest.mark.parametrize("year", PANEL_YEARS)
+    def test_a_null_is_never_no(self, year: int) -> None:
+        block = year_body(year)["election"]
+        cells = panel_of(year)
+        assert set(cells) == set(PANEL_FIELDS)
+        for field, value in block.items():
+            if field in cells and value is None:
+                assert cells[field] in (NOT_APPLICABLE, labels.NOT_IN_DATASET), field
+        assert not {"", "None", "No", "False", "0"} & {
+            cells[f] for f in PANEL_FIELDS if block[f] is None
+        }
+
+    def test_each_cell_reads_its_own_field(self) -> None:
+        """A distinct value in every panel field, so a cell reading another field
+        shows the wrong one."""
+        sentinels = {
+            "ec_winner": "Sentinel EC",
+            "pv_winner": "Sentinel PV",
+            "hybrid_winner": "Sentinel Hybrid",
+            "pv_flip": "flip-pv",
+            "hybrid_flip": "flip-hybrid",
+            "ec_margin": 11.11,
+            "pv_margin": 22.22,
+            "hybrid_margin": 33.33,
+            "ec_determinative": "majority-x",
+            "pv_coverage": 0.123,
+        }
+        assert set(sentinels) == set(PANEL_FIELDS)
+        cells = panel_of(2016, lambda b: b["election"].update(sentinels))
+        assert cells == {
+            "ec_winner": "Sentinel EC",
+            "pv_winner": "Sentinel PV",
+            "hybrid_winner": "Sentinel Hybrid",
+            "pv_flip": "flip-pv",
+            "hybrid_flip": "flip-hybrid",
+            "ec_margin": "11.1 percentage points",
+            "pv_margin": "22.2 percentage points",
+            "hybrid_margin": "33.3 percentage points",
+            "ec_determinative": "majority-x",
+            "pv_coverage": "12.3%",
+        }
+
+    def test_the_window_is_read_from_coverage_not_literals(self) -> None:
+        def window(pv_year_min: int, pv_year_max: int) -> Any:
+            return lambda b: b["meta"]["provenance"]["coverage"].update(
+                pv_year_min=pv_year_min, pv_year_max=pv_year_max
+            )
+
+        # 1824's fields are null: inside a window that starts earlier, they name no
+        # cause; they are not "not applicable".
+        inside = panel_of(1824, window(1800, 2024))
+        assert {f: inside[f] for f in PV_FIELDS} == dict.fromkeys(
+            PV_FIELDS, labels.NOT_IN_DATASET
+        )
+
+        # After the window's end: not applicable too.
+        def ended(b: dict[str, Any]) -> None:
+            window(1976, 2012)(b)
+            b["election"].update(dict.fromkeys(PV_FIELDS))
+
+        after = panel_of(2016, ended)
+        assert {f: after[f] for f in PV_FIELDS} == dict.fromkeys(
+            PV_FIELDS, NOT_APPLICABLE
+        )
+        # A value outside the window is still shown, as T2's popular votes are.
+        assert panel_of(2016, window(1976, 2012))["pv_winner"] == "Hillary Clinton"
+
+    @pytest.mark.parametrize("year", [1824, 2016])
+    @pytest.mark.parametrize("field", EC_FIELDS)
+    def test_an_electoral_college_null_names_no_cause(
+        self, year: int, field: str
+    ) -> None:
+        cells = panel_of(year, lambda b: b["election"].update({field: None}))
+        assert cells[field] == labels.NOT_IN_DATASET
+
+    def test_the_panel_comes_first_and_inside_the_success_marker(self) -> None:
+        order = ids_in_order(render(2016))
+        assert order[0] == PAGE_ID
+        assert order.index(PANEL) < order.index(STATES) < order.index(NATION)
+
+    def test_the_panel_renders_only_with_the_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        assert PANEL in component_ids(PAGE["layout"](year="2016"))
+        assert PANEL not in component_ids(PAGE["layout"](year="1825"))
+        body = year_body(2016)
+        body["election"]["year"] = 2012
+        fetch, _ = fake_fetch({**RECORDED, "/v1/elections/2016": body})
+        monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
+        degraded = PAGE["layout"](year="2016")
+        assert "isn't responding" in " ".join(texts(degraded))
+        assert not {PAGE_ID, PANEL} & component_ids(degraded)
+
+    def test_each_label_carries_its_field_name_and_a_glossary_names_them(self) -> None:
+        node = find(render(1872), PANEL)
+        dts = of_type(of_type(node, "Dl")[0], "Dt")
+        assert [(dt.children, dt.title) for dt in dts] == [
+            (labels.LABELS[f], f) for f in PANEL_FIELDS
+        ]
+        glossary = of_type(node, "Details")
+        assert [texts(dd.children)[0] for dd in of_type(glossary, "Dd")] == list(
+            PANEL_FIELDS
+        )
+
+    def test_margins_are_labelled_in_percentage_points(self) -> None:
+        for field in ("ec_margin", "pv_margin", "hybrid_margin"):
+            assert labels.LABELS[field].endswith("(percentage points)"), field
+
+    def test_the_hybrid_is_described_in_the_panel_and_under_t3(self) -> None:
+        assert labels.HYBRID_NOTE == (
+            "The hybrid score is the average of a candidate's electoral share and "
+            "popular-vote share; the candidate with the highest score wins it."
+        )
+        tree = render(2016)
+        assert labels.HYBRID_NOTE in texts(find(tree, PANEL))
+        assert texts(tree).count(labels.HYBRID_NOTE) == 2
+
+    @pytest.mark.parametrize("year", PANEL_YEARS)
+    def test_no_panel_text_calls_the_hybrid_better(self, year: int) -> None:
+        """Described, not advocated (AC): no evaluative word, matched as a word."""
+        evaluative = re.compile(
+            r"\b(better|best|fair|fairer|fairest|worse|worst|superior|should)\b",
+            re.IGNORECASE,
+        )
+        tree = render(year)
+        heading = [h.children for h in of_type(tree, "H2")]
+        prose = [
+            *texts(find(tree, PANEL)),
+            *heading,
+            labels.HYBRID_NOTE,
+            MOD["PANEL_UNAVAILABLE"],
+            *(labels.LABELS[f] for f in PANEL_FIELDS),
+            labels.LABELS["ec_share_hybrid"],
+            labels.LABELS["hybrid_score"],
+        ]
+        assert [t for t in prose if evaluative.search(t)] == []
+        assert evaluative.search("a fairer method")  # non-vacuity
+
+    def test_the_approved_cell_wording(self) -> None:
+        """The issue's sentences, as written there."""
+        assert labels.NOT_APPLICABLE == NOT_APPLICABLE
+        assert labels.EC_MAJORITY == "A candidate won a majority of electors appointed"
+        assert labels.NO_EC_MAJORITY == (
+            "No candidate reached a majority of electors appointed"
+        )
+        assert labels.FLIP_YES.format(method="popular-vote") == (
+            "Yes: the popular-vote winner differs from the Electoral College winner"
+        )
+
+
+class TestT3Hybrid:
+    def test_1824_hybrid_scores_are_not_applicable(self) -> None:
+        rows = nation_rows(render(1824))
+        assert {r["hybrid_score"] for r in rows.values()} == {NOT_APPLICABLE}
+        assert rows["Andrew Jackson"]["ec_share_hybrid"] == "37.9%"
+
+    def test_2016_scores_and_a_candidate_with_no_figure(self) -> None:
+        rows = nation_rows(render(2016))
+        assert rows["Donald J. Trump"]["hybrid_score"] == "51.3%"
+        assert rows["Hillary Clinton"]["hybrid_score"] == "45.2%"
+        assert rows["Hillary Clinton"]["ec_share_hybrid"] == "42.2%"
+        assert rows["Colin Powell"]["hybrid_score"] == labels.NO_NATIONAL_FIGURE
+
+    @pytest.mark.parametrize("year", PANEL_YEARS)
+    def test_every_hybrid_cell_is_labelled(self, year: int) -> None:
+        for row in nation_rows(render(year)).values():
+            assert row["ec_share_hybrid"].endswith("%"), (year, row)
+            assert row["hybrid_score"] not in ("", "None", "No", "0"), (year, row)
+
+    def test_t3_reads_the_index_s_flag_for_the_hybrid_score(self) -> None:
+        """Doctored index rows, so the score's year rule is T3's, not a literal."""
+        missing = MOD["render"](
+            year_body(2016),
+            {**index_row(2016), "has_popular_vote": False},
+            [],
+            per_capita_body(2016),
+        )
+        assert nation_rows(missing)["Donald J. Trump"]["hybrid_score"] == NOT_APPLICABLE
+        held = MOD["render"](
+            year_body(1872),
+            {**index_row(1872), "has_popular_vote": True},
+            [],
+            per_capita_body(1872),
+        )
+        grant = nation_rows(held)["Ulysses S. Grant"]
+        assert grant["hybrid_score"] == labels.NO_NATIONAL_FIGURE
+
+    def test_a_null_hybrid_share_names_no_cause(self) -> None:
+        body = year_body(2016)
+        body["summary"][0]["ec_share_hybrid"] = None
+        rows = nation_rows(render(2016, body=body))
+        assert rows[body["summary"][0]["candidate"]]["ec_share_hybrid"] == (
+            labels.NOT_IN_DATASET
+        )
+
+
+class TestPanelCells:
+    @pytest.mark.parametrize(
+        ("value", "applicable", "cell"),
+        [
+            (None, False, NOT_APPLICABLE),
+            (None, True, labels.NOT_IN_DATASET),
+            (2.097, False, "2.1 percentage points"),  # a value wins
+            (0, True, "0.0 percentage points"),
+            (True, True, "True"),
+            ("wide", True, "wide"),
+            (10**400, True, str(10**400)),
+            (float("nan"), True, labels.NOT_IN_DATASET),
+            (float("inf"), True, labels.NOT_IN_DATASET),
+        ],
+    )
+    def test_margin(self, value: Any, applicable: bool, cell: str) -> None:
+        assert labels.margin(value, applicable) == cell
+
+    @pytest.mark.parametrize(
+        ("value", "applicable", "cell"),
+        [
+            (
+                True,
+                True,
+                "Yes: the hybrid winner differs from the Electoral College winner",
+            ),
+            (False, True, "No"),
+            (None, False, NOT_APPLICABLE),
+            (None, True, labels.NOT_IN_DATASET),
+            (0, True, "0"),  # only a boolean is Yes or No
+            (1, True, "1"),
+            ("false", True, "false"),
+        ],
+    )
+    def test_flip(self, value: Any, applicable: bool, cell: str) -> None:
+        assert labels.flip(value, "hybrid", applicable) == cell
+
+    @pytest.mark.parametrize(
+        ("value", "cell"),
+        [
+            (True, "A candidate won a majority of electors appointed"),
+            (False, "No candidate reached a majority of electors appointed"),
+            (None, labels.NOT_IN_DATASET),
+            (0, "0"),
+            ("no", "no"),
+        ],
+    )
+    def test_ec_majority(self, value: Any, cell: str) -> None:
+        assert labels.ec_majority(value) == cell
+
+    def test_winner_and_share_cell(self) -> None:
+        assert labels.winner(None, False) == NOT_APPLICABLE
+        assert labels.winner(None, True) == labels.NOT_IN_DATASET
+        assert labels.winner("Abraham Lincoln", False) == "Abraham Lincoln"
+        assert labels.share_cell(None) == labels.NOT_IN_DATASET
+        assert labels.share_cell(0.7279693486590039) == "72.8%"
+
+    def test_the_window(self) -> None:
+        assert labels.in_pv_window(PV_MIN, COVERAGE) is True
+        assert labels.in_pv_window(PV_MAX, COVERAGE) is True
+        assert labels.in_pv_window(PV_MIN - 4, COVERAGE) is False
+        assert labels.in_pv_window(PV_MAX + 4, COVERAGE) is False
+
+    @pytest.mark.parametrize(
+        "coverage",
+        [{}, {"pv_year_min": 1976}, {"pv_year_min": "1976", "pv_year_max": 2024}],
+    )
+    def test_a_malformed_window_raises_rather_than_guesses(self, coverage: Any) -> None:
+        with pytest.raises((KeyError, TypeError)):
+            labels.in_pv_window(2016, coverage)

@@ -19,7 +19,9 @@ The cells a null or a closed value can reach live here too (#307), so a later ta
 a null is never bare, and each closed value of ``pv_status`` and
 ``electoral_count_status`` has its plain label. The per-capita tables' cells and help
 text (#280) follow the same rule: a null ratio or population is never bare: it says
-why it is null where the row explains it, and names no cause where it does not.
+why it is null where the row explains it, and names no cause where it does not. So do
+the election panel's cells and the hybrid's help text (#308): a popular-vote or hybrid
+field outside the popular-vote window is not applicable, never "No".
 """
 
 from __future__ import annotations
@@ -62,6 +64,22 @@ LABELS: dict[str, str] = {
     "boundary_basis": "Borders counted",
     "coverage": "Census figure",
     "persons_per_electoral_vote": "People per electoral vote",
+    # The election panel (#308), from a ``/v1/elections/{year}`` response's
+    # ``election`` block. ``ec_winner`` is the largest counted share, not who took
+    # office (1824: Jackson led and the House chose Adams), so it is not "Winner".
+    "ec_winner": "Most electoral votes counted",
+    "pv_winner": "Winner: popular vote",
+    "hybrid_winner": "Winner: hybrid",
+    "pv_flip": "Popular vote changes the winner",
+    "hybrid_flip": "Hybrid changes the winner",
+    "ec_margin": "Electoral margin (percentage points)",
+    "pv_margin": "Popular-vote margin (percentage points)",
+    "hybrid_margin": "Hybrid margin (percentage points)",
+    "ec_determinative": "Electoral College majority",
+    "pv_coverage": "Share of electors appointed by states that held a popular vote",
+    # T3's hybrid columns (#308). ``pv_coverage`` above means the same on a summary row.
+    "ec_share_hybrid": "Electoral share in the hybrid",
+    "hybrid_score": "Hybrid score",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -132,16 +150,34 @@ PARTY_NOTE = (
 NOT_IN_DATASET = "Not in this dataset"
 
 
+#: A popular-vote or hybrid figure for a year outside the popular-vote window (#308).
+NOT_APPLICABLE = "Not applicable: no popular vote in this dataset for this year"
+
+#: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``.
+FLIP_YES = "Yes: the {method} winner differs from the Electoral College winner"
+
+#: Each ``ec_determinative`` value: a real outcome either way, never a missing value.
+EC_MAJORITY = "A candidate won a majority of electors appointed"
+NO_EC_MAJORITY = "No candidate reached a majority of electors appointed"
+
+#: The hybrid's one line of help text: what it computes, and nothing about its merits.
+HYBRID_NOTE = (
+    "The hybrid score is the average of a candidate's electoral share and popular-vote "
+    "share; the candidate with the highest score wins it."
+)
+
+
 def header(field: str) -> html.Th:
     """A column header: the plain label, with the raw field name as its tooltip."""
     return html.Th(LABELS[field], title=field, scope="col")
 
 
-def glossary(fields: Iterable[str]) -> html.Details:
-    """Each column's plain label beside the API field name it shows."""
+def glossary(fields: Iterable[str], summary: str = "Column names") -> html.Details:
+    """Each column's plain label beside the API field name it shows. A list that is no
+    table (the election panel) names its ``summary`` otherwise."""
     return html.Details(
         [
-            html.Summary("Column names"),
+            html.Summary(summary),
             html.Dl(
                 [
                     item
@@ -358,3 +394,74 @@ def per_capita_cells(row: dict[str, Any]) -> list[html.Td]:
             )
         ),
     ]
+
+
+def in_pv_window(year: int, coverage: dict[str, Any]) -> bool:
+    """Whether ``year`` lies inside the popular-vote window ``coverage`` names (#308).
+
+    The window comes from ``coverage``, never a literal. A malformed ``coverage`` raises
+    (``KeyError``, ``TypeError``), so the page degrades, as :func:`popular_votes` does:
+    a guess either way would be a claim about the year.
+    """
+    return bool(coverage["pv_year_min"] <= year <= coverage["pv_year_max"])
+
+
+def _null(applicable: bool) -> str:
+    """A null panel figure: not applicable outside the window; inside it, no cause."""
+    return NOT_IN_DATASET if applicable else NOT_APPLICABLE
+
+
+def winner(value: object, applicable: bool) -> str:
+    """A winner cell (#308): the name, or why there is none.
+
+    ``applicable`` is whether the method has a winner this year: always for the
+    Electoral College, inside the popular-vote window for the other two. A value is
+    shown whatever the year, as :func:`popular_votes` shows one.
+    """
+    return _null(applicable) if value is None else str(value)
+
+
+def flip(value: object, method: str, applicable: bool) -> str:
+    """A flip cell (#308): only ``True`` and ``False`` read Yes and No; a null is never
+    "No" (see :func:`winner`); anything else renders as text."""
+    if value is True:
+        return FLIP_YES.format(method=method)
+    if value is False:
+        return "No"
+    return _null(applicable) if value is None else str(value)
+
+
+def margin(value: object, applicable: bool) -> str:
+    """A margin cell (#308), already in percentage points in the API, to one decimal.
+
+    A null reads as :func:`winner`'s does. Total, as :func:`share` is: an integer no
+    float can hold, or a value of no numeric type, renders as text, and a non-finite
+    number is no figure, so it names no cause.
+    """
+    if value is None:
+        return _null(applicable)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            points = float(value)
+        except OverflowError:
+            return str(value)
+        if not math.isfinite(points):
+            return NOT_IN_DATASET
+        return f"{points:.1f} percentage points"
+    return str(value)
+
+
+def ec_majority(value: object) -> str:
+    """An ``ec_determinative`` cell (#308): ``False`` is a real outcome, never a gap;
+    a null names no cause; anything else renders as text."""
+    if value is True:
+        return EC_MAJORITY
+    if value is False:
+        return NO_EC_MAJORITY
+    return NOT_IN_DATASET if value is None else str(value)
+
+
+def share_cell(value: object) -> str:
+    """A share the schema makes nullable though the API fills it for every year
+    (``ec_share_full``, ``ec_share_hybrid``, ``pv_coverage``): a null names no cause."""
+    return NOT_IN_DATASET if value is None else share(value)
