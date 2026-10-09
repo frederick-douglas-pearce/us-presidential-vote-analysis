@@ -431,9 +431,6 @@ class TestRender:
             lambda b: b["election"].update(year="1872"),
             lambda b: b["election"].update(year=True),
             lambda b: b["election"].pop("year"),
-            lambda b: b["election"].pop("hybrid_margin"),
-            lambda b: b["meta"]["provenance"]["coverage"].pop("pv_year_max"),
-            lambda b: b["meta"]["provenance"]["coverage"].update(pv_year_min="1976"),
         ],
     )
     def test_a_malformed_body_shows_the_plain_message(
@@ -1586,8 +1583,68 @@ class TestPanel:
 
     def test_the_panel_comes_first_and_inside_the_success_marker(self) -> None:
         order = ids_in_order(render(2016))
-        assert order[0] == PAGE_ID
-        assert order.index(PANEL) < order.index(STATES) < order.index(NATION)
+        # The success marker, then the page's own URL store, then the panel.
+        assert order[:3] == [PAGE_ID, MOD["URL_ID"], PANEL]
+        assert (
+            order.index(PANEL)
+            < order.index(STATES)
+            < order.index(NATION)
+            < order.index(MOD["PER_CAPITA_TABLE_ID"])
+        )
+
+    @pytest.mark.parametrize("year", [1824, 2024])
+    @pytest.mark.parametrize(
+        "window",
+        [
+            {"pv_year_min": True},
+            {"pv_year_min": 1976.0},
+            {"pv_year_min": "1976"},
+            {"pv_year_max": float("nan")},
+            {"pv_year_min": float("-inf"), "pv_year_max": float("inf")},
+            {"pv_year_min": 2024, "pv_year_max": 1976},  # reversed
+            {"pv_year_min": None},
+            {"pv_year_max": None},
+            {"pv_year_min": KeyError},  # removed
+            {"pv_year_max": KeyError},  # removed
+        ],
+    )
+    @pytest.mark.parametrize("block", ["recorded", "null"])
+    def test_a_malformed_window_degrades_the_page(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        year: int,
+        window: dict[str, Any],
+        block: str,
+    ) -> None:
+        """At 2024 the panel is the window's only other reader (every row has a
+        figure, and the year has a popular vote), and with a null block nothing else
+        reads it: the page checks the window itself, before any cell does."""
+        body = year_body(year)
+        coverage = body["meta"]["provenance"]["coverage"]
+        for key, value in window.items():
+            if value is KeyError:
+                coverage.pop(key)
+            else:
+                coverage[key] = value
+        if block == "null":
+            body["election"] = None
+        fetch, _ = fake_fetch({**RECORDED, f"/v1/elections/{year}": body})
+        monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
+        tree = PAGE["layout"](year=str(year))
+        assert "isn't responding" in " ".join(texts(tree))
+        assert PAGE_ID not in component_ids(tree)
+
+    @pytest.mark.parametrize("field", PANEL_FIELDS)
+    def test_a_missing_panel_field_degrades_the_page(
+        self, monkeypatch: pytest.MonkeyPatch, field: str
+    ) -> None:
+        body = year_body(2016)
+        body["election"].pop(field)
+        fetch, _ = fake_fetch({**RECORDED, "/v1/elections/2016": body})
+        monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
+        tree = PAGE["layout"](year="2016")
+        assert "isn't responding" in " ".join(texts(tree))
+        assert not {PAGE_ID, PANEL} & component_ids(tree)
 
     def test_the_panel_renders_only_with_the_page(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1614,7 +1671,7 @@ class TestPanel:
             PANEL_FIELDS
         )
 
-    def test_margins_are_labelled_in_percentage_points(self) -> None:
+    def test_margins_are_labeled_in_percentage_points(self) -> None:
         for field in ("ec_margin", "pv_margin", "hybrid_margin"):
             assert labels.LABELS[field].endswith("(percentage points)"), field
 
@@ -1626,16 +1683,28 @@ class TestPanel:
         tree = render(2016)
         assert labels.HYBRID_NOTE in texts(find(tree, PANEL))
         assert texts(tree).count(labels.HYBRID_NOTE) == 2
+        # The second is T3's: after its table, before the next section's heading.
+        order = texts(tree)
+        under_t3 = len(order) - 1 - order[::-1].index(labels.HYBRID_NOTE)
+        last_t3_cell = texts(find(tree, NATION))[-1]
+        assert under_t3 > order.index(last_t3_cell)
+        assert under_t3 < order.index("People per electoral vote")
 
     @pytest.mark.parametrize("year", PANEL_YEARS)
     def test_no_panel_text_calls_the_hybrid_better(self, year: int) -> None:
-        """Described, not advocated (AC): no evaluative word, matched as a word."""
+        """No word from a fixed list of evaluative words, matched as a word, in the
+        panel's text or the hybrid's labels and note. A list cannot prove the hybrid is
+        described rather than advocated: that rests on every fixed string the panel
+        renders being pinned exactly (its heading here; the labels, cell sentences, note
+        and unavailable sentence in their own tests). This scan catches a familiar word
+        in a future edit."""
         evaluative = re.compile(
             r"\b(better|best|fair|fairer|fairest|worse|worst|superior|should)\b",
             re.IGNORECASE,
         )
         tree = render(year)
         heading = [h.children for h in of_type(tree, "H2")]
+        assert heading[0] == "Under each method"
         prose = [
             *texts(find(tree, PANEL)),
             *heading,
@@ -1674,7 +1743,7 @@ class TestT3Hybrid:
         assert rows["Colin Powell"]["hybrid_score"] == labels.NO_NATIONAL_FIGURE
 
     @pytest.mark.parametrize("year", PANEL_YEARS)
-    def test_every_hybrid_cell_is_labelled(self, year: int) -> None:
+    def test_every_hybrid_cell_is_labeled(self, year: int) -> None:
         for row in nation_rows(render(year)).values():
             assert row["ec_share_hybrid"].endswith("%"), (year, row)
             assert row["hybrid_score"] not in ("", "None", "No", "0"), (year, row)
@@ -1733,6 +1802,14 @@ class TestPanelCells:
                 "Yes: the hybrid winner differs from the Electoral College winner",
             ),
             (False, True, "No"),
+            # A value is shown whatever the year (approved): only a null outside the
+            # window is not applicable.
+            (False, False, "No"),
+            (
+                True,
+                False,
+                "Yes: the hybrid winner differs from the Electoral College winner",
+            ),
             (None, False, NOT_APPLICABLE),
             (None, True, labels.NOT_IN_DATASET),
             (0, True, "0"),  # only a boolean is Yes or No

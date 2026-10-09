@@ -19,9 +19,10 @@ The cells a null or a closed value can reach live here too (#307), so a later ta
 a null is never bare, and each closed value of ``pv_status`` and
 ``electoral_count_status`` has its plain label. The per-capita tables' cells and help
 text (#280) follow the same rule: a null ratio or population is never bare: it says
-why it is null where the row explains it, and names no cause where it does not. So do
-the election panel's cells and the hybrid's help text (#308): a popular-vote or hybrid
-field outside the popular-vote window is not applicable, never "No".
+why it is null where the row explains it, and names no cause where it does not. The
+election panel's cells (#308) follow it too: a null popular-vote or hybrid field outside
+the popular-vote window reads as not applicable, never "No"; a value is shown whatever
+the year, as :func:`popular_votes` shows one.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from typing import Any
 from dash import html
 
 #: Plain label for each public field name (approved by the owner, 2026-10-01; the
-#: per-capita rows, 2026-10-08).
+#: per-capita rows and the election panel's rows (#308), 2026-10-08).
 LABELS: dict[str, str] = {
     "year": "Election year",
     "candidate_count": "Candidates",
@@ -399,9 +400,11 @@ def per_capita_cells(row: dict[str, Any]) -> list[html.Td]:
 def in_pv_window(year: int, coverage: dict[str, Any]) -> bool:
     """Whether ``year`` lies inside the popular-vote window ``coverage`` names (#308).
 
-    The window comes from ``coverage``, never a literal. A malformed ``coverage`` raises
-    (``KeyError``, ``TypeError``), so the page degrades, as :func:`popular_votes` does:
-    a guess either way would be a claim about the year.
+    The window comes from ``coverage``, never a literal. This module reads no
+    :mod:`explore.query`, so it does not check the window: the page does, once, with
+    ``query.year_span`` before any cell reads it (a bool, a float, a reversed window or
+    a missing bound would otherwise decide the answer silently). Unchecked, this raises
+    only on a missing key or an incomparable type.
     """
     return bool(coverage["pv_year_min"] <= year <= coverage["pv_year_max"])
 

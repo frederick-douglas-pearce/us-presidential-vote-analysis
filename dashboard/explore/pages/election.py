@@ -5,8 +5,8 @@ electoral vote (#280).
 The panel, T2 and T3 come from one response, ``/v1/elections/{year}`` (its
 ``election`` block, ``data`` and ``summary``), and T6 from a second,
 ``/v1/elections/{year}/per-capita``; both are filled on a miss, in the same render, so
-the page's success marker renders only when the panel and all three tables did. The
-year
+the page's success marker renders only when the panel (or, where the API serves
+``election: null``, the panel's unavailable sentence) and all three tables did. The year
 is the path (``/election/<year>``, an item singular as the index is plural); it is
 validated from the ``/v1/elections`` the page prefetches before it is formatted into an
 API path (#312), so a year the dataset does not serve is not found, at the index (404)
@@ -372,23 +372,20 @@ def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html
     )
 
 
-def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
+def _national_pv(
+    value: Any,
+    has_popular_vote: bool,
+    as_share: bool,
+    missing: str = labels.NOT_IN_DATASET,
+) -> str:
+    """A T3 cell that needs the popular vote: ``missing`` in a year with no popular
+    vote (T3's year rule, from the index row), and inside it a null is a candidate
+    with no popular-vote figure."""
     if not has_popular_vote:
-        return labels.NOT_IN_DATASET
+        return missing
     if value is None:
         return labels.NO_NATIONAL_FIGURE
     return labels.share(value) if as_share else labels.number(value)
-
-
-def _hybrid_score(value: Any, has_popular_vote: bool) -> str:
-    """T3's hybrid score: not applicable in a year with no popular vote (T3's year
-    rule, so it agrees with the row's popular-vote cells); a null inside it is a
-    candidate with no popular-vote figure, so no score."""
-    if not has_popular_vote:
-        return labels.NOT_APPLICABLE
-    if value is None:
-        return labels.NO_NATIONAL_FIGURE
-    return labels.share(value)
 
 
 def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
@@ -406,7 +403,12 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
             html.Td(labels.share_cell(row["ec_share_full"])),
             html.Td(_national_pv(row["pv_share"], has_popular_vote, True)),
             html.Td(labels.share_cell(row["ec_share_hybrid"])),
-            html.Td(_hybrid_score(row["hybrid_score"], has_popular_vote)),
+            # The hybrid's own wording (#308), on T3's year rule so the row agrees.
+            html.Td(
+                _national_pv(
+                    row["hybrid_score"], has_popular_vote, True, labels.NOT_APPLICABLE
+                )
+            ),
         ]
     )
 
@@ -560,6 +562,9 @@ def render(
     though its value may be null (:func:`_election`)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
+    # The popular-vote window, checked once before any cell reads it, whatever the
+    # ``election`` block holds: two years, the first no later than the last (#308).
+    query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
     year = _row_year(index_row)
     if year is None:
         raise TypeError("the index row names no year")
