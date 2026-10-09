@@ -33,6 +33,9 @@ th { font-weight: 600; cursor: help; }
 .filters .filter { margin-bottom: 0.5rem; }
 .table-scroll { overflow-x: auto; }
 .table-scroll table { min-width: 36rem; }
+/* T1 has three short columns: it fits a phone, so it never scrolls. */
+.table-scroll #elections-table { min-width: 0; }
+.download { margin: 0.5rem 0; font-size: 0.875rem; }
 .note { color: #444; font-size: 0.875rem; }
 .reason { font-size: 0.875rem; color: #444; }
 .glossary { margin-top: 1rem; font-size: 0.875rem; }

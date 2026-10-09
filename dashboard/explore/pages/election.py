@@ -15,7 +15,9 @@ and in the page.
 It follows the elections index's conventions (``pages/elections.py``): labels from
 :mod:`explore.labels`, filters only in the query string through the page's one parser,
 a filter change written to a page-local ``dcc.Location`` and re-rendered from the
-cache, and the provenance footer from the response's own ``meta.provenance``. T2's
+cache, the provenance footer from the response's own ``meta.provenance``, and every
+table through :func:`explore.components.table`, which offers its rows as a CSV (#309)
+built from the same list as its body. T2's
 filters are the API's own query names, ``state`` (a USPS code) and ``candidate`` (a
 slug), and the field names ``pv_status`` and ``electoral_count_status``. T3 is never
 filtered: it is the year's national result, as the API's ``summary`` is. T6 is narrowed
@@ -30,8 +32,8 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, labels, query
-from explore.config import SITE_TITLE
+from explore import api, components, export, labels, query
+from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in T2.
 PAGE_ID = "election"
@@ -64,6 +66,9 @@ STATE_FIELDS = (
 )
 #: The fields T2's glossary names: its columns, and the reason its count cell shows.
 STATE_GLOSSARY = (*STATE_FIELDS, "electoral_count_status_reason")
+#: What T2's CSV adds after its columns (#309): the reason its count cell shows, and the
+#: keys its filters and its year are named by.
+STATE_EXTRA = ("electoral_count_status_reason", "state_usps", "candidate_slug", "year")
 
 #: T3's columns, in display order, by public field name.
 NATION_FIELDS = (
@@ -80,6 +85,8 @@ NATION_FIELDS = (
     "ec_share_hybrid",
     "hybrid_score",
 )
+#: What T3's CSV adds after its columns (#309): the candidate's key and the year.
+NATION_EXTRA = ("candidate_slug", "year")
 
 #: The election panel's fields, in display order, by public field name (#308): who led
 #: under each method, whether either other method changes the winner, the three
@@ -103,6 +110,8 @@ PANEL_UNAVAILABLE = "The comparison across methods is not available for this yea
 
 #: T6's columns, in display order, by public field name (#280).
 PER_CAPITA_FIELDS = ("state", *labels.PER_CAPITA_FIELDS)
+#: What T6's CSV adds after its columns (#309): the state's key and the year.
+PER_CAPITA_EXTRA = ("state_usps", "year")
 
 #: Which of the page's filters T6 follows: the state, and not the others.
 PER_CAPITA_FILTER_NOTE = (
@@ -265,6 +274,15 @@ def search_for(state: Any, candidate: Any, pv_status: Any, count_status: Any) ->
     return query.encode_search(parse_filters(params))
 
 
+def applied_search(chosen: Filters) -> str:
+    """The filters a render applied, in the normal form :func:`search_for` writes:
+    already checked, so they are encoded without the parser."""
+    keys = (STATE, CANDIDATE, PV_STATUS, COUNT_STATUS)
+    return query.encode_search(
+        (key, value) for key, value in zip(keys, chosen, strict=True) if value
+    )
+
+
 @callback(
     Output(URL_ID, "search"),
     Input(STATE_ID, "value"),
@@ -413,17 +431,18 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
     )
 
 
-def _table(fields: tuple[str, ...], rows: list[html.Tr], table_id: str) -> html.Div:
-    # Wider than a phone: the table scrolls sideways inside its box, the page never.
-    return html.Div(
-        html.Table(
-            [
-                html.Thead(html.Tr([labels.header(field) for field in fields])),
-                html.Tbody(rows),
-            ],
-            id=table_id,
+def _download(
+    year: int, table: str, name: str, body: dict[str, Any], chosen: Filters
+) -> export.Download:
+    """A table's download: the file named for the view and the table, the provenance of
+    the response its rows come from, and the view's URL with the filters applied."""
+    return export.Download(
+        filename=f"election-{year}-{table}.csv",
+        name=name,
+        provenance=body["meta"]["provenance"],
+        view_url=export.view_url(
+            CANONICAL_HOST, f"/election/{year}", applied_search(chosen)
         ),
-        className="table-scroll",
     )
 
 
@@ -531,22 +550,24 @@ def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: str(r["state"]))
 
 
-def _per_capita_section(rows: list[dict[str, Any]], chosen: Filters) -> list[Any]:
+def _per_capita_section(
+    rows: list[dict[str, Any]], chosen: Filters, download: export.Download
+) -> list[Any]:
     """T6: every state's persons per electoral vote, narrowed by T2's resolved state."""
     shown = [r for r in rows if chosen.state in (None, r["state_usps"])]
     return [
         html.H2("People per electoral vote"),
         html.P(PER_CAPITA_FILTER_NOTE, className="note"),
         html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-        _table(
+        *components.table(
+            shown,
+            lambda r: html.Tr([_state_cell(r), *labels.per_capita_cells(r)]),
             PER_CAPITA_FIELDS,
-            [html.Tr([_state_cell(r), *labels.per_capita_cells(r)]) for r in shown],
             PER_CAPITA_TABLE_ID,
-        )
-        if shown
-        else html.P("No rows match these filters.", className="empty"),
-        html.P(labels.GOVERNING_CENSUS_NOTE, className="note"),
-        html.P(labels.BOUNDARY_NOTE, className="note"),
+            download,
+            extra=PER_CAPITA_EXTRA,
+            notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+        ),
         labels.glossary(PER_CAPITA_FIELDS),
     ]
 
@@ -590,13 +611,15 @@ def render(
             )
         )
     nation += [
-        _table(
+        *components.table(
+            summary,
+            lambda r: _nation_row(r, has_popular_vote),
             NATION_FIELDS,
-            [_nation_row(r, has_popular_vote) for r in summary],
             NATION_TABLE_ID,
+            _download(year, "national", "the national results", body, chosen),
+            extra=NATION_EXTRA,
+            notes=(labels.PARTY_NOTE, labels.HYBRID_NOTE),
         ),
-        html.P(labels.PARTY_NOTE, className="note"),
-        html.P(labels.HYBRID_NOTE, className="note"),
         labels.glossary(NATION_FIELDS),
     ]
     return html.Div(
@@ -606,17 +629,28 @@ def render(
             html.H2("Results by state"),
             _controls(rows, chosen),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            _table(
+            *components.table(
+                shown,
+                lambda r: _state_row(r, year, coverage),
                 STATE_FIELDS,
-                [_state_row(r, year, coverage) for r in shown],
                 STATES_TABLE_ID,
-            )
-            if shown
-            else html.P("No rows match these filters.", className="empty"),
-            html.P(labels.PARTY_NOTE, className="note"),
+                _download(year, "by-state", "the results by state", body, chosen),
+                extra=STATE_EXTRA,
+                notes=(labels.PARTY_NOTE,),
+            ),
             labels.glossary(STATE_GLOSSARY),
             *nation,
-            *_per_capita_section(per_capita_rows, chosen),
+            *_per_capita_section(
+                per_capita_rows,
+                chosen,
+                _download(
+                    year,
+                    "per-capita",
+                    "people per electoral vote",
+                    per_capita,
+                    chosen,
+                ),
+            ),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
