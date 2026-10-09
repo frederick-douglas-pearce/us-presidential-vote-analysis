@@ -702,10 +702,12 @@ def in_cycles(graph: dict[str, set[str]]) -> list[str]:
 def imports_api(source: str) -> bool:
     """Whether a module could reach ``explore.api``.
 
-    Flagged: any import from ``explore`` but one naming only shared modules
+    Flagged: any ``from explore …`` import but one naming only shared modules
     (:data:`SHARED_NAMES`, which import nothing else from it: ``explore.app`` and the
-    pages import ``api``, so any of them is a way in), the bare ``explore`` package, any
-    relative import, any name or attribute ``api`` or ``CLIENT``, and ``__import__`` /
+    pages import ``api``, so any of them is a way in); every ``import explore`` or
+    ``import explore.<module>``, shared or not, since either binds the package name
+    ``explore``, through which any module is reachable (``explore.pages…``); any
+    relative import; any name or attribute ``api`` or ``CLIENT``; and ``__import__`` /
     ``importlib``.
     """
     for node in ast.walk(ast.parse(source)):
@@ -723,11 +725,7 @@ def imports_api(source: str) -> bool:
                 return True
         if isinstance(node, ast.Import) and any(
             alias.name in ("explore", "importlib")
-            or alias.name.startswith("importlib.")
-            or (
-                alias.name.startswith("explore.")
-                and alias.name.split(".", 1)[1] not in SHARED_NAMES
-            )
+            or alias.name.startswith(("explore.", "importlib."))
             for alias in node.names
         ):
             return True
@@ -762,7 +760,8 @@ class TestSharedPieces:
             # #309: a shared module may import another shared module, and only that.
             ("from explore import export, labels\n", False),
             ("from explore.labels import header\n", False),
-            ("import explore.query\n", False),
+            ("import explore.query\n", True),
+            ("import explore.query\nexplore.pages.election.layout()\n", True),
             ("from explore import labels, api\n", True),
             ("from explore import config\n", True),
             ("from explore.api import fetch\n", True),

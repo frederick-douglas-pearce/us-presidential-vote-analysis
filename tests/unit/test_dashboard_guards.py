@@ -496,8 +496,9 @@ for page in PAGES:
     rendered |= rendered_ids(text)
     if path == "/":
         assert _VERSION in text
-# Every table's CSV (#309) is built in these renders, under this guard: a download is
-# its link's data: URL, with no route or callback behind it.
+# Every table's CSV (#309) is built in these renders, under this guard. That a download
+# is its link's data: URL with no route or callback behind it is checked elsewhere:
+# link_problems and TestRequestBudget in test_dashboard_export.py.
 missing = set({DOWNLOAD_IDS!r}) - rendered
 assert not missing, ("a table rendered no download link", missing)
 

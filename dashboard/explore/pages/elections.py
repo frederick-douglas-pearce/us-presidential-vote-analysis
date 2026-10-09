@@ -205,7 +205,7 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
         name="the elections",
         provenance=provenance,
         view_url=export.view_url(
-            CANONICAL_HOST, "/elections", applied_search(chosen, *span(coverage))
+            CANONICAL_HOST, "/elections", applied_search(chosen, first, last)
         ),
     )
     return html.Div(
@@ -222,6 +222,7 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
                 FIELDS,
                 TABLE_ID,
                 download,
+                notes=(labels.HAS_POPULAR_VOTE_NOTE,),
                 empty="No elections match these filters.",
             ),
             labels.glossary(FIELDS),

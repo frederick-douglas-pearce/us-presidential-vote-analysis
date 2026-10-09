@@ -9,25 +9,33 @@ server.
 The file's shape:
 
 - A UTF-8 byte-order mark, so a spreadsheet reads the text as UTF-8.
-- A preamble of two-field rows, ``#`` then a sentence: each source the table carries,
-  with its license and the license's URL, read from the response's ``meta.provenance``
-  (never a literal); the snapshot version; the years each source covers; the view's
-  URL; the notes that explain the table's nulls; and what an empty cell means. It
-  states where the data comes from, not a license condition. The rows go through the
-  same writer as the data, so a comma in a note never splits it, and a reader that
-  skips lines starting with ``#`` (``pandas.read_csv(comment="#")``) skips them all.
+- A preamble of two-field rows, a bare ``#`` then a sentence: each source the table
+  carries, with its license and the license's URL, read from the response's
+  ``meta.provenance`` (never a literal); the snapshot version; the years the Electoral
+  College and popular-vote sources cover (the latter where the table carries it); the
+  view's URL; the table's notes, which explain its nulls; and what an empty cell
+  means. It states where the data comes from, not a license condition. The sentence
+  goes through the same writer as the data, so a comma in a note never splits it.
 - A blank row, the header of raw public ``/v1`` field names, and one row per shown row.
+
+Every field holding a ``#`` is quoted, so only a preamble row starts with a bare ``#``:
+``pandas.read_csv(f, comment="#", encoding="utf-8-sig")`` (the default C engine) skips
+the preamble and never cuts a data row short.
 
 Rows are written here (:func:`row`, RFC 4180) rather than with the ``csv`` module, which
 the D070(b) guard bans from runtime modules with ``io`` (``BANNED_MODULES`` in
-``test_dashboard_guards.py``): this module only writes a file, and never reads one.
+``test_dashboard_guards.py``): this module builds the file's text in memory, and neither
+writes nor reads a file.
 
-Which sources a table carries is read from its field names (:func:`sources`): every
-exported field is in exactly one of :data:`EC_FIELDS`, :data:`POPULAR_VOTE_FIELDS` and
-:data:`CENSUS_FIELDS`, so a later table names its sources without declaring them.
+Which sources a table carries is read from its field names (:func:`sources`). Every
+field a rendered table exports is in exactly one of :data:`EC_FIELDS`,
+:data:`POPULAR_VOTE_FIELDS` and :data:`CENSUS_FIELDS`
+(``test_the_field_sets_are_disjoint_and_cover_every_column`` in
+``test_dashboard_export.py``), so a later table names its sources without declaring
+them, and one exporting an unplaced field fails that test.
 
-Like ``components``, ``labels`` and ``query``, this module reads no API, and it imports
-nothing from ``explore``.
+Like ``labels`` and ``query``, this module imports nothing from ``explore``, so it reads
+no API (``test_the_shared_modules_read_no_api``).
 """
 
 from __future__ import annotations
@@ -110,7 +118,8 @@ NULL_LINE = "An empty cell is a null: the dataset holds no value there."
 #: The first field of every preamble row.
 COMMENT = "#"
 
-#: The characters a spreadsheet may read as the start of a formula (OWASP's list).
+#: The characters a spreadsheet may read as the start of a formula (OWASP's list),
+#: checked at the start of the text and after any leading whitespace.
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
 #: The byte-order mark the file starts with, so a spreadsheet reads it as UTF-8.
@@ -142,8 +151,12 @@ def view_url(host: str, path: str, search: str) -> str:
 
 
 def guard(text: str) -> str:
-    """Text a spreadsheet will not run: a leading formula character gets a ``'``."""
-    return "'" + text if text.startswith(FORMULA_STARTS) else text
+    """Text a spreadsheet will not run: text starting with a formula character, or
+    starting with one after leading whitespace (a spreadsheet may trim it), gets a
+    ``'``."""
+    if text.startswith(FORMULA_STARTS) or text.lstrip().startswith(FORMULA_STARTS):
+        return "'" + text
+    return text
 
 
 def cell(value: Any) -> str:
@@ -208,13 +221,14 @@ def preamble(
     return [_line(str(text)) for text in lines]
 
 
-#: The characters that make a field need quoting (RFC 4180).
-QUOTE_WHEN = (",", '"', "\r", "\n")
+#: The characters that make a field need quoting: RFC 4180's, and ``#``, so only a
+#: preamble row starts with a bare comment character.
+QUOTE_WHEN = (",", '"', "\r", "\n", COMMENT)
 
 
 def row(fields: Iterable[str]) -> str:
-    """One CSV row (RFC 4180): a field holding a comma, a quote or a line break is
-    quoted, its quotes doubled; rows end in CRLF."""
+    """One CSV row (RFC 4180): a field holding a comma, a quote, a line break or a
+    ``#`` is quoted, its quotes doubled; rows end in CRLF."""
     return (
         ",".join(
             '"' + f.replace('"', '""') + '"' if any(c in f for c in QUOTE_WHEN) else f
@@ -231,8 +245,9 @@ def csv_text(
     notes: Iterable[str] = (),
 ) -> str:
     """The file: byte-order mark, preamble, a blank row, header, and one row per row."""
+    # The marker is written bare, never through row(), which would quote it.
     lines = [
-        row([COMMENT, text])
+        f"{COMMENT},{row([text])}"
         for text in preamble(fields, download.provenance, download.view_url, notes)
     ]
     lines.append("\r\n")
@@ -243,8 +258,10 @@ def csv_text(
 
 def href(text: str) -> str:
     """The ``data:`` URL carrying ``text``, every reserved character percent-encoded,
-    so a ``#`` in the file never ends the URL."""
-    return DATA_URL_PREFIX + quote(text, safe="")
+    so a ``#`` in the file never ends the URL. A character UTF-8 cannot encode (a lone
+    surrogate, which ``json.loads`` accepts) is written as ``?``, as the page shows the
+    rest of the value, rather than raising past the page's degraded state."""
+    return DATA_URL_PREFIX + quote(text, safe="", errors="replace")
 
 
 def link_id(table_id: str) -> str:

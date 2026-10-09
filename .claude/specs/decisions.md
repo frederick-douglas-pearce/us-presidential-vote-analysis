@@ -5159,31 +5159,44 @@ download. It left the attribution's shape (lines or columns) to the architect.
   the snapshot and the filters the reader is looking at. A `dcc.Download` callback was rejected:
   re-reading the cache at click time could cross a snapshot swap, and would need a pin to keep
   "no request after render". The cost is page weight (the largest table, 2016's T2, is tens of
-  kilobytes before compression). With no rows there is no table and no link.
-- **Shape.** A UTF-8 byte-order mark; a preamble of two-field rows, `#` and a sentence, written by
-  the same writer as the data; a blank row; the header; the rows. The preamble names each source
-  the table carries with its license and the license's URL, the snapshot version, the years each
-  source covers, the view's URL (its path and the filters the render applied, in the `og:url`
-  normal form), the notes that explain the table's nulls, and that an empty cell is a null. It
-  states provenance, never a license condition. A spreadsheet opens the data as a block under its
-  header; `pandas.read_csv(comment="#")` skips the preamble.
-- **Sources follow the columns.** Every exported field is in exactly one of three sets
-  (`export.EC_FIELDS`, `POPULAR_VOTE_FIELDS`, `CENSUS_FIELDS`): the Electoral College source is
-  always named, the popular-vote and census sources when a field of theirs is present.
+  kilobytes before compression). With no rows there is no table and no link. The link is the
+  table's scroll box's next sibling, outside it (`components.table` returns them adjacent, and
+  `TestEveryTable` checks that sibling); a wrapper around the two was considered at the plan
+  gate and is not needed. A character UTF-8 cannot encode (a lone surrogate) is written as `?`
+  rather than failing the page.
+- **Shape.** A UTF-8 byte-order mark; a preamble of two-field rows, a bare `#` and a sentence
+  written by the same writer as the data; a blank row; the header; the rows. The preamble names
+  each source the table carries with its license and the license's URL, the snapshot version, the
+  years the Electoral College source covers and, where the table carries popular votes, the
+  popular-vote years (provenance carries no census window; each per-capita row names its census
+  in `governing_census_year`), the view's URL (its path and the filters the render applied, in the
+  `og:url` normal form), the table's notes (which explain its nulls, what `has_popular_vote`'s
+  `false` means, and which filters a per-capita table follows), and that an empty cell is a null.
+  It states provenance, never a license condition. A spreadsheet opens the data as a block under
+  its header. Every field holding a `#` is quoted, so only a preamble row starts with a bare `#`:
+  `pandas.read_csv(f, comment="#", encoding="utf-8-sig")` skips the preamble and never cuts a
+  data row short.
+- **Sources follow the columns.** Every field a rendered table exports is in exactly one of three
+  sets (`export.EC_FIELDS`, `POPULAR_VOTE_FIELDS`, `CENSUS_FIELDS`;
+  `test_the_field_sets_are_disjoint_and_cover_every_column` in `test_dashboard_export.py`): the
+  Electoral College source is always named, the popular-vote and census sources when a field of
+  theirs is present.
 - **Columns** are raw public `/v1` field names: the table's displayed fields in display order, then
-  the keys a filter or another year needs (`state_usps`, `candidate_slug`, `year`) and the count
-  status's reason where the table shows it inside a cell. The owner kept the appended keys "for
-  now" (2026-10-09).
+  the count status's reason where the table shows it inside a cell, then the keys a filter or
+  another year needs (`state_usps`, `candidate_slug`, `year`). The owner kept the appended keys
+  "for now" (2026-10-09).
 - **Cells.** A null, or a non-finite number, is empty; a boolean is `true`/`false`; a number is
   written as served; any other value is text, and text starting with `=`, `+`, `-`, `@`, a tab or
-  a carriage return gets a `'` prefix against formula injection.
+  a carriage return, at its start or after any leading whitespace, gets a `'` prefix against
+  formula injection (OWASP's list). Full-width signs and `;`-locale separators are #340.
 - **No `csv` or `io` module.** Both are on the D070(b) guard's banned list for runtime modules, so
-  `export.row` writes RFC 4180 rows itself; the module only writes, and never reads, a file.
+  `export.row` writes RFC 4180 rows itself; the module builds the file's text in memory and
+  neither writes nor reads a file.
 
 **Rationale.** Building the file where the table is built makes "exactly the view" and "no
 request" true by construction rather than by a pin and a test of it, and adds nothing the D070(b)
 guard must newly drive: its success run renders every table's link.
 
-**Related:** D070, D072, D073, #306, #307, #309.
+**Related:** D070, D072, D073, #306, #307, #309, #340.
 
 ---

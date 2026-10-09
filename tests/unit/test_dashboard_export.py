@@ -31,8 +31,9 @@ from tests.unit.test_dashboard_app import (
     concrete_values,
 )
 from tests.unit.test_dashboard_elections import label_key_problems, of_type, parse
+from tests.unit.test_dashboard_guards import DOWNLOAD_IDS
 
-#: Every table and its download link's id, by the page that renders it.
+#: Every table's id (its link's is ``export.link_id(id)``), by the page that renders it.
 TABLES = {
     "elections-table": "/elections",
     "election-states": "/election/<year>",
@@ -80,13 +81,26 @@ ROUTES = {
 
 FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
+#: Every callback output once Dash has registered them all, before and after #309: the
+#: Pages router's two and each filtered page's URL. A download adds none.
+CALLBACK_OUTPUTS = {
+    ".._pages_content.children..._pages_store.data..",
+    "_pages_dummy.children",
+    "elections-url.search",
+    "election-url.search",
+    "state-url.search",
+}
+
+HOST = "https://explore.us-presidential-election-center.org"
+
+
+def page_key(page: dict[str, Any]) -> str:
+    key: str = page.get("path_template") or page["path"]
+    return key
+
 
 def page_of(key: str) -> dict[str, Any]:
-    (page,) = [
-        p
-        for p in dash.page_registry.values()
-        if (p.get("path_template") or p["path"]) == key
-    ]
+    (page,) = [p for p in dash.page_registry.values() if page_key(p) == key]
     found: dict[str, Any] = page
     return found
 
@@ -103,7 +117,9 @@ def render(
 
 
 def all_pages(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    return {key: render(key, monkeypatch)[0] for key in READS_BEFORE}
+    """Every registered page's tree, at the registry's concrete values."""
+    keys = [page_key(page) for page in dash.page_registry.values()]
+    return {key: render(key, monkeypatch)[0] for key in keys}
 
 
 class Csv:
@@ -186,6 +202,8 @@ def link_problems(table: Any, after: Any) -> list[str]:
         return [f"{table.id}: the link is not a data: URL"]
     file = Csv(link.href)
     headers = [th.title for th in of_type(table, "Th")]
+    if not headers or not all(isinstance(h, str) and h for h in headers):
+        return [f"{table.id}: no column headers"]
     problems = []
     if file.header[: len(headers)] != headers:
         problems.append(f"{table.id}: columns {file.header} do not start {headers}")
@@ -203,11 +221,61 @@ class TestEveryTable:
     def test_every_rendered_table_offers_its_rows(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Every registered page, rendered: each table is built by
+        ``components.table`` (recorded through a wrapper) and carries its link."""
+        built: list[str] = []
+        real = components.table
+
+        def recording(*args: Any, **kwargs: Any) -> list[Any]:
+            built.append(args[3])  # the table id
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(components, "table", recording)
         found: set[Any] = set()
         for key, tree in all_pages(monkeypatch).items():
             assert table_problems(tree) == [], key
-            found |= {getattr(t, "id", None) for t in of_type(tree, "Table")}
+            ids = {getattr(t, "id", None) for t in of_type(tree, "Table")}
+            assert ids <= set(built), (key, ids - set(built))
+            found |= ids
         assert set(TABLES) <= found
+
+    def test_the_registry_and_the_table_literals_agree(self) -> None:
+        assert set(READS_BEFORE) == {page_key(p) for p in dash.page_registry.values()}
+        assert {export.link_id(table) for table in TABLES} == set(DOWNLOAD_IDS)
+
+    def test_the_file_keeps_the_body_s_order(self) -> None:
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        rows = [{"year": y} for y in (1830, 1824, 1828)]
+        seen: list[int] = []
+
+        def render_row(row: dict[str, Any]) -> html.Tr:
+            seen.append(row["year"])
+            return html.Tr()
+
+        built = components.table(rows, render_row, ("year",), "t", dl)
+        assert [int(r["year"]) for r in Csv(built[1].children.href).rows] == seen
+        assert seen == [1830, 1824, 1828]
+
+    def test_a_file_with_other_columns_or_a_bad_filename_fails(self) -> None:
+        box = html.Div(
+            html.Table([html.Thead(html.Tr(labels.header("year"))), html.Tbody([])]),
+            className="table-scroll",
+        )
+        box.children.id = "t"
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        wrong = export.link("t", dl, export.csv_text(("candidate",), [], dl))
+        assert table_problems(html.Div([box, wrong])) == [
+            "t: columns ['candidate'] do not start ['year']"
+        ]
+        named = export.link("t", dl._replace(filename="a b.csv"), "x")
+        named.children.href = export.href(export.csv_text(("year",), [], dl))
+        assert table_problems(html.Div([box, named])) == ["t: filename 'a b.csv'"]
+
+    def test_a_table_with_no_headers_fails(self) -> None:
+        box = html.Div(html.Table([html.Tbody([])], id="t"), className="table-scroll")
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        link = export.link("t", dl, export.csv_text(("year",), [], dl))
+        assert table_problems(html.Div([box, link])) == ["t: no column headers"]
 
     def test_a_bare_table_fails(self) -> None:
         bare = html.Div([html.Table([html.Tbody([html.Tr()])], id="bare")])
@@ -277,9 +345,74 @@ class TestExactlyTheView:
     ) -> None:
         tree, _ = render("/state/<usps>", monkeypatch, "year_from=1976&year_to=1980")
         history = download(tree, "state-history")
-        assert {r["year"] for r in history.rows} == {"1976", "1980"}
+        expected = sorted(
+            (r for r in RECORDED["/v1/states/GA"]["data"] if 1976 <= r["year"] <= 1980),
+            key=lambda r: (r["year"], str(r["candidate"])),
+        )
+        assert [(r["year"], r["candidate_slug"]) for r in history.rows] == [
+            (str(r["year"]), r["candidate_slug"]) for r in expected
+        ]
+        assert len(history.rows) == len(body_rows(tree, "state-history"))
         per_capita = download(tree, "state-per-capita")
-        assert {r["year"] for r in per_capita.rows} == {"1976", "1980"}
+        assert [r["year"] for r in per_capita.rows] == [
+            str(r["year"])
+            for r in sorted(
+                RECORDED["/v1/states/GA/per-capita"]["data"], key=lambda r: r["year"]
+            )
+            if 1976 <= r["year"] <= 1980
+        ]
+        assert len(per_capita.rows) == len(body_rows(tree, "state-per-capita"))
+
+    def test_the_elections_file_follows_its_filters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/elections", monkeypatch, "year_from=1976&pv=1")
+        file = download(tree, "elections-table")
+        assert [r["year"] for r in file.rows] == [
+            str(r["year"])
+            for r in RECORDED["/v1/elections"]["data"]
+            if r["year"] >= 1976 and r["has_popular_vote"] is True
+        ]
+        assert len(file.rows) == len(body_rows(tree, "elections-table"))
+        assert {r["has_popular_vote"] for r in file.rows} == {"true"}
+
+    @pytest.mark.parametrize(
+        ("key", "query", "table", "view"),
+        [
+            # Out of span: the bound falls back, so only the applied filter is named.
+            ("/elections", "year_from=1700&pv=1", "elections-table", "/elections?pv=1"),
+            # The full span is the default: no filter at all.
+            (
+                "/elections",
+                "year_from=1824&year_to=2024",
+                "elections-table",
+                "/elections",
+            ),
+            # A candidate the state never had falls back to "all".
+            (
+                "/state/<usps>",
+                "year_from=1976&candidate=no-such-slug",
+                "state-history",
+                "/state/GA?year_from=1976",
+            ),
+            (
+                "/state/<usps>",
+                "year_to=2024&pv_status=popular_vote",
+                "state-per-capita",
+                "/state/GA?pv_status=popular_vote",
+            ),
+        ],
+    )
+    def test_the_view_url_names_only_the_applied_filters(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        key: str,
+        query: str,
+        table: str,
+        view: str,
+    ) -> None:
+        tree, _ = render(key, monkeypatch, query)
+        assert f"View: {HOST}{view}" in download(tree, table).lines
 
     def test_the_view_url_names_the_filters_the_render_applied(
         self, monkeypatch: pytest.MonkeyPatch
@@ -407,6 +540,38 @@ class TestNulls:
         lines = download(tree, "state-per-capita").lines
         assert labels.GOVERNING_CENSUS_NOTE in lines
         assert labels.BOUNDARY_NOTE in lines
+        state = page_of("/state/<usps>")["layout"].__globals__
+        assert state["PER_CAPITA_FILTER_NOTE"] in lines
+        tree, _ = render("/election/<year>", monkeypatch)
+        election = page_of("/election/<year>")["layout"].__globals__
+        assert election["PER_CAPITA_FILTER_NOTE"] in (
+            download(tree, "election-per-capita").lines
+        )
+
+    def test_the_elections_file_says_what_false_means(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/elections", monkeypatch)
+        file = download(tree, "elections-table")
+        assert labels.HAS_POPULAR_VOTE_NOTE in file.lines
+        assert {r["has_popular_vote"] for r in file.rows} == {"true", "false"}
+
+    def test_every_data_cell_goes_through_cell(self) -> None:
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        row = {"a": "=x", "b": None, "c": True, "d": math.nan, "e": -2}
+        text = export.csv_text(tuple(row), [row], dl)
+        assert text.endswith("\r\n'=x,,true,,-2\r\n")
+
+    def test_a_lone_surrogate_is_replaced_not_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = copy.deepcopy(RECORDED["/v1/elections/1824"])
+        body["data"][0]["candidate"] = "A\ud800B"
+        monkeypatch.setitem(RECORDED, "/v1/elections/1824", body)
+        tree, _ = render("/election/<year>", monkeypatch)
+        assert of_type(tree, "Table"), "the page degraded"
+        file = download(tree, "election-states")
+        assert "A?B" in [r["candidate"] for r in file.rows]
 
     @pytest.mark.parametrize(
         ("value", "written"),
@@ -429,6 +594,12 @@ class TestNulls:
             ("@SUM(A1)", "'@SUM(A1)"),
             ("\tx", "'\tx"),
             ("\rx", "'\rx"),
+            # A spreadsheet may trim leading whitespace before evaluating.
+            (" =1", "' =1"),
+            ("\xa0=1", "'\xa0=1"),
+            ("\u3000+1", "'\u3000+1"),
+            ("\n-1", "'\n-1"),
+            ("a =1", "a =1"),
             (["=x"], "['=x']"),
             ({"a": 1}, "{'a': 1}"),
         ],
@@ -510,16 +681,39 @@ class TestAttribution:
             is census
         )
 
+    @pytest.mark.parametrize(
+        ("key", "path", "table", "other"),
+        [
+            (
+                "/state/<usps>",
+                "/v1/states/GA/per-capita",
+                "state-per-capita",
+                "state-history",
+            ),
+            (
+                "/election/<year>",
+                "/v1/elections/1824/per-capita",
+                "election-per-capita",
+                "election-states",
+            ),
+        ],
+    )
     def test_a_per_capita_table_reads_its_own_response(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        key: str,
+        path: str,
+        table: str,
+        other: str,
     ) -> None:
-        per_capita = copy.deepcopy(RECORDED["/v1/states/GA/per-capita"])
-        per_capita["meta"]["provenance"]["census_source_name"] = "OWN-RESPONSE"
-        monkeypatch.setitem(RECORDED, "/v1/states/GA/per-capita", per_capita)
-        tree, _ = render("/state/<usps>", monkeypatch)
-        assert any(
-            "OWN-RESPONSE" in x for x in download(tree, "state-per-capita").lines
-        )
+        # The recorded pair carry identical provenance, so only a changed copy tells
+        # which response a file read.
+        per_capita = copy.deepcopy(RECORDED[path])
+        per_capita["meta"]["provenance"]["snapshot_version"] = "OWN-RESPONSE"
+        monkeypatch.setitem(RECORDED, path, per_capita)
+        tree, _ = render(key, monkeypatch)
+        assert "Data snapshot: OWN-RESPONSE" in download(tree, table).lines
+        assert "Data snapshot: OWN-RESPONSE" not in download(tree, other).lines
 
     def test_it_states_provenance_never_a_license_condition(
         self, monkeypatch: pytest.MonkeyPatch
@@ -555,13 +749,21 @@ class TestFile:
     def test_the_href_carries_the_exact_bytes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        text = export.BOM + "#,a b%–\r\n\r\nx\r\n"
+        encoded = export.href(text).removeprefix(export.DATA_URL_PREFIX)
+        assert unquote_to_bytes(encoded) == text.encode("utf-8")
         tree, _ = render("/election/<year>", monkeypatch, year="1872")
         for link in links(tree).values():
             encoded = link.href.removeprefix(export.DATA_URL_PREFIX)
             assert not set(encoded) & {"#", " ", "\n", "\r", ","}
             file = Csv(link.href)
-            assert file.raw.startswith("﻿".encode())
-            assert file.raw.count("﻿".encode()) == 1
+            assert file.raw.startswith(export.BOM.encode())
+            assert file.raw.count(export.BOM.encode()) == 1
+            # Only a preamble row starts with a bare "#".
+            body = file.raw.removeprefix(export.BOM.encode()).split(b"\r\n")
+            marked = [line for line in body if line.startswith(b"#")]
+            assert len(marked) == len(file.preamble)
+            assert all(line.startswith(b"#,") for line in marked)
 
     def test_a_script_skipping_comments_reads_the_table(
         self, monkeypatch: pytest.MonkeyPatch
@@ -575,9 +777,26 @@ class TestFile:
         assert len(frame) == len(file.rows) == len(body_rows(tree, "election-states"))
 
     def test_a_comma_or_quote_in_a_cell_is_quoted(self) -> None:
-        assert export.row(["a,b", 'say "x"', "line\nbreak", "plain"]) == (
-            '"a,b","say ""x""","line\nbreak",plain\r\n'
+        assert export.row(["a,b", 'say "x"', "line\nbreak", "plain", "a #1"]) == (
+            '"a,b","say ""x""","line\nbreak",plain,"a #1"\r\n'
         )
+
+    def test_a_hash_in_a_cell_never_cuts_its_row(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = copy.deepcopy(RECORDED["/v1/elections/1824"])
+        body["data"][0]["candidate"] = "Lincoln #1"
+        monkeypatch.setitem(RECORDED, "/v1/elections/1824", body)
+        tree, _ = render("/election/<year>", monkeypatch)
+        file = download(tree, "election-states")
+        frame = pd.read_csv(
+            io.BytesIO(file.raw), comment="#", encoding="utf-8-sig", dtype=str
+        )
+        assert len(frame) == len(file.rows)
+        hashed = frame[frame["candidate"] == "Lincoln #1"]
+        assert len(hashed) == 1
+        assert hashed.iloc[0]["state_usps"] == body["data"][0]["state_usps"]
+        assert "Lincoln #1" in [r["candidate"] for r in file.rows]
 
 
 # --- request budget and D070(b) -------------------------------------------------------
@@ -591,33 +810,17 @@ class TestRequestBudget:
             _, reads = render(key, monkeypatch)
             assert reads == before, key
 
-    def test_the_file_is_whole_without_the_api(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, "state=SC", year="1860")
-
-        class NoClient:
-            def view(self) -> Any:
-                raise AssertionError("a download read the API")
-
-        monkeypatch.setattr(api, "CLIENT", NoClient())
-        file = download(tree, "election-states")
-        expected = [
-            r for r in RECORDED["/v1/elections/1860"]["data"] if r["state_usps"] == "SC"
-        ]
-        assert [r["candidate"] for r in file.rows] == [r["candidate"] for r in expected]
-        assert [r["electoral_votes"] for r in file.rows] == [
-            str(r["electoral_votes"]) for r in expected
-        ]
-
     def test_no_callback_or_route_serves_a_download(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        outputs = [
-            str(c.get("output")) for c in dash._callback.GLOBAL_CALLBACK_LIST
-        ] + [str(key) for key in appmod.app.callback_map]
-        assert outputs, "no callbacks found; the check would be vacuous"
-        assert not [o for o in outputs if "-csv" in o or "download" in o.lower()]
+        """A download is the link's own ``data:`` URL: no callback output, route or
+        ``dcc.Download`` serves one (with ``link_problems``' check that every link is
+        a ``data:`` URL)."""
+        # A first request makes Dash register every callback in its map.
+        assert appmod.server.test_client().get("/elections").status_code == 200
+        outputs = {str(c.get("output")) for c in dash._callback.GLOBAL_CALLBACK_LIST}
+        assert outputs | set(appmod.app.callback_map) == CALLBACK_OUTPUTS
         assert {r.rule for r in appmod.server.url_map.iter_rules()} == ROUTES
+        assert of_type(appmod.app.layout, "Download") == []
         for tree in all_pages(monkeypatch).values():
             assert of_type(tree, "Download") == []

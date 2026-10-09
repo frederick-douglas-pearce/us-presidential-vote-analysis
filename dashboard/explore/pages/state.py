@@ -71,7 +71,7 @@ PER_CAPITA_EXTRA = ("state_usps",)
 
 #: Which of the page's filters T7 follows: the year range, and not the others.
 PER_CAPITA_FILTER_NOTE = (
-    "The year range above applies to this table; the candidate and popular-vote "
+    "Only the year range applies to this table; the candidate and popular-vote "
     "filters do not."
 )
 
@@ -411,7 +411,6 @@ def _per_capita_section(
     shown = [r for r in rows if chosen.year_from <= r["year"] <= chosen.year_to]
     return [
         html.H2("People per electoral vote"),
-        html.P(PER_CAPITA_FILTER_NOTE, className="note"),
         html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
         *components.table(
             shown,
@@ -420,7 +419,11 @@ def _per_capita_section(
             PER_CAPITA_TABLE_ID,
             download,
             extra=PER_CAPITA_EXTRA,
-            notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+            notes=(
+                PER_CAPITA_FILTER_NOTE,
+                labels.GOVERNING_CENSUS_NOTE,
+                labels.BOUNDARY_NOTE,
+            ),
         ),
         labels.glossary(PER_CAPITA_FIELDS),
     ]

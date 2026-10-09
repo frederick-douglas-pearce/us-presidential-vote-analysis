@@ -130,14 +130,18 @@ def table(
     notes: tuple[str, ...] = (),
     empty: str = NO_ROWS,
 ) -> list[Any]:
-    """A table, its CSV download and its notes (#309); every table goes through here.
+    """A table, its CSV download and its notes (#309).
 
-    The body and the CSV are built from the one list ``rows``, so the file holds
-    exactly the rows the table shows. The CSV's columns are the table's ``fields`` in
-    display order, then ``extra`` (the keys a filter or another year needs, which the
-    table shows only inside a cell or not at all). ``notes`` are shown under the table
-    and written into the file's preamble, so a null they explain is explained in both.
-    With no rows, there is no table and nothing to download: ``empty`` says so.
+    Every table goes through here: ``TestEveryTable`` in ``test_dashboard_export.py``
+    records each call while rendering every registered page and fails a rendered table
+    it did not build. The body and the CSV are built from the one list ``rows``, so the
+    file holds exactly the rows the table shows, in the same order. The CSV's columns
+    are the table's ``fields`` in display order, then ``extra`` (the count reason a cell
+    shows, and the keys a filter or another year needs, which the table shows only
+    inside a cell or not at all). ``notes`` are shown under the table and written into
+    the file's preamble, so what they explain is explained in both. With no rows, there
+    is no table and nothing to download: ``empty`` says so. The link is the scroll
+    box's next sibling, outside it, so it never scrolls away with the table.
     """
     shown = [html.P(note, className="note") for note in notes]
     if not rows:
@@ -155,7 +159,6 @@ def table(
             ),
             className="table-scroll",
         ),
-        # Outside the scrolling box, so the link never scrolls away with the table.
         export.link(table_id, download, text),
         *shown,
     ]

@@ -115,8 +115,8 @@ PER_CAPITA_EXTRA = ("state_usps", "year")
 
 #: Which of the page's filters T6 follows: the state, and not the others.
 PER_CAPITA_FILTER_NOTE = (
-    "The state filter above applies to this table; the candidate and status filters "
-    "do not."
+    "Only the state filter applies to this table; the candidate and status filters do "
+    "not."
 )
 
 #: The query keys this page reads: the API's own filter names for a state and a
@@ -557,7 +557,6 @@ def _per_capita_section(
     shown = [r for r in rows if chosen.state in (None, r["state_usps"])]
     return [
         html.H2("People per electoral vote"),
-        html.P(PER_CAPITA_FILTER_NOTE, className="note"),
         html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
         *components.table(
             shown,
@@ -566,7 +565,11 @@ def _per_capita_section(
             PER_CAPITA_TABLE_ID,
             download,
             extra=PER_CAPITA_EXTRA,
-            notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+            notes=(
+                PER_CAPITA_FILTER_NOTE,
+                labels.GOVERNING_CENSUS_NOTE,
+                labels.BOUNDARY_NOTE,
+            ),
         ),
         labels.glossary(PER_CAPITA_FIELDS),
     ]
