@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import copy
 import csv
+import functools
 import io
 import math
 import re
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote_to_bytes
 
@@ -214,6 +216,25 @@ def link_problems(table: Any, after: Any) -> list[str]:
     return problems
 
 
+def unbuilt_tables(
+    build: Callable[[], Any], monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, set[Any]]:
+    """``build()``'s tree, and the ids of its tables ``components.table`` did not
+    build during that call (recorded through a wrapper; pages call it by attribute)."""
+    built: list[str] = []
+    real = components.table
+
+    def recording(*args: Any, **kwargs: Any) -> list[Any]:
+        built.append(args[3])  # the table id
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(components, "table", recording)
+    tree = build()
+    monkeypatch.setattr(components, "table", real)
+    ids = {getattr(t, "id", None) for t in of_type(tree, "Table")}
+    return tree, ids - set(built)
+
+
 # --- coverage is structural -----------------------------------------------------------
 
 
@@ -223,21 +244,37 @@ class TestEveryTable:
     ) -> None:
         """Every registered page, rendered: each table is built by
         ``components.table`` (recorded through a wrapper) and carries its link."""
-        built: list[str] = []
-        real = components.table
-
-        def recording(*args: Any, **kwargs: Any) -> list[Any]:
-            built.append(args[3])  # the table id
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(components, "table", recording)
         found: set[Any] = set()
-        for key, tree in all_pages(monkeypatch).items():
+        for page in dash.page_registry.values():
+            key = page_key(page)
+            tree, unbuilt = unbuilt_tables(
+                functools.partial(lambda k: render(k, monkeypatch)[0], key), monkeypatch
+            )
             assert table_problems(tree) == [], key
-            ids = {getattr(t, "id", None) for t in of_type(tree, "Table")}
-            assert ids <= set(built), (key, ids - set(built))
-            found |= ids
+            assert unbuilt == set(), key
+            found |= {getattr(t, "id", None) for t in of_type(tree, "Table")}
         assert set(TABLES) <= found
+
+    def test_a_table_built_outside_the_component_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity for the wrapper: a boxed, linked table a page builds by hand is
+        caught, though ``table_problems`` passes it."""
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        rows = [{"year": 1824}]
+        built_by_hand = components.table(
+            rows, lambda r: html.Tr(html.Td("1824")), ("year",), "by-hand", dl
+        )
+
+        def layout() -> Any:
+            via = components.table(
+                rows, lambda r: html.Tr(html.Td("1824")), ("year",), "via", dl
+            )
+            return html.Div([*via, *built_by_hand])
+
+        tree, unbuilt = unbuilt_tables(layout, monkeypatch)
+        assert table_problems(tree) == []
+        assert unbuilt == {"by-hand"}
 
     def test_the_registry_and_the_table_literals_agree(self) -> None:
         assert set(READS_BEFORE) == {page_key(p) for p in dash.page_registry.values()}
@@ -649,6 +686,35 @@ class TestAttribution:
             "Electoral votes cover 1111–2222",
             "Popular votes cover 1333–1444",
             "View: URL",
+            export.NULL_LINE,
+        ]
+
+    def test_the_census_line_and_the_notes_have_their_places(self) -> None:
+        given = provenance()
+        given.update(
+            ec_source_name="EC-NAME",
+            ec_license="EC-LIC",
+            ec_license_url="https://ec.example",
+            census_source_name="CB-NAME",
+            census_license="CB-LIC",
+            census_license_url="https://cb.example",
+            snapshot_version="v-123",
+        )
+        given["coverage"] = {
+            "year_min": 1111,
+            "year_max": 2222,
+            "pv_year_min": 1333,
+            "pv_year_max": 1444,
+        }
+        lines = export.preamble(("year", "population"), given, "URL", ("N1", "N2"))
+        assert lines == [
+            "Electoral votes: EC-NAME (EC-LIC; https://ec.example)",
+            "Population: CB-NAME (CB-LIC; https://cb.example)",
+            "Data snapshot: v-123",
+            "Electoral votes cover 1111–2222",
+            "View: URL",
+            "N1",
+            "N2",
             export.NULL_LINE,
         ]
 
