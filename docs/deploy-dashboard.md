@@ -437,8 +437,10 @@ running instance**; `min_instances: 1` makes App Engine start another at once. I
 deploy account holds Service Admin (§7), but run this as a person.
 
 **Before you start:** no dashboard deploy (`deploy-dashboard.yml`) or API deploy
-(`deploy.yml`) is running or about to; for a dashboard-cold measurement, stay clear of the
-daily canary (`api-canary.yml`, 13:17 UTC), which probes `explore.`. **Blast radius:** the
+(`deploy.yml`) is running or about to. Stay clear of the daily canary (`api-canary.yml`,
+scheduled 13:17 UTC; a scheduled run can start late, so check `gh run list
+--workflow=api-canary.yml`): it probes `explore.`, which spoils a dashboard-cold run, and its
+uncached `/health` wakes the API origin, which spoils an origin-cold one. **Blast radius:** the
 delete drops whatever the one instance is serving at that moment, and every visitor's
 cached responses go with it.
 
@@ -499,8 +501,8 @@ Then check, before measuring:
 3. **Immediately before each run**, the year you are about to measure was not filled since
    the restart (visitors and crawlers can reach it): the same query with
    `textPayload:"api fetch /v1/elections/<year>"` returns nothing. With no restart in this
-   shell, set `RESTART_TS` to the instance's start first:
-   `RESTART_TS=$(gcloud app instances list --project=uspv-explore --service=default --format='value(instance.startTime)')`.
+   shell, set both variables first:
+   `PROJECT=uspv-explore RESTART_TS=$(gcloud app instances list --project=uspv-explore --service=default --format='value(instance.startTime)')`.
 
 Drilled 2026-10-10 UTC (#310): the delete completed at 04:49:37Z, the new instance started
 about 1 s later, `/_ah/warmup` ran on it as a loading request (1.67 s), and it was serving
@@ -526,32 +528,40 @@ extent (`/v1/meta` and `/v1/elections` only). The page makes two fills on a miss
 states, all with the dashboard serving a snapshot and that year missing from its cache
 (check 3 above):
 
-- **Edge and origin cold**: a year no one has requested since the last API deploy, with
-  the API origin idle. Run this first: its cold start warms the origin for the next state.
+- **Edge and origin cold**: a year the edge should not hold (below), with the API origin
+  idle. Run this first: its cold start warms the origin for the next state.
 - **Edge cold, origin warm**: another such year, within about 10 minutes of an origin
   request (the previous state's run will do).
 - **Edge warm**: the API's Cloudflare cache holds the year. That cache is per data center,
   so warm it only through the dashboard's own fills, never with a `curl` from elsewhere,
   which reaches a different one. Measure years an earlier run filled **with data** (all of
-  state 2's; a degraded run leaves nothing at the edge), after a
+  state 2's; the degraded runs below left nothing at the edge, since their one fill was
+  abandoned), after a
   [restart](#restarting-the-instance-to-empty-its-cache), with no API deploy in between
   (the API deploy purges the edge).
 
 Before each run, record `RUN_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)` and check the API's side.
-The last API deploy is the newest revision's creation time
-(`gcloud run revisions list --service=usvote-api --project=uspv-api --region=us-west1 --limit=1`).
-A year (`YEAR`) is edge-cold if the origin has seen no request under its
-`/v1/elections/<year>` since then (pass that time as `SINCE`); the origin is idle only if **no request of any kind** reached it in the last
-15 minutes and it has logged `Shutting down` since its last one, because scanners hit
+**Edge cold.** A year (`YEAR`) whose `/v1/elections/<year>` the origin has seen no request
+under since the last API deploy (`SINCE`, the newest revision's creation time) is certainly
+not at the edge. That pre-check is sufficient, not necessary: the edge also evicts entries
+without a purge, and a request from elsewhere fills a different data center's cache, so a
+year that fails it may still miss. The 2026-10-10 runs below all failed it (every year had
+been requested since the last API deploy) and all missed the edge. **The deciding test is
+after the run**: a fill that reached the origin missed the edge (classification, below).
+**Origin idle** (origin-cold state only): no request of any kind reached it in the last 15
+minutes, and it has logged `Shutting down` since its last one, because scanners hit
 non-`/v1/` paths too:
 
 ```bash
-# Edge cold: expect nothing.
+SINCE=$(gcloud run revisions list --service=usvote-api --project=uspv-api \
+  --region=us-west1 --limit=1 --format='value(metadata.creationTimestamp)')
+# Edge cold (sufficient, not necessary): nothing printed means certainly cold.
 gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="usvote-api" AND
   httpRequest.requestUrl:"/v1/elections/'"$YEAR"'" AND timestamp>="'"$SINCE"'"' \
   --project=uspv-api --format='value(timestamp,httpRequest.requestUrl)'
-# Origin idle (origin-cold state only): expect no request lines, and a Shutting down after them.
+# Origin idle: no request line in the last 15 minutes, and the newest line is Shutting down.
+# If nothing prints, widen --freshness until a Shutting down appears with no request after it.
 gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="usvote-api" AND
   (logName:"run.googleapis.com%2Frequests" OR textPayload:"Shutting down")' \
@@ -569,8 +579,10 @@ uvx --with playwright python scripts/measure_dashboard_cold_start.py \
 **Classify each run from the logs, never by assumption.** The dashboard's `api fetch` lines
 (project `uspv-explore`) say what the instance filled. The API's Cloud Run request log says
 whether a fill reached the origin, that is, missed the edge, and a `Starting new instance`
-line beside it marks an origin cold start. Bound both by `RUN_TS`, so an empty result means
-"nothing since this run" rather than "nothing in the last few minutes":
+line beside it marks an origin cold start (one with no year path beside it, such as the
+canary's, means the run did not measure what it meant to: discard it). Bound both by
+`RUN_TS`, so an empty result means "nothing since this run" rather than "nothing in the
+last few minutes":
 
 ```bash
 gcloud logging read 'resource.type="cloud_run_revision" AND
@@ -579,9 +591,10 @@ gcloud logging read 'resource.type="cloud_run_revision" AND
   --format='value(timestamp,httpRequest.requestUrl,httpRequest.latency,textPayload)'
 ```
 
-The dashboard's 5-minute `/v1/meta` recheck is answered by the edge, which holds it until
-the next API deploy's purge, so between API deploys it does not reach the origin or keep it
-warm (the first recheck after a purge does).
+The dashboard's 5-minute `/v1/meta` recheck is answered by the edge, which holds it for up
+to 30 days (the Worker's `s-maxage`) unless a purge or eviction clears it first, so it
+seldom reaches the origin and does not keep it warm (the first recheck after a purge or an
+eviction does).
 
 **Measured 2026-10-10 UTC, 04:46–05:45Z (#310)**, version `v-59ebc741fcd0-r5-a1`, snapshot
 `71b777de…`. In time order: 1836, then state 2, then the 1836 reload, the restart, the
