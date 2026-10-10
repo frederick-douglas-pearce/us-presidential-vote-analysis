@@ -437,10 +437,12 @@ running instance**; `min_instances: 1` makes App Engine start another at once. I
 deploy account holds Service Admin (§7), but run this as a person.
 
 **Before you start:** no dashboard deploy (`deploy-dashboard.yml`) or API deploy
-(`deploy.yml`) is running or about to. Stay clear of the daily canary (`api-canary.yml`,
-scheduled 13:17 UTC; a scheduled run can start late, so check `gh run list
---workflow=api-canary.yml`): it probes `explore.`, which spoils a dashboard-cold run, and its
-uncached `/health` wakes the API origin, which spoils an origin-cold one. **Blast radius:** the
+(`deploy.yml`) is running or about to. Stay clear of the daily canary (`api-canary.yml`): it
+probes `explore.`, which spoils a dashboard-cold run, and its uncached `/health` wakes the
+API origin, which spoils an origin-cold one. It is scheduled 13:17 UTC but has lately
+started 4–8 hours late, so measure before 13:17 UTC, or after
+`gh run list --workflow=api-canary.yml` shows today's run completed (for an origin-cold
+run, then wait for the origin to go idle). **Blast radius:** the
 delete drops whatever the one instance is serving at that moment, and every visitor's
 cached responses go with it.
 
@@ -542,11 +544,13 @@ states, all with the dashboard serving a snapshot and that year missing from its
 
 Before each run, record `RUN_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)` and check the API's side.
 **Edge cold.** A year (`YEAR`) whose `/v1/elections/<year>` the origin has seen no request
-under since the last API deploy (`SINCE`, the newest revision's creation time) is certainly
-not at the edge. That pre-check is sufficient, not necessary: the edge also evicts entries
+under since the last API deploy (`SINCE`, the newest revision's creation time) is not at
+the edge, provided the deploy's purge reached the dashboard's data center (`deploy.yml`
+verifies only the runner's). That pre-check is sufficient, not necessary: the edge also evicts entries
 without a purge, and a request from elsewhere fills a different data center's cache, so a
-year that fails it may still miss. The 2026-10-10 runs below all failed it (every year had
-been requested since the last API deploy) and all missed the edge. **The deciding test is
+year that fails it may still miss. The six edge-cold runs below (the first two states) all
+failed it (every year had been requested since the last API deploy) and all missed the
+edge. **The deciding test is
 after the run**: a fill that reached the origin missed the edge (classification, below).
 **Origin idle** (origin-cold state only): no request of any kind reached it in the last 15
 minutes, and it has logged `Shutting down` since its last one, because scanners hit
@@ -555,7 +559,7 @@ non-`/v1/` paths too:
 ```bash
 SINCE=$(gcloud run revisions list --service=usvote-api --project=uspv-api \
   --region=us-west1 --limit=1 --format='value(metadata.creationTimestamp)')
-# Edge cold (sufficient, not necessary): nothing printed means certainly cold.
+# Edge cold (sufficient, not necessary): nothing printed means cold, if the last purge took.
 gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="usvote-api" AND
   httpRequest.requestUrl:"/v1/elections/'"$YEAR"'" AND timestamp>="'"$SINCE"'"' \
@@ -579,8 +583,9 @@ uvx --with playwright python scripts/measure_dashboard_cold_start.py \
 **Classify each run from the logs, never by assumption.** The dashboard's `api fetch` lines
 (project `uspv-explore`) say what the instance filled. The API's Cloud Run request log says
 whether a fill reached the origin, that is, missed the edge, and a `Starting new instance`
-line beside it marks an origin cold start (one with no year path beside it, such as the
-canary's, means the run did not measure what it meant to: discard it). Bound both by
+line beside it marks an origin cold start (one before this run's fill, and not beside this
+run's own year path, means something else woke the origin first, such as the canary, whose
+`/health` this query does not show: discard the run). Bound both by
 `RUN_TS`, so an empty result means "nothing since this run" rather than "nothing in the
 last few minutes":
 
