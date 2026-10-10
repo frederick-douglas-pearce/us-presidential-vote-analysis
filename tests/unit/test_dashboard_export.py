@@ -342,9 +342,12 @@ class TestEveryTable:
 
     def test_no_rows_no_table_and_no_download(self) -> None:
         dl = export.Download("t.csv", "t", {}, "u")
-        built = components.table([], lambda r: html.Tr(), ("year",), "t", dl)
+        built = components.table(
+            [], lambda r: html.Tr(), ("year",), "t", dl, notes=("N1", "N2")
+        )
         assert links(built) == {} and of_type(built, "Table") == []
-        assert built[0].children == components.NO_ROWS
+        # The empty sentence, then the notes: a note can explain the empty result.
+        assert [p.children for p in built] == [components.NO_ROWS, "N1", "N2"]
 
 
 # --- exactly the view -----------------------------------------------------------------
@@ -438,6 +441,16 @@ class TestExactlyTheView:
                 "state-per-capita",
                 "/state/GA?pv_status=popular_vote",
             ),
+            # Each status filter under its own key (closed values: kept even when no
+            # row has them).
+            (
+                "/election/<year>",
+                "electoral_count_status=disputed&pv_status=popular_vote",
+                # T3 is never filtered, so its file names the view however few rows
+                # T2 keeps.
+                "election-nation",
+                "/election/1824?electoral_count_status=disputed&pv_status=popular_vote",
+            ),
         ],
     )
     def test_the_view_url_names_only_the_applied_filters(
@@ -489,8 +502,54 @@ class TestExactlyTheView:
                     "year",
                 ),
             ),
-            ("/election/<year>", "election-per-capita", None),
-            ("/state/<usps>", "state-history", None),
+            (
+                "/election/<year>",
+                "election-nation",
+                (
+                    "candidate",
+                    "party",
+                    "national_electoral_votes",
+                    "national_electoral_votes_counted",
+                    "national_electoral_denominator",
+                    "electoral_rank",
+                    "took_office",
+                    "national_pv_votes",
+                    "ec_share_full",
+                    "pv_share",
+                    "ec_share_hybrid",
+                    "hybrid_score",
+                    "candidate_slug",
+                    "year",
+                ),
+            ),
+            (
+                "/election/<year>",
+                "election-per-capita",
+                ("state", *labels.PER_CAPITA_FIELDS, "state_usps", "year"),
+            ),
+            (
+                "/state/<usps>",
+                "state-history",
+                (
+                    "year",
+                    "candidate",
+                    "party",
+                    "state_electoral_votes",
+                    "electoral_votes",
+                    "electoral_votes_counted",
+                    "electoral_count_status",
+                    "pv_status",
+                    "popular_votes",
+                    "electoral_count_status_reason",
+                    "candidate_slug",
+                    "state_usps",
+                ),
+            ),
+            (
+                "/state/<usps>",
+                "state-per-capita",
+                ("year", *labels.PER_CAPITA_FIELDS, "state_usps"),
+            ),
         ],
     )
     def test_the_columns(
@@ -569,6 +628,15 @@ class TestNulls:
         assert "Popular votes cover 1976–2024" in states.lines
         assert export.NULL_LINE in states.lines
         assert labels.PARTY_NOTE in states.lines
+
+    def test_the_state_history_explains_its_null_party(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/state/<usps>", monkeypatch)
+        history = download(tree, "state-history")
+        assert "" in {r["party"] for r in history.rows}  # the premise: a null party
+        assert labels.PARTY_NOTE in history.lines
+        assert labels.PARTY_NOTE in [p.children for p in of_type(tree, "P")]
 
     def test_the_per_capita_notes_explain_its_nulls(
         self, monkeypatch: pytest.MonkeyPatch
@@ -843,9 +911,9 @@ class TestFile:
         assert len(frame) == len(file.rows) == len(body_rows(tree, "election-states"))
 
     def test_a_comma_or_quote_in_a_cell_is_quoted(self) -> None:
-        assert export.row(["a,b", 'say "x"', "line\nbreak", "plain", "a #1"]) == (
-            '"a,b","say ""x""","line\nbreak",plain,"a #1"\r\n'
-        )
+        assert export.row(
+            ["a,b", 'say "x"', "line\nbreak", "plain", "a #1", "lone\rcr"]
+        ) == ('"a,b","say ""x""","line\nbreak",plain,"a #1","lone\rcr"\r\n')
 
     def test_a_hash_in_a_cell_never_cuts_its_row(
         self, monkeypatch: pytest.MonkeyPatch
