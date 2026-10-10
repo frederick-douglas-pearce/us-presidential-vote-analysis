@@ -5140,3 +5140,63 @@ D073 intends. Widening the prefetch to include the roster stays #310's measured 
 **Related:** D070, D072, D073, #279, #310, #330, #331.
 
 ---
+
+## D075: A table's CSV download is built at render time into its link, with a `#,` provenance preamble and the API's raw field names
+
+**Date:** 2026-10-09
+**Builds on:** D070(b), D072 · **Decided by:** the owner, approving the architect's rulings at
+#309's plan gate (2026-10-09); recorded by #309 (E9-S3 family)
+
+**Context.** #309 asks every dashboard table to offer exactly its filtered rows as a CSV that
+names its sources, built from the response already cached for the view, with no API request on
+download. It left the attribution's shape (lines or columns) to the architect.
+
+**Decision.**
+- **The file is built in the render, into the link.** Each table's link is an `html.A` whose
+  `href` is a `data:text/csv;charset=utf-8,` URL, percent-encoded with `quote(…, safe="")`, built
+  from the same row list as the table's body (`components.table`). A click downloads in the
+  browser: there is no route or callback, so a download makes no request, and the file is always
+  the snapshot and the filters the reader is looking at. A `dcc.Download` callback was rejected:
+  re-reading the cache at click time could cross a snapshot swap, and would need a pin to keep
+  "no request after render". The cost is page weight (the largest table, 2016's T2, is tens of
+  kilobytes before compression). With no rows there is no table and no link. The link is the
+  table's scroll box's next sibling, outside it (`components.table` returns them adjacent, and
+  `TestEveryTable` checks that sibling); a wrapper around the two was considered at the plan
+  gate and is not needed. A character UTF-8 cannot encode (a lone surrogate) is written as `?`
+  rather than failing the page.
+- **Shape.** A UTF-8 byte-order mark; a preamble of two-field rows, a bare `#` and a sentence
+  written by the same writer as the data; a blank row; the header; the rows. The preamble names
+  each source the table carries with its license and the license's URL, the snapshot version, the
+  years the Electoral College source covers and, where the table carries popular votes, the
+  popular-vote years (provenance carries no census window; each per-capita row names its census
+  in `governing_census_year`), the view's URL (its path and the filters the render applied, in the
+  `og:url` normal form), the table's notes (which explain its nulls, what `has_popular_vote`'s
+  `false` means, and which filters a per-capita table follows), and that an empty cell is a null.
+  It states provenance, never a license condition. A spreadsheet opens the data as a block under
+  its header. Every field holding a `#` is quoted, so only a preamble row starts with a bare `#`:
+  `pandas.read_csv(f, comment="#", encoding="utf-8-sig")` skips the preamble and never cuts a
+  data row short.
+- **Sources follow the columns.** Every field a rendered table exports is in exactly one of three
+  sets (`export.EC_FIELDS`, `POPULAR_VOTE_FIELDS`, `CENSUS_FIELDS`;
+  `test_the_field_sets_are_disjoint_and_cover_every_column` in `test_dashboard_export.py`): the
+  Electoral College source is always named, the popular-vote and census sources when a field of
+  theirs is present.
+- **Columns** are raw public `/v1` field names: the table's displayed fields in display order, then
+  the count status's reason where the table shows it inside a cell, then the keys a filter or
+  another year needs (`state_usps`, `candidate_slug`, `year`). The owner kept the appended keys
+  "for now" (2026-10-09).
+- **Cells.** A null, or a non-finite number, is empty; a boolean is `true`/`false`; a number is
+  written as served; any other value is text, and text starting with `=`, `+`, `-`, `@`, a tab or
+  a carriage return, at its start or after any leading whitespace, gets a `'` prefix against
+  formula injection (OWASP's list). Full-width signs and `;`-locale separators are #340.
+- **No `csv` or `io` module.** Both are on the D070(b) guard's banned list for runtime modules, so
+  `export.row` writes RFC 4180 rows itself; the module builds the file's text in memory and
+  neither writes nor reads a file.
+
+**Rationale.** Building the file where the table is built makes "exactly the view" and "no
+request" true by construction rather than by a pin and a test of it, and adds nothing the D070(b)
+guard must newly drive: its success run renders every table's link.
+
+**Related:** D070, D072, D073, #306, #307, #309, #340.
+
+---

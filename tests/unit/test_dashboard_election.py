@@ -1079,7 +1079,9 @@ def section(year: int, body: Any = None, **chosen: Any) -> Any:
         **{"state": None, "candidate": None, "pv_status": None, "count_status": None}
         | chosen
     )
-    return MOD["_per_capita_section"](MOD["_per_capita_rows"](body["data"], year), filters)
+    download = MOD["_download"](year, "per-capita", "x", body, filters)
+    rows = MOD["_per_capita_rows"](body["data"], year)
+    return MOD["_per_capita_section"](rows, filters, download)
 
 
 def all_cells(tree: Any) -> list[str]:

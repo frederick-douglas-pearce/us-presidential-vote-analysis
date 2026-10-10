@@ -748,7 +748,8 @@ def texas_section(query: str = "") -> Any:
     rows = MOD["_rows"](body, "TX", MOD["_served_years"](INDEX), "x")
     span = (1824, 2024)
     chosen = MOD["filters"](MOD["parse_filters"](parse(query)), [], span)
-    return MOD["_per_capita_section"](rows, chosen)
+    download = MOD["_download"]("TX", "per-capita", "x", body, chosen, span)
+    return MOD["_per_capita_section"](rows, chosen, download)
 
 
 class TestGeorgiaPerCapita:

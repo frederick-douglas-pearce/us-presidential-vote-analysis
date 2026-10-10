@@ -122,6 +122,17 @@ FIXTURE_FILES = {
     "/v1/states/GA/per-capita": "v1_states_GA_per_capita.json",
 }
 
+#: Each table's download link (#309), all rendered by the success run at
+#: :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render, under the guard.
+DOWNLOAD_IDS = (
+    "elections-table-csv",
+    "election-states-csv",
+    "election-nation-csv",
+    "election-per-capita-csv",
+    "state-history-csv",
+    "state-per-capita-csv",
+)
+
 #: Prefetched by no page: the success run's first fill on a miss, read by the
 #: one-election view (#307) rendered at :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
@@ -474,6 +485,7 @@ assert api.CLIENT.snapshot is not None, "warmup did not fill the cache"
 assert api.CLIENT.snapshot.version == _VERSION
 assert client.get("/").status_code == 200
 assert "/" in [concrete(page) for page in PAGES]
+rendered = set()
 for page in PAGES:
     path = concrete(page)
     # The one-election view's render, at 1824, makes its fills on a miss
@@ -481,8 +493,14 @@ for page in PAGES:
     text = route(client, path)
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])
+    rendered |= rendered_ids(text)
     if path == "/":
         assert _VERSION in text
+# Every table's CSV (#309) is built in these renders, under this guard. That a download
+# is its link's data: URL with no route or callback behind it is checked elsewhere:
+# link_problems and TestRequestBudget in test_dashboard_export.py.
+missing = set({DOWNLOAD_IDS!r}) - rendered
+assert not missing, ("a table rendered no download link", missing)
 
 for miss in {ELECTION_MISSES!r} + {STATE_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)

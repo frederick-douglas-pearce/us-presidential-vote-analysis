@@ -652,7 +652,11 @@ class TestLabels:
 
 # --- the shared pieces: footer, degraded state, purity -------------------------------
 
-SHARED_MODULES = ("components.py", "labels.py", "query.py")
+SHARED_MODULES = ("components.py", "export.py", "labels.py", "query.py")
+
+#: The shared modules by import name: the only ``explore`` modules a shared module may
+#: import (#309: the shared table component builds on ``labels`` and ``export``).
+SHARED_NAMES = frozenset(name.removesuffix(".py") for name in SHARED_MODULES)
 
 
 def with_span(first: Any, last: Any) -> dict[str, Any]:
@@ -665,19 +669,59 @@ def with_span(first: Any, last: Any) -> dict[str, Any]:
 PACKAGE = Path(api.__file__).parent
 
 
+def shared_imports(source: str) -> set[str]:
+    """The shared modules (:data:`SHARED_NAMES`) a module imports by name."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.level == 0:
+            if node.module == "explore":
+                found |= {a.name for a in node.names} & SHARED_NAMES
+            elif (node.module or "").startswith("explore."):
+                found |= {(node.module or "").split(".", 1)[1]} & SHARED_NAMES
+        if isinstance(node, ast.Import):
+            found |= {
+                a.name.split(".", 1)[1]
+                for a in node.names
+                if a.name.startswith("explore.")
+            } & SHARED_NAMES
+    return found
+
+
+def in_cycles(graph: dict[str, set[str]]) -> list[str]:
+    """The nodes of ``graph`` (module -> what it imports) that reach themselves."""
+
+    def reaches(start: str, goal: str, seen: frozenset[str]) -> bool:
+        return any(
+            n == goal or (n not in seen and reaches(n, goal, seen | {n}))
+            for n in graph.get(start, set())
+        )
+
+    return sorted(name for name in graph if reaches(name, name, frozenset()))
+
+
 def imports_api(source: str) -> bool:
     """Whether a module could reach ``explore.api``.
 
-    Flagged: any import from ``explore`` (``explore.app`` and the pages import ``api``,
-    so any of them is a way in), any relative import, any name or attribute ``api`` or
-    ``CLIENT``, and ``__import__`` / ``importlib``.
+    Flagged: any ``from explore …`` import but one naming only shared modules
+    (:data:`SHARED_NAMES`, which import nothing else from it: ``explore.app`` and the
+    pages import ``api``, so any of them is a way in); every ``import explore`` or
+    ``import explore.<module>``, shared or not, since either binds the package name
+    ``explore``, through which any module is reachable (``explore.pages…``); any
+    relative import; any name or attribute ``api`` or ``CLIENT``; and ``__import__`` /
+    ``importlib``.
     """
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if node.level > 0 or module == "explore" or module.startswith("explore."):
+            if node.level > 0 or module == "importlib":
                 return True
-            if module == "importlib":
+            if module == "explore" and any(
+                alias.name not in SHARED_NAMES for alias in node.names
+            ):
+                return True
+            if module.startswith("explore.") and (
+                module.split(".", 1)[1] not in SHARED_NAMES
+            ):
                 return True
         if isinstance(node, ast.Import) and any(
             alias.name in ("explore", "importlib")
@@ -713,12 +757,47 @@ class TestSharedPieces:
             ("CLIENT.view()\n", True),
             ("from dash import html\n", False),
             ("from typing import Any\n", False),
+            # #309: a shared module may import another shared module, and only that.
+            ("from explore import export, labels\n", False),
+            ("from explore.labels import header\n", False),
+            ("import explore.query\n", True),
+            ("import explore.query\nexplore.pages.election.layout()\n", True),
+            ("from explore import labels, api\n", True),
+            ("from explore import config\n", True),
+            ("from explore.api import fetch\n", True),
+            ("import explore.app\n", True),
+            ("import explore\n", True),
+            ("from . import labels\n", True),
+            ("from explore.labels.x import y\n", True),
         ],
     )
     def test_the_purity_check_fails_what_it_should(
         self, source: str, imports: bool
     ) -> None:
         assert imports_api(source) is imports
+
+    def test_the_shared_modules_import_each_other_without_a_cycle(self) -> None:
+        """A cycle would make the import order decide what a module sees."""
+        graph = {
+            name.removesuffix(".py"): shared_imports(
+                (PACKAGE / name).read_text(encoding="utf-8")
+            )
+            for name in SHARED_MODULES
+        }
+        assert graph["components"] == {"export", "labels"}  # non-vacuity
+        assert in_cycles(graph) == []
+
+    def test_the_cycle_check_sees_a_cycle(self) -> None:
+        assert shared_imports("from explore import components\n") == {"components"}
+        assert shared_imports("import explore.labels\nfrom explore import api\n") == {
+            "labels"
+        }
+        assert in_cycles({"a": {"b"}, "b": {"c"}, "c": {"a"}, "d": {"a"}}) == [
+            "a",
+            "b",
+            "c",
+        ]
+        assert in_cycles({"a": {"b"}, "b": set()}) == []
 
     @pytest.mark.parametrize("module", sorted(dash.page_registry))
     def test_every_page_renders_the_shared_footer(

@@ -151,6 +151,14 @@ PARTY_NOTE = (
 NOT_IN_DATASET = "Not in this dataset"
 
 
+#: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
+#: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
+#: raw ``false``. It says nothing about whether a popular vote was held.
+HAS_POPULAR_VOTE_NOTE = (
+    "has_popular_vote is false where this dataset holds no popular-vote figure for the "
+    "year; it does not say whether a popular vote was held."
+)
+
 #: A popular-vote or hybrid cell with no figure because the year lies outside the
 #: popular-vote window (#308): the panel's null there, and T3's in a year with no
 #: popular vote.

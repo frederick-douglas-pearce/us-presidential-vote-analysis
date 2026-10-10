@@ -12,6 +12,8 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   request.
 - **The provenance footer** comes from :mod:`explore.components`, built from the
   response's own ``meta.provenance``.
+- **The table** is :func:`explore.components.table`, which offers its rows as a CSV
+  (#309) built from the same list as its body.
 """
 
 from __future__ import annotations
@@ -21,8 +23,8 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, labels, query
-from explore.config import SITE_TITLE
+from explore import api, components, export, labels, query
+from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in the table.
 PAGE_ID = "elections"
@@ -122,6 +124,15 @@ def search_for(years: Any, pv: Any, first: Any, last: Any) -> str:
     return query.encode_search(parse_filters(params))
 
 
+def applied_search(chosen: Filters, first: int, last: int) -> str:
+    """The filters a render applied, in the normal form :func:`search_for` writes:
+    already checked, so they are encoded without the parser."""
+    params = query.year_range_search([chosen.year_from, chosen.year_to], first, last)
+    if chosen.pv_only:
+        params[PV] = "1"
+    return query.encode_search(params.items())
+
+
 @callback(
     Output(URL_ID, "search"),
     Input(YEARS_ID, "value"),
@@ -189,12 +200,13 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
         ],
         className="filters",
     )
-    table = html.Table(
-        [
-            html.Thead(html.Tr([labels.header(field) for field in FIELDS])),
-            html.Tbody([_row(e) for e in shown]),
-        ],
-        id=TABLE_ID,
+    download = export.Download(
+        filename="elections.csv",
+        name="the elections",
+        provenance=provenance,
+        view_url=export.view_url(
+            CANONICAL_HOST, "/elections", applied_search(chosen, first, last)
+        ),
     )
     return html.Div(
         [
@@ -204,9 +216,15 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
                 f"Showing {len(shown)} of {len(elections)} elections",
                 className="count",
             ),
-            table
-            if shown
-            else html.P("No elections match these filters.", className="empty"),
+            *components.table(
+                shown,
+                _row,
+                FIELDS,
+                TABLE_ID,
+                download,
+                notes=(labels.HAS_POPULAR_VOTE_NOTE,),
+                empty="No elections match these filters.",
+            ),
             labels.glossary(FIELDS),
             components.provenance_footer(provenance),
         ],

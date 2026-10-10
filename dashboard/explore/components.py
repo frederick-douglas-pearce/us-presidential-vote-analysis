@@ -1,18 +1,22 @@
-"""View pieces every page shares: the provenance footer, the degraded state (#306) and
-the year-range slider every year-filtered table uses (#279).
+"""View pieces every page shares: the provenance footer, the degraded state (#306), the
+year-range slider every year-filtered table uses (#279), and the table itself with its
+CSV download (#309).
 
 Pure functions of what a page already read, so they read no API: a page reads through
 its own render-scoped view and hands them what it read.
 ``TestSharedPieces.test_the_shared_modules_read_no_api`` (in
 ``test_dashboard_elections.py``) checks that this module imports nothing from
-``explore`` and names no ``api`` or ``CLIENT``.
+``explore`` but the other shared modules, and names no ``api`` or ``CLIENT``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from dash import dcc, html
+
+from explore import export, labels
 
 #: The id of the paragraph carrying the snapshot version.
 SNAPSHOT_ID = "snapshot-version"
@@ -21,11 +25,11 @@ SNAPSHOT_ID = "snapshot-version"
 PROVENANCE_ID = "provenance"
 
 #: The three sources, in display order: what each supplies, and the provenance keys
-#: naming it and its license.
+#: naming it and its license. The CSV preamble names the same triples (#309).
 SOURCES: tuple[tuple[str, str, str, str], ...] = (
-    ("Electoral votes", "ec_source_name", "ec_license", "ec_license_url"),
-    ("Popular votes", "source_name", "license", "license_url"),
-    ("Population", "census_source_name", "census_license", "census_license_url"),
+    export.EC_SOURCE,
+    export.PV_SOURCE,
+    export.CENSUS_SOURCE,
 )
 
 #: The degraded state's sentence. ``scripts/probe_dashboard.sh`` greps the routed root
@@ -109,3 +113,52 @@ def year_slider(
         marks=year_marks(first, last),
         tooltip={"placement": "bottom"},
     )
+
+
+#: A table's sentence when its filters leave no rows.
+NO_ROWS = "No rows match these filters."
+
+
+def table(
+    rows: Sequence[dict[str, Any]],
+    render_row: Callable[[dict[str, Any]], html.Tr],
+    fields: tuple[str, ...],
+    table_id: str,
+    download: export.Download,
+    *,
+    extra: tuple[str, ...] = (),
+    notes: tuple[str, ...] = (),
+    empty: str = NO_ROWS,
+) -> list[Any]:
+    """A table, its CSV download and its notes (#309).
+
+    Every table goes through here: ``TestEveryTable`` in ``test_dashboard_export.py``
+    records each call while rendering every registered page and fails a rendered table
+    it did not build. The body and the CSV are built from the one list ``rows``, so the
+    file holds exactly the rows the table shows, in the same order. The CSV's columns
+    are the table's ``fields`` in display order, then ``extra`` (the count reason a cell
+    shows, and the keys a filter or another year needs, which the table shows only
+    inside a cell or not at all). ``notes`` are shown under the table and written into
+    the file's preamble, so what they explain is explained in both. With no rows, there
+    is no table and nothing to download: ``empty`` says so. The link is the scroll
+    box's next sibling, outside it, so it never scrolls away with the table.
+    """
+    shown = [html.P(note, className="note") for note in notes]
+    if not rows:
+        return [html.P(empty, className="empty"), *shown]
+    text = export.csv_text((*fields, *extra), rows, download, notes)
+    return [
+        # Wider than a phone: the table scrolls sideways inside its box, the page never.
+        html.Div(
+            html.Table(
+                [
+                    html.Thead(html.Tr([labels.header(field) for field in fields])),
+                    html.Tbody([render_row(row) for row in rows]),
+                ],
+                id=table_id,
+            ),
+            className="table-scroll",
+        ),
+        export.link(table_id, download, text),
+        *shown,
+    ]
