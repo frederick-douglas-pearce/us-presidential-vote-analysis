@@ -367,9 +367,12 @@ and App Engine fetches `/v1` with no `Origin` header, so CORS never applies and
 `API_CORS_ORIGINS` is deliberately unchanged. If a browser-side component is ever added,
 that story adds the origin and this check.
 
-**The degraded message** appears only when the cache is **empty** (a fresh instance that
-could not reach the API). A warm cache keeps serving the last snapshot it read when the API
-is down, which is correct under D034: snapshots are immutable, so the last one is still true.
+**The degraded message** appears when a page needs a response the cache does not hold and
+cannot get within the render's deadline: an empty cache (a fresh instance that could not
+reach the API), or a path filled on a miss (a year or state page, D072) whose fill failed
+or was too slow (§12, [cold year links](#cold-year-links-310)). A warm cache keeps serving
+the last snapshot it read when the API is down, which is correct under D034: snapshots are
+immutable, so the last one is still true.
 
 **Cost posture.** One F1 instance pinned all day uses 24 of the free tier's 28 F1
 instance-hours per day, per project, so compute is about $0 (D071(b)); `max_instances: 1`
@@ -385,22 +388,28 @@ The MVP target (D071(g)): OG HTML in ≤ 1 s TTFB, and first data in ≤ 3 s for
 link at 390 px on 10 Mbps / 100 ms.
 [`scripts/measure_dashboard_cold_start.py`](../scripts/measure_dashboard_cold_start.py)
 measures both from one navigation in a fresh browser context each run, and reports a run
-that got the plain-language message instead of data as `degraded`. **Nothing else may
-reach the server first**: a `curl` sent ahead of the browser would take the start-up and
-start the cache fill, and the browser would measure the second visitor. The server
-states worth measuring:
+that got the plain-language message instead of data as `degraded`. **When the instance
+itself is what is being measured cold, nothing else may reach the server first**: a `curl`
+sent ahead of the browser would take the start-up and start the cache fill, and the
+browser would measure the second visitor. (A run that measures one *path* missing from a
+warm instance's cache, as in [cold year links](#cold-year-links-310) below, only needs
+that path unrequested.) The server states worth measuring:
 
 - **Warm** (the ordinary case): run it.
-- **Dashboard cold**: right after a deploy (warmup has run), and after a kill-switch
+- **Dashboard cold**: right after a deploy (warmup has run), after a
+  [restart](#restarting-the-instance-to-empty-its-cache), and after a kill-switch
   un-pause (the instance starts from nothing).
-- **API edge cold**: the order matters, because a running dashboard's refresher re-reads
-  `/v1/meta` through the edge every 5 minutes and so refills it. **Pause the dashboard
-  first** (§10), then purge the API's Cloudflare cache, wait until the API origin has had
-  no request for about 15 minutes (it then scales to zero; check its request log, since
-  crawlers wake it too), then un-pause and measure the first visitor. A purge alone
-  changes nothing a visitor sees: the dashboard serves from its in-process cache, and the
-  purge does not change `snapshot_version`, so no refetch happens. By design, a visitor
-  meets a cold API only when the cache is empty.
+- **API edge cold** for what the dashboard prefetches (`/v1/meta`, `/v1/elections`): the
+  order matters, because a running dashboard's refresher re-reads `/v1/meta` through the
+  edge every 5 minutes and so refills it. **Pause the dashboard first** (§10), then purge
+  the API's Cloudflare cache, wait until the API origin has had no request for about 15
+  minutes (it then scales to zero; check its request log, since crawlers wake it too), then
+  un-pause and measure the first visitor. A purge alone changes nothing a visitor of a
+  prefetched path sees: the dashboard serves those from its in-process cache, and the purge
+  does not change `snapshot_version`, so no refetch happens. A path filled on a miss (a
+  year page, a state page; D072) is different: its first visitor after a restart or a new
+  snapshot reads it through the edge, and possibly from a cold origin. That is the case
+  [cold year links](#cold-year-links-310) measures.
 
 [`scripts/dashboard_load_test.py`](../scripts/dashboard_load_test.py) drives first-visit
 page loads (shell, every bundle, layout, dependencies, the routing callback) against the
@@ -415,3 +424,127 @@ run caused from the app's log (`api fetch` lines):
 gcloud logging read 'resource.type="gae_app" AND textPayload:"api fetch"' \
   --project="$PROJECT" --freshness=10m --format='value(timestamp,textPayload)'
 ```
+
+### Restarting the instance to empty its cache
+
+The cache lives in the one gunicorn process on the one pinned instance (`app.yaml`), so
+only a new instance empties it. **Delete the running instance**; `min_instances: 1` makes
+App Engine start another at once. It needs `appengine.instances.delete` (an owner or App
+Engine admin; the deploy account cannot). Drilled 2026-10-09 (#310): the new instance was
+up 4 s after the delete, `/_ah/warmup` ran on it as a loading request (1.67 s), and no
+request returned a 5xx in the gap.
+
+```bash
+PROJECT=uspv-explore
+VERSION=$(gcloud app versions list --project=$PROJECT --service=default \
+  --filter='traffic_split>0' --format='value(id)')
+OLD=$(gcloud app instances list --project=$PROJECT --service=default \
+  --version="$VERSION" --format='value(id)')
+RESTART_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gcloud app instances delete "$OLD" --project=$PROJECT --service=default \
+  --version="$VERSION" --quiet
+until NEW=$(gcloud app instances list --project=$PROJECT --service=default \
+    --version="$VERSION" --format='value(id)') && [ -n "$NEW" ] && [ "$NEW" != "$OLD" ]
+do sleep 10; done
+```
+
+Then check, before measuring:
+
+1. **Warmup ran** on the new instance, and how long it took:
+   ```bash
+   gcloud logging read "resource.type=\"gae_app\" AND logName:\"request_log\" \
+     AND protoPayload.resource=\"/_ah/warmup\" AND timestamp>=\"$RESTART_TS\"" \
+     --project=$PROJECT \
+     --format='value(timestamp,protoPayload.latency,protoPayload.wasLoadingRequest)'
+   ```
+2. **The cache is empty**: since `RESTART_TS`, the new instance logged one
+   `serving snapshot … (2 responses)` and `api fetch` lines for `/v1/meta` and
+   `/v1/elections` only:
+   ```bash
+   gcloud logging read "resource.type=\"gae_app\" AND (textPayload:\"serving snapshot\" \
+     OR textPayload:\"api fetch\") AND timestamp>=\"$RESTART_TS\"" \
+     --project=$PROJECT --format='value(timestamp,textPayload)'
+   ```
+   App Engine does not guarantee warmup. If neither line appears within about 2 minutes,
+   send one `GET /` (it starts the refresher and fills only those two paths), and note that
+   warmup did not run.
+3. **Immediately before each run**, the path you are about to measure was not filled since
+   the restart (visitors and crawlers can reach it): the same query with
+   `textPayload:"api fetch /v1/elections/<year>"` returns nothing.
+
+**Other ways, and when to use them.** A **redeploy** (§9) also empties the cache. Use it if
+a delete is refused or no new instance appears; pick the measured commit through a tag in
+"Use workflow from", since the workflow deploys the selected ref. Its probes request only
+`/`, so they reach no year or state path. **The kill-switch pause** (§10) takes the whole
+app down, and disabling can take a while to stop a busy instance, so use it only when the
+dashboard must stay silent, as in "API edge cold" above, and still check for a new
+instance id after the un-pause. `gcloud app versions stop` is not available: it needs
+manual scaling.
+
+### Cold year links (#310)
+
+What the first reader of a shared `/election/<year>` link waits for, at D072's prefetch
+extent (`/v1/meta` and `/v1/elections` only). The page makes two fills on a miss
+(`/v1/elections/{year}`, then `/v1/elections/{year}/per-capita`), under one render deadline
+(`MAX_REQUEST_WAIT_S`, 2.0 s), each capped at `VISITOR_FETCH_TIMEOUT_S` (1.5 s). The three
+states, all with the dashboard serving a snapshot and that year missing from its cache:
+
+- **Edge warm**: the API's Cloudflare cache holds the year. That cache is per data center,
+  so warm it only through the dashboard's own fills, never with a `curl` from elsewhere,
+  which reaches a different one. Measure the years states 2 and 3 already filled, after a
+  [restart](#restarting-the-instance-to-empty-its-cache), with no API deploy in between
+  (the API deploy purges the edge).
+- **Edge cold, origin warm**: a year no one has requested since the last API deploy,
+  within a few minutes of another origin request.
+- **Edge and origin cold**: such a year, after the API origin has had no request for about
+  15 minutes.
+
+**Classify each run from the logs, never by assumption.** The dashboard's `api fetch` lines
+(project `uspv-explore`) say what the instance filled and when. The API's Cloud Run
+request log (project `uspv-api`) says whether a fill reached the origin, that is, missed
+the edge, and a `Starting new instance` line beside it marks an origin cold start:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND
+  resource.labels.service_name="usvote-api" AND (httpRequest.requestUrl:"/v1/" OR
+  textPayload:"Starting new instance")' --project=uspv-api --freshness=10m \
+  --format='value(timestamp,httpRequest.requestUrl,httpRequest.latency,textPayload)'
+```
+
+The dashboard's 5-minute `/v1/meta` recheck is answered by the edge and never reaches the
+origin, so it does not keep the origin warm.
+
+**Measured 2026-10-09 (#310)**, version `v-59ebc741fcd0-r5-a1`, snapshot `71b777de…`:
+
+| State | Year | TTFB (s) | First data (s) | Outcome | From the logs |
+|---|---|---|---|---|---|
+| Edge warm | 1852 | 0.10 | 1.23 | data | no origin request |
+| Edge warm | 1876 | 0.22 | 1.27 | data | no origin request |
+| Edge warm | 1840 | 0.09 | 1.55 | data | no origin request |
+| Edge cold, origin warm | 1852 | 0.15 | 1.62 | data | both paths at the origin, ≤ 7 ms each |
+| Edge cold, origin warm | 1876 | 0.14 | 1.61 | data | both paths at the origin, ≤ 7 ms each |
+| Edge cold, origin warm | 1840 | 0.15 | 1.59 | data | both paths at the origin, ≤ 6 ms each |
+| Edge and origin cold | 1836 | 0.13 | 2.58 | **degraded** | origin cold start; the year took 2.27 s at the origin, past the 1.5 s fill cap; per-capita never requested |
+| Edge and origin cold | 1880 | 0.23 | 2.67 | **degraded** | origin cold start; the year took 1.76 s at the origin; per-capita never requested |
+| Edge and origin cold | 1888 | 0.36 | 2.82 | **degraded** | origin cold start; the year took 2.57 s at the origin; per-capita never requested |
+
+The edge-warm runs came first in the table but last in time: they ran after the restart, on
+years the edge-cold runs had just filled.
+
+- **Edge warm and edge cold with a warm origin meet D071(g)**, with a second to spare: a
+  fill through the edge costs about 0.1–0.2 s, and the origin answers in milliseconds.
+- **A year cold at both the edge and the origin misses it every time.** A Cloud Run cold
+  start put the first fill at 1.8–2.6 s, past `VISITOR_FETCH_TIMEOUT_S`, so the render gave
+  up and showed "isn't responding". This is the cost D072 accepted; #343 builds the remedy.
+- **The slow response is not cached.** Reloading 1836 right after its degraded run reached
+  data in 1.63 s, but both of its paths went to the origin again: the edge kept nothing from
+  the request the dashboard abandoned. A reader who reloads succeeds only because the first
+  attempt woke the origin.
+- **How often a link meets a cold origin** depends on traffic: the origin scaled to zero
+  about 15 minutes after its last request, and the dashboard's own rechecks never wake it.
+  At MVP traffic most first opens of a year will find it cold.
+- **Warmup and swap.** After the restart, `/_ah/warmup` took 1.67 s; on the deploy App
+  Engine sent no warmup request, and the deploy probe's `GET /` was the loading request
+  (4.34 s, instance start included). Either way the snapshot swap, from the `/v1/meta` fetch
+  to `serving snapshot`, took 0.28 s, for two responses. The instance used 106–126 MiB of
+  F1's 384 MiB (`gcloud app instances list`, `instance.memoryUsage`).
