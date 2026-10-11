@@ -135,9 +135,9 @@ META_PATH = "/v1/meta"
 
 #: The one non-``/v1/`` path :func:`build_url` accepts: the refresher's keep-warm ping
 #: (D076). The API serves it ``no-store`` and its WAF rule covers ``/v1`` only, so the
-#: ping reaches the origin and the rate-limit rule cannot throttle it. It takes no fill token
-#: because :meth:`Client._ping` bypasses the bucket. Only :meth:`Client._ping` reads it;
-#: :func:`_refuse_health` keeps it out of every fill.
+#: ping reaches the origin and the rate-limit rule cannot throttle it. It takes no fill
+#: token because :meth:`Client._ping` bypasses the bucket. Only :meth:`Client._ping`
+#: reads it; :func:`_refuse_health` keeps it out of every fill.
 HEALTH_PATH = "/health"
 
 #: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; the pages
