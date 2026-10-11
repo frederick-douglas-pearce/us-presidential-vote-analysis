@@ -382,6 +382,22 @@ exposure:** the origin is DNS-only, so Cloudflare does not stand in front of it,
 could run up egress before the budget's alerts (which lag by hours) fire the kill-switch.
 That is one of D071's flip conditions.
 
+**The keep-warm ping (D076).** The refresher GETs the API's `/health` once per refresh
+interval (5 min), so the API origin does not scale to zero while the dashboard runs. That is
+about 288 requests a day, each also a Worker invocation against the Cloudflare account's
+free 100,000 a day (D071 finding 1), and about $0 at the origin under request-based CPU
+(`docs/deploy-cloud-run.md`). Each ping logs one `api ping /health <elapsed>s` line, or a
+warning `api ping /health failed after …`, never an `api fetch` line, so the `api fetch`
+counts in §12 stay `/v1` fills only. To see the pings:
+
+```
+gcloud logging read 'resource.type="gae_app" AND textPayload:"api ping"' \
+  --project="$PROJECT" --freshness=30m --format='value(timestamp,textPayload)'
+```
+
+There is no lever to pause the ping alone: pausing the app (§10) stops it, and the API's
+kill-switch leaves it failing once per interval, logged, with no effect on the cache.
+
 ## 12. Measuring cold start and load
 
 The MVP target (D071(g)): OG HTML in ≤ 1 s TTFB, and first data in ≤ 3 s for a cold shared
@@ -401,6 +417,23 @@ section gives the checks.) The server states worth measuring:
   (warmup has run, when App Engine sends it), and after a kill-switch un-pause (the
   instance starts from nothing). A deploy's own probes are the new instance's first
   visitors, so a run after a deploy measures an instance that is already up.
+- **API origin cold** (any run that needs the origin idle): **pause the dashboard first**
+  (§10). A running dashboard pings the origin's `/health` every 5 minutes (D076), so the
+  origin never goes idle while it serves, and nothing pauses the ping alone. A
+  [restart](#restarting-the-instance-to-empty-its-cache) or a redeploy is no substitute:
+  the instance it replaces pinged within the last few minutes. Wait for the origin to go
+  idle ("Origin idle" in [cold year links](#cold-year-links-310)), then un-pause. The
+  origin then stays cold for one `REFRESH_TTL_S` (5 min) **only if the new instance's
+  warmup ran and succeeded**: its refresher then waits that long before its first cycle
+  and first ping, and warmup reaches the origin only if the edge lacks `/v1/meta` or
+  `/v1/elections`. If warmup failed, the refresher retries and pings at once; if it did
+  not run, the refresher starts on the first request and pings at once. Whether App Engine
+  sends warmup on an un-pause is not yet known (#347). So confirm the window from the logs
+  before each run: since the un-pause, the new instance logged `serving snapshot` (check 2
+  of the restart) and no `api ping` line (the query in §11), and the API logged no request.
+  An origin-cold run then needs no API deploy, only the pause, the idle wait and the
+  un-pause, measured inside that window and before any request of its own wakes the
+  origin.
 - **API edge cold** for what the dashboard prefetches (`/v1/meta`, `/v1/elections`): the
   order matters, because a running dashboard's refresher re-reads `/v1/meta` through the
   edge every 5 minutes and so refills it. **Pause the dashboard first** (§10), then purge
@@ -441,10 +474,11 @@ deploy account holds Service Admin (§7), but run this as a person.
 probes `explore.`, which spoils a dashboard-cold run, and its uncached `/health` wakes the
 API origin, which spoils an origin-cold one. It is scheduled 13:17 UTC but has lately
 started 4–8 hours late, so measure before 13:17 UTC, or after
-`gh run list --workflow=api-canary.yml` shows today's run completed (for an origin-cold
-run, then wait for the origin to go idle). **Blast radius:** the
-delete drops whatever the one instance is serving at that moment, and every visitor's
-cached responses go with it.
+`gh run list --workflow=api-canary.yml` shows today's run completed. A restart cannot
+give an origin-cold run: the running dashboard's keep-warm ping (D076) keeps the origin
+warm, so use the pause in [API origin cold](#12-measuring-cold-start-and-load) instead.
+**Blast radius:** the delete drops whatever the one instance is serving at that moment, and
+every visitor's cached responses go with it.
 
 Run these in one shell; the checks below use its variables.
 
@@ -497,9 +531,10 @@ Then check, before measuring:
      --project=$PROJECT --format='value(timestamp,labels.clone_id,textPayload)'
    ```
    App Engine does not guarantee warmup. If neither line appears within about 2 minutes:
-   for a cold-year run, send one `GET /` (it starts the refresher and fills only the
-   prefetched paths) and note that warmup did not run; for a dashboard-cold run, send
-   nothing, since the measured navigation must be the first request.
+   for a cold-year run, send one `GET /` (it starts the refresher, which fills only the
+   prefetched paths and pings the API origin at once, so no origin-cold run can follow) and
+   note that warmup did not run; for a dashboard-cold run, send nothing, since the measured
+   navigation must be the first request.
 3. **Immediately before each run**, the year you are about to measure was not filled since
    the restart (visitors and crawlers can reach it): the same query with
    `textPayload:"api fetch /v1/elections/<year>"` returns nothing. With no restart in this
@@ -515,11 +550,12 @@ does not show what one mid-restart would see.
 the delete is refused or no new instance appears; pick the measured commit through a tag
 in "Use workflow from", since the workflow deploys the selected ref. Its probes request `/`
 and its routing callback and read `/v1/meta` from the API directly, so they reach no year
-or state path, but they can wake the API origin: wait for it to go idle before an
-origin-cold run. **The kill-switch pause** (§10) takes the whole app down, so use it only
-when the dashboard must stay silent, as in "API edge cold" above, and check for a new
-instance id after the un-pause. `gcloud app versions stop` is not available: it needs
-manual or basic scaling, and this app uses automatic.
+or state path. Like a restart, a redeploy cannot give an origin-cold run: the new
+instance's refresher keeps pinging the origin (D076). **The kill-switch pause** (§10) takes
+the whole app down, so use it only when the dashboard must stay silent, as in "API origin
+cold" and "API edge cold" above, and check for a new instance id after the un-pause.
+`gcloud app versions stop` is not available: it needs manual or basic scaling, and this app
+uses automatic.
 
 ### Cold year links (#310)
 
@@ -531,7 +567,11 @@ states, all with the dashboard serving a snapshot and that year missing from its
 (check 3 above):
 
 - **Edge and origin cold**: a year the edge should not hold (below), with the API origin
-  idle. Run this first: its cold start warms the origin for the next state.
+  idle. Run this first: its cold start warms the origin for the next state. Since D076 the
+  origin is idle only after a pause of the dashboard (§10), and then for at most one
+  `REFRESH_TTL_S` after the un-pause, under the conditions
+  [API origin cold](#12-measuring-cold-start-and-load) gives; the 2026-10-10 runs below
+  predate the ping.
 - **Edge cold, origin warm**: another such year, within about 10 minutes of an origin
   request (the previous state's run will do).
 - **Edge warm**: the API's Cloudflare cache holds the year. That cache is per data center,
@@ -584,10 +624,10 @@ uvx --with playwright python scripts/measure_dashboard_cold_start.py \
 (project `uspv-explore`) say what the instance filled. The API's Cloud Run request log says
 whether a fill reached the origin, that is, missed the edge, and a `Starting new instance`
 line beside it marks an origin cold start (one before this run's fill, and not beside this
-run's own year path, means something else woke the origin first, such as the canary, whose
-`/health` this query does not show: discard the run). Bound both by
-`RUN_TS`, so an empty result means "nothing since this run" rather than "nothing in the
-last few minutes":
+run's own year path, means something else woke the origin first, such as the canary or the
+dashboard's own keep-warm ping, whose `/health` this query does not show: discard the run).
+Bound both by `RUN_TS`, so an empty result means "nothing since this run" rather than
+"nothing in the last few minutes":
 
 ```bash
 gcloud logging read 'resource.type="cloud_run_revision" AND
@@ -599,7 +639,9 @@ gcloud logging read 'resource.type="cloud_run_revision" AND
 The dashboard's 5-minute `/v1/meta` recheck is answered by the edge, which holds it for up
 to 30 days (the Worker's `s-maxage`) unless a purge or eviction clears it first, so it
 seldom reaches the origin and does not keep it warm (the first recheck after a purge or an
-eviction does).
+eviction does). Since D076 the refresher's `/health` ping keeps the origin warm instead.
+This query does not show the ping, since it filters on `/v1/`; to see it, query
+`httpRequest.requestUrl:"/health"` instead.
 
 **Measured 2026-10-10 UTC, 04:46–05:45Z (#310)**, version `v-59ebc741fcd0-r5-a1`, snapshot
 `71b777de…`. In time order: 1836, then state 2, then the 1836 reload, the restart, the
@@ -621,19 +663,56 @@ edge-warm runs (04:50Z), then 1880 and 1888.
   fill through the edge costs about 0.1–0.2 s, and the origin answered in under 10 ms.
 - **A year cold at both the edge and the origin missed it on every run.** A Cloud Run cold
   start put the first fill at 1.8–2.6 s, past `VISITOR_FETCH_TIMEOUT_S`, so the render gave
-  up and showed "isn't responding". This is the cost D072 accepted; #343 builds the remedy.
+  up and showed "isn't responding". This is the cost D072 accepted. The first remedy is
+  #346's keep-warm ping (D076); #343's backfill is the escalation if #347 finds it is not
+  enough.
 - **An abandoned fill is not cached.** Reloading 1836 two minutes later, after the state-2
   runs, reached data in 1.63 s, but both of its paths went to the origin again: the edge
   kept nothing from the request the dashboard abandoned. The Worker stores a response only
   after the origin answers (`docs/deploy-cloud-run.md`), and the dashboard had disconnected
   before that; the origin's 200 still landed, so the Worker's pending store was evidently
   dropped with the client. The reload succeeded because the origin was warm by then.
-- **How often a link meets a cold origin** depends on traffic: the origin scaled to zero a
+- **How often a link meets a cold origin** depended on traffic: the origin scaled to zero a
   little over 15 minutes after its last request, each of the three times it was watched,
-  and the dashboard's own rechecks do not keep it warm. At MVP traffic, many first opens of
-  a year may find it cold; scanners that reach the origin directly also wake it.
+  and the dashboard's own rechecks did not keep it warm. At MVP traffic, many first opens of
+  a year might have found it cold; scanners that reach the origin directly also wake it.
+  #346 answered this with the keep-warm ping (D076); what it leaves uncovered is #347's.
 - **Warmup and swap.** After the restart, `/_ah/warmup` took 1.67 s; on the deploy App
   Engine sent no warmup request, and the deploy probe's `GET /` was the loading request
   (4.34 s, instance start included). Either way the snapshot swap, from the `/v1/meta` fetch
   to `serving snapshot`, took 0.28 s, for two responses. The instance used 106–126 MiB of
   F1's 384 MiB (`gcloud app instances list`, `instance.memoryUsage`).
+
+**Measured 2026-10-11 UTC, 08:38–10:01Z, with the keep-warm ping live (#346)**, version
+`v-7ed3bee8be7e-r6-a1` (the PR's branch head, deployed before merge), snapshot `71b777de…`.
+App Engine again sent no warmup on the deploy, so the refresher started on the deploy
+probe's `GET /` and pinged at once (08:38:19Z). The dashboard logged `api ping /health` every
+5 minutes, 0.11–0.17 s each; the API logged a `GET /health` from `usvote-explore` for each,
+answered in 3–8 ms, and no `Starting new instance` or `Shutting down` in the window. The 17
+pings the API logged came 300.04–300.22 s apart: one `REFRESH_TTL_S` plus that cycle's
+`/v1/meta` check, within D076's bound.
+
+Every year had reached the origin since the last API deploy (2026-09-27), so the edge-cold
+pre-check selected nothing; the years were the four the origin had gone longest without
+(last requested 2026-10-08), each unfilled on the new instance (check 3). Runs about 20
+minutes apart:
+
+| State | Year | Run (Z) | TTFB (s) | First data (s) | Outcome | From the logs |
+|---|---|---|---|---|---|---|
+| Edge cold, origin warm by the ping | 1828 | 08:58:58 | 0.49 | 1.91 | data | both paths at the origin, 4–7 ms; last ping 08:58:19 |
+| Edge cold, origin warm by the ping | 1844 | 09:20:15 | 0.23 | 1.70 | data | both paths at the origin, 4–7 ms; last ping 09:18:20 |
+| Edge cold, origin warm by the ping | 1860 | 09:40:25 | 0.23 | 1.65 | data | both paths at the origin, 5–11 ms; last ping 09:38:20 |
+| Edge cold, origin warm by the ping | 1872 | 10:00:34 | 0.13 | 1.72 | data | both paths at the origin, 4–10 ms; last ping 09:58:21 |
+
+- **Every edge-cold year link met D071(g)** (≤ 3 s to first data), each a fill that missed
+  the edge, against a warm origin.
+- **Without the ping, runs 2–4 would have met a cold origin.** Apart from the pings, the
+  origin's only requests in the window were the runs' own and one scanner `GET /` at
+  08:59:18Z, so 20–21 minutes passed before each of those runs with nothing else reaching
+  it, past the ~15 minutes after which #310 saw it scale to zero.
+- **One `api fetch` line was missing** from the dashboard's log: 1828's year fill, which the
+  API's request log shows at 08:59:01.89Z beside its per-capita fill. The other three runs
+  logged both lines. Classify from the API's request log, as above, not from the count of
+  `api fetch` lines alone.
+- What the ping leaves uncovered (un-pause, a start with no warmup and no request, a Cloud
+  Run instance replacement) is measured over seven days in #347.
