@@ -16,13 +16,14 @@ import html.parser
 import http.client
 import http.server
 import json
+import logging
 import re
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -165,9 +166,13 @@ def failing_fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Respon
     raise api.ApiUnavailable(f"GET {path}: HTTP 503 upstream said SECRET-DETAIL")
 
 
+#: A ``/health`` body, for a fake fetch that serves the keep-warm ping (D076).
+HEALTH = {"status": "ok"}
+
+
 def offline_client(fetch: Any = None, **kwargs: Any) -> api.Client:
     if fetch is None:
-        fetch, _ = fake_fetch({api.META_PATH: META})
+        fetch, _ = fake_fetch({api.META_PATH: META, api.HEALTH_PATH: HEALTH})
     kwargs.setdefault("bucket", api.TokenBucket(per_minute=6000, burst=1000))
     kwargs.setdefault("max_request_wait", 1.0)
     # Long by default, so a refresher left running by a failing test sleeps quietly.
@@ -1333,6 +1338,15 @@ def template_problems(page: dict[str, Any]) -> list[str]:
 
 
 class TestRegistryContracts:
+    def test_no_page_names_the_keep_warm_path(self) -> None:
+        """Only the refresher's ping reads ``/health`` (D076); no page declares it."""
+        assert dash.page_registry  # the real pages, so this checks something
+        for page in dash.page_registry.values():
+            named = [*page.get("prefetch", ()), *page.get("on_miss", ())]
+            if page.get("validate"):
+                named.append(page["validate"][0])
+            assert "/health" not in named, page["module"]
+
     def test_every_validating_page_declares_its_source(
         self, register: Callable[..., dict[str, Any]]
     ) -> None:
@@ -1566,16 +1580,25 @@ class TestBuildUrl:
     def test_builds_on_the_public_host(self, path: str) -> None:
         assert api.build_url(path) == PUBLIC_API_BASE + path
 
+    def test_accepts_the_keep_warm_path_and_no_other_outside_v1(self) -> None:
+        """``/health`` is the one non-``/v1/`` path (D076), on the same public host."""
+        assert api.build_url("/health") == PUBLIC_API_BASE + "/health"
+
+    def test_the_health_constant_is_the_literal(self) -> None:
+        assert api.HEALTH_PATH == "/health"
+
+    @pytest.mark.parametrize("path", ["/v1/meta", "/health"])
     def test_the_host_check_refuses_a_base_that_moved(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, path: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The scheme/host check, not only the path pattern, keeps requests on the host."""
+        """The scheme/host check, not only the path pattern, keeps requests on the host,
+        for the keep-warm literal as for a ``/v1/`` path."""
         monkeypatch.setattr(api, "API_BASE", "https://usvote-api-x.a.run.app")
         with pytest.raises(ValueError):
-            api.build_url("/v1/meta")
+            api.build_url(path)
         monkeypatch.setattr(api, "API_BASE", "http://api.us-presidential-election-center.org")
         with pytest.raises(ValueError):
-            api.build_url("/v1/meta")
+            api.build_url(path)
 
     @pytest.mark.parametrize(
         "path",
@@ -1584,9 +1607,18 @@ class TestBuildUrl:
             "https://usvote-api-abc.a.run.app/v1/meta",
             "v1/meta",
             "/v2/meta",
-            "/health",
             "/v1//meta",
             "/v1/../health",
+            "/health?x=1",
+            "/health/",
+            "/HEALTH",
+            "/healthz",
+            "/health#x",
+            "/health%2F",
+            " /health",
+            "/health ",
+            "//health",
+            "health",
             "/v1/meta@evil.example",
             "/v1/meta#frag",
         ],
@@ -1780,7 +1812,9 @@ class TestCache:
         threads: list[str] = []
 
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
-            threads.append(threading.current_thread().name)
+            # Counted by path: the refresher's keep-warm ping races the reads below.
+            if path == api.META_PATH:
+                threads.append(threading.current_thread().name)
             return api.Response(body=META, version=VERSION)
 
         client = offline_client(fetch, ttl=3600)
@@ -2734,7 +2768,8 @@ class TestWakeInterval:
         metas: list[float] = []
 
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
-            metas.append(time.monotonic())
+            if path == api.META_PATH:  # not the keep-warm ping
+                metas.append(time.monotonic())
             return api.Response(body=META, version=VERSION)
 
         client = offline_client(fetch, ttl=3600, min_recheck=0.3)
@@ -2840,6 +2875,8 @@ class TestRefresher:
         calls = {"n": 0}
 
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path != api.META_PATH:  # the keep-warm ping is not a cycle
+                return api.Response(body=HEALTH, version=None)
             calls["n"] += 1
             attempts.release()
             if calls["n"] == 1:
@@ -2860,7 +2897,8 @@ class TestRefresher:
         attempts: list[float] = []
 
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
-            attempts.append(time.monotonic())
+            if path == api.META_PATH:  # not the keep-warm ping
+                attempts.append(time.monotonic())
             raise api.ApiUnavailable("down")
 
         client = offline_client(fetch, retry_backoff=0.5)
@@ -2877,6 +2915,319 @@ class TestRefresher:
         thread = client._thread
         client.ensure_refresher()
         assert client._thread is thread
+
+
+# --- the keep-warm ping (D076) ---------------------------------------------------------
+
+
+class _StopRefresher(BaseException):
+    """Ends a synchronously driven ``Client._run``. A ``BaseException``, so the
+    refresher's own ``except Exception`` handlers let it through."""
+
+
+class FakeWake:
+    """The refresher's wake-up event on a :class:`FakeClock`, so ``_run`` runs inline.
+
+    ``wakes`` are the times visitors set it. Like a real event it stays set until
+    cleared: ``wait`` returns at once if it is set or a wake-up has already arrived,
+    otherwise it advances the clock to the next wake-up within ``timeout`` (and
+    returns ``True``) or to the timeout (``False``). ``clear`` drops every wake-up at
+    or before now. A runaway loop is stopped after ``max_waits`` waits.
+    """
+
+    def __init__(
+        self, clock: FakeClock, wakes: Iterable[float] = (), max_waits: int = 10_000
+    ) -> None:
+        self._clock = clock
+        self._wakes = sorted(wakes)
+        self._set = False
+        self._max_waits = max_waits
+        self.waits = 0
+
+    def set(self) -> None:
+        self._set = True
+
+    def is_set(self) -> bool:
+        return self._set or any(t <= self._clock.now for t in self._wakes)
+
+    def clear(self) -> None:
+        self._set = False
+        self._wakes = [t for t in self._wakes if t > self._clock.now]
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits += 1
+        if self.waits >= self._max_waits:
+            raise _StopRefresher
+        assert timeout is not None and timeout >= 0, timeout
+        if self.is_set():
+            return True
+        end = self._clock.now + timeout
+        arriving = [t for t in self._wakes if t <= end]
+        if arriving:
+            self._clock.now = arriving[0]
+            return True
+        self._clock.now = end
+        return False
+
+
+class TestKeepWarm:
+    """The refresher's ``/health`` ping, driven through the real ``_run`` on a fake
+    clock: every sleep, wait and fetch advances it, so ping times are exact."""
+
+    TTL = 300.0
+    BACKOFF = 30.0
+    RECHECK = 30.0
+    R = 2.0  # what a /v1/meta check takes
+    P = 10.0  # what a ping takes
+
+    def run(
+        self,
+        wakes: Iterable[float] = (),
+        meta_error: BaseException | None = None,
+        ping_error: BaseException | None = None,
+        warm: bool = False,
+        cycles: int = 3,
+    ) -> tuple[api.Client, list[tuple[str, float, float]], list[float]]:
+        """Run the refresher for ``cycles`` ``/v1/meta`` checks, stopping as the next
+        one starts; return the client, every fetch as ``(path, start, timeout)``, and
+        every sleep."""
+        clock = FakeClock()
+        calls: list[tuple[str, float, float]] = []
+        sleeps: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock.now += seconds
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path == api.META_PATH and len(self.metas(calls)) == cycles:
+                raise _StopRefresher
+            calls.append((path, clock.now, timeout))
+            if path == api.HEALTH_PATH:
+                clock.now += self.P
+                if ping_error is not None:
+                    raise ping_error
+                return api.Response(body=HEALTH, version=None)
+            clock.now += self.R
+            if meta_error is not None:
+                raise meta_error
+            return api.Response(body=META, version=VERSION)
+
+        client = offline_client(
+            fetch,
+            clock=clock,
+            sleep=sleep,
+            ttl=self.TTL,
+            retry_backoff=self.BACKOFF,
+            min_recheck=self.RECHECK,
+        )
+        if warm:
+            client.refresh()  # what /_ah/warmup does, before the refresher starts
+            calls.clear()
+            sleeps.clear()
+        client._wake = FakeWake(clock, wakes)  # type: ignore[assignment]
+        with pytest.raises(_StopRefresher):
+            client._run()
+        return client, calls, sleeps
+
+    @staticmethod
+    def pings(calls: list[tuple[str, float, float]]) -> list[float]:
+        return [start for path, start, _ in calls if path == api.HEALTH_PATH]
+
+    @staticmethod
+    def metas(calls: list[tuple[str, float, float]]) -> list[float]:
+        return [start for path, start, _ in calls if path == api.META_PATH]
+
+    @property
+    def bound(self) -> float:
+        """The worst gap between ping starts: a TTL, one unwakeable wait, one refresh."""
+        return self.TTL + max(self.BACKOFF, self.RECHECK) + self.R
+
+    def gaps(self, pings: list[float]) -> list[float]:
+        return [b - a for a, b in zip(pings, pings[1:], strict=False)]
+
+    def test_a_lazy_start_pings_after_its_first_refresh_then_once_per_cycle(
+        self,
+    ) -> None:
+        _, calls, _ = self.run(cycles=3)
+        # Stamped at the start of each ping: a stamp taken at its end would put the
+        # next ping P later, at 314.
+        assert self.pings(calls) == [2.0, 304.0, 606.0]
+        assert self.metas(calls) == [0.0, 302.0, 604.0]
+
+    def test_a_warmup_filled_start_waits_one_ttl_before_its_first_ping(self) -> None:
+        _, calls, _ = self.run(warm=True, cycles=2)
+        # Warmup's refresh took 0..2; the refresher then waits a whole TTL.
+        assert self.pings(calls) == [304.0, 606.0]
+
+    def test_refresh_itself_never_pings(self) -> None:
+        state = {"version": VERSION}
+        seen: list[tuple[str, float]] = []
+        client = offline_client(
+            versioned_fetch(state, seen), prefetch_paths=lambda: [api.ELECTIONS_PATH]
+        )
+        client.refresh()
+        state["version"] = "next"
+        client.refresh()
+        assert api.HEALTH_PATH not in [path for path, _ in seen]
+
+    def test_the_ping_times_out_at_the_refresher_timeout(self) -> None:
+        _, calls, _ = self.run(cycles=2)
+        timeouts = {t for path, _, t in calls if path == api.HEALTH_PATH}
+        assert timeouts == {api.FETCH_TIMEOUT_S}
+
+    def test_a_wake_storm_still_pings_once_per_ttl(self) -> None:
+        wakes = [float(t) for t in range(1, 2000)]  # a visitor every second
+        _, calls, _ = self.run(wakes=wakes, cycles=31)  # checks at 0, 30, ..., 900
+        metas = self.metas(calls)
+        assert self.gaps(metas) and all(g == self.RECHECK for g in self.gaps(metas))
+        assert self.pings(calls) == [2.0, 302.0, 602.0, 902.0]
+
+    def test_a_wake_just_before_the_ping_is_due_does_not_defer_it_a_ttl(self) -> None:
+        """The case a plain debounce fails: the woken cycle skips the ping, and the
+        next cycle would come a whole TTL later, nearly 2 x TTL after the last ping."""
+        eps = 5.0
+        assert eps > self.R  # the woken cycle finishes before the ping is due
+        due = 2.0 + self.TTL
+        _, calls, _ = self.run(wakes=[due - eps], cycles=4)
+        metas, pings = self.metas(calls), self.pings(calls)
+        assert due - eps in metas  # the visitor's wake-up ran a cycle...
+        assert due - eps not in pings and due - eps + self.R not in pings  # ...no ping
+        assert pings[:2] == [2.0, due + self.R]
+        assert all(g <= self.bound for g in self.gaps(pings)), self.gaps(pings)
+
+    def test_failure_backoff_keeps_the_gap_under_the_bound(self) -> None:
+        _, calls, sleeps = self.run(meta_error=api.ApiUnavailable("down"), cycles=25)
+        pings = self.pings(calls)
+        assert pings[0] == 2.0  # a refresh that raises still pings
+        assert len(pings) >= 2
+        assert all(self.TTL <= g <= self.bound for g in self.gaps(pings)), pings
+        assert set(sleeps) == {self.BACKOFF}
+
+    def test_a_refresh_that_raises_still_pings(self) -> None:
+        client, calls, _ = self.run(meta_error=RuntimeError("bad body"), cycles=1)
+        assert [path for path, _, _ in calls] == [api.META_PATH, api.HEALTH_PATH]
+        assert client.snapshot is None
+
+    @pytest.mark.parametrize(
+        "error", [api.ApiUnavailable("GET /health: HTTP 503"), RuntimeError("boom")]
+    )
+    def test_a_failed_ping_is_not_a_failed_cycle(self, error: Exception) -> None:
+        client, calls, sleeps = self.run(ping_error=error, cycles=3)
+        assert sleeps == []  # never the retry backoff: the cycles succeeded
+        assert self.metas(calls) == [0.0, 302.0, 604.0]  # the loop went on
+        assert client._last_check == 604.0  # the last refresh's start, nothing else
+
+    def test_a_failing_ping_is_debounced_like_a_working_one(self) -> None:
+        wakes = [float(t) for t in range(1, 2000)]
+        _, calls, _ = self.run(
+            wakes=wakes, ping_error=api.ApiUnavailable("down"), cycles=31
+        )
+        # Stamped when the attempt starts, success or not: one per TTL, not per cycle.
+        assert self.pings(calls) == [2.0, 302.0, 602.0, 902.0]
+
+    def test_a_failing_ping_under_failure_backoff_is_debounced(self) -> None:
+        _, calls, _ = self.run(
+            meta_error=api.ApiUnavailable("down"),
+            ping_error=api.ApiUnavailable("down"),
+            cycles=25,
+        )
+        pings = self.pings(calls)
+        assert len(pings) >= 2
+        assert all(self.TTL <= g <= self.bound for g in self.gaps(pings)), pings
+
+    def test_the_ping_takes_no_token_and_logs_its_own_line(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bucket = RecordingBucket()
+        clock = FakeClock()
+        calls: list[str] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            calls.append(path)
+            return api.Response(body=HEALTH, version=None)
+
+        client = offline_client(fetch, bucket=bucket, clock=clock)
+        with caplog.at_level(logging.INFO, logger=api.log.name):
+            client._ping()
+        assert calls == [api.HEALTH_PATH]
+        assert bucket.waits == []
+        messages = [r.getMessage() for r in caplog.records]
+        assert any(m.startswith("api ping /health ") for m in messages), messages
+        assert not any(m.startswith("api fetch") for m in messages), messages
+
+    def test_a_failed_ping_logs_a_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = offline_client(failing_fetch, clock=FakeClock())
+        with caplog.at_level(logging.INFO, logger=api.log.name):
+            client._ping()
+        [record] = [r for r in caplog.records if "api ping" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert record.getMessage().startswith("api ping /health failed after ")
+
+    def test_warmup_never_pings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        paths: list[str] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            paths.append(path)
+            return api.Response(body=META, version=VERSION)
+
+        client = offline_client(fetch, ttl=3600)
+        monkeypatch.setattr(api, "CLIENT", client)
+        assert appmod.server.test_client().get("/_ah/warmup").status_code == 200
+        time.sleep(0.2)  # give a wrongly eager refresher time to ping
+        assert paths == [api.META_PATH]
+
+    def test_a_visitors_miss_never_pings(self) -> None:
+        state = {"version": VERSION}
+        seen: list[tuple[str, float]] = []
+        client = offline_client(versioned_fetch(state, seen))
+        client.refresh()
+        assert client.get("/v1/elections/2000") == {
+            "path": "/v1/elections/2000",
+            "version": VERSION,
+        }
+        assert [path for path, _ in seen] == [api.META_PATH, "/v1/elections/2000"]
+
+
+class TestNoPageReadsHealth:
+    """Both fill paths refuse the ping's path before taking a token or fetching."""
+
+    def make(self) -> tuple[api.Client, RecordingBucket, list[str]]:
+        bucket = RecordingBucket()
+        calls: list[str] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            calls.append(path)
+            return api.Response(body=HEALTH, version=VERSION)
+
+        return offline_client(fetch, bucket=bucket), bucket, calls
+
+    def test_the_refresher_fill_refuses_it(self) -> None:
+        client, bucket, calls = self.make()
+        with pytest.raises(ValueError):
+            client._fill("/health", None, api.FETCH_TIMEOUT_S)
+        assert bucket.waits == [] and calls == []
+
+    def test_the_visitor_fill_refuses_it(self) -> None:
+        client, bucket, calls = self.make()
+        with pytest.raises(ValueError):
+            client._visitor_fill("/health", time.monotonic() + 2.0)
+        assert bucket.waits == [] and calls == []
+
+    def test_a_page_read_refuses_it(self) -> None:
+        client, bucket, calls = self.make()
+        client._snapshot = api.Snapshot(version=VERSION, responses={})
+        with pytest.raises(ValueError):
+            client.get("/health")
+        assert bucket.waits == [] and calls == []
+
+    def test_a_prefetch_naming_it_fails_the_refresh(self) -> None:
+        client, bucket, calls = self.make()
+        client._prefetch_paths = lambda: ["/health"]
+        client._fetch = versioned_fetch({"version": VERSION})
+        with pytest.raises(ValueError):
+            client.refresh()
+        assert client.snapshot is None
 
 
 # --- the canonical host --------------------------------------------------------------

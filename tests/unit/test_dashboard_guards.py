@@ -1104,6 +1104,15 @@ def test_the_deploy_root_allow_list(relative: str, allowed: bool) -> None:
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
+def test_only_api_names_the_keep_warm_path(path: Path) -> None:
+    """``/health`` is the refresher's ping and nothing else's (D076): no other runtime
+    module names it, by literal or by ``api.HEALTH_PATH``."""
+    text = path.read_text(encoding="utf-8")
+    named = "/health" in text or "HEALTH_PATH" in text
+    assert named is (path == PACKAGE / "api.py")
+
+
+@pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
 def test_no_runtime_module_names_the_test_fixtures(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert "fixtures" not in text

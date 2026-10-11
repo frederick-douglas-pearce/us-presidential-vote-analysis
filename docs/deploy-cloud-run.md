@@ -10,6 +10,12 @@ rate limiting, and bot protection — provisioned once, then redeployed by a
 **one** instance, uses **request-based CPU** (billed only while serving), and Cloudflare's
 edge absorbs repeat reads so the origin is rarely woken. A **budget kill-switch** caps the
 worst case. At this project's traffic, expect to sit inside the Cloud Run free tier (≈ $0).
+**While the dashboard runs, its refresher pings `/health` every 5 minutes**
+([D076](../.claude/specs/decisions.md)), so the origin does not scale to zero then: about
+288 short requests a day, billed only while served (≈ $0), and 288 Worker invocations
+against the account's free 100,000. `/health` is `no-store` and outside the `/v1` rate-limit
+rule (§7, Cloudflare step 4), so the ping always reaches the origin and is never throttled.
+Pausing the dashboard stops it.
 
 > **You run the provisioning** (steps 1–7) with your own GCP + Cloudflare credentials — the
 > repo ships the glue, not access to your cloud. After that, refreshing data is one click
