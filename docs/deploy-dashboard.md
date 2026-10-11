@@ -477,9 +477,8 @@ started 4–8 hours late, so measure before 13:17 UTC, or after
 `gh run list --workflow=api-canary.yml` shows today's run completed. A restart cannot
 give an origin-cold run: the running dashboard's keep-warm ping (D076) keeps the origin
 warm, so use the pause in [API origin cold](#12-measuring-cold-start-and-load) instead.
-**Blast radius:** the
-delete drops whatever the one instance is serving at that moment, and every visitor's
-cached responses go with it.
+**Blast radius:** the delete drops whatever the one instance is serving at that moment, and
+every visitor's cached responses go with it.
 
 Run these in one shell; the checks below use its variables.
 
@@ -554,8 +553,9 @@ and its routing callback and read `/v1/meta` from the API directly, so they reac
 or state path. Like a restart, a redeploy cannot give an origin-cold run: the new
 instance's refresher keeps pinging the origin (D076). **The kill-switch pause** (§10) takes
 the whole app down, so use it only when the dashboard must stay silent, as in "API origin
-cold" and "API edge cold" above, and check for a new instance id after the un-pause. `gcloud app versions stop` is not available: it needs
-manual or basic scaling, and this app uses automatic.
+cold" and "API edge cold" above, and check for a new instance id after the un-pause.
+`gcloud app versions stop` is not available: it needs manual or basic scaling, and this app
+uses automatic.
 
 ### Cold year links (#310)
 
@@ -626,9 +626,8 @@ whether a fill reached the origin, that is, missed the edge, and a `Starting new
 line beside it marks an origin cold start (one before this run's fill, and not beside this
 run's own year path, means something else woke the origin first, such as the canary or the
 dashboard's own keep-warm ping, whose `/health` this query does not show: discard the run).
-Bound both by
-`RUN_TS`, so an empty result means "nothing since this run" rather than "nothing in the
-last few minutes":
+Bound both by `RUN_TS`, so an empty result means "nothing since this run" rather than
+"nothing in the last few minutes":
 
 ```bash
 gcloud logging read 'resource.type="cloud_run_revision" AND

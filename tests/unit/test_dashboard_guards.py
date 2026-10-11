@@ -1117,7 +1117,7 @@ def _ping_references(tree: ast.AST) -> list[str]:
     """Where a module refers to ``_ping``, as the enclosing ``Class.function`` name.
 
     A call, a bare reference (``f = client._ping``) and a ``getattr`` string all count,
-    so a request hook cannot reach the ping by any of them.
+    so none of them can refer to the ping outside ``Client._cycle``.
     """
     found: list[str] = []
 
@@ -1140,8 +1140,10 @@ def _ping_references(tree: ast.AST) -> list[str]:
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
 def test_only_the_refresher_cycle_calls_the_ping(path: Path) -> None:
-    """The ping runs on the refresher thread only, never on a visitor's request
-    (D076): ``Client._cycle`` is the one place any runtime module refers to it."""
+    """``Client._cycle`` is the one place any runtime module refers to the ping (D076).
+
+    Who calls ``_cycle`` is not checked here; ``TestKeepWarm`` checks that warmup and a
+    visitor's miss never ping."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     expected = ["Client._cycle"] if path == PACKAGE / "api.py" else []
     assert _ping_references(tree) == expected

@@ -5235,10 +5235,11 @@ is answered by the edge.
   string `HEALTH_PATH == "/health"`, nothing else (`/health/`, `/health?x`, `/HEALTH`,
   `/v1/../health` stay refused), and the scheme and host check runs on it as on every path. Both
   fill paths refuse it, so no page, prefetch or `validate` source can read it. Two guards in
-  `test_dashboard_guards.py` keep the ping on the refresher: no runtime module but `api.py` names
+  `test_dashboard_guards.py` pin the ping's one entry point: no runtime module but `api.py` names
   the path (`test_only_api_names_the_keep_warm_path`), and `Client._cycle` is the one place any
-  runtime module refers to `_ping` (`test_only_the_refresher_cycle_calls_the_ping`). D070(b)'s
-  chokepoint is unchanged: `fetch` is still the one function that opens a connection.
+  runtime module refers to `_ping` (`test_only_the_refresher_cycle_calls_the_ping`). They do not
+  check who calls `_cycle`; `TestKeepWarm` checks that warmup and a visitor's miss never ping.
+  D070(b)'s chokepoint is unchanged: `fetch` is still the one function that opens a connection.
 - **The body is discarded.** `/health` names the *origin's* `snapshot_version`. It is never a
   version source: the cache stays keyed on `/v1/meta`'s body, so a ping can never swap a snapshot.
 - **The gap.** A debounce alone allows nearly 2 × TTL between pings: a visitor's wake-up just
@@ -5254,8 +5255,8 @@ is answered by the edge.
   one (decoupling the ping from the refresh was judged not worth its complexity).
 - **Effect on D034's scale-to-zero.** While the dashboard runs, the origin no longer scales to
   zero. Under request-based CPU it is billed only while serving, so 288 short requests a day cost
-  about $0; they are also 288 Worker invocations a day against the account-wide free 100,000
-  (D071 finding 1). D034's intent otherwise stands: the origin still scales to zero whenever the
+  about $0; they are also 288 Worker invocations a day against the account-wide free 100,000 a
+  day (D071 finding 1). D034's intent otherwise stands: the origin still scales to zero whenever the
   dashboard is paused or down.
 - **Rejected: Cloud Run `min-instances`.** A minimum instance is billed while idle, against the
   API's $5 budget, which #283 scoped to `uspv-api`; and the API's kill-switch pauses it by setting
