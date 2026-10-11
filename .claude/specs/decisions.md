@@ -5213,17 +5213,19 @@ recorded by #346 (E9)
 `docs/deploy-dashboard.md` §12, "Cold year links"). With the year cold at the API's edge and the
 Cloud Run origin idle, every run degraded: the origin's cold start put the first fill at
 1.8–2.6 s, past the 1.5 s visitor fill cap. With the origin warm, the same links reached data in
-1.59–1.62 s. The origin scales to zero about 15 minutes after its last request (D034), and
-nothing kept it warm: the dashboard's 5-minute `/v1/meta` recheck is answered by the edge.
+1.59–1.62 s. The origin scales to zero about 15 minutes after its last request (#310's
+measurement, runbook §12), and nothing kept it warm: the dashboard's 5-minute `/v1/meta` recheck
+is answered by the edge.
 
 **Decision.**
 - **What.** After every refresh attempt, succeeded or failed, the refresher (`explore/api.py`,
   `Client._ping`) GETs `/health` through `fetch` if one `REFRESH_TTL_S` (300 s) has passed since
   the last ping *started*. It is stamped at the start of the attempt, success or failure, so a
   failing ping is debounced like a working one. Timeout `FETCH_TIMEOUT_S`. It takes no fill token,
-  logs `api ping /health <elapsed>s` (a warning when it fails), never `api fetch`, and never
-  counts as a failed cycle: no backoff, no change to the last-check stamp. Warmup, `refresh()` and
-  a visitor's request never ping.
+  logs `api ping /health <elapsed>s`, never `api fetch`, and never counts as a failed cycle: no
+  backoff, no change to the last-check stamp. An unavailable API logs a warning; any other error
+  is a bug, logged at error level with its traceback; neither ever escapes. Warmup, `refresh()`
+  and a visitor's request never ping.
 - **Why `/health`.** The API serves it `no-store` (checked 2026-10-10: `cf-cache-status:
   DYNAMIC`), so the edge never answers it and every ping reaches the origin. The rate-limit rule
   is `URI Path starts_with "/v1"` (`docs/deploy-cloud-run.md`), so the ping can be neither
@@ -5232,9 +5234,11 @@ nothing kept it warm: the dashboard's 5-minute `/v1/meta` recheck is answered by
 - **The `/v1`-only rule widens by exactly one literal.** `build_url` accepts `/v1/` paths and the
   string `HEALTH_PATH == "/health"`, nothing else (`/health/`, `/health?x`, `/HEALTH`,
   `/v1/../health` stay refused), and the scheme and host check runs on it as on every path. Both
-  fill paths refuse it, so no page, prefetch or `validate` source can read it; only the ping names
-  it, and a guard checks that no other runtime module does. D070(b)'s chokepoint is unchanged:
-  `fetch` is still the one function that opens a connection.
+  fill paths refuse it, so no page, prefetch or `validate` source can read it. Two guards in
+  `test_dashboard_guards.py` keep the ping on the refresher: no runtime module but `api.py` names
+  the path (`test_only_api_names_the_keep_warm_path`), and `Client._cycle` is the one place any
+  runtime module refers to `_ping` (`test_only_the_refresher_cycle_calls_the_ping`). D070(b)'s
+  chokepoint is unchanged: `fetch` is still the one function that opens a connection.
 - **The body is discarded.** `/health` names the *origin's* `snapshot_version`. It is never a
   version source: the cache stays keyed on `/v1/meta`'s body, so a ping can never swap a snapshot.
 - **The gap.** A debounce alone allows nearly 2 × TTL between pings: a visitor's wake-up just
@@ -5245,19 +5249,22 @@ nothing kept it warm: the dashboard's 5-minute `/v1/meta` recheck is answered by
   (`/v1/meta` and, on a new version, every prefetch, each a socket timeout plus token waits and
   DNS): about 6 minutes at D072's extent, inside the origin's ~15-minute idle window. The cost is
   at most one extra edge-answered `/v1/meta` check per TTL, only when a wake-up has moved the
-  cycle off the ping.
+  cycle off the ping. The cycle that the ping-due wait ends refreshes as well as pings, and is not
+  held to `MIN_RECHECK_INTERVAL_S`, so that extra check can come sooner than 30 s after the woken
+  one (decoupling the ping from the refresh was judged not worth its complexity).
 - **Effect on D034's scale-to-zero.** While the dashboard runs, the origin no longer scales to
   zero. Under request-based CPU it is billed only while serving, so 288 short requests a day cost
   about $0; they are also 288 Worker invocations a day against the account-wide free 100,000
   (D071 finding 1). D034's intent otherwise stands: the origin still scales to zero whenever the
   dashboard is paused or down.
 - **Rejected: Cloud Run `min-instances`.** A minimum instance is billed while idle, against the
-  $5 budget that covers the whole billing account (D071 finding 5); and the API's kill-switch
-  pauses it by setting `max-instances=0` (D034), which a standing minimum would have to be changed
-  with. The ping costs nothing standing, and stops with whatever stops the dashboard.
+  API's $5 budget, which #283 scoped to `uspv-api`; and the API's kill-switch pauses it by setting
+  `max-instances=0` (D034), which a standing minimum would have to be changed with. The ping costs
+  nothing standing, and stops with whatever stops the dashboard.
 - **Kill-switches.** The dashboard's, like a pause by hand (dashboard runbook §10), stops the
-  ping with the app; there is no lever to pause the ping alone. The API's leaves the dashboard pinging a paused
-  service: one failed, logged ping per TTL, no backoff and no effect on the cache.
+  ping with the app; there is no lever to pause the ping alone. The API's leaves the dashboard
+  pinging a paused service: one failed, logged ping per TTL, no backoff and no effect on the
+  cache.
 - **The residual** (architect verification, 2026-10-10), measured and decided in #347: every
   un-pause, by the kill-switch or by hand, including the first `REFRESH_TTL_S` after warmup,
   because a refresher that starts with a snapshot already serving waits one TTL before its first

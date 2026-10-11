@@ -168,6 +168,7 @@ def failing_fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Respon
 
 #: A ``/health`` body, for a fake fetch that serves the keep-warm ping (D076).
 HEALTH = {"status": "ok"}
+OTHER_HEALTH = {"status": "ok", "snapshot_version": "other"}
 
 
 def offline_client(fetch: Any = None, **kwargs: Any) -> api.Client:
@@ -1580,7 +1581,7 @@ class TestBuildUrl:
     def test_builds_on_the_public_host(self, path: str) -> None:
         assert api.build_url(path) == PUBLIC_API_BASE + path
 
-    def test_accepts_the_keep_warm_path_and_no_other_outside_v1(self) -> None:
+    def test_accepts_the_keep_warm_path_on_the_public_host(self) -> None:
         """``/health`` is the one non-``/v1/`` path (D076), on the same public host."""
         assert api.build_url("/health") == PUBLIC_API_BASE + "/health"
 
@@ -1809,18 +1810,19 @@ class TestOpener:
 
 class TestCache:
     def test_a_cold_get_is_filled_by_the_refresher_then_served_from_cache(self) -> None:
-        threads: list[str] = []
+        calls: list[tuple[str, str]] = []
 
         def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
-            # Counted by path: the refresher's keep-warm ping races the reads below.
-            if path == api.META_PATH:
-                threads.append(threading.current_thread().name)
+            calls.append((threading.current_thread().name, path))
             return api.Response(body=META, version=VERSION)
 
         client = offline_client(fetch, ttl=3600)
         assert client.get(api.META_PATH) == META
         assert client.get(api.META_PATH) == META
-        assert threads == ["explore-refresher"]  # never on the visitor's thread
+        # Every fetch, the keep-warm ping's included, never on the visitor's thread.
+        # The ping races the reads, so /v1/meta is counted by path.
+        assert {thread for thread, _ in calls} == {"explore-refresher"}
+        assert [path for _, path in calls].count(api.META_PATH) == 1
 
     def test_a_cold_view_sets_no_wake_up(self) -> None:
         """AC6: no wake-up from a cold visitor, so a cold start costs one /v1/meta.
@@ -3007,7 +3009,8 @@ class TestKeepWarm:
                 clock.now += self.P
                 if ping_error is not None:
                     raise ping_error
-                return api.Response(body=HEALTH, version=None)
+                # Names another snapshot, which must never reach the cache.
+                return api.Response(body=OTHER_HEALTH, version="other")
             clock.now += self.R
             if meta_error is not None:
                 raise meta_error
@@ -3045,6 +3048,21 @@ class TestKeepWarm:
 
     def gaps(self, pings: list[float]) -> list[float]:
         return [b - a for a, b in zip(pings, pings[1:], strict=False)]
+
+    def test_the_ping_body_never_reaches_the_cache(self) -> None:
+        client, calls, _ = self.run(cycles=3)
+        assert len(self.pings(calls)) == 3
+        assert client.snapshot is not None
+        assert client.snapshot.version == VERSION
+        assert client.snapshot.responses == {api.META_PATH: META}
+
+    def test_a_ping_due_cycle_is_not_held_to_the_recheck_interval(self) -> None:
+        """Documented, not a defect (D076): the cycle the ping-due wait ends refreshes
+        too, so once per TTL a /v1/meta check can follow a woken one sooner than
+        ``min_recheck``. The ping-due cycle at 302 comes 5 s after the woken one."""
+        _, calls, _ = self.run(wakes=[297.0], cycles=4)
+        assert self.metas(calls) == [0.0, 297.0, 302.0, 604.0]
+        assert self.pings(calls) == [2.0, 304.0, 606.0]
 
     def test_a_lazy_start_pings_after_its_first_refresh_then_once_per_cycle(
         self,
@@ -3152,17 +3170,52 @@ class TestKeepWarm:
             client._ping()
         assert calls == [api.HEALTH_PATH]
         assert bucket.waits == []
+        [record] = [r for r in caplog.records if "api ping" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert record.getMessage().startswith("api ping /health ")
+        assert "failed" not in record.getMessage()
         messages = [r.getMessage() for r in caplog.records]
-        assert any(m.startswith("api ping /health ") for m in messages), messages
         assert not any(m.startswith("api fetch") for m in messages), messages
 
-    def test_a_failed_ping_logs_a_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_an_unavailable_api_logs_a_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         client = offline_client(failing_fetch, clock=FakeClock())
         with caplog.at_level(logging.INFO, logger=api.log.name):
             client._ping()
         [record] = [r for r in caplog.records if "api ping" in r.getMessage()]
         assert record.levelno == logging.WARNING
         assert record.getMessage().startswith("api ping /health failed after ")
+        assert record.exc_info is None
+
+    @pytest.mark.parametrize("error", [ValueError("refused"), RuntimeError("boom")])
+    def test_any_other_ping_error_is_a_bug_logged_with_its_traceback(
+        self, error: Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            raise error
+
+        client = offline_client(fetch, clock=FakeClock())
+        with caplog.at_level(logging.INFO, logger=api.log.name):
+            client._ping()  # logs, never raises
+        [record] = [r for r in caplog.records if "api ping" in r.getMessage()]
+        assert record.levelno == logging.ERROR
+        assert record.exc_info is not None and record.exc_info[1] is error
+
+    def test_a_ping_goes_through_the_real_fetch(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The other ping tests inject a fetch; this one drives :func:`api.fetch`, so
+        a chokepoint that stopped accepting the path would fail here, not just log."""
+        opener = _FakeOpener(_FakeRaw(200, json.dumps(OTHER_HEALTH).encode(), None))
+        monkeypatch.setattr(api, "_OPENER", opener)
+        client = api.Client(clock=FakeClock())
+        with caplog.at_level(logging.INFO, logger=api.log.name):
+            client._ping()
+        assert [r.full_url for r in opener.requests] == [PUBLIC_API_BASE + "/health"]
+        assert opener.timeouts == [api.FETCH_TIMEOUT_S]
+        [record] = [r for r in caplog.records if "api ping" in r.getMessage()]
+        assert record.levelno == logging.INFO
 
     def test_warmup_never_pings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         paths: list[str] = []

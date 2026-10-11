@@ -13,7 +13,7 @@ worst case. At this project's traffic, expect to sit inside the Cloud Run free t
 **While the dashboard runs, its refresher pings `/health` every 5 minutes**
 ([D076](../.claude/specs/decisions.md)), so the origin does not scale to zero then: about
 288 short requests a day, billed only while served (≈ $0), and 288 Worker invocations
-against the account's free 100,000. `/health` is `no-store` and outside the `/v1` rate-limit
+a day against the account's free 100,000 a day. `/health` is `no-store` and outside the `/v1` rate-limit
 rule (§7, Cloudflare step 4), so the ping always reaches the origin and is never throttled.
 Pausing the dashboard stops it.
 

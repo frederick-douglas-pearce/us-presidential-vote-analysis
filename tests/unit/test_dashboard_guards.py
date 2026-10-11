@@ -1106,10 +1106,63 @@ def test_the_deploy_root_allow_list(relative: str, allowed: bool) -> None:
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
 def test_only_api_names_the_keep_warm_path(path: Path) -> None:
     """``/health`` is the refresher's ping and nothing else's (D076): no other runtime
-    module names it, by literal or by ``api.HEALTH_PATH``."""
+    module names it, by literal or by ``api.HEALTH_PATH``. Who may call the ping is the
+    next guard's rule."""
     text = path.read_text(encoding="utf-8")
     named = "/health" in text or "HEALTH_PATH" in text
     assert named is (path == PACKAGE / "api.py")
+
+
+def _ping_references(tree: ast.AST) -> list[str]:
+    """Where a module refers to ``_ping``, as the enclosing ``Class.function`` name.
+
+    A call, a bare reference (``f = client._ping``) and a ``getattr`` string all count,
+    so a request hook cannot reach the ping by any of them.
+    """
+    found: list[str] = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = (*scope, child.name)
+            if (
+                (isinstance(child, ast.Attribute) and child.attr == "_ping")
+                or (isinstance(child, ast.Name) and child.id == "_ping")
+                or (isinstance(child, ast.Constant) and child.value == "_ping")
+            ):
+                found.append(".".join(scope) or "<module>")
+            visit(child, inner)
+
+    visit(tree, ())
+    return found
+
+
+@pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
+def test_only_the_refresher_cycle_calls_the_ping(path: Path) -> None:
+    """The ping runs on the refresher thread only, never on a visitor's request
+    (D076): ``Client._cycle`` is the one place any runtime module refers to it."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    expected = ["Client._cycle"] if path == PACKAGE / "api.py" else []
+    assert _ping_references(tree) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "found"),
+    [
+        ("class Client:\n    def _cycle(self):\n        self._ping()\n", ["Client._cycle"]),
+        ("class Client:\n    def _ping(self):\n        pass\n", []),
+        ("class Client:\n    def _ping_due(self):\n        self._ping_due()\n", []),
+        ("def hook():\n    api.CLIENT._ping()\n", ["hook"]),
+        ("class View:\n    def get(self):\n        f = c._ping\n", ["View.get"]),
+        ("def hook():\n    getattr(api.CLIENT, '_ping')()\n", ["hook"]),
+    ],
+)
+def test_the_ping_call_site_rule_finds_what_it_should(
+    source: str, found: list[str]
+) -> None:
+    """Non-vacuity of the call-site guard, rule by rule."""
+    assert _ping_references(ast.parse(source)) == found
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))

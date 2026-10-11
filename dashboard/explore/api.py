@@ -1,8 +1,9 @@
 """The dashboard's only way to read data: the public API, cached in-process (D071(d)).
 
 These properties hold here (the tests that pin them are in
-``test_dashboard_app.py``: ``TestFetch`` and ``TestOpener``, ``TestCache``,
-``TestView``, ``TestRenderDeadline``, ``TestWakeInterval`` and ``TestKeepWarm``):
+``test_dashboard_app.py``: ``TestBuildUrl``, ``TestFetch`` and ``TestOpener``,
+``TestCache``, ``TestView``, ``TestRenderDeadline``, ``TestWakeInterval``,
+``TestKeepWarm`` and ``TestNoPageReadsHealth``):
 
 - **One outbound chokepoint.** :func:`fetch` is the only function that opens a
   connection. It accepts ``/v1/`` paths and the one literal :data:`HEALTH_PATH`, builds
@@ -41,6 +42,8 @@ These properties hold here (the tests that pin them are in
   The ping takes no bucket token, logs ``api ping`` rather than ``api fetch``, discards
   its body (``/health`` names the origin's snapshot version, never the cache's), and
   never counts as a failed cycle. No page can read the path: both fill paths refuse it.
+  Two guards in ``test_dashboard_guards.py`` keep it there: no other runtime module
+  names the path, and nothing but :meth:`Client._cycle` calls :meth:`Client._ping`.
 
 The refresher is one daemon thread per process (one gunicorn worker, so one cache),
 started lazily by the app, never at import: an import-time thread would make network
@@ -52,7 +55,9 @@ a miss path whose edge keeps answering an older version cannot turn every visit 
 ``/v1/meta`` recheck. That rule governs wake-ups. Once a ping has been attempted, the
 wait after a successful cycle also ends when the next ping is due, so a wake-up that
 ran a cycle just before then cannot push the ping a whole TTL later: the gap between
-pings stays near one TTL, plus one unwakeable 30 s wait and one refresh.
+pings stays near one TTL, plus one unwakeable 30 s wait and one refresh. The cycle that
+wait ends refreshes too, and is not held to :data:`MIN_RECHECK_INTERVAL_S`, so once per
+TTL at most, a ``/v1/meta`` check can follow a woken one sooner than that.
 
 Pages declare what they read in ``dash.register_page``: ``prefetch=(...)`` lists the
 canonical paths warmed on every new snapshot version, ``on_miss=(...)`` the paths (or
@@ -130,8 +135,9 @@ META_PATH = "/v1/meta"
 
 #: The one non-``/v1/`` path :func:`build_url` accepts: the refresher's keep-warm ping
 #: (D076). The API serves it ``no-store`` and its WAF rule covers ``/v1`` only, so the
-#: ping reaches the origin, takes no fill token and cannot be throttled. Only
-#: :meth:`Client._ping` reads it; :func:`_refuse_health` keeps it out of every fill.
+#: ping reaches the origin and the rate-limit rule cannot throttle it. It takes no fill token
+#: because :meth:`Client._ping` bypasses the bucket. Only :meth:`Client._ping` reads it;
+#: :func:`_refuse_health` keeps it out of every fill.
 HEALTH_PATH = "/health"
 
 #: The elections index. D072's MVP prefetch extent is this and ``/v1/meta``; the pages
@@ -643,7 +649,8 @@ class Client:
         failing ping is debounced like a working one and its own duration does not
         stretch the interval. It bypasses :meth:`_fill`: no bucket token, no
         ``api fetch`` line. It never raises, never touches ``_last_check`` and never
-        counts as a failed cycle; its body is discarded.
+        counts as a failed cycle; its body is discarded. An unavailable API logs a
+        warning; any other error is a bug, so it logs a traceback at error level.
         """
         now = self._clock()
         due = self._ping_due()
@@ -652,12 +659,17 @@ class Client:
         self._last_ping = now
         try:
             self._fetch(HEALTH_PATH, FETCH_TIMEOUT_S)
-        except Exception as exc:  # anything escaping would end the refresher thread
+        except ApiUnavailable as exc:
             log.warning(
                 "api ping %s failed after %.2fs: %s",
                 HEALTH_PATH,
                 self._clock() - now,
                 exc,
+            )
+            return
+        except Exception:  # a bug, not an outage; escaping would end the refresher
+            log.exception(
+                "api ping %s failed after %.2fs", HEALTH_PATH, self._clock() - now
             )
             return
         log.info("api ping %s %.2fs", HEALTH_PATH, self._clock() - now)
@@ -670,7 +682,9 @@ class Client:
             self._sleep(self._retry_backoff)
             return
         # Until the next ping is due, at most a TTL: a wake-up that ran a cycle just
-        # before then must not push the ping a whole TTL later.
+        # before then must not push the ping a whole TTL later. The cycle this timeout
+        # starts also refreshes, without the ``min_recheck`` gate below, so at most
+        # once per TTL a /v1/meta check can follow a woken one sooner than that.
         due = self._ping_due()
         timeout = self._ttl if due is None else max(0.0, due - self._clock())
         # A wake-up set during the cycle that just ran is still set, so it is answered
@@ -680,7 +694,7 @@ class Client:
         if self._wake.wait(timeout) and self._last_check is not None:
             remaining = self._last_check + self._min_recheck - self._clock()
             if remaining > 0:
-                self._sleep(remaining)  # not wakeable: one recheck per interval
+                self._sleep(remaining)  # not wakeable: one woken recheck per interval
 
     def _cycle(self) -> None:
         """One refresher cycle: refresh, ping if due, then wait."""
