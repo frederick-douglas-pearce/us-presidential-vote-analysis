@@ -682,3 +682,37 @@ edge-warm runs (04:50Z), then 1880 and 1888.
   (4.34 s, instance start included). Either way the snapshot swap, from the `/v1/meta` fetch
   to `serving snapshot`, took 0.28 s, for two responses. The instance used 106–126 MiB of
   F1's 384 MiB (`gcloud app instances list`, `instance.memoryUsage`).
+
+**Measured 2026-10-11 UTC, 08:38–10:01Z, with the keep-warm ping live (#346)**, version
+`v-7ed3bee8be7e-r6-a1` (the PR's branch head, deployed before merge), snapshot `71b777de…`.
+App Engine again sent no warmup on the deploy, so the refresher started on the deploy
+probe's `GET /` and pinged at once (08:38:19Z). The dashboard logged `api ping /health` every
+5 minutes, 0.11–0.17 s each; the API logged a `GET /health` from `usvote-explore` for each,
+answered in 3–8 ms, and no `Starting new instance` or `Shutting down` in the window. The 17
+pings the API logged came 300.04–300.22 s apart: one `REFRESH_TTL_S` plus that cycle's
+`/v1/meta` check, within D076's bound.
+
+Every year had reached the origin since the last API deploy (2026-09-27), so the edge-cold
+pre-check selected nothing; the years were the four the origin had gone longest without
+(last requested 2026-10-08), each unfilled on the new instance (check 3). Runs about 20
+minutes apart:
+
+| State | Year | Run (Z) | TTFB (s) | First data (s) | Outcome | From the logs |
+|---|---|---|---|---|---|---|
+| Edge cold, origin warm by the ping | 1828 | 08:58:58 | 0.49 | 1.91 | data | both paths at the origin, 4–7 ms; last ping 08:58:19 |
+| Edge cold, origin warm by the ping | 1844 | 09:20:15 | 0.23 | 1.70 | data | both paths at the origin, 4–7 ms; last ping 09:18:20 |
+| Edge cold, origin warm by the ping | 1860 | 09:40:25 | 0.23 | 1.65 | data | both paths at the origin, 5–11 ms; last ping 09:38:20 |
+| Edge cold, origin warm by the ping | 1872 | 10:00:34 | 0.13 | 1.72 | data | both paths at the origin, 4–10 ms; last ping 09:58:21 |
+
+- **Every edge-cold year link met D071(g)** (≤ 3 s to first data), each a fill that missed
+  the edge, against a warm origin.
+- **Without the ping, runs 2–4 would have met a cold origin.** Apart from the pings, the
+  origin's only requests in the window were the runs' own and one scanner `GET /` at
+  08:59:18Z, so 20–21 minutes passed before each of those runs with nothing else reaching
+  it, past the ~15 minutes after which #310 saw it scale to zero.
+- **One `api fetch` line was missing** from the dashboard's log: 1828's year fill, which the
+  API's request log shows at 08:59:01.89Z beside its per-capita fill. The other three runs
+  logged both lines. Classify from the API's request log, as above, not from the count of
+  `api fetch` lines alone.
+- What the ping leaves uncovered (un-pause, a start with no warmup and no request, a Cloud
+  Run instance replacement) is measured over seven days in #347.
