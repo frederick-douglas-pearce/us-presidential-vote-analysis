@@ -21,8 +21,10 @@ a null is never bare, and each closed value of ``pv_status`` and
 text (#280) follow the same rule: a null ratio or population is never bare: it says
 why it is null where the row explains it, and names no cause where it does not. The
 election panel's cells (#308) follow it too: a null popular-vote or hybrid field outside
-the popular-vote window reads as not applicable, never "No"; a value is shown whatever
-the year, as :func:`popular_votes` shows one.
+the popular-vote window reads :data:`NOT_APPLICABLE`, never "No"; a value is shown
+whatever the year, as :func:`popular_votes` shows one. The wording follows the project
+glossary (``docs/glossary.md``) and its wording rules (#352): no underscore or raw field
+name in a label, cell or note, and "counted" only for vote counts.
 """
 
 from __future__ import annotations
@@ -34,10 +36,11 @@ from typing import Any
 from dash import html
 
 #: Plain label for each public field name (approved by the owner, 2026-10-01; the
-#: per-capita rows and the election panel's rows (#308), 2026-10-08).
+#: per-capita rows and the election panel's rows (#308), 2026-10-08; reworded to the
+#: glossary's decisions, #352).
 LABELS: dict[str, str] = {
     "year": "Election year",
-    "candidate_count": "Candidates",
+    "candidate_count": "Candidates with electoral votes",
     "has_popular_vote": "Popular vote in this dataset",
     # The one-election view (#307). Series wording: appointed / cast / counted.
     "state": "State",
@@ -47,7 +50,7 @@ LABELS: dict[str, str] = {
     "electoral_votes": "Electoral votes cast",
     "electoral_votes_counted": "Electoral votes counted",
     "electoral_count_status": "Count status",
-    "electoral_count_status_reason": "Count status: the Archives' reason",
+    "electoral_count_status_reason": "Count status: the National Archives' reason",
     "pv_status": "Popular vote in this state",
     "popular_votes": "Popular votes",
     "national_electoral_votes": "Electoral votes cast (nation)",
@@ -60,19 +63,19 @@ LABELS: dict[str, str] = {
     "pv_share": "Popular-vote share",
     # The per-capita tables (#280). ``state_electoral_votes`` above is the same
     # appointed allotment, so it keeps its label.
-    "governing_census_year": "Census in force",
-    "population": "Population (census in force)",
-    "boundary_basis": "Borders counted",
+    "governing_census_year": "Census used",
+    "population": "Population (from that census)",
+    "boundary_basis": "Borders used",
     "coverage": "Census figure",
     "persons_per_electoral_vote": "People per electoral vote",
     # The election panel (#308), from a ``/v1/elections/{year}`` response's
     # ``election`` block. ``ec_winner`` is the largest counted share, not who took
     # office (1824: Jackson led and the House chose Adams), so it is not "Winner".
     "ec_winner": "Most electoral votes counted",
-    "pv_winner": "Winner: popular vote",
-    "hybrid_winner": "Winner: hybrid",
-    "pv_flip": "Popular vote changes the winner",
-    "hybrid_flip": "Hybrid changes the winner",
+    "pv_winner": "Popular-vote winner",
+    "hybrid_winner": "Hybrid winner",
+    "pv_flip": "Popular-vote winner differs from the Electoral College result",
+    "hybrid_flip": "Hybrid winner differs from the Electoral College result",
     "ec_margin": "Electoral margin (percentage points)",
     "pv_margin": "Popular-vote margin (percentage points)",
     "hybrid_margin": "Hybrid margin (percentage points)",
@@ -85,8 +88,8 @@ LABELS: dict[str, str] = {
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
 PV_STATUS: dict[str, str] = {
-    "popular_vote": "Popular vote",
-    "legislature_chosen": "State legislature chose",
+    "popular_vote": "Popular vote held",
+    "legislature_chosen": "State legislature chose the electors",
     "not_participating": "Took no part",
 }
 
@@ -94,14 +97,14 @@ PV_STATUS: dict[str, str] = {
 #: ``counted``, what it means.
 COUNT_STATUS: dict[str, tuple[str, str | None]] = {
     "counted": ("Counted", None),
-    "not_counted": ("Not counted", "Congress refused the votes"),
-    "disputed": ("Disputed", "Congress never resolved the question"),
+    "not_counted": ("Not counted", "Congress decided not to count them"),
+    "disputed": ("Disputed", "Congress never reached a decision"),
 }
 
 #: Each closed ``boundary_basis`` value of a per-capita row (#280).
 BOUNDARY_BASIS: dict[str, str] = {
     "at_election": "Borders at the election",
-    "present_day": "Present-day footprint",
+    "present_day": "Present-day borders",
 }
 
 #: The per-capita ``coverage`` value that explains a null population and ratio.
@@ -110,7 +113,7 @@ NO_GOVERNING_FIGURE = "no_governing_figure"
 #: Each closed ``coverage`` value of a per-capita row (#280).
 PER_CAPITA_COVERAGE: dict[str, str] = {
     "covered": "Available",
-    NO_GOVERNING_FIGURE: "No census figure governs this election",
+    NO_GOVERNING_FIGURE: "No census figure for this state at this election",
 }
 
 #: A null ratio's cell when the state's allotment is zero (its votes were withheld).
@@ -118,16 +121,16 @@ NO_ELECTORAL_VOTES = "No electoral votes this election"
 
 #: Why each election reads the census it does: one line under each per-capita table.
 GOVERNING_CENSUS_NOTE = (
-    "Each election uses the census whose apportionment set its electoral votes, not "
-    "the nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
-    "Congress made no apportionment from the 1920 census."
+    "Each election uses the census that set the state's electoral votes, not the "
+    "nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
+    "Congress did not redistribute House seats after the 1920 census."
 )
 
 #: What each ``boundary_basis`` value describes. Neutral about the Census Bureau's
 #: tabulation, which this dataset reports as published.
 BOUNDARY_NOTE = (
     "At the election: the people inside the state's borders when the election was "
-    "held. Present-day footprint: the Census Bureau's figure for the state as its "
+    "held. Present-day borders: the Census Bureau's figure for the state as its "
     "table reports it, which this dataset does not claim matches the state's borders "
     "at that election."
 )
@@ -137,13 +140,13 @@ LEGISLATURE_CHOSE = "No popular vote: the state legislature chose the electors"
 TOOK_NO_PART = "Took no part in this election"
 BEFORE_WINDOW = "Popular vote held; not in this dataset before {pv_year_min}"
 AFTER_WINDOW = "Popular vote held; not in this dataset yet"
-NO_FIGURE = "No popular-vote figure for this candidate in this state"
-NO_NATIONAL_FIGURE = "No popular-vote figure for this candidate"
+NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this state"
+NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
 
 #: Why ``party`` is often null: help text beside a null party cell.
 PARTY_NOTE = (
-    "Party comes from the popular-vote source, so it is recorded only where a "
-    "popular-vote figure is."
+    "Party comes from the popular-vote source, so this dataset records it only where "
+    "it has a popular-vote figure."
 )
 
 #: What ``has_popular_vote: false`` means: this dataset holds no popular vote for that
@@ -155,14 +158,16 @@ NOT_IN_DATASET = "Not in this dataset"
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
 #: raw ``false``. It says nothing about whether a popular vote was held.
 HAS_POPULAR_VOTE_NOTE = (
-    "has_popular_vote is false where this dataset holds no popular-vote figure for the "
-    "year; it does not say whether a popular vote was held."
+    '"Not in this dataset" in the popular-vote column (false in the download) means '
+    "this dataset holds no popular-vote figure for that year. It does not say whether "
+    "a popular vote was held."
 )
 
 #: A popular-vote or hybrid cell with no figure because the year lies outside the
-#: popular-vote window (#308): the panel's null there, and T3's in a year with no
-#: popular vote.
-NOT_APPLICABLE = "Not applicable: no popular vote in this dataset for this year"
+#: popular-vote window (#308): the panel's null there, and every popular-vote and hybrid
+#: column of T3 in a year with no popular vote. One wording for that cause everywhere
+#: (#352).
+NOT_APPLICABLE = "Not in this dataset: no popular-vote figures for this year"
 
 #: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``.
 FLIP_YES = "Yes: the {method} winner differs from the Electoral College winner"
@@ -175,6 +180,20 @@ NO_EC_MAJORITY = "No candidate reached a majority of electors appointed"
 HYBRID_NOTE = (
     "The hybrid score is the average of a candidate's electoral share and popular-vote "
     "share; the candidate with the highest score wins it."
+)
+
+#: What the panel's three margins measure (#352; drafted for the owner's review in
+#: place).
+MARGIN_NOTE = (
+    "A margin is the gap, in percentage points, between the first- and second-place "
+    "candidates under that method. Each method ranks the candidates on its own."
+)
+
+#: Why T3 shows the electoral share twice (#352; drafted for the owner's review in
+#: place). True by configuration: the only coverage policy is (b) (D038, D042 §2).
+EC_SHARE_HYBRID_NOTE = (
+    "The hybrid uses each candidate's electoral share as it is, so the hybrid's "
+    "electoral share repeats it. Both are shown so you can check that."
 )
 
 
@@ -420,7 +439,8 @@ def in_pv_window(year: int, coverage: dict[str, Any]) -> bool:
 
 
 def _null(applicable: bool) -> str:
-    """A null panel figure: not applicable outside the window; inside it, no cause."""
+    """A null panel figure: :data:`NOT_APPLICABLE` outside the window; inside it, no
+    cause."""
     return NOT_IN_DATASET if applicable else NOT_APPLICABLE
 
 

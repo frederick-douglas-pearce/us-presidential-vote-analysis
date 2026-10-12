@@ -726,7 +726,7 @@ class TestPicker:
 # --- the per-capita table, T7 (#280) --------------------------------------------------
 
 PER_CAPITA = MOD["PER_CAPITA_TABLE_ID"]
-NO_FIGURE = "No census figure governs this election"
+NO_FIGURE = "No census figure for this state at this election"
 NO_VOTES = "No electoral votes this election"
 
 

@@ -257,7 +257,8 @@ file.
   to less than 100% (D041). `ec_share_hybrid` is the electoral share fed into the hybrid; under
   the only configured policy, (b), it equals `ec_share_full`, and it is served separately so that
   can be checked.
-- **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`.
+- **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`;
+  `labels.EC_SHARE_HYBRID_NOTE` under T3.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4.
 - **Not:** A share of the votes cast.
@@ -325,7 +326,8 @@ file.
   popular-vote margin is Gore's lead over Bush. `ec_margin` is null with fewer than two scored
   candidates; the popular-vote and hybrid margins are null outside the popular-vote window.
 - **Shown as:** `LABELS["ec_margin"]`, `LABELS["pv_margin"]`, `LABELS["hybrid_margin"]`;
-  `labels.margin`; a one-line panel note is drafted for the owner's review on the dashboard.
+  `labels.margin`; the panel note `labels.MARGIN_NOTE`, drafted for the owner's review on the
+  dashboard.
 - **Source:** `ElectionSummary.ec_margin`, `pv_margin`, `hybrid_margin` and
   `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037.
 - **Not:** A percent change. A gap measured from the Electoral College's winner or leader.

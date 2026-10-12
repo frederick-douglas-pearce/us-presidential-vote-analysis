@@ -72,10 +72,13 @@ means the fact was read in the repo; **I** means it was inferred and not checked
   S2 makes this a guard, not a convention.
 - **Editorial guardrail:** nothing critical of a data source is published, including in
   column help text, empty-state wording and narrative tabs. The wording describes what the
-  dataset holds ("not in this dataset before 1976"), not a fault in a source.
+  dataset holds (for example `labels.BEFORE_WINDOW`), not a fault in a source.
 - **Public-facing copy** (labels, help text, narrative) gets a `marketer` draft/review
   pass per the repo's convention. The label tables below are functional specs, not final
-  copy.
+  copy. Shipped wording lives in `dashboard/explore/labels.py` (with a few page-level
+  sentences in `components.py`, `export.py` and the pages), and what each term means in
+  the project glossary, `docs/glossary.md`; this spec names those constants rather than
+  quoting their text (#352).
 
 ---
 
@@ -398,7 +401,7 @@ It sets them as a working vertical slice, not a separate framework story.
 
 | View | Table | Endpoint | Filters |
 |---|---|---|---|
-| Elections | T1 — elections index (year, candidate count, has popular vote) | `GET /v1/elections` | year range; "has popular vote" toggle |
+| Elections | T1 — elections index (year, candidate count, has popular vote) | `GET /v1/elections` | year range; `has_popular_vote` toggle |
 | One election | T2 — state-by-candidate results | `GET /v1/elections/{year}` → `data` | **year (required)**; state; candidate; `pv_status`; electoral count status |
 | One election | T3 — national results per candidate | same response → `summary` | year (inherited) |
 | One election | Election panel — winners under each method, flips, margins, EC majority | same response → `election` | year (inherited) |
@@ -419,12 +422,12 @@ opens that election's view.
 **A null is never bare.** Popular-vote cell labelling (functional spec; final copy goes
 through the marketer pass and the editorial guardrail):
 
-| `pv_status` | year vs. `pv_year_min` | `popular_votes` | cell shows (proposed) |
+| `pv_status` | year vs. `pv_year_min` | `popular_votes` | cell shows (wording in `labels.py`) |
 |---|---|---|---|
-| `legislature_chosen` | any | null | "No popular vote: the state legislature chose the electors" |
-| `not_participating` | any | null | "Did not take part in this election" |
-| `popular_vote` | before window | null | "Popular vote held; not in this dataset before 1976" (year from `coverage`) |
-| `popular_vote` | inside window | null | "No popular-vote figure for this candidate in this state" |
+| `legislature_chosen` | any | null | `labels.LEGISLATURE_CHOSE` |
+| `not_participating` | any | null | `labels.TOOK_NO_PART` |
+| `popular_vote` | before window | null | `labels.BEFORE_WINDOW` (year from `coverage`) |
+| `popular_vote` | inside window | null | `labels.NO_FIGURE` |
 | `popular_vote` | inside window | value | the number |
 
 - **Given** 1860, **when** T2 renders, **then** South Carolina's rows show the legislature
@@ -447,13 +450,14 @@ through the marketer pass and the editorial guardrail):
 
 **Election panel**
 - Flips, the popular-vote and hybrid winners, and `pv_margin` / `hybrid_margin` that are
-  null (pre-1976) show "not applicable: no popular vote in this dataset for this year".
+  null (pre-1976) show `labels.NOT_APPLICABLE`, as every popular-vote and hybrid column
+  of T3 does in such a year (#352).
   They are **never** rendered as "No", `false` or `0`.
 - `pv_coverage` is populated for **every** year (D053). It measures the share of electoral
   votes appointed by popular-vote states, not this dataset's coverage, and its label says
   so.
-- **Given** 1824, **then** the EC-majority field reads as "no candidate reached a majority
-  of electors appointed", a real answer, not a missing value.
+- **Given** 1824, **then** the EC-majority field reads as `labels.NO_EC_MAJORITY`, a real
+  answer, not a missing value.
 
 **Shared conventions (reused by S4/S5)**
 - **Shareable URL:** every filter and the selected year live in the URL. **Given** a URL
@@ -566,10 +570,10 @@ shared link lands where a reader expects it.
 - Columns show governing census year, electoral votes (state total), population, boundary
   basis, coverage and persons per electoral vote, with plain-language headers.
 - **A null ratio is never bare** [F10]:
-  - **Given** 1848, **then** Texas shows "no census figure governs this election" (from
-    `coverage='no_governing_figure'`).
-  - **Given** 1864, **then** each zero-allotment state shows "no electoral votes this
-    election", not a blank or an infinity.
+  - **Given** 1848, **then** Texas shows the no-governing-figure label
+    (`labels.PER_CAPITA_COVERAGE`, from `coverage='no_governing_figure'`).
+  - **Given** 1864, **then** each zero-allotment state shows
+    `labels.NO_ELECTORAL_VOTES`, not a blank or an infinity.
 - `governing_census_year` is shown, so a reader can see that 2020's figure comes from the
   2010 census and 1924/1928's from 1910. The help text says why in one line.
 - The **Census Bureau** attribution appears in the provenance footer on these views.

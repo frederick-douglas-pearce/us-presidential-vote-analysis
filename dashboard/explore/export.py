@@ -209,7 +209,7 @@ def preamble(
         f"{label}: {provenance[name]} ({provenance[lic]}; {provenance[lic_url]})"
         for label, name, lic, lic_url in carried
     ]
-    lines.append(f"Data snapshot: {provenance['snapshot_version']}")
+    lines.append(f"Data version: {provenance['snapshot_version']}")
     lines.append(f"Electoral votes cover {coverage['year_min']}–{coverage['year_max']}")
     if PV_SOURCE in carried:
         lines.append(
