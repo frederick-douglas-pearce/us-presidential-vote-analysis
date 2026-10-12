@@ -634,7 +634,7 @@ class TestLabels:
 
     def test_the_approved_labels(self) -> None:
         assert labels.LABELS["year"] == "Election year"
-        assert labels.LABELS["candidate_count"] == "Candidates"
+        assert labels.LABELS["candidate_count"] == "Candidates with electoral votes"
         assert labels.LABELS["has_popular_vote"] == "Popular vote in this dataset"
 
     def test_every_label_keys_a_public_api_field_never_a_snapshot_column(self) -> None:

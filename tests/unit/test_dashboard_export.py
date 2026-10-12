@@ -653,6 +653,22 @@ class TestNulls:
             download(tree, "election-per-capita").lines
         )
 
+    def test_the_national_file_carries_t3_s_notes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T3's notes (#352 adds the second share's) show under it and travel in its
+        file, as every table note does."""
+        tree, _ = render("/election/<year>", monkeypatch, year="1872")
+        lines = download(tree, "election-nation").lines
+        shown = [p.children for p in of_type(tree, "P")]
+        for note in (
+            labels.PARTY_NOTE,
+            labels.HYBRID_NOTE,
+            labels.EC_SHARE_HYBRID_NOTE,
+        ):
+            assert note in lines
+            assert note in shown
+
     def test_the_elections_file_says_what_false_means(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -750,7 +766,7 @@ class TestAttribution:
         assert lines == [
             "Electoral votes: EC-NAME (EC-LIC; https://ec.example)",
             "Popular votes: PV-NAME (PV-LIC; https://pv.example)",
-            "Data snapshot: v-123",
+            "Data version: v-123",
             "Electoral votes cover 1111–2222",
             "Popular votes cover 1333–1444",
             "View: URL",
@@ -778,7 +794,7 @@ class TestAttribution:
         assert lines == [
             "Electoral votes: EC-NAME (EC-LIC; https://ec.example)",
             "Population: CB-NAME (CB-LIC; https://cb.example)",
-            "Data snapshot: v-123",
+            "Data version: v-123",
             "Electoral votes cover 1111–2222",
             "View: URL",
             "N1",
@@ -846,8 +862,8 @@ class TestAttribution:
         per_capita["meta"]["provenance"]["snapshot_version"] = "OWN-RESPONSE"
         monkeypatch.setitem(RECORDED, path, per_capita)
         tree, _ = render(key, monkeypatch)
-        assert "Data snapshot: OWN-RESPONSE" in download(tree, table).lines
-        assert "Data snapshot: OWN-RESPONSE" not in download(tree, other).lines
+        assert "Data version: OWN-RESPONSE" in download(tree, table).lines
+        assert "Data version: OWN-RESPONSE" not in download(tree, other).lines
 
     def test_it_states_provenance_never_a_license_condition(
         self, monkeypatch: pytest.MonkeyPatch

@@ -67,7 +67,7 @@ def provenance_footer(provenance: dict[str, Any]) -> html.Footer:
                 id=PROVENANCE_ID,
             ),
             html.P(
-                ["Data snapshot ", html.Code(str(provenance["snapshot_version"]))],
+                ["Data version ", html.Code(str(provenance["snapshot_version"]))],
                 className="snapshot",
                 id=SNAPSHOT_ID,
             ),

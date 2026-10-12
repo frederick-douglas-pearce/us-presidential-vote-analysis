@@ -22,7 +22,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, labels
+from explore import api, components, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     META,
@@ -357,9 +357,7 @@ class TestRender:
             rows = state_rows(render(1860, body=body))
             return {r["popular_votes"] for r in rows if r["state"] == "New York"}
 
-        assert new_york(1800) == {
-            "No popular-vote figure for this candidate in this state"
-        }
+        assert new_york(1800) == {labels.NO_FIGURE}
         assert new_york(1900) == {"Popular vote held; not in this dataset before 1900"}
 
     def test_the_window_s_end_is_read_from_coverage_not_literals(self) -> None:
@@ -458,6 +456,9 @@ class TestHeaders:
             "electoral_votes": "Electoral votes cast",
             "electoral_votes_counted": "Electoral votes counted",
             "electoral_count_status": "Count status",
+            "electoral_count_status_reason": (
+                "Count status: the National Archives' reason"
+            ),
             "pv_status": "Popular vote in this state",
             "popular_votes": "Popular votes",
             "national_electoral_votes": "Electoral votes cast (nation)",
@@ -468,12 +469,18 @@ class TestHeaders:
             "national_pv_votes": "Popular votes (nation)",
             "ec_share_full": "Electoral share (counted ÷ appointed)",
             "pv_share": "Popular-vote share",
-            # The election panel and T3's hybrid columns (#308), approved 2026-10-08.
+            # The per-capita table (#280), reworded to the glossary (#352).
+            "governing_census_year": "Census used",
+            "population": "Population (from that census)",
+            "boundary_basis": "Borders used",
+            "persons_per_electoral_vote": "People per electoral vote",
+            # The election panel and T3's hybrid columns (#308), approved 2026-10-08;
+            # the winner and flip rows reworded to the glossary (#352).
             "ec_winner": "Most electoral votes counted",
-            "pv_winner": "Winner: popular vote",
-            "hybrid_winner": "Winner: hybrid",
-            "pv_flip": "Popular vote changes the winner",
-            "hybrid_flip": "Hybrid changes the winner",
+            "pv_winner": "Popular-vote winner",
+            "hybrid_winner": "Hybrid winner",
+            "pv_flip": "Popular-vote winner differs from the Electoral College result",
+            "hybrid_flip": "Hybrid winner differs from the Electoral College result",
             "ec_margin": "Electoral margin (percentage points)",
             "pv_margin": "Popular-vote margin (percentage points)",
             "hybrid_margin": "Hybrid margin (percentage points)",
@@ -564,17 +571,32 @@ class TestNullCells:
             "Popular vote held; not in this dataset before 1976"
         )
         assert labels.popular_votes(None, "popular_vote", 2016, COVERAGE) == (
-            "No popular-vote figure for this candidate in this state"
+            "No popular-vote figure in this dataset for this candidate in this state"
         )
+        assert labels.NO_NATIONAL_FIGURE == (
+            "No popular-vote figure in this dataset for this candidate"
+        )
+        assert labels.HAS_POPULAR_VOTE_NOTE == (
+            '"Not in this dataset" in the popular-vote column (false in the download) '
+            "means this dataset holds no popular-vote figure for that year. It does not "
+            "say whether a popular vote was held."
+        )
+        # The note quotes the cell it explains, so the two cannot drift apart.
+        assert f'"{labels.NOT_IN_DATASET}"' in labels.HAS_POPULAR_VOTE_NOTE
         assert labels.NOT_IN_DATASET == "Not in this dataset"
         assert labels.PARTY_NOTE == (
-            "Party comes from the popular-vote source, so it is recorded only where a "
-            "popular-vote figure is."
+            "Party comes from the popular-vote source, so this dataset records it only "
+            "where it has a popular-vote figure."
         )
         assert labels.COUNT_STATUS == {
             "counted": ("Counted", None),
-            "not_counted": ("Not counted", "Congress refused the votes"),
-            "disputed": ("Disputed", "Congress never resolved the question"),
+            "not_counted": ("Not counted", "Congress decided not to count them"),
+            "disputed": ("Disputed", "Congress never reached a decision"),
+        }
+        assert labels.PV_STATUS == {
+            "popular_vote": "Popular vote held",
+            "legislature_chosen": "State legislature chose the electors",
+            "not_participating": "Took no part",
         }
 
     def test_1860_reads_the_legislature_and_the_window_differently(self) -> None:
@@ -616,9 +638,24 @@ class TestNullCells:
         assert note.children == MOD["NO_PV_SENTENCE"].format(
             year=year, first=PV_MIN, last=PV_MAX
         )
-        for row in nation_rows(tree).values():
-            assert row["national_pv_votes"] == labels.NOT_IN_DATASET
-            assert row["pv_share"] == labels.NOT_IN_DATASET
+        # One wording for the outside-the-window cause (#352): T3's popular-vote
+        # columns and hybrid score read the panel's, never the bare "Not in this
+        # dataset".
+        rows = nation_rows(tree)
+        for row in rows.values():
+            for field in ("national_pv_votes", "pv_share", "hybrid_score"):
+                assert row[field] == labels.NOT_APPLICABLE, (year, field)
+            # The second share is a value at every year, not a popular-vote cell.
+            assert row["ec_share_hybrid"].endswith("%"), (year, row)
+        assert {panel(tree)[f] for f in PV_FIELDS} == {labels.NOT_APPLICABLE}
+        # Out of AC3 by the owner's ruling (#352, option (i)): a null party keeps
+        # "Not in this dataset" with its note, as in T2; #355 owns party display.
+        null_party = [
+            r["candidate"] for r in year_body(year)["summary"] if r["party"] is None
+        ]
+        assert null_party  # the premise
+        for name in null_party:
+            assert rows[name]["party"] == labels.NOT_IN_DATASET, (year, name)
 
     def test_inside_the_window_t3_has_no_year_note_and_names_a_missing_figure(
         self,
@@ -645,7 +682,7 @@ class TestNullCells:
         )
         assert find(held, MOD["NO_PV_ID"]) is None
         grant = nation_rows(held)["Ulysses S. Grant"]
-        assert grant["national_pv_votes"] == "No popular-vote figure for this candidate"
+        assert grant["national_pv_votes"] == labels.NO_NATIONAL_FIGURE
         missing = MOD["render"](
             year_body(2016),
             {**index_row(2016), "has_popular_vote": False},
@@ -654,15 +691,15 @@ class TestNullCells:
         )
         assert find(missing, MOD["NO_PV_ID"]) is not None
         trump = nation_rows(missing)["Donald J. Trump"]
-        assert trump["national_pv_votes"] == trump["pv_share"] == "Not in this dataset"
+        assert trump["national_pv_votes"] == trump["pv_share"] == labels.NOT_APPLICABLE
         body = year_body(1860)
         body["meta"]["provenance"]["coverage"].update(
             pv_year_min=1900, pv_year_max=2000
         )
         note = find(render(1860, body=body), MOD["NO_PV_ID"])
         assert note.children == (
-            "This dataset has no popular vote for 1860; its popular-vote figures cover "
-            "1900–2000."
+            "This dataset has no popular-vote figures for 1860; its popular-vote "
+            "figures cover 1900–2000."
         )
 
     @pytest.mark.parametrize("flag", ["false", 1, None])
@@ -722,7 +759,11 @@ class TestNullCells:
             (labels.party, None, labels.NOT_IN_DATASET),
             (labels.share, 10**400, str(10**400)),  # no float holds it
             (labels.share, float("inf"), "inf"),
-            (labels.pv_status, "legislature_chosen", "State legislature chose"),
+            (
+                labels.pv_status,
+                "legislature_chosen",
+                "State legislature chose the electors",
+            ),
             (labels.pv_status, "mystery", "mystery"),
             (labels.pv_status, None, "None"),
         ],
@@ -1056,7 +1097,7 @@ def test_the_footer_carries_the_response_s_provenance() -> None:
 # --- the per-capita table, T6 (#280) --------------------------------------------------
 
 PER_CAPITA = MOD["PER_CAPITA_TABLE_ID"]
-NO_FIGURE = "No census figure governs this election"
+NO_FIGURE = "No census figure for this state at this election"
 NO_VOTES = "No electoral votes this election"
 
 
@@ -1152,7 +1193,11 @@ def test_the_governing_census_is_shown_with_its_reason() -> None:
         "1870"
     }
     assert labels.GOVERNING_CENSUS_NOTE in texts(tree)
-    assert "2010" in labels.GOVERNING_CENSUS_NOTE and "1910" in labels.GOVERNING_CENSUS_NOTE
+    assert labels.GOVERNING_CENSUS_NOTE == (
+        "Each election uses the census that set the state's electoral votes, not the "
+        "nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
+        "Congress did not redistribute House seats after the 1920 census."
+    )
 
 
 def test_each_boundary_basis_cell_carries_its_help_text() -> None:
@@ -1162,9 +1207,15 @@ def test_each_boundary_basis_cell_carries_its_help_text() -> None:
     assert {c.title for c in cells} == {labels.BOUNDARY_NOTE}
     assert {cell_text(c) for c in cells} == {
         "Borders at the election",
-        "Present-day footprint",
+        "Present-day borders",
     }
     assert labels.BOUNDARY_NOTE in texts(tree)
+    assert labels.BOUNDARY_NOTE == (
+        "At the election: the people inside the state's borders when the election was "
+        "held. Present-day borders: the Census Bureau's figure for the state as its "
+        "table reports it, which this dataset does not claim matches the state's "
+        "borders at that election."
+    )
 
 
 def test_every_recorded_year_renders_t6_beside_t2_and_t3() -> None:
@@ -1420,7 +1471,7 @@ PV_FIELDS = (
 )
 #: The panel's fields the API fills for every year.
 EC_FIELDS = ("ec_winner", "ec_margin", "ec_determinative", "pv_coverage")
-NOT_APPLICABLE = "Not applicable: no popular vote in this dataset for this year"
+NOT_APPLICABLE = "Not in this dataset: no popular-vote figures for this year"
 PANEL_YEARS = (*RECORDED_YEARS, 2024)
 
 
@@ -1697,9 +1748,9 @@ class TestPanel:
         """No word from a fixed list of evaluative words, matched as a word, in the
         panel's text or the hybrid's labels and note. A list cannot prove the hybrid is
         described rather than advocated: that rests on every fixed string the panel
-        renders being pinned exactly (its heading here; the labels, cell sentences, note
-        and unavailable sentence in their own tests). This scan catches a familiar word
-        in a future edit."""
+        renders being pinned exactly (its heading here; the labels, cell sentences,
+        notes and unavailable sentence in their own tests). This scan catches a familiar
+        word in a future edit."""
         evaluative = re.compile(
             r"\b(better|best|fair|fairer|fairest|worse|worst|superior|should)\b",
             re.IGNORECASE,
@@ -1729,6 +1780,104 @@ class TestPanel:
         assert labels.FLIP_YES.format(method="popular-vote") == (
             "Yes: the popular-vote winner differs from the Electoral College winner"
         )
+
+
+class TestWordingRules:
+    """The glossary's wording rules (#352, ``docs/glossary.md``): no constant #352
+    rewords or adds carries an underscore. A snake_case field name always has one; a
+    one-word field name (``party``, ``population``) is ordinary English and cannot be
+    told from prose, so the underscore is what a test can check. The closed-value and
+    fallback paths are #355's."""
+
+    @staticmethod
+    def reworded() -> dict[str, str]:
+        """Every wording #352 changes or adds, by where it lives."""
+        texts_ = {
+            f"LABELS[{key}]": labels.LABELS[key]
+            for key in (
+                "candidate_count",
+                "boundary_basis",
+                "governing_census_year",
+                "population",
+                "electoral_count_status_reason",
+                "pv_flip",
+                "hybrid_flip",
+                "pv_winner",
+                "hybrid_winner",
+            )
+        }
+        texts_ |= {f"PV_STATUS[{k}]": v for k, v in labels.PV_STATUS.items()}
+        texts_ |= {
+            f"COUNT_STATUS[{k}]": meaning
+            for k, (_, meaning) in labels.COUNT_STATUS.items()
+            if meaning is not None
+        }
+        texts_["BOUNDARY_BASIS[present_day]"] = labels.BOUNDARY_BASIS["present_day"]
+        texts_["PER_CAPITA_COVERAGE[no_governing_figure]"] = (
+            labels.PER_CAPITA_COVERAGE[labels.NO_GOVERNING_FIGURE]
+        )
+        for name in (
+            "BOUNDARY_NOTE",
+            "GOVERNING_CENSUS_NOTE",
+            "NOT_APPLICABLE",
+            "NO_FIGURE",
+            "NO_NATIONAL_FIGURE",
+            "HAS_POPULAR_VOTE_NOTE",
+            "PARTY_NOTE",
+            "MARGIN_NOTE",
+            "EC_SHARE_HYBRID_NOTE",
+        ):
+            texts_[name] = getattr(labels, name)
+        texts_["NO_PV_SENTENCE"] = MOD["NO_PV_SENTENCE"].format(
+            year=1860, first=1976, last=2024
+        )
+        return texts_
+
+    @staticmethod
+    def breaks_the_rule(text: str) -> bool:
+        return "_" in text
+
+    def test_no_reworded_constant_carries_an_underscore(self) -> None:
+        assert {
+            name: text
+            for name, text in self.reworded().items()
+            if self.breaks_the_rule(text)
+        } == {}
+
+    def test_the_rule_fails_what_it_should(self) -> None:
+        # Non-vacuity: the note #352 replaced named the raw field.
+        assert self.breaks_the_rule(
+            "has_popular_vote is false where this dataset holds no popular-vote "
+            "figure for the year; it does not say whether a popular vote was held."
+        )
+
+    def test_the_drafted_notes_are_pinned(self) -> None:
+        """Drafted for the owner's review in place (#352): pinned as shipped, so a
+        reword is a deliberate change here, and the panel's every fixed string stays
+        pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
+        assert labels.MARGIN_NOTE == (
+            "A margin is the gap, in percentage points, between the first- and "
+            "second-place candidates under that method. Each method ranks the "
+            "candidates on its own."
+        )
+        assert labels.EC_SHARE_HYBRID_NOTE == (
+            "The hybrid uses each candidate's electoral share as it is, so the hybrid's "
+            "electoral share repeats it. Both are shown so you can check that."
+        )
+
+    def test_the_drafted_notes_show_where_they_explain(self) -> None:
+        tree = render(1872)
+        panel_notes = [p.children for p in of_type(find(tree, PANEL), "P")]
+        assert labels.MARGIN_NOTE in panel_notes
+        assert labels.HYBRID_NOTE in panel_notes
+        shown = [p.children for p in of_type(tree, "P")]
+        assert labels.EC_SHARE_HYBRID_NOTE in shown
+        assert labels.EC_SHARE_HYBRID_NOTE not in panel_notes
+
+    def test_the_footer_names_the_data_version(self) -> None:
+        footer = find(render(1872), components.SNAPSHOT_ID)
+        assert footer is not None
+        assert footer.children[0] == "Data version "
 
 
 class TestT3Hybrid:

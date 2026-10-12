@@ -257,7 +257,8 @@ file.
   to less than 100% (D041). `ec_share_hybrid` is the electoral share fed into the hybrid; under
   the only configured policy, (b), it equals `ec_share_full`, and it is served separately so that
   can be checked.
-- **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`.
+- **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`;
+  `labels.EC_SHARE_HYBRID_NOTE` under T3.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4.
 - **Not:** A share of the votes cast.
@@ -325,7 +326,8 @@ file.
   popular-vote margin is Gore's lead over Bush. `ec_margin` is null with fewer than two scored
   candidates; the popular-vote and hybrid margins are null outside the popular-vote window.
 - **Shown as:** `LABELS["ec_margin"]`, `LABELS["pv_margin"]`, `LABELS["hybrid_margin"]`;
-  `labels.margin`; a one-line panel note is drafted for the owner's review on the dashboard.
+  `labels.margin`; the panel note `labels.MARGIN_NOTE`, drafted for the owner's review on the
+  dashboard.
 - **Source:** `ElectionSummary.ec_margin`, `pv_margin`, `hybrid_margin` and
   `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037.
 - **Not:** A percent change. A gap measured from the Electoral College's winner or leader.
@@ -368,8 +370,11 @@ file.
   can be shown.
 - **Precise:** A null popular-vote or hybrid field in a year outside the popular-vote window of
   `meta.provenance.coverage` (`labels.in_pv_window` is false, or, in T3, the year's
-  `has_popular_vote` is false). It names its cause, and one wording serves every place this cause
-  appears: the panel, and every popular-vote and hybrid column of T3.
+  `has_popular_vote` is false). It names its cause, and one wording serves the panel and T3's
+  popular-vote columns and hybrid score (`national_pv_votes`, `pv_share`, `hybrid_score`;
+  owner decision, 2026-10-12, #352). A null party in such a year reads *Not in this dataset*
+  with `labels.PARTY_NOTE` (see Party: its null has two causes), and T2 and T4 name the window's
+  side (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`).
 - **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 through `_national_pv` in
   `pages/election.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,

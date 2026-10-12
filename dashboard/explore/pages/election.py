@@ -89,9 +89,9 @@ NATION_FIELDS = (
 NATION_EXTRA = ("candidate_slug", "year")
 
 #: The election panel's fields, in display order, by public field name (#308): who led
-#: under each method, whether either other method changes the winner, the three
-#: margins, whether anyone won a majority of electors, and the share of electors
-#: appointed by states that held a popular vote.
+#: under each method, whether the popular-vote or the hybrid winner differs from the
+#: Electoral College result, the three margins, whether anyone won a majority of
+#: electors, and the share of electors appointed by states that held a popular vote.
 PANEL_FIELDS = (
     "ec_winner",
     "pv_winner",
@@ -128,8 +128,8 @@ COUNT_STATUS = "electoral_count_status"
 
 #: The year's popular-vote sentence above T3, when the dataset holds none for it.
 NO_PV_SENTENCE = (
-    "This dataset has no popular vote for {year}; its popular-vote figures cover "
-    "{first}–{last}."
+    "This dataset has no popular-vote figures for {year}; its popular-vote figures "
+    "cover {first}–{last}."
 )
 
 #: The not-found state's sentence. The raw path value is never echoed.
@@ -390,17 +390,13 @@ def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html
     )
 
 
-def _national_pv(
-    value: Any,
-    has_popular_vote: bool,
-    as_share: bool,
-    missing: str = labels.NOT_IN_DATASET,
-) -> str:
-    """A T3 cell that needs the popular vote: ``missing`` in a year with no popular
-    vote (T3's year rule, from the index row), and inside it a null is a candidate
-    with no popular-vote figure."""
+def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
+    """A T3 cell that needs the popular vote: :data:`labels.NOT_APPLICABLE` in a year
+    with no popular vote (T3's year rule, from the index row), the panel's wording for
+    the same cause (#352), and inside it a null is a candidate with no popular-vote
+    figure."""
     if not has_popular_vote:
-        return missing
+        return labels.NOT_APPLICABLE
     if value is None:
         return labels.NO_NATIONAL_FIGURE
     return labels.share(value) if as_share else labels.number(value)
@@ -421,12 +417,8 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
             html.Td(labels.share_cell(row["ec_share_full"])),
             html.Td(_national_pv(row["pv_share"], has_popular_vote, True)),
             html.Td(labels.share_cell(row["ec_share_hybrid"])),
-            # The hybrid's own wording (#308), on T3's year rule so the row agrees.
-            html.Td(
-                _national_pv(
-                    row["hybrid_score"], has_popular_vote, True, labels.NOT_APPLICABLE
-                )
-            ),
+            # On T3's year rule, so the row agrees with itself.
+            html.Td(_national_pv(row["hybrid_score"], has_popular_vote, True)),
         ]
     )
 
@@ -483,8 +475,8 @@ def _election(value: Any, year: int) -> dict[str, Any] | None:
 def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, str]:
     """Each panel field's cell. The Electoral College fields and ``pv_coverage`` exist
     for every year, so a null there names no cause; a null popular-vote or hybrid field
-    outside the window (from ``coverage``) is not applicable, and a value is shown
-    whatever the year."""
+    outside the window (from ``coverage``) reads :data:`labels.NOT_APPLICABLE`, and a
+    value is shown whatever the year."""
     applicable = labels.in_pv_window(year, coverage)
     return {
         "ec_winner": labels.winner(block["ec_winner"], True),
@@ -502,7 +494,8 @@ def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
 
 def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
     """The election panel (#308): each field's label (its raw name as the tooltip, as
-    a column header's is) beside its cell, the hybrid's help text, and a glossary."""
+    a column header's is) beside its cell, the hybrid's and the margins' help text,
+    and a glossary."""
     heading = html.H2("Under each method")
     if block is None:
         return [
@@ -525,6 +518,7 @@ def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
                     ]
                 ),
                 html.P(labels.HYBRID_NOTE, className="note"),
+                html.P(labels.MARGIN_NOTE, className="note"),
                 labels.glossary(PANEL_FIELDS, "Field names"),
             ],
             id=PANEL_ID,
@@ -621,7 +615,7 @@ def render(
             NATION_TABLE_ID,
             _download(year, "national", "the national results", body, chosen),
             extra=NATION_EXTRA,
-            notes=(labels.PARTY_NOTE, labels.HYBRID_NOTE),
+            notes=(labels.PARTY_NOTE, labels.HYBRID_NOTE, labels.EC_SHARE_HYBRID_NOTE),
         ),
         labels.glossary(NATION_FIELDS),
     ]
