@@ -476,8 +476,7 @@ def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
     """Each panel field's cell. The Electoral College fields and ``pv_coverage`` exist
     for every year, so a null there names no cause; a null popular-vote or hybrid field
     outside the window (from ``coverage``) reads :data:`labels.NOT_APPLICABLE`, and a
-    value is shown
-    whatever the year."""
+    value is shown whatever the year."""
     applicable = labels.in_pv_window(year, coverage)
     return {
         "ec_winner": labels.winner(block["ec_winner"], True),

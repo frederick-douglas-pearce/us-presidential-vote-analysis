@@ -1748,9 +1748,9 @@ class TestPanel:
         """No word from a fixed list of evaluative words, matched as a word, in the
         panel's text or the hybrid's labels and note. A list cannot prove the hybrid is
         described rather than advocated: that rests on every fixed string the panel
-        renders being pinned exactly (its heading here; the labels, cell sentences, note
-        and unavailable sentence in their own tests). This scan catches a familiar word
-        in a future edit."""
+        renders being pinned exactly (its heading here; the labels, cell sentences,
+        notes and unavailable sentence in their own tests). This scan catches a familiar
+        word in a future edit."""
         evaluative = re.compile(
             r"\b(better|best|fair|fairer|fairest|worse|worst|superior|should)\b",
             re.IGNORECASE,
