@@ -164,9 +164,12 @@ HAS_POPULAR_VOTE_NOTE = (
 )
 
 #: A popular-vote or hybrid cell with no figure because the year lies outside the
-#: popular-vote window (#308): the panel's null there, and every popular-vote and hybrid
-#: column of T3 in a year with no popular vote. One wording for that cause everywhere
-#: (#352).
+#: popular-vote window (#308): the panel's null there, and T3's popular-vote columns
+#: and hybrid score (``national_pv_votes``, ``pv_share``, ``hybrid_score``) in a year
+#: with no popular vote. One wording for that cause in the panel and T3 (#352). A null
+#: party there reads :data:`NOT_IN_DATASET` with :data:`PARTY_NOTE` (party is null for
+#: two causes), and T2 and T4 name the window's side (:data:`BEFORE_WINDOW`,
+#: :data:`AFTER_WINDOW`).
 NOT_APPLICABLE = "Not in this dataset: no popular-vote figures for this year"
 
 #: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``.

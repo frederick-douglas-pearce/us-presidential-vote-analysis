@@ -370,8 +370,11 @@ file.
   can be shown.
 - **Precise:** A null popular-vote or hybrid field in a year outside the popular-vote window of
   `meta.provenance.coverage` (`labels.in_pv_window` is false, or, in T3, the year's
-  `has_popular_vote` is false). It names its cause, and one wording serves every place this cause
-  appears: the panel, and every popular-vote and hybrid column of T3.
+  `has_popular_vote` is false). It names its cause, and one wording serves the panel and T3's
+  popular-vote columns and hybrid score (`national_pv_votes`, `pv_share`, `hybrid_score`;
+  owner decision, 2026-10-12, #352). A null party in such a year reads *Not in this dataset*
+  with `labels.PARTY_NOTE` (see Party: its null has two causes), and T2 and T4 name the window's
+  side (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`).
 - **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 through `_national_pv` in
   `pages/election.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,

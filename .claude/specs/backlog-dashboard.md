@@ -450,8 +450,8 @@ through the marketer pass and the editorial guardrail):
 
 **Election panel**
 - Flips, the popular-vote and hybrid winners, and `pv_margin` / `hybrid_margin` that are
-  null (pre-1976) show `labels.NOT_APPLICABLE`, as every popular-vote and hybrid column
-  of T3 does in such a year (#352).
+  null (pre-1976) show `labels.NOT_APPLICABLE`, as T3's popular-vote columns and hybrid
+  score (`national_pv_votes`, `pv_share`, `hybrid_score`) do in such a year (#352).
   They are **never** rendered as "No", `false` or `0`.
 - `pv_coverage` is populated for **every** year (D053). It measures the share of electoral
   votes appointed by popular-vote states, not this dataset's coverage, and its label says

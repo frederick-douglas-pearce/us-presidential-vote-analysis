@@ -576,6 +576,13 @@ class TestNullCells:
         assert labels.NO_NATIONAL_FIGURE == (
             "No popular-vote figure in this dataset for this candidate"
         )
+        assert labels.HAS_POPULAR_VOTE_NOTE == (
+            '"Not in this dataset" in the popular-vote column (false in the download) '
+            "means this dataset holds no popular-vote figure for that year. It does not "
+            "say whether a popular vote was held."
+        )
+        # The note quotes the cell it explains, so the two cannot drift apart.
+        assert f'"{labels.NOT_IN_DATASET}"' in labels.HAS_POPULAR_VOTE_NOTE
         assert labels.NOT_IN_DATASET == "Not in this dataset"
         assert labels.PARTY_NOTE == (
             "Party comes from the popular-vote source, so this dataset records it only "
@@ -631,12 +638,24 @@ class TestNullCells:
         assert note.children == MOD["NO_PV_SENTENCE"].format(
             year=year, first=PV_MIN, last=PV_MAX
         )
-        # One wording for the outside-the-window cause (#352): every popular-vote and
-        # hybrid column of T3 reads the panel's, never the bare "Not in this dataset".
-        for row in nation_rows(tree).values():
+        # One wording for the outside-the-window cause (#352): T3's popular-vote
+        # columns and hybrid score read the panel's, never the bare "Not in this
+        # dataset".
+        rows = nation_rows(tree)
+        for row in rows.values():
             for field in ("national_pv_votes", "pv_share", "hybrid_score"):
                 assert row[field] == labels.NOT_APPLICABLE, (year, field)
+            # The second share is a value at every year, not a popular-vote cell.
+            assert row["ec_share_hybrid"].endswith("%"), (year, row)
         assert {panel(tree)[f] for f in PV_FIELDS} == {labels.NOT_APPLICABLE}
+        # Out of AC3 by the owner's ruling (#352, option (i)): a null party keeps
+        # "Not in this dataset" with its note, as in T2; #355 owns party display.
+        null_party = [
+            r["candidate"] for r in year_body(year)["summary"] if r["party"] is None
+        ]
+        assert null_party  # the premise
+        for name in null_party:
+            assert rows[name]["party"] == labels.NOT_IN_DATASET, (year, name)
 
     def test_inside_the_window_t3_has_no_year_note_and_names_a_missing_figure(
         self,
@@ -1174,7 +1193,11 @@ def test_the_governing_census_is_shown_with_its_reason() -> None:
         "1870"
     }
     assert labels.GOVERNING_CENSUS_NOTE in texts(tree)
-    assert "2010" in labels.GOVERNING_CENSUS_NOTE and "1910" in labels.GOVERNING_CENSUS_NOTE
+    assert labels.GOVERNING_CENSUS_NOTE == (
+        "Each election uses the census that set the state's electoral votes, not the "
+        "nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
+        "Congress did not redistribute House seats after the 1920 census."
+    )
 
 
 def test_each_boundary_basis_cell_carries_its_help_text() -> None:
@@ -1187,6 +1210,12 @@ def test_each_boundary_basis_cell_carries_its_help_text() -> None:
         "Present-day borders",
     }
     assert labels.BOUNDARY_NOTE in texts(tree)
+    assert labels.BOUNDARY_NOTE == (
+        "At the election: the people inside the state's borders when the election was "
+        "held. Present-day borders: the Census Bureau's figure for the state as its "
+        "table reports it, which this dataset does not claim matches the state's "
+        "borders at that election."
+    )
 
 
 def test_every_recorded_year_renders_t6_beside_t2_and_t3() -> None:
@@ -1820,6 +1849,20 @@ class TestWordingRules:
         assert self.breaks_the_rule(
             "has_popular_vote is false where this dataset holds no popular-vote "
             "figure for the year; it does not say whether a popular vote was held."
+        )
+
+    def test_the_drafted_notes_are_pinned(self) -> None:
+        """Drafted for the owner's review in place (#352): pinned as shipped, so a
+        reword is a deliberate change here, and the panel's every fixed string stays
+        pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
+        assert labels.MARGIN_NOTE == (
+            "A margin is the gap, in percentage points, between the first- and "
+            "second-place candidates under that method. Each method ranks the "
+            "candidates on its own."
+        )
+        assert labels.EC_SHARE_HYBRID_NOTE == (
+            "The hybrid uses each candidate's electoral share as it is, so the hybrid's "
+            "electoral share repeats it. Both are shown so you can check that."
         )
 
     def test_the_drafted_notes_show_where_they_explain(self) -> None:

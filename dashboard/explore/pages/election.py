@@ -89,9 +89,9 @@ NATION_FIELDS = (
 NATION_EXTRA = ("candidate_slug", "year")
 
 #: The election panel's fields, in display order, by public field name (#308): who led
-#: under each method, whether either other method changes the winner, the three
-#: margins, whether anyone won a majority of electors, and the share of electors
-#: appointed by states that held a popular vote.
+#: under each method, whether the popular-vote or the hybrid winner differs from the
+#: Electoral College result, the three margins, whether anyone won a majority of
+#: electors, and the share of electors appointed by states that held a popular vote.
 PANEL_FIELDS = (
     "ec_winner",
     "pv_winner",
@@ -475,7 +475,8 @@ def _election(value: Any, year: int) -> dict[str, Any] | None:
 def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, str]:
     """Each panel field's cell. The Electoral College fields and ``pv_coverage`` exist
     for every year, so a null there names no cause; a null popular-vote or hybrid field
-    outside the window (from ``coverage``) is not applicable, and a value is shown
+    outside the window (from ``coverage``) reads :data:`labels.NOT_APPLICABLE`, and a
+    value is shown
     whatever the year."""
     applicable = labels.in_pv_window(year, coverage)
     return {
