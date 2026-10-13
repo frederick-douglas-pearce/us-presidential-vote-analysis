@@ -1,7 +1,10 @@
-/* Two layouts (#360). Below 64rem, one readable column; nothing fixed-width, so a phone
-   never scrolls sideways. From 64rem up, the page widens to 72rem so the tables fit
-   without scrolling, while running text, the panel and the filters keep the 42rem
-   measure at every width. */
+/* Two layouts (#360). The page is up to 72rem wide at any width, but running text, the
+   panel, the filters and the short lists keep a readable measure (--measure) and only
+   tables use the rest. A phone is narrower than the measure, so it sees one column and
+   scrolls sideways only inside a table. From 64rem up the side padding grows and the
+   States list goes to three columns; the widest tables fit without scrolling from about
+   1280px. */
+:root { --measure: 42rem; }
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -11,7 +14,7 @@ body {
   background: #fff;
 }
 .explore {
-  max-width: 42rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding: 1.25rem 1rem 3rem;
 }
@@ -52,15 +55,16 @@ th { font-weight: 600; cursor: help; }
 .panel dd { margin: 0; }
 .panel .glossary dt { font-weight: normal; cursor: auto; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid #ddd; }
-/* The readable measure. Below 64rem the page is no wider than this, so it binds only above. */
-.explore p, .glossary, .panel, .filters, .provenance-footer ul { max-width: 42rem; }
+/* The readable measure. T1 and the States list are here too: at full width their few
+   short columns would spread thin. */
+.explore p, .glossary, .panel, .filters, .unavailable, .states, .provenance-footer ul,
+.table-scroll #elections-table { max-width: var(--measure); }
 @media (min-width: 64rem) {
-  .explore { max-width: 72rem; padding-left: 2rem; padding-right: 2rem; }
-  .states { columns: 3; }
+  .explore { padding-left: 2rem; padding-right: 2rem; }
+  /* The gap leaves room for each column's bullets, which sit outside its text. */
+  .states { columns: 3; column-gap: 2rem; }
   /* Padding, not margin: a margin at the top of a column is dropped, so the columns would not line up. */
   .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
-  /* T1's three short columns would spread thin at full width. */
-  .table-scroll #elections-table { max-width: 42rem; }
 }
 @media (prefers-color-scheme: dark) {
   body { color: #e8e8e8; background: #121212; }
