@@ -26,6 +26,7 @@ bottom is what the backlog expands into GitHub issues and stories.
 | **E8** Internal API | **Done, and past its MVP bar** (#94) — a read-only SQLite snapshot served by FastAPI with no live DB (D028), publicly deployed to Cloud Run behind Cloudflare and **live at `https://api.us-presidential-election-center.org`** (#101, D034/D035). The served window was widened from the MIT-only 1976–2024 back to the full **1824–2024** EC span in #139. **Open:** hybrid/flip/margin fields (#102) — E7 has landed, so this is no longer gated |
 | **E9** Public dashboard *(re-scoped from "analytical explorer data mart", D070)* | **Scoped, not started** — a dashboard at `explore.us-presidential-election-center.org` that reads the public API; the mart is deferred under YAGNI. Gated on a platform research spike (E9-S1); see [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
 | **E10** Census / apportionment analysis | **Done** — every story landed (tracker #129) — added after this outline was written; per-capita series on the public API since #245 |
+| **E14** Dashboard UI *(split out of E9, 2026-10-12)* | **Scoped** (#361, `epic:dashboard-ui`) — layout, theming, visual design, accessibility and the chart presentation foundation; E9 keeps the data path. See [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
 | *(unnumbered)* Publishing | **Done and in use** — see below |
 
 Two workstreams sit outside the original E1–E9 outline:
@@ -209,6 +210,7 @@ the original plan; the **Status** column is where each one actually got to.
 | **E8** | Internal API | FastAPI/REST over `ec_pv_redistributable` via a read-only embedded snapshot (no live DB); redistributable-only; MVP bar = powers our app; **depends only on E6, not E7** (D028–D032) | M3 (scoped + filed, #94) | **Done + publicly deployed**; #102 open |
 | **E9** | Public dashboard *(was: analytical explorer data mart — re-scoped, D070)* | dashboard over the public API: raw tables → charts → narrative tabs → landing page; mart deferred (YAGNI) | M3 (named) | Scoped (`epic:dashboard`) |
 | **E10** | Census / apportionment analysis | state population + apportionment; the per-capita elector-weight drift question | *(added later)* | **Done** — every story landed (tracker #129) |
+| **E14** | Dashboard UI | presentation across the dashboard: layout and responsive behavior, light/dark theming, visual design, accessibility, chart templates and palette; split out of E9 | *(added later)* | Scoped (#361, `epic:dashboard-ui`) |
 
 **Critical path:** E1 → E2 (backbone) with E3 running in parallel. PV is dual-source
 (D014): **E4 (UCSB historical, un-deferred, high-priority)** and E5 (MIT modern) feed E6

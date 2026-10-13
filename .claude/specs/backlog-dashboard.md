@@ -611,6 +611,8 @@ per election; persons-per-electoral-vote drift over time (the Post 4 sequel).
   uses (EC 1824+ or popular vote 1976+).
 - Any new data shape a chart needs is filed as its **own** story under D070(c), naming the
   chart.
+- Each chart story depends on **E14-S3**, the chart theme foundation (see
+  [E14](#e14-dashboard-ui-split-out-of-e9-2026-10-12)), and does not style itself.
 
 ### E9-S7: Phase 3 — narrative tabs (placeholder — unfiled)
 
@@ -634,6 +636,37 @@ linking to the matching "Counted, Not Assumed" post.
 A front door that summarizes each tab in a sentence and a thumbnail, and is the URL most
 worth sharing. Open at shaping time: whether the apex domain should serve or redirect to
 it.
+
+---
+
+## E14: dashboard UI (split out of E9, 2026-10-12)
+
+> **Epic #361, label `epic:dashboard-ui`.** E9 keeps the data path; E14 owns presentation.
+> #361's body carries the full routing rule; this section is its summary.
+
+**Routing rule:** an issue belongs in E14 when it changes how something is presented, not
+what is shown or where it comes from.
+
+| E14 owns | E9 keeps |
+|---|---|
+| Layout and responsive behavior: widths, breakpoints, page arrangement | Pages, routes, data reads, the cache, the API contract, new data shapes (D070(c)) |
+| Theming: System / Light / Dark, color tokens, `dcc` control theming | Table contents: columns, filters, URL state, CSV export (D075), null labeling |
+| Visual design: typography, palette, spacing, table styling | Reader-facing wording: `labels.py`, `docs/glossary.md` (#352) |
+| Accessibility: contrast, keyboard, focus, screen readers | Open Graph tags, canonical links, 404s (D071(a), D073) |
+| Chart presentation foundation: Plotly templates for both themes, the categorical/party palette, chart accessibility and interaction conventions | Deploy, the structural guards, the canary; every individual chart (E9-S6) |
+
+An E14 story that needs a guard's allow-list widened (a `.js` asset under
+`explore/assets/`, say) makes that change in its own PR with its reason; the guard stays
+E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
+
+**Stories** (#360 lands before #359; both edit `explore/assets/style.css`):
+
+- **E14-S1** — #360: widen the layout on desktop, keep the phone column.
+- **E14-S2** — #359: light/dark theme choice (System / Light / Dark).
+- **E14-S3** — chart theme foundation (light/dark Plotly templates + palette).
+  **Unfiled placeholder, gated on E9-S6:** filed when the first chart story is shaped, and
+  lands before or with that chart. It picks each chart's template from E14-S2's
+  `data-theme`.
 
 ---
 
