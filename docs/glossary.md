@@ -409,7 +409,9 @@ file.
   words in ordinary capitalization); `labels.PARTY_NOTE` as help text on a cell with no party
   (null or blank) and under T2, T3 and T4.
 - **Source:** `EcPvRow.party`, `NationalSummaryRow.party`; D019; D024 §5 (citing D018: party must
-  not become a second source of party truth); display rule: owner decision, 2026-10-10, #348;
+  not become a second source of party truth); display rule: owner decision, 2026-10-10, #348; a
+  code with no letter or digit reads *Unrecognized value*: owner decision, 2026-10-13, #355 (code
+  review);
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Then there is a third number" (the
   Democratic name in reader prose).
 - **Not:** An Electoral College attribute; the dataset serves none. Not a second party record:
@@ -563,8 +565,9 @@ file.
   cell whose `coverage` is, and a people-per-electoral-vote cell whose `coverage` is and whose
   allotment is not zero (a zero allotment explains the null first). Names and parties are open
   vocabularies: any non-blank text is shown (a party through its display form, see Party), never
-  this, unless a party code has no letter or digit to show (underscores, spaces, punctuation or
-  invisible characters only); candidate and state names in the tables are shown as served (#367).
+  this, unless no character of a party code is a letter or digit (for example underscores,
+  punctuation, symbols or a zero-width space; a few letters render blank and are shown as served,
+  #368); candidate and state names in the tables are shown as served (#367).
   A null or blank text is not this: it names no cause (*Not in this dataset*), or the cause its
   row or year gives. No served year reaches this cell; it is defensive. In a CSV download the
   field is written as the API served it; for a null figure with an unrecognized cause, the
@@ -580,10 +583,10 @@ file.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
-  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355; a party code with no letter
-  or digit: owner decision, 2026-10-13, #355 (code review) (its wording
-  reviewed by the owner on the #355 branch deploy); the comment on `UNRECOGNIZED` and the
-  `labels.py` module docstring.
+  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording
+  reviewed by the owner on the #355 branch deploy); a party code with no letter or digit: owner
+  decision, 2026-10-13, #355 (code review); the comment on `UNRECOGNIZED` and the `labels.py`
+  module docstring.
 - **Not:** *Not in this dataset*, which means the dataset holds nothing here. Not a claim that the
   value is wrong, or about any source: only that this page has no wording for it. Not *disputed*,
   which is a recorded fact (see Count status).

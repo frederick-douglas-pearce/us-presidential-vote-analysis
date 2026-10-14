@@ -366,9 +366,10 @@ def _party_words(code: str) -> str:
 def party(value: object) -> str:
     """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
     capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
-    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text or has no
-    letter or digit (underscores, punctuation or invisible characters alone; owner
-    decision at #355's review), which would otherwise show as a bare-looking cell."""
+    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text, or in which
+    no character is a letter or digit (for example underscores, punctuation, symbols or
+    a zero-width space; owner decision at #355's review), which would otherwise show as
+    a bare-looking cell. A few letters render blank and are shown as served (#368)."""
     if isinstance(value, str) and not is_blank(value):
         code = value.strip()
         if not any(ch.isalnum() for ch in code):
