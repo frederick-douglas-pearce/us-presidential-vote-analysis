@@ -356,16 +356,16 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
             html.Td(str(row["candidate"])),
             labels.party_cell(row["party"]),
-            html.Td(labels.number(row["state_electoral_votes"])),
-            html.Td(labels.number(row["electoral_votes"])),
-            html.Td(labels.number(row["electoral_votes_counted"])),
-            html.Td(
+            labels.cell(labels.number(row["state_electoral_votes"])),
+            labels.cell(labels.number(row["electoral_votes"])),
+            labels.cell(labels.number(row["electoral_votes_counted"])),
+            labels.cell(
                 labels.count_status(
                     row["electoral_count_status"], row["electoral_count_status_reason"]
                 )
             ),
-            html.Td(labels.pv_status(row["pv_status"])),
-            html.Td(
+            labels.cell(labels.pv_status(row["pv_status"])),
+            labels.cell(
                 labels.popular_votes(
                     row["popular_votes"], row["pv_status"], year, coverage
                 )

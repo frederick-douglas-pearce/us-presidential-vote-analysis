@@ -213,10 +213,13 @@ file.
 - **Precise:** `ec_winner`, the candidate with the largest counted electoral share. Its reader
   name depends on `ec_determinative` from the same election block: true reads as the Electoral
   College winner; false reads as the Electoral College leader with no majority; null reads as
-  the Electoral College leader, claiming neither a majority nor its absence (owner decision, 2026-10-11, #348).
+  the Electoral College leader, claiming neither a majority nor its absence (owner decision, 2026-10-11, #348); so does a value this page does not recognize.
   Neither name says who took office.
-- **Shown as:** `LABELS["ec_winner"]` and the panel row label chosen with `ec_determinative`;
-  `labels.winner`; referred to by `labels.FLIP_YES`.
+- **Shown as:** `LABELS["ec_winner"]`, the label wherever no recognized `ec_determinative` is in
+  hand; `labels.EC_WINNER` and `labels.EC_LEADER_NO_MAJORITY`, chosen by
+  `labels.ec_winner_label` from `ec_determinative` for the panel row and its field-name list
+  (`_panel` in `pages/election.py`, through `labels.glossary`'s `chosen` map); the cell
+  `labels.winner`; the same role names `labels.FLIP_YES`.
 - **Source:** owner decision, 2026-10-10, #348; `ElectionSummary.ec_winner` and
   `ec_determinative`; D041; D038 (the 1824 rationale); `posts/2026-08-25-it-takes-270-but-270-of-what.md`,
   "The one time it happened" (the electoral leader, majority outright, who took office);
@@ -295,7 +298,9 @@ file.
   false when it is the same person. Null where the method has no winner (outside the popular-vote
   window): null, never false, because a method with no winner neither agrees nor disagrees. The
   reader wording names the Electoral College side the same way `ec_winner` does.
-- **Shown as:** `LABELS["pv_flip"]`, `LABELS["hybrid_flip"]`; `labels.flip`, `labels.FLIP_YES`.
+- **Shown as:** `LABELS["pv_flip"]`, `LABELS["hybrid_flip"]`; the cell `labels.flip`, given
+  `ec_determinative`, which fills `labels.FLIP_YES` with the Electoral College's role by the same
+  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader).
 - **Source:** `ElectionSummary.pv_flip`, `hybrid_flip` and the class docstring; owner decision,
   2026-10-10, #348 (consistency with `ec_winner`).
 - **Not:** "No", which is a recorded agreement. *Outside the popular-vote window*, which is no
@@ -352,12 +357,15 @@ file.
 - **Plain:** This dataset has no value here. It says nothing about why, or about what happened at
   the time.
 - **Precise:** The cell for a null, blank or non-finite value that the row does not explain. It is
-  also the cell for `has_popular_vote: false` and for a null `party`, both of which are about what
+  also the cell for `has_popular_vote: false` and for a null or blank `party`, both of which are about what
   the dataset holds. In a CSV download the same thing is an empty cell (`export.NULL_LINE`). A
   cause, where one is known, follows it after a colon (*Outside the popular-vote window*).
 - **Shown as:** `labels.NOT_IN_DATASET`, reached through `labels.has_popular_vote`,
-  `labels.party`, `labels._closed_value`, `labels._null`, `labels.ec_majority`,
-  `labels.share_cell`, `labels.margin`, `labels.persons_per_electoral_vote`.
+  `labels.yes_no`, `labels.number`, `labels.share` (so `labels.share_cell`), `labels.census_year`,
+  `labels.pv_status`, `labels.count_status`, `labels.popular_votes`, `labels.party` (with
+  `labels.PARTY_NOTE` through `labels.party_cell`), `labels._closed_value`, `labels._null` (so
+  `labels.winner`, `labels.flip`, `labels.margin`), `labels.ec_majority`,
+  `labels.persons_per_electoral_vote`.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -386,14 +394,17 @@ file.
 - **Plain:** The candidate's party as the popular-vote source records it, shown as a name in
   ordinary capitalization.
 - **Precise:** The party of record from the popular-vote source. The API serves the source's own
-  code; the dashboard shows a display form of that code (capitalization, plus a short list of
-  exceptions where the name is not the code's case form: `DEMOCRAT` reads "Democratic", the
-  party's own name, owner decision, 2026-10-11, #348). The download keeps the code as served.
+  code; the dashboard shows a display form of that code (underscores read as spaces and each word
+  capitalized, plus a short list of exceptions where the name is not the code's case form:
+  `DEMOCRAT` reads "Democratic", the party's own name, owner decision, 2026-10-11, #348). The
+  download keeps the code as served. A party that is not text reads *Unrecognized value*.
   Null outside the popular-vote window and wherever that source has no figure for the candidate.
   The codes the public data can carry are limited by `EC_GETTER_PARTIES` in
   `src/usvote/mit/transform.py` (D019).
-- **Shown as:** `LABELS["party"]`; `labels.party_cell`, with `labels.PARTY_NOTE` as help text on a
-  null cell and under T2, T3 and T4.
+- **Shown as:** `LABELS["party"]`; the cell `labels.party_cell`, through `labels.party`, which
+  shows a code's display form (`labels.PARTY_DISPLAY` for the exceptions, otherwise the code's
+  words in ordinary capitalization); `labels.PARTY_NOTE` as help text on a cell with no party
+  (null or blank) and under T2, T3 and T4.
 - **Source:** `EcPvRow.party`, `NationalSummaryRow.party`; D019; D024 §5 (citing D018: party must
   not become a second source of party truth); display rule: owner decision, 2026-10-10, #348;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Then there is a third number" (the
@@ -535,16 +546,38 @@ file.
 - **Status:** settled
 
 ### Unrecognized value
-- **Plain:** The dataset has a value here that this page does not have a label for. The download
-  shows it as served.
-- **Precise:** The reader cell for a closed-vocabulary value outside the known set (a status,
-  boundary basis or census-figure code the dashboard does not label). Today these fall back to the
-  raw value as text, which the no-raw-names rule forbids.
-- **Shown as:** a new constant, wording "Unrecognized value". Today the fallbacks are in `labels.pv_status`,
-  `labels.count_status`, `labels._closed_value` and `labels.popular_votes`.
-- **Source:** the "renders as text rather than as a claim" docstrings in `labels.py`; owner
-  decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision, 2026-10-11, #348.
-- **Not:** *Not in this dataset*, which means the dataset holds nothing here.
+- **Plain:** This dataset holds a value that this page has no label for, so the page does not
+  show the value itself. Where the value sits in a table, the table's download includes it.
+- **Precise:** The reader cell for a non-null value outside what the dashboard has wording for:
+  a closed-vocabulary code outside the known set (popular vote held in this state, count status,
+  borders used, census figure); a value of the wrong type in a yes-or-no cell (popular vote in
+  this dataset, took office, flip, Electoral College majority); a candidate name or party that is
+  not text; and a number of the wrong type, or an integer too large to convert to a float, in a
+  count, share, margin, population, people-per-electoral-vote or census-year cell. It is also the
+  cell for a null figure whose cause field holds an unrecognized code: a popular-vote cell whose
+  `pv_status` is unrecognized, and a population or people-per-electoral-vote cell whose
+  `coverage` is. Names and parties are open vocabularies: any non-blank text is shown (a party
+  through its display form, see Party), never this. A null, blank text, or a non-finite number is
+  not this: it reads *Not in this dataset*. No served year reaches this cell; it is defensive. In
+  a CSV download the field is written as the API served it; for a null figure with an
+  unrecognized cause, the figure's column is empty and the cause field carries the code.
+- **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help
+  text (set by `labels.cell`, and by `labels.party_cell`). Reached through `labels.pv_status`,
+  `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
+  `labels.per_capita_coverage`, `labels._null_per_capita`), `labels.popular_votes`,
+  `labels.has_popular_vote`, `labels.yes_no`, `labels.flip`, `labels.ec_majority`,
+  `labels.winner`, `labels.party`, `labels.margin`, `labels.number`, `labels.share` (so
+  `labels.share_cell`), `labels.population`, `labels.persons_per_electoral_vote`,
+  `labels.census_year`.
+- **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
+  2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
+  this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
+  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording
+  reviewed by the owner on the #355 branch deploy); the comment on `UNRECOGNIZED` and the
+  `labels.py` module docstring.
+- **Not:** *Not in this dataset*, which means the dataset holds nothing here. Not a claim that the
+  value is wrong, or about any source: only that this page has no wording for it. Not *disputed*,
+  which is a recorded fact (see Count status).
 - **Status:** settled
 
 ### Years covered

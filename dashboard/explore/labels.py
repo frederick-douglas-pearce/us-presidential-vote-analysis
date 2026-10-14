@@ -24,13 +24,16 @@ election panel's cells (#308) follow it too: a null popular-vote or hybrid field
 the popular-vote window reads :data:`NOT_APPLICABLE`, never "No"; a value is shown
 whatever the year, as :func:`popular_votes` shows one. The wording follows the project
 glossary (``docs/glossary.md``) and its wording rules (#352): no underscore or raw field
-name in a label, cell or note, and "counted" only for vote counts.
+name in a label, cell or note, and "counted" only for vote counts. No cell shows a raw
+value either (#355): a null or blank names no cause (:data:`NOT_IN_DATASET`), and a
+value this module has no wording for reads :data:`UNRECOGNIZED`, with
+:data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`).
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from dash import html
@@ -70,8 +73,10 @@ LABELS: dict[str, str] = {
     "persons_per_electoral_vote": "People per electoral vote",
     # The election panel (#308), from a ``/v1/elections/{year}`` response's
     # ``election`` block. ``ec_winner`` is the largest counted share, not who took
-    # office (1824: Jackson led and the House chose Adams), so it is not "Winner".
-    "ec_winner": "Most electoral votes counted",
+    # office (1824: Jackson led and the House chose Adams), so its label follows
+    # ``ec_determinative`` (#355, :func:`ec_winner_label`); this one claims neither a
+    # majority nor its absence, for wherever no ``ec_determinative`` is in hand.
+    "ec_winner": "Electoral College leader",
     "pv_winner": "Popular-vote winner",
     "hybrid_winner": "Hybrid winner",
     "pv_flip": "Popular-vote winner differs from the Electoral College result",
@@ -153,6 +158,16 @@ PARTY_NOTE = (
 #: year, not that none was held. Never "No".
 NOT_IN_DATASET = "Not in this dataset"
 
+#: A value this module has no wording for (#355): an unknown closed-vocabulary code, or
+#: a value of the wrong type. Never the raw value, and never :data:`NOT_IN_DATASET`,
+#: which means the dataset holds nothing here. A download writes the value as served.
+UNRECOGNIZED = "Unrecognized value"
+
+#: The help text every :data:`UNRECOGNIZED` cell carries (#355, drafted with the
+#: glossary for the owner's review in place). One sentence, true on the panel too, which
+#: has no download.
+UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for."
+
 
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
@@ -172,8 +187,14 @@ HAS_POPULAR_VOTE_NOTE = (
 #: :data:`AFTER_WINDOW`).
 NOT_APPLICABLE = "Not in this dataset: no popular-vote figures for this year"
 
-#: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``.
-FLIP_YES = "Yes: the {method} winner differs from the Electoral College winner"
+#: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``, and ``role`` is
+#: ``winner`` with an Electoral College majority, else ``leader`` (#355).
+FLIP_YES = "Yes: the {method} winner is not the Electoral College {role}"
+
+#: The panel's ``ec_winner`` label when ``ec_determinative`` is true, and when it is
+#: false (#355); a null or unknown one reads ``LABELS["ec_winner"]``.
+EC_WINNER = "Electoral College winner"
+EC_LEADER_NO_MAJORITY = "Electoral College leader (no majority)"
 
 #: Each ``ec_determinative`` value: a real outcome either way, never a missing value.
 EC_MAJORITY = "A candidate won a majority of electors appointed"
@@ -200,14 +221,61 @@ EC_SHARE_HYBRID_NOTE = (
 )
 
 
+#: A party code's display form where it is not the code's own words capitalized (#355).
+#: Only respells a served code: it never assigns a party (D024 §5).
+PARTY_DISPLAY: dict[str, str] = {"DEMOCRAT": "Democratic"}
+
+
+def _ec_role_is_winner(determinative: object) -> bool:
+    """The one test of whether the Electoral College's top candidate is its winner:
+    only a true ``ec_determinative`` (a majority of electors appointed); otherwise it
+    is its leader."""
+    return determinative is True
+
+
+def ec_winner_label(determinative: object) -> str:
+    """The panel's ``ec_winner`` label for the block's ``ec_determinative`` (#355)."""
+    if _ec_role_is_winner(determinative):
+        return EC_WINNER
+    if determinative is False:
+        return EC_LEADER_NO_MAJORITY
+    return LABELS["ec_winner"]
+
+
+def _blank(value: object) -> bool:
+    """A null or blank text: no value, so a cell names no cause for it."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _unknown(value: object, null: str = NOT_IN_DATASET) -> str:
+    """A value a cell has no wording for: ``null`` for no value, else
+    :data:`UNRECOGNIZED`. Never the raw value."""
+    return null if _blank(value) else UNRECOGNIZED
+
+
+def cell(children: Any, tag: Any = html.Td, title: str | None = None) -> Any:
+    """A cell (``tag``, a ``Td`` or a panel ``Dd``) holding ``children``; an
+    :data:`UNRECOGNIZED` cell carries :data:`UNRECOGNIZED_NOTE` as its help text, else
+    ``title`` where one is given."""
+    if children == UNRECOGNIZED or children == [UNRECOGNIZED]:
+        title = UNRECOGNIZED_NOTE
+    return tag(children) if title is None else tag(children, title=title)
+
+
 def header(field: str) -> html.Th:
     """A column header: the plain label, with the raw field name as its tooltip."""
     return html.Th(LABELS[field], title=field, scope="col")
 
 
-def glossary(fields: Iterable[str], summary: str = "Column names") -> html.Details:
+def glossary(
+    fields: Iterable[str],
+    summary: str = "Column names",
+    chosen: Mapping[str, str] | None = None,
+) -> html.Details:
     """Each column's plain label beside the API field name it shows. A list that is no
-    table (the election panel) names its ``summary`` otherwise."""
+    table (the election panel) names its ``summary`` otherwise, and a label that
+    depends on the data (``ec_winner``'s, #355) comes from ``chosen``."""
+    shown = {**LABELS, **(chosen or {})}
     return html.Details(
         [
             html.Summary(summary),
@@ -215,7 +283,7 @@ def glossary(fields: Iterable[str], summary: str = "Column names") -> html.Detai
                 [
                     item
                     for field in fields
-                    for item in (html.Dt(LABELS[field]), html.Dd(html.Code(field)))
+                    for item in (html.Dt(shown[field]), html.Dd(html.Code(field)))
                 ]
             ),
         ],
@@ -226,59 +294,78 @@ def glossary(fields: Iterable[str], summary: str = "Column names") -> html.Detai
 def has_popular_vote(value: object) -> str:
     """The cell for ``has_popular_vote``.
 
-    ``True`` reads "Yes" and ``False`` :data:`NOT_IN_DATASET`; anything else renders as
-    text rather than as a claim about the dataset.
+    ``True`` reads "Yes" and ``False`` :data:`NOT_IN_DATASET`, never a claim about the
+    dataset otherwise: see :func:`_unknown`.
     """
     if value is True:
         return "Yes"
     if value is False:
         return NOT_IN_DATASET
-    return str(value)
+    return _unknown(value)
 
 
 def number(value: object) -> str:
-    """An integer with thousands separators; anything else as text."""
+    """An integer with thousands separators; anything else is no count: see
+    :func:`_unknown`."""
     if isinstance(value, int) and not isinstance(value, bool):
         return f"{value:,}"
-    return str(value)
+    return _unknown(value)
 
 
 def share(value: object) -> str:
-    """A share as a percentage to one decimal place; anything else as text.
+    """A share as a percentage to one decimal place.
 
-    Total: a number no float can hold (``json`` parses integers of any size) renders
-    as text too, rather than raising ``OverflowError`` past the page's degraded state.
+    Total: a number no float can hold (``json`` parses integers of any size) reads
+    :data:`UNRECOGNIZED` rather than raising ``OverflowError`` past the page's degraded
+    state, as a value of no numeric type does; a non-finite number is no figure, so it
+    names no cause.
     """
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             percent = float(value) * 100
         except OverflowError:
-            return str(value)
+            return UNRECOGNIZED
         if math.isfinite(percent):
             return f"{percent:.1f}%"
-    return str(value)
+        return NOT_IN_DATASET
+    return _unknown(value)
 
 
 def yes_no(value: object) -> str:
-    """A known boolean fact (``took_office``): "Yes" or "No"; anything else as text."""
+    """A known boolean fact (``took_office``): "Yes" or "No"; otherwise see
+    :func:`_unknown`."""
     if value is True:
         return "Yes"
     if value is False:
         return "No"
-    return str(value)
+    return _unknown(value)
+
+
+def _party_words(code: str) -> str:
+    """A code's own words in ordinary capitalization: underscores read as spaces, and
+    each word is upper-cased at its first letter only (``str.title`` would give
+    "People'S")."""
+    return " ".join(
+        w[:1].upper() + w[1:].lower() for w in code.replace("_", " ").split()
+    )
 
 
 def party(value: object) -> str:
-    """A party, or :data:`NOT_IN_DATASET` for a null one (see :data:`PARTY_NOTE`)."""
-    return NOT_IN_DATASET if value is None else str(value)
+    """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
+    capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
+    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text."""
+    if isinstance(value, str) and not _blank(value):
+        code = value.strip()
+        return PARTY_DISPLAY.get(code, _party_words(code))
+    return _unknown(value)
 
 
 def party_cell(value: object) -> html.Td:
-    """A party cell: :func:`party`, and for a null one :data:`PARTY_NOTE` as its help
-    text."""
-    if value is None:
-        return html.Td(party(value), title=PARTY_NOTE)
-    return html.Td(party(value))
+    """A party cell: :func:`party`, and for no party :data:`PARTY_NOTE` as its help
+    text (an unrecognized one carries :data:`UNRECOGNIZED_NOTE`)."""
+    shown = party(value)
+    td: html.Td = cell(shown, title=PARTY_NOTE if shown == NOT_IN_DATASET else None)
+    return td
 
 
 def popular_votes(
@@ -289,9 +376,9 @@ def popular_votes(
     A null is never bare: a legislature's choice and a state taking no part say so
     whatever the year; a held popular vote with no figure says whether the year lies
     before the dataset's popular-vote window, after it (a snapshot whose Electoral
-    College data runs ahead of its popular vote), or inside it. An unknown status
-    renders as text rather than as a claim. The window comes from ``coverage``, never
-    a literal.
+    College data runs ahead of its popular vote), or inside it. An unknown status names
+    no cause it cannot vouch for: see :func:`_unknown`. The window comes from
+    ``coverage``, never a literal.
     """
     if value is not None:
         return number(value)
@@ -300,7 +387,7 @@ def popular_votes(
     if pv_status == "not_participating":
         return TOOK_NO_PART
     if pv_status != "popular_vote":
-        return str(pv_status)
+        return _unknown(pv_status)
     if year < coverage["pv_year_min"]:
         return BEFORE_WINDOW.format(pv_year_min=coverage["pv_year_min"])
     if year > coverage["pv_year_max"]:
@@ -309,31 +396,31 @@ def popular_votes(
 
 
 def pv_status(value: object) -> str:
-    """A ``pv_status`` value's label; an unknown value as text."""
-    return PV_STATUS.get(value, str(value)) if isinstance(value, str) else str(value)
+    """A ``pv_status`` value's label; see :func:`_closed_value`."""
+    return _closed_value(value, PV_STATUS)
 
 
 def count_status(status: object, reason: object) -> list[Any]:
     """A count-status cell: the label, and for a vote not counted, its meaning and the
-    Archives' reason sentence verbatim. An unknown value renders as text."""
+    Archives' reason sentence verbatim. Any other value: see :func:`_unknown`."""
     if not isinstance(status, str) or status not in COUNT_STATUS:
-        return [str(status)]
+        return [_unknown(status)]
     label, meaning = COUNT_STATUS[status]
     if meaning is None:
         return [label]
-    cell: list[Any] = [html.Strong(label), f" ({meaning})"]
+    parts: list[Any] = [html.Strong(label), f" ({meaning})"]
     if reason is not None:
-        cell += [html.Br(), html.Span(str(reason), className="reason")]
-    return cell
+        parts += [html.Br(), html.Span(str(reason), className="reason")]
+    return parts
 
 
 def _closed_value(value: object, table: dict[str, str]) -> str:
-    """A closed value's label. An unknown non-blank string renders as text rather than
-    as a claim; anything else (a null, a blank, a non-string) is no value the row
-    explains, so it names none: :data:`NOT_IN_DATASET`, never a bare cell."""
-    if isinstance(value, str) and value.strip():
-        return table.get(value, value)
-    return NOT_IN_DATASET
+    """A closed value's label. A null or a blank is no value the row explains, so it
+    names none (:data:`NOT_IN_DATASET`, never a bare cell); any other value outside
+    ``table`` reads :data:`UNRECOGNIZED`, never the raw value (#355)."""
+    if isinstance(value, str) and value in table:
+        return table[value]
+    return _unknown(value)
 
 
 def boundary_basis(value: object) -> str:
@@ -349,9 +436,9 @@ def per_capita_coverage(value: object) -> str:
 def _null_per_capita(coverage: object) -> str:
     """Why a per-capita figure is null, as far as ``coverage`` says.
 
-    No governing census figure reads as such; an unknown non-blank value renders as
-    text rather than as a claim; ``covered``, a blank or a non-string gives no cause,
-    so the cell names none (:data:`NOT_IN_DATASET`).
+    No governing census figure reads as such; ``covered``, a null or a blank gives no
+    cause, so the cell names none (:data:`NOT_IN_DATASET`); any other value reads
+    :data:`UNRECOGNIZED` (see :func:`_closed_value`).
     """
     if coverage == "covered":
         return NOT_IN_DATASET
@@ -374,8 +461,8 @@ def persons_per_electoral_vote(
     comes first, so a row carrying both causes reads as that; then a zero allotment (the
     state's votes were withheld). A null with neither cause names none. A non-finite
     number is no figure either, so it names none too. Total, as :func:`share` is: an
-    integer no float can hold, or a value of no numeric type (a bool, a string), renders
-    as text.
+    integer no float can hold, or a value of no numeric type (a bool, a string), reads
+    :data:`UNRECOGNIZED`.
     """
     if value is None:
         if coverage == NO_GOVERNING_FIGURE:
@@ -387,11 +474,19 @@ def persons_per_electoral_vote(
         try:
             number_ = float(value)
         except OverflowError:
-            return str(value)
+            return UNRECOGNIZED
         if not math.isfinite(number_):
             return NOT_IN_DATASET
         return f"{round(number_):,}"
-    return str(value)
+    return _unknown(value)
+
+
+def census_year(value: object) -> str:
+    """A census year (#280): the year, with no thousands separator; otherwise see
+    :func:`_unknown`."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return _unknown(value)
 
 
 #: The per-capita columns both tables share, in display order, after each table's own
@@ -410,18 +505,17 @@ def per_capita_cells(row: dict[str, Any]) -> list[html.Td]:
     """A per-capita row's cells for :data:`PER_CAPITA_FIELDS` (#280).
 
     The boundary-basis cell carries :data:`BOUNDARY_NOTE` as its help text, as a null
-    party cell carries its note.
+    party cell carries its note; an unrecognized cell carries :data:`UNRECOGNIZED_NOTE`.
     """
     coverage = row["coverage"]
     allotment = row["state_electoral_votes"]
     return [
-        # A year, so no thousands separator.
-        html.Td(str(row["governing_census_year"])),
-        html.Td(number(allotment)),
-        html.Td(population(row["population"], coverage)),
-        html.Td(boundary_basis(row["boundary_basis"]), title=BOUNDARY_NOTE),
-        html.Td(per_capita_coverage(coverage)),
-        html.Td(
+        cell(census_year(row["governing_census_year"])),
+        cell(number(allotment)),
+        cell(population(row["population"], coverage)),
+        cell(boundary_basis(row["boundary_basis"]), title=BOUNDARY_NOTE),
+        cell(per_capita_coverage(coverage)),
+        cell(
             persons_per_electoral_vote(
                 row["persons_per_electoral_vote"], coverage, allotment
             )
@@ -451,53 +545,58 @@ def winner(value: object, applicable: bool) -> str:
     """A winner cell (#308): the name, or why there is none.
 
     ``applicable`` is whether the method has a winner this year: always for the
-    Electoral College, inside the popular-vote window for the other two. A value is
-    shown whatever the year, as :func:`popular_votes` shows one.
+    Electoral College, inside the popular-vote window for the other two. A name is
+    shown whatever the year, as :func:`popular_votes` shows a figure; a blank is no
+    name, and a value that is not text reads :data:`UNRECOGNIZED`.
     """
-    return _null(applicable) if value is None else str(value)
+    if isinstance(value, str) and not _blank(value):
+        return value
+    return _unknown(value, _null(applicable))
 
 
-def flip(value: object, method: str, applicable: bool) -> str:
+def flip(value: object, method: str, applicable: bool, *, determinative: object) -> str:
     """A flip cell (#308): only ``True`` and ``False`` read Yes and No; a null is never
-    "No" (see :func:`winner`); anything else renders as text."""
+    "No" (see :func:`winner`); anything else reads :data:`UNRECOGNIZED`. A flip names
+    the Electoral College's winner only with a majority (``determinative``), else its
+    leader (#355)."""
     if value is True:
-        return FLIP_YES.format(method=method)
+        role = "winner" if _ec_role_is_winner(determinative) else "leader"
+        return FLIP_YES.format(method=method, role=role)
     if value is False:
         return "No"
-    return _null(applicable) if value is None else str(value)
+    return _unknown(value, _null(applicable))
 
 
 def margin(value: object, applicable: bool) -> str:
     """A margin cell (#308), already in percentage points in the API, to one decimal.
 
     A null reads as :func:`winner`'s does. Total, as :func:`share` is: an integer no
-    float can hold, or a value of no numeric type, renders as text, and a non-finite
-    number is no figure, so it names no cause.
+    float can hold, or a value of no numeric type, reads :data:`UNRECOGNIZED`, and a
+    non-finite number is no figure, so it names no cause.
     """
-    if value is None:
-        return _null(applicable)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             points = float(value)
         except OverflowError:
-            return str(value)
+            return UNRECOGNIZED
         if not math.isfinite(points):
             return NOT_IN_DATASET
         return f"{points:.1f} percentage points"
-    return str(value)
+    return _unknown(value, _null(applicable))
 
 
 def ec_majority(value: object) -> str:
     """An ``ec_determinative`` cell (#308): ``False`` is a real outcome, never a gap;
-    a null names no cause; anything else renders as text."""
+    a null names no cause; anything else reads :data:`UNRECOGNIZED`."""
     if value is True:
         return EC_MAJORITY
     if value is False:
         return NO_EC_MAJORITY
-    return NOT_IN_DATASET if value is None else str(value)
+    return _unknown(value)
 
 
 def share_cell(value: object) -> str:
     """A share the schema makes nullable though the API fills it for every year
-    (``ec_share_full``, ``ec_share_hybrid``, ``pv_coverage``): a null names no cause."""
-    return NOT_IN_DATASET if value is None else share(value)
+    (``ec_share_full``, ``ec_share_hybrid``, ``pv_coverage``): a null names no cause,
+    as :func:`share` reads one."""
+    return share(value)

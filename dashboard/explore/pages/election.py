@@ -372,16 +372,16 @@ def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html
             _state_cell(row),
             html.Td(str(row["candidate"])),
             labels.party_cell(row["party"]),
-            html.Td(labels.number(row["state_electoral_votes"])),
-            html.Td(labels.number(row["electoral_votes"])),
-            html.Td(labels.number(row["electoral_votes_counted"])),
-            html.Td(
+            labels.cell(labels.number(row["state_electoral_votes"])),
+            labels.cell(labels.number(row["electoral_votes"])),
+            labels.cell(labels.number(row["electoral_votes_counted"])),
+            labels.cell(
                 labels.count_status(
                     row["electoral_count_status"], row["electoral_count_status_reason"]
                 )
             ),
-            html.Td(labels.pv_status(row["pv_status"])),
-            html.Td(
+            labels.cell(labels.pv_status(row["pv_status"])),
+            labels.cell(
                 labels.popular_votes(
                     row["popular_votes"], row["pv_status"], year, coverage
                 )
@@ -407,18 +407,20 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
         [
             html.Td(str(row["candidate"])),
             labels.party_cell(row["party"]),
-            html.Td(labels.number(row["national_electoral_votes"])),
-            html.Td(labels.number(row["national_electoral_votes_counted"])),
-            html.Td(labels.number(row["national_electoral_denominator"])),
-            html.Td(labels.number(row["electoral_rank"])),
-            html.Td(labels.yes_no(row["took_office"])),
-            html.Td(_national_pv(row["national_pv_votes"], has_popular_vote, False)),
+            labels.cell(labels.number(row["national_electoral_votes"])),
+            labels.cell(labels.number(row["national_electoral_votes_counted"])),
+            labels.cell(labels.number(row["national_electoral_denominator"])),
+            labels.cell(labels.number(row["electoral_rank"])),
+            labels.cell(labels.yes_no(row["took_office"])),
+            labels.cell(
+                _national_pv(row["national_pv_votes"], has_popular_vote, False)
+            ),
             # Nullable in the API's schema, though real for every served year.
-            html.Td(labels.share_cell(row["ec_share_full"])),
-            html.Td(_national_pv(row["pv_share"], has_popular_vote, True)),
-            html.Td(labels.share_cell(row["ec_share_hybrid"])),
+            labels.cell(labels.share_cell(row["ec_share_full"])),
+            labels.cell(_national_pv(row["pv_share"], has_popular_vote, True)),
+            labels.cell(labels.share_cell(row["ec_share_hybrid"])),
             # On T3's year rule, so the row agrees with itself.
-            html.Td(_national_pv(row["hybrid_score"], has_popular_vote, True)),
+            labels.cell(_national_pv(row["hybrid_score"], has_popular_vote, True)),
         ]
     )
 
@@ -478,16 +480,21 @@ def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
     outside the window (from ``coverage``) reads :data:`labels.NOT_APPLICABLE`, and a
     value is shown whatever the year."""
     applicable = labels.in_pv_window(year, coverage)
+    determinative = block["ec_determinative"]
     return {
         "ec_winner": labels.winner(block["ec_winner"], True),
         "pv_winner": labels.winner(block["pv_winner"], applicable),
         "hybrid_winner": labels.winner(block["hybrid_winner"], applicable),
-        "pv_flip": labels.flip(block["pv_flip"], "popular-vote", applicable),
-        "hybrid_flip": labels.flip(block["hybrid_flip"], "hybrid", applicable),
+        "pv_flip": labels.flip(
+            block["pv_flip"], "popular-vote", applicable, determinative=determinative
+        ),
+        "hybrid_flip": labels.flip(
+            block["hybrid_flip"], "hybrid", applicable, determinative=determinative
+        ),
         "ec_margin": labels.margin(block["ec_margin"], True),
         "pv_margin": labels.margin(block["pv_margin"], applicable),
         "hybrid_margin": labels.margin(block["hybrid_margin"], applicable),
-        "ec_determinative": labels.ec_majority(block["ec_determinative"]),
+        "ec_determinative": labels.ec_majority(determinative),
         "pv_coverage": labels.share_cell(block["pv_coverage"]),
     }
 
@@ -495,7 +502,8 @@ def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
 def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
     """The election panel (#308): each field's label (its raw name as the tooltip, as
     a column header's is) beside its cell, the hybrid's and the margins' help text,
-    and a glossary."""
+    and a glossary. ``ec_winner``'s label follows ``ec_determinative`` (#355), from one
+    label map the list and the glossary share."""
     heading = html.H2("Under each method")
     if block is None:
         return [
@@ -503,6 +511,9 @@ def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
             html.P(PANEL_UNAVAILABLE, id=PANEL_UNAVAILABLE_ID, className="note"),
         ]
     cells = _panel_cells(block, year, coverage)
+    shown = {field: labels.LABELS[field] for field in PANEL_FIELDS} | {
+        "ec_winner": labels.ec_winner_label(block["ec_determinative"])
+    }
     return [
         heading,
         html.Div(
@@ -512,14 +523,14 @@ def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
                         item
                         for field in PANEL_FIELDS
                         for item in (
-                            html.Dt(labels.LABELS[field], title=field),
-                            html.Dd(cells[field]),
+                            html.Dt(shown[field], title=field),
+                            labels.cell(cells[field], html.Dd),
                         )
                     ]
                 ),
                 html.P(labels.HYBRID_NOTE, className="note"),
                 html.P(labels.MARGIN_NOTE, className="note"),
-                labels.glossary(PANEL_FIELDS, "Field names"),
+                labels.glossary(PANEL_FIELDS, "Field names", shown),
             ],
             id=PANEL_ID,
             className="panel",

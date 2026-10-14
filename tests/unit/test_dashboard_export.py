@@ -974,3 +974,66 @@ class TestRequestBudget:
         assert of_type(appmod.app.layout, "Download") == []
         for tree in all_pages(monkeypatch).values():
             assert of_type(tree, "Download") == []
+
+
+# --- no raw values on a page (#355) ---------------------------------------------------
+
+#: The recorded years of the one-election view, each rendered whole.
+ELECTION_YEARS = ("1824", "1860", "1868", "1872", "2016", "2024")
+
+
+def reader_texts(node: Any) -> list[str]:
+    """Every string a reader sees in a rendered tree: children only (a ``title`` or
+    an ``href`` is no reader text here), with ``Code`` exempt, since a field name is
+    shown as one where the page presents it as a field name (a glossary's names, the
+    data version)."""
+    if node is None:
+        return []
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, (int, float)):
+        return [str(node)]
+    if isinstance(node, (list, tuple)):
+        return [t for child in node for t in reader_texts(child)]
+    if isinstance(node, Component):
+        if type(node).__name__ == "Code":
+            return []
+        return reader_texts(getattr(node, "children", None))
+    raise TypeError(f"unexpected node {node!r}")
+
+
+def raw_values(tree: Any) -> list[str]:
+    """Reader texts carrying an underscore or a served party code (#355)."""
+    from usvote.mit.transform import EC_GETTER_PARTIES
+
+    return [
+        text
+        for text in reader_texts(tree)
+        if "_" in text or text.strip() in EC_GETTER_PARTIES
+    ]
+
+
+class TestNoRawValues:
+    """The glossary's no-raw-values rule over whole rendered pages (#355), so a raw
+    code reaching a cell through a path no per-function test lists still fails."""
+
+    def test_every_registered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pages = all_pages(monkeypatch)
+        assert pages  # the premise
+        assert {key: raw_values(tree) for key, tree in pages.items()} == dict.fromkeys(
+            pages, []
+        )
+
+    @pytest.mark.parametrize("year", ELECTION_YEARS)
+    def test_every_recorded_election(
+        self, year: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/election/<year>", monkeypatch, year=year)
+        assert reader_texts(tree)  # the premise: a rendered page
+        assert raw_values(tree) == []
+
+    def test_the_scan_fails_what_it_should(self) -> None:
+        # Non-vacuity: a raw code in a cell fails, a field name in a Code does not.
+        assert raw_values(html.Td("mystery_code")) == ["mystery_code"]
+        assert raw_values(html.Td(["Party: ", "REPUBLICAN"])) == ["REPUBLICAN"]
+        assert raw_values(html.Dd(html.Code("ec_winner"))) == []
