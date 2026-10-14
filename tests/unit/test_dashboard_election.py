@@ -804,6 +804,8 @@ class TestNullCells:
             (labels.party, "&", labels.UNRECOGNIZED),
             (labels.party, "+", labels.UNRECOGNIZED),
             (labels.party, "A-1", "A-1"),  # one letter or digit is enough
+            (labels.party, "123", "123"),  # a digit counts, not only a letter
+            (labels.party, " DEMOCRAT ", "Democratic"),  # trimmed before the lookup
             # A blank is no value in every function the rule covers (#355's review).
             (labels.has_popular_vote, "", labels.NOT_IN_DATASET),
             (labels.has_popular_vote, " ", labels.NOT_IN_DATASET),

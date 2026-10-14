@@ -1068,79 +1068,107 @@ def doctor(monkeypatch: pytest.MonkeyPatch, path: str, change: Any) -> None:
     monkeypatch.setitem(RECORDED, path, body)
 
 
-def _row(**fields: Any) -> Any:
+#: Every field a ``labels`` function words, per row kind, by public field name: each is
+#: doctored with :data:`SENTINEL`, except a name or party, which is open vocabulary (a
+#: text sentinel would rightly be shown) and gets a non-text value instead.
+STATE_ROW_FIELDS = (
+    "state_electoral_votes",
+    "electoral_votes",
+    "electoral_votes_counted",
+    "electoral_count_status",
+    "pv_status",
+)
+SUMMARY_ROW_FIELDS = (
+    "national_electoral_votes",
+    "national_electoral_votes_counted",
+    "national_electoral_denominator",
+    "electoral_rank",
+    "took_office",
+    "national_pv_votes",
+    "ec_share_full",
+    "pv_share",
+    "ec_share_hybrid",
+    "hybrid_score",
+)
+PER_CAPITA_ROW_FIELDS = (
+    "governing_census_year",
+    "state_electoral_votes",
+    "population",
+    "boundary_basis",
+    "coverage",
+    "persons_per_electoral_vote",
+)
+PANEL_WORDED_FIELDS = (
+    "pv_flip",
+    "hybrid_flip",
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
+    "ec_determinative",
+    "pv_coverage",
+)
+PANEL_NAME_FIELDS = ("ec_winner", "pv_winner", "hybrid_winner")
+
+
+def _row(*fields: str, **others: Any) -> Any:
+    """Doctor the first row: each of ``fields`` to :data:`SENTINEL`, plus ``others``."""
+
     def change(body: dict[str, Any]) -> None:
-        body["data"][0].update(fields)
+        body["data"][0].update(dict.fromkeys(fields, SENTINEL), **others)
 
     return change
 
 
-#: Per page: the responses to doctor, each with a sentinel in every closed-vocabulary
-#: and yes-or-no field the page shows, one numeric field of each table, and a party
-#: that is not text, so every table reaches a fallback.
+def _election(body: dict[str, Any]) -> None:
+    _row(*STATE_ROW_FIELDS, party=7)(body)
+    body["summary"][0].update(dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), party=7)
+    body["election"].update(
+        dict.fromkeys(PANEL_WORDED_FIELDS, SENTINEL),
+        **dict.fromkeys(PANEL_NAME_FIELDS, 7),
+    )
+
+
+#: Per page: the responses to doctor, each with every field a ``labels`` function
+#: words in one row of each table (and the panel) set to a value no cell has wording
+#: for, so every such cell is exercised.
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
         {},
-        {"/v1/elections": _row(has_popular_vote=SENTINEL, candidate_count=SENTINEL)},
+        {"/v1/elections": _row("has_popular_vote", "candidate_count")},
     ),
     "/election/<year>": (
         {"year": "2016"},
         {
-            "/v1/elections/2016": lambda b: (
-                b["data"][0].update(
-                    pv_status=SENTINEL,
-                    electoral_count_status=SENTINEL,
-                    electoral_votes=SENTINEL,
-                    party=7,
-                ),
-                b["summary"][0].update(
-                    took_office=SENTINEL, national_electoral_votes=SENTINEL, party=7
-                ),
-                b["election"].update(
-                    ec_margin=SENTINEL,
-                    pv_flip=SENTINEL,
-                    hybrid_flip=SENTINEL,
-                    ec_determinative=SENTINEL,
-                ),
-            ),
-            "/v1/elections/2016/per-capita": _row(
-                boundary_basis=SENTINEL,
-                coverage=SENTINEL,
-                governing_census_year=SENTINEL,
-            ),
+            "/v1/elections/2016": _election,
+            "/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
     "/state/<usps>": (
         {"usps": "GA"},
         {
-            "/v1/states/GA": _row(
-                pv_status=SENTINEL,
-                electoral_count_status=SENTINEL,
-                electoral_votes=SENTINEL,
-                party=7,
-            ),
-            "/v1/states/GA/per-capita": _row(
-                boundary_basis=SENTINEL,
-                coverage=SENTINEL,
-                governing_census_year=SENTINEL,
-            ),
+            "/v1/states/GA": _row(*STATE_ROW_FIELDS, party=7),
+            "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
 }
 
 
 #: How many cells read "Unrecognized value" on each doctored page, per table (and the
-#: panel): one per doctored field, plus a popular-vote cell whose cause is the doctored
-#: status. Written out, so a doctored cell reading anything else fails.
+#: panel): one per doctored field (a state row's popular-vote cell reads it too, its
+#: cause being the doctored status). Derived from the field lists above, which a new
+#: worded column must join for its cell to be checked.
 UNRECOGNIZED_CELLS = {
     "/elections": {"elections-table": 2},
     "/election/<year>": {
-        "election-states": 5,
-        "election-nation": 3,
-        "election-per-capita": 3,
-        "election-panel": 4,
+        "election-states": len(STATE_ROW_FIELDS) + 2,  # party, popular votes
+        "election-nation": len(SUMMARY_ROW_FIELDS) + 1,  # party
+        "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
+        "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
     },
-    "/state/<usps>": {"state-history": 5, "state-per-capita": 3},
+    "/state/<usps>": {
+        "state-history": len(STATE_ROW_FIELDS) + 2,
+        "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
+    },
 }
 
 
