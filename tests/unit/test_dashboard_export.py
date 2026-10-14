@@ -629,6 +629,16 @@ class TestNulls:
         assert export.NULL_LINE in states.lines
         assert labels.PARTY_NOTE in states.lines
 
+    def test_the_state_history_keeps_the_served_party_code(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#355: the page shows a party's display form; the file keeps the code."""
+        from usvote.mit.transform import EC_GETTER_PARTIES
+
+        tree, _ = render("/state/<usps>", monkeypatch)
+        history = download(tree, "state-history")
+        assert {r["party"] for r in history.rows} - {""} == EC_GETTER_PARTIES
+
     def test_the_state_history_explains_its_null_party(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -974,3 +984,260 @@ class TestRequestBudget:
         assert of_type(appmod.app.layout, "Download") == []
         for tree in all_pages(monkeypatch).values():
             assert of_type(tree, "Download") == []
+
+
+# --- no raw values on a page (#355) ---------------------------------------------------
+
+#: The recorded years of the one-election view, each rendered whole.
+ELECTION_YEARS = ("1824", "1860", "1868", "1872", "2016", "2024")
+
+#: A value no cell has wording for: an underscore, so a raw rendering of it fails
+#: :func:`raw_values` wherever it lands.
+SENTINEL = "zz_sentinel"
+
+
+def reader_texts(node: Any) -> list[str]:
+    """Every string a reader sees in a rendered tree: children, a dropdown's option
+    labels and its placeholder. ``Code`` is exempt, since a field name is shown as one
+    where the page presents it as a field name (a glossary's names, the data version),
+    and so are ``title`` tooltips: a header's is its field name by design, and the
+    help-text constants are scanned by ``TestWordingRules`` instead."""
+    if node is None:
+        return []
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, (int, float)):
+        return [str(node)]
+    if isinstance(node, (list, tuple)):
+        return [t for child in node for t in reader_texts(child)]
+    if isinstance(node, Component):
+        if type(node).__name__ == "Code":
+            return []
+        own: list[str] = []
+        for option in getattr(node, "options", None) or []:
+            label = option.get("label") if isinstance(option, dict) else option
+            own += reader_texts(label)
+        placeholder = getattr(node, "placeholder", None)
+        if isinstance(placeholder, str):
+            own.append(placeholder)
+        return own + reader_texts(getattr(node, "children", None))
+    raise TypeError(f"unexpected node {node!r}")
+
+
+def raw_values(tree: Any) -> list[str]:
+    """Reader texts that are a raw value (#355): any text carrying an underscore, and
+    any that is exactly a served code (a party, or a closed-vocabulary value, which may
+    be one word: ``counted``, ``covered``)."""
+    from usvote.count_status import COUNT_STATUS_VALUES
+    from usvote.mit.transform import EC_GETTER_PARTIES
+    from usvote.pv.status import PV_STATUS_VALUES
+    from usvote.snapshot_schema import (
+        PER_CAPITA_BOUNDARY_BASIS_VALUES,
+        PER_CAPITA_COVERAGE_VALUES,
+    )
+
+    codes = {
+        *EC_GETTER_PARTIES,
+        *PV_STATUS_VALUES,
+        *COUNT_STATUS_VALUES,
+        *PER_CAPITA_BOUNDARY_BASIS_VALUES,
+        *PER_CAPITA_COVERAGE_VALUES,
+    }
+    return [text for text in reader_texts(tree) if "_" in text or text.strip() in codes]
+
+
+def cells_reading(tree: Any, text: str) -> list[Any]:
+    """Every ``Td`` and ``Dd`` whose text is ``text``."""
+    return [
+        cell
+        for kind in ("Td", "Dd")
+        for cell in of_type(tree, kind)
+        if "".join(reader_texts(cell.children)) == text
+    ]
+
+
+def tables_in(tree: Any) -> dict[str, Any]:
+    """Every table in a tree, by id."""
+    return {t.id: t for t in of_type(tree, "Table") if getattr(t, "id", None)}
+
+
+def doctor(monkeypatch: pytest.MonkeyPatch, path: str, change: Any) -> None:
+    """Serve ``path`` changed by ``change`` for the rest of the test."""
+    body = copy.deepcopy(RECORDED[path])
+    change(body)
+    monkeypatch.setitem(RECORDED, path, body)
+
+
+#: Every field a ``labels`` function words, per row kind, by public field name: each is
+#: doctored with :data:`SENTINEL`, except a name or party, which is open vocabulary (a
+#: text sentinel would rightly be shown) and gets a non-text value instead.
+STATE_ROW_FIELDS = (
+    "state_electoral_votes",
+    "electoral_votes",
+    "electoral_votes_counted",
+    "electoral_count_status",
+    "pv_status",
+)
+SUMMARY_ROW_FIELDS = (
+    "national_electoral_votes",
+    "national_electoral_votes_counted",
+    "national_electoral_denominator",
+    "electoral_rank",
+    "took_office",
+    "national_pv_votes",
+    "ec_share_full",
+    "pv_share",
+    "ec_share_hybrid",
+    "hybrid_score",
+)
+PER_CAPITA_ROW_FIELDS = (
+    "governing_census_year",
+    "state_electoral_votes",
+    "population",
+    "boundary_basis",
+    "coverage",
+    "persons_per_electoral_vote",
+)
+PANEL_WORDED_FIELDS = (
+    "pv_flip",
+    "hybrid_flip",
+    "ec_margin",
+    "pv_margin",
+    "hybrid_margin",
+    "ec_determinative",
+    "pv_coverage",
+)
+PANEL_NAME_FIELDS = ("ec_winner", "pv_winner", "hybrid_winner")
+
+
+def _row(*fields: str, **others: Any) -> Any:
+    """Doctor the first row: each of ``fields`` to :data:`SENTINEL`, plus ``others``."""
+
+    def change(body: dict[str, Any]) -> None:
+        body["data"][0].update(dict.fromkeys(fields, SENTINEL), **others)
+
+    return change
+
+
+def _election(body: dict[str, Any]) -> None:
+    _row(*STATE_ROW_FIELDS, party=7)(body)
+    body["summary"][0].update(dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), party=7)
+    body["election"].update(
+        dict.fromkeys(PANEL_WORDED_FIELDS, SENTINEL),
+        **dict.fromkeys(PANEL_NAME_FIELDS, 7),
+    )
+
+
+#: Per page: the responses to doctor, each with every field a ``labels`` function
+#: words in one row of each table (and the panel) set to a value no cell has wording
+#: for, so every such cell is exercised.
+DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
+    "/elections": (
+        {},
+        {"/v1/elections": _row("has_popular_vote", "candidate_count")},
+    ),
+    "/election/<year>": (
+        {"year": "2016"},
+        {
+            "/v1/elections/2016": _election,
+            "/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
+        },
+    ),
+    "/state/<usps>": (
+        {"usps": "GA"},
+        {
+            "/v1/states/GA": _row(*STATE_ROW_FIELDS, party=7),
+            "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
+        },
+    ),
+}
+
+
+#: How many cells read "Unrecognized value" on each doctored page, per table (and the
+#: panel): one per doctored field (a state row's popular-vote cell reads it too, its
+#: cause being the doctored status). Derived from the field lists above, which a new
+#: worded column must join for its cell to be checked.
+UNRECOGNIZED_CELLS = {
+    "/elections": {"elections-table": 2},
+    "/election/<year>": {
+        "election-states": len(STATE_ROW_FIELDS) + 2,  # party, popular votes
+        "election-nation": len(SUMMARY_ROW_FIELDS) + 1,  # party
+        "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
+        "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
+    },
+    "/state/<usps>": {
+        "state-history": len(STATE_ROW_FIELDS) + 2,
+        "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
+    },
+}
+
+
+class TestNoRawValues:
+    """The glossary's no-raw-values rule over whole rendered pages (#355), as far as
+    rendered text shows it (children, dropdown labels and placeholders; not tooltips).
+    Recorded data reaches no fallback, so each table page is also rendered from bodies
+    doctored as ``DOCTORED`` says: every doctored cell then reads "Unrecognized value"
+    with its help text, never the raw value, and ``UNRECOGNIZED_CELLS`` pins how many
+    per table, so a doctored cell that reads otherwise fails. Candidate and state names
+    are shown as served (#367)."""
+
+    def test_every_registered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pages = all_pages(monkeypatch)
+        assert set(TABLES) <= {i for tree in pages.values() for i in tables_in(tree)}
+        assert {key: raw_values(tree) for key, tree in pages.items()} == dict.fromkeys(
+            pages, []
+        )
+
+    @pytest.mark.parametrize("year", ELECTION_YEARS)
+    def test_every_recorded_election(
+        self, year: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/election/<year>", monkeypatch, year=year)
+        on_page = {t for t, key in TABLES.items() if key == "/election/<year>"}
+        assert on_page <= set(tables_in(tree))  # the premise: no degraded page
+        assert raw_values(tree) == []
+
+    @pytest.mark.parametrize("key", list(DOCTORED))
+    def test_a_doctored_page_shows_no_raw_value_and_notes_every_unrecognized_cell(
+        self, key: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        values, changes = DOCTORED[key]
+        for path, change in changes.items():
+            doctor(monkeypatch, path, change)
+        tree, _ = render(key, monkeypatch, **values)
+        tables = tables_in(tree)
+        on_page = {t for t, page in TABLES.items() if page == key}
+        assert on_page <= set(tables)  # the premise: no degraded page
+        assert raw_values(tree) == []
+        unknown = cells_reading(tree, labels.UNRECOGNIZED)
+        assert unknown
+        assert [getattr(c, "title", None) for c in unknown] == [
+            labels.UNRECOGNIZED_NOTE
+        ] * len(unknown)
+        regions = {
+            **tables,
+            **{
+                d.id: d
+                for d in of_type(tree, "Div")
+                if getattr(d, "id", None) == "election-panel"
+            },
+        }
+        assert set(UNRECOGNIZED_CELLS[key]) >= on_page
+        assert {
+            region: len(cells_reading(regions[region], labels.UNRECOGNIZED))
+            for region in UNRECOGNIZED_CELLS[key]
+        } == UNRECOGNIZED_CELLS[key]
+        assert len(unknown) == sum(UNRECOGNIZED_CELLS[key].values())
+
+    def test_the_scan_fails_what_it_should(self) -> None:
+        # Non-vacuity: a raw code in a cell or a dropdown fails, one-word codes too; a
+        # field name in a Code does not.
+        assert raw_values(html.Td("mystery_code")) == ["mystery_code"]
+        assert raw_values(html.Td(["Party: ", "REPUBLICAN"])) == ["REPUBLICAN"]
+        assert raw_values(html.Td("counted")) == ["counted"]
+        assert raw_values(html.Td(html.Code("ec_winner"))) == []
+        dropdown = dash.dcc.Dropdown(
+            options=[{"label": "popular_vote", "value": "popular_vote"}],
+            placeholder="covered",
+        )
+        assert raw_values(dropdown) == ["popular_vote", "covered"]

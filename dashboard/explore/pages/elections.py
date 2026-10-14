@@ -158,8 +158,8 @@ def _row(election: dict[str, Any]) -> html.Tr:
         [
             # A year links to its one-election view (#307).
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
-            html.Td(str(election["candidate_count"])),
-            html.Td(labels.has_popular_vote(election["has_popular_vote"])),
+            labels.cell(labels.number(election["candidate_count"])),
+            labels.cell(labels.has_popular_vote(election["has_popular_vote"])),
         ]
     )
 

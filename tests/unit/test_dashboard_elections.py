@@ -193,12 +193,13 @@ class TestTable:
         assert labels.NOT_IN_DATASET in cells.values()
         assert "No" not in texts(render())
 
-    def test_an_unexpected_has_popular_vote_renders_as_text_not_a_claim(self) -> None:
-        assert labels.has_popular_vote(None) == "None"
-        assert labels.has_popular_vote(0) == "0"
+    def test_an_unexpected_has_popular_vote_is_never_a_claim_or_raw(self) -> None:
+        # #355: a null names no cause; any other non-bool is unrecognized.
+        assert labels.has_popular_vote(None) == labels.NOT_IN_DATASET
+        assert labels.has_popular_vote(0) == labels.UNRECOGNIZED
         # Truthy non-bools too: only True itself may claim the dataset holds it.
-        assert labels.has_popular_vote(1) == "1"
-        assert labels.has_popular_vote("false") == "false"
+        assert labels.has_popular_vote(1) == labels.UNRECOGNIZED
+        assert labels.has_popular_vote("false") == labels.UNRECOGNIZED
 
 
 # --- filters ---------------------------------------------------------------------
