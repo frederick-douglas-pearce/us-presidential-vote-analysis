@@ -1075,8 +1075,9 @@ def _row(**fields: Any) -> Any:
     return change
 
 
-#: Per page: the responses to doctor, each with a sentinel in every closed field and
-#: one numeric field of each table it feeds, so every table reaches a fallback.
+#: Per page: the responses to doctor, each with a sentinel in every closed-vocabulary
+#: and yes-or-no field the page shows, one numeric field of each table, and a party
+#: that is not text, so every table reaches a fallback.
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
         {},
@@ -1095,7 +1096,12 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
                 b["summary"][0].update(
                     took_office=SENTINEL, national_electoral_votes=SENTINEL, party=7
                 ),
-                b["election"].update(ec_margin=SENTINEL, pv_flip=SENTINEL),
+                b["election"].update(
+                    ec_margin=SENTINEL,
+                    pv_flip=SENTINEL,
+                    hybrid_flip=SENTINEL,
+                    ec_determinative=SENTINEL,
+                ),
             ),
             "/v1/elections/2016/per-capita": _row(
                 boundary_basis=SENTINEL,
@@ -1123,13 +1129,29 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 }
 
 
+#: How many cells read "Unrecognized value" on each doctored page, per table (and the
+#: panel): one per doctored field, plus a popular-vote cell whose cause is the doctored
+#: status. Written out, so a doctored cell reading anything else fails.
+UNRECOGNIZED_CELLS = {
+    "/elections": {"elections-table": 2},
+    "/election/<year>": {
+        "election-states": 5,
+        "election-nation": 3,
+        "election-per-capita": 3,
+        "election-panel": 4,
+    },
+    "/state/<usps>": {"state-history": 5, "state-per-capita": 3},
+}
+
+
 class TestNoRawValues:
     """The glossary's no-raw-values rule over whole rendered pages (#355), as far as
     rendered text shows it (children, dropdown labels and placeholders; not tooltips).
     Recorded data reaches no fallback, so each table page is also rendered from bodies
-    doctored with a sentinel in every closed field (``DOCTORED``): every cell a
-    ``labels`` function words then reads "Unrecognized value" with its help text, never
-    the raw value. Candidate and state names are shown as served (#367)."""
+    doctored as ``DOCTORED`` says: every doctored cell then reads "Unrecognized value"
+    with its help text, never the raw value, and ``UNRECOGNIZED_CELLS`` pins how many
+    per table, so a doctored cell that reads otherwise fails. Candidate and state names
+    are shown as served (#367)."""
 
     def test_every_registered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         pages = all_pages(monkeypatch)
@@ -1164,14 +1186,20 @@ class TestNoRawValues:
         assert [getattr(c, "title", None) for c in unknown] == [
             labels.UNRECOGNIZED_NOTE
         ] * len(unknown)
-        for table_id in on_page:  # every table reached a fallback
-            assert cells_reading(tables[table_id], labels.UNRECOGNIZED), table_id
-        if key == "/election/<year>":
-            panel = [
-                d for d in of_type(tree, "Div") if getattr(d, "id", None) == "election-panel"
-            ]
-            assert panel  # the premise
-            assert cells_reading(panel, labels.UNRECOGNIZED)
+        regions = {
+            **tables,
+            **{
+                d.id: d
+                for d in of_type(tree, "Div")
+                if getattr(d, "id", None) == "election-panel"
+            },
+        }
+        assert set(UNRECOGNIZED_CELLS[key]) >= on_page
+        assert {
+            region: len(cells_reading(regions[region], labels.UNRECOGNIZED))
+            for region in UNRECOGNIZED_CELLS[key]
+        } == UNRECOGNIZED_CELLS[key]
+        assert len(unknown) == sum(UNRECOGNIZED_CELLS[key].values())
 
     def test_the_scan_fails_what_it_should(self) -> None:
         # Non-vacuity: a raw code in a cell or a dropdown fails, one-word codes too; a

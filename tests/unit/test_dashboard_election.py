@@ -795,6 +795,17 @@ class TestNullCells:
             (labels.party, None, labels.NOT_IN_DATASET),
             (labels.party, "", labels.NOT_IN_DATASET),
             (labels.party, 7, labels.UNRECOGNIZED),
+            (labels.party, "_", labels.UNRECOGNIZED),  # text with no words to show
+            (labels.party, "_ _", labels.UNRECOGNIZED),
+            # A blank is no value in every function the rule covers (#355's review).
+            (labels.has_popular_vote, "", labels.NOT_IN_DATASET),
+            (labels.has_popular_vote, " ", labels.NOT_IN_DATASET),
+            (labels.yes_no, "", labels.NOT_IN_DATASET),
+            (labels.yes_no, " ", labels.NOT_IN_DATASET),
+            (labels.number, "", labels.NOT_IN_DATASET),
+            (labels.number, " ", labels.NOT_IN_DATASET),
+            (labels.census_year, "", labels.NOT_IN_DATASET),
+            (labels.census_year, " ", labels.NOT_IN_DATASET),
             (
                 labels.pv_status,
                 "legislature_chosen",
@@ -853,6 +864,8 @@ class TestCountStatus:
         assert labels.count_status("counted", "ignored") == ["Counted"]
         assert labels.count_status("mystery_code", None) == [labels.UNRECOGNIZED]
         assert labels.count_status(None, None) == [labels.NOT_IN_DATASET]
+        assert labels.count_status("", None) == [labels.NOT_IN_DATASET]
+        assert labels.count_status(" ", None) == [labels.NOT_IN_DATASET]
         # #355's review: only a reason that is text with something in it is shown.
         for reason in (None, "", "  ", 5):
             assert [type(c).__name__ for c in labels.count_status("disputed", reason)] == [

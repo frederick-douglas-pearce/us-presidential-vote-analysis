@@ -159,9 +159,10 @@ PARTY_NOTE = (
 #: year, not that none was held. Never "No".
 NOT_IN_DATASET = "Not in this dataset"
 
-#: A value this module has no wording for (#355): an unknown closed-vocabulary code, or
-#: a value of the wrong type. Never the raw value, and never :data:`NOT_IN_DATASET`,
-#: which means the dataset holds nothing here. A download writes the value as served.
+#: A value this module has no wording for (#355): an unknown closed-vocabulary code, a
+#: value of the wrong type, a non-finite number, or one too large to show as a share,
+#: margin or ratio. Never the raw value, and never :data:`NOT_IN_DATASET`, which means
+#: the dataset holds nothing here. A download writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
 
 #: The help text every :data:`UNRECOGNIZED` cell carries (#355, drafted with the
@@ -309,8 +310,9 @@ def glossary(
 def has_popular_vote(value: object) -> str:
     """The cell for ``has_popular_vote``.
 
-    ``True`` reads "Yes" and ``False`` :data:`NOT_IN_DATASET`, never a claim about the
-    dataset otherwise: see :func:`_unknown`.
+    ``True`` reads "Yes" and ``False`` :data:`NOT_IN_DATASET`. A null or a blank names
+    no cause, so it reads :data:`NOT_IN_DATASET` too (:data:`HAS_POPULAR_VOTE_NOTE`
+    explains only ``False``); any other value reads :data:`UNRECOGNIZED`.
     """
     if value is True:
         return "Yes"
@@ -363,10 +365,11 @@ def _party_words(code: str) -> str:
 def party(value: object) -> str:
     """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
     capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
-    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text."""
+    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text or has no
+    words to show (``_``)."""
     if isinstance(value, str) and not is_blank(value):
         code = value.strip()
-        return PARTY_DISPLAY.get(code, _party_words(code))
+        return PARTY_DISPLAY.get(code) or _party_words(code) or UNRECOGNIZED
     return _unknown(value)
 
 

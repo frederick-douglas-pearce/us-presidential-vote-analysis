@@ -367,7 +367,7 @@ file.
   `labels.pv_status`, `labels.count_status`, `labels.popular_votes`, `labels.party` (with
   `labels.PARTY_NOTE` through `labels.party_cell`), `labels._closed_value`, `labels._null` (so
   `labels.winner`, `labels.flip`, `labels.margin`), `labels.ec_majority`,
-  `labels.persons_per_electoral_vote`.
+  `labels._null_per_capita` (so `labels.population`), `labels.persons_per_electoral_vote`.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -562,11 +562,11 @@ file.
   cell whose `coverage` is, and a people-per-electoral-vote cell whose `coverage` is and whose
   allotment is not zero (a zero allotment explains the null first). Names and parties are open
   vocabularies: any non-blank text is shown (a party through its display form, see Party), never
-  this; candidate and state names in the tables are shown as served (#367). A null or blank text
-  is not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
-  served year reaches this cell; it is defensive. In a CSV download the field is written as the
-  API served it; for a null figure with an unrecognized cause, the figure's column is empty and
-  the cause field carries the code.
+  this, unless a party code has no words to show (an underscore alone); candidate and state names
+  in the tables are shown as served (#367). A null or blank text is not this: it names no cause
+  (*Not in this dataset*), or the cause its row or year gives. No served year reaches this cell;
+  it is defensive. In a CSV download the field is written as the API served it; for a null figure
+  with an unrecognized cause, the figure's column is empty and the cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help
   text (set by `labels.cell`, and by `labels.party_cell`). Reached through `labels.pv_status`,
   `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
