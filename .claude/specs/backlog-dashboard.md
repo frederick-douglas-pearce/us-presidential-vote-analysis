@@ -73,12 +73,14 @@ means the fact was read in the repo; **I** means it was inferred and not checked
 - **Editorial guardrail:** nothing critical of a data source is published, including in
   column help text, empty-state wording and narrative tabs. The wording describes what the
   dataset holds (for example `labels.BEFORE_WINDOW`), not a fault in a source.
-- **Public-facing copy** (labels, help text, narrative) gets a `marketer` draft/review
-  pass per the repo's convention. The label tables below are functional specs, not final
-  copy. Shipped wording lives in `dashboard/explore/labels.py` (with a few page-level
-  sentences in `components.py`, `export.py` and the pages), and what each term means in
-  the project glossary, `docs/glossary.md`; this spec names those constants rather than
-  quoting their text (#352).
+- **Reader-facing wording** (labels, help text, column-name lists, null, empty and error
+  states) gets a `ba` label spec against the project glossary, per root `CLAUDE.md`
+  (*Who writes wording*); narrative prose is routed under E9-S7. The label tables below
+  are functional specs, not final copy. Shipped wording lives in
+  `dashboard/explore/labels.py` (with a few page-level sentences in `components.py`,
+  `export.py` and the pages), and what each term means in the project glossary,
+  `docs/glossary.md`; this spec names those constants rather than quoting their text
+  (#352).
 
 ---
 
@@ -394,7 +396,7 @@ The first real content: raw, filterable tables for **the list of elections** and
 election in full**. They are deliberately close to data dumps. They let a reader look up
 any election, and they are the **debugging view** every Phase 2 chart will be checked
 against. This story also sets the **shared table conventions** (null labelling, count
-status, provenance footer, shareable URL state, column glossary) that S4 and S5 reuse.
+status, provenance footer, shareable URL state, column-name list) that S4 and S5 reuse.
 It sets them as a working vertical slice, not a separate framework story.
 
 **Tables and endpoints** [F1]
@@ -420,7 +422,7 @@ opens that election's view.
   `electoral_votes_counted`, `popular_votes`, …), not internal snapshot column names.
 
 **A null is never bare.** Popular-vote cell labelling (functional spec; final copy goes
-through the marketer pass and the editorial guardrail):
+through the `ba` pass and the editorial guardrail):
 
 | `pv_status` | year vs. `pv_year_min` | `popular_votes` | cell shows (wording in `labels.py`) |
 |---|---|---|---|
@@ -624,7 +626,8 @@ linking to the matching "Counted, Not Assumed" post.
 - Findings, not arguments: the series posture applies. **The hybrid thesis, if it ever
   appears, is a clearly labelled opinion tab**, never mixed into the neutral tabs.
 - Every claim is checked before publishing and nothing critical of a source is published,
-  as with posts. Copy gets the marketer pass.
+  as with posts. `marketer` drafts the prose and `ba` checks its terms against the
+  project glossary (decided at #349's plan gate, 2026-10-14).
 - Open: whether narrative text lives in the dashboard or is pulled from the published
   posts. Decide when this story is shaped.
 
