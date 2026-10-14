@@ -797,6 +797,14 @@ class TestNullCells:
             (labels.party, 7, labels.UNRECOGNIZED),
             (labels.party, "_", labels.UNRECOGNIZED),  # text with no words to show
             (labels.party, "_ _", labels.UNRECOGNIZED),
+            # No letter or digit at all (owner decision at round 3): an invisible
+            # character, or punctuation alone, never a bare-looking cell.
+            (labels.party, "\u200b", labels.UNRECOGNIZED),
+            (labels.party, "_\u200b", labels.UNRECOGNIZED),
+            (labels.party, "\ufeff", labels.UNRECOGNIZED),
+            (labels.party, "-", labels.UNRECOGNIZED),
+            (labels.party, "&", labels.UNRECOGNIZED),
+            (labels.party, "A-1", "A-1"),  # one letter or digit is enough
             # A blank is no value in every function the rule covers (#355's review).
             (labels.has_popular_vote, "", labels.NOT_IN_DATASET),
             (labels.has_popular_vote, " ", labels.NOT_IN_DATASET),

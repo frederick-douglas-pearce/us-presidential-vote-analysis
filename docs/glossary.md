@@ -399,7 +399,8 @@ file.
   code; the dashboard shows a display form of that code (underscores read as spaces and each word
   capitalized, plus a short list of exceptions where the name is not the code's case form:
   `DEMOCRAT` reads "Democratic", the party's own name, owner decision, 2026-10-11, #348). The
-  download keeps the code as served. A party that is not text reads *Unrecognized value*.
+  download keeps the code as served. A party that is not text, or whose code has no letter or
+  digit, reads *Unrecognized value*.
   Null outside the popular-vote window and wherever that source has no figure for the candidate.
   The codes the public data can carry are limited by `EC_GETTER_PARTIES` in
   `src/usvote/mit/transform.py` (D019).
@@ -562,11 +563,12 @@ file.
   cell whose `coverage` is, and a people-per-electoral-vote cell whose `coverage` is and whose
   allotment is not zero (a zero allotment explains the null first). Names and parties are open
   vocabularies: any non-blank text is shown (a party through its display form, see Party), never
-  this, unless a party code has no words to show (an underscore alone); candidate and state names
-  in the tables are shown as served (#367). A null or blank text is not this: it names no cause
-  (*Not in this dataset*), or the cause its row or year gives. No served year reaches this cell;
-  it is defensive. In a CSV download the field is written as the API served it; for a null figure
-  with an unrecognized cause, the figure's column is empty and the cause field carries the code.
+  this, unless a party code has no letter or digit to show (underscores, spaces, punctuation or
+  invisible characters only); candidate and state names in the tables are shown as served (#367).
+  A null or blank text is not this: it names no cause (*Not in this dataset*), or the cause its
+  row or year gives. No served year reaches this cell; it is defensive. In a CSV download the
+  field is written as the API served it; for a null figure with an unrecognized cause, the
+  figure's column is empty and the cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help
   text (set by `labels.cell`, and by `labels.party_cell`). Reached through `labels.pv_status`,
   `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
@@ -578,7 +580,8 @@ file.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
-  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording
+  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355; a party code with no letter
+  or digit: owner decision, 2026-10-13, #355 (code review) (its wording
   reviewed by the owner on the #355 branch deploy); the comment on `UNRECOGNIZED` and the
   `labels.py` module docstring.
 - **Not:** *Not in this dataset*, which means the dataset holds nothing here. Not a claim that the

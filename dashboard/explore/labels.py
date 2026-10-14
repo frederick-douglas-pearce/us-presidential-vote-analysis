@@ -160,9 +160,10 @@ PARTY_NOTE = (
 NOT_IN_DATASET = "Not in this dataset"
 
 #: A value this module has no wording for (#355): an unknown closed-vocabulary code, a
-#: value of the wrong type, a non-finite number, or one too large to show as a share,
-#: margin or ratio. Never the raw value, and never :data:`NOT_IN_DATASET`, which means
-#: the dataset holds nothing here. A download writes the value as served.
+#: value of the wrong type, a non-finite number, one too large to show as a share,
+#: margin or ratio, or a party code with no letter or digit. Never the raw value, and
+#: never :data:`NOT_IN_DATASET`, which means the dataset holds nothing here. A download
+#: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
 
 #: The help text every :data:`UNRECOGNIZED` cell carries (#355, drafted with the
@@ -366,10 +367,13 @@ def party(value: object) -> str:
     """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
     capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
     :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text or has no
-    words to show (``_``)."""
+    letter or digit (underscores, punctuation or invisible characters alone; owner
+    decision at #355's review), which would otherwise show as a bare-looking cell."""
     if isinstance(value, str) and not is_blank(value):
         code = value.strip()
-        return PARTY_DISPLAY.get(code) or _party_words(code) or UNRECOGNIZED
+        if not any(ch.isalnum() for ch in code):
+            return UNRECOGNIZED
+        return PARTY_DISPLAY.get(code, _party_words(code))
     return _unknown(value)
 
 
