@@ -149,7 +149,9 @@ file.
   sentence, verbatim, in `electoral_count_status_reason`; the reason is null when the votes were
   counted. National totals rows are never flagged (D044).
 - **Shown as:** `LABELS["electoral_count_status"]`, `LABELS["electoral_count_status_reason"]`;
-  values `labels.COUNT_STATUS`; the cell `labels.count_status`; the count-status filter.
+  values `labels.COUNT_STATUS`; the cell `labels.count_status`, which shows the reason verbatim
+  only when it is text with something in it, and leaves it out otherwise (the download keeps it
+  as served; #355); the count-status filter.
 - **Source:** `src/usvote/count_status.py`, `COUNT_STATUS_VALUES` and the comment on each value;
   `EcPvRow.electoral_count_status` and `electoral_count_status_reason`; D043; D044; D047; D048 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "When the record itself won't say" (the
@@ -356,7 +358,7 @@ file.
 ### Not in this dataset (a value with no cause given)
 - **Plain:** This dataset has no value here. It says nothing about why, or about what happened at
   the time.
-- **Precise:** The cell for a null, blank or non-finite value that the row does not explain. It is
+- **Precise:** The cell for a null or blank value that the row does not explain. It is
   also the cell for `has_popular_vote: false` and for a null or blank `party`, both of which are about what
   the dataset holds. In a CSV download the same thing is an empty cell (`export.NULL_LINE`). A
   cause, where one is known, follows it after a colon (*Outside the popular-vote window*).
@@ -548,19 +550,23 @@ file.
 ### Unrecognized value
 - **Plain:** This dataset holds a value that this page has no label for, so the page does not
   show the value itself. Where the value sits in a table, the table's download includes it.
-- **Precise:** The reader cell for a non-null value outside what the dashboard has wording for:
-  a closed-vocabulary code outside the known set (popular vote held in this state, count status,
+- **Precise:** The reader cell for a non-null value outside what the dashboard has wording
+  for: a closed-vocabulary code outside the known set (popular vote in this state, count status,
   borders used, census figure); a value of the wrong type in a yes-or-no cell (popular vote in
-  this dataset, took office, flip, Electoral College majority); a candidate name or party that is
-  not text; and a number of the wrong type, or an integer too large to convert to a float, in a
-  count, share, margin, population, people-per-electoral-vote or census-year cell. It is also the
-  cell for a null figure whose cause field holds an unrecognized code: a popular-vote cell whose
-  `pv_status` is unrecognized, and a population or people-per-electoral-vote cell whose
-  `coverage` is. Names and parties are open vocabularies: any non-blank text is shown (a party
-  through its display form, see Party), never this. A null, blank text, or a non-finite number is
-  not this: it reads *Not in this dataset*. No served year reaches this cell; it is defensive. In
-  a CSV download the field is written as the API served it; for a null figure with an
-  unrecognized cause, the figure's column is empty and the cause field carries the code.
+  this dataset, took office, flip, Electoral College majority); a winner's name on the election
+  panel, or a party, that is not text; a number of the wrong type, or a non-finite one, in a
+  count, share, margin, population, people-per-electoral-vote or census-year cell; and a number
+  too large to show as a share, margin or people-per-electoral-vote figure (a count, population
+  or census year shows any integer). It is also the cell for a null figure whose cause field
+  holds an unrecognized code: a popular-vote cell whose `pv_status` is unrecognized, a population
+  cell whose `coverage` is, and a people-per-electoral-vote cell whose `coverage` is and whose
+  allotment is not zero (a zero allotment explains the null first). Names and parties are open
+  vocabularies: any non-blank text is shown (a party through its display form, see Party), never
+  this; candidate and state names in the tables are shown as served (#367). A null or blank text
+  is not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
+  served year reaches this cell; it is defensive. In a CSV download the field is written as the
+  API served it; for a null figure with an unrecognized cause, the figure's column is empty and
+  the cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help
   text (set by `labels.cell`, and by `labels.party_cell`). Reached through `labels.pv_status`,
   `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,

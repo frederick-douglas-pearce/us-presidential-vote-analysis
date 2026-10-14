@@ -393,11 +393,11 @@ def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html
 def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
     """A T3 cell that needs the popular vote: :data:`labels.NOT_APPLICABLE` in a year
     with no popular vote (T3's year rule, from the index row), the panel's wording for
-    the same cause (#352), and inside it a null is a candidate with no popular-vote
-    figure."""
+    the same cause (#352), and inside it a null (or a blank, #355) is a candidate with
+    no popular-vote figure."""
     if not has_popular_vote:
         return labels.NOT_APPLICABLE
-    if value is None:
+    if labels.is_blank(value):
         return labels.NO_NATIONAL_FIGURE
     return labels.share(value) if as_share else labels.number(value)
 

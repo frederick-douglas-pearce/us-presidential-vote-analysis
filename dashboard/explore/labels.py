@@ -24,10 +24,11 @@ election panel's cells (#308) follow it too: a null popular-vote or hybrid field
 the popular-vote window reads :data:`NOT_APPLICABLE`, never "No"; a value is shown
 whatever the year, as :func:`popular_votes` shows one. The wording follows the project
 glossary (``docs/glossary.md``) and its wording rules (#352): no underscore or raw field
-name in a label, cell or note, and "counted" only for vote counts. No cell shows a raw
-value either (#355): a null or blank names no cause (:data:`NOT_IN_DATASET`), and a
-value this module has no wording for reads :data:`UNRECOGNIZED`, with
-:data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`).
+name in a label, cell or note, and "counted" only for vote counts. No cell this module
+words shows a raw value either (#355): a null or blank names no cause
+(:data:`NOT_IN_DATASET`), and a value it has no wording for reads :data:`UNRECOGNIZED`,
+with :data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`). Candidate and state
+names are shown as served: an open vocabulary the API types as text, not codes (#367).
 """
 
 from __future__ import annotations
@@ -173,9 +174,9 @@ UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for.
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
 #: raw ``false``. It says nothing about whether a popular vote was held.
 HAS_POPULAR_VOTE_NOTE = (
-    '"Not in this dataset" in the popular-vote column (false in the download) means '
-    "this dataset holds no popular-vote figure for that year. It does not say whether "
-    "a popular vote was held."
+    'A false in the popular-vote column, shown as "Not in this dataset", means this '
+    "dataset holds no popular-vote figure for that year. It does not say whether a "
+    "popular vote was held."
 )
 
 #: A popular-vote or hybrid cell with no figure because the year lies outside the
@@ -242,15 +243,29 @@ def ec_winner_label(determinative: object) -> str:
     return LABELS["ec_winner"]
 
 
-def _blank(value: object) -> bool:
-    """A null or blank text: no value, so a cell names no cause for it."""
+def is_blank(value: object) -> bool:
+    """A null or blank text: no value, so a cell names no cause for it, or the cause
+    its row gives (#355). Every other value is a value."""
     return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _finite(value: object) -> float | None:
+    """A number as a finite float, or ``None`` for anything else: a bool, a value of no
+    numeric type, an integer no float can hold, or a non-finite number. Each of those
+    that is a value reads :data:`UNRECOGNIZED` (:func:`_unknown`), never a figure."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        number_ = float(value)
+    except OverflowError:
+        return None
+    return number_ if math.isfinite(number_) else None
 
 
 def _unknown(value: object, null: str = NOT_IN_DATASET) -> str:
     """A value a cell has no wording for: ``null`` for no value, else
     :data:`UNRECOGNIZED`. Never the raw value."""
-    return null if _blank(value) else UNRECOGNIZED
+    return null if is_blank(value) else UNRECOGNIZED
 
 
 def cell(children: Any, tag: Any = html.Td, title: str | None = None) -> Any:
@@ -305,8 +320,8 @@ def has_popular_vote(value: object) -> str:
 
 
 def number(value: object) -> str:
-    """An integer with thousands separators; anything else is no count: see
-    :func:`_unknown`."""
+    """An integer with thousands separators, however large; a null or a blank names no
+    cause, and anything else (a float, a bool, a string) reads :data:`UNRECOGNIZED`."""
     if isinstance(value, int) and not isinstance(value, bool):
         return f"{value:,}"
     return _unknown(value)
@@ -315,25 +330,20 @@ def number(value: object) -> str:
 def share(value: object) -> str:
     """A share as a percentage to one decimal place.
 
-    Total: a number no float can hold (``json`` parses integers of any size) reads
-    :data:`UNRECOGNIZED` rather than raising ``OverflowError`` past the page's degraded
-    state, as a value of no numeric type does; a non-finite number is no figure, so it
-    names no cause.
+    Total: a null or a blank names no cause; any other value no percentage can show
+    reads :data:`UNRECOGNIZED` (see :func:`_finite`), including a finite one whose
+    percentage overflows, rather than raising ``OverflowError`` past the page's degraded
+    state (``json`` parses integers of any size).
     """
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            percent = float(value) * 100
-        except OverflowError:
-            return UNRECOGNIZED
-        if math.isfinite(percent):
-            return f"{percent:.1f}%"
-        return NOT_IN_DATASET
-    return _unknown(value)
+    number_ = _finite(value)
+    if number_ is None or not math.isfinite(number_ * 100):
+        return _unknown(value)
+    return f"{number_ * 100:.1f}%"
 
 
 def yes_no(value: object) -> str:
-    """A known boolean fact (``took_office``): "Yes" or "No"; otherwise see
-    :func:`_unknown`."""
+    """A known boolean fact (``took_office``): "Yes" or "No"; a null or a blank names
+    no cause, and anything else reads :data:`UNRECOGNIZED`."""
     if value is True:
         return "Yes"
     if value is False:
@@ -354,7 +364,7 @@ def party(value: object) -> str:
     """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
     capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
     :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text."""
-    if isinstance(value, str) and not _blank(value):
+    if isinstance(value, str) and not is_blank(value):
         code = value.strip()
         return PARTY_DISPLAY.get(code, _party_words(code))
     return _unknown(value)
@@ -373,14 +383,14 @@ def popular_votes(
 ) -> str:
     """A state's popular-vote cell: the figure, or why there is none.
 
-    A null is never bare: a legislature's choice and a state taking no part say so
-    whatever the year; a held popular vote with no figure says whether the year lies
-    before the dataset's popular-vote window, after it (a snapshot whose Electoral
-    College data runs ahead of its popular vote), or inside it. An unknown status names
-    no cause it cannot vouch for: see :func:`_unknown`. The window comes from
-    ``coverage``, never a literal.
+    A null (or a blank, #355) is never bare: a legislature's choice and a state taking
+    no part say so whatever the year; a held popular vote with no figure says whether
+    the year lies before the dataset's popular-vote window, after it (a snapshot whose
+    Electoral College data runs ahead of its popular vote), or inside it. An unknown
+    status names no cause it cannot vouch for: see :func:`_unknown`. The window comes
+    from ``coverage``, never a literal.
     """
-    if value is not None:
+    if not is_blank(value):
         return number(value)
     if pv_status == "legislature_chosen":
         return LEGISLATURE_CHOSE
@@ -402,15 +412,17 @@ def pv_status(value: object) -> str:
 
 def count_status(status: object, reason: object) -> list[Any]:
     """A count-status cell: the label, and for a vote not counted, its meaning and the
-    Archives' reason sentence verbatim. Any other value: see :func:`_unknown`."""
+    National Archives' reason sentence verbatim, shown only when it is text with
+    something in it (the download keeps it as served). Any other status: see
+    :func:`_unknown`."""
     if not isinstance(status, str) or status not in COUNT_STATUS:
         return [_unknown(status)]
     label, meaning = COUNT_STATUS[status]
     if meaning is None:
         return [label]
     parts: list[Any] = [html.Strong(label), f" ({meaning})"]
-    if reason is not None:
-        parts += [html.Br(), html.Span(str(reason), className="reason")]
+    if isinstance(reason, str) and reason.strip():
+        parts += [html.Br(), html.Span(reason, className="reason")]
     return parts
 
 
@@ -446,8 +458,9 @@ def _null_per_capita(coverage: object) -> str:
 
 
 def population(value: object, coverage: object) -> str:
-    """A per-capita population cell: the figure, or why there is none (#280)."""
-    return _null_per_capita(coverage) if value is None else number(value)
+    """A per-capita population cell: the figure, or why there is none (#280); a blank
+    is no figure (#355)."""
+    return _null_per_capita(coverage) if is_blank(value) else number(value)
 
 
 def persons_per_electoral_vote(
@@ -455,30 +468,24 @@ def persons_per_electoral_vote(
 ) -> str:
     """A persons-per-electoral-vote cell: the figure to a whole person, or why there is
     none (#280). Never bare, and never an infinity: a null ratio over a zero allotment
-    reads as such, and a non-finite figure names no cause.
+    reads as such.
 
-    The single statement of which cause explains a null ratio. A missing census figure
-    comes first, so a row carrying both causes reads as that; then a zero allotment (the
-    state's votes were withheld). A null with neither cause names none. A non-finite
-    number is no figure either, so it names none too. Total, as :func:`share` is: an
-    integer no float can hold, or a value of no numeric type (a bool, a string), reads
+    The single statement of which cause explains a null (or blank, #355) ratio. A
+    missing census figure comes first, so a row carrying both causes reads as that;
+    then a zero allotment (the state's votes were withheld), which wins over an
+    unrecognized ``coverage``; then ``coverage`` as :func:`_null_per_capita` reads it.
+    Total, as :func:`share` is: any other value no figure can show (a non-finite
+    number, an integer no float can hold, a bool, a string) reads
     :data:`UNRECOGNIZED`.
     """
-    if value is None:
+    if is_blank(value):
         if coverage == NO_GOVERNING_FIGURE:
             return PER_CAPITA_COVERAGE[NO_GOVERNING_FIGURE]
         if allotment == 0 and not isinstance(allotment, bool):
             return NO_ELECTORAL_VOTES
         return _null_per_capita(coverage)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            number_ = float(value)
-        except OverflowError:
-            return UNRECOGNIZED
-        if not math.isfinite(number_):
-            return NOT_IN_DATASET
-        return f"{round(number_):,}"
-    return _unknown(value)
+    number_ = _finite(value)
+    return _unknown(value) if number_ is None else f"{round(number_):,}"
 
 
 def census_year(value: object) -> str:
@@ -549,16 +556,16 @@ def winner(value: object, applicable: bool) -> str:
     shown whatever the year, as :func:`popular_votes` shows a figure; a blank is no
     name, and a value that is not text reads :data:`UNRECOGNIZED`.
     """
-    if isinstance(value, str) and not _blank(value):
+    if isinstance(value, str) and not is_blank(value):
         return value
     return _unknown(value, _null(applicable))
 
 
 def flip(value: object, method: str, applicable: bool, *, determinative: object) -> str:
-    """A flip cell (#308): only ``True`` and ``False`` read Yes and No; a null is never
-    "No" (see :func:`winner`); anything else reads :data:`UNRECOGNIZED`. A flip names
-    the Electoral College's winner only with a majority (``determinative``), else its
-    leader (#355)."""
+    """A flip cell (#308): only ``True`` and ``False`` read Yes and No; a null or a
+    blank is never "No" (see :func:`winner`); anything else reads
+    :data:`UNRECOGNIZED`. A flip names the Electoral College's winner only with a
+    majority (``determinative``), else its leader (#355)."""
     if value is True:
         role = "winner" if _ec_role_is_winner(determinative) else "leader"
         return FLIP_YES.format(method=method, role=role)
@@ -570,24 +577,19 @@ def flip(value: object, method: str, applicable: bool, *, determinative: object)
 def margin(value: object, applicable: bool) -> str:
     """A margin cell (#308), already in percentage points in the API, to one decimal.
 
-    A null reads as :func:`winner`'s does. Total, as :func:`share` is: an integer no
-    float can hold, or a value of no numeric type, reads :data:`UNRECOGNIZED`, and a
-    non-finite number is no figure, so it names no cause.
+    A null or a blank reads as :func:`winner`'s does. Total, as :func:`share` is: any
+    other value no figure can show (a non-finite number, an integer no float can hold,
+    a value of no numeric type) reads :data:`UNRECOGNIZED`.
     """
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            points = float(value)
-        except OverflowError:
-            return UNRECOGNIZED
-        if not math.isfinite(points):
-            return NOT_IN_DATASET
-        return f"{points:.1f} percentage points"
-    return _unknown(value, _null(applicable))
+    points = _finite(value)
+    if points is None:
+        return _unknown(value, _null(applicable))
+    return f"{points:.1f} percentage points"
 
 
 def ec_majority(value: object) -> str:
     """An ``ec_determinative`` cell (#308): ``False`` is a real outcome, never a gap;
-    a null names no cause; anything else reads :data:`UNRECOGNIZED`."""
+    a null or a blank names no cause; anything else reads :data:`UNRECOGNIZED`."""
     if value is True:
         return EC_MAJORITY
     if value is False:

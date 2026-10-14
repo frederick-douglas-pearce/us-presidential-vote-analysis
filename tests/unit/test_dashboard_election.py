@@ -551,6 +551,9 @@ class TestNullCells:
             (None, "popular_vote", PV_MAX + 4, labels.AFTER_WINDOW),
             (62985062, "popular_vote", 2016, "62,985,062"),
             (0, "popular_vote", 2016, "0"),
+            # A blank is no figure: its status explains it (#355's review).
+            ("", "legislature_chosen", 1860, labels.LEGISLATURE_CHOSE),
+            (" ", "popular_vote", PV_MIN, labels.NO_FIGURE),
             # Never the raw value (#355): an unknown status, and no status at all.
             (None, "mystery_code", 2016, labels.UNRECOGNIZED),
             (None, None, 2016, labels.NOT_IN_DATASET),
@@ -581,10 +584,12 @@ class TestNullCells:
         assert labels.NO_NATIONAL_FIGURE == (
             "No popular-vote figure in this dataset for this candidate"
         )
+        # Reworded at #355's review so it runs one way only: a null cell reads "Not in
+        # this dataset" too, and is no false (owner decision, 2026-10-13).
         assert labels.HAS_POPULAR_VOTE_NOTE == (
-            '"Not in this dataset" in the popular-vote column (false in the download) '
-            "means this dataset holds no popular-vote figure for that year. It does not "
-            "say whether a popular vote was held."
+            'A false in the popular-vote column, shown as "Not in this dataset", means '
+            "this dataset holds no popular-vote figure for that year. It does not say "
+            "whether a popular vote was held."
         )
         # The note quotes the cell it explains, so the two cannot drift apart.
         assert f'"{labels.NOT_IN_DATASET}"' in labels.HAS_POPULAR_VOTE_NOTE
@@ -771,8 +776,17 @@ class TestNullCells:
             (labels.share, "x_y", labels.UNRECOGNIZED),
             (labels.share, None, labels.NOT_IN_DATASET),
             (labels.share, 10**400, labels.UNRECOGNIZED),  # no float holds it
-            (labels.share, float("inf"), labels.NOT_IN_DATASET),  # no figure
-            (labels.share, float("nan"), labels.NOT_IN_DATASET),
+            # #355's review: one rule, so a non-finite number is a value no cell
+            # can word, as is a finite one whose percentage overflows.
+            (labels.share, float("inf"), labels.UNRECOGNIZED),
+            (labels.share, float("nan"), labels.UNRECOGNIZED),
+            (labels.share, 1e307, labels.UNRECOGNIZED),
+            (labels.share, 10**307, labels.UNRECOGNIZED),
+            (labels.share, "", labels.NOT_IN_DATASET),
+            # A count shows any integer, however large; a non-finite one is no count.
+            (labels.number, 10**400, f"{10**400:,}"),
+            (labels.number, float("nan"), labels.UNRECOGNIZED),
+            (labels.census_year, float("nan"), labels.UNRECOGNIZED),
             (labels.number, 1234567, "1,234,567"),
             (labels.number, False, labels.UNRECOGNIZED),
             (labels.number, 1.5, labels.UNRECOGNIZED),  # a count is an integer
@@ -839,6 +853,12 @@ class TestCountStatus:
         assert labels.count_status("counted", "ignored") == ["Counted"]
         assert labels.count_status("mystery_code", None) == [labels.UNRECOGNIZED]
         assert labels.count_status(None, None) == [labels.NOT_IN_DATASET]
+        # #355's review: only a reason that is text with something in it is shown.
+        for reason in (None, "", "  ", 5):
+            assert [type(c).__name__ for c in labels.count_status("disputed", reason)] == [
+                "Strong",
+                "str",
+            ], reason
 
     def test_1872_grant_reads_cast_counted_and_appointed(self) -> None:
         grant = nation_rows(render(1872))["Ulysses S. Grant"]
@@ -1375,12 +1395,12 @@ class TestT6Bodies:
         assert PAGE_ID not in ids and STATES not in ids
         assert target in calls
 
-    def test_a_non_finite_ratio_names_no_cause(self) -> None:
+    def test_a_non_finite_ratio_reads_unrecognized(self) -> None:
         body = per_capita_body(1872)
         row = next(r for r in body["data"] if r["state_usps"] == "GA")
         row["persons_per_electoral_vote"] = float("inf")
         shown = per_capita_rows(render(1872, per_capita=body))["Georgia"]
-        assert shown["persons_per_electoral_vote"] == labels.NOT_IN_DATASET
+        assert shown["persons_per_electoral_vote"] == labels.UNRECOGNIZED
 
     def test_an_unexplained_null_names_no_cause_and_does_not_degrade(self) -> None:
         body = per_capita_body(1872)
@@ -1447,9 +1467,15 @@ class TestPerCapitaCells:
             (None, 7, 3, labels.UNRECOGNIZED),
             (677344.6545454545, "covered", 55, "677,345"),
             (12, "covered", 1, "12"),
-            (float("inf"), "covered", 1, labels.NOT_IN_DATASET),
-            (float("-inf"), "covered", 0, labels.NOT_IN_DATASET),
-            (float("nan"), "covered", 1, labels.NOT_IN_DATASET),
+            (float("inf"), "covered", 1, labels.UNRECOGNIZED),
+            (float("-inf"), "covered", 0, labels.UNRECOGNIZED),
+            (float("nan"), "covered", 1, labels.UNRECOGNIZED),
+            # A blank is no figure, so its row's cause explains it (#355).
+            ("", "no_governing_figure", 5, NO_FIGURE),
+            (" ", "covered", 0, NO_VOTES),
+            ("", "covered", 3, labels.NOT_IN_DATASET),
+            # A zero allotment wins over an unrecognized coverage.
+            (None, "estimated", 0, NO_VOTES),
             (10**400, "covered", 1, labels.UNRECOGNIZED),
             (True, "covered", 1, labels.UNRECOGNIZED),
             ("many", "covered", 1, labels.UNRECOGNIZED),
@@ -1466,6 +1492,7 @@ class TestPerCapitaCells:
             (None, "no_governing_figure", NO_FIGURE),
             (None, "covered", labels.NOT_IN_DATASET),
             (None, "estimated", labels.UNRECOGNIZED),
+            ("", "no_governing_figure", NO_FIGURE),  # a blank is no figure (#355)
             (None, None, labels.NOT_IN_DATASET),
             (None, "", labels.NOT_IN_DATASET),
             (37253956, "covered", "37,253,956"),
@@ -1625,21 +1652,39 @@ class TestPanel:
             cells[f] for f in PANEL_FIELDS if block[f] is None
         }
 
-    def test_each_cell_reads_its_own_field(self) -> None:
+    @pytest.mark.parametrize(
+        ("flips", "shown"),
+        [
+            (
+                (True, False, False),
+                (
+                    "Yes: the popular-vote winner is not the Electoral College leader",
+                    "No",
+                    labels.NO_EC_MAJORITY,
+                ),
+            ),
+            ((False, False, True), ("No", "No", labels.EC_MAJORITY)),
+        ],
+    )
+    def test_each_cell_reads_its_own_field(
+        self, flips: tuple[bool, bool, bool], shown: tuple[str, str, str]
+    ) -> None:
         """A distinct value in every panel field, so a cell reading another field
-        shows the wrong one."""
+        shows the wrong one. The three booleans (``pv_flip``, ``hybrid_flip``,
+        ``ec_determinative``) cannot all differ in one render, so two renders between
+        them give every pair different values in at least one (#355: a non-bool is
+        unrecognized, so string sentinels would all read alike)."""
+        pv_flip, hybrid_flip, determinative = flips
         sentinels = {
             "ec_winner": "Sentinel EC",
             "pv_winner": "Sentinel PV",
             "hybrid_winner": "Sentinel Hybrid",
-            # Booleans that read differently (#355: a non-bool is unrecognized, so
-            # string sentinels would all read alike).
-            "pv_flip": True,
-            "hybrid_flip": False,
+            "pv_flip": pv_flip,
+            "hybrid_flip": hybrid_flip,
             "ec_margin": 11.11,
             "pv_margin": 22.22,
             "hybrid_margin": 33.33,
-            "ec_determinative": False,
+            "ec_determinative": determinative,
             "pv_coverage": 0.123,
         }
         assert set(sentinels) == set(PANEL_FIELDS)
@@ -1648,14 +1693,12 @@ class TestPanel:
             "ec_winner": "Sentinel EC",
             "pv_winner": "Sentinel PV",
             "hybrid_winner": "Sentinel Hybrid",
-            "pv_flip": (
-                "Yes: the popular-vote winner is not the Electoral College leader"
-            ),
-            "hybrid_flip": "No",
+            "pv_flip": shown[0],
+            "hybrid_flip": shown[1],
             "ec_margin": "11.1 percentage points",
             "pv_margin": "22.2 percentage points",
             "hybrid_margin": "33.3 percentage points",
-            "ec_determinative": labels.NO_EC_MAJORITY,
+            "ec_determinative": shown[2],
             "pv_coverage": "12.3%",
         }
 
@@ -1873,8 +1916,8 @@ class TestWordingRules:
     one-word field name (``party``, ``population``) is ordinary English and cannot be
     told from prose, so the underscore is what a test can check. #355 adds its labels
     and notes here; its closed-value and fallback paths are guarded per function
-    (``test_an_unexpected_value_is_never_shown_raw``) and on every rendered page
-    (``TestNoRawValues`` in ``test_dashboard_export.py``)."""
+    (``test_an_unexpected_value_is_never_shown_raw``) and on each table page rendered
+    from doctored bodies (``TestNoRawValues`` in ``test_dashboard_export.py``)."""
 
     @staticmethod
     def reworded() -> dict[str, str]:
@@ -2089,20 +2132,25 @@ class TestPartyDisplay:
     def test_the_rule(self, code: str, shown: str) -> None:
         assert labels.party(code) == shown
 
-    def test_t3_shows_the_form_and_its_download_keeps_the_code(self) -> None:
+    def test_the_page_shows_the_form_and_its_downloads_keep_the_code(self) -> None:
+        """T2 and T3 show the display form; both files carry only served codes (or an
+        empty cell), never a display form. T4's file: ``test_dashboard_export.py``."""
         from tests.unit.test_dashboard_export import Csv, links
+        from usvote.mit.transform import EC_GETTER_PARTIES
 
         tree = render(2016)
         assert nation_rows(tree)["Hillary Clinton"]["party"] == "Democratic"
         shown = {r["party"] for r in state_rows(tree)} - {labels.NOT_IN_DATASET}
         assert shown == {"Democratic", "Republican"}
-        nation = Csv(links(tree)[export.link_id(NATION)].href)
-        assert {r["party"] for r in nation.rows} >= {"DEMOCRAT", "REPUBLICAN"}
+        for table_id in (STATES, NATION):
+            rows = Csv(links(tree)[export.link_id(table_id)].href).rows
+            assert {r["party"] for r in rows} - {""} == EC_GETTER_PARTIES, table_id
 
 
 class TestUnrecognizedCell:
-    """Every "Unrecognized value" cell carries its help text (#355, owner decision at
-    the plan gate), on a table cell and on the panel."""
+    """An "Unrecognized value" cell carries its help text (#355, owner decision at the
+    plan gate): the cell builder, and a T2 cell and a panel cell here; every table's
+    cells on a doctored page in ``TestNoRawValues`` (``test_dashboard_export.py``)."""
 
     def test_the_cell_builder(self) -> None:
         unknown = labels.cell(labels.UNRECOGNIZED)
@@ -2203,8 +2251,8 @@ class TestPanelCells:
             (10**400, True, labels.UNRECOGNIZED),
             ("", True, labels.NOT_IN_DATASET),
             ("", False, NOT_APPLICABLE),
-            (float("nan"), True, labels.NOT_IN_DATASET),
-            (float("inf"), True, labels.NOT_IN_DATASET),
+            (float("nan"), True, labels.UNRECOGNIZED),
+            (float("inf"), True, labels.UNRECOGNIZED),
         ],
     )
     def test_margin(self, value: Any, applicable: bool, cell: str) -> None:
@@ -2302,3 +2350,12 @@ class TestPanelCells:
     def test_a_malformed_window_raises_rather_than_guesses(self, coverage: Any) -> None:
         with pytest.raises((KeyError, TypeError)):
             labels.in_pv_window(2016, coverage)
+
+
+def test_a_blank_t3_figure_is_a_missing_one() -> None:
+    """#355's review: a blank is no value, so inside the window it reads as a
+    candidate with no popular-vote figure, as a null does."""
+    national_pv = MOD["_national_pv"]
+    assert national_pv("", True, False) == labels.NO_NATIONAL_FIGURE
+    assert national_pv(" ", True, True) == labels.NO_NATIONAL_FIGURE
+    assert national_pv("", False, True) == labels.NOT_APPLICABLE
