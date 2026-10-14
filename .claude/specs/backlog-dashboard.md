@@ -667,6 +667,14 @@ E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
   **Unfiled placeholder, gated on E9-S6:** filed when the first chart story is shaped, and
   lands before or with that chart. It picks each chart's template from E14-S2's
   `data-theme`.
+- **E14-S4** — #364: use the desktop width at the top of each page (a two-column top on the
+  one-election page, filter dropdowns in a row, and the landing, elections-index and
+  state-history pages). **Gated on a design research pass** (the `dataviz` skill plus
+  comparable public data explorers), whose per-page wireframes are agreed on the issue
+  before layout code merges. It leaves a slot for charts rather than waiting for them; a
+  chart it calls for, such as a landing graphic, is a separate E9 story that depends on
+  E14-S3. Independent of #359 (whichever lands second rebases); it adds no new color
+  values.
 
 ---
 
