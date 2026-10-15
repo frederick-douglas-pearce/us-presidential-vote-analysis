@@ -97,16 +97,37 @@ file.
 - **Not:** Everyone on the ballot.
 - **Status:** settled
 
+### Candidates in the dataset (dataset-wide count)
+- **Plain:** How many different people received at least one electoral vote in any election in
+  the dataset, each listed once however many elections they appear in.
+- **Precise:** `candidate_count` on `/v1/meta`: the number of distinct `candidate_slug` values
+  across every year served. A candidate is someone who received at least one electoral vote cast
+  in some election (D007), so 1872's Greeley (3 cast, 0 counted) is included.
+- **Shown as:** on the API's `/docs` page, the `SnapshotMetaResponse.candidate_count` field
+  description in `src/usvote/api/models.py`. Not shown on the dashboard; showing it needs its own
+  qualified `LABELS` key.
+- **Source:** `SnapshotMetaResponse.candidate_count` in `src/usvote/api/models.py`; the
+  `candidate_count` build in `src/usvote/snapshot.py` (distinct `candidate_slug`); D006; D007.
+- **Not:** *Candidates with electoral votes (count per election)*; the sum of the per-election
+  counts (a candidate in several elections is listed once).
+- **Status:** settled
+
 ### Candidates with electoral votes (count per election)
 - **Plain:** How many candidates received electoral votes in that election.
-- **Precise:** `candidate_count` on a `/v1/elections` row: distinct candidates with national
-  roll-up rows that year. `/v1/meta` also has a `candidate_count`, meaning distinct candidates
-  across the whole dataset; showing that one needs its own qualified `LABELS` key.
-- **Shown as:** `LABELS["candidate_count"]` (T1).
-- **Source:** `YearListItem.candidate_count` and `SnapshotMetaResponse.candidate_count` in
-  `src/usvote/api/models.py`; D007; the `labels.py` module docstring; header wording: owner
-  decision, 2026-10-10, #348.
-- **Not:** Candidates on the ballot; the dataset-wide count.
+- **Precise:** `candidate_count` on a `/v1/elections` row: the number of distinct candidates in
+  that year's national roll-up, which holds every candidate who received at least one electoral
+  vote cast that year, including one whose votes Congress did not count (1872, Greeley: 3 cast,
+  0 counted). `/v1/meta` also has a `candidate_count` with another meaning: see *Candidates in
+  the dataset (dataset-wide count)*.
+- **Shown as:** `LABELS["candidate_count"]` (T1); on the API's `/docs` page, the
+  `YearListItem.candidate_count` field description in `src/usvote/api/models.py`.
+- **Source:** `YearListItem.candidate_count` in `src/usvote/api/models.py`;
+  `SnapshotRepository.list_years` in `src/usvote/api/repository.py` (per-year count over
+  `national_rollup`), which counts distinct candidates because `national_rollup` is keyed
+  `(year, candidate_slug)` in `src/usvote/snapshot.py`; D007; the `labels.py` module docstring;
+  header wording: owner decision, 2026-10-10, #348.
+- **Not:** Candidates on the ballot; *Candidates in the dataset (dataset-wide count)*; only
+  candidates whose votes Congress counted.
 - **Status:** settled
 
 ### Census figure (per-capita coverage)
