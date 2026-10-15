@@ -22,7 +22,7 @@ The binding table. The engine names each parameter in `CAPS`; the values here ar
 | `BACKLOG_SOURCE` | GitHub issues on `frederick-douglas-pearce/us-presidential-vote-analysis`, grouped by `epic:*` label (no milestones in use). **Current active epic: `epic:dashboard` (E9, #275). Phase 0 is done: #276's verdict recorded as D071 (Plotly Dash on App Engine standard, project `uspv-explore`), #283 (S1b) gave the dashboard project its own budget and kill-switch, and #277 (S2) put the walking skeleton live at `explore.us-presidential-election-center.org` (PR #292, merged 2026-09-30). Phase 1 enters at #305 (S3a, cache and routing for pages that read more than one API path, `priority:high`). #278 (S3) was split on 2026-10-02 into #305–#308 (S3a–S3d), #309 (CSV download) and #310 (cold year-page links and the prefetch extent), and closed as superseded. Order: #305 → #306 → #307 → {#308, #309, #310, #279}; #280 needs #306, #307 and #279. #293 (the guard's success path) is done (PR #304). #284 (S1a, `priority:low`) is optional and gates nothing. Follow-ups from #277, curated into the queue 2026-10-01: #291 (capacity), #294 (the rollback drill) and #295 (research: cold start while the API is also cold). E9-S6–S8 are unfiled tracker rows in the backlog, not issues, until Phase 1 (#305–#310, #279, #280) ships. E9's spec is `.claude/specs/backlog-dashboard.md`. Previous epic: `epic:census` (E10, #129) — `RUN COMPLETE` 2026-09-27; its two `deferred` rows (#267, #272) are both closed, and the #129 tracker has no open children. Before it: `epic:tech-debt` (E12) — `RUN PARKED` 2026-09-11 with all 20 rows terminal; its five parked members (#187/#189/#203/#205/#214) release only on an explicit human un-park. A change to this row is `blocked: human-only` — the engine forbids the orchestrator editing this file.** Standing queue: `epic:tech-debt` (E12, #179) never closes, so its run parks rather than completes | inferred from `gh label list` + `gh issue list`; no GitHub milestones exist |
 | `SCOPE_AGENT` | `pm` (user-global subagent — translates vision/pain-points into specs, backlog prioritization, scope/trade-off calls) | inferred from available agent roster + memory `working-conventions` (pm agent owns PM artifacts) |
 | `DESIGN_AGENT` | `architect` (user-global subagent — reviews plans/design pre-implementation, the architect gate in §2; **and rules on scope, stopping with that ruling attached, when a BLOCKING code-review finding raises a design question**) | inferred from available agent roster. The scope ruling is a **second gate the engine makes due, not this file** (dev-loop 0.3.0, #114): `ARCHITECT_TRIGGERS` does not bound it, it fires on every route at whatever round the finding arises, and no value here switches it off — absent, `—` or `TODO`, the stop still fires with no ruling attached. The engine's Gate table is the authoritative list of every gate this binding staffs. **Never delete this row.** |
-| `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on `main...HEAD` in round 1 (after step 7 commits, the working diff is empty). A later round is whatever the engine runs there (its one lighter checker, or its full fallback on `main...HEAD`), and §6 says how that round carries the wording checks. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. **Its arguments always carry the issue's acceptance criteria, §6's two wording checks** (spec match and Key index), **the plan's `## Wording spec`** (or that it has none) plus wording `ba` added since, **and the PR body's Key-index follow-ups**, whether or not the plan has a wording spec: the skill runs in a separate context and sees only what it is handed. Round 1 also spawns §6's **wording finder** (a fresh `ba`) with its own verdict on both checks; a later round's lighter checker carries them. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence. **A plausibly empty verdict is a gate-error, not clean:** if the output shows no evidence it read the diff (no files named, no findings, a run of seconds where a real one takes minutes), retry once, and if the retry is also empty, journal `- gate-error: code-review — /code-review — empty verdict after retry` and escalate. A retry that recovers is noted on the `- Code-review:` line instead, because a `gate-error` line means the iteration stopped. **A round isn't clean without a result for both wording checks** (§6): retry the carrier once, then journal `- gate-error: code-review — wording checks — <check> result absent` and escalate. Never journal it as clean. Evidence (claude-hook-validator #27): the skill forked before it received the checks, and nothing would have shown they never ran |
+| `CODE_REVIEW` | **the `code-review` skill** — invoke it as `/code-review` on `main...HEAD` in round 1 (after step 7 commits, the working diff is empty). A later round is the engine's one lighter checker, not `/code-review`: on `<reviewed>..HEAD`, or on `main...HEAD` when the engine falls back to full, still as that one checker. §6 says how it carries the wording checks. This is the *only* accepted spelling for the code-review gate; see the "not these" note below. **Its arguments always carry the issue's acceptance criteria, §6's two wording checks** (spec match and Key index), **the plan's `## Wording spec`** (or that it has none) plus wording `ba` added since, **and the PR body's Key-index follow-ups**, whether or not the plan has a wording spec: the skill runs in a separate context and sees only what it is handed. Round 1 also spawns §6's **wording finder** (a fresh `ba`) with its own verdict on both checks; a later round's lighter checker carries them. | independent post-impl review; matches the repo's "Address code-review findings" commit cadence. **A plausibly empty verdict is a gate-error, not clean:** if the output shows no evidence it read the diff (no files named, no findings, a run of seconds where a real one takes minutes), retry once, and if the retry is also empty, journal `- gate-error: code-review — /code-review — empty verdict after retry` and escalate. A retry that recovers is noted on the `- Code-review:` line instead, because a `gate-error` line means the iteration stopped. **A round isn't clean without a result for both wording checks** (§6): retry the carrier once, then journal `- gate-error: code-review — wording checks — <check> result absent` and escalate. Never journal it as clean. Evidence (claude-hook-validator #27): the skill forked before it received the checks, and nothing would have shown they never ran |
 | `SECURITY_REVIEW` | `/security-review` (built-in, local) — run on branches touching a **sensitive surface as §4 defines it**. §4 is the single authoritative list; this row deliberately does **not** restate it, because the two copies are what drifted apart before #247 | Confirmed local-only: none of the workflows in `.github/workflows/` is a security workflow; review runs locally via `/security-review`, no CI security job to trigger |
 | `VERIFY` | `/verify` (built-in) | runtime behavior check when an AC needs proof-by-running (e.g. the local API smoke-test in `docs/`) |
 | `PRIORITY_LABELS` | `priority:high` > `priority:medium` > `priority:low`; tiebreak issue number ascending | inferred from `gh label list` (`priority:high`=Must have, `medium`=Should have, `low`=Nice to have) |
@@ -252,18 +252,27 @@ ways the first version could fail quietly.
   file", and around each call the orchestrator runs two checks from the repo root:
   - `git status --porcelain --untracked-files=all`, before and after. The tree is clean at the plan
     step (the ledger is gitignored), so both runs must print nothing.
-  - `touch` a marker file in the scratchpad just before the call, and after it run
-    `find . \( -path ./.claude/worktrees -o -name node_modules \) -prune -o -name glossary.md
-    -newer <marker> -print`, which must print nothing. This one sees gitignored paths too
-    (`.claude/loop/`, `.venv/`), which `git status` doesn't. It skips agent worktrees, which are
-    other sessions' checkouts: a glossary written there is not `ba`'s to restore.
+  - `touch` a marker file in the scratchpad just before the call, and after it run this from the
+    repo root, which must print nothing:
 
-  Anything either prints is a finding: restore each path (`git restore <path>` for a tracked file,
-  delete a file `ba` created), keep only the text `ba` returned, and record it on the
-  `- Wording-spec:` line. **The checks don't reach outside the repo**: a `glossary.md` elsewhere (a
+    ```sh
+    find . -name node_modules -prune -o -name glossary.md -newer <marker> -print
+    ```
+
+    It sees gitignored paths too (`.claude/loop/`, `.venv/`, agent worktrees under
+    `.claude/worktrees/`), which `git status` doesn't.
+
+  Anything either prints is a finding: restore each path in this checkout (`git restore <path>` for
+  a tracked file, delete a file `ba` created), keep only the text `ba` returned, and record it on the
+  `- Wording-spec:` line. A hit under `.claude/worktrees/` is another session's checkout, which that
+  session may also be editing (the hit may be that session's own edit): record it and name it to the
+  human at the next stop, but don't restore it. **The checks don't reach outside the repo**: a `glossary.md` elsewhere (a
   sibling repo's, a temporary copy's) or `ba`'s memory directory goes unseen. If the tree isn't clean
-  before the call, don't call `ba`: journal
-  `- gate-error: wording-spec — git status — tree not clean before ba` and stop for the human.
+  before the plan-step call, don't call `ba`: journal
+  `- gate-error: wording-spec — git status — tree not clean before ba` and stop for the human. A
+  later call (wording sent back during implementation, or the merge-gate status text below) comes
+  when the branch has work in progress: commit it first, so the checks run on a clean tree as at the
+  plan step.
 - **A wording spec always stops at the plan gate.** Every ledger here runs `plan-gate: always` today.
   If one is ever relaxed to `conditional`, **any plan with a `## Wording spec` section still stops at
   the human plan gate.** That's this file's rule; it doesn't depend on the engine's frozen-vs-live
@@ -286,7 +295,9 @@ ways the first version could fail quietly.
   time: #354 settles it as `settled; wording pending (<what awaits the owner>)`, and until #354
   merges the file's existing `**Status:** settled.` line plus a sentence naming what awaits the
   owner. That edit is a new commit after the verdicts came in, so the engine's rules decide which
-  gates it re-arms before the merge. The heading covers wording on an open PR; the glossary status
+  gates it re-arms before the merge. If `ba` can't be invoked there or returns no status text, the
+  PR doesn't merge: journal `- gate-error: wording-spec — ba (merge gate) — <reason>` and stop for
+  the human. The heading covers wording on an open PR; the glossary status
   covers wording that has merged unapproved (owner decision on #369, 2026-10-15; recorded on #354). If `ba` can't be invoked
   or returns no spec, journal `- gate-error: wording-spec — ba — <reason>` and stop for the human.
 - **Every iteration records the wording step.** Otherwise "not due" and "never ran" look the same in
@@ -304,7 +315,9 @@ ways the first version could fail quietly.
 
   The plan file keeps what step 5 needs to write the line: the `## Wording spec` (or a note that
   none is due), the value line, and any write the check restored. A row resumed at or before step 5
-  writes the line there from the plan file, without calling `ba` again. A row resumed past step 5
+  writes the line there from the plan file when the file already holds the value line and a spec
+  (or its "none due") that is current after the architect's review; otherwise it calls `ba` as the
+  plan step does. A row resumed past step 5
   writes no new line: step 5 already wrote one, and the close record carries that one forward. The close record adds what changed after the plan step:
   `; <m> keys added after the plan gate` when `ba` added wording later, and
   `; ba wrote <path> at the plan step, restored` when the check above found a write. An `n/a` that
