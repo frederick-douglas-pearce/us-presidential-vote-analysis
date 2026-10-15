@@ -121,10 +121,10 @@ file.
   the dataset (dataset-wide count)*.
 - **Shown as:** `LABELS["candidate_count"]` (T1); on the API's `/docs` page, the
   `YearListItem.candidate_count` field description in `src/usvote/api/models.py`.
-- **Source:** `YearListItem.candidate_count` and `SnapshotMetaResponse.candidate_count` in
-  `src/usvote/api/models.py`; `SnapshotRepository.list_years` in `src/usvote/api/repository.py`
-  (per-year count over `national_rollup`) and the `candidate_count` build in
-  `src/usvote/snapshot.py` (distinct `candidate_slug`); D007; the `labels.py` module docstring;
+- **Source:** `YearListItem.candidate_count` in `src/usvote/api/models.py`;
+  `SnapshotRepository.list_years` in `src/usvote/api/repository.py` (per-year count over
+  `national_rollup`), which counts distinct candidates because `national_rollup` is keyed
+  `(year, candidate_slug)` in `src/usvote/snapshot.py`; D007; the `labels.py` module docstring;
   header wording: owner decision, 2026-10-10, #348.
 - **Not:** Candidates on the ballot; *Candidates in the dataset (dataset-wide count)*; only
   candidates whose votes Congress counted.

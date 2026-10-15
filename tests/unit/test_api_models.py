@@ -186,8 +186,9 @@ def test_the_meta_examples_match_the_recorded_served_counts() -> None:
     The same two counts are pinned in two other places, deliberately independently: the
     recorded ``tests/fixtures/dashboard/v1_meta.json`` (read here) and the integration
     oracle's ``CANDIDATE_COUNT`` / ``ROW_COUNT`` in
-    ``tests/integration/test_snapshot_build.py``. A snapshot rebuild that moves either
-    count fails the integration oracle at once, and this test only once the fixture is
+    ``tests/integration/test_snapshot_build.py``. A change that moves either count fails
+    the integration oracle the next time it is run (``pytest -m integration`` with the
+    four local corpora set; CI skips it), and this test only once the fixture is
     re-recorded.
     """
     served = _recorded("v1_meta.json")
