@@ -1,14 +1,27 @@
 # Glossary
 
 What this project's terms mean, for readers who are not engineers and for the people writing to
-them. Maintained by the `ba` agent; the owner settles anything marked `proposed`.
+them. Maintained by the `ba` agent; whatever awaits the owner is listed under **Open decisions**.
 
-**This file records meaning, not display text.** The dashboard's shipped wording lives in
-`dashboard/explore/labels.py` (`LABELS`, the closed-value tables, and the null and help-text
-constants), with a few page-level sentences in `dashboard/explore/components.py`,
+**Statuses.** Every entry and wording rule ends with one of three. `settled`: a source settles
+the meaning, and no merged reader wording for it is known to await the owner. It does not claim
+the owner approved that wording: where the owner did, the entry's **Source** says so (#378 will check
+this for every entry). `settled; wording pending (<what awaits the owner>)`: the meaning is
+settled, but merged reader wording for it is known to await the owner, for example a
+historical-claim check or a review on the live dashboard. `proposed (<the decision the owner
+needs to make>)`: no source settles the meaning yet. An entry that is not plain `settled` is also
+listed under **Open decisions**. Wording still under review in an open pull request is not marked
+here; that pull request carries it.
+
+**This file records what terms mean; the code ships the wording.** The dashboard's shipped
+wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, and the null
+and help-text constants), with a few page-level sentences in `dashboard/explore/components.py`,
 `dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`. Each entry points
-at that code under **Shown as** and does not repeat its wording. If the two disagree, the code is
-what readers see; fix whichever is wrong and say which.
+at that code under **Shown as**. Some entry names, a few plain definitions and the **Say instead**
+table use the same words readers see, because those words are the plain term; each Say instead
+row names the code that ships its wording, or marks it a rule that no single string ships. The
+code is the shipped form: if this file and the code disagree, the code is what readers see; fix
+whichever is wrong and say which.
 
 **Audiences.** Public readers of the dashboard at `explore.us-presidential-election-center.org`,
 non-technical readers first (epic #275, product frame 3); readers of the "Counted, Not Assumed"
@@ -154,10 +167,12 @@ file.
   under T6 and T7.
 - **Source:** `PerCapitaRow.governing_census_year`; D064; D066(b);
   `posts/2026-09-03-how-did-we-get-to-538-electors.md`, "The decade Congress skipped" (the 1920
-  gap, and the 1910 map electing 1924 and 1928); header wording: owner decision, 2026-10-10, #348.
+  gap, and the 1910 map electing 1924 and 1928); header wording: owner decision, 2026-10-10, #348;
+  the help text's wording and historical claim: the owner's ruling at the #352 plan gate,
+  2026-10-12, that the claim was checked (its citations are not yet recorded in the repo; #356,
+  open, will record them and name the record here).
 - **Not:** The census nearest the election.
-- **Status:** settled. The reworded help text restates a historical claim and waits on the owner's
-  claim check before it ships.
+- **Status:** settled
 
 ### Count status
 - **Plain:** Whether Congress counted the electoral votes that were cast: counted; not counted,
@@ -242,7 +257,8 @@ file.
   hand; `labels.EC_WINNER` and `labels.EC_LEADER_NO_MAJORITY`, chosen by
   `labels.ec_winner_label` from `ec_determinative` for the panel row and its field-name list
   (`_panel` in `pages/election.py`, through `labels.glossary`'s `chosen` map); the cell
-  `labels.winner`; the same role names `labels.FLIP_YES`.
+  `labels.winner`; `labels.flip`, which names the role in `labels.FLIP_YES` by the same test as
+  `labels.ec_winner_label` (`labels._ec_role_is_winner`).
 - **Source:** owner decision, 2026-10-10, #348; `ElectionSummary.ec_winner` and
   `ec_determinative`; D041; D038 (the 1824 rationale); `posts/2026-08-25-it-takes-270-but-270-of-what.md`,
   "The one time it happened" (the electoral leader, majority outright, who took office);
@@ -286,10 +302,10 @@ file.
 - **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`;
   `labels.EC_SHARE_HYBRID_NOTE` under T3.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
-  D042 §2; D046 §4.
+  D042 §2; D046 §4; help-text wording (`labels.EC_SHARE_HYBRID_NOTE`): approved by the owner in
+  place on the #352 branch deploy, 2026-10-12.
 - **Not:** A share of the votes cast.
-- **Status:** settled. The reader note explaining the second share is drafted for the owner's
-  review on the dashboard.
+- **Status:** settled
 
 ### Electoral votes cast
 - **Plain:** The electoral votes that electors actually cast for a candidate.
@@ -354,10 +370,10 @@ file.
   popular-vote margin is Gore's lead over Bush. `ec_margin` is null with fewer than two scored
   candidates; the popular-vote and hybrid margins are null outside the popular-vote window.
 - **Shown as:** `LABELS["ec_margin"]`, `LABELS["pv_margin"]`, `LABELS["hybrid_margin"]`;
-  `labels.margin`; the panel note `labels.MARGIN_NOTE`, drafted for the owner's review on the
-  dashboard.
+  `labels.margin`; the panel note `labels.MARGIN_NOTE`.
 - **Source:** `ElectionSummary.ec_margin`, `pv_margin`, `hybrid_margin` and
-  `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037.
+  `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037; help-text wording
+  (`labels.MARGIN_NOTE`): approved by the owner in place on the #352 branch deploy, 2026-10-12.
 - **Not:** A percent change. A gap measured from the Electoral College's winner or leader.
 - **Status:** settled
 
@@ -394,7 +410,8 @@ file.
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
 - **Not:** "No", which is a recorded negative. Zero. "Not held". *Unrecognized value*, where the
   dataset does hold something.
-- **Status:** settled
+- **Status:** settled; wording pending (#375: whether the CSV preamble's last line,
+  `export.NULL_LINE`, keeps the word "null")
 
 ### Outside the popular-vote window
 - **Plain:** The dataset has no popular-vote figures for this year, so nothing computed from them
@@ -539,8 +556,8 @@ file.
 - **Status:** settled
 
 ### Sources
-- **Plain:** The three public organizations the figures come from, and the license each is
-  published under.
+- **Plain:** Where each kind of figure comes from (electoral votes, popular votes, population):
+  the organization that publishes it, and the license it is published under.
 - **Precise:** Electoral votes: `ec_source_name`, `ec_license`. Popular votes: `source_name`,
   `license`. Population: `census_source_name`, `census_license`. Rendered from
   `meta.provenance`, never written in by hand.
@@ -604,8 +621,8 @@ file.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
-  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording
-  reviewed by the owner on the #355 branch deploy); a party code with no letter or digit: owner
+  gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording:
+  owner decision at the #354 plan gate, 2026-10-15); a party code with no letter or digit: owner
   decision, 2026-10-13, #355 (code review); the comment on `UNRECOGNIZED` and the `labels.py`
   module docstring.
 - **Not:** *Not in this dataset*, which means the dataset holds nothing here. Not a claim that the
@@ -619,8 +636,8 @@ file.
 - **Precise:** `meta.provenance.coverage`: `year_min` / `year_max` for every year served and
   `pv_year_min` / `pv_year_max` for the years that also carry popular votes. It describes the
   data; it is not a promise. Pages read it from the response, never from a literal.
-- **Shown as:** the home page's coverage list; the CSV preamble; `labels.BEFORE_WINDOW`;
-  `NO_PV_SENTENCE` in `pages/election.py`.
+- **Shown as:** the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`; the CSV
+  preamble; `labels.BEFORE_WINDOW`; `NO_PV_SENTENCE` in `pages/election.py`.
 - **Source:** `Coverage` in `src/usvote/api/models.py`; D048 §1;
   `posts/2026-08-06-222-votes-away.md` (both windows published on every response).
 - **Not:** *Census figure* (per-capita `coverage`); *Share of electors from popular-vote states*.
@@ -678,30 +695,31 @@ Every `LABELS` key and the entry that defines it.
 
 ## Say instead
 
-Words that reach readers too often without help, and what to say instead.
+Words that reach readers too often without help, and what to say instead. **Ships in** names the
+code that carries the wording today; "a rule" marks a row that no single string ships.
 
-| Avoid | Say instead | Why |
-|---|---|---|
-| "winner" for the Electoral College leader in a year with no majority | Electoral College leader (no majority) | In 1824 the leader did not become president. |
-| "not applicable" for a year outside the popular-vote window | that this dataset has no popular-vote figures for the year | "Not applicable" reads as a claim that the method had no result at the time. |
-| "no figure" without "in this dataset" | no figure in this dataset | Without it, a reader can take the cell as zero votes. |
-| a raw field name, a status code, or anything with an underscore | the plain label | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). |
-| "null" | no value in this dataset | Engineering term. |
-| "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | The project uses the word for three different things. |
-| "counted" for anything but votes | used, covers, included | "Counted" is reserved for vote counts (owner decision, 2026-10-10). |
-| "in force", "governs", "apportionment" | used; set the state's electoral votes; redistribute House seats | Legal register. |
-| "footprint" | borders | Survey jargon. |
-| "the Archives" | the National Archives | A reader may not know which archive. |
-| "snapshot" | data version | Engineering term (owner decision, 2026-10-10). |
-| "No" for a missing value | Not in this dataset | "No" is a recorded answer. |
-| 0 for a missing figure | never | Zero is a measurement; a missing figure is not. |
-| a party code in capitals | the party name in ordinary capitalization | Owner decision, 2026-10-10. |
+| Avoid | Say instead | Ships in | Why |
+|---|---|---|---|
+| "winner" for the Electoral College leader in a year with no majority | Electoral College leader (no majority) | `labels.ec_winner_label`, which picks `labels.EC_LEADER_NO_MAJORITY`; `labels.flip`, which names the role in `labels.FLIP_YES` by the same test (`labels._ec_role_is_winner`) | In 1824 the leader did not become president. |
+| "not applicable" for a year outside the popular-vote window | that this dataset has no popular-vote figures for the year | `labels.NOT_APPLICABLE`; `NO_PV_SENTENCE` in `pages/election.py` | "Not applicable" reads as a claim that the method had no result at the time. |
+| "no figure" without "in this dataset" | no figure in this dataset | `labels.NO_FIGURE`, `labels.NO_NATIONAL_FIGURE` | Without it, a reader can take the cell as zero votes. |
+| a raw field name, a status code, or anything with an underscore | the plain label | `LABELS`; `labels.PV_STATUS`, `labels.COUNT_STATUS`, `labels.BOUNDARY_BASIS`, `labels.PER_CAPITA_COVERAGE` | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). |
+| "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. |
+| "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | `LABELS["coverage"]`, `LABELS["pv_coverage"]`; years covered: the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`, `export.preamble` | The project uses the word for three different things. |
+| "counted" for anything but votes | used, covers, included | a rule (see Wording rules) | "Counted" is reserved for vote counts (owner decision, 2026-10-10). |
+| "in force", "governs", "apportionment" | used; set the state's electoral votes; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. |
+| "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
+| "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
+| "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble` | Engineering term (owner decision, 2026-10-10). |
+| "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
+| 0 for a missing figure | never | a rule | Zero is a measurement; a missing figure is not. |
+| a party code in capitals | the party name in ordinary capitalization | `labels.party`, `labels.PARTY_DISPLAY` | Owner decision, 2026-10-10. |
 
 ## Open decisions
 
-Terms or wordings no source settles yet. Each needs the owner.
+Terms whose meaning no source settles yet (`proposed`), and settled terms whose merged reader
+wording still awaits the owner (`settled; wording pending`). Each line names the decision and who
+makes it.
 
-- Census used: the reworded help text restates the 1920 claim and needs the owner's historical
-  claim check before it ships. (owner)
-- Margin and the second electoral share: the drafted notes await the owner's review on the
-  dashboard. (owner)
+- **Not in this dataset**: whether the CSV preamble's last line, `export.NULL_LINE`, keeps the
+  word "null" (#375). The owner decides, on a label spec from `ba`.
