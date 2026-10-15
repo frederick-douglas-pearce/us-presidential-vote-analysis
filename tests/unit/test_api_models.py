@@ -144,8 +144,10 @@ def test_every_per_capita_column_is_mapped_or_dropped() -> None:
     )
 
 
-# Recorded live ``/v1`` responses (test input only). They were recorded from the deployed
-# API, not built from these models, so comparing an example with them is not circular.
+# Recorded ``/v1`` responses from the deployed API (test input only). They were not
+# built from these models, so comparing an example with them is not circular. They are
+# a recording, not the live API: an example follows a later snapshot only once the
+# fixtures are re-recorded.
 _RECORDED = FIXTURES_DIR / "dashboard"
 
 
@@ -154,28 +156,41 @@ def _recorded(name: str) -> dict[str, Any]:
     return body
 
 
-def test_the_year_list_example_matches_the_recorded_served_row() -> None:
-    """The ``/v1/elections`` example shows what the API serves for its year (#351).
+def _published_examples(model: type[pydantic.BaseModel]) -> list[Any]:
+    """The examples ``model`` publishes to ``/docs``, read from its config, not a constant."""
+    extra = model.model_config.get("json_schema_extra")
+    examples = extra.get("examples") if isinstance(extra, dict) else None
+    assert isinstance(examples, list) and examples, (
+        f"{model.__name__} publishes no examples"
+    )
+    return examples
 
-    It once showed 2000 with ``candidate_count`` 7, 2016's value, which taught a reader of
-    ``/docs`` that the count covers more than the candidates who received electoral votes.
+
+def test_the_year_list_examples_match_the_recorded_served_rows() -> None:
+    """Each ``/v1/elections`` example shows what the API served for its year (#351).
+
+    One once showed 2000 with ``candidate_count`` 7, 2016's value, which taught a reader
+    of ``/docs`` that the count covers more than the candidates who received electoral
+    votes.
     """
-    example = models._YEAR_LIST_EXAMPLE
-    rows = [
-        r for r in _recorded("v1_elections.json")["data"] if r["year"] == example["year"]
-    ]
-    assert len(rows) == 1, f"no single recorded row for {example['year']}: {rows}"
-    assert example["candidate_count"] == rows[0]["candidate_count"]
-    assert example["has_popular_vote"] == rows[0]["has_popular_vote"]
+    served = _recorded("v1_elections.json")["data"]
+    for example in _published_examples(models.YearListItem):
+        rows = [r for r in served if r["year"] == example["year"]]
+        assert len(rows) == 1, f"no single recorded row for {example['year']}: {rows}"
+        assert example == rows[0]
 
 
-def test_the_meta_example_matches_the_recorded_served_counts() -> None:
-    """The ``/v1/meta`` example's counts are the served ones (#351).
+def test_the_meta_examples_match_the_recorded_served_counts() -> None:
+    """Each ``/v1/meta`` example's counts are the recorded served ones (#351).
 
-    A snapshot rebuild that changes either count changes the recorded fixture when it is
-    re-recorded, and this then fails until the example follows.
+    The same two counts are pinned in two other places, deliberately independently: the
+    recorded ``tests/fixtures/dashboard/v1_meta.json`` (read here) and the integration
+    oracle's ``CANDIDATE_COUNT`` / ``ROW_COUNT`` in
+    ``tests/integration/test_snapshot_build.py``. A snapshot rebuild that moves either
+    count fails the integration oracle at once, and this test only once the fixture is
+    re-recorded.
     """
-    example = models._SNAPSHOT_META_RESPONSE_EXAMPLE
     served = _recorded("v1_meta.json")
-    for key in ("row_count", "candidate_count"):
-        assert example[key] == served[key], key
+    for example in _published_examples(models.SnapshotMetaResponse):
+        for key in ("row_count", "candidate_count"):
+            assert example[key] == served[key], key

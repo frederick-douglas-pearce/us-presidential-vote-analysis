@@ -186,9 +186,11 @@ _PER_CAPITA_EXAMPLE: dict[str, Any] = {
     "persons_per_electoral_vote": 677344.6545454545,
 }
 
-# The served values for 2000 (Bush and Gore received electoral votes). A test pins this
-# to the recorded live response, so it cannot drift from what the API serves:
-# test_api_models.test_the_year_list_example_matches_the_recorded_served_row.
+# The served values for 2000 (Bush and Gore received electoral votes).
+# test_api_models.test_the_year_list_examples_match_the_recorded_served_rows pins
+# YearListItem's published examples to the recorded /v1/elections response
+# (tests/fixtures/dashboard/v1_elections.json), so they follow a later snapshot only
+# once that fixture is re-recorded.
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {
     "year": 2000,
     "candidate_count": 2,
