@@ -11,10 +11,12 @@ single-source-of-truth role of ``snapshot_schema``.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pydantic
 
+from tests._helpers import FIXTURES_DIR
 from usvote.api import models
 from usvote.join import EC_PV_COLUMNS
 from usvote.snapshot import DERIVED_DATA_COLUMNS
@@ -140,3 +142,40 @@ def test_every_per_capita_column_is_mapped_or_dropped() -> None:
     assert not missing, (
         f"unmapped per_capita columns (add a field or drop them): {missing}"
     )
+
+
+# Recorded live ``/v1`` responses (test input only). They were recorded from the deployed
+# API, not built from these models, so comparing an example with them is not circular.
+_RECORDED = FIXTURES_DIR / "dashboard"
+
+
+def _recorded(name: str) -> dict[str, Any]:
+    body: dict[str, Any] = json.loads((_RECORDED / name).read_text(encoding="utf-8"))
+    return body
+
+
+def test_the_year_list_example_matches_the_recorded_served_row() -> None:
+    """The ``/v1/elections`` example shows what the API serves for its year (#351).
+
+    It once showed 2000 with ``candidate_count`` 7, 2016's value, which taught a reader of
+    ``/docs`` that the count covers more than the candidates who received electoral votes.
+    """
+    example = models._YEAR_LIST_EXAMPLE
+    rows = [
+        r for r in _recorded("v1_elections.json")["data"] if r["year"] == example["year"]
+    ]
+    assert len(rows) == 1, f"no single recorded row for {example['year']}: {rows}"
+    assert example["candidate_count"] == rows[0]["candidate_count"]
+    assert example["has_popular_vote"] == rows[0]["has_popular_vote"]
+
+
+def test_the_meta_example_matches_the_recorded_served_counts() -> None:
+    """The ``/v1/meta`` example's counts are the served ones (#351).
+
+    A snapshot rebuild that changes either count changes the recorded fixture when it is
+    re-recorded, and this then fails until the example follows.
+    """
+    example = models._SNAPSHOT_META_RESPONSE_EXAMPLE
+    served = _recorded("v1_meta.json")
+    for key in ("row_count", "candidate_count"):
+        assert example[key] == served[key], key

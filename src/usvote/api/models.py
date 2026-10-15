@@ -186,9 +186,12 @@ _PER_CAPITA_EXAMPLE: dict[str, Any] = {
     "persons_per_electoral_vote": 677344.6545454545,
 }
 
+# The served values for 2000 (Bush and Gore received electoral votes). A test pins this
+# to the recorded live response, so it cannot drift from what the API serves:
+# test_api_models.test_the_year_list_example_matches_the_recorded_served_row.
 _YEAR_LIST_EXAMPLE: dict[str, Any] = {
     "year": 2000,
-    "candidate_count": 7,
+    "candidate_count": 2,
     "has_popular_vote": True,
 }
 
@@ -648,7 +651,12 @@ class YearListItem(BaseModel):
 
     year: int = Field(description="An election year in the data.")
     candidate_count: int = Field(
-        description="Distinct candidates with national roll-up rows this year."
+        description=(
+            "Number of candidates who received at least one electoral vote this year, "
+            "judged on votes cast (electoral_votes), so it includes a candidate whose "
+            "votes Congress did not count (1872). Candidates who received popular "
+            "votes only are not in the dataset."
+        )
     )
     has_popular_vote: bool = Field(
         description=(
@@ -812,7 +820,14 @@ class SnapshotMetaResponse(BaseModel):
     provenance: Provenance = Field(description="Data source, license, and coverage.")
     schema_version: int = Field(description="Snapshot serving-contract schema version.")
     row_count: int = Field(description="Number of `ec_pv` fact rows in the snapshot.")
-    candidate_count: int = Field(description="Distinct candidates in the snapshot.")
+    candidate_count: int = Field(
+        description=(
+            "Number of distinct candidates across every year served, each listed once "
+            "however many elections they appear in. A candidate is someone who "
+            "received at least one electoral vote cast in some election; candidates "
+            "who received popular votes only are not in the dataset."
+        )
+    )
     build_timestamp: str = Field(
         description="When the snapshot was built (informational; not part of the ETag)."
     )
