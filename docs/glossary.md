@@ -5,7 +5,7 @@ them. Maintained by the `ba` agent; whatever awaits the owner is listed under **
 
 **Statuses.** Every entry and wording rule ends with one of three. `settled`: a source settles
 the meaning, and no merged reader wording for it is known to await the owner. It does not claim
-the owner approved that wording: where the owner did, its **Source** says so (#378 will check
+the owner approved that wording: where the owner did, the entry's **Source** says so (#378 will check
 this for every entry). `settled; wording pending (<what awaits the owner>)`: the meaning is
 settled, but merged reader wording for it is known to await the owner, for example a
 historical-claim check or a review on the live dashboard. `proposed (<the decision the owner
@@ -257,7 +257,8 @@ file.
   hand; `labels.EC_WINNER` and `labels.EC_LEADER_NO_MAJORITY`, chosen by
   `labels.ec_winner_label` from `ec_determinative` for the panel row and its field-name list
   (`_panel` in `pages/election.py`, through `labels.glossary`'s `chosen` map); the cell
-  `labels.winner`; the same role names `labels.FLIP_YES`.
+  `labels.winner`; `labels.flip`, which names the role in `labels.FLIP_YES` by the same test as
+  `labels.ec_winner_label` (`labels._ec_role_is_winner`).
 - **Source:** owner decision, 2026-10-10, #348; `ElectionSummary.ec_winner` and
   `ec_determinative`; D041; D038 (the 1824 rationale); `posts/2026-08-25-it-takes-270-but-270-of-what.md`,
   "The one time it happened" (the electoral leader, majority outright, who took office);
@@ -409,7 +410,8 @@ file.
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
 - **Not:** "No", which is a recorded negative. Zero. "Not held". *Unrecognized value*, where the
   dataset does hold something.
-- **Status:** settled
+- **Status:** settled; wording pending (#375: whether the CSV preamble's last line,
+  `export.NULL_LINE`, keeps the word "null")
 
 ### Outside the popular-vote window
 - **Plain:** The dataset has no popular-vote figures for this year, so nothing computed from them
@@ -719,4 +721,5 @@ Terms whose meaning no source settles yet (`proposed`), and settled terms whose 
 wording still awaits the owner (`settled; wording pending`). Each line names the decision and who
 makes it.
 
-None.
+- **Not in this dataset**: whether the CSV preamble's last line, `export.NULL_LINE`, keeps the
+  word "null" (#375). The owner decides, on a label spec from `ba`.
