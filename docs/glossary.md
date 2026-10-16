@@ -20,8 +20,8 @@ wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value table
 and help-text constants), with a few page-level sentences in `dashboard/explore/components.py`,
 `dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`. The API's
 published text is its `/docs` page (also served at `/redoc` and `/openapi.json`) and the text of
-its responses; `CLAUDE.md`, *Who writes wording*, lists what that includes. It ships from five
-files under `src/usvote/api/`:
+its responses other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
+what that includes. It ships from five files under `src/usvote/api/`:
 
 - `models.py`: field descriptions, response-model docstrings, and the prose inside response
   examples (the example error message in `_ERROR_EXAMPLE`).
@@ -59,8 +59,8 @@ disagree, the disagreement is a finding for the owner, and the post is never edi
 
 These bind every label, cell, note and sentence a reader sees, and every wording drawn from this
 file. They govern three surfaces: the dashboard (its pages and its CSV downloads), the API's
-published text (its `/docs` page and its responses), and the blog posts. Every rule binds all
-three unless the rule states an exception.
+published text (its `/docs` page and its responses), and the marketing prose (the blog posts,
+articles and announcements). Every rule binds all three unless the rule states an exception.
 
 - **Editorial guardrails** (`CLAUDE.md`, "Publishing"): nothing critical of a data source is ever
   published, and every historical claim is checked before publishing. Wording describes what the
