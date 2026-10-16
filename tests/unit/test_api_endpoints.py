@@ -17,11 +17,14 @@ here — the flip itself is asserted in ``test_api_e2e``).
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
+from usvote.api.repository import SnapshotError, SnapshotRepository
 
 # --- list years -------------------------------------------------------------
 
@@ -178,6 +181,89 @@ def test_get_candidate_unknown_404(client: TestClient) -> None:
     assert resp.json()["error"]["code"] == "candidate_not_found"
 
 
+# --- candidate index (#330) -------------------------------------------------
+
+#: The index the fixture frame must produce, written out by hand from
+#: ``tests/fixtures/api_snapshot.py`` rather than re-queried from the snapshot: a test
+#: that recomputed it from ``ec_pv`` would re-encode the code under test and agree with
+#: it when both drifted. ``cand-d`` 1860 is 8 votes cast and 0 counted (the 1872
+#: Greeley shape), so the cast basis of ``years`` is exercised.
+_EXPECTED_CANDIDATE_INDEX = [
+    {"candidate_slug": "cand-a", "candidate": "Cand A", "years": [2016, 2020]},
+    {"candidate_slug": "cand-b", "candidate": "Cand B", "years": [2016, 2020]},
+    {"candidate_slug": "cand-c", "candidate": "Cand C", "years": [1860]},
+    {"candidate_slug": "cand-d", "candidate": "Cand D", "years": [1860]},
+]
+
+
+def test_candidate_index_lists_every_candidate_once(client: TestClient) -> None:
+    """Slug order, oldest year first, one item per candidate, exactly three fields."""
+    body = client.get("/v1/candidates").json()
+    assert body["data"] == _EXPECTED_CANDIDATE_INDEX
+    assert body["meta"]["count"] == len(body["data"])
+
+
+def test_candidate_index_matches_the_by_slug_route_both_ways(client: TestClient) -> None:
+    """AC4: the listed slugs are exactly those ``/v1/candidates/{slug}`` answers 200 for.
+
+    "Exactly" holds over canonical lowercase slugs: the by-slug route lowercases its
+    input, so ``CAND-A`` also answers 200 without being listed. One direction: every
+    listed slug answers 200. The other: every candidate in the fixture frame (the
+    hand-written oracle, not the served index) answers 200 and is listed, and a
+    well-formed slug that is not a candidate answers 404.
+    """
+    listed = [item["candidate_slug"] for item in client.get("/v1/candidates").json()["data"]]
+    for slug in listed:
+        assert client.get(f"/v1/candidates/{slug}").status_code == 200, slug
+    expected = [item["candidate_slug"] for item in _EXPECTED_CANDIDATE_INDEX]
+    for slug in expected:
+        assert client.get(f"/v1/candidates/{slug}").status_code == 200, slug
+    assert listed == expected
+    assert "cand-e" not in listed
+    assert client.get("/v1/candidates/cand-e").status_code == 404
+
+
+def test_candidate_index_years_are_the_by_slug_years_with_votes_cast(
+    client: TestClient,
+) -> None:
+    """Each listed year is a year the by-slug route returns rows for, with votes cast.
+
+    Holds the published wording true: "the years `/v1/candidates/{slug}` returns rows
+    for" and "at least one electoral vote cast" — read off the by-slug route, a
+    different query from the index's.
+    """
+    for item in client.get("/v1/candidates").json()["data"]:
+        rows = client.get(f"/v1/candidates/{item['candidate_slug']}").json()["data"]
+        assert item["years"] == sorted({r["year"] for r in rows})
+        for year in item["years"]:
+            cast = sum(r["electoral_votes"] for r in rows if r["year"] == year)
+            assert cast > 0, (item["candidate_slug"], year)
+
+
+def test_candidate_index_agrees_with_the_build_time_counts(client: TestClient) -> None:
+    """Cross-table checks that do not go through the index's own SQL.
+
+    ``/v1/meta``'s ``candidate_count`` is counted when the snapshot is built, and
+    ``/v1/elections`` counts candidates per year from the national roll-up table.
+    """
+    index = client.get("/v1/candidates").json()
+    meta = client.get("/v1/meta").json()
+    assert index["meta"]["count"] == meta["candidate_count"]
+    per_year = client.get("/v1/elections").json()["data"]
+    assert sum(len(i["years"]) for i in index["data"]) == sum(
+        y["candidate_count"] for y in per_year
+    )
+
+
+def test_candidate_index_carries_the_snapshot_etag(client: TestClient) -> None:
+    resp = client.get("/v1/candidates")
+    assert resp.headers["cache-control"].startswith("public, max-age=3600")
+    assert resp.headers["etag"] == client.get("/v1/elections").headers["etag"]
+    again = client.get("/v1/candidates", headers={"If-None-Match": resp.headers["etag"]})
+    assert again.status_code == 304
+    assert again.content == b""
+
+
 # --- validation (422) -------------------------------------------------------
 
 
@@ -229,6 +315,7 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
         "/v1/elections/2020",
         "/v1/elections/2020/summary",
         "/v1/states/CA",
+        "/v1/candidates",
         "/v1/candidates/cand-a",
     ):
         assert "candidate_id" not in client.get(path).text, path
@@ -239,6 +326,26 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
 
 
 # --- server-side cap fails loud, never truncates ----------------------------
+
+
+def test_candidate_index_fails_loud_on_a_slug_with_two_names(snapshot_path: str) -> None:
+    """One slug carrying two display names raises, never a duplicate or a silent pick.
+
+    The build refuses such a frame (``add_candidate_slug``), so the file is doctored
+    after the build to reach the repository's own failure branch.
+    """
+    conn = sqlite3.connect(snapshot_path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE ec_pv SET candidate = 'Cand A Renamed' "
+                "WHERE candidate_slug = 'cand-a' AND year = 2020"
+            )
+    finally:
+        conn.close()
+    repo = SnapshotRepository.open(snapshot_path)
+    with pytest.raises(SnapshotError, match="cand-a"):
+        repo.list_candidates()
 
 
 def test_row_cap_fails_loud(settings: ApiSettings, monkeypatch: pytest.MonkeyPatch) -> None:

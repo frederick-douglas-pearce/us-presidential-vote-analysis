@@ -203,6 +203,38 @@ def get_state(
 
 
 @router.get(
+    "/candidates",
+    response_model=models.Envelope[models.CandidateListItem],
+    summary=(
+        "List every candidate in this dataset, with the election years they appear in."
+    ),
+    tags=["Candidates"],
+)
+def list_candidates(
+    request: Request,
+    response: Response,
+) -> models.Envelope[models.CandidateListItem]:
+    """Every candidate in this dataset, one item per candidate, in `candidate_slug`
+    order. Each item gives the candidate's public id (`candidate_slug`), name
+    (`candidate`) and election years (`years`): the years in which they received at
+    least one electoral vote cast. Candidates who received popular votes only are not
+    in this dataset.
+
+    Each `candidate_slug` listed is one that `/v1/candidates/{slug}` returns rows for.
+    That route ignores letter case, and any slug not on this list returns 404 there.
+    Use the list to check a slug before you request that route, or to build a
+    candidate picker. The list changes only when the data version does.
+    """
+    # #330 / D070(c): derived from ec_pv at serve time, so no snapshot table and no
+    # schema bump. The whole docstring above publishes on /docs, so notes stay here.
+    # The index always exists, so the cache check runs first, as in list_elections.
+    repo = _repo(request)
+    cache_dependency(request, response)
+    data = [models.CandidateListItem.model_validate(r) for r in repo.list_candidates()]
+    return models.Envelope(data=data, meta=_meta(repo, len(data)))
+
+
+@router.get(
     "/candidates/{slug}",
     response_model=models.Envelope[models.EcPvRow],
     responses=_NOT_FOUND_RESPONSE,

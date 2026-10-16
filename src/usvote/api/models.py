@@ -197,6 +197,15 @@ _YEAR_LIST_EXAMPLE: dict[str, Any] = {
     "has_popular_vote": True,
 }
 
+# Cleveland's non-consecutive terms show that ``years`` is a list of the years the
+# candidate appears in, not a span. Checked against the 1824–2024 data version
+# (71b777de…) when #330 shipped; not yet pinned to a recorded response.
+_CANDIDATE_LIST_EXAMPLE: dict[str, Any] = {
+    "candidate_slug": "grover-cleveland",
+    "candidate": "Grover Cleveland",
+    "years": [1884, 1888, 1892],
+}
+
 # Derive every display field from the provenance maps (not literals), so the shipped
 # example can't drift from _SOURCES / _LICENSES if a name or URL is ever edited.
 _EX_SRC = provenance.source_display("MIT")
@@ -666,6 +675,37 @@ class YearListItem(BaseModel):
             "every election before the popular-vote window — the electoral-college "
             "data is still complete. Answers 'which years can I compare PV for' "
             "without a second call."
+        )
+    )
+
+
+# One item of ``GET /v1/candidates`` (#330), derived from ``ec_pv`` at serve time by
+# ``SnapshotRepository.list_candidates``. The class docstring is the schema description
+# on /docs in full, so developer notes live here, not in it.
+class CandidateListItem(BaseModel):
+    """One candidate in this dataset: public id, name, and the election years they
+    appear in."""
+
+    model_config = _config(_CANDIDATE_LIST_EXAMPLE)
+
+    candidate_slug: str = Field(
+        description=(
+            "The candidate's public id: the `{slug}` in `/v1/candidates/{slug}`, and "
+            "the same value as `candidate_slug` elsewhere in the API."
+        )
+    )
+    candidate: str = Field(
+        description=(
+            "The candidate's name as this dataset shows it, the same in every year."
+        )
+    )
+    years: list[int] = Field(
+        description=(
+            "The election years in which this candidate received at least one "
+            "electoral vote cast, oldest first; never empty. They are the years "
+            "`/v1/candidates/{slug}` returns rows for. Votes cast decide which years "
+            "appear, so Horace Greeley's list includes 1872, when Congress did not "
+            "count his electoral votes."
         )
     )
 
