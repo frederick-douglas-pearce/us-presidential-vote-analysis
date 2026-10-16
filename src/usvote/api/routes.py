@@ -221,9 +221,10 @@ def list_candidates(
     in this dataset.
 
     Each `candidate_slug` listed is one that `/v1/candidates/{slug}` returns rows for.
-    That route ignores letter case, and any slug not on this list returns 404 there.
-    Use the list to check a slug before you request that route, or to build a
-    candidate picker. The list changes only when the data version does.
+    That route ignores letter case: a slug that matches none on this list, in any
+    letter case, returns 404 there. Use the list to check a slug before you request
+    that route, or to build a candidate picker. The list changes only when the data
+    version does.
     """
     # #330 / D070(c): derived from ec_pv at serve time, so no snapshot table and no
     # schema bump. The whole docstring above publishes on /docs, so notes stay here.

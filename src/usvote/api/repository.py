@@ -48,12 +48,12 @@ from usvote.snapshot_schema import (
 #: snapshot was ~1,700 rows and this note said so; the widened 1824–2024 surface is
 #: ~5,600, so a hypothetical unscoped ``SELECT`` would trip the cap. None exists:
 #: :meth:`list_years` aggregates, :meth:`list_candidates` deduplicates to one row per
-#: ``(candidate, year)`` (132 on the 1824–2024 data), and every fact read goes through
-#: :meth:`_data_rows`, which always carries a ``WHERE``. What the cap protects is
-#: therefore unchanged — a *scoped* query returning thousands of rows means a
-#: grain/fan-out regression, not a large-but-valid result. Measured headroom on the
-#: widened surface: the widest scoped reads are one year (~357 rows), one candidate
-#: (~200) and one state (~150), so roughly 14×.
+#: ``(candidate, year)`` (as many as ``national_rollup`` holds), and every fact read
+#: goes through :meth:`_data_rows`, which always carries a ``WHERE``. What the cap
+#: protects is therefore unchanged — a *scoped* query returning thousands of rows
+#: means a grain/fan-out regression, not a large-but-valid result. Measured headroom on
+#: the widened surface: the widest scoped reads are one year (~357 rows), one
+#: candidate (~200) and one state (~150), so roughly 14×.
 MAX_ROWS = 5000
 
 

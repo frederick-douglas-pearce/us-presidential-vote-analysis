@@ -127,12 +127,6 @@ than silently shipping duplicates the content hash would bless. Secondary indexe
 `year` lookups ride the PK's leftmost prefix). Every EC state row is kept — winners **and**
 0-EV losers (the dense-fact rows the thesis explores: "lost the EC, won the PV").
 
-`GET /v1/candidates` (#330) is derived from this table at serve time — the distinct
-`(candidate_slug, candidate, year)` triples, grouped per slug — so it needs no table of its
-own and no schema bump (D070(c)). Reading `ec_pv` rather than `national_rollup` keeps the
-index and the by-candidate 404 on one source: a slug is listed exactly when
-`/v1/candidates/{slug}` finds rows for it.
-
 | column | type | notes |
 |---|---|---|
 | `year`, `state` | INTEGER, TEXT | canonical grain |
@@ -150,6 +144,12 @@ index and the by-candidate 404 on one source: a slug is listed exactly when
 | `national_counted_electoral_votes` | INTEGER | national **counted** EV total |
 | `count_status` | TEXT **NOT NULL** | `counted` / `not_counted` / `disputed` |
 | `count_status_reason` | TEXT | the Archives' sentence explaining a non-`counted` status; NULL otherwise |
+
+`GET /v1/candidates` (#330) is derived from this table at serve time — the distinct
+`(candidate_slug, candidate, year)` triples, grouped per slug — so it needs no table of its
+own and no schema bump (D070(c)). Reading `ec_pv` rather than `national_rollup` keeps the
+index and the by-candidate 404 on one source: a slug (lowercase) is listed exactly when
+`/v1/candidates/{slug}` finds rows for it.
 
 `pv_status` and `count_status` are `NOT NULL` deliberately: "a null popular vote is never
 bare" and "every row says whether its votes were counted" are per-row promises, so the store

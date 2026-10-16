@@ -207,30 +207,29 @@ def test_candidate_index_matches_the_by_slug_route_both_ways(client: TestClient)
     """AC4: the listed slugs are exactly those ``/v1/candidates/{slug}`` answers 200 for.
 
     "Exactly" holds over canonical lowercase slugs: the by-slug route lowercases its
-    input, so ``CAND-A`` also answers 200 without being listed. One direction: every
-    listed slug answers 200. The other: every candidate in the fixture frame (the
-    hand-written oracle, not the served index) answers 200 and is listed, and a
-    well-formed slug that is not a candidate answers 404.
+    input, so ``CAND-A`` answers 200 without being listed (asserted below). One
+    direction: the listed slugs equal the hand-written oracle's, and each answers 200.
+    The other: a well-formed slug that is not a candidate answers 404.
     """
     listed = [item["candidate_slug"] for item in client.get("/v1/candidates").json()["data"]]
+    assert listed == [item["candidate_slug"] for item in _EXPECTED_CANDIDATE_INDEX]
     for slug in listed:
         assert client.get(f"/v1/candidates/{slug}").status_code == 200, slug
-    expected = [item["candidate_slug"] for item in _EXPECTED_CANDIDATE_INDEX]
-    for slug in expected:
-        assert client.get(f"/v1/candidates/{slug}").status_code == 200, slug
-    assert listed == expected
     assert "cand-e" not in listed
     assert client.get("/v1/candidates/cand-e").status_code == 404
+    assert "CAND-A" not in listed
+    assert client.get("/v1/candidates/CAND-A").status_code == 200
 
 
-def test_candidate_index_years_are_the_by_slug_years_with_votes_cast(
-    client: TestClient,
-) -> None:
-    """Each listed year is a year the by-slug route returns rows for, with votes cast.
+def test_candidate_index_years_are_the_by_slug_years(client: TestClient) -> None:
+    """Each item's years are exactly the years the by-slug route returns rows for.
 
-    Holds the published wording true: "the years `/v1/candidates/{slug}` returns rows
-    for" and "at least one electoral vote cast" — read off the by-slug route, a
-    different query from the index's.
+    Read off the by-slug route, a different query from the index's. The cast-vote
+    loop is a sanity check on the fixture, not on ``list_candidates``, which applies
+    no cast filter: it confirms the test data holds no candidate-year with zero votes
+    cast. The cast basis of ``years`` is pinned by ``cand-d`` 1860 (8 cast, 0 counted)
+    in ``_EXPECTED_CANDIDATE_INDEX``; in production the "at least one electoral vote
+    cast" wording rests on the EC-spine invariant that #373 will guard at build time.
     """
     for item in client.get("/v1/candidates").json()["data"]:
         rows = client.get(f"/v1/candidates/{item['candidate_slug']}").json()["data"]
@@ -262,6 +261,74 @@ def test_candidate_index_carries_the_snapshot_etag(client: TestClient) -> None:
     again = client.get("/v1/candidates", headers={"If-None-Match": resp.headers["etag"]})
     assert again.status_code == 304
     assert again.content == b""
+
+
+def _doctor(snapshot_path: str, *statements: str) -> SnapshotRepository:
+    """Edit a built fixture snapshot, then open it.
+
+    The build refuses or normalizes the shapes these tests need (one slug with two
+    names; names that sort differently from their slugs; rows out of year order), so
+    the file is edited after the build to reach them.
+    """
+    conn = sqlite3.connect(snapshot_path)
+    try:
+        with conn:
+            for statement in statements:
+                conn.execute(statement)
+    finally:
+        conn.close()
+    return SnapshotRepository.open(snapshot_path)
+
+
+def test_candidate_index_fails_loud_on_a_slug_with_two_names(snapshot_path: str) -> None:
+    """One slug carrying two display names raises, never a duplicate or a silent pick.
+
+    The build refuses such a frame (``add_candidate_slug``). The edit touches ``ec_pv``
+    only, so this is also the test that fails if ``list_candidates`` were moved to read
+    ``national_rollup``: listing and existence must share ``ec_pv``.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "UPDATE ec_pv SET candidate = 'Cand A Renamed' "
+        "WHERE candidate_slug = 'cand-a' AND year = 2020",
+    )
+    with pytest.raises(SnapshotError, match="cand-a"):
+        repo.list_candidates()
+
+
+def test_candidate_index_is_ordered_by_slug_not_name(snapshot_path: str) -> None:
+    """Items follow slug order even where display names sort differently.
+
+    The fixture's names sort like their slugs, so ordering by name would pass every
+    other test. Renaming every ``cand-a`` row to one name that sorts last separates
+    the two orders without tripping the two-name guard.
+    """
+    repo = _doctor(
+        snapshot_path, "UPDATE ec_pv SET candidate = 'Zed A' WHERE candidate_slug = 'cand-a'"
+    )
+    items = repo.list_candidates()
+    assert [i["candidate_slug"] for i in items] == ["cand-a", "cand-b", "cand-c", "cand-d"]
+    assert items[0]["candidate"] == "Zed A"
+
+
+def test_candidate_index_years_are_oldest_first_whatever_the_row_order(
+    snapshot_path: str,
+) -> None:
+    """``years`` is sorted by the query, not by the order rows were written.
+
+    The build writes rows in year order, so an index read with no year ordering could
+    still return years ascending. Rewriting ``cand-a``'s 2016 rows after its 2020 rows
+    reverses the storage order; the published "oldest first" must still hold.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "CREATE TEMP TABLE moved AS "
+        "SELECT * FROM ec_pv WHERE candidate_slug = 'cand-a' AND year = 2016",
+        "DELETE FROM ec_pv WHERE candidate_slug = 'cand-a' AND year = 2016",
+        "INSERT INTO ec_pv SELECT * FROM moved",
+    )
+    by_slug = {i["candidate_slug"]: i["years"] for i in repo.list_candidates()}
+    assert by_slug["cand-a"] == [2016, 2020]
 
 
 # --- validation (422) -------------------------------------------------------
@@ -326,26 +393,6 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
 
 
 # --- server-side cap fails loud, never truncates ----------------------------
-
-
-def test_candidate_index_fails_loud_on_a_slug_with_two_names(snapshot_path: str) -> None:
-    """One slug carrying two display names raises, never a duplicate or a silent pick.
-
-    The build refuses such a frame (``add_candidate_slug``), so the file is doctored
-    after the build to reach the repository's own failure branch.
-    """
-    conn = sqlite3.connect(snapshot_path)
-    try:
-        with conn:
-            conn.execute(
-                "UPDATE ec_pv SET candidate = 'Cand A Renamed' "
-                "WHERE candidate_slug = 'cand-a' AND year = 2020"
-            )
-    finally:
-        conn.close()
-    repo = SnapshotRepository.open(snapshot_path)
-    with pytest.raises(SnapshotError, match="cand-a"):
-        repo.list_candidates()
 
 
 def test_row_cap_fails_loud(settings: ApiSettings, monkeypatch: pytest.MonkeyPatch) -> None:
