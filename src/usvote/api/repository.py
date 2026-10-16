@@ -47,12 +47,13 @@ from usvote.snapshot_schema import (
 #: **The cap now sits below the table size, and that is correct.** Before #139 the whole
 #: snapshot was ~1,700 rows and this note said so; the widened 1824–2024 surface is
 #: ~5,600, so a hypothetical unscoped ``SELECT`` would trip the cap. None exists:
-#: :meth:`list_years` aggregates, and every fact read goes through :meth:`_data_rows`,
-#: which always carries a ``WHERE``. What the cap protects is therefore unchanged — a
-#: *scoped* query returning thousands of rows means a grain/fan-out regression, not a
-#: large-but-valid result. Measured headroom on the widened surface: the widest scoped
-#: reads are one year (~357 rows), one candidate (~200) and one state (~150), so roughly
-#: 14×.
+#: :meth:`list_years` aggregates, :meth:`list_candidates` deduplicates to one row per
+#: ``(candidate, year)`` (as many as ``national_rollup`` holds), and every fact read
+#: goes through :meth:`_data_rows`, which always carries a ``WHERE``. What the cap
+#: protects is therefore unchanged — a *scoped* query returning thousands of rows
+#: means a grain/fan-out regression, not a large-but-valid result. Measured headroom on
+#: the widened surface: the widest scoped reads are one year (~357 rows), one
+#: candidate (~200) and one state (~150), so roughly 14×.
 MAX_ROWS = 5000
 
 
@@ -178,8 +179,9 @@ class SnapshotRepository:
     # --- data reads (E8-S3, #97) --------------------------------------------
     #
     # Each returns plain ``dict`` rows keyed by snapshot column (the route layer maps
-    # them to public Pydantic models). Column lists are module constants, never user
-    # input, so the f-string interpolation is safe (the S608 noqa).
+    # them to public Pydantic models) — except :meth:`list_candidates`, whose ``years``
+    # key is derived by grouping. Column lists are module constants, never user input,
+    # so the f-string interpolation is safe (the S608 noqa).
 
     def _select(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
         """Run a capped SELECT; fail loud if it would exceed :data:`MAX_ROWS`.
@@ -365,6 +367,44 @@ class SnapshotRepository:
         clauses += extra
         params += extra_params
         return self._data_rows(clauses, params, "year, state")
+
+    def list_candidates(self) -> list[dict[str, object]]:
+        """Every candidate in ``ec_pv``: slug, display name and sorted years (#330).
+
+        Read from ``ec_pv``, the table :meth:`candidate_exists` keys on, so the index
+        and the by-slug 404 can never disagree about which slugs exist.
+        ``national_rollup`` would spare the ``DISTINCT`` but split listing and
+        existence across two tables.
+
+        The ``(slug, name, year)`` triples are deduplicated in SQL and grouped here, not
+        in the handler (routes stay free of aggregation). A slug arriving with a second
+        display name raises :class:`SnapshotError`: the build's slug-collision guard
+        (``snapshot.add_candidate_slug``) makes that unreachable through the real
+        writer, and the alternatives — a duplicate slug, or one name chosen silently —
+        would break "one item per candidate" without a sound.
+        """
+        rows = self._select(
+            f"SELECT DISTINCT candidate_slug, candidate, year FROM {DATA_TABLE} "  # noqa: S608
+            "ORDER BY candidate_slug, year",
+            (),
+        )
+        grouped: list[tuple[object, object, list[object]]] = []
+        for row in rows:
+            slug, name, year = row["candidate_slug"], row["candidate"], row["year"]
+            if grouped and grouped[-1][0] == slug:
+                if grouped[-1][1] != name:
+                    raise SnapshotError(
+                        f"candidate slug {slug!r} carries two display names "
+                        f"({grouped[-1][1]!r}, {name!r}) — a slug collision the "
+                        "build should have refused."
+                    )
+                grouped[-1][2].append(year)
+            else:
+                grouped.append((slug, name, [year]))
+        return [
+            {"candidate_slug": slug, "candidate": name, "years": years}
+            for slug, name, years in grouped
+        ]
 
 
 def _year_range_clauses(

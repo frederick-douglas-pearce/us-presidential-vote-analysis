@@ -88,7 +88,12 @@ def test_every_data_column_comes_from_the_join_view_or_is_explicitly_derived() -
 
 def test_candidate_id_is_never_a_model_field() -> None:
     """D006: the internal surrogate must not appear on any public model."""
-    for model in (models.EcPvRow, models.NationalSummaryRow, models.YearListItem):
+    for model in (
+        models.EcPvRow,
+        models.NationalSummaryRow,
+        models.YearListItem,
+        models.CandidateListItem,
+    ):
         assert "candidate_id" not in _mapped_columns(model)
         assert "candidate_id" not in model.model_fields
 
@@ -121,12 +126,17 @@ def test_every_shipped_example_validates() -> None:
 
 
 def test_key_public_models_ship_an_example() -> None:
-    """The public-facing response models each advertise at least one example."""
-    with_examples = {model for model, _ in _models_with_examples()}
+    """The public-facing response models each advertise at least one example.
+
+    Counts a model only when its examples list is non-empty: an ``examples`` key
+    holding ``[]`` advertises nothing.
+    """
+    with_examples = {model for model, examples in _models_with_examples() if examples}
     for model in (
         models.EcPvRow,
         models.NationalSummaryRow,
         models.YearListItem,
+        models.CandidateListItem,
         models.Provenance,
         models.Meta,
         models.SnapshotMetaResponse,

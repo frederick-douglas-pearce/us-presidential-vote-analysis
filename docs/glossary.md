@@ -164,13 +164,20 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** A person who received at least one electoral vote in that election.
 - **Precise:** The canonical display name (D006), with `candidate_slug` as its durable public id.
   The dataset's candidate scope is candidates who received electoral votes (D007); candidates who
-  only received popular votes are not in it.
+  only received popular votes are not in it. `/v1/candidates` lists each candidate once, with
+  `candidate_slug`, `candidate` and the election years they appear in (*Election years a
+  candidate appears in*).
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` and
-  `/state/<usps>`.
+  `/state/<usps>`; on the API's `/docs` page, the `CandidateListItem.candidate` and
+  `CandidateListItem.candidate_slug` field descriptions in `src/usvote/api/models.py`.
 - **Source:** `EcPvRow.candidate` and `candidate_slug`; D006; D007; `docs/canonical-keys.md`,
-  "The two keys are two-tier".
+  "The two keys are two-tier"; `CandidateListItem` in `src/usvote/api/models.py`.
 - **Not:** Everyone on the ballot.
-- **Status:** settled
+- **Status:** settled; wording pending (#379: reader text does not call `candidate_slug`
+  "durable", by owner decision, 2026-10-16, but these still do: this entry's **Precise**; the
+  `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
+  `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in
+  `src/usvote/api/models.py`)
 
 ### Candidates in the dataset (dataset-wide count)
 - **Plain:** How many different people received at least one electoral vote in any election in
@@ -303,6 +310,22 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["year"]`; the year-range slider.
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`.
 - **Not:** *Census used*, which is also a year.
+- **Status:** settled
+
+### Election years a candidate appears in (`years`)
+- **Plain:** The election years in which a candidate received at least one electoral vote, oldest
+  first.
+- **Precise:** `years` on a `/v1/candidates` item: the distinct `year` values of that candidate's
+  rows, sorted oldest first, which are the years `/v1/candidates/{slug}` returns rows for. The basis
+  is electoral votes cast, as for `candidate_count` on `/v1/elections`, so 1872 is among Horace
+  Greeley's years (3 cast, 0 counted). Never empty. Candidates who received popular votes only are
+  not in this dataset, so they are not listed.
+- **Shown as:** on the API's `/docs` page, the `CandidateListItem.years` field description in
+  `src/usvote/api/models.py`. Not shown on the dashboard; showing it needs its own `LABELS` key.
+- **Source:** `CandidateListItem.years` in `src/usvote/api/models.py` and
+  `SnapshotRepository.list_candidates` in `src/usvote/api/repository.py` (#330); D007.
+- **Not:** Years the candidate ran or was on the ballot; only years whose electoral votes Congress
+  counted (*Electoral votes counted*); years the candidate took office (*Took office*).
 - **Status:** settled
 
 ### Electoral College winner, or leader with no majority (`ec_winner`)
@@ -786,7 +809,12 @@ decision and who makes it.
 
 - **Not in this dataset**: whether the CSV preamble's last line, `export.NULL_LINE`, keeps the
   word "null" (#375). The owner decides, on a label spec from `ba`.
-- **The API's published text**: merged API text does not yet follow these rules: *The API's
-  published text is reader wording*; *In the API's published text, public names are
-  vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal and survey
-  terms*. #379 rewrites it. The owner approves the rewrite, on a label spec from `ba`.
+- **The API's published text** and **Candidate**: merged API text does not yet follow these
+  rules: *The API's published text is reader wording*; *In the API's published text, public
+  names are vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal
+  and survey terms*. Separately, reader text does not call `candidate_slug` "durable" (owner
+  decision, 2026-10-16, #379), but these still do: the *Candidate* entry's **Precise**; the
+  `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
+  `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in
+  `src/usvote/api/models.py`. #379 rewrites all of them. The owner approves the rewrite, on a
+  label spec from `ba`.

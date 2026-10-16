@@ -88,7 +88,11 @@ API_TITLE = "US Presidential Vote API"
 #: 0.4.0 -> 0.5.0 by #245: two per-capita routes, a ``PerCapitaRow`` model, and four
 #: ``census_*`` fields on every response's ``meta.provenance``. Additive, hence minor.
 #: ``SNAPSHOT_SCHEMA_VERSION`` moved 3 -> 4 for the same event.
-API_VERSION = "0.5.0"
+#:
+#: 0.5.0 -> 0.6.0 by #330: the ``/v1/candidates`` index and its ``CandidateListItem``
+#: model. Additive, hence minor. It reads an existing table, so
+#: ``SNAPSHOT_SCHEMA_VERSION`` did not move (D070(c)).
+API_VERSION = "0.6.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -178,8 +182,8 @@ _OPENAPI_TAGS: list[dict[str, Any]] = [
     {
         "name": "Candidates",
         "description": (
-            "One candidate's EC + PV rows across every covered year, keyed by the "
-            "durable public slug."
+            "Every candidate in this dataset, and one candidate's rows, state by "
+            "state, for every year they appear in."
         ),
     },
     {

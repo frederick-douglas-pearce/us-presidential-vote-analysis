@@ -17,11 +17,14 @@ here — the flip itself is asserted in ``test_api_e2e``).
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
+from usvote.api.repository import SnapshotError, SnapshotRepository
 
 # --- list years -------------------------------------------------------------
 
@@ -178,6 +181,162 @@ def test_get_candidate_unknown_404(client: TestClient) -> None:
     assert resp.json()["error"]["code"] == "candidate_not_found"
 
 
+# --- candidate index (#330) -------------------------------------------------
+
+#: The index the fixture frame must produce, written out by hand from
+#: ``tests/fixtures/api_snapshot.py`` rather than re-queried from the snapshot: a test
+#: that recomputed it from ``ec_pv`` would re-encode the code under test and agree with
+#: it when both drifted. ``cand-d`` 1860 is 8 votes cast and 0 counted (the 1872
+#: Greeley shape), so the cast basis of ``years`` is exercised.
+_EXPECTED_CANDIDATE_INDEX = [
+    {"candidate_slug": "cand-a", "candidate": "Cand A", "years": [2016, 2020]},
+    {"candidate_slug": "cand-b", "candidate": "Cand B", "years": [2016, 2020]},
+    {"candidate_slug": "cand-c", "candidate": "Cand C", "years": [1860]},
+    {"candidate_slug": "cand-d", "candidate": "Cand D", "years": [1860]},
+]
+
+
+def test_candidate_index_lists_every_candidate_once(client: TestClient) -> None:
+    """Slug order, oldest year first, one item per candidate, exactly three fields."""
+    body = client.get("/v1/candidates").json()
+    assert body["data"] == _EXPECTED_CANDIDATE_INDEX
+    assert body["meta"]["count"] == len(body["data"])
+
+
+def test_candidate_index_matches_the_by_slug_route_both_ways(client: TestClient) -> None:
+    """AC4: the listed slugs are exactly those ``/v1/candidates/{slug}`` answers 200 for.
+
+    "Exactly" holds over canonical lowercase slugs: the by-slug route lowercases its
+    input, so ``CAND-A`` answers 200 without being listed (asserted below). One
+    direction: the listed slugs equal the hand-written oracle's, and each answers 200.
+    The other: a well-formed slug that is not a candidate answers 404.
+    """
+    listed = [item["candidate_slug"] for item in client.get("/v1/candidates").json()["data"]]
+    assert listed == [item["candidate_slug"] for item in _EXPECTED_CANDIDATE_INDEX]
+    for slug in listed:
+        assert client.get(f"/v1/candidates/{slug}").status_code == 200, slug
+    assert "cand-e" not in listed
+    assert client.get("/v1/candidates/cand-e").status_code == 404
+    assert "CAND-A" not in listed
+    upper = client.get("/v1/candidates/CAND-A")
+    assert upper.status_code == 200
+    # Same rows, not merely a 200: the published text says the route ignores case.
+    lower_rows = client.get("/v1/candidates/cand-a").json()["data"]
+    assert lower_rows
+    assert upper.json()["data"] == lower_rows
+
+
+def test_candidate_index_years_are_the_by_slug_years(client: TestClient) -> None:
+    """Each item's years are exactly the years the by-slug route returns rows for.
+
+    Read off the by-slug route, a different query from the index's. The cast-vote
+    loop is a sanity check on the fixture, not on ``list_candidates``, which applies
+    no cast filter: it confirms the test data holds no candidate-year with zero votes
+    cast. The cast basis of ``years`` is pinned by ``cand-d`` 1860 (8 cast, 0 counted)
+    in ``_EXPECTED_CANDIDATE_INDEX``; in production the "at least one electoral vote
+    cast" wording rests on the EC-spine invariant that #373 will guard at build time.
+    """
+    for item in client.get("/v1/candidates").json()["data"]:
+        rows = client.get(f"/v1/candidates/{item['candidate_slug']}").json()["data"]
+        assert item["years"] == sorted({r["year"] for r in rows})
+        for year in item["years"]:
+            cast = sum(r["electoral_votes"] for r in rows if r["year"] == year)
+            assert cast > 0, (item["candidate_slug"], year)
+
+
+def test_candidate_index_agrees_with_the_build_time_counts(client: TestClient) -> None:
+    """Cross-table checks that do not go through the index's own SQL.
+
+    ``/v1/meta``'s ``candidate_count`` is counted when the snapshot is built, and
+    ``/v1/elections`` counts candidates per year from the national roll-up table.
+    """
+    index = client.get("/v1/candidates").json()
+    meta = client.get("/v1/meta").json()
+    assert index["meta"]["count"] == meta["candidate_count"]
+    per_year = client.get("/v1/elections").json()["data"]
+    assert sum(len(i["years"]) for i in index["data"]) == sum(
+        y["candidate_count"] for y in per_year
+    )
+
+
+def test_candidate_index_carries_the_snapshot_etag(client: TestClient) -> None:
+    resp = client.get("/v1/candidates")
+    assert resp.headers["cache-control"].startswith("public, max-age=3600")
+    assert resp.headers["etag"] == client.get("/v1/elections").headers["etag"]
+    again = client.get("/v1/candidates", headers={"If-None-Match": resp.headers["etag"]})
+    assert again.status_code == 304
+    assert again.content == b""
+
+
+def _doctor(snapshot_path: str, *statements: str) -> SnapshotRepository:
+    """Edit a built fixture snapshot, then open it.
+
+    The build refuses a slug carrying two names, derives every slug from its name, and
+    writes rows in year order, so it cannot produce the shapes these tests need (one
+    slug with two names; a name its slug is not derived from; rows stored out of year
+    order). The file is edited after the build to reach them.
+    """
+    conn = sqlite3.connect(snapshot_path)
+    try:
+        with conn:
+            for statement in statements:
+                conn.execute(statement)
+    finally:
+        conn.close()
+    return SnapshotRepository.open(snapshot_path)
+
+
+def test_candidate_index_fails_loud_on_a_slug_with_two_names(snapshot_path: str) -> None:
+    """One slug carrying two display names raises, never a duplicate or a silent pick.
+
+    The build refuses such a frame (``add_candidate_slug``). The edit touches ``ec_pv``
+    only, so this is also the test that fails if ``list_candidates`` were moved to read
+    ``national_rollup``: listing and existence must share ``ec_pv``.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "UPDATE ec_pv SET candidate = 'Cand A Renamed' "
+        "WHERE candidate_slug = 'cand-a' AND year = 2020",
+    )
+    with pytest.raises(SnapshotError, match="cand-a"):
+        repo.list_candidates()
+
+
+def test_candidate_index_is_ordered_by_slug_not_name(snapshot_path: str) -> None:
+    """Items follow slug order even where display names sort differently.
+
+    The fixture's names sort like their slugs, so ordering by name would pass every
+    other test. Renaming every ``cand-a`` row to one name that sorts last separates
+    the two orders without tripping the two-name guard.
+    """
+    repo = _doctor(
+        snapshot_path, "UPDATE ec_pv SET candidate = 'Zed A' WHERE candidate_slug = 'cand-a'"
+    )
+    items = repo.list_candidates()
+    assert [i["candidate_slug"] for i in items] == ["cand-a", "cand-b", "cand-c", "cand-d"]
+    assert items[0]["candidate"] == "Zed A"
+
+
+def test_candidate_index_years_are_oldest_first_whatever_the_row_order(
+    snapshot_path: str,
+) -> None:
+    """``years`` is sorted by the query, not by the order rows were written.
+
+    The build writes rows in year order, so an index read with no year ordering could
+    still return years ascending. Rewriting ``cand-a``'s 2016 rows after its 2020 rows
+    reverses the storage order; the published "oldest first" must still hold.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "CREATE TEMP TABLE moved AS "
+        "SELECT * FROM ec_pv WHERE candidate_slug = 'cand-a' AND year = 2016",
+        "DELETE FROM ec_pv WHERE candidate_slug = 'cand-a' AND year = 2016",
+        "INSERT INTO ec_pv SELECT * FROM moved",
+    )
+    by_slug = {i["candidate_slug"]: i["years"] for i in repo.list_candidates()}
+    assert by_slug["cand-a"] == [2016, 2020]
+
+
 # --- validation (422) -------------------------------------------------------
 
 
@@ -229,6 +388,7 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
         "/v1/elections/2020",
         "/v1/elections/2020/summary",
         "/v1/states/CA",
+        "/v1/candidates",
         "/v1/candidates/cand-a",
     ):
         assert "candidate_id" not in client.get(path).text, path
