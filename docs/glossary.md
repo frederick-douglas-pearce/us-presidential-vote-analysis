@@ -1,32 +1,53 @@
 # Glossary
 
-What this project's terms mean, for readers who are not engineers and for the people writing to
-them. Maintained by the `ba` agent; whatever awaits the owner is listed under **Open decisions**.
+What this project's terms mean, for readers who are not engineers, for developers who build on the
+public API (API users), and for the people writing to them. Maintained by the `ba` agent; whatever
+awaits the owner is listed under **Open decisions**.
 
 **Statuses.** Every entry and wording rule ends with one of three. `settled`: a source settles
 the meaning, and no merged reader wording for it is known to await the owner. It does not claim
 the owner approved that wording: where the owner did, the entry's **Source** says so (#378 will check
 this for every entry). `settled; wording pending (<what awaits the owner>)`: the meaning is
-settled, but merged reader wording for it is known to await the owner, for example a
-historical-claim check or a review on the live dashboard. `proposed (<the decision the owner
-needs to make>)`: no source settles the meaning yet. An entry that is not plain `settled` is also
-listed under **Open decisions**. Wording still under review in an open pull request is not marked
-here; that pull request carries it.
+settled, but merged reader wording for it (for a rule, merged wording the rule governs) is known
+to await the owner, for example a historical-claim check, a review on the live dashboard, or a
+rewrite of merged text that does not yet follow the rule. `proposed (<the decision the owner
+needs to make>)`: no source settles the meaning yet. An entry or rule that is not plain `settled`
+is also listed under **Open decisions**. Wording still under review in an open pull request is
+not marked here; that pull request carries it.
 
 **This file records what terms mean; the code ships the wording.** The dashboard's shipped
 wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, and the null
 and help-text constants), with a few page-level sentences in `dashboard/explore/components.py`,
-`dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`. Each entry points
-at that code under **Shown as**. Some entry names, a few plain definitions and the **Say instead**
-table use the same words readers see, because those words are the plain term; each Say instead
-row names the code that ships its wording, or marks it a rule that no single string ships. The
-code is the shipped form: if this file and the code disagree, the code is what readers see; fix
-whichever is wrong and say which.
+`dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`. The API's
+published text is its `/docs` page (also served at `/redoc` and `/openapi.json`) and the text of
+its responses other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
+what that includes. It ships from five files under `src/usvote/api/`:
+
+- `models.py`: field descriptions, response-model docstrings, and the prose inside response
+  examples (the example error message in `_ERROR_EXAMPLE`).
+- `routes.py`: the data endpoints' summaries and docstrings, query-parameter descriptions, and
+  the error messages served for a year, state or candidate not in the data (404) and for an
+  inverted year range (422).
+- `app.py`: the API title (`API_TITLE`), summary (`API_SUMMARY`) and description; the tag names
+  and descriptions (`_OPENAPI_TAGS`); the `/health` docstring; and the `/v1/meta` summary and
+  docstring.
+- `origin_guard.py`: the 403 error message (`_FORBIDDEN_BODY`).
+- `provenance.py`: the `redistributable_note` text.
+
+Each entry points at that code under **Shown as**; an API description reads "on the API's
+`/docs` page, the `Model.field` field description in `src/usvote/api/models.py`". Some entry
+names, a few plain definitions and the **Say instead** table use the same words readers see,
+because those words are the plain term; each Say instead row names the code that ships its
+wording, or marks it a rule that no single string ships. The code is the shipped form: if this
+file and the code disagree, the code is what readers see; fix whichever is wrong and say which.
 
 **Audiences.** Public readers of the dashboard at `explore.us-presidential-election-center.org`,
 non-technical readers first (epic #275, product frame 3); readers of the "Counted, Not Assumed"
-blog series under `posts/`; people who download a table as CSV; the owner; and the agents who
-write labels and help text. Plain definitions are written for the least technical of them.
+blog series under `posts/`; people who download a table as CSV; developers who build on the
+public API at `api.us-presidential-election-center.org` and read its `/docs` page (**API
+users**; owner decision, 2026-10-15, #374); the owner; and the agents who write labels, help
+text and the API's published text. Plain definitions are written for the least technical of
+them.
 
 **The published posts are the best evidence of reader-facing wording.** They are owner-edited.
 Where a post settles how a term reads, it is cited under **Source**; where a post and the code
@@ -37,7 +58,9 @@ disagree, the disagreement is a finding for the owner, and the post is never edi
 ## Wording rules
 
 These bind every label, cell, note and sentence a reader sees, and every wording drawn from this
-file.
+file. They govern three surfaces: the dashboard (its pages and its CSV downloads), the API's
+published text (its `/docs` page and its responses), and the marketing prose (the blog posts,
+articles and announcements). Every rule binds all three unless the rule states an exception.
 
 - **Editorial guardrails** (`CLAUDE.md`, "Publishing"): nothing critical of a data source is ever
   published, and every historical claim is checked before publishing. Wording describes what the
@@ -48,16 +71,55 @@ file.
   panel "Field names") list, and a CSV header row. It never appears in a label, a cell, a note, a
   preamble sentence or page prose, and neither does a raw coded value (for example a status code).
   The view link in a CSV preamble is exempt, as a header row is: it carries the API's own query
-  names because it has to reopen the view exactly.
-  *Source:* owner decision, 2026-10-10, #348; the view-link exemption, owner decision, 2026-10-11, #348. *Status:* settled.
+  names because it has to reopen the view exactly. The API's published text is the other
+  exception: it writes public `/v1` names as served (*In the API's published text, public names
+  are vocabulary*, below).
+  *Source:* owner decision, 2026-10-10, #348; the view-link exemption, owner decision, 2026-10-11,
+  #348; the API exception: owner decision, 2026-10-15, #374. *Status:* settled.
+- **The API's published text is reader wording.** Everything the API publishes as text, on its
+  `/docs` page and in its responses, follows these rules. `CLAUDE.md`, *Who writes wording*,
+  lists what that includes, and the top of this file maps where each kind ships. Its readers are
+  API users. The `ba` agent writes that text as a label spec checked against this file, and the
+  parent agent applies it.
+  *Source:* owner decision, 2026-10-15, #374. *Status:* settled; wording pending (#379: merged
+  API text does not yet follow these rules).
+- **In the API's published text, public names are vocabulary.** A public `/v1` field name, query
+  parameter or served closed value (for example `legislature_chosen`, a `pv_status` value) is the
+  word API users code against, so the API's text writes it as served, underscores included. A
+  name that is also a public `/v1` field, query parameter or served value counts as public, even
+  where a warehouse column has the same name (`took_office`, `pv_status`). The JSON value is
+  null, never Python's None. The API's text never names any other warehouse table, view or column
+  (`dwh.*`, `total_electoral_votes`, `president_*`, `candidate_votes`), a table inside the data
+  file the API serves (`ec_pv`, `national_rollup`, `hybrid_summary`, `per_capita`), an internal
+  key (`candidate_id`), or a project tracking reference (an issue number, a decision id such as
+  D046, a story id such as E8-S8); a public document is linked by its URL. Prose spells out
+  "Electoral College" and "popular vote"; `ec_` and `pv_` appear only inside field names.
+  *Source:* owner decision, 2026-10-15, #374. *Status:* settled; wording pending (#379: merged
+  API text does not yet follow this rule).
+- **Every term an API description uses can be looked up here.** Each public `/v1` field with a
+  meaning beyond its name has a defining entry whose **Shown as** names its `/docs` description,
+  and each domain term the API's published text uses has an entry (which need not name every
+  description that uses it). Fields that describe the response rather than the elections
+  (`meta.count`, `schema_version`, `row_count`, `build_timestamp`, the license URLs) need no
+  entry: their description is the definition. An API description is never a **Key index** row;
+  that index lists `LABELS` keys only. Until #380 is done, most entries for `/v1` fields do not
+  name their `/docs` description, and some fields and terms have no entry; that gap is in this
+  file, not in wording readers see.
+  *Source:* owner decision, 2026-10-15, #374. *Status:* settled.
 - **"Counted" is reserved for vote counts** (Congress's count of electoral votes, and popular-vote
   counts). Anything else that is counted, such as people in a census or states in a total, gets
-  other wording. *Source:* owner decision, 2026-10-10, #348;
-  `posts/2026-08-25-it-takes-270-but-270-of-what.md` (appointed, cast, counted). *Status:* settled.
+  other wording. On every surface these rules bind, a total that includes each state once says
+  "each state included once", not "counted once". *Source:* owner decision, 2026-10-10, #348;
+  `posts/2026-08-25-it-takes-270-but-270-of-what.md` (appointed, cast, counted); "each state
+  included once": owner decision, 2026-10-15, #374. *Status:* settled; wording pending (#379:
+  merged API text does not yet follow this rule).
 - **Plain words over legal and survey terms**: "census used" rather than "census in force", no
   "governs", "borders" rather than "footprint", no "apportionment" in reader wording, and "the
-  National Archives" rather than "the Archives". The precise terms stay in this file. *Source:*
-  owner decision, 2026-10-10, #348. *Status:* settled.
+  National Archives" rather than "the Archives". The precise terms stay in this file. The API's
+  published text has one exception: a public field name or served value that contains one of
+  these words (`governing_census_year`, `no_governing_figure`) is written as served. *Source:*
+  owner decision, 2026-10-10, #348; the API exception: owner decision, 2026-10-15, #374.
+  *Status:* settled; wording pending (#379: merged API text does not yet follow this rule).
 
 ---
 
@@ -703,23 +765,28 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "winner" for the Electoral College leader in a year with no majority | Electoral College leader (no majority) | `labels.ec_winner_label`, which picks `labels.EC_LEADER_NO_MAJORITY`; `labels.flip`, which names the role in `labels.FLIP_YES` by the same test (`labels._ec_role_is_winner`) | In 1824 the leader did not become president. |
 | "not applicable" for a year outside the popular-vote window | that this dataset has no popular-vote figures for the year | `labels.NOT_APPLICABLE`; `NO_PV_SENTENCE` in `pages/election.py` | "Not applicable" reads as a claim that the method had no result at the time. |
 | "no figure" without "in this dataset" | no figure in this dataset | `labels.NO_FIGURE`, `labels.NO_NATIONAL_FIGURE` | Without it, a reader can take the cell as zero votes. |
-| a raw field name, a status code, or anything with an underscore | the plain label | `LABELS`; `labels.PV_STATUS`, `labels.COUNT_STATUS`, `labels.BOUNDARY_BASIS`, `labels.PER_CAPITA_COVERAGE` | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). |
-| "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. |
+| a raw field name, a status code, or anything with an underscore | the plain label | `LABELS`; `labels.PV_STATUS`, `labels.COUNT_STATUS`, `labels.BOUNDARY_BASIS`, `labels.PER_CAPITA_COVERAGE` | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). In the API's published text a public `/v1` name is written as served, and an internal name never appears (owner decision, 2026-10-15, #374). |
+| "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. In the API's published text, null is the JSON value and is written "null", never "None" (owner decision, 2026-10-15, #374). |
 | "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | `LABELS["coverage"]`, `LABELS["pv_coverage"]`; years covered: the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`, `export.preamble` | The project uses the word for three different things. |
 | "counted" for anything but votes | used, covers, included | a rule (see Wording rules) | "Counted" is reserved for vote counts (owner decision, 2026-10-10). |
 | "in force", "governs", "apportionment" | used; set the state's electoral votes; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. |
 | "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
 | "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
-| "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble` | Engineering term (owner decision, 2026-10-10). |
+| "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
+| "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
 | 0 for a missing figure | never | a rule | Zero is a measurement; a missing figure is not. |
 | a party code in capitals | the party name in ordinary capitalization | `labels.party`, `labels.PARTY_DISPLAY` | Owner decision, 2026-10-10. |
 
 ## Open decisions
 
-Terms whose meaning no source settles yet (`proposed`), and settled terms whose merged reader
-wording still awaits the owner (`settled; wording pending`). Each line names the decision and who
-makes it.
+Terms whose meaning no source settles yet (`proposed`), and settled terms and wording rules whose
+merged reader wording still awaits the owner (`settled; wording pending`). Each line names the
+decision and who makes it.
 
 - **Not in this dataset**: whether the CSV preamble's last line, `export.NULL_LINE`, keeps the
   word "null" (#375). The owner decides, on a label spec from `ba`.
+- **The API's published text**: merged API text does not yet follow these rules: *The API's
+  published text is reader wording*; *In the API's published text, public names are
+  vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal and survey
+  terms*. #379 rewrites it. The owner approves the rewrite, on a label spec from `ba`.
