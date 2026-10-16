@@ -266,9 +266,10 @@ def test_candidate_index_carries_the_snapshot_etag(client: TestClient) -> None:
 def _doctor(snapshot_path: str, *statements: str) -> SnapshotRepository:
     """Edit a built fixture snapshot, then open it.
 
-    The build refuses or normalizes the shapes these tests need (one slug with two
-    names; names that sort differently from their slugs; rows out of year order), so
-    the file is edited after the build to reach them.
+    The build refuses a slug carrying two names, derives every slug from its name, and
+    writes rows in year order, so it cannot produce the shapes these tests need (one
+    slug with two names; a name its slug is not derived from; rows stored out of year
+    order). The file is edited after the build to reach them.
     """
     conn = sqlite3.connect(snapshot_path)
     try:

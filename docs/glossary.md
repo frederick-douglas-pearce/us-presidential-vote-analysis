@@ -173,9 +173,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** `EcPvRow.candidate` and `candidate_slug`; D006; D007; `docs/canonical-keys.md`,
   "The two keys are two-tier"; `CandidateListItem` in `src/usvote/api/models.py`.
 - **Not:** Everyone on the ballot.
-- **Status:** settled; wording pending (#379: this entry's **Precise** and the
-  `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py` still call `candidate_slug`
-  "durable", which reader text does not do, by owner decision, 2026-10-16)
+- **Status:** settled; wording pending (#379: reader text does not call `candidate_slug`
+  "durable", by owner decision, 2026-10-16, but these still do: this entry's **Precise**; the
+  `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
+  `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in
+  `src/usvote/api/models.py`)
 
 ### Candidates in the dataset (dataset-wide count)
 - **Plain:** How many different people received at least one electoral vote in any election in
@@ -810,7 +812,9 @@ decision and who makes it.
 - **The API's published text** and **Candidate**: merged API text does not yet follow these
   rules: *The API's published text is reader wording*; *In the API's published text, public
   names are vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal
-  and survey terms*. Separately, the `/v1/candidates/{slug}` docstring and the *Candidate*
-  entry's **Precise** still call `candidate_slug` "durable", which reader text does not (owner
-  decision, 2026-10-16, #379). #379 rewrites both. The owner approves the rewrite, on a label
-  spec from `ba`.
+  and survey terms*. Separately, reader text does not call `candidate_slug` "durable" (owner
+  decision, 2026-10-16, #379), but these still do: the *Candidate* entry's **Precise**; the
+  `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
+  `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in
+  `src/usvote/api/models.py`. #379 rewrites all of them. The owner approves the rewrite, on a
+  label spec from `ba`.
