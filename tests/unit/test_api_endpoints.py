@@ -218,7 +218,12 @@ def test_candidate_index_matches_the_by_slug_route_both_ways(client: TestClient)
     assert "cand-e" not in listed
     assert client.get("/v1/candidates/cand-e").status_code == 404
     assert "CAND-A" not in listed
-    assert client.get("/v1/candidates/CAND-A").status_code == 200
+    upper = client.get("/v1/candidates/CAND-A")
+    assert upper.status_code == 200
+    # Same rows, not merely a 200: the published text says the route ignores case.
+    lower_rows = client.get("/v1/candidates/cand-a").json()["data"]
+    assert lower_rows
+    assert upper.json()["data"] == lower_rows
 
 
 def test_candidate_index_years_are_the_by_slug_years(client: TestClient) -> None:
