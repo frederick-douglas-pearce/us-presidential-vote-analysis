@@ -785,7 +785,7 @@ class TestSharedPieces:
             )
             for name in SHARED_MODULES
         }
-        assert graph["components"] == {"export", "labels"}  # non-vacuity
+        assert graph["components"] == {"export", "labels", "query"}  # non-vacuity
         assert in_cycles(graph) == []
 
     def test_the_cycle_check_sees_a_cycle(self) -> None:

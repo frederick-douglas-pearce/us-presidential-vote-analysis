@@ -358,19 +358,11 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     )
 
 
-def _state_cell(row: dict[str, Any]) -> html.Td:
-    """The state's name, linked to its history (#279) when its code is a USPS code."""
-    usps = row["state_usps"]
-    if isinstance(usps, str) and query.USPS_RE.fullmatch(usps):
-        return html.Td(dcc.Link(str(row["state"]), href=f"/state/{usps}"))
-    return html.Td(str(row["state"]))
-
-
 def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html.Tr:
     return html.Tr(
         [
-            _state_cell(row),
-            html.Td(str(row["candidate"])),
+            components.state_cell(row),
+            components.candidate_cell(row),
             labels.party_cell(row["party"]),
             labels.cell(labels.number(row["state_electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes"])),
@@ -405,7 +397,7 @@ def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
 def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
     return html.Tr(
         [
-            html.Td(str(row["candidate"])),
+            components.candidate_cell(row),
             labels.party_cell(row["party"]),
             labels.cell(labels.number(row["national_electoral_votes"])),
             labels.cell(labels.number(row["national_electoral_votes_counted"])),
@@ -565,7 +557,7 @@ def _per_capita_section(
         html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
         *components.table(
             shown,
-            lambda r: html.Tr([_state_cell(r), *labels.per_capita_cells(r)]),
+            lambda r: html.Tr([components.state_cell(r), *labels.per_capita_cells(r)]),
             PER_CAPITA_FIELDS,
             PER_CAPITA_TABLE_ID,
             download,

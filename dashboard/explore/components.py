@@ -1,6 +1,7 @@
 """View pieces every page shares: the provenance footer, the degraded state (#306), the
-year-range slider every year-filtered table uses (#279), and the table itself with its
-CSV download (#309).
+year-range slider every year-filtered table uses (#279), the candidate history's
+single-choice year control (#331), the linked state and candidate cells (#279, #331),
+and the table itself with its CSV download (#309).
 
 Pure functions of what a page already read, so they read no API: a page reads through
 its own render-scoped view and hands them what it read.
@@ -16,7 +17,7 @@ from typing import Any
 
 from dash import dcc, html
 
-from explore import export, labels
+from explore import export, labels, query
 
 #: The id of the paragraph carrying the snapshot version.
 SNAPSHOT_ID = "snapshot-version"
@@ -113,6 +114,72 @@ def year_slider(
         marks=year_marks(first, last),
         tooltip={"placement": "bottom"},
     )
+
+
+#: The value of :func:`year_buttons`' first option, every year: never a year, and never
+#: shown (a radio item renders its label, not its value).
+ALL_YEARS_VALUE = ""
+
+
+def year_buttons(
+    control_id: str,
+    legend: str,
+    all_label: str,
+    years: Sequence[int],
+    chosen: int | None,
+    *,
+    hidden: bool = False,
+) -> html.Fieldset:
+    """A single-choice year control (#331): ``all_label`` first, then one button per
+    year, as an inline radio group named by ``legend``.
+
+    ``chosen`` is the one year applied, or ``None`` for every year. With ``hidden`` the
+    group is still rendered, so a page's one filter callback keeps all its inputs, but
+    not shown. No ``persistence``: it would override the URL, which is where the year
+    lives.
+    """
+    return html.Fieldset(
+        [
+            html.Legend(legend, className="label"),
+            dcc.RadioItems(
+                id=control_id,
+                options=[
+                    {"label": all_label, "value": ALL_YEARS_VALUE},
+                    *({"label": str(year), "value": str(year)} for year in years),
+                ],
+                value=ALL_YEARS_VALUE if chosen is None else str(chosen),
+                inline=True,
+                className="year-buttons",
+            ),
+        ],
+        className="filter",
+        hidden=hidden,
+    )
+
+
+def _has_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def state_cell(row: dict[str, Any]) -> html.Td:
+    """The state's name, linked to its history (#279) when its code is a USPS code."""
+    usps = row["state_usps"]
+    if isinstance(usps, str) and query.USPS_RE.fullmatch(usps):
+        return html.Td(dcc.Link(str(row["state"]), href=f"/state/{usps}"))
+    return html.Td(str(row["state"]))
+
+
+def candidate_cell(row: dict[str, Any]) -> html.Td:
+    """The candidate's name, linked to their history (#331) when the row's slug is a
+    slug and the name is text with something in it (an empty link is invisible).
+
+    A slug of any other type is text too: :func:`explore.query.is_slug` takes a
+    ``str``, so a null slug must not reach it, or a page that renders today degrades.
+    """
+    slug, name = row["candidate_slug"], row["candidate"]
+    if isinstance(slug, str) and query.is_slug(slug) and _has_text(name):
+        return html.Td(dcc.Link(name, href=f"/candidate/{slug}"))
+    return html.Td(str(name))
 
 
 #: A table's sentence when its filters leave no rows.

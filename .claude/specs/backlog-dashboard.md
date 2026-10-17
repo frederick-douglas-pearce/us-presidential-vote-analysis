@@ -484,6 +484,7 @@ through the `ba` pass and the editorial guardrail):
   popular-vote source [F7]. Non-technical readers will expect a party. **Surface the gap
   honestly in Phase 1. Do not fix it here.** If a Phase 2 chart needs pre-1976 party, that
   becomes the first concrete-need API addition under D070(c), filed as its own story.
+  Filed as E9-S9 (#389) on the API side's E8-S10–S14 (owner rulings, 2026-10-16).
 - The API's `state`/`candidate` query filters exist, but prefer in-dashboard filtering of
   the full year payload (see Request budget). A year is well under `MAX_ROWS` [F3].
 - Streamlit re-runs its script on every interaction, so the request budget implies
@@ -498,6 +499,11 @@ _Story of epic #N (E9 — public dashboard)._
 ---
 
 ### E9-S4: Phase 1b — state and candidate histories
+
+> **Filed as #279, then split at its plan gate (2026-10-07).** The body below is the pre-split text, kept for reference. The live stories are:
+> - #279: T4, the state picker and the state links (closed 2026-10-08).
+> - #330: the `GET /v1/candidates` index a candidate slug is validated against (D073). Deployed 2026-10-16 (API 0.6.0, PR #383).
+> - #331: T5, the candidate history at `/candidate/<slug>`.
 
 **Issue title:** Add filterable state-history and candidate-history tables
 **Labels:** `epic:dashboard`, `enhancement`, `priority:medium`
@@ -532,9 +538,11 @@ Two views across years, reusing S3's labelling and URL conventions:
 
 ### Implementation Notes
 
-- **No candidate-index endpoint exists** [F2]. The year-first picker avoids needing one. If
-  readers need to search candidates by name across all years, a `/v1/candidates` index is a
-  legitimate concrete-need addition under D070(c). File it then, not now.
+- **No candidate-index endpoint existed at drafting** [F2]. The year-first picker avoids
+  needing one. **Since 2026-10-16** there is one, `GET /v1/candidates` (#330), built for slug
+  validation rather than name search: D073 bars filling an API path built from an unvalidated
+  slug, and that was the concrete need under D070(c). #331 validates T5's slug against it. A
+  name search across all years is still a later addition if readers ask.
 - The API's `year_from`/`year_to` filters reject an inverted range with a 422 [F1]. The
   dashboard should prevent an inverted range rather than surface the error.
 
@@ -640,6 +648,10 @@ A front door that summarizes each tab in a sentence and a thumbnail, and is the 
 worth sharing. Open at shaping time: whether the apex domain should serve or redirect to
 it.
 
+### E9-S9: One party per candidate per election in T2–T5
+
+> **Filed as #389; the issue body is authoritative.** Meets D070(c) for T2–T5. After #386 (E8-S12) is live; depends on #331. Narrows "Not in this dataset" to candidate-years not yet collected.
+
 ---
 
 ## E14: dashboard UI (split out of E9, 2026-10-12)
@@ -694,8 +706,8 @@ E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
 
 | # | Fact | Label |
 |---|---|---|
-| F1 | Data routes in `src/usvote/api/routes.py`: `GET /v1/elections` (`year_from`/`year_to`); `/v1/elections/{year}` (`state`, `candidate` filters; one response carries `data` + `summary` + `election`); `/v1/elections/{year}/summary`; `/v1/states/{usps}` (year range); `/v1/candidates/{slug}` (year range); `/v1/elections/{year}/per-capita` (`state`); `/v1/states/{usps}/per-capita` (year range). `/v1/meta` and `/health` live in `app.py`. An inverted year range returns 422. | R |
-| F2 | There is no endpoint that lists states or candidates. | R |
+| F1 | Data routes in `src/usvote/api/routes.py`: `GET /v1/elections` (`year_from`/`year_to`); `/v1/elections/{year}` (`state`, `candidate` filters; one response carries `data` + `summary` + `election`); `/v1/elections/{year}/summary`; `/v1/states/{usps}` (year range); `/v1/candidates` (no parameters; added 2026-10-16 by #330, after drafting); `/v1/candidates/{slug}` (year range); `/v1/elections/{year}/per-capita` (`state`); `/v1/states/{usps}/per-capita` (year range). `/v1/meta` and `/health` live in `app.py`. An inverted year range returns 422. | R |
+| F2 | There is no endpoint that lists states or candidates. **Amended 2026-10-16:** candidates now have one, `GET /v1/candidates` (#330, API 0.6.0): one item per candidate with `candidate_slug`, `candidate` and `years` (the years with at least one electoral vote cast), ordered by slug, and its slugs are exactly those `/v1/candidates/{slug}` answers 200 for. States still have no list endpoint. | R |
 | F3 | `MAX_ROWS = 5000` in `repository.py`. The cap fails loudly rather than truncating. | R |
 | F4 | CORS uses Starlette's `CORSMiddleware` with the origin list from `USVOTE_API_CORS_ORIGINS`, GET only, no credentials, defaulting to localhost when unset. A request with no `Origin` passes through with no CORS header and no `Vary`. `deploy.yml` sets the variable on every deploy from the GitHub variable `API_CORS_ORIGINS`, currently `https://us-presidential-election-center.org`. `config.py` says "the exact dashboard origin is deferred (frontend D001)". | R |
 | F5 | Per the runbook, the `usvote-api-proxy` Worker is bound to `api.`, rewrites Host, injects the origin secret, and caches `GET /v1` 200s in `caches.default` (local to each data center) with `s-maxage=2592000`; the cache key includes the query string (`deploy.yml` relies on it). The WAF limits `/v1` to 60 requests per minute per IP. That the live config matches the runbook, and whether WAF rate limiting counts cache hits, are I. | R (runbook, `deploy.yml`) |

@@ -43,10 +43,14 @@ TABLES = {
     "election-per-capita": "/election/<year>",
     "state-history": "/state/<usps>",
     "state-per-capita": "/state/<usps>",
+    "candidate-history": "/candidate/<slug>",
 }
 
 #: Each page's reads before #309, recorded on ``main`` at 72312da with
 #: :class:`RecordingClient` at the registry's concrete values: the download adds none.
+#: The candidate history (#331) was built with its download, so its entry pins its
+#: reads rather than recording them from before one; that a download makes no request
+#: is guarded by ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/elections": ["/v1/elections"],
@@ -64,6 +68,11 @@ READS_BEFORE = {
         "/v1/states/GA/per-capita",
     ],
     "/states": ["/v1/elections", "/v1/elections/2024"],
+    "/candidate/<slug>": [
+        "/v1/candidates",
+        "/v1/elections",
+        "/v1/candidates/andrew-jackson",
+    ],
 }
 
 #: The server's routes before #309: a download adds none.
@@ -91,6 +100,7 @@ CALLBACK_OUTPUTS = {
     "elections-url.search",
     "election-url.search",
     "state-url.search",
+    "candidate-url.search",
 }
 
 HOST = "https://explore.us-presidential-election-center.org"
@@ -428,6 +438,21 @@ class TestExactlyTheView:
                 "elections-table",
                 "/elections",
             ),
+            # The candidate history (#331): a range and a state the candidate's rows do
+            # not name both fall back, so the view is unfiltered; one of their years and
+            # one of their states are named.
+            (
+                "/candidate/<slug>",
+                "year_from=1824&year_to=1828&state=AZ",
+                "candidate-history",
+                "/candidate/andrew-jackson",
+            ),
+            (
+                "/candidate/<slug>",
+                "year_from=1828&year_to=1828&state=GA",
+                "candidate-history",
+                "/candidate/andrew-jackson?state=GA&year_from=1828&year_to=1828",
+            ),
             # A candidate the state never had falls back to "all".
             (
                 "/state/<usps>",
@@ -590,6 +615,7 @@ class TestExactlyTheView:
             "election-per-capita-csv": "election-1824-per-capita.csv",
             "state-history-csv": "state-GA-history.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
+            "candidate-history-csv": "candidate-andrew-jackson-history.csv",
         }
 
     def test_each_link_on_a_page_has_its_own_name(
@@ -1150,6 +1176,10 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
             "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
+    "/candidate/<slug>": (
+        {"slug": "andrew-jackson"},
+        {"/v1/candidates/andrew-jackson": _row(*STATE_ROW_FIELDS, party=7)},
+    ),
 }
 
 
@@ -1169,6 +1199,7 @@ UNRECOGNIZED_CELLS = {
         "state-history": len(STATE_ROW_FIELDS) + 2,
         "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
+    "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 2},
 }
 
 

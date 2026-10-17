@@ -37,6 +37,12 @@ table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nu
 th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #ddd; }
 th { font-weight: 600; cursor: help; }
 .filters .filter { margin-bottom: 0.5rem; }
+/* The candidate history's year control (#331): a fieldset with no frame, each choice a button. */
+fieldset.filter { border: 0; padding: 0; margin-left: 0; margin-right: 0; min-width: 0; }
+fieldset.filter legend { padding: 0; }
+.year-buttons label { display: inline-block; margin: 0 0.35rem 0.35rem 0; padding: 0.25rem 0.6rem; border: 1px solid #0b5cad; border-radius: 1rem; cursor: pointer; }
+.year-buttons input[type="radio"] { margin-right: 0.3rem; }
+.year-buttons label:has(input:checked) { background: #0b5cad; color: #fff; }
 .table-scroll { overflow-x: auto; }
 .table-scroll table { min-width: 36rem; }
 /* T1 has three short columns: it fits a phone, so it never scrolls. */

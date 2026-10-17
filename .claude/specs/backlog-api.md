@@ -142,6 +142,11 @@ should be reflected back into `docs/ROADMAP.md` (and recorded as D029).
 - [ ] #N — E8-S7 (later/stretch): Cloud Run deploy + CDN caching
 - [ ] #N — E8-S8 (later, gated on E7): Add hybrid / flip / margin fields to the API
 - [ ] #139 — E8-S9: Grow the public surface back to 1824 (pre-1976 EC facts + `pv_status` coverage roster on the snapshot). Implements the #134 decision; hard-prereq #127.
+- [ ] #384 — E8-S10: Research how to source and define each candidate's party before 1976 (`.claude/specs/research-candidate-party-source.md`; verdict recorded as D077).
+- [ ] #385 — E8-S11: Add `dwh.candidate_party` (year, candidate_id) from Archives Table 1, with `usvote/party.py` and the build guards (MIT check-only). After E8-S10.
+- [ ] #386 — E8-S12: Serve the per-election candidate party on `/v1` (snapshot v5); not-yet-collected state defined. After E8-S11.
+- [ ] #387 — E8-S13: Curated party rows for third-party nominees outside the Archives top two (data cutover on v5). After E8-S10; cutover after E8-S12.
+- [ ] #388 — E8-S14: Curated party rows for electoral-vote recipients no party nominated (data cutover on v5). After E8-S10 and E8-S13.
 
 ### Proposed endpoint / resource shape (for architect review)
 
@@ -689,6 +694,7 @@ rationale is durable:
   free-text roster `note`, and the pre-1976 national PV aggregates derived from them
   (D022/D030). The firewall is structural — the redistributable view boundary plus a rollup
   post-condition — not editorial. Record once the #139 architect-review gate is passed.
+- **D077 (proposed, E8-S10 / #384)** — the definition of candidate party ("the party that nominated the candidate for President that year"), its closed vocabulary including `no_nomination`, the evidence bar, and the license/provenance code for curated rows. US-government public-domain sources of record only; UCSB never consulted. Record once the #384 architect review is passed.
 
 ## Open questions to resolve with the architect
 

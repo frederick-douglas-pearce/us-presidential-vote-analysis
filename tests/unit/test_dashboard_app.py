@@ -73,12 +73,15 @@ RECORDED: dict[str, dict[str, Any]] = {
             f"/v1/states/{usps}/per-capita": f"v1_states_{usps}_per_capita.json"
             for usps in ("GA", "TX")
         },
+        # The candidate index (#330) and one candidate's history, T5 (#331).
+        "/v1/candidates": "v1_candidates.json",
+        "/v1/candidates/andrew-jackson": "v1_candidates_andrew-jackson.json",
     }.items()
 }
 
 #: The concrete value each templated page is rendered at, one per path variable. Each
 #: must make the page read a path in :data:`RECORDED`.
-PATH_VALUES = {"year": "1824", "usps": "GA"}
+PATH_VALUES = {"year": "1824", "usps": "GA", "slug": "andrew-jackson"}
 
 #: The coverage variables (``api.COVERAGE_VARS``) as the recorded index resolves them:
 #: what an ``on_miss`` template or a ``validate`` source naming one is formatted with.
@@ -86,7 +89,7 @@ COVERAGE_VALUES = api.coverage_vars(RECORDED["/v1/elections"])
 
 #: A well-formed value each path variable's page does not serve: what the hostile
 #: renders put in the path (#279, so a page validating only syntax is caught).
-UNSERVED_VALUES = {"year": "1825", "usps": "ZZ"}
+UNSERVED_VALUES = {"year": "1825", "usps": "ZZ", "slug": "no-such-candidate"}
 
 
 def resolved(source: str) -> str:
@@ -309,8 +312,9 @@ class TestRender:
             register("fake_shadow", **{**YEAR_PAGE, "path_template": "/election/<yr>"})
         assert "fake_shadow" not in dash.page_registry
         # A variable where the real page has a fixed segment: "x/x" routes nowhere,
-        # yet the template matches /election/1824.
-        with pytest.raises(AssertionError, match="pages.election"):
+        # yet the template matches /election/1824, and /candidate/andrew-jackson, which
+        # the registry, sorted by module name, reaches first (#331).
+        with pytest.raises(AssertionError, match=r"pages\.candidate"):
             register("fake_wide", **{**YEAR_PAGE, "path_template": "/<kind>/<year>"})
         assert "fake_wide" not in dash.page_registry
 
@@ -2336,6 +2340,7 @@ PAGE_API_NAMES = {
     "META_PATH",
     "ELECTIONS_PATH",
     "ROSTER_PATH",
+    "CANDIDATES_PATH",
     "Validate",
     "accepted",
     # Pure functions of a body the page already read through its view.

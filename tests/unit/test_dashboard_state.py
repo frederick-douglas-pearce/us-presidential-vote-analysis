@@ -444,7 +444,9 @@ def test_the_one_election_view_links_each_state_to_its_history(
     per_capita = copy.deepcopy(RECORDED["/v1/elections/1868/per-capita"])
     tree = election["render"](body, index_row, [], per_capita)
     hrefs = {
-        link.href for link in of_type(find(tree, election["STATES_TABLE_ID"]), "Link")
+        link.href
+        for link in of_type(find(tree, election["STATES_TABLE_ID"]), "Link")
+        if link.href.startswith("/state/")
     }
     assert "/state/GA" in hrefs
     assert hrefs == {f"/state/{r['state_usps']}" for r in body["data"]}
@@ -461,7 +463,8 @@ def test_a_state_code_that_is_not_one_is_text_not_a_link(usps: Any) -> None:
     tree = election["render"](
         body, election["index_row"](INDEX, "1868"), [], per_capita
     )
-    assert of_type(find(tree, election["STATES_TABLE_ID"]), "Link") == []
+    links = of_type(find(tree, election["STATES_TABLE_ID"]), "Link")
+    assert [link.href for link in links if link.href.startswith("/state/")] == []
 
 
 # --- validation at the index and at render, and the request budget -------------------

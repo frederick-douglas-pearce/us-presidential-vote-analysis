@@ -159,9 +159,10 @@ def test_the_page_is_registered_as_planned() -> None:
 
 @pytest.mark.parametrize("path", sorted(RECORDED))
 def test_every_recorded_response_is_one_snapshot(path: str) -> None:
-    """Every recorded response (``/v1/meta``, ``/v1/elections``, each year, each state
-    and each per-capita table) was recorded from one snapshot, the one ``v1_meta.json``
-    names, and each answers the path it is recorded under."""
+    """Every recorded response (``/v1/meta``, ``/v1/elections``, each year, each state,
+    each per-capita table, the candidate index and each candidate) was recorded from
+    one snapshot, the one ``v1_meta.json`` names, and each answers the path it is
+    recorded under."""
     body = RECORDED[path]
     provenance = (
         body["provenance"] if path == api.META_PATH else body["meta"]["provenance"]
@@ -176,6 +177,13 @@ def test_every_recorded_response_is_one_snapshot(path: str) -> None:
     if per_state := re.fullmatch(r"/v1/states/([A-Z]{2})/per-capita", path):
         assert body["data"]
         assert {row["state_usps"] for row in body["data"]} == {per_state[1]}
+    # The candidate history (#331): every row names the path's slug, and the recorded
+    # index lists it.
+    if slug := re.fullmatch(r"/v1/candidates/([a-z0-9-]+)", path):
+        assert body["data"]
+        assert {row["candidate_slug"] for row in body["data"]} == {slug[1]}
+        listed = {i["candidate_slug"] for i in RECORDED[api.CANDIDATES_PATH]["data"]}
+        assert slug[1] in listed
 
 
 # --- validation: served years come from /v1/elections, never literals ---------------

@@ -22,7 +22,7 @@ offers its rows as a CSV (#309) built from the same list as its body. The filter
 the shared year range (``year_from`` / ``year_to``, judged against the dataset's span
 as on ``/elections``, so a range before the state's first election is an honest empty
 result), ``candidate`` (a slug) and ``pv_status``. T7 is narrowed by the year range
-only.
+only. Each candidate links to their history (``pages/candidate.py``, #331).
 """
 
 from __future__ import annotations
@@ -354,7 +354,8 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
         [
             # A year links to its one-election view (#307).
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
-            html.Td(str(row["candidate"])),
+            # A candidate links to their history (#331).
+            components.candidate_cell(row),
             labels.party_cell(row["party"]),
             labels.cell(labels.number(row["state_electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes"])),
