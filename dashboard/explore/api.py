@@ -154,6 +154,11 @@ COVERAGE_VARS = ("year_max",)
 #: Filled on a miss; whether to warm it is #310's question (D072).
 ROSTER_PATH = "/v1/elections/{year_max}"
 
+#: The candidate index (#330): every candidate slug ``/v1/candidates/{slug}`` serves,
+#: the candidate history's ``validate`` source (#331). A literal, filled on a miss
+#: (D074(ii)); whether to warm it is #310's question beside the roster (D072).
+CANDIDATES_PATH = "/v1/candidates"
+
 _PLACEHOLDER_RE = re.compile(r"{(.*?)}")
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")

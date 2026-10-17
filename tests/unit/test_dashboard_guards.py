@@ -43,12 +43,15 @@ code that runs only after a successful response is under the guard too.
 an element it renders only from a successful read. The success run asserts each page's
 render carries that id (and ``/`` its snapshot version too); the refused run asserts
 none does, so a marker the degraded state also renders is caught. Templated pages are
-rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs. The
+rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs, in order of
+their concrete paths. The candidate history, ``/candidate/andrew-jackson`` (#331), sorts
+first, so its render makes the success run's first fills on a miss,
+:data:`CANDIDATE_MISSES` (the candidate index, then the candidate's rows). The
 one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` on a miss:
-rendered at 1824, its render makes the success run's first fills on a miss,
-:data:`ELECTION_MISSES` (the year, :data:`MISS_PATH`, then its per-capita table, #280),
-through the render-scoped view pages use; the run checks every named miss, in some
-registered page's ``on_miss`` and in the snapshot. It validates the year from the
+rendered at 1824, its render makes the next ones, :data:`ELECTION_MISSES` (the year,
+:data:`MISS_PATH`, then its per-capita table, #280), through the render-scoped view
+pages use; the run checks every named miss, in some registered page's ``on_miss`` and in
+the snapshot. It validates the year from the
 ``/v1/elections`` it prefetches before formatting it into a path (#312), and the
 success run renders it at 1825 too: the page's not-found state, neither its success marker nor the degraded
 state, with no request reaching the transport at all (``REQUESTED``, which records
@@ -120,6 +123,9 @@ FIXTURE_FILES = {
     # The per-capita tables (#280): each page's last fill on a miss.
     "/v1/elections/1824/per-capita": "v1_elections_1824_per_capita.json",
     "/v1/states/GA/per-capita": "v1_states_GA_per_capita.json",
+    # The candidate history (#331): the index it validates against, then its rows.
+    "/v1/candidates": "v1_candidates.json",
+    "/v1/candidates/andrew-jackson": "v1_candidates_andrew-jackson.json",
 }
 
 #: Each table's download link (#309), all rendered by the success run at
@@ -131,6 +137,7 @@ DOWNLOAD_IDS = (
     "election-per-capita-csv",
     "state-history-csv",
     "state-per-capita-csv",
+    "candidate-history-csv",
 )
 
 #: Prefetched by no page: the success run's first fill on a miss, read by the
@@ -141,10 +148,16 @@ MISS_PATH = "/v1/elections/1824"
 #: page's variables need an entry (the programs assert it), or Dash would render it at
 #: its inferred ``/…/none`` path and the run would check nothing. Each value must make
 #: the page read a path in :data:`FIXTURE_FILES`.
-GUARD_PATH_VALUES = {"year": "1824", "usps": "GA"}
+GUARD_PATH_VALUES = {"year": "1824", "usps": "GA", "slug": "andrew-jackson"}
 
-#: The one-election view's fills on a miss, in the order its render makes them: the
-#: year's rows (:data:`MISS_PATH`), then its per-capita table (#280).
+#: The candidate history's fills on a miss (#331), the success run's first: its
+#: ``/candidate/…`` path sorts before every other templated page's. The index it
+#: validates the slug against, then the candidate's rows.
+CANDIDATE_MISSES = ["/v1/candidates", "/v1/candidates/andrew-jackson"]
+
+#: The one-election view's fills on a miss, after :data:`CANDIDATE_MISSES`, in the order
+#: its render makes them: the year's rows (:data:`MISS_PATH`), then its per-capita
+#: table (#280).
 ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
 #: The fills on a miss after :data:`ELECTION_MISSES`, in the order the success run
@@ -469,7 +482,9 @@ for page in PAGES:
         misses.append(template.format(**values))
 assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
 # Every named fill, so a page that stops declaring one in on_miss fails by name.
-assert set({ELECTION_MISSES!r} + {STATE_MISSES!r}) <= set(misses), misses
+assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}) <= set(
+    misses
+), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
 # for real, and enough of them run into this subprocess's timeout. Fail fast instead.
 planned = 1 + len([path for path in registered if path != api.META_PATH])
@@ -488,8 +503,8 @@ assert "/" in [concrete(page) for page in PAGES]
 rendered = set()
 for page in PAGES:
     path = concrete(page)
-    # The one-election view's render, at 1824, makes its fills on a miss
-    # (ELECTION_MISSES).
+    # The candidate history's render makes the first fills on a miss
+    # (CANDIDATE_MISSES), then the one-election view's, at 1824 (ELECTION_MISSES).
     text = route(client, path)
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])
@@ -502,7 +517,7 @@ for page in PAGES:
 missing = set({DOWNLOAD_IDS!r}) - rendered
 assert not missing, ("a table rendered no download link", missing)
 
-for miss in {ELECTION_MISSES!r} + {STATE_MISSES!r}:
+for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)
 
 # A year the index does not serve: refused from the cached index, so nothing is
@@ -528,12 +543,25 @@ assert "state" not in rendered_ids(text)
 assert "state-not-found" in rendered_ids(text)
 assert "isn't responding" not in text
 assert REQUESTED == requested_before, (REQUESTED, requested_before)
+
+# A slug the candidate index does not list (#331): refused from the index the
+# /candidate/andrew-jackson render above filled, so nothing is requested, and never
+# /v1/candidates/no-such-candidate.
+text = route(client, "/candidate/no-such-candidate")
+(candidate_page,) = [
+    p for p in PAGES if p.get("path_template") == "/candidate/<slug>"
+]
+assert candidate_page["success"] == "candidate", candidate_page["success"]
+assert "candidate" not in rendered_ids(text)
+assert "candidate-not-found" in rendered_ids(text)
+assert "isn't responding" not in text
+assert REQUESTED == requested_before, (REQUESTED, requested_before)
 (states_page,) = [p for p in PAGES if p.get("path") == "/states"]
 assert states_page["success"] == "states", states_page["success"]
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
-expected += [*{ELECTION_MISSES!r}, *{STATE_MISSES!r}]
+expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{STATE_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
 """
         + _ALL_MODULES_LOADED
@@ -738,7 +766,7 @@ def test_the_guard_values_render_the_miss_path() -> None:
     assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
     assert ELECTION_MISSES[0] == MISS_PATH
     # Every fill on a miss the success run expects is answered from a recording.
-    assert set(ELECTION_MISSES + STATE_MISSES) <= set(FIXTURE_FILES)
+    assert set(CANDIDATE_MISSES + ELECTION_MISSES + STATE_MISSES) <= set(FIXTURE_FILES)
 
 
 def test_the_guard_program_can_fail(tmp_path: Path) -> None:

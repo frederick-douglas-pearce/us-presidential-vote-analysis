@@ -168,8 +168,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `candidate_slug`, `candidate` and the election years they appear in (*Election years a
   candidate appears in*).
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` and
-  `/state/<usps>`; on the API's `/docs` page, the `CandidateListItem.candidate` and
-  `CandidateListItem.candidate_slug` field descriptions in `src/usvote/api/models.py`.
+  `/state/<usps>`; the name, as served, as the link to the candidate history page
+  `/candidate/<slug>` in T2, T3 and T4, and as that page's heading (`pages/candidate.py`); on the
+  API's `/docs` page, the `CandidateListItem.candidate` and `CandidateListItem.candidate_slug`
+  field descriptions in `src/usvote/api/models.py`.
 - **Source:** `EcPvRow.candidate` and `candidate_slug`; D006; D007; `docs/canonical-keys.md`,
   "The two keys are two-tier"; `CandidateListItem` in `src/usvote/api/models.py`.
 - **Not:** Everyone on the ballot.
@@ -298,8 +300,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   that wording is load-bearing.
 - **Shown as:** `components.UNAVAILABLE_MESSAGE`.
 - **Source:** `dashboard/explore/components.py`; `dashboard/CLAUDE.md`, `components.py`.
-- **Not:** A not-found state, which is a year or state the dataset does not serve
-  (`NOT_FOUND_SENTENCE` in `pages/election.py` and `pages/state.py`). An empty filter result
+- **Not:** A not-found state, which is a year, state or candidate the dataset does not serve
+  (`NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and `pages/candidate.py`). An empty filter result
   (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`).
 - **Status:** settled
 
@@ -307,7 +309,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** The year the presidential election was held.
 - **Precise:** `year`. The years served run from `meta.provenance.coverage.year_min` to
   `year_max`, read from the response, never written as a literal.
-- **Shown as:** `LABELS["year"]`; the year-range slider.
+- **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`); the label
+  of the year control on `/candidate/<slug>`.
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`.
 - **Not:** *Census used*, which is also a year.
 - **Status:** settled
@@ -321,7 +324,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   Greeley's years (3 cast, 0 counted). Never empty. Candidates who received popular votes only are
   not in this dataset, so they are not listed.
 - **Shown as:** on the API's `/docs` page, the `CandidateListItem.years` field description in
-  `src/usvote/api/models.py`. Not shown on the dashboard; showing it needs its own `LABELS` key.
+  `src/usvote/api/models.py`. The same years are the year options on `/candidate/<slug>` (with
+  `ALL_YEARS` first, and no control for a candidate with one year), which the page builds from
+  that candidate's `/v1/candidates/{slug}` rows, not from the `years` field; the two agree because
+  `years` lists exactly the years that endpoint returns rows for. `years` itself is not shown, and
+  showing the field needs its own `LABELS` key. The candidate history page (`pages/candidate.py`)
+  reads `/v1/candidates` to check a link before it requests the candidate's rows, and its rows are
+  exactly these years, but it does not show the field.
 - **Source:** `CandidateListItem.years` in `src/usvote/api/models.py` and
   `SnapshotRepository.list_candidates` in `src/usvote/api/repository.py` (#330); D007.
 - **Not:** Years the candidate ran or was on the ballot; only years whose electoral votes Congress
@@ -690,7 +699,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   vocabularies: any non-blank text is shown (a party through its display form, see Party), never
   this, unless no character of a party code is a letter or digit (for example underscores,
   punctuation, symbols or a zero-width space; a few letters render blank and are shown as served,
-  #368); candidate and state names in the tables are shown as served (#367).
+  #368); candidate and state names in the tables, as link text, and as the heading of a state or
+  candidate history page are shown as served (#367).
   A null or blank text is not this: it names no cause (*Not in this dataset*), or the cause its
   row or year gives. No served year reaches this cell; it is defensive. In a CSV download the
   field is written as the API served it; for a null figure with an unrecognized cause, the
@@ -800,6 +810,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
 | 0 for a missing figure | never | a rule | Zero is a measurement; a missing figure is not. |
 | a party code in capitals | the party name in ordinary capitalization | `labels.party`, `labels.PARTY_DISPLAY` | Owner decision, 2026-10-10. |
+| "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
 
 ## Open decisions
 
