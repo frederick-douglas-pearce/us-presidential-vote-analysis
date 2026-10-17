@@ -312,9 +312,9 @@ class TestRender:
             register("fake_shadow", **{**YEAR_PAGE, "path_template": "/election/<yr>"})
         assert "fake_shadow" not in dash.page_registry
         # A variable where the real page has a fixed segment: "x/x" routes nowhere,
-        # yet the template matches /election/1824 (and /candidate/andrew-jackson, which
-        # the registry reaches first, #331).
-        with pytest.raises(AssertionError, match=r"pages\.(candidate|election)"):
+        # yet the template matches /election/1824, and /candidate/andrew-jackson, which
+        # the registry, sorted by module name, reaches first (#331).
+        with pytest.raises(AssertionError, match=r"pages\.candidate"):
             register("fake_wide", **{**YEAR_PAGE, "path_template": "/<kind>/<year>"})
         assert "fake_wide" not in dash.page_registry
 

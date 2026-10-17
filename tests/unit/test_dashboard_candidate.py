@@ -127,7 +127,7 @@ class TestOnIndex:
     @pytest.mark.parametrize(
         "slug",
         [
-            "Andrew-Jackson",  # a listed slug in another letter case: exact match only
+            "Andrew-Jackson",  # another letter case: the slug pattern refuses it
             "ANDREW-JACKSON",
             "no-such-candidate",  # well-formed, unlisted
             "andrew-jackson-",
@@ -147,6 +147,11 @@ class TestOnIndex:
             lambda b: b["data"].append({"candidate_slug": 7}),
             lambda b: b["data"].append("andrew-jackson"),
             lambda b: b["data"][-1].pop("candidate_slug"),
+            # A listed value is formatted into a path, so one that is no slug refuses
+            # the whole index, as one bad roster row does.
+            lambda b: b["data"].append({"candidate_slug": "../x"}),
+            lambda b: b["data"].append({"candidate_slug": "Andrew-Jackson"}),
+            lambda b: b["data"].append({"candidate_slug": "a" * 65}),
             lambda b: b.update(data={"andrew-jackson": {}}),
             lambda b: b.update(data=[]),
             lambda b: b.clear(),
@@ -248,22 +253,22 @@ class TestJackson:
 
 
 @pytest.mark.parametrize(
-    "change",
+    ("change", "message"),
     [
-        {"candidate_slug": "john-quincy-adams"},
-        {"year": 1825},  # no served year
-        {"year": "1824"},
-        {"state_usps": "ga"},
-        {"state_usps": None},
+        ({"candidate_slug": "john-quincy-adams"}, "another candidate"),
+        ({"year": 1825}, "no served year"),
+        ({"year": "1824"}, "no served year"),
+        ({"state_usps": "ga"}, "no state code"),
+        ({"state_usps": None}, "no state code"),
     ],
     ids=repr,
 )
 def test_a_row_of_another_candidate_or_no_served_year_or_state_is_malformed(
-    change: dict[str, Any],
+    change: dict[str, Any], message: str
 ) -> None:
     body = jackson()
     body["data"][len(body["data"]) // 2].update(change)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=message):
         render(body=body)
 
 
@@ -298,7 +303,17 @@ class TestFilters:
 
     @pytest.mark.parametrize(
         "query",
-        ["state=ga", "state=Georgia", "state=GA&state=TX", "year_from=182"],
+        [
+            "state=ga",
+            "state=Georgia",
+            "state=GA&state=TX",
+            "year_from=182",
+            # A range or a lone bound names no view this page shows (#331's review).
+            "year_from=1824&year_to=1832",
+            "year_from=1828",
+            "year_to=1828",
+            "year_from=1832&year_to=1824",
+        ],
     )
     def test_a_bad_parameter_is_dropped(self, query: str) -> None:
         assert MOD["parse_filters"](parse(query)) == []
@@ -352,16 +367,20 @@ class TestFilters:
         assert control.options[0]["value"] == components.ALL_YEARS_VALUE
         assert not str(control.options[0]["value"]).isdigit()
 
-    def test_the_year_control_is_hidden_for_a_one_election_candidate(self) -> None:
+    @pytest.mark.parametrize(
+        ("years", "shown"),
+        [({1832}, False), ({1828, 1832}, True), (set(JACKSON_YEARS), True)],
+    )
+    def test_the_year_control_shows_only_for_two_or_more_years(
+        self, years: set[int], shown: bool
+    ) -> None:
         body = jackson()
-        body["data"] = [r for r in body["data"] if r["year"] == 1832]
+        body["data"] = [r for r in body["data"] if r["year"] in years]
         tree, _, several = rendered(body=body)
-        assert several is False
-        fieldset = next(
-            f for f in of_type(tree, "Fieldset") if find(f, MOD["YEAR_ID"]) is not None
-        )
-        assert fieldset.hidden is True
-        assert of_type(render(), "Fieldset")[0].hidden is False
+        assert several is shown
+        (fieldset,) = of_type(tree, "Fieldset")
+        assert find(fieldset, MOD["YEAR_ID"]) is not None
+        assert fieldset.hidden is (not shown)
 
     def test_the_year_control_is_named_by_its_legend(self) -> None:
         (fieldset,) = of_type(render(), "Fieldset")
@@ -453,7 +472,7 @@ def test_t4_links_each_candidate_to_their_history() -> None:
     ],
     ids=repr,
 )
-def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error(
+def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
     row: dict[str, Any],
 ) -> None:
     cell = components.candidate_cell(
@@ -470,6 +489,19 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error(
     tree, election = _election_tree(change=doctor)  # renders, does not raise
     for table in (election["STATES_TABLE_ID"], election["NATION_TABLE_ID"]):
         assert _candidate_links(find(tree, table)) == set()
+    # T4, which also builds its cells through components.candidate_cell.
+    state = dash.page_registry["pages.state"]["layout"].__globals__
+    body = copy.deepcopy(RECORDED["/v1/states/GA"])
+    for r in body["data"]:
+        r.update(row)
+    tree, _ = state["render"](  # renders, does not raise
+        body,
+        copy.deepcopy(INDEX),
+        "GA",
+        [],
+        copy.deepcopy(RECORDED["/v1/states/GA/per-capita"]),
+    )
+    assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
 
 
 def test_a_slug_and_a_name_make_a_link() -> None:
@@ -533,8 +565,12 @@ class TestRequestBudget:
         assert PAGE_ID not in ids
         assert "unavailable" not in ids
         assert calls == [] and bucket.waits == []
-        # The raw path value is never echoed.
-        assert slug not in response.get_data(as_text=True)
+        text = response.get_data(as_text=True)
+        # The raw path value is never echoed, and no filter is offered with no filters.
+        assert slug not in text
+        assert MOD["FILTER_SENTENCE"] not in text
+        assert MOD["FILTER_SENTENCE_ONE_YEAR"] not in text
+        assert MOD["LEDE"] in text
 
     def test_cold_an_unlisted_slug_costs_one_fill_of_the_index_only(
         self, monkeypatch: pytest.MonkeyPatch
@@ -591,6 +627,22 @@ class TestIndex:
         assert status == 200
         assert head.canonical == url(f"/candidate/{SLUG}")
         assert head.og_url == url(f"/candidate/{SLUG}?state=GA")
+
+    @pytest.mark.parametrize(
+        ("search", "named"),
+        [
+            # A range the page does not apply is never named (#331's review).
+            ("?year_from=1824&year_to=1832", ""),
+            ("?year_from=1828", ""),
+            ("?year_from=1828&year_to=1828", "?year_from=1828&year_to=1828"),
+        ],
+    )
+    def test_og_url_names_only_a_year_the_page_could_apply(
+        self, monkeypatch: pytest.MonkeyPatch, search: str, named: str
+    ) -> None:
+        cached_client(monkeypatch, source=api.CANDIDATES_PATH)
+        _, head, _ = get(f"/candidate/{SLUG}{search}")
+        assert head.og_url == url(f"/candidate/{SLUG}{named}")
 
     @pytest.mark.parametrize(
         "path",

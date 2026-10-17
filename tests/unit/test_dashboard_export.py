@@ -48,8 +48,9 @@ TABLES = {
 
 #: Each page's reads before #309, recorded on ``main`` at 72312da with
 #: :class:`RecordingClient` at the registry's concrete values: the download adds none.
-#: A page added later (the candidate history, #331) records its reads without the
-#: download, which it was built with, so the name predates it.
+#: The candidate history (#331) was built with its download, so its entry pins its
+#: reads rather than recording them from before one; that a download makes no request
+#: is guarded by ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/elections": ["/v1/elections"],
@@ -436,6 +437,21 @@ class TestExactlyTheView:
                 "year_from=1824&year_to=2024",
                 "elections-table",
                 "/elections",
+            ),
+            # The candidate history (#331): a range and a state the candidate's rows do
+            # not name both fall back, so the view is unfiltered; one of their years and
+            # one of their states are named.
+            (
+                "/candidate/<slug>",
+                "year_from=1824&year_to=1828&state=AZ",
+                "candidate-history",
+                "/candidate/andrew-jackson",
+            ),
+            (
+                "/candidate/<slug>",
+                "year_from=1828&year_to=1828&state=GA",
+                "candidate-history",
+                "/candidate/andrew-jackson?state=GA&year_from=1828&year_to=1828",
             ),
             # A candidate the state never had falls back to "all".
             (

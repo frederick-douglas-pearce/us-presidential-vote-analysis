@@ -68,7 +68,8 @@ HEADING = "Candidate history"
 #: it never says the dataset lacks the candidate; the raw path value is never echoed.
 NOT_FOUND_SENTENCE = "This link does not match any candidate in this dataset."
 NOT_FOUND_LINK = "Browse every election to find a candidate"
-#: The lede, then the sentence naming the filters the render shows.
+#: The lede, then, on a successful render only, the sentence naming the filters it
+#: shows.
 LEDE = (
     "This candidate's electoral votes, state by state, in every election in which they "
     "received at least one, with the popular vote where this dataset has it. A state "
@@ -86,14 +87,19 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
     """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
 
     Syntactic and total, and it reads no API: Dash's index runs it to build ``og:url``.
-    Keeps the year keys as :func:`explore.query.parse_year_range` does and ``state``
-    only as a USPS code; a key repeated with differing values is dropped, and so is a
-    key it does not know. Never emits ``slug``, the path variable. Whether a year or
-    state is in this candidate's rows is the layout's question (:func:`filters`).
+    Keeps the year keys only as one year, ``year_from`` = ``year_to``, each as
+    :func:`explore.query.parse_year_range` keeps it: a range or a lone bound names no
+    view this page shows, so both keys are dropped. ``state`` is kept only as a USPS
+    code; a key repeated with differing values is dropped, and so is a key it does not
+    know. Never emits ``slug``, the path variable. Whether the year or the state is in
+    this candidate's rows is the layout's question (:func:`filters`).
     """
     if not isinstance(params, dict):
         return []
     kept = query.parse_year_range(params)
+    if kept.get("year_from") != kept.get("year_to"):
+        kept.pop("year_from", None)
+        kept.pop("year_to", None)
     state = query.single(params.get(STATE))
     if state is not None and query.USPS_RE.fullmatch(state):
         kept[STATE] = state
@@ -108,12 +114,16 @@ def _rows_of(body: Any) -> list[Any]:
 def listed(body: Any) -> set[str]:
     """The slugs the candidate index lists, read all or nothing.
 
-    One item that is not an object with a string ``candidate_slug`` makes the index
-    name no slug, as :func:`explore.api.roster` refuses a roster with one bad row.
+    One item that is not an object whose ``candidate_slug`` is a slug
+    (:func:`explore.query.is_slug`) makes the index name no slug, as
+    :func:`explore.api.roster` refuses a roster with one bad row: a listed value is
+    formatted into an API path, so it is checked as a path variable is.
     """
     items = _rows_of(body)
     if not items or not all(
-        isinstance(item, dict) and isinstance(item.get("candidate_slug"), str)
+        isinstance(item, dict)
+        and isinstance(slug := item.get("candidate_slug"), str)
+        and query.is_slug(slug)
         for item in items
     ):
         return set()
@@ -174,8 +184,11 @@ def _years(rows: list[dict[str, Any]]) -> list[int]:
     return sorted({r["year"] for r in rows})
 
 
-def filters(pairs: list[tuple[str, str]], rows: list[dict[str, Any]]) -> Filters:
-    """The filters to apply to this candidate's rows.
+def filters(
+    pairs: list[tuple[str, str]], rows: list[dict[str, Any]], years: list[int]
+) -> Filters:
+    """The filters to apply to this candidate's rows, whose election years are
+    ``years``.
 
     Per parameter, as ``og:url`` is. A year is applied only as one of the candidate's
     own election years, written ``year_from`` = ``year_to``; any other pair (a range,
@@ -187,7 +200,7 @@ def filters(pairs: list[tuple[str, str]], rows: list[dict[str, Any]]) -> Filters
     year = None
     if year_from is not None and year_from == year_to:
         candidate_year = int(year_from)
-        if candidate_year in _years(rows):
+        if candidate_year in years:
             year = candidate_year
     state = given.get(STATE)
     return Filters(
@@ -277,8 +290,9 @@ def _rows(body: Any, slug: str, served: set[int]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: (r["year"], str(r.get("state", ""))))
 
 
-def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
-    years = _years(rows)
+def _controls(
+    rows: list[dict[str, Any]], years: list[int], several: bool, chosen: Filters
+) -> html.Div:
     states = {r["state_usps"]: str(r["state"]) for r in rows}
     return html.Div(
         [
@@ -288,7 +302,7 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
                 ALL_YEARS,
                 years,
                 chosen.year,
-                hidden=len(years) < 2,
+                hidden=not several,
             ),
             html.Div(
                 [
@@ -350,7 +364,10 @@ def render(
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     rows = _rows(body, slug, _served_years(index))
-    chosen = filters(pairs, rows)
+    years = _years(rows)
+    # One decision, read by the year control and by the lede alike.
+    several = len(years) > 1
+    chosen = filters(pairs, rows, years)
     shown = select(rows, chosen)
     download = export.Download(
         filename=f"candidate-{slug}-history.csv",
@@ -363,7 +380,7 @@ def render(
     content = html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            _controls(rows, chosen),
+            _controls(rows, years, several, chosen),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
             *components.table(
                 shown,
@@ -381,7 +398,7 @@ def render(
     )
     name = rows[0]["candidate"]
     heading = name if isinstance(name, str) and name.strip() else HEADING
-    return content, heading, len(_years(rows)) > 1
+    return content, heading, several
 
 
 def not_found() -> html.Div:
@@ -397,7 +414,9 @@ def not_found() -> html.Div:
 
 def layout(slug: Any = None, **params: Any) -> html.Div:
     heading = HEADING
-    lede = f"{LEDE} {FILTER_SENTENCE}"
+    # The filter sentence only above the filters: not on the not-found or degraded
+    # state, which show none.
+    lede = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated against the candidate index before it is formatted (#331, D073).
@@ -409,8 +428,8 @@ def layout(slug: Any = None, **params: Any) -> html.Div:
                 content, heading, several = render(
                     body, index, slug, parse_filters(params)
                 )
-                if not several:
-                    lede = f"{LEDE} {FILTER_SENTENCE_ONE_YEAR}"
+                sentence = FILTER_SENTENCE if several else FILTER_SENTENCE_ONE_YEAR
+                lede = f"{LEDE} {sentence}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div([html.H1(heading), html.P(lede, className="lede"), content])

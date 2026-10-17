@@ -169,7 +169,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   candidate appears in*).
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` and
   `/state/<usps>`; the name, as served, as the link to the candidate history page
-  `/candidate/<slug>` in T2, T3 and T4, and as that page's heading (`pages/candidate.py`); on the
+  `/candidate/<slug>` in T2, T3 and T4, and as that page's heading (`pages/candidate.py`), or
+  `HEADING` there until a name is read, which is also the page's title (`title`); and in
+  `pages/candidate.py`, the page's link-preview `description` and its download name; on the
   API's `/docs` page, the `CandidateListItem.candidate` and `CandidateListItem.candidate_slug`
   field descriptions in `src/usvote/api/models.py`.
 - **Source:** `EcPvRow.candidate` and `candidate_slug`; D006; D007; `docs/canonical-keys.md`,
@@ -300,8 +302,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   that wording is load-bearing.
 - **Shown as:** `components.UNAVAILABLE_MESSAGE`.
 - **Source:** `dashboard/explore/components.py`; `dashboard/CLAUDE.md`, `components.py`.
-- **Not:** A not-found state, which is a year, state or candidate the dataset does not serve
-  (`NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and `pages/candidate.py`). An empty filter result
+- **Not:** A not-found state (*Not-found state*): a link whose year, state code or candidate slug
+  the dataset does not serve (`NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and
+  `pages/candidate.py`). An empty filter result
   (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`).
 - **Status:** settled
 
@@ -310,7 +313,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** `year`. The years served run from `meta.provenance.coverage.year_min` to
   `year_max`, read from the response, never written as a literal.
 - **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`); the label
-  of the year control on `/candidate/<slug>`.
+  of the year control on `/candidate/<slug>`, and the lede sentence that offers it
+  (`FILTER_SENTENCE` in `pages/candidate.py`).
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`.
 - **Not:** *Census used*, which is also a year.
 - **Status:** settled
@@ -328,9 +332,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `ALL_YEARS` first, and no control for a candidate with one year), which the page builds from
   that candidate's `/v1/candidates/{slug}` rows, not from the `years` field; the two agree because
   `years` lists exactly the years that endpoint returns rows for. `years` itself is not shown, and
-  showing the field needs its own `LABELS` key. The candidate history page (`pages/candidate.py`)
-  reads `/v1/candidates` to check a link before it requests the candidate's rows, and its rows are
-  exactly these years, but it does not show the field.
+  showing the field needs its own `LABELS` key.
 - **Source:** `CandidateListItem.years` in `src/usvote/api/models.py` and
   `SnapshotRepository.list_candidates` in `src/usvote/api/repository.py` (#330); D007.
 - **Not:** Years the candidate ran or was on the ballot; only years whose electoral votes Congress
@@ -507,6 +509,18 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled; wording pending (#375: whether the CSV preamble's last line,
   `export.NULL_LINE`, keeps the word "null")
 
+### Not-found state (a link the dataset does not serve)
+- **Plain:** What a page says when its link names a year, a state code or a candidate link this
+  dataset does not serve.
+- **Precise:** Rendered when a page's `validate` judge refuses its path value (D073, D074). It
+  never repeats the value and fills nothing built from it. Candidate links match exactly, so a
+  listed slug in another letter case is refused too.
+- **Shown as:** `NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and
+  `pages/candidate.py`; `NOT_FOUND_LINK` in `pages/candidate.py`.
+- **Source:** D073; D074; `dashboard/CLAUDE.md`, `pages/`.
+- **Not:** *Degraded state*; an empty filter result (`components.NO_ROWS`).
+- **Status:** settled
+
 ### Outside the popular-vote window
 - **Plain:** The dataset has no popular-vote figures for this year, so nothing computed from them
   can be shown.
@@ -666,7 +680,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** One of the 50 states, or the District of Columbia.
 - **Precise:** The full state name, the canonical display key; `state_usps` is the two-letter
   code used in URLs and filters.
-- **Shown as:** `LABELS["state"]`; the state filter; `/states`.
+- **Shown as:** `LABELS["state"]`; the state filter (on `/candidate/<slug>`, with
+  `STATE_PLACEHOLDER`, and named by the lede's `FILTER_SENTENCE` or `FILTER_SENTENCE_ONE_YEAR`);
+  `/states`; the name, as served, as the link to `/state/<usps>` in T2, T5 and T6
+  (`components.state_cell`).
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier".
 - **Not:** —
