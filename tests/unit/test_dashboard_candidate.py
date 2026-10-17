@@ -479,16 +479,6 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
         {"candidate_slug": SLUG, "candidate": "Andrew Jackson", **row}
     )
     assert of_type(cell, "Link") == []
-    if "candidate" in row and row["candidate"] is None:
-        return  # the election page sorts by name, which a null name breaks (#367)
-
-    def doctor(body: dict[str, Any]) -> None:
-        for r in [*body["data"], *body["summary"]]:
-            r.update(row)
-
-    tree, election = _election_tree(change=doctor)  # renders, does not raise
-    for table in (election["STATES_TABLE_ID"], election["NATION_TABLE_ID"]):
-        assert _candidate_links(find(tree, table)) == set()
     # T4, which also builds its cells through components.candidate_cell.
     state = dash.page_registry["pages.state"]["layout"].__globals__
     body = copy.deepcopy(RECORDED["/v1/states/GA"])
@@ -502,6 +492,16 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
         copy.deepcopy(RECORDED["/v1/states/GA/per-capita"]),
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
+    if "candidate" in row and row["candidate"] is None:
+        return  # the election page sorts by name, which a null name breaks (#367)
+
+    def doctor(body: dict[str, Any]) -> None:
+        for r in [*body["data"], *body["summary"]]:
+            r.update(row)
+
+    tree, election = _election_tree(change=doctor)  # renders, does not raise
+    for table in (election["STATES_TABLE_ID"], election["NATION_TABLE_ID"]):
+        assert _candidate_links(find(tree, table)) == set()
 
 
 def test_a_slug_and_a_name_make_a_link() -> None:
@@ -616,6 +616,26 @@ class TestRequestBudget:
         body = response.get_data(as_text=True)
         assert MOD["FILTER_SENTENCE_ONE_YEAR"] in body
         assert MOD["FILTER_SENTENCE"] not in body
+
+    def test_the_degraded_state_offers_no_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = copy.deepcopy(RECORDED)
+        bodies[JACKSON_PATH]["data"] = []  # malformed: the page degrades
+        fetch, _ = fake_fetch(bodies)
+        client = offline_client(
+            fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, api.CANDIDATES_PATH]
+        )
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        response = route(f"/candidate/{SLUG}")
+        ids = routed_ids(response)
+        assert "unavailable" in ids and PAGE_ID not in ids
+        body = response.get_data(as_text=True)
+        assert MOD["LEDE"] in body
+        assert MOD["FILTER_SENTENCE"] not in body
+        assert MOD["FILTER_SENTENCE_ONE_YEAR"] not in body
 
 
 class TestIndex:
