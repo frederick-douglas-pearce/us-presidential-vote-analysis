@@ -24,7 +24,9 @@ into values, and the rules every value obeys:
 ``CHECK`` from them, and neither may depend on the other. Nothing here imports pandas,
 psycopg2 or the network stack, and nothing here imports another ``usvote`` module —
 year ranges are written out with :func:`range` rather than read from
-:mod:`usvote.years`. ``tests/unit/test_party.py`` enforces both.
+:mod:`usvote.years`. ``tests/unit/test_layering.py`` enforces both
+(``test_the_party_module_is_dependency_free``,
+``test_the_party_module_imports_with_the_heavy_stack_blocked``).
 
 **What is not here.** The curated catalog for candidates outside Table 1 is #387/#388's
 authority; :func:`usvote.transform.build_candidate_party` takes it as a parameter, and
@@ -242,7 +244,7 @@ class CuratedPartyRow:
 
     Keyed like the Table 1 constants, by ``(year, name)`` with the candidate
     dimension's spelling. ``rules`` and ``note`` obey the same rules as a Table 1 row's.
-    Citations are #387's to shape and are not modelled here.
+    Citations are #387's to shape and are not modeled here.
     """
 
     year: int

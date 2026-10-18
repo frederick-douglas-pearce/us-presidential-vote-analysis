@@ -100,12 +100,13 @@ def test_count_status_check_tracks_the_value_tuple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The property the test above cannot show on its own: adding a value must change the
-    # emitted SQL. Without this, a hand-written CHECK that happens to list today's three
-    # values passes forever.
+    # SQL the load stage emits. Read through build_table_column_defs, not the builder
+    # alone: a CHECK hand-written in load.py that lists today's three values would pass
+    # a test of the builder, and the test above, forever.
     monkeypatch.setattr(count_status, "COUNT_STATUS_VALUES", ("counted", "invented"))
-    assert count_status.build_count_status_check() == (
-        "CHECK (count_status IN ('counted', 'invented'))"
-    )
+    votes = dict(zip(TABLE_NAMES, build_table_column_defs(), strict=True))["votes"]
+    status = next(col for col in votes if col[0] == COUNT_STATUS_COLUMN)
+    assert status[-1] == "CHECK (count_status IN ('counted', 'invented'))"
 
 
 def _candidate_party_defs() -> dict[str, tuple[str, ...]]:
@@ -156,10 +157,21 @@ def test_candidate_party_has_a_named_composite_primary_key() -> None:
 def test_party_value_check_tracks_the_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Adding a code must change the emitted SQL; a CHECK written out by hand would not.
+    # Adding a code must change the SQL the load stage emits. Read through
+    # build_table_column_defs: a CHECK hand-written in load.py would pass a test of the
+    # builder alone.
     monkeypatch.setattr(party, "PARTY_COMPONENTS", {"democratic": (), "invented": ()})
-    assert party.build_party_value_check() == (
+    assert _candidate_party_defs()[PARTY_COLUMN][-1] == (
         "CHECK (nominating_party IN ('democratic', 'invented'))"
+    )
+
+
+def test_party_source_check_tracks_the_source_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(party, "PARTY_SOURCES", ("NARA", "INVENTED"))
+    assert _candidate_party_defs()[SOURCE_COLUMN][-1] == (
+        "CHECK (nominating_party_source IN ('NARA', 'INVENTED'))"
     )
 
 

@@ -20,7 +20,7 @@ This file is the human-browsable **index**. The authoritative, machine-readable
 source of truth is the set of provenance-carrying constants in
 [`src/usvote/transform.py`](../src/usvote/transform.py) (the "Corrections" section
 near the top of the module); each is locked by a test in
-[`tests/test_transform.py`](../tests/test_transform.py). Corrections to a candidate's
+[`tests/unit/test_transform.py`](../tests/unit/test_transform.py). Corrections to a candidate's
 **nominating party** (D077) live instead in
 [`src/usvote/party.py`](../src/usvote/party.py), beside the party vocabulary and the
 year-scoped token map they amend, and are locked by tests in

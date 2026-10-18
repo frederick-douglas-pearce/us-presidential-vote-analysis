@@ -1963,6 +1963,11 @@ def _table1_tokens(
     their Table 2 spelling by :func:`reconcile_table1_names`, the same two steps
     ``dwh.candidate``'s party columns take. Tokens are as printed: no
     :data:`PARTY_CODE_FIXES`.
+
+    Re-derived from ``parsed_years`` although :func:`transform_parsed_years` has already
+    normalized the same parse: deliberate (#385 architect review), so neither function's
+    input or return contract widens to pass the frame along. It is one small pass over
+    two rows per year.
     """
     t1 = normalize_candidate_parties(parsed_years)
     if t1.empty:
@@ -2012,7 +2017,7 @@ def assert_token_map_total(
 
     Every printed ``(year, token)`` must be mapped, and every mapped pair whose year is
     in this build must print. Scoped to the build so a fixture slice of two years does
-    not fail on the other forty-nine; the default full build checks the whole map.
+    not fail on the other ingest years; the default full build checks the whole map.
     """
     printed = {(year, token) for year, _name, token in table1}
     unmapped = sorted(printed - set(token_map))
@@ -2155,8 +2160,9 @@ def build_candidate_party(
         build_years,
     )
 
+    ingest_years = ec_ingest_years()
     out_of_range = sorted(
-        (row.year, row.name) for row in curated if row.year not in ec_ingest_years()
+        (row.year, row.name) for row in curated if row.year not in ingest_years
     )
     if out_of_range:
         raise TransformError(

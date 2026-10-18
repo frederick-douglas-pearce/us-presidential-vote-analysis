@@ -144,8 +144,8 @@ def run_ec_pipeline(
         parsed_years, state_geo
     )
     # The nominating party per candidate-year (#385, D077): built here from the same
-    # parse, and loaded in the same transaction. Not returned, so the 3-tuple callers
-    # (the #384 research script, many tests) are unchanged; read it from
+    # parse, and loaded in the same transaction. Not returned, so this function's
+    # 3-tuple callers (many tests, and run_warehouse) are unchanged; read it from
     # dwh.candidate_party.
     candidate_party_df = transform.build_candidate_party(
         parsed_years, candidates_df, votes_df

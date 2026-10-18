@@ -418,10 +418,27 @@ def test_the_ucsb_blocker_in_that_program_actually_blocks() -> None:
 #: subpackage — or of the DB/pandas stack — would falsify the reason it lives there.
 _APPORTIONMENT_ALLOWED_USVOTE_IMPORTS = frozenset({"usvote.years"})
 
-#: Third-party names whose presence would make the module non-importable from a pure,
-#: offline context. Deliberately the heavy stack rather than an allow-list: a new stdlib
-#: import is fine and should not need this tuple edited.
-_HEAVY_IMPORTS = ("pandas", "psycopg2", "requests", "geopandas", "bs4", "matplotlib")
+#: The import roots a dependency-free module may use besides ``usvote`` itself: the
+#: standard library, read from the running interpreter rather than written out, so a new
+#: stdlib import needs no edit here. An allow-list, not a deny-list of the heavy stack: a
+#: deny-list let ``numpy``, or any third-party name nobody thought to list, through.
+_STDLIB_ROOTS = frozenset(sys.stdlib_module_names) | {"__future__"}
+
+
+def _non_stdlib_imports(imported: set[str]) -> list[str]:
+    """The imported names whose root is neither ``usvote`` nor the standard library."""
+    return sorted(
+        name
+        for name in imported
+        if name.split(".")[0] not in _STDLIB_ROOTS and name.split(".")[0] != "usvote"
+    )
+
+
+def test_the_stdlib_allow_list_rejects_a_third_party_import() -> None:
+    """Non-vacuity for the two scans below: a third-party root is reported."""
+    assert _non_stdlib_imports(
+        {"numpy", "numpy.linalg", "json", "collections.abc", "__future__", "usvote.years"}
+    ) == ["numpy", "numpy.linalg"]
 
 
 def _imported_names(source: str) -> set[str]:
@@ -461,14 +478,10 @@ def test_the_apportionment_module_is_dependency_free() -> None:
         f"{sorted(_APPORTIONMENT_ALLOWED_USVOTE_IMPORTS)} from the package; found "
         f"{sorted(offenders)}"
     )
-    heavy = sorted(
-        name
-        for name in imported
-        if name.split(".")[0] in _HEAVY_IMPORTS
-    )
-    assert not heavy, (
-        f"usvote.apportionment must stay importable without the heavy stack; found "
-        f"{heavy}"
+    third_party = _non_stdlib_imports(imported)
+    assert not third_party, (
+        f"usvote.apportionment must import only the standard library and "
+        f"usvote.years; found {third_party}"
     )
 
 
@@ -585,8 +598,8 @@ def test_the_party_module_is_dependency_free() -> None:
     assert not usvote_imports, (
         f"usvote.party must import nothing from the package; found {usvote_imports}"
     )
-    heavy = sorted(n for n in imported if n.split(".")[0] in _HEAVY_IMPORTS)
-    assert not heavy, f"usvote.party must stay stdlib-only; found {heavy}"
+    third_party = _non_stdlib_imports(imported)
+    assert not third_party, f"usvote.party must stay stdlib-only; found {third_party}"
 
 
 _PARTY_PROGRAM = _HEAVY_BLOCK_PREAMBLE + """

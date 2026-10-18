@@ -108,10 +108,17 @@ def read_mit_party_floor(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
     return df[list(MIT_PARTY_FLOOR_COLUMNS)]
 
 
-def read_archives_years_from_mit_floor(
+def read_archives_years_since_mit_min(
     dbc: DBC, *, schema: str = SCHEMA
 ) -> set[int]:
-    """The years from :data:`MIT_PV_YEAR_MIN` on that carry an Archives party row."""
+    """The years from :data:`MIT_PV_YEAR_MIN` on that carry an Archives party row.
+
+    Reads ``dwh.candidate_party`` only — never ``dwh.pv_votes`` or the ``source``
+    filter the other two reads share. That independence is the point: if the
+    ``source = 'MIT'`` filter ever stopped matching what the PV loader writes, the
+    comparison and the floor would both come back empty, the floor would pass on
+    nothing, and this is the read that still says the build should have compared rows.
+    """
     df = dbc.select_query_to_df(
         f"SELECT DISTINCT year FROM {schema}.candidate_party "
         f"WHERE nominating_party_source = '{SOURCE_ARCHIVES}' "
@@ -123,7 +130,7 @@ def read_archives_years_from_mit_floor(
 def assert_mit_party_agrees(
     comparison: pd.DataFrame,
     floor: pd.DataFrame,
-    archives_years_from_mit_floor: set[int],
+    archives_years_since_mit_min: set[int],
     *,
     crosswalk: Mapping[str, str] = MIT_PARTY_CROSSWALK,
     exceptions: Mapping[tuple[int, str, str], str] = MIT_PARTY_EXCEPTIONS,
@@ -143,7 +150,12 @@ def assert_mit_party_agrees(
        disagreeing row.
     4. **Floor** — every ``floor`` candidate-year has at least one compared row.
     5. **Not vacuous** — a build with an Archives row from 1976 on must compare at
-       least one row.
+       least one row. Not redundant with the floor: the floor and the comparison share
+       the MIT source filter, so a filter that matched nothing would empty both and pass
+       the floor; ``archives_years_since_mit_min`` is read without it
+       (:func:`read_archives_years_since_mit_min`). On ``run_warehouse`` a build with
+       1976+ years always loads MIT rows (``run_mit_pipeline`` raises when no requested
+       year has any), so this fires only when a read is wrong.
     """
     mit = comparison["mit_party"]
     unmapped = sorted(
@@ -196,10 +208,10 @@ def assert_mit_party_agrees(
             "dwh.pv_votes and dwh.candidate."
         )
 
-    if archives_years_from_mit_floor and compared.empty:
+    if archives_years_since_mit_min and compared.empty:
         raise PartyCheckError(
             f"the build has Archives party rows from {MIT_PV_YEAR_MIN} on "
-            f"({sorted(archives_years_from_mit_floor)}) but compared no MIT row"
+            f"({sorted(archives_years_since_mit_min)}) but compared no MIT row"
         )
 
 
@@ -208,5 +220,5 @@ def assert_db_mit_party_agrees(dbc: DBC, *, schema: str = SCHEMA) -> None:
     assert_mit_party_agrees(
         read_mit_party_comparison(dbc, schema=schema),
         read_mit_party_floor(dbc, schema=schema),
-        read_archives_years_from_mit_floor(dbc, schema=schema),
+        read_archives_years_since_mit_min(dbc, schema=schema),
     )

@@ -137,6 +137,40 @@ def test_table1_names_are_reconciled_like_the_candidate_dimension() -> None:
     assert list(party["candidate_id"]) == [1, 2]
 
 
+def test_both_table1_readers_reconcile_names_through_the_one_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mechanism behind the test above: ``dwh.candidate``'s party columns and
+    ``dwh.candidate_party`` both call ``reconcile_table1_names``.
+
+    A sentinel replaces it, mapping a name no fix list holds. If either reader applied
+    :data:`~usvote.transform.PARTY_NAME_FIXES` itself instead, it would not see the
+    sentinel, and that reader's result below would differ.
+    """
+    calls: list[str] = []
+
+    def sentinel(names: pd.Series) -> pd.Series:
+        calls.append("called")
+        return names.replace({"Zed": "Robert Dole"})
+
+    monkeypatch.setattr(transform, "reconcile_table1_names", sentinel)
+    parsed, candidates, votes = _inputs(
+        [(1996, "Bill Clinton", "D", 379), (1996, "Robert Dole", "R", 159)]
+    )
+    parsed[0]["t1"][1]["president_candidate_name"] = "Zed"
+
+    party = _build(
+        inputs=(parsed, candidates, votes),
+        token_map={(1996, "D"): "democratic", (1996, "R"): "republican"},
+    )
+    assert list(party["candidate_id"]) == [1, 2]
+    assert len(calls) == 1
+
+    parties = transform._candidate_parties(transform.normalize_candidate_parties(parsed))
+    assert set(parties["name"]) == {"Bill Clinton", "Robert Dole"}
+    assert len(calls) == 2
+
+
 # --- AC3: the map is keyed by (year, token) ---------------------------------
 
 
@@ -349,7 +383,10 @@ def test_a_table1_row_with_no_votes_cast_fails() -> None:
 
 
 def test_a_curated_name_missing_from_the_candidate_dimension_fails() -> None:
-    with pytest.raises(TransformError, match="curated rows that do not resolve"):
+    with pytest.raises(
+        TransformError,
+        match=r"curated rows that do not resolve.*no candidate named 'Nobody'",
+    ):
         _build(curated=[CuratedPartyRow(1904, "Nobody", "populist")])
 
 
@@ -404,7 +441,7 @@ def test_a_note_required_rule_without_a_real_note_fails(note: str | None) -> Non
 def test_a_curated_note_required_rule_without_a_note_fails() -> None:
     inputs = _inputs(extra_candidates={"Dee Dunn": 9}, extra_totals=[(1904, "Dee Dunn", 1)])
     row = CuratedPartyRow(1904, "Dee Dunn", "populist", rules=frozenset({8}))
-    with pytest.raises(TransformError, match="blank note"):
+    with pytest.raises(TransformError, match=r"blank note: \[\(1904, 'Dee Dunn'\)\]"):
         _build(inputs=inputs, curated=[row])
 
 

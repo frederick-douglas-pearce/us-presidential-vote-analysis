@@ -1,9 +1,12 @@
 """Unit tests for ``usvote.party_check``, the MIT party check (#385, D077).
 
 Each branch of :func:`assert_mit_party_agrees` fires on a bad frame and passes on a
-good one. The SQL reads run against a live warehouse in the integration suite
-(``tests/integration/test_ec_pv_join.py`` and ``test_load.py`` build through
-``run_warehouse``, which calls the check).
+good one. The SQL reads run against a live warehouse in the integration tests that
+build through ``run_warehouse``, which calls the check: ``tests/integration/
+test_ec_pv_join.py``, ``test_hybrid_views.py`` and ``test_snapshot_build.py``. AC4's
+automated coverage, the check passing on the full current warehouse, is
+``test_hybrid_views.py::test_hybrid_views_over_a_real_full_warehouse``, which builds
+every year and needs the local corpora, so it cannot run in CI.
 """
 
 from __future__ import annotations
