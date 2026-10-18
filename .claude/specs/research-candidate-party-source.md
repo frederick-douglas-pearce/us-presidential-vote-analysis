@@ -831,10 +831,11 @@ The review is also recorded as a comment on #384.
 
 ## §14 — Code review of this PR (2026-10-17)
 
-Three fresh reviewers read the PR: the code-review skill, a guard-efficacy lens, and a `ba`
-wording finder. The wording finder's two checks were clean, because the PR ships no reader-facing
-text. All 31 findings were acted on, two of them (ba6, ba7) in a modified form, after a fresh
-`architect` ruled on scope. The owner decided the two questions it referred:
+**Round 1.** Three fresh reviewers read the PR: the code-review skill, a guard-efficacy lens, and
+a `ba` wording finder. The wording finder's two checks were clean, because the PR ships no
+reader-facing text. All 31 findings were acted on, after a fresh `architect` ruled on scope. Two
+of them, the `ba` wording finder's findings on display names and on the word "note", were applied
+in a modified form. The owner decided the two questions the architect referred:
 - **1828 Jackson:** option (B), the Archives token standing (§2.1).
 - **The rule-8 note:** it covers all eleven rows (§1).
 
@@ -857,10 +858,13 @@ The changes:
   - the §7 citations and §3's labels;
   - Davis's routing (§8.3), and D077's MIT skip rule and `no_nomination` definition.
 
-**Round 2.** A fresh reviewer found the round-1 fixes discharged, apart from eight new findings
-in their wording. The owner chose to drop the claim that BDUSC's 1828 "Democrat" is
-anachronistic, which no source here supports: option (B) rests on the token standing alone
-(§2.1). The owner also attributed the per-row rule set to the architect (§12). The rest were
-fixed as found: the grain wording, D077's `no_nomination` scope and null-guard summary, the
-script's tripwire reasons, check 2's label and its era labels.
+**Round 2.** A fresh reviewer found the round-1 fixes discharged, apart from eight new findings.
+The owner chose to drop the claim that BDUSC's 1828 "Democrat" is anachronistic, which no source
+here supports: option (B) rests on the token standing alone (§2.1). The owner also attributed the
+per-row rule set to the architect (§12). The rest were fixed as found: the verdict's "at most
+once" and the grain wording, D077's `no_nomination` scope, null-guard summary and line wraps, the
+script's tripwire reasons, check 2's label and its era labels, and this section's account of
+round 1. A further fresh re-check found three more, all in wording: the PR description, two
+finding IDs no reader could look up, and this section's labels. They were fixed, and the owner
+chose to skip another re-check.
 
