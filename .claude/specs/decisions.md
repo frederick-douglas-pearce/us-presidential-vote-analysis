@@ -5284,3 +5284,105 @@ already runs a timer, at no standing cost, and without widening what a page can 
 **Related:** D034, D070, D071, D072, #295, #310, #343, #344, #346, #347.
 
 ---
+
+## D077: A candidate's party in an election is their nominating party, from Archives Table 1 or a cited US-government work
+
+**Date:** 2026-10-17
+**Builds on:** D006, D014, D022, D041, D046, D069(c) · **Amends:** D018's "Party *authority*
+lives in the EC candidate dim (D006)" · **Decided by:** the owner, accepting #384's verdict and
+making its six calls (2026-10-17), after the architect's plan-gate and verdict reviews; recorded
+by #384 (E8-S10)
+
+**Context.** The served party is MIT's `party`, which covers 1976 on and only the recipients MIT
+lists (D018: a popular-vote ballot line, descriptive-only). Before 1976 no candidate has a party
+on `/v1`. The Archives print a party only for the two Table 1 candidates per election, and
+`dwh.candidate.party`/`party_2` aggregate it per candidate across years, so it cannot answer
+"which party in which election". #384 researched the field's definition and sources, and its
+evidence record is [`research-candidate-party-source.md`](research-candidate-party-source.md),
+with the derivation script beside it.
+
+**Decision.**
+- **The field.** A candidate's **nominating party** in an election is the party whose nominating
+  body named them for President for that election. It is stored once per (year, candidate) in
+  `dwh.candidate_party` (#385), as one value from a closed vocabulary of snake_case codes. The
+  bare term "party" is not used for it (D018's sense stays MIT's).
+- **The rules** are the doc's §1, rules 1–8: national bodies count (1); state-level nominations
+  count only for 1824 outside the caucus, 1828 and the 1836 Whigs, a closed list (2); a national
+  body's endorsement counts as its nomination (3); a joint nomination is two or more national
+  bodies naming the same person for President (4); the nomination must stand when the electors
+  vote (5); a party running several candidates gives each its own row, and the two 1860
+  Democratic conventions are two parties (6); only a presidential nomination counts (7); a
+  US-government source of record's statement that the person was party P's candidate or nominee,
+  or that a body of P nominated or supported them, is accepted as P's nomination (8).
+- **The vocabulary** (doc §2) has one code per party organization, which means the same thing in
+  every year. **Names are merged only for the same party:** two sources' names become one code
+  only when they name the same party, the code and the display name follow the higher-ranked
+  source (doc §6.2), and the same name for two parties stays two codes (`progressive_1912`,
+  `progressive_1924`). Joint nominations are enumerated atomic codes that declare their
+  components (`liberal_republican_democratic`, `democratic_populist`, `american_whig`), never
+  split at a separator. `no_nomination` is a served value, for a recipient no counted body
+  nominated for President that year. **There is no `independent`**, because no source of record
+  assigns it to a recipient (doc §3). A code never changes meaning: adding a value, adding a
+  component to a joint code, or merging codes makes a new code, by a superseding D-entry with an
+  API changelog note.
+- **Sources.** A Table 1 row's source of record is the Archives page, read through a year-scoped
+  token map that is total over the printed (year, token) pairs (doc §4). It is overridden only by
+  a correction constant, a test and a `docs/corrections.md` row, where a VERIFIED government
+  source shows a different or an additional national body (1872 Greeley →
+  `liberal_republican_democratic`). Every other value is a **curated row** citing one or more
+  US-government works, each citation with a verbatim passage of 40 words or fewer, its URL, a
+  page locator where needed, and its verification date (doc §6.1). The source order, the
+  "specificity beats rank" rule, and "an unresolved conflict ships no row" are doc §6.2–§6.3.
+  UCSB is never consulted (D022), and Wikipedia and Wikidata are finding aids only.
+- **The population to curate** is the served candidate-years with electoral votes **cast**, not
+  counted (D041/D046), minus the Table 1 rows. C1 rows have a nominating party, and C2 rows are
+  `no_nomination`. A reported nomination at any evidence level bars `no_nomination` until rule 5
+  rules it out. MIT plays no part in membership.
+- **The null has one cause.** A served candidate-year with no `dwh.candidate_party` row is null,
+  and nothing else is. A four-part build guard proves it (doc §2.3), ending in equality: the
+  served null set equals the population minus the curated keys. No status column is added
+  (D069(c)).
+- **The note.** Each row carries a nullable, sourced note on how its value arose (doc §2.4). It
+  is required where the value rests on rule 3 (an endorsement), rule 5 (a withdrawal, or a
+  nominee's death before the electors voted) or rule 8 (a statement with no nominating body
+  named), and allowed for any other exceptional case. A guard fails the build when a required
+  case has none. Its null means nothing exceptional, and is not the value's null.
+- **Provenance.** Table 1 rows keep `NARA`/`US-PD`, corrected ones included. Curated rows take
+  the new pair **`USGOV`/`US-PD`**, with each citation naming the publisher. `snapshot_meta` gains
+  that fourth pair, and a per-row source column ships beside the field.
+- **MIT's party is a check, not a source.** `/v1`'s `party` stays MIT's, served unchanged. The
+  nominating party is a new field, appended additively (#386). From #389 on, it is what the
+  dashboard shows as "Party", in every year. A build check maps MIT's `DEMOCRAT`/`REPUBLICAN` to
+  `democratic`/`republican` and requires each non-null MIT value on a row to match the value or
+  one of its components. A disagreement is a named exception constant with a corrections row, or
+  the build fails.
+- **D018 is amended.** Party authority moves to `dwh.candidate_party` (year, candidate_id).
+  `dwh.candidate.party`/`party_2` stay as a non-authoritative per-candidate summary of the raw
+  tokens, and `pv`'s `party` stays descriptive-only.
+- **Three authorities, each for one thing:** this entry for the rules; `usvote/party.py` (#385)
+  for the vocabulary, the token map, the correction constant and the Table 1 notes; the curated
+  catalog (#387/#388) for the curated values, their notes and their citations. The research doc
+  is a dated evidence record, not an authority. #385 pins the vocabulary with a hand-written
+  literal test whose comment says a change needs a superseding D-entry.
+
+**The owner's six calls** (2026-10-17): the `USGOV` source code; the `US-PD` license; no
+`independent`, on the condition that no source of record assigns it, with the naming rule
+above; rule 3, with a note where a component rests on an endorsement; rule 5, with a note on the
+facts; and rule 8, with a note.
+
+**Rationale.** The nominating party is defined the same way in every era, which a ballot line
+is not: before 1976 there is no ballot-line source, and a ballot line can differ by state. The
+research found a US-government source of record for all but two of the rows left to curate (doc
+§8.3), so the field can be sourced without anything the project may not redistribute. Defining the population on votes cast keeps every served recipient inside it,
+the single-cause null makes "not collected" provable rather than assumed, and the note lets a
+reader see where a value rests on a ruling rather than on a plain nomination.
+
+**Action required.** #385 builds `dwh.candidate_party` from Table 1 with the token map, the
+Greeley correction, the note column and the guards. #386 serves the field and its note, with the
+provenance pair and the schema 5 bump. #387 curates the C1 rows (Hospers's source, the
+two-Progressives question, a rule-3 sweep), and #388 the C2 rows (Davis). #389 shows it on the
+dashboard. Each takes its share from the doc's §12.
+
+**Related:** D006, D014, D018, D022, D041, D046, D069, #384, #385, #386, #387, #388, #389.
+
+---
