@@ -5320,7 +5320,8 @@ with the derivation script beside it.
 - **The vocabulary** (doc §2) has one code per party organization, which means the same thing in
   every year. The one exception is `democratic_republican`, which is scoped to the name the
   Archives print for 1824 and 1828 and claims no continuity between the two. 1828 Jackson takes
-  it because the Archives token stands, and BDUSC's "Democrat" for him is read as anachronistic.
+  it because the Archives token stands: BDUSC's "Democrat" for him names no different
+  nominating body, and is not treated as a second name for the same party.
   **Names are merged only for the same party:** two sources' names become one code only when
   they name the same party. The code then follows the name the higher-ranked source uses (doc
   §6.2), and the same name for two parties stays two codes (`progressive_1912`,
@@ -5328,12 +5329,11 @@ with the derivation script beside it.
   nominations are enumerated atomic codes that declare their components
   (`liberal_republican_democratic`, `democratic_populist`, `american_whig`), never split at a
   separator. `no_nomination` is a served value, for a recipient whom no body qualifying under
-  rules 1–2 nominated for President that year, or whose nomination did not stand when the
+  rules 1–8 nominated for President that year, or whose nomination did not stand when the
   electors voted (rule 5). Its reader wording is `ba`'s. **There is no `independent`**, because
-  no source of record
-  assigns it to a recipient (doc §3). A code never changes meaning: adding a value, adding a
-  component to a joint code, or merging codes makes a new code, by a superseding D-entry with an
-  API changelog note. #385's literal pins each code with its component tuple.
+  no source of record assigns it to a recipient (doc §3). A code never changes meaning: adding a
+  value, adding a component to a joint code, or merging codes makes a new code, by a superseding
+  D-entry with an API changelog note. #385's literal pins each code with its component tuple.
 - **Sources.** A Table 1 row's source of record is the Archives page, read through a year-scoped
   token map that is total over the printed (year, token) pairs (doc §4). It is overridden only by
   a correction constant, a test and a `docs/corrections.md` row, where a VERIFIED government
@@ -5349,8 +5349,9 @@ with the derivation script beside it.
   rules it out. MIT plays no part in membership.
 - **The null has one cause.** A served candidate-year with no `dwh.candidate_party` row is null,
   and nothing else is. A four-part build guard proves it (doc §2.3). Parts 1–3 run in the
-  warehouse (#385): every Table 1 and curated key resolves to exactly one served candidate-year
-  with votes cast. Part 4 runs at the snapshot build (#386). It reads the null set from the
+  warehouse (#385): every Table 1 key has exactly one row; every Table 1 and curated key
+  resolves to exactly one served candidate-year with votes cast; and every served candidate-year
+  has votes cast. Part 4 runs at the snapshot build (#386). It reads the null set from the
   served column itself, on `ec_pv` and `national_rollup` rows, and requires it to equal the
   population minus the curated keys. No status column is added (D069(c)).
 - **The row note.** Each row carries a nullable, sourced note on how its value arose, and records
@@ -5380,31 +5381,30 @@ with the derivation script beside it.
 - **Three authorities, each for one thing:** this entry for the rules; `usvote/party.py` (#385)
   for the vocabulary, the token map, the correction constant and the Table 1 notes and rule sets;
   the curated catalog (#387/#388) for the curated values, their notes, rule sets and citations.
-  The research doc
-  is a dated evidence record, not an authority. #385 pins the vocabulary with a hand-written
-  literal test whose comment says a change needs a superseding D-entry.
+  The research doc is a dated evidence record, not an authority. #385 pins the vocabulary with a
+  hand-written literal test whose comment says a change needs a superseding D-entry.
 
 **The owner's six calls** (2026-10-17): the `USGOV` source code; the `US-PD` license; no
 `independent`, on the condition that no source of record assigns it, with the naming rule
 above; rule 3, with a note where a component rests on an endorsement; rule 5, with a note on the
 facts; and rule 8, with a note. At the code-review gate the owner chose the Archives-token reason
-for 1828 Jackson, and confirmed that rule 8's note covers all eleven rows it decides.
+for 1828 Jackson, and confirmed that rule 8's note covers all eleven rows it decides. The per-row
+rule set that drives the required-note guard is the architect's design, not an owner call.
 
 **Rationale.** The nominating party is defined the same way in every era, which a ballot line
 is not: before 1976 there is no ballot-line source, and a ballot line can differ by state. The
 research found a US-government source of record for all but two of the rows left to curate (doc
 §8.3), so the field can be sourced without anything the project may not redistribute. Defining
-the population on votes cast keeps every served recipient inside it,
-the single-cause null makes "not collected" provable rather than assumed, and the note lets a
-reader see where a value rests on a ruling rather than on a plain nomination.
+the population on votes cast keeps every served recipient inside it, the single-cause null makes
+"not collected" provable rather than assumed, and the note lets a reader see where a value rests
+on a ruling rather than on a plain nomination.
 
 **Action required.** #385 builds `dwh.candidate_party` from Table 1 with the token map, the
 Greeley correction, the row-note column and rule sets, and the guards. #386 serves the field and
-its note, with the
-provenance pair, null-guard part 4 and the schema 5 bump. #387 curates the C1 rows (Hospers's
-source, the two-Progressives question, a rule-3 sweep), and #388 the C2 rows. #388 also decides
-Davis under rule 5: if his nomination stood, he is C1 under a new code by a superseding D-entry.
-#389 shows it on the dashboard. Each takes its share from the doc's §12.
+its note, with the provenance pair, null-guard part 4 and the schema 5 bump. #387 curates the C1
+rows (Hospers's source, the two-Progressives question, a rule-3 sweep), and #388 the C2 rows. #388
+also decides Davis under rule 5: if his nomination stood, he is C1 under a new code by a
+superseding D-entry. #389 shows it on the dashboard. Each takes its share from the doc's §12.
 
 **Related:** D006, D014, D018, D022, D041, D046, D069, #384, #385, #386, #387, #388, #389.
 

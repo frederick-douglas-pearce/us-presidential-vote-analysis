@@ -75,6 +75,8 @@ SNAPSHOT = Path(
 
 #: MIT's coverage starts here, so the population is reported in two eras.
 MIT_FLOOR = MIT_PV_YEAR_MIN
+EARLY_ERA = f"pre-{MIT_FLOOR}"
+MIT_ERA = f"{MIT_FLOOR}+"
 
 #: The doc's two-entry crosswalk (§9): the Table 1 token, its code, and MIT's value.
 MIT_CROSSWALK = {"D": "DEMOCRAT", "R": "REPUBLICAN"}
@@ -231,7 +233,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     check(set(t1["year"]) == years, "Table 1 years differ from ec_ingest_years()")
     check(set(totals["year"]) == years, "fact years differ from ec_ingest_years()")
 
-    # 2. Each Table 1 row resolves to exactly one candidate with cast votes that year.
+    # 2. Each Table 1 row resolves to a candidate with cast votes that year. That it
+    # is only one follows from national_totals' no-duplicate check.
     cast = totals.loc[totals["cast"] > 0]
     joined = t1.merge(cast, on=["year", "name"], how="left", indicator=True)
     unresolved = joined.loc[joined["_merge"] != "both"]
@@ -257,8 +260,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     # Consequence tripwires: these follow from parse_table1 (which zips the fixed
-    # T1_ROW_INDS) and from checks 2 and 3, so they cannot fail on their own. They
-    # stay so that a change to either fails here, by name.
+    # T1_ROW_INDS) and from national_totals' no-duplicate check, so they cannot fail
+    # on their own. They stay so that a change to either fails here, by name.
     check(
         (t1.groupby("year").size() == len(parse.T1_ROW_INDS)).all(),
         f"a year has other than {len(parse.T1_ROW_INDS)} Table 1 rows",
@@ -271,9 +274,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         [(y, n) not in t1_keys for y, n in zip(cast["year"], cast["name"], strict=True)]
     ].sort_values(["year", "cast"], ascending=[True, False])
     remainder = remainder.assign(
-        era=["pre-1976" if y < MIT_FLOOR else "1976+" for y in remainder["year"]]
+        era=[EARLY_ERA if y < MIT_FLOOR else MIT_ERA for y in remainder["year"]]
     )
-    # Consequence tripwire of checks 2 and 3.
+    # Consequence tripwire of checks 2 and 3 and national_totals' no-duplicate check.
     check(
         len(remainder) + len(t1) == len(cast),
         "population + Table 1 rows != cast-vote candidate-years",
@@ -336,12 +339,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )[["year", "name", "token", "mit_party"]]
         check(
             set(mit["token"]) <= set(MIT_CROSSWALK),
-            f"a 1976+ Table 1 token outside the crosswalk: {sorted(set(mit['token']))}",
+            f"a {MIT_ERA} Table 1 token outside the crosswalk: "
+            f"{sorted(set(mit['token']))}",
         )
         disagree = mit.loc[mit["mit_party"] != mit["token"].map(MIT_CROSSWALK)]
         check(
             disagree.empty,
-            "1976+ Table 1 rows whose MIT party disagrees with the token: "
+            f"{MIT_ERA} Table 1 rows whose MIT party disagrees with the token: "
             + ", ".join(f"{r.year} {r.name}" for r in disagree.itertuples()),
         )
         # A dated headline: the 1976+ population rows have no MIT party. If a later
@@ -354,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )[["year", "name", "mit_party"]]
         check(
             mit_population["mit_party"].isna().all(),
-            "a 1976+ population row has an MIT party; re-check the doc's §9",
+            f"a {MIT_ERA} population row has an MIT party; re-check the doc's §9",
         )
 
     # 7. Nothing here touched UCSB (D022).
@@ -370,8 +374,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     era_counts = remainder["era"].value_counts()
     print(
         f"- population (cast minus Table 1): {len(remainder)} "
-        f"(pre-1976 {era_counts.get('pre-1976', 0)}, "
-        f"1976+ {era_counts.get('1976+', 0)})"
+        f"({EARLY_ERA} {era_counts.get(EARLY_ERA, 0)}, "
+        f"{MIT_ERA} {era_counts.get(MIT_ERA, 0)})"
     )
     print("\n## (a) Table 1 printed tokens\n")
     print(markdown(t1[["year", "row", "printed_name", "token"]]))
@@ -388,12 +392,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("\n## (c) Cast and counted differ\n")
     print(markdown(differ[["year", "name", "cast", "counted"]]))
     if mit is not None:
-        print("\n## MIT party on the 1976+ Table 1 rows (snapshot)\n")
+        print(f"\n## MIT party on the {MIT_ERA} Table 1 rows (snapshot)\n")
         print(markdown(mit))
         mit_values = sorted(mit["mit_party"].dropna().unique())
         print(f"\nDistinct MIT values: {', '.join(mit_values)}")
     if mit_population is not None:
-        print("\n## MIT party on the 1976+ population rows (snapshot)\n")
+        print(f"\n## MIT party on the {MIT_ERA} population rows (snapshot)\n")
         print(markdown(mit_population))
     print(f"\nAll checks passed{skipped}.")
     return 0
