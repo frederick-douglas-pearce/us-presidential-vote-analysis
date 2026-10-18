@@ -694,7 +694,7 @@ is the raw Table 1 tokens, (b) the population by era, and (c) the candidate-year
 counted totals differ. It also prints the MIT `party` on each 1976+ Table 1 row and each 1976+
 population row.
 
-**The run this doc records.** Commit `1b1aaa2`, clean (`git describe --dirty` printed no `-dirty`;
+**The run this doc records.** Commit `47f4761`, clean (`git describe --dirty` printed no `-dirty`;
 the later commit that records this run changes no script line), the corpus at
 `~/Documents/Projects/data/presidential_vote_analysis/ec_raw`, and snapshot
 `71b777de23181c224d80207fb756a9a4541fe18ce70cced28dd8de9d666c20a0` (schema 4). Every check
