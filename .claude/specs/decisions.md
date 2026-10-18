@@ -5315,8 +5315,9 @@ with the derivation script beside it.
   Democratic conventions are two parties (6); only a presidential nomination counts (7); a
   US-government source of record's statement that the person was party P's candidate or nominee,
   or that a body of P nominated or supported them, is accepted as P's nomination (8). Rule 8
-  decides every row whose cited passages name the party but not the body that nominated:
-  eleven rows today (doc §1).
+  decides every row whose cited passages name the party but not the body that nominated, or,
+  like 1824 Crawford's, name the body but say only that it "supported" them: twelve rows today
+  (doc §1).
 - **The vocabulary** (doc §2) has one code per party organization, which means the same thing in
   every year. The one exception is `democratic_republican`, which is scoped to the name the
   Archives print for 1824 and 1828 and claims no continuity between the two. 1828 Jackson takes
@@ -5388,8 +5389,10 @@ with the derivation script beside it.
 `independent`, on the condition that no source of record assigns it, with the naming rule
 above; rule 3, with a note where a component rests on an endorsement; rule 5, with a note on the
 facts; and rule 8, with a note. At the code-review gate the owner chose the Archives-token reason
-for 1828 Jackson, and confirmed that rule 8's note covers all eleven rows it decides. The per-row
-rule set that drives the required-note guard is the architect's design, not an owner call.
+for 1828 Jackson, and confirmed that rule 8's note covers all eleven rows it then decided. At the
+acceptance gate the owner added 1824 Crawford as a twelfth, and accepted the partial link that
+makes him `democratic_republican` (doc §2.1). The per-row rule set that drives the required-note
+guard is the architect's design, not an owner call.
 
 **Rationale.** The nominating party is defined the same way in every era, which a ballot line
 is not: before 1976 there is no ballot-line source, and a ballot line can differ by state. The

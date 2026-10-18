@@ -65,11 +65,11 @@ re-downloaded every source and matched every quoted passage against it (§0.3).
 | **ST-xx** | Senate, "States in the Senate" timeline for state `xx`: `https://www.senate.gov/states/<xx>/timeline.htm` | Federal work. |
 | **SFB-name** | Senate featured biographies: `https://www.senate.gov/senators/FeaturedBios/Featured_Bio_<Name>.htm` | Federal work. |
 | **TRIB** | *Tributes Delivered in Congress to Strom Thurmond*, S. Doc. 107-12: `https://www.govinfo.gov/content/pkg/CDOC-107sdoc12/pdf/CDOC-107sdoc12.pdf` | Federal work. |
-| **ND** | Senate Historical Office, *200 Notable Days*: `https://www.govinfo.gov/content/pkg/GPO-200NOTABLEDAYS/pdf/GPO-200NOTABLEDAYS.pdf` | Federal work. |
+| **ND** | Senate Historical Office, *200 Notable Days*: `https://www.govinfo.gov/content/pkg/GPO-200NOTABLEDAYS/pdf/GPO-200NOTABLEDAYS.pdf` | Federal work. Consulted; no passage is cited below. |
 | **DOJ** | Department of Justice, Attorney General biography of William Wirt: `https://www.justice.gov/ag/bio/wirt-william` | Federal work. |
-| **NPS-1840**, **NPS-1864**, **NPS-W** | National Park Service: `https://www.nps.gov/mava/learn/historyculture/the-election-of-1840.htm`; `https://www.nps.gov/articles/000/the-elections-of-1860-and-1864.htm`; the Thomas E. Watson NHL nomination, `https://npgallery.nps.gov/NRHP/GetAsset/NHLS/76002144_text` | Federal work. The NHL form may have been prepared by a contractor; this was not checked, so NPS-W is cited only beside a federal corroborating source. |
+| **NPS-1840**, **NPS-1864**, **NPS-W** | National Park Service: `https://www.nps.gov/mava/learn/historyculture/the-election-of-1840.htm`; `https://www.nps.gov/articles/000/the-elections-of-1860-and-1864.htm`; the Thomas E. Watson NHL nomination, `https://npgallery.nps.gov/NRHP/GetAsset/NHLS/76002144_text` | Federal work. NPS-1840 was consulted, and no passage from it is cited below. The NHL form may have been prepared by a contractor; this was not checked, so NPS-W is cited only beside a federal corroborating source. |
 | **LOC-yyyy** | Library of Congress research guide, "Presidential Election of yyyy": `https://guides.loc.gov/presidential-election-<yyyy>` | The guide's own prose is a federal work. Its results table is CQ-derived and is not a source of record. One table footnote, "Awarded by the South Carolina Legislature" (LOC-1832, LOC-1836), is cited only as context for how Floyd's and Mangum's votes arose (§3, §8.1), never for a value; #388 looks for a government prose source for it. |
-| **CRS-xxx** | Congressional Research Service reports on congress.gov: R42533 (national conventions), IN12396 (2024 Democratic convention), R43824 (the Electoral College), RL32611 (the Electoral College): `https://www.congress.gov/crs_external_products/<R|IN|RL>/PDF/<id>/<id>.<n>.pdf` | Federal work. R43824's faithless-elector footnote credits FairVote for 1948–1988, so it is cited for the elector facts, not for nominations. |
+| **CRS-xxx** | Congressional Research Service reports on congress.gov: R42533 (national conventions), IN12396 (2024 Democratic convention), R43824 (the Electoral College), RL32611 (the Electoral College): `https://www.congress.gov/crs_external_products/<R|IN|RL>/PDF/<id>/<id>.<n>.pdf` | Federal work. R42533 was consulted, and no passage from it is cited below. R43824's faithless-elector footnote credits FairVote for 1948–1988, so it is cited for the elector facts, not for nominations. |
 
 Sources considered and **not** used for a party value:
 - **House Clerk election statistics and FEC results** report **state ballot lines** under local names: Thurmond ran as "States' Rights Democrats (Democratic)" in Alabama, and Wallace as "Courage" in New York (agent OCR of the Clerk's 1948 and 1968 volumes, UNVERIFIED by the parent). A ballot line is the D018 sense of party, not a nomination, so neither source can back a value.
@@ -115,7 +115,8 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
    evidence for each case:
    - 1824: the other candidates "encouraged their supporters to boycott the moribund caucus"
      (SNP, VERIFIED), and all of them were "Republicans" (VPB, Calhoun chapter, VERIFIED).
-   - 1828: Jackson's candidacy began with a Tennessee legislature resolution (ST-TN, VERIFIED).
+   - 1828: the Tennessee legislature "passed a resolution supporting Senator Andrew Jackson's
+     candidacy for the 1828 presidential election" (ST-TN, VERIFIED).
    - 1836: the Whigs "chose not to hold a presidential nominating convention that year",
      fielding "several regional candidates, nominated at the state and local level" (VPB, Tyler
      chapter, VERIFIED).
@@ -151,11 +152,13 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
    says what the field means, and this rule says what evidence establishes it. It decides every
    row whose cited passages name the party but not the body that nominated: 1824 Clay, 1832
    Wirt, 1836 White and Webster, 1856 Fillmore, 1860 Bell, 1892 Weaver, 1912 Taft, 1924
-   La Follette, 1948 Thurmond and 1968 Wallace (the §8.1 passages; Crawford's caucus and
-   Breckinridge's convention are named, so rule 8 does not decide them). It is looser than
-   rules 1–2 alone. **Accepted by the owner (§12)**, on the condition that each such row carries
-   a note saying that its cited sources name the party, not the nominating body (§2.4). The note
-   says only that; whether some other source names the body is not a claim it makes.
+   La Follette, 1948 Thurmond and 1968 Wallace (the §8.1 passages). It also decides 1824
+   Crawford: SNP names his caucus but says it "supported" him, not that it nominated him.
+   Breckinridge's convention is named and "nominated" him, so rule 8 does not decide him. The
+   rule is looser than rules 1–2 alone. **Accepted by the owner (§12)**, on the condition that
+   each such row carries a note saying that its cited sources name the party, not the nominating
+   body, or for Crawford, that the source says the caucus supported him (§2.4). The note says
+   only that; whether some other source names the body or the act is not a claim it makes.
 
 **The grain is (year, candidate)** (owner ruling, 2026-10-16). Each candidate has at most one row
 per election in which they received an electoral vote; a candidate-year with no row is served as
@@ -176,7 +179,7 @@ sets its case, punctuation and any disambiguation.
 only when they name the same party. The code then follows the name used by the higher-ranked
 source (§6.2). The same name used for two different parties stays two codes, as the two
 Progressives do. The rule settles which name is used once two names are known to name one
-party; it does not decide whether they do. It decides two values:
+party; it does not decide whether they do. It decides three values:
 - **The Populists** are `populist`. VPB (rank 2: "The Populists had already nominated") and BDUSC
   (rank 3: "Populist candidate for President in 1892") both use that name. "People's" appears
   only in a CQ-derived LOC table label, "Populist (People's)", and in a photograph caption, and
@@ -184,6 +187,11 @@ party; it does not decide whether they do. It decides two values:
 - **1856 Fillmore's** first component stays `american`. VPB, his source of record, calls it "the
   … Know-Nothing party" in his chapter, and "the American (Know-Nothing)" party where it names it
   in full (VERIFIED). The two are one party, and the full name is the one used.
+- **1824 Crawford** is `democratic_republican`, on a partial link (owner, §12). SNP names his
+  caucus "Jeffersonian-Republican". VPB counts him in the 1824 field, with Adams and Jackson, who
+  were "all Republicans" (Calhoun chapter), and the Archives print "Democratic-Republican" for
+  Adams and Jackson (ARCH-1824), all VERIFIED. No cited passage says outright that the names are
+  one party, so the link is partial. The Archives' name, the higher-ranked, is used.
 
 **1828 Jackson is `democratic_republican`, because the Archives token stands (owner, §12).** The
 Archives print "Democratic-Republican" for him in 1824 and in 1828, and no correction overrides a
@@ -203,7 +211,7 @@ years, which no source of record here establishes.
 | `national_republican` | National Republican | 1828, 1832 | ST-KY (1832); ARCH-1828 token (§4) |
 | `democratic` | Democratic | 1832–2024; component only (1872, 1896, 1900) | §4 |
 | `anti_masonic` | Anti-Masonic | 1832 | DOJ |
-| `whig` | Whig | 1836–1852; component (1856) | VPB |
+| `whig` | Whig | 1836–1852; component (1856) | VPB; LOC-1856 for the 1856 endorsement |
 | `american` | American (Know-Nothing) | component only (1856) | VPB, Fillmore chapter |
 | `republican` | Republican; includes its 1864 "National Union" name | 1856–2024 | NPS-1864 (§4) |
 | `southern_democratic` | the Southern Democratic convention of 1860 | 1860 | VPB, Breckinridge chapter |
@@ -300,15 +308,16 @@ its value arose. It is stored with the value in `dwh.candidate_party` and served
     whose Whig component LOC-1856 records as an endorsement);
   - **rule 5,** a nomination withdrawn before the electors voted (1872 Davis, if confirmed), or a
     nominee who died before the electors voted (1872 Greeley, a Table 1 row);
-  - **rule 8,** a value whose cited passages name the party but not the nominating body (the
-    eleven rows rule 8 lists).
+  - **rule 8,** a value whose cited passages name the party but not the nominating body, or, as
+    for 1824 Crawford, name the body but say only that it "supported" them (the twelve rows rule
+    8 lists).
 - **Allowed** for any other exceptional case. The cases this research found:
   - rule 2's state-level nominations (1824 Jackson, Adams and Clay; 1828 Jackson; the 1836 Whigs,
     Harrison included);
   - rule 6's two 1860 Democratic conventions (Douglas, Breckinridge);
   - Lincoln's 1864 "National Union" name;
-  - how a C2 row's votes arose: a faithless elector, unpledged electors, legislature-appointed
-    electors, a vice-presidential nomination, or electors left free by the nominee's death (1872
+  - how a C2 row's votes arose: a faithless elector, unpledged electors, a legislature's award, a
+    vice-presidential nomination, or electors left free by the nominee's death (1872
     Hendricks and Jenkins). Every C2 row already cites this (§6.1), so the recommendation to #388
     is a note on each.
 - **A note states only facts its row's citations support.** It adds no source of its own, and
@@ -321,7 +330,7 @@ its value arose. It is stored with the value in `dwh.candidate_party` and served
   rollup carry (§9) and the same CSV field set (§7).
 - **A guard** (#385/#387/#388) fails the build where a row's rule set includes 3, 5 or 8 and its
   note is blank once stripped, so an empty string fails too. The keys this doc names (Fillmore,
-  Greeley, the eleven rule-8 rows, and Davis once confirmed) are pinned as a hand-written literal
+  Greeley, the twelve rule-8 rows, and Davis once confirmed) are pinned as a hand-written literal
   floor, so a row cannot silently drop its rule set.
 
 ---
@@ -331,10 +340,9 @@ its value arose. It is stored with the value in `dwh.candidate_party` and served
 **"Independent" is not a vocabulary value.** No electoral-vote recipient in this data needs one:
 
 - **Floyd (1832) and Mangum (1836)** are labeled "Independent" (Floyd) and "Independent
-  Democrat" (Mangum) only in the CQ-derived tables of LOC-1832 and LOC-1836. Their votes came
-  from electors appointed by the South Carolina
-  legislature (same tables, footnote "Awarded by the South Carolina Legislature", VERIFIED). No
-  nominating body is recorded for either, so both are `no_nomination`.
+  Democrat" (Mangum) only in the CQ-derived tables of LOC-1832 and LOC-1836. The same tables
+  footnote their votes "Awarded by the South Carolina Legislature" (VERIFIED; context only,
+  §0.2). No nominating body was found for either, so both are `no_nomination`.
 - **Wallace (1968)** is the "American Independent Party candidate" in ARCH-1968 (VERIFIED), so
   he takes `american_independent`.
 - **La Follette (1924)** ran "on the Progressive Party ticket" (SFB-LaFollette, VERIFIED), so he
@@ -350,6 +358,9 @@ holds:
 - VPB, in its Agnew chapter, calls Wallace's an "independent candidacy" (VERIFIED). That
   describes the candidacy, and is not a party name. ARCH-1968, the higher-ranked source, names
   his party (§2.1).
+- VPB, in its Roosevelt chapter, says "Roosevelt's independent candidacy came in second" in
+  1912 (VERIFIED). That too describes the candidacy; the same chapter says he "formed his own
+  party, the Progressive or Bull Moose party", and ARCH-1912 prints "P" (§4.1).
 - VPB counts David Davis as one of "2 Independents" in the Senate. That is his later Senate
   label, not a label for his 1872 candidacy, and his row is unresolved anyway (§8.3).
 - The only places a recipient's party is printed as "Independent" are LOC's CQ-derived tables
@@ -371,7 +382,7 @@ superseding D-entry.
 
 | Year(s) | Printed token | Code | Comment |
 |---|---|---|---|
-| 1824 | `Democratic-Republican` | `democratic_republican` | Jackson. The Archives token stands (§6.1). The caucus nominated Crawford, and Jackson stood outside it, in the same party (SNP; VPB, Calhoun chapter; §1 rule 2). |
+| 1824 | `Democratic-Republican` | `democratic_republican` | Jackson. The Archives token stands (§6.1). The caucus supported Crawford, and Jackson stood outside it, in the same party (SNP; VPB, Calhoun chapter; §1 rule 2). |
 | 1824 | `D-R` | `democratic_republican` | Adams. Same reason. |
 | 1828 | `Democratic-Republican` | `democratic_republican` | Jackson. BDUSC has "elected as a Democrat as President of the United States in 1828" (VERIFIED), which names no different nominating body, so the Archives token stands (§2.1, §6.1). |
 | 1828, 1832 | `National Republican` | `national_republican` | 1832 Clay: ST-KY (§1). 1828 Adams: no US-government source names his nominating body (UNVERIFIED), so the Archives token stands, as §6.1 provides. |
@@ -426,10 +437,12 @@ standing nomination)** is a member with `no_nomination`.
 C2 is defined by the absence of a standing presidential nomination that year, not by how the
 vote arrived. It covers five kinds of row:
 - faithless electors' choices;
-- unpledged electors' choices (1960 Byrd: 14 of his 15 votes came from unpledged Alabama and
-  Mississippi electors, faithless-electors §3);
-- electors appointed by a legislature for a candidate nobody nominated (1832 Floyd, 1836
-  Mangum);
+- unpledged electors' choices (1960 Byrd: CRS-RL32611 n.43 says Mississippi's eight were
+  "unpledged Democratic" electors, VERIFIED. It counts Alabama's six as pledged electors who voted
+  otherwise, which `research-faithless-electors.md` §2 disputes on non-CRS sources. Byrd is
+  `no_nomination` either way, and #388 settles which kind of row his Alabama votes are);
+- votes a legislature awarded to a candidate nobody nominated (1832 Floyd, 1836 Mangum, per LOC's
+  table footnote, §0.2);
 - vice-presidential nominees who drew a presidential vote (1872 Brown, 1988 Bentsen, 2004
   Edwards);
 - electors left free by the nominee's death (1872 Hendricks and Jenkins, from Greeley's
@@ -472,7 +485,7 @@ the recipients Table 1 does not cover, not those without an MIT party.
   nomination is shown not to stand under rule 5. This keeps Davis (1872) and Hospers (1972) out
   of C2 for want of research.
 - **A C2 row (`no_nomination`) needs a source of record for how the votes arose:** a faithless
-  elector, unpledged electors, legislature-appointed electors, a vice-presidential nomination or
+  elector, unpledged electors, a legislature's award, a vice-presidential nomination or
   the 1872 scatter. It also needs no VERIFIED source showing a standing presidential nomination.
   Absence of a nomination cannot be quoted, so the row cites the vote's origin and records what
   was searched in the curated catalog, beside its citations.
@@ -542,13 +555,13 @@ The script prints each count, so they are named there and not frozen here.
 
 | Year | Candidate | Class | Proposed value | Source of record | Passage | Label |
 |---|---|---|---|---|---|---|
-| 1824 | William H. Crawford | C1 | `democratic_republican` | SNP | "when the Jeffersonian-Republican caucus convened in the House Chamber … They supported Treasury Secretary William Crawford" | VERIFIED |
+| 1824 | William H. Crawford | C1 | `democratic_republican` | SNP; VPB, Calhoun chapter | "when the Jeffersonian-Republican caucus convened in the House Chamber … They supported Treasury Secretary William Crawford"; "In addition to Calhoun, Adams, and Crawford, the crowded field … —all Republicans" | VERIFIED. Rule 8 (the caucus "supported" him). The code's link to SNP's name is partial (§2.1). |
 | 1824 | Henry Clay | C1 | `democratic_republican` | BDUSC Clay | "unsuccessful presidential candidate of the Democratic Republican Party in 1824" | VERIFIED |
-| 1832 | John Floyd | C2 | `no_nomination` | BDUSC Floyd | "received the electoral vote of South Carolina for President in 1833". BDUSC dates the vote to its count; the electors were legislature-appointed (LOC-1832 footnote). | VERIFIED (origin); no nomination found |
+| 1832 | John Floyd | C2 | `no_nomination` | BDUSC Floyd | "received the electoral vote of South Carolina for President in 1833". BDUSC dates the vote 1833, the year after the election; LOC-1832's table footnotes it "Awarded by the South Carolina Legislature" (§0.2). | VERIFIED (origin); no nomination found |
 | 1832 | William Wirt | C1 | `anti_masonic` | DOJ | "In 1831, Wirt accepted the nomination of the Anti-Masonic Party for the presidency" | VERIFIED |
 | 1836 | Hugh L. White | C1 | `whig` | VPB, Johnson chapter | "The Whig presidential candidates were Daniel Webster, Tennessee Senator and former Jacksonian Hugh Lawson White, and … William Henry Harrison" | VERIFIED |
 | 1836 | Daniel Webster | C1 | `whig` | BDUSC Webster | "unsuccessful Whig candidate for president in 1836" | VERIFIED |
-| 1836 | Willie P. Mangum | C2 | `no_nomination` | BDUSC Mangum | "received the eleven electoral votes of South Carolina for President of the United States in 1837" (counted in 1837; legislature-appointed electors, LOC-1836 footnote) | VERIFIED (origin); no nomination found |
+| 1836 | Willie P. Mangum | C2 | `no_nomination` | BDUSC Mangum | "received the eleven electoral votes of South Carolina for President of the United States in 1837" (BDUSC dates it 1837, the year after the election; LOC-1836's table footnote, as for Floyd) | VERIFIED (origin); no nomination found |
 | 1856 | Millard Fillmore | C1 | `american_whig` | VPB, Fillmore chapter; LOC-1856 | "accepting the 1856 presidential nomination of the … Know-Nothing party"; "The Whig Party also endorsed Fillmore for president." | VERIFIED |
 | 1860 | John C. Breckinridge | C1 | `southern_democratic` | VPB, Breckinridge chapter | "They held their own convention in Baltimore and nominated Breckinridge as their presidential candidate." | VERIFIED |
 | 1860 | John Bell | C1 | `constitutional_union` | ST-TN | "John Bell of Nashville was nominated for president of the United States by the Constitutional Union Party" | VERIFIED |
@@ -561,7 +574,7 @@ The script prints each count, so they are named there and not frozen here.
 | 1924 | Robert M. La Follette | C1 | `progressive_1924` | SFB-LaFollette | "ran for president on the Progressive Party ticket in 1924" | VERIFIED |
 | 1948 | J. Strom Thurmond | C1 | `states_rights_democratic` | TRIB; SFB-Thurmond | "as the nominee of the States Rights Democratic Party, and won 39 electoral votes"; "He ran as the States' Rights Democratic (also known as Dixiecrat) candidate for president in 1948" | VERIFIED |
 | 1956 | Walter B. Jones | C2 | `no_nomination` | ARCH-1956; CRS-R43824 | "An Alabama elector voted for Jones and Talmadge."; "an Alabama elector for Adlai Stevenson (D) voted for Walter Jones" | VERIFIED |
-| 1960 | Harry F. Byrd | C2 | `no_nomination` | ARCH-1960 | "Byrd received electoral votes for President from Alabama (6), Mississippi (8) and Oklahoma (1)." Unpledged slates: faithless-electors §3. | VERIFIED |
+| 1960 | Harry F. Byrd | C2 | `no_nomination` | ARCH-1960 | "Byrd received electoral votes for President from Alabama (6), Mississippi (8) and Oklahoma (1)." Which of his votes came from unpledged slates: §5. | VERIFIED |
 | 1968 | George C. Wallace | C1 | `american_independent` | ARCH-1968 | "American Independent Party candidate Wallace received 9,906,473 popular votes for President." | VERIFIED. No source found for a 1968 national convention; under §6.1 the ARCH passage is enough. |
 | 1972 | John Hospers | C1 | `libertarian` | **needs a stronger source** | CRS-R43824 tags him "(Libertarian)" in a footnote credited to FairVote (VERIFIED), which §6.1 rules is not enough | #387 sources it (§8.3) |
 
@@ -718,8 +731,8 @@ The numbers are that run's output. A re-run is the authority.
 - **VPB is inconsistent on two convention dates.** Its Van Buren chapter gives May 21, 1832 and
   May 20, 1835, and its Johnson chapter gives May 22 for both (VERIFIED). This doc cites it
   for parties only.
-- **BDUSC dates a vote to the year Congress counted it** (Floyd "1833", Mangum "1837"). Its party
-  wording is checked against §4's map, not taken as a token.
+- **BDUSC dates some votes to the year after the election** (Floyd "1833", Mangum "1837"). Its
+  party wording is checked against §4's map, not taken as a token.
 - **BDUSC's La Follette entry** says only that he "several times unsuccessfully sought the
   Republican and Progressive Party presidential nominations" (VERIFIED), which is misleading on
   its own. §8 cites SFB-LaFollette instead.
@@ -741,17 +754,19 @@ The numbers are that run's output. A re-run is the authority.
    name is used (§2.1). It changed `peoples` to `populist`. At the code-review gate the owner
    chose option (B) for 1828 Jackson: `democratic_republican`, because the Archives token stands
    (BDUSC's "Democrat" names no different nominating body), and not because of the naming rule
-   (§2.1).
+   (§2.1). At the acceptance gate the owner accepted the partial link that makes 1824 Crawford
+   `democratic_republican` (§2.1).
 4. **Rule 3, an endorsement counts as a nomination,** with a note where a component rests on an
    endorsement and not a nomination. The owner also allowed the note for any other exceptional
    case (§2.4).
 5. **Rule 5, a withdrawn nomination does not count,** with a note giving the facts (Davis, if
    confirmed).
-6. **Rule 8, a source of record's "candidate of P" statement is accepted as P's nomination,**
-   with a note. At the code-review gate the owner confirmed that this covers all eleven rows
-   whose cited passages name no nominating body (§1 rule 8), not only the four first named
-   (Wallace, La Follette, White, Webster). The per-row rule set that drives the required-note
-   guard (§2.4) is the architect's design (§14), not one of the owner's calls.
+6. **Rule 8, a source of record's "candidate of P" statement is accepted as P's nomination,** with
+   a note. At the code-review gate the owner confirmed that this covers all eleven rows whose
+   cited passages name no nominating body (§1 rule 8), not only the four first named (Wallace, La
+   Follette, White, Webster). At the acceptance gate the owner added 1824 Crawford as a twelfth
+   row, because his source says the caucus "supported" him. The per-row rule set that drives the
+   required-note guard (§2.4) is the architect's design (§14), not one of the owner's calls.
 
 **What D077 records.** It holds the rules and points at this doc for the evidence:
 - **Rules:** §1's rules 1–8, the population (votes cast > 0, minus Table 1), the single-cause
@@ -787,8 +802,9 @@ The numbers are that run's output. A re-run is the authority.
   sweep of every C1 row for a second national body, as was done for Table 1 (e.g. whether a
   Socialist endorsement makes 1924 La Follette joint).
 - **#388:** the C2 rows, each with a note on how its votes arose (§2.4), Davis's rule-5
-  question, which decides whether he is C2 or needs a new code (§8.3), and a government prose
-  source for Floyd's and Mangum's legislature-appointed electors (§0.2).
+  question, which decides whether he is C2 or needs a new code (§8.3), a government prose
+  source for the South Carolina legislature's part in Floyd's and Mangum's votes (§0.2), and
+  which kind of row Byrd's Alabama votes are (§5).
 - **#389:** the export field set for the new field and its note (§7), the reader label and a
   qualified glossary term for MIT's `party`, since the glossary's Party entry and
   `labels.PARTY_NOTE` tie the word to the popular-vote source (§9), how the note is shown, the
@@ -829,8 +845,8 @@ All were adopted, and none was declined:
 The review is also recorded as a comment on #384.
 
 **D077's slot was confirmed free when it was recorded** (2026-10-17): the last entry in
-`decisions.md` on `main` was D076, and the only mention of D077 on `main` was #384's own
-reservation in `backlog-api.md`.
+`decisions.md` on `main` was D076, and the only mentions of D077 on `main` were #384's own, in
+`backlog-api.md`.
 
 ---
 
@@ -877,4 +893,11 @@ chose to skip another re-check.
 beyond their citations and one contradiction about LOC's tables. Each claim was narrowed to what
 its source says (§1 rules 1, 5 and 6, §2.4, §4.1, §11), §0.2 was reconciled with the footnote's
 use, and the slot confirmation was written down (§13).
+
+A fresh re-verify found eight more claims beyond their passages. The owner made 1824 Crawford a
+twelfth rule-8 row, because SNP says his caucus "supported" him, and accepted the partial link
+that makes him `democratic_republican` (§2.1). The rest were narrowed to their passages: the 1828
+Tennessee resolution (§1 rule 2), Floyd's and Mangum's dates and the legislature footnote (§3,
+§5, §8.1, §11), Byrd's unpledged electors with the CRS conflict routed to #388 (§5), the
+"Independent" search (§3), and the 1856 Whig basis (§2.1).
 
