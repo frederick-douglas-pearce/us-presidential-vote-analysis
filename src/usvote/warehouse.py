@@ -69,6 +69,7 @@ from usvote.db import DBC
 from usvote.hybrid import assert_db_margin_agreement, create_hybrid_views
 from usvote.join import create_ec_pv_views
 from usvote.mit.pipeline import run_mit_pipeline
+from usvote.party_check import assert_db_mit_party_agrees
 from usvote.pipeline import run_ec_pipeline
 from usvote.pv.load import build_pv_union
 from usvote.pv.overlap import OverlapReport, assert_db_overlap_within_tolerance
@@ -226,6 +227,12 @@ def run_warehouse(
        It sits here rather than among the PV sources because it is **not** one: it
        depends only on ``dwh.state``, contributes nothing to the D017 resolution views,
        and is read by none of the gates below.
+
+    Between steps 4 and 5 run two checks over the loaded facts: the #183 seat
+    reconciliation, and the MIT party check
+    (:func:`usvote.party_check.assert_db_mit_party_agrees`, #385 / D077), which fails
+    the build if MIT's per-state party disagrees with ``dwh.candidate_party``.
+
     5. :func:`rebuild_views` — the resolved-PV, EC<->PV join and hybrid views, always
        rebuilt, plus the per-capita view (#184) when a census corpus loaded in step 4.
     6. the **D017 layer-3 overlap gates** (#167, D051), when ``validate_overlap`` — MIT
@@ -344,6 +351,13 @@ def run_warehouse(
         # breach should not leave a warehouse whose views are built over facts the
         # reconciliation rejects.
         assert_seats_reconcile(read_ec_participation(dbc))
+
+        # The MIT party check (#385, D077 amends D018): MIT's per-state party must agree
+        # with dwh.candidate_party from 1976 on. Before rebuild_views for the same
+        # reason as the seat reconciliation, and after every source has loaded because
+        # it reads both the EC spine and MIT's rows. Its floor is scoped to the years
+        # MIT loaded, so a deliberately partial build is held only to what it loaded.
+        assert_db_mit_party_agrees(dbc)
 
         rebuild_views(dbc)
 

@@ -110,8 +110,9 @@ def run_ec_pipeline(
     state-name set from it — the same frame :func:`usvote.transform.build_state_dim`
     consumes, keeping the parse filter and the state dimension in lockstep (the SSOT
     is the shapefile) — then scrapes the Archives, parses each year's tables, builds
-    the ``(candidates_df, state_df, votes_df)`` warehouse frames, and loads them into
-    the ``dwh`` schema on ``dbc``.
+    the ``(candidates_df, state_df, votes_df)`` warehouse frames plus the
+    nominating-party frame (:func:`usvote.transform.build_candidate_party`, #385), and
+    loads all four into the ``dwh`` schema on ``dbc``.
 
     ``years`` is the set of election years to ingest; it defaults to
     :func:`ec_ingest_years` (the supported EC spine — 1824 through
@@ -142,7 +143,14 @@ def run_ec_pipeline(
     candidates_df, state_df, votes_df = transform.transform_parsed_years(
         parsed_years, state_geo
     )
-    # Load the three star-schema tables atomically (#84a): this pipeline OWNS the
+    # The nominating party per candidate-year (#385, D077): built here from the same
+    # parse, and loaded in the same transaction. Not returned, so the 3-tuple callers
+    # (the #384 research script, many tests) are unchanged; read it from
+    # dwh.candidate_party.
+    candidate_party_df = transform.build_candidate_party(
+        parsed_years, candidates_df, votes_df
+    )
+    # Load the four EC tables atomically (#84a): this pipeline OWNS the
     # transaction, so a caller above it (the #84b warehouse orchestrator) sequences
     # pipelines without wrapping them. On the ``replace=True`` path the schema drop +
     # rebuild is inside the transaction too, so an interrupted rebuild rolls back to the
@@ -155,6 +163,7 @@ def run_ec_pipeline(
             state_df=state_df,
             candidates_df=candidates_df,
             votes_df=votes_df,
+            candidate_party_df=candidate_party_df,
             replace=replace,
         )
     if close:

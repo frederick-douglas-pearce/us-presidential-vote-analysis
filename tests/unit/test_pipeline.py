@@ -122,11 +122,12 @@ def test_run_ec_pipeline_wires_all_stages_offline(
     # Both fixture years flowed through to the votes fact.
     assert set(votes_df["year"]) == {2016, 2020}
 
-    # All three tables were created and inserted, in FK order.
+    # All four EC tables were created and inserted, in FK order.
     assert [sql.split()[2] for sql, _ in inserts] == [
         f"{SCHEMA}.state",
         f"{SCHEMA}.candidate",
         f"{SCHEMA}.votes",
+        f"{SCHEMA}.candidate_party",
     ]
 
 

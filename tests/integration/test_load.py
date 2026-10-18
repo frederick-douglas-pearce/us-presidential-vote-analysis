@@ -57,6 +57,8 @@ def test_fixture_slice_loads_into_real_postgres(
         assert counts["state"] == len(state_df) == 51
         assert counts["candidate"] == len(candidates_df)
         assert counts["votes"] == len(votes_df)
+        # One Archives row per Table 1 row: the President and Main Opponent per year.
+        assert counts["candidate_party"] == 4
 
         # Grain: primary keys are unique (a broken grain would have raised on the
         # PK constraint at insert, but assert explicitly for a clear signal).
@@ -66,6 +68,11 @@ def test_fixture_slice_loads_into_real_postgres(
                 f"GROUP BY {pk} HAVING count(*) > 1"
             )
             assert dup.empty, f"{table}.{pk} not unique"
+        party_dup = dbc.select_query_to_df(
+            f"SELECT year, candidate_id FROM {SCHEMA}.candidate_party "
+            "GROUP BY year, candidate_id HAVING count(*) > 1"
+        )
+        assert party_dup.empty, "candidate_party (year, candidate_id) not unique"
 
         # FK containment: every votes.candidate_id resolves to a candidate, and
         # every non-null votes.state resolves to a state.
@@ -81,7 +88,102 @@ def test_fixture_slice_loads_into_real_postgres(
             f"WHERE v.state IS NOT NULL AND s.state IS NULL"
         )
         assert orphan_state.empty
+        # Every candidate_party row names a candidate with a national totals row that
+        # year, so the nominating party can never attach to a candidate-year the votes
+        # fact does not have.
+        orphan_party = dbc.select_query_to_df(
+            f"SELECT cp.year, cp.candidate_id FROM {SCHEMA}.candidate_party cp "
+            f"LEFT JOIN {SCHEMA}.votes v ON v.year = cp.year "
+            "AND v.candidate_id = cp.candidate_id AND v.is_total "
+            "WHERE v.votes_id IS NULL"
+        )
+        assert orphan_party.empty
     finally:
+        dbc.delete_schema(SCHEMA, option="Cascade")
+        dbc.close_connection()
+
+
+@pytest.mark.integration
+def test_candidate_party_round_trips_and_its_checks_are_live(
+    integration_db_config: dict[str, Any],
+) -> None:
+    """#385: the nominating-party table on a real database.
+
+    1872 carries the one corrected row and the one note; 2016 carries plain rows whose
+    missing note must arrive as SQL NULL (the write boundary's NaN-to-None step). The
+    three CHECKs and the composite key are then shown to be live, since the transform's
+    own guards would otherwise hide a constraint that never reached the DDL.
+    """
+    from usvote.pipeline import run_ec_pipeline
+    from usvote.scrape import fetch_from_dir
+
+    dbc = DBC(integration_db_config)
+    try:
+        run_ec_pipeline(
+            dbc,
+            "unused.shp",
+            replace=True,
+            years={1872, 2016},
+            fetch=fetch_from_dir(FIXTURES_DIR),
+            load_geo=lambda _p: fake_state_geo(),
+        )
+        rows = dbc.select_query_to_df(
+            "SELECT cp.year, c.name, cp.nominating_party, cp.nominating_party_source, "
+            "cp.archives_party_code, cp.nominating_party_note "
+            f"FROM {SCHEMA}.candidate_party cp "
+            f"JOIN {SCHEMA}.candidate c USING (candidate_id) ORDER BY cp.year, c.name"
+        )
+        by_key = {(int(r.year), r.name): r for r in rows.itertuples()}
+        assert len(by_key) == 4
+        greeley = by_key[(1872, "Horace Greeley")]
+        assert greeley.nominating_party == "liberal_republican_democratic"
+        assert greeley.archives_party_code == "D"
+        assert "November 29, 1872" in greeley.nominating_party_note
+        assert by_key[(1872, "Ulysses S. Grant")].nominating_party == "republican"
+        assert set(rows["nominating_party_source"]) == {"NARA"}
+        nulls = dbc.select_query_to_df(
+            f"SELECT count(*) AS n FROM {SCHEMA}.candidate_party "
+            "WHERE nominating_party_note IS NULL"
+        )["n"].iloc[0]
+        assert nulls == 3
+
+        first = (
+            f"(SELECT min(candidate_id) FROM {SCHEMA}.candidate_party "
+            "WHERE year = 2016)"
+        )
+        for statement, constraint in (
+            (
+                f"UPDATE {SCHEMA}.candidate_party SET nominating_party = 'invented' "
+                f"WHERE year = 2016 AND candidate_id = {first}",
+                "nominating_party",
+            ),
+            (
+                f"UPDATE {SCHEMA}.candidate_party "
+                "SET nominating_party_source = 'OTHER' "
+                f"WHERE year = 2016 AND candidate_id = {first}",
+                "nominating_party_source",
+            ),
+            (
+                # A curated row may not carry an Archives code.
+                f"UPDATE {SCHEMA}.candidate_party "
+                "SET nominating_party_source = 'USGOV' "
+                f"WHERE year = 2016 AND candidate_id = {first}",
+                "candidate_party_source_code_check",
+            ),
+            (
+                f"INSERT INTO {SCHEMA}.candidate_party "
+                f"SELECT * FROM {SCHEMA}.candidate_party WHERE year = 2016",
+                "candidate_party_pkey",
+            ),
+        ):
+            with (
+                pytest.raises(Exception, match=constraint),
+                dbc.conn,
+                dbc.conn.cursor() as cur,
+            ):
+                cur.execute(statement)
+    finally:
+        dbc.conn.rollback()
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()
 

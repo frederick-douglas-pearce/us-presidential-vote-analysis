@@ -1,16 +1,17 @@
-"""Load stage — write the three DataFrames into the Postgres ``dwh`` schema.
+"""Load stage — write the EC DataFrames into the Postgres ``dwh`` schema.
 
 Maps to notebook Section 4. Orchestrates DataFrame -> Postgres via the ``DBC``
 wrapper in :mod:`usvote.db`, creating the loose star schema (``state`` and
-``candidate`` dimensions, ``votes`` fact) in FK-dependency order
-(state -> candidate -> votes) and inserting the rows.
+``candidate`` dimensions, ``votes`` fact) and the per-election nominating-party table
+(``candidate_party``, #385 / D077) in FK-dependency order
+(state -> candidate -> votes -> candidate_party) and inserting the rows.
 
 Ported from ``step1_electoral_college_data.ipynb`` in E2-S5 (#28). Two changes
 from the notebook's ``create_tables_from_dfs``:
 
 - **Named frames, not a positional list.** The notebook relied on
   ``dfs = [state_df, candidates_df, votes_df]`` lining up by position with
-  ``table_names``; :func:`load_dataframes` takes the three frames by keyword and
+  ``table_names``; :func:`load_dataframes` takes the frames by keyword and
   orders them internally, so a caller cannot silently transpose the candidate and
   state loads (``transform_parsed_years`` returns them candidates-first).
 - **Guarded destructive write.** The notebook defaulted ``replace=True``, which
@@ -33,13 +34,24 @@ import pandas as pd
 
 from usvote.count_status import build_count_status_check, build_counted_votes_check
 from usvote.db import DBC
+from usvote.party import (
+    ARCHIVES_CODE_COLUMN,
+    NOTE_COLUMN,
+    PARTY_COLUMN,
+    SOURCE_COLUMN,
+    build_party_source_check,
+    build_party_source_code_check,
+    build_party_value_check,
+)
 
 # The data-warehouse schema and its tables, listed in FK-dependency order: a table
 # with a FK REFERENCES must be created after the table it points at (candidate ->
-# state, votes -> state + candidate). load_dataframes creates and inserts in this
-# order.
+# state, votes -> state + candidate, candidate_party -> candidate). load_dataframes
+# creates and inserts in this order.
 SCHEMA = "dwh"
-TABLE_NAMES: tuple[str, str, str] = ("state", "candidate", "votes")
+TABLE_NAMES: tuple[str, str, str, str] = (
+    "state", "candidate", "votes", "candidate_party",
+)
 
 
 def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]:
@@ -51,7 +63,7 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
     FKs drifting. Each inner list is one table's columns as ``DBC.create_table``
     tuples (name, type, *constraints), ordered to match :data:`TABLE_NAMES`.
     """
-    state, candidate, _votes = TABLE_NAMES
+    state, candidate, _votes, _candidate_party = TABLE_NAMES
     return [
         [  # state dimension
             ("state", "varchar", "primary key"),
@@ -80,6 +92,10 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
             ("name_suffix", "varchar"),
             ("state", "varchar", f"REFERENCES {schema}.{state}"),
             ("state_2", "varchar", f"REFERENCES {schema}.{state}"),
+            # A non-authoritative per-candidate summary of the raw Table 1 tokens
+            # (PARTY_CODE_FIXES applied), kept for the notebook and existing readers.
+            # The authority for a candidate's party in an election is candidate_party
+            # below, keyed (year, candidate_id) (D077 amends D018).
             ("party", "varchar"),
             ("party_2", "varchar"),
         ],
@@ -122,6 +138,32 @@ def build_table_column_defs(schema: str = SCHEMA) -> list[list[tuple[str, ...]]]
                 build_counted_votes_check(),
             ),
         ],
+        [  # nominating party per candidate-year (#385, D077)
+            ("year", "smallint", "not null"),
+            (
+                "candidate_id", "smallint", "not null",
+                f"REFERENCES {schema}.{candidate}",
+            ),
+            # The value, from a closed vocabulary whose one definition is
+            # usvote.party; the CHECK is built from it (the count_status pattern).
+            (PARTY_COLUMN, "varchar", "not null", build_party_value_check()),
+            # Where it came from: NARA (Archives Table 1) or USGOV (the curated catalog
+            # of US-government works, #387/#388).
+            (SOURCE_COLUMN, "varchar", "not null", build_party_source_check()),
+            # The Table 1 token exactly as printed, on NARA rows only.
+            (ARCHIVES_CODE_COLUMN, "varchar"),
+            # A short statement of fact about how the value arose; null when none was
+            # recorded (research doc §2.4). Not the value's null.
+            (NOTE_COLUMN, "text"),
+            (
+                "CONSTRAINT", "candidate_party_pkey",
+                "PRIMARY KEY", "(year, candidate_id)",
+            ),
+            (
+                "CONSTRAINT", "candidate_party_source_code_check",
+                build_party_source_code_check(),
+            ),
+        ],
     ]
 
 
@@ -131,15 +173,16 @@ def load_dataframes(
     state_df: pd.DataFrame,
     candidates_df: pd.DataFrame,
     votes_df: pd.DataFrame,
+    candidate_party_df: pd.DataFrame,
     schema: str = SCHEMA,
     replace: bool = False,
     close: bool = False,
 ) -> None:
-    """Create the ``dwh`` schema + tables and insert the three warehouse frames.
+    """Create the ``dwh`` schema + tables and insert the four EC warehouse frames.
 
     Creates ``schema`` then each table in FK-dependency order (state -> candidate
-    -> votes) using :func:`build_table_column_defs`, inserting each frame right
-    after its table is created.
+    -> votes -> candidate_party) using :func:`build_table_column_defs`, inserting each
+    frame right after its table is created.
 
     ``replace`` gates the **destructive** rebuild: when ``True`` the schema is
     dropped with ``CASCADE`` and recreated empty, discarding all existing ``dwh``
@@ -155,7 +198,12 @@ def load_dataframes(
     ``close`` closes the connection when done; it defaults to ``False`` because the
     caller owns the ``dbc`` it passed in.
     """
-    frames = {"state": state_df, "candidate": candidates_df, "votes": votes_df}
+    frames = {
+        "state": state_df,
+        "candidate": candidates_df,
+        "votes": votes_df,
+        "candidate_party": candidate_party_df,
+    }
     column_defs = dict(zip(TABLE_NAMES, build_table_column_defs(schema), strict=True))
 
     dbc.create_schema(schema, replace=replace)
