@@ -694,7 +694,7 @@ rationale is durable:
   free-text roster `note`, and the pre-1976 national PV aggregates derived from them
   (D022/D030). The firewall is structural — the redistributable view boundary plus a rollup
   post-condition — not editorial. Record once the #139 architect-review gate is passed.
-- **D077 (proposed, E8-S10 / #384)** — the definition of candidate party ("the party that nominated the candidate for President that year"), its closed vocabulary including `no_nomination`, the evidence bar, and the license/provenance code for curated rows. US-government public-domain sources of record only; UCSB never consulted. Record once the #384 architect review is passed.
+- **D077 (recorded 2026-10-17, E8-S10 / #384)** — the definition of candidate party (the nominating party: "the party whose nominating body named them for President for that election"), its closed vocabulary including `no_nomination`, the per-row note, the evidence bar, and the `USGOV`/`US-PD` provenance pair for curated rows. US-government public-domain sources of record only; UCSB never consulted. Amends D018's party authority.
 
 ## Open questions to resolve with the architect
 
