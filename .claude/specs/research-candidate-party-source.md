@@ -68,7 +68,7 @@ re-downloaded every source and matched every quoted passage against it (§0.3).
 | **ND** | Senate Historical Office, *200 Notable Days*: `https://www.govinfo.gov/content/pkg/GPO-200NOTABLEDAYS/pdf/GPO-200NOTABLEDAYS.pdf` | Federal work. |
 | **DOJ** | Department of Justice, Attorney General biography of William Wirt: `https://www.justice.gov/ag/bio/wirt-william` | Federal work. |
 | **NPS-1840**, **NPS-1864**, **NPS-W** | National Park Service: `https://www.nps.gov/mava/learn/historyculture/the-election-of-1840.htm`; `https://www.nps.gov/articles/000/the-elections-of-1860-and-1864.htm`; the Thomas E. Watson NHL nomination, `https://npgallery.nps.gov/NRHP/GetAsset/NHLS/76002144_text` | Federal work. The NHL form may have been prepared by a contractor; this was not checked, so NPS-W is cited only beside a federal corroborating source. |
-| **LOC-yyyy** | Library of Congress research guide, "Presidential Election of yyyy": `https://guides.loc.gov/presidential-election-<yyyy>` | The guide's own prose is a federal work. Its results table is CQ-derived and is not cited. |
+| **LOC-yyyy** | Library of Congress research guide, "Presidential Election of yyyy": `https://guides.loc.gov/presidential-election-<yyyy>` | The guide's own prose is a federal work. Its results table is CQ-derived and is not a source of record. One table footnote, "Awarded by the South Carolina Legislature" (LOC-1832, LOC-1836), is cited only as context for how Floyd's and Mangum's votes arose (§3, §8.1), never for a value; #388 looks for a government prose source for it. |
 | **CRS-xxx** | Congressional Research Service reports on congress.gov: R42533 (national conventions), IN12396 (2024 Democratic convention), R43824 (the Electoral College), RL32611 (the Electoral College): `https://www.congress.gov/crs_external_products/<R|IN|RL>/PDF/<id>/<id>.<n>.pdf` | Federal work. R43824's faithless-elector footnote credits FairVote for 1948–1988, so it is cited for the elector facts, not for nominations. |
 
 Sources considered and **not** used for a party value:
@@ -103,12 +103,12 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
 
 **Rules.** They are tested against every Table 1 row and every row in §8.
 
-1. **A national nominating body counts.** That means a national convention, or in 1824 the
-   congressional caucus. Since 1832 the conventions are the norm (ST-KY: in December 1831 Clay
-   won "the presidential nomination of a political party, the National Republicans, meeting in
-   convention in Baltimore", VERIFIED). A body that acts by delegate roll call before its
-   meeting is still the convention (CRS-IN12396 on 2024: "a planned virtual roll call … to
-   nominate its presidential ticket before the convention begins", VERIFIED).
+1. **A national nominating body counts.** That means a national convention (ST-KY: in December
+   1831 Clay won "the presidential nomination of a political party, the National Republicans,
+   meeting in convention in Baltimore", VERIFIED), or in 1824 the congressional caucus (SNP,
+   §8.1). A body that acts by delegate roll call before its meeting is still the convention
+   (CRS-IN12396 on 2024: "a planned virtual roll call … to nominate its presidential ticket before
+   the convention begins", VERIFIED).
 2. **A state-level nomination counts in exactly these cases: 1824 (candidates outside the
    caucus), 1828, and the 1836 Whigs.** The list is closed. Its value is the party the source of
    record names the candidate as running for, because a legislature belongs to no party. The
@@ -129,17 +129,19 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
 4. **A joint nomination is two or more national bodies naming the same person for President.**
    It counts even where they named different running mates. A state-level cross-endorsement
    never makes a joint nomination, and nor does a state ballot label (D018).
-5. **The nomination must still stand when the electors vote.** A nomination withdrawn before
-   then does not count. A nominee who died after the popular vote keeps the nomination for the
-   votes cast for him, as Greeley does in 1872. **Accepted by the owner (§12).** Both cases
-   carry a note with the facts: the withdrawal and its date, or the death and its date (§2.4).
+5. **The nomination must still stand when the electors vote.** A nomination withdrawn before then
+   does not count. A nominee who died before the electors voted keeps the nomination for the votes
+   cast for him, as Greeley does in 1872 (ARCH-1872: "Following Greeley's death, electors in
+   several states cast their votes variously", VERIFIED). **Accepted by the owner (§12).** Both
+   cases carry a note with the facts: the withdrawal and its date, or the death and its date
+   (§2.4).
 6. **A party that ran more than one candidate gives each one its own row.** The 1836 Whigs ran
    several, as rule 2 cites. In 1860 two national Democratic conventions each nominated a
    candidate: Douglas was nominated "by the northern faction of the Democratic Party" (ST-IL),
    and the southern delegates "held their own convention in Baltimore and nominated
    Breckinridge" (VPB, Breckinridge chapter), both VERIFIED. Those two bodies are two parties,
    coded separately (§2). The northern body keeps `democratic`, because the Archives print Douglas
-   as "D" and his convention is the one the southern delegates walked out of.
+   as "D" (§4).
 7. **Only a presidential nomination counts.** Someone nominated for Vice President, or a loser
    of the presidential nomination, who receives a presidential electoral vote is
    `no_nomination` (§5).
@@ -297,8 +299,7 @@ its value arose. It is stored with the value in `dwh.candidate_party` and served
   - **rule 3,** a component that rests on an endorsement and not a nomination (1856 Fillmore,
     whose Whig component LOC-1856 records as an endorsement);
   - **rule 5,** a nomination withdrawn before the electors voted (1872 Davis, if confirmed), or a
-    nominee who died between the popular vote and the electors' vote (1872 Greeley, a Table 1
-    row);
+    nominee who died before the electors voted (1872 Greeley, a Table 1 row);
   - **rule 8,** a value whose cited passages name the party but not the nominating body (the
     eleven rows rule 8 lists).
 - **Allowed** for any other exceptional case. The cases this research found:
@@ -370,7 +371,7 @@ superseding D-entry.
 
 | Year(s) | Printed token | Code | Comment |
 |---|---|---|---|
-| 1824 | `Democratic-Republican` | `democratic_republican` | Jackson. The caucus nominated Crawford; Jackson's nomination was state-level, in the same party (§1 rule 2). |
+| 1824 | `Democratic-Republican` | `democratic_republican` | Jackson. The Archives token stands (§6.1). The caucus nominated Crawford, and Jackson stood outside it, in the same party (SNP; VPB, Calhoun chapter; §1 rule 2). |
 | 1824 | `D-R` | `democratic_republican` | Adams. Same reason. |
 | 1828 | `Democratic-Republican` | `democratic_republican` | Jackson. BDUSC has "elected as a Democrat as President of the United States in 1828" (VERIFIED), which names no different nominating body, so the Archives token stands (§2.1, §6.1). |
 | 1828, 1832 | `National Republican` | `national_republican` | 1832 Clay: ST-KY (§1). 1828 Adams: no US-government source names his nominating body (UNVERIFIED), so the Archives token stands, as §6.1 provides. |
@@ -717,9 +718,8 @@ The numbers are that run's output. A re-run is the authority.
 - **VPB is inconsistent on two convention dates.** Its Van Buren chapter gives May 21, 1832 and
   May 20, 1835, and its Johnson chapter gives May 22 for both (VERIFIED). This doc cites it
   for parties only.
-- **BDUSC dates a vote to the year Congress counted it** (Floyd "1833", Mangum "1837"), and uses
-  some anachronistic party names ("Democratic Republican" for Clay). Its party wording is
-  checked against §4's map, not taken as a token.
+- **BDUSC dates a vote to the year Congress counted it** (Floyd "1833", Mangum "1837"). Its party
+  wording is checked against §4's map, not taken as a token.
 - **BDUSC's La Follette entry** says only that he "several times unsuccessfully sought the
   Republican and Progressive Party presidential nominations" (VERIFIED), which is misleading on
   its own. §8 cites SFB-LaFollette instead.
@@ -786,8 +786,9 @@ The numbers are that run's output. A re-run is the authority.
 - **#387:** the C1 rows, including Hospers's source, the two-Progressives question, and a rule-3
   sweep of every C1 row for a second national body, as was done for Table 1 (e.g. whether a
   Socialist endorsement makes 1924 La Follette joint).
-- **#388:** the C2 rows, each with a note on how its votes arose (§2.4), and Davis's rule-5
-  question, which decides whether he is C2 or needs a new code (§8.3).
+- **#388:** the C2 rows, each with a note on how its votes arose (§2.4), Davis's rule-5
+  question, which decides whether he is C2 or needs a new code (§8.3), and a government prose
+  source for Floyd's and Mangum's legislature-appointed electors (§0.2).
 - **#389:** the export field set for the new field and its note (§7), the reader label and a
   qualified glossary term for MIT's `party`, since the glossary's Party entry and
   `labels.PARTY_NOTE` tie the word to the popular-vote source (§9), how the note is shown, the
@@ -826,6 +827,10 @@ All were adopted, and none was declined:
 - **M8:** rule 8 covers "supported".
 
 The review is also recorded as a comment on #384.
+
+**D077's slot was confirmed free when it was recorded** (2026-10-17): the last entry in
+`decisions.md` on `main` was D076, and the only mention of D077 on `main` was #384's own
+reservation in `backlog-api.md`.
 
 ---
 
@@ -867,4 +872,9 @@ script's tripwire reasons, check 2's label and its era labels, and this section'
 round 1. A further fresh re-check found three more, all in wording: the PR description, two
 finding IDs no reader could look up, and this section's labels. They were fixed, and the owner
 chose to skip another re-check.
+
+**Acceptance check.** A fresh verifier found every criterion met. It flagged four claims that went
+beyond their citations and one contradiction about LOC's tables. Each claim was narrowed to what
+its source says (§1 rules 1, 5 and 6, §2.4, §4.1, §11), §0.2 was reconciled with the footnote's
+use, and the slot confirmation was written down (§13).
 
