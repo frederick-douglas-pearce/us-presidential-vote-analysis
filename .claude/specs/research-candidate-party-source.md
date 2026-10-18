@@ -12,19 +12,20 @@
 > `no_nomination`, which is a served value. A candidate-year the dataset has no row for is
 > served as null, for that one reason alone (§2.3). Where two sources name the same party
 > differently, the value follows the name the higher-ranked source uses (§2.1). A row whose value
-> rests on an exception to the plain case carries a short, sourced **note** (§2.4).
+> rests on an exception to the plain case carries a short, sourced **row note** (§2.4).
 >
 > **Table 1 covers most of it.** The Archives print a party for the President and the Main
 > Opponent in every election. A year-scoped token map (§4) turns those tokens into codes. The
 > evidence found one printed token that is incomplete: 1872 Greeley ("D", but jointly
-> nominated). #385 handles it with a correction constant. The population left to curate is the candidate-years with
-> electoral votes cast that Table 1 does not cover (§8). The script below derives it, splits it
-> by era at 1976, and names its size. Each row is classified C1 (nominated) or C2 (not
-> nominated), and given a source of record.
+> nominated). #385 handles it with a correction constant. The population left to curate is the
+> candidate-years with electoral votes cast that Table 1 does not cover (§8). The script below
+> derives it, splits it by era at 1976, and names its size. Each row is classified C1
+> (nominated) or C2 (no standing nomination), and given a source of record.
 >
-> **MIT's party stays, but as a check only.** From #389 on, the reader's "Party" is the
-> nominating party in every year, 1976 on included. MIT's `party` field is still served unchanged
-> under `/v1`. It is no longer shown on the dashboard, and it never decides a value (§9).
+> **MIT's party stays, but as a check only.** From #389 on, where the dashboard shows a party it
+> shows the nominating party, in every year, 1976 on included. MIT's `party` values are still
+> served unchanged under `/v1`, with a rewritten description. They are no longer shown on the
+> dashboard, and they never decide a value (§9).
 >
 > **Sources.** Every source of record is a US-government work, and each one's public-domain basis
 > is stated (§0.2). **The American Presidency Project (UCSB) was not consulted for any part of
@@ -96,9 +97,9 @@ returned HTTP 403 to the parent.
 ## §1 — Field definition: the nominating party
 
 **Definition.** A candidate's **nominating party** in an election is the party whose nominating
-body named them as its candidate **for President** for that election. The bare term "party" is
-not used for it: in this project "party" already means the popular-vote source's ballot-line
-party (D018, `docs/glossary.md`).
+body named them as its candidate **for President** for that election. The field's **name** does
+not use the bare term `party`, which on `/v1` stays the popular-vote source's ballot-line party
+(D018, `docs/glossary.md`). The **label** readers see is `ba`'s, set at #389 (§9).
 
 **Rules.** They are tested against every Table 1 row and every row in §8.
 
@@ -145,14 +146,18 @@ party (D018, `docs/glossary.md`).
 8. **A source of record's statement is accepted as the nomination.** Where a US-government source
    of record states that the person was party P's candidate or nominee for President that year,
    or that a body of P supported or nominated them, that is accepted as P's nomination. Rule 1
-   says what the field means, and this rule says what evidence establishes it. It decides the
-   rows whose nominating body no source names: Wallace (1968), La Follette (1924), and White and
-   Webster (1836). It is looser than rules 1–2 alone. **Accepted by the owner (§12)**, on the
-   condition that each such row carries a note saying that no source names the nominating body
-   (§2.4).
+   says what the field means, and this rule says what evidence establishes it. It decides every
+   row whose cited passages name the party but not the body that nominated: 1824 Clay, 1832
+   Wirt, 1836 White and Webster, 1856 Fillmore, 1860 Bell, 1892 Weaver, 1912 Taft, 1924
+   La Follette, 1948 Thurmond and 1968 Wallace (the §8.1 passages; Crawford's caucus and
+   Breckinridge's convention are named, so rule 8 does not decide them). It is looser than
+   rules 1–2 alone. **Accepted by the owner (§12)**, on the condition that each such row carries
+   a note saying that its cited sources name the party, not the nominating body (§2.4). The note
+   says only that; whether some other source names the body is not a claim it makes.
 
-**The grain is (year, candidate)** (owner ruling, 2026-10-16). Each candidate has exactly one
-value per election in which they received an electoral vote.
+**The grain is (year, candidate)** (owner ruling, 2026-10-16). Each candidate has at most one row
+per election in which they received an electoral vote; a candidate-year with none is served as
+null (§2.3).
 
 ---
 
@@ -161,14 +166,15 @@ value per election in which they received an electoral vote.
 ### 2.1 Party codes
 
 Each code names **one party organization**, and it means the same thing in every year it
-appears. Display names are left to `ba` (#386/#389).
+appears. The one exception is `democratic_republican`, which is scoped to a name (below). Display
+forms are `ba`'s (#386/#389): the name they render is fixed by the naming rule below, and `ba`
+sets its case, punctuation and any disambiguation.
 
 **Names are merged only for the same party (owner, §12).** Two sources' names become one code
 only when they name the same party. The code then follows the name used by the higher-ranked
-source (§6.2), and the display name does the same. The same name used for two different parties
-stays two codes, as the two Progressives do. This rule decides three values:
-- **1828 Jackson** is `democratic_republican`, the Archives' "Democratic-Republican" (rank 1), not
-  BDUSC's "elected as a Democrat" (rank 3).
+source (§6.2). The same name used for two different parties stays two codes, as the two
+Progressives do. The rule settles which name is used once two names are known to name one
+party; it does not decide whether they do. It decides two values:
 - **The Populists** are `populist`. VPB (rank 2: "The Populists had already nominated") and BDUSC
   (rank 3: "Populist candidate for President in 1892") both use that name. "People's" appears
   only in a CQ-derived LOC table label, "Populist (People's)", and in a photograph caption, and
@@ -177,14 +183,26 @@ stays two codes, as the two Progressives do. This rule decides three values:
   … Know-Nothing party" in his chapter, and "the American (Know-Nothing)" party where it names it
   in full (VERIFIED). The two are one party, and the full name is the one used.
 
+**1828 Jackson is `democratic_republican`, because the Archives token stands (owner, §12).** The
+Archives print "Democratic-Republican" for him in 1824 and in 1828, and no correction overrides a
+Table 1 token without a VERIFIED source showing a different nominating body (§6.1). BDUSC's
+"elected as a Democrat as President of the United States in 1828" is read as one of its
+anachronistic party names, as its "Democratic Republican" for Clay is (§11), not as a second name
+for the same party. So the naming rule is not what decides this row. The code is scoped to the
+name the Archives print for 1824 and 1828, and this doc claims no organizational continuity
+between the two years, which no source of record here establishes.
+
+**The "Years it appears" column** lists the years a code is a whole value, and then, as
+"component", the years it appears only inside a joint code.
+
 | Code | Party | Years it appears (in this data) | Basis |
 |---|---|---|---|
-| `democratic_republican` | Democratic-Republican (Jeffersonian Republican) | 1824, 1828 | SNP, VPB, BDUSC Clay; ARCH-1824 and ARCH-1828 tokens (§4) |
+| `democratic_republican` | the Democratic-Republican name the Archives print for 1824 and 1828 | 1824, 1828 | SNP, VPB, BDUSC Clay; ARCH-1824 and ARCH-1828 tokens (§4) |
 | `national_republican` | National Republican | 1828, 1832 | ST-KY (1832); ARCH-1828 token (§4) |
-| `democratic` | Democratic | 1832–2024 | §4 |
+| `democratic` | Democratic | 1832–2024; component only (1872, 1896, 1900) | §4 |
 | `anti_masonic` | Anti-Masonic | 1832 | DOJ |
-| `whig` | Whig | 1836–1852 | VPB |
-| `american` | American (Know-Nothing) | 1856 | VPB, Fillmore chapter |
+| `whig` | Whig | 1836–1852; component (1856) | VPB |
+| `american` | American (Know-Nothing) | component only (1856) | VPB, Fillmore chapter |
 | `republican` | Republican; includes its 1864 "National Union" name | 1856–2024 | NPS-1864 (§4) |
 | `southern_democratic` | the Southern Democratic convention of 1860 | 1860 | VPB, Breckinridge chapter |
 | `constitutional_union` | Constitutional Union | 1860 | ST-TN |
@@ -194,7 +212,7 @@ stays two codes, as the two Progressives do. This rule decides three values:
 | `progressive_1924` | the 1924 Progressive ticket | 1924 | SFB-LaFollette (§8) |
 | `states_rights_democratic` | States' Rights Democratic ("Dixiecrat") | 1948 | TRIB, SFB-Thurmond |
 | `american_independent` | American Independent | 1968 | ARCH-1968 |
-| `libertarian` | Libertarian | 1972 | CRS-R43824 (§8) |
+| `libertarian` | Libertarian | 1972 | none yet (#387, §8.3) |
 
 **The two Progressives are separate codes.** The government sources call both "Progressive". The
 VPB's Roosevelt chapter says he "formed his own party, the Progressive or Bull Moose party"
@@ -212,7 +230,9 @@ components in order of nomination, with the Table 1 token's order where one prin
 
 **A code never changes meaning.** Adding a component to a joint nomination (§4.2's open items),
 merging the two Progressives, or adding any value makes a **new code**. Each needs a superseding
-D-entry and an API changelog note, because a served value changes.
+D-entry and an API changelog note, because a served value changes. So #385's hand-written literal
+pins each code **with its component tuple, in order** (a single code maps to `()`), not the code
+names alone: a component appended to `democratic_populist` under the same name must fail it.
 
 | Code | Components | Candidate-year | Basis |
 |---|---|---|---|
@@ -220,10 +240,11 @@ D-entry and an API changelog note, because a served value changes.
 | `democratic_populist` | `democratic`, `populist` | 1896 Bryan, 1900 Bryan | LOC-1896: "William Jennings Bryan (Democratic/Populist)". VPB, Stevenson chapter, on 1900: "The Populists had already nominated the ticket of Bryan and Charles A. Towne" (both VERIFIED). See §4.2 for a third component. |
 | `american_whig` | `american`, `whig` | 1856 Fillmore | VPB: "the 1856 presidential nomination of the … Know-Nothing party". LOC-1856: "The Whig Party also endorsed Fillmore for president." (both VERIFIED; joint under rule 3) |
 
-**`no_nomination`** means that no body counted by §1 nominated the candidate for President that
-year, or that the nomination did not stand when the electors voted (rule 5). It is a served
-value, never null or blank. Reader wording must say "not nominated for president that year",
-never "no party" (ba, plan step).
+**`no_nomination`** means that no body qualifying under §1 nominated the candidate for President
+that year, or that the nomination did not stand when the electors voted (rule 5). It is a served
+value, never null or blank. Its reader wording is `ba`'s (#386/#389), under three constraints: it
+stays distinct from the null, it never reads as "no party", and it never says that a nominee
+whose nomination was withdrawn was not nominated.
 
 ### 2.3 The null: one cause only
 
@@ -232,56 +253,75 @@ in SQL (`NULL`) and in the CSV (an empty cell). That is the only reason it can b
 "Not yet collected" is the absence of a row, not a vocabulary member, so #385's
 closed-vocabulary check still holds.
 
-- **A build guard proves the single cause, with four assertions** (#385/#386):
-  1. every Table 1 key has exactly one row;
-  2. every curated row resolves to exactly one served candidate-year with votes cast, so no
-     curated row is orphaned by a name or id drift;
-  3. every served candidate-year has votes cast (the script's check 4, moved into the build);
-  4. the served null set **equals** the population (§5) minus the curated keys.
+- **A build guard proves the single cause, with four assertions, split by layer.**
+  - **#385, in the warehouse:**
+    1. every Table 1 key has exactly one row, and resolves to exactly one served candidate-year
+       with votes cast;
+    2. every curated row resolves to exactly one served candidate-year with votes cast, so no
+       curated row is orphaned by a name or id drift;
+    3. every served candidate-year has votes cast (the script's checks 4 and 5, moved into the
+       build).
 
-  A subset test would not be enough: with every Table 1 key present, "null set ⊆ population"
-  holds by construction. It would miss a curated row that exists but fails to join, a null with
-  a second cause that looks like "not collected".
+    That curated keys and Table 1 keys are disjoint is already in #385's scope, and stays there.
+  - **#386, at the snapshot build:**
+    4. the served null set, observed **on the served output** (the new column `IS NULL` on every
+       `ec_pv` row and every `national_rollup` row), **equals** the population (§5) minus the
+       curated keys, with both sides derived independently of that column.
+
+  Part 4 must read the served column. Computed as an anti-join of the served candidate-years
+  against `dwh.candidate_party`, it would be an identity given parts 1–3, and would miss a null
+  arising after the row exists: a lost `carry=`, a key drift in the `ec_pv` join, or a row stored
+  with a null value. A subset test would fail the same way: with every Table 1 key present, "null
+  set ⊆ population" holds by construction. The mixed null and non-null case within one
+  candidate-year is §9's constancy check. #385's acceptance criteria already call for a test that
+  makes each guard fire as well as one that passes.
 - **An unresolved source conflict ships no row**, so it shows as the same null. This doc names
   each such candidate-year (§8.3).
 - **The one cause is stated** in the field description, in `docs/api-snapshot.md` and in a
   rewritten `labels.PARTY_NOTE`. The wording is `ba`'s, dataset-first, with no "yet".
 - **No sibling status column is needed**, following the per-capita precedent (D069(c)).
 - **Typing is #386's call.** A `Literal` over the full D077 vocabulary does not change at the
-  #387/#388 cutovers, which add rows with existing values. Only a superseding D-entry (§2.2)
-  changes it.
+  #387/#388 cutovers, which add rows with existing values, unless a superseding D-entry adds a
+  value (Davis if his nomination stood, a #387 rule-3 finding, or §4.2's Bryan item). That
+  D-entry changes the `Literal` in the same change.
 
-### 2.4 The note (owner, §12)
+### 2.4 The row note (owner, §12)
 
-Each row, Table 1 or curated, has a nullable **note**: a short statement of fact about how its
-value arose. It is stored with the value in `dwh.candidate_party` and served beside it.
+Each row, Table 1 or curated, has a nullable **row note**: a short statement of fact about how
+its value arose. It is stored with the value in `dwh.candidate_party` and served beside it.
+"Row note" is this doc's working term; the field's name is #386's and `ba`'s.
 
-- **Required** wherever the value rests on one of the rules the owner accepted as calls:
+- **Each row records the rules its value rests on**, as a closed set drawn from {2, 3, 5, 6, 8},
+  empty for a plain row. It is build metadata, not served.
+- **Required** wherever that set includes a rule the owner accepted as a call:
   - **rule 3,** a component that rests on an endorsement and not a nomination (1856 Fillmore,
     whose Whig component LOC-1856 records as an endorsement);
   - **rule 5,** a nomination withdrawn before the electors voted (1872 Davis, if confirmed), or a
     nominee who died between the popular vote and the electors' vote (1872 Greeley, a Table 1
     row);
-  - **rule 8,** a value accepted from a statement, with no source naming the nominating body
-    (1836 White and Webster, 1924 La Follette, 1968 Wallace).
+  - **rule 8,** a value whose cited passages name the party but not the nominating body (the
+    eleven rows rule 8 lists).
 - **Allowed** for any other exceptional case. The cases this research found:
   - rule 2's state-level nominations (1824 Jackson, Adams and Clay; 1828 Jackson; the 1836 Whigs,
     Harrison included);
   - rule 6's two 1860 Democratic conventions (Douglas, Breckinridge);
   - Lincoln's 1864 "National Union" name;
-  - how a C2 row's votes arose (a faithless elector, unpledged electors, legislature-appointed
-    electors, a vice-presidential nomination). Every C2 row already cites this (§6.1), so the
-    recommendation to #388 is a note on each.
+  - how a C2 row's votes arose: a faithless elector, unpledged electors, legislature-appointed
+    electors, a vice-presidential nomination, or electors left free by the nominee's death (1872
+    Hendricks and Jenkins). Every C2 row already cites this (§6.1), so the recommendation to #388
+    is a note on each.
 - **A note states only facts its row's citations support.** It adds no source of its own, and
   the editorial guardrails bind it like any published claim.
-- **Its null means "nothing exceptional".** It is not the value's null, and §2.3's guard counts
+- **Its null means no note was recorded.** It is not the value's null, and §2.3's guard counts
   only the value.
 - **Its facts are the research's; its wording follows `ba`.** The wording is fixed when #386
-  first serves it, and the field's name is #386's and `ba`'s.
+  first serves it.
 - **It travels with the value.** It is constant per (year, candidate), so it uses the same
   rollup carry (§9) and the same CSV field set (§7).
-- **A guard** (#385/#387/#388) lists the required cases' keys and fails the build if one of them
-  has no note.
+- **A guard** (#385/#387/#388) fails the build where a row's rule set includes 3, 5 or 8 and its
+  note is blank once stripped, so an empty string fails too. The keys this doc names (Fillmore,
+  Greeley, the eleven rule-8 rows, and Davis once confirmed) are pinned as a hand-written literal
+  floor, so a row cannot silently drop its rule set.
 
 ---
 
@@ -289,8 +329,9 @@ value arose. It is stored with the value in `dwh.candidate_party` and served bes
 
 **"Independent" is not a vocabulary value.** No electoral-vote recipient in this data needs one:
 
-- **Floyd (1832) and Mangum (1836)** are labelled "Independent" only in the CQ-derived tables of
-  LOC-1832 and LOC-1836. Their votes came from electors appointed by the South Carolina
+- **Floyd (1832) and Mangum (1836)** are labeled "Independent" (Floyd) and "Independent
+  Democrat" (Mangum) only in the CQ-derived tables of LOC-1832 and LOC-1836. Their votes came
+  from electors appointed by the South Carolina
   legislature (same tables, footnote "Awarded by the South Carolina Legislature", VERIFIED). No
   nominating body is recorded for either, so both are `no_nomination`.
 - **Wallace (1968)** is the "American Independent Party candidate" in ARCH-1968 (VERIFIED), so
@@ -327,11 +368,11 @@ superseding D-entry.
 #385 stores the **printed** token, so the map is keyed on it: the raw parse, before
 `transform.PARTY_CODE_FIXES`. Every pair below is one the script printed (§10, output (a)).
 
-| Year(s) | Printed token | Code | Note |
+| Year(s) | Printed token | Code | Comment |
 |---|---|---|---|
 | 1824 | `Democratic-Republican` | `democratic_republican` | Jackson. The caucus nominated Crawford; Jackson's nomination was state-level, in the same party (§1 rule 2). |
 | 1824 | `D-R` | `democratic_republican` | Adams. Same reason. |
-| 1828 | `Democratic-Republican` | `democratic_republican` | Jackson. BDUSC has "elected as a Democrat as President of the United States in 1828" (VERIFIED), but BDUSC is outranked by the Archives, so the Archives' name stands (§2.1). |
+| 1828 | `Democratic-Republican` | `democratic_republican` | Jackson. BDUSC has "elected as a Democrat as President of the United States in 1828" (VERIFIED), which is read as one of BDUSC's anachronistic names (§11), so the Archives token stands (§2.1). |
 | 1828, 1832 | `National Republican` | `national_republican` | 1832 Clay: ST-KY (§1). 1828 Adams: no US-government source names his nominating body (UNVERIFIED), so the Archives token stands, as §6.1 provides. |
 | 1832–1892, 1904–2024 | `D` | `democratic` | No `D` prints in 1896 or 1900. |
 | 1836–1852 | `Whig` | `whig` | |
@@ -347,8 +388,8 @@ year key: it means `progressive_1912` in 1912 and is a component of `democratic_
 
 **Map entry or correction.** A map entry translates what a token means in a year, as "P" means
 `progressive_1912` in 1912. A correction adds or replaces a party the token does not name, as for
-1872 Greeley. Under §2.1's naming rule, no map entry renames the party a token prints: each entry
-gives the code for the party the Archives name.
+1872 Greeley. No map entry renames the party a token prints: each entry gives the code for the
+party the Archives name.
 
 ### 4.2 What the evidence routes to #385 as corrections
 
@@ -360,7 +401,7 @@ a test and a `docs/corrections.md` row.
 |---|---|---|---|
 | 1872 Greeley | `D` | Joint: Liberal Republican and Democratic conventions (BDUSC Greeley, VERIFIED) | **Correction constant** → `liberal_republican_democratic` |
 | 1896 and 1900 Bryan | `D-P` | BDUSC Bryan: "endorsed by the Populist and Silver Republican Parties in the first and second campaigns" (VERIFIED) | **Open.** Under rule 3 the endorsement would add a third component. Which national body endorsed him in each year is not sourced, so no code is defined for it yet (§2.2). Until a source names the body for each year, `democratic_populist` stands, because that much is VERIFIED. |
-| 1828 Jackson | `Democratic-Republican` | BDUSC: "elected as a Democrat" (VERIFIED) | **No correction.** The two name the same party, and the Archives outrank BDUSC (§2.1). |
+| 1828 Jackson | `Democratic-Republican` | BDUSC: "elected as a Democrat" (VERIFIED) | **No correction.** BDUSC's "Democrat" is read as anachronistic (§11) and shows no different nominating body, so the token stands (§2.1, §6.1). |
 | 1916 Hughes | `R` | No source found either way | **Open question for #385:** did a second national body endorse him? No change without a source. |
 | 1840 Harrison, 1848 Taylor, 1856 Frémont | `Whig`, `Whig`, `R` | No source found either way | **Open question for #385:** did a minor national body also nominate or endorse each? No change without a source. |
 
@@ -378,18 +419,20 @@ votes cast that Congress did not count. 1872 Greeley had 3 cast and 0 counted, a
 output (c) shows it. Defined on counted votes, he would leave the population, though the votes
 cast for him are served.
 
-**C1 (nominated)** is a member of the population with a nominating party under §1. **C2 (not
-nominated)** is a member with `no_nomination`.
+**C1 (nominated)** is a member of the population with a nominating party under §1. **C2 (no
+standing nomination)** is a member with `no_nomination`.
 
-C2 is defined by the absence of a presidential nomination that year, not by how the vote
-arrived. It covers four kinds of row:
+C2 is defined by the absence of a standing presidential nomination that year, not by how the
+vote arrived. It covers five kinds of row:
 - faithless electors' choices;
 - unpledged electors' choices (1960 Byrd: 14 of his 15 votes came from unpledged Alabama and
   Mississippi electors, faithless-electors §3);
 - electors appointed by a legislature for a candidate nobody nominated (1832 Floyd, 1836
   Mangum);
 - vice-presidential nominees who drew a presidential vote (1872 Brown, 1988 Bentsen, 2004
-  Edwards).
+  Edwards);
+- electors left free by the nominee's death (1872 Hendricks and Jenkins, from Greeley's
+  electors; ARCH-1872).
 
 A third-party nominee is C1 however few votes they drew: 1972 Hospers had one, from a faithless
 elector.
@@ -457,16 +500,16 @@ label.
 ## §7 — License and provenance for curated rows
 
 - **Table 1 rows reuse the EC pair** `EC_SOURCE = "NARA"` and `EC_LICENSE = "US-PD"`
-  (`snapshot_schema.py:63`).
+  (`snapshot_schema.py:63–64`).
 - **The curated rows' pair is `USGOV` / `US-PD` (owner, §12).**
   - **`USGOV`** names a publisher class, US-government works, as `NARA`, `MIT` and `USCB` each
     name a publisher. Each row's citations name the actual publisher (Senate, GPO, NPS, …), so
     `meta.provenance` does not grow with each new one. `CURATED` was rejected because it names a
     process, not a publisher.
   - **`US-PD`** states the sources' status, as `EC_LICENSE = "US-PD"` already does for the
-    Archives, though this project's compilation of them includes corrections
-    (`snapshot_schema.py:60–64`). `US-PD` is the statutory status of a federal work (17 U.S.C.
-    §105), and the values are facts drawn from such works, so no new license code is needed.
+    Archives, though this project's compilation of them includes corrections (the constants in
+    `src/usvote/transform.py`, cataloged in `docs/corrections.md`). `US-PD` is the statutory
+    status of a federal work (17 U.S.C. §105), and the values are facts drawn from such works, so no new license code is needed.
   - Each row's quotation is a short excerpt from a public-domain federal work, so it carries no
     third-party restriction. Text that is public domain by age only is never stored as the
     quotation (§6.1).
@@ -510,7 +553,7 @@ The script prints each count, so they are named there and not frozen here.
 | 1860 | John Bell | C1 | `constitutional_union` | ST-TN | "John Bell of Nashville was nominated for president of the United States by the Constitutional Union Party" | VERIFIED |
 | 1872 | Thomas A. Hendricks | C2 | `no_nomination` | VPB, Hendricks chapter; ARCH-1872 | VPB: "The Democrats instead nominated the eccentric newspaper editor Horace Greeley". ARCH: "Following Greeley's death, electors in several states cast their votes variously" | VERIFIED |
 | 1872 | Benjamin Gratz Brown | C2 | `no_nomination` | BDUSC Brown | "unsuccessful Democratic candidate for Vice President of the United States on the ticket with Horace Greeley in 1872" | VERIFIED |
-| 1872 | Charles J. Jenkins | C2 | `no_nomination` | ARCH-1872 | the scatter Note above | VERIFIED (origin); no nomination found |
+| 1872 | Charles J. Jenkins | C2 | `no_nomination` | ARCH-1872 | the ARCH-1872 passage in the Hendricks row | VERIFIED (origin); no nomination found |
 | 1872 | David Davis | **unresolved** | — | — | Nominated by the National Labor Reform convention and withdrawn before the election, per his letter in the Chicago Tribune, 1872-06-28 (RELAYED, public domain by age only). BDUSC says only "candidate for nomination for president on the Liberal-Republican ticket in 1872" (VERIFIED). Rule 5 makes him `no_nomination` if the withdrawal is confirmed. | needs a source of record (§8.3) |
 | 1892 | James B. Weaver | C1 | `populist` | BDUSC Weaver | "Populist candidate for President in 1892" | VERIFIED |
 | 1912 | William H. Taft | C1 | `republican` | ARCH-1912 | "Republican Party candidate Taft, and Vice Presidential running mate James S. Sherman, received 8 electoral votes each" | VERIFIED |
@@ -541,8 +584,11 @@ All of these are C2, `no_nomination`.
 Two candidate-years ship no curated row until a source of record is found. Each is served as
 null meanwhile (§2.3):
 
-- **1872 David Davis.** The withdrawal needs a government source, or a decision that the
-  Tribune letter is enough to rule that his nomination did not stand.
+- **1872 David Davis.** #388 settles rule 5 for him. The withdrawal needs a government source,
+  or a decision that the Tribune letter is enough to rule that his nomination did not stand. If
+  it did not stand, he is C2, `no_nomination`, with a row note on the withdrawal (§2.4). If it
+  stood, he is C1, and his National Labor Reform nomination needs a new code by a superseding
+  D-entry (§2.2, §2.3); he ships no row until then.
 - **1972 John Hospers.** A US-government passage naming him the Libertarian nominee is needed.
 - **The open #385 corrections in §4.2.** These are Table 1 rows, so the current value stands
   until a source exists. No null results.
@@ -554,15 +600,17 @@ C1 and C2 split as the tables show. Of the pre-1976 rows, two are unresolved. Ev
 
 ## §9 — Relation to MIT's party (owner rulings Q4/Q5, architect, 2026-10-17)
 
-- **What readers see.** From #389 on, the dashboard's and the glossary's "Party" is the
-  nominating party in every served year, 1976 on included. The field's **name** avoids bare
-  `party`, because `/v1`'s `party` stays MIT's (§1); the reader's **label** becomes "Party" when
-  #389 rewrites the glossary entry. MIT's party is no longer displayed (owner Q4); whether it
+- **What readers see.** From #389 on, where the dashboard shows a party it shows the nominating
+  party, in every served year, 1976 on included (owner Q4). The field's **name** avoids bare
+  `party`, because `/v1`'s `party` stays MIT's (§1). The reader's **label** is `ba`'s, in #389's
+  label spec, which the owner approves. MIT's party is no longer displayed (owner Q4); whether it
   also leaves the dashboard CSV is #389's to settle.
-- **The API.** MIT's value stays served unchanged as `party` under `/v1`. The nominating party
-  is a new field, appended additively; #386 and `ba` name it. Repurposing `party` would break
-  `/v1` consumers and reverse #386's own ruling ("not a repurposed `party`"). It would also
-  credit MIT, in the docs, the CSV preamble and the snapshot meta, for values that come from the
+- **The API.** MIT's **values** stay served unchanged as `party` under `/v1`. Its description,
+  "Party of record" (`src/usvote/api/models.py`), stops being true when party authority moves, so
+  `ba` rewrites it at #386 to say it is the popular-vote source's party. The nominating party is
+  a new field, appended additively; #386 and `ba` name it. Repurposing `party` would break `/v1`
+  consumers and reverse #386's own ruling ("not a repurposed `party`"). It would also credit
+  MIT, in the docs, the CSV preamble and the snapshot meta, for values that come from the
   Archives. For #386 this is an additive minor `API_VERSION` bump, plus snapshot schema 4 → 5.
 - **Authority: D077 amends D018.** D018's sentence "Party *authority* lives in the EC candidate
   dim (D006)" changes to `dwh.candidate_party` (year, candidate_id). `dwh.candidate.party`/
@@ -578,17 +626,22 @@ C1 and C2 split as the tables show. Of the pre-1976 rows, two are unresolved. Ev
   and non-null in one candidate-year; #385/#386 count nulls for this field too.
 - **The MIT crosswalk and check.** MIT's party-bearing values on EC-vote recipients are the two
   in `mit.transform.EC_GETTER_PARTIES`. On the 1976+ Table 1 rows the script found only those,
-and on the 1976+ population rows it found none (§10). They
-  map `DEMOCRAT` → `democratic` and `REPUBLICAN` → `republican`. The check, per candidate-year:
+  and on the 1976+ population rows it found none (§10, check 8). The crosswalk maps `DEMOCRAT` →
+  `democratic` and `REPUBLICAN` → `republican`. The check:
   - every non-null MIT `party` maps to the nominating value, or to a component of a joint
     nomination;
-  - a null MIT party is skipped by rule;
+  - an MIT value outside the crosswalk fails the build, as an unmapped token does (§4.1);
+  - a row where MIT's party is null, or where the nominating party is null, is skipped, since
+    MIT then adds nothing to compare;
   - a disagreement is a named exception constant with a `docs/corrections.md` row, or else it
     fails the build;
-  - a state-level fusion line (D018) is never a nomination.
+  - a state-level fusion line (D018) is never a nomination;
+  - **a floor:** every 1976+ Table 1 candidate-year has at least one compared row, so a field
+    that never reaches the compared frame fails rather than passing on zero comparisons.
 
-  - where the nominating party is null and MIT's is not, the check skips the row, since MIT adds
-    no coverage.
+  **The grain is #385's plan-gate question.** The recommendation is per (year, state, candidate)
+  on `ec_pv` rows, because the rollup resolves MIT's `party` by `min`, which can hide a
+  disagreement in one state.
 
   On the current snapshot every 1976+ Table 1 row agrees, and every 1976+ population row has a
   null MIT party, so none meets the check against `no_nomination` (§10).
@@ -602,33 +655,46 @@ uv run python .claude/specs/research-candidate-party-source.py
 ```
 
 **What it reads.** Offline, with no network and no database credentials. It reads the Archives
-corpus (`USVOTE_EC_HTML_DIR`), the TIGER shapefile (`USVOTE_SHAPEFILE_PATH`) and, optionally,
-the served snapshot (`USVOTE_API_SNAPSHOT_PATH`, opened `mode=ro`).
+corpus (`USVOTE_EC_HTML_DIR`), the TIGER shapefile (`USVOTE_SHAPEFILE_PATH`) and the served
+snapshot (`USVOTE_API_SNAPSHOT_PATH`, opened `mode=ro`). The snapshot is required: without it
+the run fails, unless `--allow-no-snapshot` is passed, which skips checks 5 and 8 and says so in
+the last line.
 
 **How it builds the frames.** It uses the warehouse's own composition,
-`transform.transform_parsed_years`, so its candidate-years are the ones `dwh.votes` and
-`dwh.candidate` hold. SQL over `dwh` cannot produce the list, because `dwh.candidate.party` is
+`transform.transform_parsed_years`, so its candidate-years are the ones that composition loads
+into `dwh.votes` and `dwh.candidate`. It never reads `dwh` itself; check 5 compares its set with
+the served snapshot's. SQL over `dwh` cannot produce the list, because `dwh.candidate.party` is
 aggregated per candidate across years.
 
-**What it asserts.** It exits non-zero on any failure:
-1. the years equal `ec_ingest_years()`, and every year has the two Table 1 rows;
+**What it asserts.** It exits non-zero on any failure. Each check reads the frame it names:
+1. the Table 1 years and the transform's national-totals years both equal `ec_ingest_years()`;
 2. each Table 1 row resolves, through the transform's own name steps, to one candidate with
    votes cast that year;
 3. a year's two Table 1 rows are different candidates;
-4. no served candidate-year has zero votes cast, so the population is the whole served set less
-   Table 1, and §2.3's null has no second cause;
-5. with the snapshot present, its cast-vote (year, slug) set equals the script's in both
-   directions;
-6. population plus Table 1 equals the cast-vote set;
-7. `usvote.ucsb` was never imported.
+4. no candidate-year in the transform's national totals has zero votes cast;
+5. the snapshot's `national_rollup` (year, slug) set, unfiltered, equals the transform's, in
+   both directions, and every served row has votes cast. With check 4, this is what shows that
+   the population is the whole served set less Table 1, so §2.3's null has no second cause;
+6. no candidate-year has more votes counted than cast;
+7. `usvote.ucsb` was never imported;
+8. MIT's party, joined with every row matched to a served row: on each 1976+ Table 1 row it is
+   the crosswalk value for the printed token (`D` → `DEMOCRAT`, `R` → `REPUBLICAN`), and on each
+   1976+ population row it is null. The second half is a dated headline: if a later snapshot
+   breaks it, §9 needs re-checking, not the data.
+
+Three more asserts are **tripwires**: two Table 1 rows per year (which `parse.parse_table1`
+guarantees), one match per Table 1 row, and population plus Table 1 equals the cast-vote set
+(both following from checks 2 and 3). They cannot fail on their own, and are labeled so in the
+code.
 
 The "Other Presidential Opponents" cross-check the plan listed as optional was not built.
 
-**What it prints.** Output (a) is the raw Table 1 tokens, (b) the population by era, and (c)
-the candidate-years whose cast and counted totals differ. With the snapshot present it also
-prints the MIT `party` on each 1976+ Table 1 row and each 1976+ population row.
+**What it prints.** Markdown on stdout; the scrape and parse progress goes to stderr. Output (a)
+is the raw Table 1 tokens, (b) the population by era, and (c) the candidate-years whose cast and
+counted totals differ. It also prints the MIT `party` on each 1976+ Table 1 row and each 1976+
+population row.
 
-**The run this doc records.** Commit `279838b`, the corpus at
+**The run this doc records.** RUN_ID_PLACEHOLDER, the corpus at
 `~/Documents/Projects/data/presidential_vote_analysis/ec_raw`, and snapshot
 `71b777de23181c224d80207fb756a9a4541fe18ce70cced28dd8de9d666c20a0` (schema 4). Every check
 passed. That run printed:
@@ -671,47 +737,58 @@ The numbers are that run's output. A re-run is the authority.
 3. **Independent:** not a value, on the condition that no source of record assigns it to a
    recipient (§3, where the condition is checked). With it the owner set the **naming rule**:
    names merge into one code only when they name the same party, and the higher-ranked source's
-   name is used (§2.1). It changed 1828 Jackson to `democratic_republican`, and `peoples` to
-   `populist`.
+   name is used (§2.1). It changed `peoples` to `populist`. At the code-review gate the owner
+   chose option (B) for 1828 Jackson: `democratic_republican`, because the Archives token stands
+   and BDUSC's "Democrat" is anachronistic, not because of the naming rule (§2.1).
 4. **Rule 3, an endorsement counts as a nomination,** with a note where a component rests on an
    endorsement and not a nomination. The owner also allowed the note for any other exceptional
    case (§2.4).
 5. **Rule 5, a withdrawn nomination does not count,** with a note giving the facts (Davis, if
    confirmed).
 6. **Rule 8, a source of record's "candidate of P" statement is accepted as P's nomination,**
-   with a note (Wallace, La Follette, White, Webster).
+   with a note. At the code-review gate the owner confirmed that this covers all eleven rows
+   whose cited passages name no nominating body (§1 rule 8), not only the four first named
+   (Wallace, La Follette, White, Webster), and that a per-row rule set drives the guard (§2.4).
 
 **What D077 records.** It holds the rules and points at this doc for the evidence:
 - **Rules:** §1's rules 1–8, the population (votes cast > 0, minus Table 1), the single-cause
   null and its four-part guard (§2.3), the evidence bar, source order and conflict rule (§6),
   MIT's check-only relation (§9), and the amendment to D018 (§9).
-- **Policies:** one code per organization, and the naming rule (§2.1); joint codes as atomic
-  values with declared components; `no_nomination` served; no `independent`; the note and when
-  it is required (§2.4); the change procedure (§2.2).
+- **Policies:** one code per organization (with `democratic_republican` scoped to a name), and
+  the naming rule (§2.1); joint codes as atomic values with declared components; `no_nomination`
+  served; no `independent`; the row note, the per-row rule set and when a note is required
+  (§2.4); the change procedure (§2.2).
 - **The owner's six calls above.**
 - **Three authorities, each for one thing:**
   - D077, for the rules;
-  - `usvote/party.py` (#385), for the vocabulary, the token map, the correction constant and the
-    Table 1 rows' notes;
-  - the curated catalog (#387/#388), for the curated values, their notes and their citations.
+  - `usvote/party.py` (#385), for the vocabulary, the token map, the correction constant, and
+    the Table 1 rows' notes and rule sets (§4.1's Comment column is not their source);
+  - the curated catalog (#387/#388), for the curated values, their notes, rule sets and
+    citations.
 
   This doc is a dated evidence record, not an authority.
-- **A guard:** #385 pins `party.py`'s vocabulary with a hand-written literal test, whose comment
-  says a change needs a superseding D-entry.
+- **A guard:** #385 pins `party.py`'s vocabulary, each code with its component tuple, with a
+  hand-written literal test, whose comment says a change needs a superseding D-entry (§2.2).
 
 **Passed on:**
-- **#385:** §4's map and its ranges, the 1872 Greeley correction, §4.2's open questions, the
-  four-part guard, the MIT check (§9), the D018 summary columns, and the note column with the
-  Table 1 rows' notes and the required-note guard (§2.4).
-- **#386:** the field's name and typing (§2.3), serving the note beside it with `ba`'s wording
-  (§2.4), the per-row source column and the `USGOV`/`US-PD` provenance pair (§7), the rollup
-  carry (§9), and the schema 5 bump.
+- **#385:** §4's map and its ranges, the 1872 Greeley correction, §4.2's open questions, parts
+  1–3 of the null guard (§2.3), the MIT check with its floor and closed crosswalk, and its grain
+  as a plan-gate question (§9), the D018 summary columns, the vocabulary literal with
+  components (§2.2), and the row-note column with the Table 1 rows' notes, their rule sets and
+  the required-note guard (§2.4).
+- **#386:** the field's name and typing (§2.3), part 4 of the null guard on the served output
+  (§2.3), serving the row note beside the value with `ba`'s wording (§2.4), `ba`'s rewrite of
+  MIT `party`'s description (§9), the per-row source column and the `USGOV`/`US-PD` provenance
+  pair (§7), the rollup carry (§9), and the schema 5 bump.
 - **#387:** the C1 rows, including Hospers's source, the two-Progressives question, and a rule-3
   sweep of every C1 row for a second national body, as was done for Table 1 (e.g. whether a
   Socialist endorsement makes 1924 La Follette joint).
-- **#388:** the C2 rows, including Davis, each with a note on how its votes arose (§2.4).
-- **#389:** the export field set for the new field and its note (§7), the reader label (§9),
-  how the note is shown, and whether MIT's party leaves the CSV.
+- **#388:** the C2 rows, each with a note on how its votes arose (§2.4), and Davis's rule-5
+  question, which decides whether he is C2 or needs a new code (§8.3).
+- **#389:** the export field set for the new field and its note (§7), the reader label and a
+  qualified glossary term for MIT's `party`, since the glossary's Party entry and
+  `labels.PARTY_NOTE` tie the word to the popular-vote source (§9), how the note is shown, the
+  display forms (§2.1), and whether MIT's party leaves the CSV.
 
 ---
 
@@ -746,3 +823,34 @@ All were adopted, and none was declined:
 - **M8:** rule 8 covers "supported".
 
 The review is also recorded as a comment on #384.
+
+---
+
+## §14 — Code review of this PR, round 1 (2026-10-17)
+
+Three fresh reviewers read the PR: the code-review skill, a guard-efficacy lens, and a `ba`
+wording finder. The wording finder's two checks were clean, because the PR ships no reader-facing
+text. All 31 findings were adopted, after a fresh `architect` ruled on scope. It found nine of
+them to be design questions, and the owner decided the two it referred:
+- **1828 Jackson:** option (B), the Archives token standing (§2.1).
+- **The rule-8 note:** it covers all eleven rows (§1).
+
+The changes:
+- **The script** compares the served set unfiltered, requires the snapshot by default, and
+  asserts its MIT headlines. It labels the asserts that hold by construction as tripwires,
+  records `git describe --dirty`, sends progress to stderr, and imports `MIT_PV_YEAR_MIN`.
+- **The guards it prescribes:**
+  - the null guard is split by layer, with part 4 read from the served output (§2.3);
+  - the required-note guard is driven by a per-row rule set (§2.4);
+  - the vocabulary literal pins component tuples (§2.2);
+  - the MIT check gains a floor and a closed crosswalk (§9).
+- **Wording:** the field's name and the reader's label are separated, and MIT `party`'s
+  description rewrite is routed to #386 (§9). The display forms are `ba`'s, and the
+  `no_nomination` wording was left to `ba` under three constraints (§2.2). The row note is
+  named (§2.4).
+- **Consistency:**
+  - the grain sentence (§1) and the vocabulary's year column (§2.1);
+  - `libertarian`'s basis (§2.1), and a fifth kind of C2 row (§5);
+  - the §7 citations and §3's labels;
+  - Davis's routing (§8.3), and D077's MIT skip rule and `no_nomination` definition.
+

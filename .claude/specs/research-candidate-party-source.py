@@ -7,13 +7,18 @@ network and no database credentials:
 
     USVOTE_EC_HTML_DIR/<year>.html        (the Archives corpus, #89)
     USVOTE_SHAPEFILE_PATH                 (TIGER2019 states, as the EC pipeline uses)
-    USVOTE_API_SNAPSHOT_PATH (optional)   (the served snapshot, opened read-only)
+    USVOTE_API_SNAPSHOT_PATH              (the served snapshot, opened read-only)
 
     uv run python .claude/specs/research-candidate-party-source.py
 
+The snapshot is required: checks 5 and 8 read it. `--allow-no-snapshot` skips them, and
+the run then says so in its last line.
+
 It builds the warehouse's EC frames with the warehouse's **own** composition,
 `transform.transform_parsed_years` (the call `pipeline.run_ec_pipeline` makes), so the
-candidate-years it lists are the ones `dwh.votes` and `dwh.candidate` hold. SQL over
+candidate-years it lists are the ones that composition loads into `dwh.votes` and
+`dwh.candidate`. The script never reads `dwh` itself; check 5 compares its set with the
+served snapshot's. SQL over
 `dwh` cannot produce the list: `dwh.candidate.party`/`party_2` is aggregated per
 candidate across years (`transform._candidate_parties`), so it cannot say whether
 Table 1 covered a given *year*.
@@ -29,13 +34,15 @@ table. Outputs, as Markdown the research doc embeds:
     that Table 1 does not cover, by era: the population #387/#388 curate;
 (c) the candidate-years whose cast and counted national totals differ.
 
-With the snapshot present it also prints the MIT `party` values on each 1976+ Table 1
-row, for the doc's crosswalk, and checks the snapshot's candidate-year set against the
-script's.
+It also prints the MIT `party` values on the 1976+ Table 1 rows and population rows,
+which check 8 asserts. Progress output from the scrape and parse goes to stderr, so
+stdout is only the Markdown.
 """
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import os
 import sqlite3
 import subprocess
@@ -47,6 +54,7 @@ from typing import Any
 import pandas as pd
 
 from usvote import parse, scrape, transform
+from usvote.pv.source import MIT_PV_YEAR_MIN
 from usvote.slug import candidate_slug
 from usvote.years import ec_ingest_years
 
@@ -66,7 +74,10 @@ SNAPSHOT = Path(
 )
 
 #: MIT's coverage starts here, so the population is reported in two eras.
-MIT_FLOOR = 1976
+MIT_FLOOR = MIT_PV_YEAR_MIN
+
+#: The doc's two-entry crosswalk (§9): the Table 1 token, its code, and MIT's value.
+MIT_CROSSWALK = {"D": "DEMOCRAT", "R": "REPUBLICAN"}
 
 
 class CheckFailed(AssertionError):
@@ -139,15 +150,15 @@ def table1_rows(parsed: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def read_snapshot() -> tuple[set[tuple[int, str]], pd.DataFrame, str] | None:
-    """The served (year, slug) set with cast votes, the MIT parties, and the version.
+def read_snapshot() -> tuple[pd.DataFrame, str] | None:
+    """Every served `national_rollup` row, unfiltered, and the snapshot version.
 
     Opened through a `mode=ro` URI so the read cannot write. Returns None when the
-    file is absent, and the caller says so.
+    file is absent, and the caller decides whether that fails the run.
     """
     if not SNAPSHOT.exists():
         return None
-    con = sqlite3.connect(f"file:{SNAPSHOT}?mode=ro", uri=True)
+    con = sqlite3.connect(SNAPSHOT.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         version, schema = con.execute(
             "SELECT snapshot_version, schema_version FROM snapshot_meta"
@@ -159,10 +170,34 @@ def read_snapshot() -> tuple[set[tuple[int, str]], pd.DataFrame, str] | None:
         )
     finally:
         con.close()
-    cast = served.loc[served["national_electoral_votes"] > 0]
-    pairs = zip(cast["year"], cast["candidate_slug"], strict=True)
-    keys = {(int(y), str(s)) for y, s in pairs}
-    return keys, served, f"{version} (schema {schema})"
+    return served, f"{version} (schema {schema})"
+
+
+def merge_all(left: pd.DataFrame, right: pd.DataFrame, what: str) -> pd.DataFrame:
+    """A left merge on (year, slug) in which every left row must find a served row.
+
+    Without this, a failed join and a genuine null MIT party print the same empty cell.
+    """
+    out = left.merge(right, on=["year", "candidate_slug"], how="left", indicator=True)
+    missed = out.loc[out["_merge"] != "both"]
+    check(
+        missed.empty,
+        f"{what}: rows with no served row: "
+        + ", ".join(f"{r.year} {r.candidate_slug}" for r in missed.itertuples()),
+    )
+    return out.drop(columns="_merge")
+
+
+def run_id() -> str:
+    """The commit the run is on, marked `-dirty` when the tree has changes."""
+    done = subprocess.run(
+        ["git", "describe", "--always", "--dirty"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).resolve().parent,
+    )
+    return done.stdout.strip() if done.returncode == 0 else "unknown (git failed)"
 
 
 def markdown(df: pd.DataFrame) -> str:
@@ -174,20 +209,27 @@ def markdown(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    parsed, state_geo = load_parsed_years()
-    candidates, _state, votes = transform.transform_parsed_years(parsed, state_geo)
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--allow-no-snapshot",
+        action="store_true",
+        help="skip checks 5 and 8 when the snapshot is absent",
+    )
+    args = parser.parse_args(argv)
+
+    with contextlib.redirect_stdout(sys.stderr):
+        parsed, state_geo = load_parsed_years()
+        candidates, _state, votes = transform.transform_parsed_years(parsed, state_geo)
     totals = national_totals(votes, candidates)
     t1 = table1_rows(parsed)
     years = ec_ingest_years()
 
-    # 1. The years covered are exactly the EC ingest years.
+    # 1. The years covered are exactly the EC ingest years. A skipped year would
+    # otherwise pass: `scrape_raw_election_tables` can drop one, and this script does
+    # not call `pipeline._assert_years_scraped`.
     check(set(t1["year"]) == years, "Table 1 years differ from ec_ingest_years()")
     check(set(totals["year"]) == years, "fact years differ from ec_ingest_years()")
-    check(
-        (t1.groupby("year").size() == len(parse.T1_ROW_INDS)).all(),
-        f"a year has other than {len(parse.T1_ROW_INDS)} Table 1 rows",
-    )
 
     # 2. Each Table 1 row resolves to exactly one candidate with cast votes that year.
     cast = totals.loc[totals["cast"] > 0]
@@ -198,7 +240,6 @@ def main() -> int:
         "Table 1 rows with no cast-vote candidate that year: "
         + ", ".join(f"{r.year} {r.printed_name}" for r in unresolved.itertuples()),
     )
-    check(len(joined) == len(t1), "a Table 1 row matched more than one candidate")
 
     # 3. The two Table 1 rows in a year are different candidates.
     check(
@@ -206,13 +247,23 @@ def main() -> int:
         "a year's two Table 1 rows name the same candidate",
     )
 
-    # 4. A served candidate-year with no cast vote would need its own null cause.
-    zero_cast = totals.loc[totals["cast"] <= 0]
+    # 4. No candidate-year in the transform's national totals has zero votes cast.
+    # This reads the transform frame; check 5 carries it to the served set.
+    zero_cast = totals.loc[~(totals["cast"] > 0)]
     check(
         zero_cast.empty,
-        "served candidate-years with no cast vote (each needs a stated cause): "
+        "candidate-years with no cast vote (each needs a stated cause): "
         + ", ".join(f"{r.year} {r.name}" for r in zero_cast.itertuples()),
     )
+
+    # Consequence tripwires: these follow from parse_table1 (which zips the fixed
+    # T1_ROW_INDS) and from checks 2 and 3, so they cannot fail on their own. They
+    # stay so that a change to either fails here, by name.
+    check(
+        (t1.groupby("year").size() == len(parse.T1_ROW_INDS)).all(),
+        f"a year has other than {len(parse.T1_ROW_INDS)} Table 1 rows",
+    )
+    check(len(joined) == len(t1), "a Table 1 row matched more than one candidate")
 
     # (b) The population: cast-vote candidate-years minus Table 1's.
     t1_keys = set(zip(t1["year"], t1["name"], strict=True))
@@ -222,66 +273,95 @@ def main() -> int:
     remainder = remainder.assign(
         era=["pre-1976" if y < MIT_FLOOR else "1976+" for y in remainder["year"]]
     )
+    # Consequence tripwire of checks 2 and 3.
     check(
         len(remainder) + len(t1) == len(cast),
         "population + Table 1 rows != cast-vote candidate-years",
     )
 
+    # 6. No candidate-year has more votes counted than cast (appointed >= cast >=
+    # counted).
+    check(
+        (totals["counted"] <= totals["cast"]).all(),
+        "a candidate-year has more votes counted than cast",
+    )
     # (c) Cast and counted differ.
     differ = totals.loc[totals["cast"] != totals["counted"]].sort_values(
         ["year", "name"]
     )
-    check(
-        (differ["counted"] <= differ["cast"]).all(),
-        "a candidate-year has more votes counted than cast",
-    )
 
-    # 5. The served snapshot holds the same cast-vote candidate-years.
     snapshot = read_snapshot()
+    skipped = ""
+    mit = mit_population = None
     if snapshot is None:
-        print(f"> snapshot cross-check skipped: {SNAPSHOT} is absent\n")
+        check(
+            args.allow_no_snapshot,
+            f"the snapshot is absent ({SNAPSHOT}); checks 5 and 8 need it "
+            "(--allow-no-snapshot skips them)",
+        )
         version = "absent"
-        mit = None
-        mit_population = None
+        skipped = " (checks 5 and 8 skipped: no snapshot)"
     else:
-        served_keys, served, version = snapshot
+        served, version = snapshot
+        # 5. The served snapshot holds exactly the transform's candidate-years, with
+        # neither side filtered first, and every served one has votes cast. A served
+        # zero-cast or null row would be a second cause of a null party (doc §2.3).
+        served_keys = {
+            (int(y), str(sl))
+            for y, sl in zip(served["year"], served["candidate_slug"], strict=True)
+        }
         script_keys = {
             (int(y), candidate_slug(n))
-            for y, n in zip(cast["year"], cast["name"], strict=True)
+            for y, n in zip(totals["year"], totals["name"], strict=True)
         }
         check(
             served_keys == script_keys,
-            "snapshot vs script cast-vote set: only served "
+            "snapshot vs script candidate-year set: only served "
             f"{sorted(served_keys - script_keys)}, only script "
             f"{sorted(script_keys - served_keys)}",
         )
+        check(
+            bool((served["national_electoral_votes"] > 0).all()),
+            "a served candidate-year has no electoral vote cast",
+        )
+
+        # 8. MIT's party, as the doc's §9 records it. Every join must find its served
+        # row, so a failed join cannot read as a null party.
         mit_party = served[["year", "candidate_slug", "party"]].rename(
             columns={"party": "mit_party"}
         )
         t1_slugs = t1.assign(candidate_slug=t1["name"].map(candidate_slug))
-        mit = t1_slugs.loc[t1_slugs["year"] >= MIT_FLOOR].merge(
-            mit_party, on=["year", "candidate_slug"], how="left"
+        mit = merge_all(
+            t1_slugs.loc[t1_slugs["year"] >= MIT_FLOOR], mit_party, "MIT, Table 1"
         )[["year", "name", "token", "mit_party"]]
-        # The 1976+ population rows too: a non-null MIT party on one of them would
-        # meet the MIT check against a curated value, not a Table 1 one.
+        check(
+            set(mit["token"]) <= set(MIT_CROSSWALK),
+            f"a 1976+ Table 1 token outside the crosswalk: {sorted(set(mit['token']))}",
+        )
+        disagree = mit.loc[mit["mit_party"] != mit["token"].map(MIT_CROSSWALK)]
+        check(
+            disagree.empty,
+            "1976+ Table 1 rows whose MIT party disagrees with the token: "
+            + ", ".join(f"{r.year} {r.name}" for r in disagree.itertuples()),
+        )
+        # A dated headline: the 1976+ population rows have no MIT party. If a later
+        # snapshot breaks this, re-check the doc's §9 rather than the data.
         late = remainder.loc[remainder["year"] >= MIT_FLOOR]
-        mit_population = late.assign(
-            candidate_slug=late["name"].map(candidate_slug)
-        ).merge(mit_party, on=["year", "candidate_slug"], how="left")[
-            ["year", "name", "mit_party"]
-        ]
+        mit_population = merge_all(
+            late.assign(candidate_slug=late["name"].map(candidate_slug)),
+            mit_party,
+            "MIT, population",
+        )[["year", "name", "mit_party"]]
+        check(
+            mit_population["mit_party"].isna().all(),
+            "a 1976+ population row has an MIT party; re-check the doc's §9",
+        )
 
     # 7. Nothing here touched UCSB (D022).
     check("usvote.ucsb" not in sys.modules, "usvote.ucsb was imported")
 
-    sha = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
     print("## Run metadata\n")
-    print(f"- commit: {sha}")
+    print(f"- commit: {run_id()}")
     print(f"- corpus: {EC_DIR}")
     print(f"- snapshot: {SNAPSHOT} — {version}")
     print(f"- elections: {len(years)} ({min(years)}–{max(years)})")
@@ -315,7 +395,7 @@ def main() -> int:
     if mit_population is not None:
         print("\n## MIT party on the 1976+ population rows (snapshot)\n")
         print(markdown(mit_population))
-    print("\nAll checks passed.")
+    print(f"\nAll checks passed{skipped}.")
     return 0
 
 
