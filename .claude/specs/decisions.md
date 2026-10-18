@@ -5307,12 +5307,13 @@ with the derivation script beside it.
   candidate) in `dwh.candidate_party` (#385), as one value from a closed vocabulary of snake_case
   codes. The field's name does not use the bare term `party`, whose `/v1` sense stays MIT's
   (D018); the reader's label is `ba`'s, at #389.
-- **The rules** are the doc's §1, rules 1–8: national bodies count (1); state-level nominations
-  count only for 1824 outside the caucus, 1828 and the 1836 Whigs, a closed list (2); a national
+- **The rules** are the doc's §1, rules 1–8: national bodies count (1); where no national body
+  nominated, the party the source of record names counts only for 1824 outside the caucus, 1828
+  and the 1836 Whigs, a closed list (2); a national
   body's endorsement counts as its nomination (3); a joint nomination is two or more national
   bodies naming the same person for President (4); the nomination must stand when the electors
   vote (5); a party running several candidates gives each its own row, and the two 1860
-  Democratic conventions are two parties (6); only a presidential nomination counts (7); a
+  Democratic nominating bodies are two parties (6); only a presidential nomination counts (7); a
   US-government source of record's statement that the person was party P's candidate or nominee,
   or that a body of P nominated or supported them, is accepted as P's nomination (8). Rule 8
   decides every row whose cited passages name the party but not the body that nominated, or,

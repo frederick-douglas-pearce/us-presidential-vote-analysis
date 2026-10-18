@@ -72,8 +72,8 @@ re-downloaded every source and matched every quoted passage against it (§0.3).
 | **CRS-xxx** | Congressional Research Service reports on congress.gov: R42533 (national conventions), IN12396 (2024 Democratic convention), R43824 (the Electoral College), RL32611 (the Electoral College): `https://www.congress.gov/crs_external_products/<R|IN|RL>/PDF/<id>/<id>.<n>.pdf` | Federal work. R42533 was consulted, and no passage from it is cited below. R43824's faithless-elector footnote credits FairVote for 1948–1988, so it is cited for the elector facts, not for nominations. |
 
 Sources considered and **not** used for a party value:
-- **House Clerk election statistics and FEC results** report **state ballot lines** under local names: Thurmond ran as "States' Rights Democrats (Democratic)" in Alabama, and Wallace as "Courage" in New York (agent OCR of the Clerk's 1948 and 1968 volumes, UNVERIFIED by the parent). A ballot line is the D018 sense of party, not a nomination, so neither source can back a value.
-- **The Congressional Journals** record the electoral count, not nominations. They back vote facts the warehouse already holds, not a party.
+- **House Clerk election statistics and FEC results** report **state ballot lines**, which can carry a local name. A ballot line is the D018 sense of party, not a nomination, so neither source can back a value.
+- **The Congressional Journals** were not consulted. The warehouse takes its vote facts from the Archives, and this research looks for nominations, not counts.
 - **Privately printed works on .gov hosts** (the Congressional Globe, newspapers on Chronicling America) are public domain by age at most. They are not federal works, so they may corroborate a claim but are never its source of record.
 
 ### 0.3 Evidence labels
@@ -109,10 +109,10 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
    §8.1). A body that acts by delegate roll call before its meeting is still the convention
    (CRS-IN12396 on 2024: "a planned virtual roll call … to nominate its presidential ticket before
    the convention begins", VERIFIED).
-2. **A state-level nomination counts in exactly these cases: 1824 (candidates outside the
-   caucus), 1828, and the 1836 Whigs.** The list is closed. Its value is the party the source of
-   record names the candidate as running for, because a legislature belongs to no party. The
-   evidence for each case:
+2. **Where no national body nominated, the party the source of record names counts in exactly
+   these cases: 1824 (candidates outside the caucus), 1828, and the 1836 Whigs.** The list is
+   closed. The rule rests on the passages below as quoted. Only the 1836 passage says the
+   candidates were nominated at all; the 1824 and 1828 passages name no nominating body:
    - 1824: the other candidates "encouraged their supporters to boycott the moribund caucus"
      (SNP, VERIFIED), and all of them were "Republicans" (VPB, Calhoun chapter, VERIFIED).
    - 1828: the Tennessee legislature "passed a resolution supporting Senator Andrew Jackson's
@@ -120,13 +120,12 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
    - 1836: the Whigs "chose not to hold a presidential nominating convention that year",
      fielding "several regional candidates, nominated at the state and local level" (VPB, Tyler
      chapter, VERIFIED).
-3. **A formal endorsement by a national body counts as its nomination.** The government sources
-   use "endorsed" and "nominated" interchangeably for the same act. On Bryan in 1896, for
-   example, NPS-W says the Populists "nominated" him while BDUSC says he "was endorsed by the
-   Populist and Silver Republican Parties" (both VERIFIED). A rule that admitted only the word
-   "nominated" would depend on which source a row happened to cite. **Accepted by the owner
-   (§12).** A value with a component that rests on an endorsement and not a nomination carries a
-   note saying so (§2.4).
+3. **A formal endorsement by a national body counts as its nomination.** Two government sources
+   name the same act with different words. On Bryan in 1896, NPS-W says the Populists "nominated"
+   him while BDUSC says he "was endorsed by the Populist and Silver Republican Parties" (both
+   VERIFIED). A rule that admitted only the word "nominated" would depend on which source a row
+   happened to cite. **Accepted by the owner (§12).** A value with a component that rests on an
+   endorsement and not a nomination carries a note saying so (§2.4).
 4. **A joint nomination is two or more national bodies naming the same person for President.**
    It counts even where they named different running mates. A state-level cross-endorsement
    never makes a joint nomination, and nor does a state ballot label (D018).
@@ -137,7 +136,7 @@ not use the bare term `party`, which on `/v1` stays the popular-vote source's ba
    cases carry a note with the facts: the withdrawal and its date, or the death and its date
    (§2.4).
 6. **A party that ran more than one candidate gives each one its own row.** The 1836 Whigs ran
-   several, as rule 2 cites. In 1860 two national Democratic conventions each nominated a
+   several, as rule 2 cites. In 1860 the Democrats split, and each side nominated a
    candidate: Douglas was nominated "by the northern faction of the Democratic Party" (ST-IL),
    and the southern delegates "held their own convention in Baltimore and nominated
    Breckinridge" (VPB, Breckinridge chapter), both VERIFIED. Those two bodies are two parties,
@@ -312,9 +311,9 @@ its value arose. It is stored with the value in `dwh.candidate_party` and served
     for 1824 Crawford, name the body but say only that it "supported" them (the twelve rows rule
     8 lists).
 - **Allowed** for any other exceptional case. The cases this research found:
-  - rule 2's state-level nominations (1824 Jackson, Adams and Clay; 1828 Jackson; the 1836 Whigs,
-    Harrison included);
-  - rule 6's two 1860 Democratic conventions (Douglas, Breckinridge);
+  - rule 2's cases with no national nomination (1824 Jackson, Adams and Clay; 1828 Jackson; the
+    1836 Whigs, Harrison included);
+  - rule 6's two 1860 Democratic nominations (Douglas, Breckinridge);
   - Lincoln's 1864 "National Union" name;
   - how a C2 row's votes arose: a faithless elector, unpledged electors, a legislature's award, a
     vice-presidential nomination, or electors left free by the nominee's death (1872
@@ -438,8 +437,9 @@ C2 is defined by the absence of a standing presidential nomination that year, no
 vote arrived. It covers five kinds of row:
 - faithless electors' choices;
 - unpledged electors' choices (1960 Byrd: CRS-RL32611 n.43 says Mississippi's eight were
-  "unpledged Democratic" electors, VERIFIED. It counts Alabama's six as pledged electors who voted
-  otherwise, which `research-faithless-electors.md` §2 disputes on non-CRS sources. Byrd is
+  "unpledged Democratic" electors, VERIFIED. Of Alabama it says "six Democratic electors in
+  Alabama and one in Oklahoma voted for candidates other than those to whom they were pledged"
+  (VERIFIED), which `research-faithless-electors.md` §2 disputes on non-CRS sources. Byrd is
   `no_nomination` either way, and #388 settles which kind of row his Alabama votes are);
 - votes a legislature awarded to a candidate nobody nominated (1832 Floyd, 1836 Mangum, per LOC's
   table footnote, §0.2);
@@ -448,8 +448,8 @@ vote arrived. It covers five kinds of row:
 - electors left free by the nominee's death (1872 Hendricks and Jenkins, from Greeley's
   electors; ARCH-1872).
 
-A third-party nominee is C1 however few votes they drew: 1972 Hospers had one, from a faithless
-elector.
+A third-party nominee is C1 however few votes they drew. 1972 Hospers is placed in C1 on that
+footing, but the passage naming him a nominee is still needed (§8.3).
 
 **MIT plays no part in membership** (architect, plan step). From 1976 on, the population is
 the recipients Table 1 does not cover, not those without an MIT party.
@@ -768,6 +768,10 @@ The numbers are that run's output. A re-run is the authority.
    row, because his source says the caucus "supported" him. The per-row rule set that drives the
    required-note guard (§2.4) is the architect's design (§14), not one of the owner's calls.
 
+At the acceptance gate the owner also approved rewording rule 2 to what its passages say: it
+counts the party the source of record names where no national body nominated, and no longer calls
+the 1824 and 1828 cases state-level nominations. No value changed.
+
 **What D077 records.** It holds the rules and points at this doc for the evidence:
 - **Rules:** §1's rules 1–8, the population (votes cast > 0, minus Table 1), the single-cause
   null and its four-part guard (§2.3), the evidence bar, source order and conflict rule (§6),
@@ -900,4 +904,11 @@ that makes him `democratic_republican` (§2.1). The rest were narrowed to their 
 Tennessee resolution (§1 rule 2), Floyd's and Mangum's dates and the legislature footnote (§3,
 §5, §8.1, §11), Byrd's unpledged electors with the CRS conflict routed to #388 (§5), the
 "Independent" search (§3), and the 1856 Whig basis (§2.1).
+
+A third fresh re-verify, which the owner asked for, found seven more. The owner approved
+rewording rule 2 so that it no longer calls the 1824 and 1828 cases state-level nominations
+(§1, §2.4, §12). The rest were narrowed: rule 6's 1860 bodies, Hospers's class (§5), the
+ballot-line and Journals entries (§0.2), the CRS passage on Byrd's Alabama electors (§5), and
+rule 3's evidence. On the owner's call these fixes went to the merge gate without a further
+check, because each pass found new and smaller items.
 
