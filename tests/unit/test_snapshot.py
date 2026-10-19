@@ -171,9 +171,10 @@ def _party_keys(frame: pd.DataFrame | None = None) -> pd.DataFrame:
     """``dwh.candidate_party``'s ``(year, candidate_id)`` keys behind ``frame``.
 
     One per candidate-year whose rows carry a party, as a real warehouse has (the view
-    reads the party from that table); the derivation is the shared fixture's. The
-    null-guard tests below doctor the keys this returns (or, for the population side,
-    the frame), so the side they change is the one under test.
+    reads the party from that table); the derivation is the shared fixture's. Most
+    null-guard tests below doctor the keys this returns or, for the population side, the
+    frame; the two roll-up tests change the roll-up instead. Either way the side they
+    change is the one under test.
     """
     return synthetic_party_keys_frame(_ec_pv_frame() if frame is None else frame)
 
@@ -2055,8 +2056,9 @@ class TestTheNullHasOneCause:
 
 
 class TestTheStoreRefusesWhatTheWarehouseCannotHold:
-    """The DDL's CHECKs (#386): the vocabulary from ``usvote.party``, value and source
-    NULL together, no note without a value, and no blank note."""
+    """The DDL's constraints (#386): the vocabulary from ``usvote.party`` for value and
+    source, value and source NULL together, no note without a value, no blank note, and
+    ``ec_pv``'s primary key."""
 
     def test_an_out_of_vocabulary_value_fails_at_insert(self, tmp_path: Path) -> None:
         # Every guard before the write passes this frame (one value per candidate-year,

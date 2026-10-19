@@ -728,9 +728,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `components.provenance_footer`; `export.preamble`; `export.EC_SOURCE`,
   `PV_SOURCE`, `CENSUS_SOURCE`; on the API's `/docs` page, the `Provenance.ec_source`,
   `Provenance.ec_license`, `Provenance.usgov_source`, `Provenance.usgov_source_name` and
-  `Provenance.usgov_license` field descriptions in `src/usvote/api/models.py`; in every API
-  response, `meta.provenance.redistributable_note` and the `USGOV` entry of `_SOURCES`, both
-  in `src/usvote/api/provenance.py`.
+  `Provenance.usgov_license` field descriptions in `src/usvote/api/models.py`; in the body
+  of every successful `/v1` data response, under `meta.provenance`, and of `/v1/meta`, under
+  `provenance`: `redistributable_note` (built by `redistributable_note()`) and
+  `usgov_source_name` (the `USGOV` entry of `_SOURCES`, which the note also names), both in
+  `src/usvote/api/provenance.py`.
 - **Source:** `Provenance` in `src/usvote/api/models.py`; D030; D048 §6; D069(f); #275,
   carry-forward constraints; D077, Provenance.
 - **Not:** —
