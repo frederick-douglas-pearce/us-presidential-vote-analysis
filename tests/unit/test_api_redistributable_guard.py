@@ -122,9 +122,10 @@ def test_no_endpoint_surfaces_roster_free_text(client: TestClient) -> None:
 def test_no_endpoint_surfaces_an_uncatalogued_count_reason(client: TestClient) -> None:
     """Served ``count_status_reason`` values come from the curated Archives vocabulary.
 
-    The one free-text column the public surface carries, admissible only because it is
-    a U.S. Government work (D044 §3) drawn from a closed set. Without pinning it to that
-    set, the provenance claim would be a docstring rather than a property.
+    One of the two free-text columns the public surface carries (with
+    ``nominating_party_note``, #386), admissible only because it is a U.S. Government
+    work (D044 §3) drawn from a closed set. Without pinning it to that set, the
+    provenance claim would be a docstring rather than a property.
     """
     allowed = {reason for _, reason in COUNT_STATUS_OVERRIDES.values()}
     for path in _ALL_ROW_PATHS:

@@ -5413,3 +5413,18 @@ superseding D-entry. #389 shows it on the dashboard. Each takes its share from t
 **Related:** D006, D014, D018, D022, D041, D046, D069, #384, #385, #386, #387, #388, #389.
 
 ---
+
+## D077-E1: Erratum — D077 cites D069(c) where D064(c) is meant
+
+**Date:** 2026-10-19 · **Corrects:** D077 · **Decided by:** the owner, at #386's code-review
+gate (PR #396, round 1), on the architect's scope ruling
+
+D077 cites D069(c) twice for the rule that a NULL needs no sibling status column: on its
+**Builds on** line, and in its null-guard bullet ("No status column is added (D069(c))").
+D069(c) is the rule that the content hash covers `per_capita`. The rule meant is **D064(c)**:
+"There is no `per_capita_status` column; a NULL ratio is explained by its own operands." Read
+both D077 citations as D064(c). D077's decision is unchanged. The slip came from
+`research-candidate-party-source.md` §2.3, which carries it too and is left as written, as an
+evidence record. Recorded as an appended entry because this log is append-only.
+
+---

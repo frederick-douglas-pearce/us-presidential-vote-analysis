@@ -107,10 +107,6 @@ def api_snapshot_row(
     national_counted_ev: int | None = None,
     count_status: str = COUNT_STATUS_COUNTED,
     count_status_reason: str | None = None,
-    nominating_party: str | None = None,
-    nominating_party_source: str | None = None,
-    nominating_party_note: str | None = None,
-    nominating_party_default: bool = True,
 ) -> dict[str, object]:
     """One ``build_snapshot`` input row (``join.EC_PV_COLUMNS`` + ``state_usps``).
 
@@ -125,18 +121,14 @@ def api_snapshot_row(
     a fixture change that quietly perturbed the existing rows would move the content
     hash and invalidate the ETag assertions built on it.
 
-    The three nominating-party parameters (#386) default, with
-    ``nominating_party_default``, to the candidate's :data:`FIXTURE_NOMINATING_PARTY`
-    entry with source ``NARA`` (and :data:`FIXTURE_PARTY_NOTE` on Cand C), or NULL for a
-    candidate it does not list; pass ``nominating_party_default=False`` to set them
-    exactly as given.
+    The nominating party (#386) follows the candidate: its
+    :data:`FIXTURE_NOMINATING_PARTY` entry with source ``NARA`` (and
+    :data:`FIXTURE_PARTY_NOTE` on Cand C), or NULL in all three columns for a candidate
+    that dict does not list. A test wanting another shape edits the built frame.
     """
     if party is None:
         party = "DEMOCRAT" if candidate == "Cand B" else "REPUBLICAN"
-    if nominating_party_default:
-        nominating_party = FIXTURE_NOMINATING_PARTY.get(candidate)
-        nominating_party_source = "NARA" if nominating_party else None
-        nominating_party_note = FIXTURE_PARTY_NOTE if candidate == "Cand C" else None
+    nominating_party = FIXTURE_NOMINATING_PARTY.get(candidate)
     return {
         "year": year,
         "state": state,
@@ -161,8 +153,8 @@ def api_snapshot_row(
         COUNT_STATUS_COLUMN: count_status,
         COUNT_STATUS_REASON_COLUMN: count_status_reason,
         PARTY_COLUMN: nominating_party,
-        SOURCE_COLUMN: nominating_party_source,
-        NOTE_COLUMN: nominating_party_note,
+        SOURCE_COLUMN: "NARA" if nominating_party else None,
+        NOTE_COLUMN: FIXTURE_PARTY_NOTE if candidate == "Cand C" else None,
     }
 
 

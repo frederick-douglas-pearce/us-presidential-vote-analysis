@@ -204,6 +204,15 @@ def test_the_archives_source_code_is_the_one_the_api_serves() -> None:
     assert party.PARTY_SOURCES == (SOURCE_ARCHIVES, SOURCE_CURATED)
 
 
+def test_no_table1_note_carries_a_control_character() -> None:
+    # #386: the snapshot serves these notes verbatim and pins every served note to this
+    # catalog, so a control character here would reach the content hash (whose field
+    # and row separators are control characters) and every CSV. #387/#388 extend this
+    # to the curated catalog's notes.
+    for key, note in TABLE1_ROW_NOTES.items():
+        assert not any(ord(c) < 32 or ord(c) == 127 for c in note), key
+
+
 def test_the_curated_source_code_is_the_one_the_api_serves() -> None:
     # #386: snapshot_schema holds the code as a literal (the serving side may not
     # import this module), so this pin is what keeps the two from drifting apart.

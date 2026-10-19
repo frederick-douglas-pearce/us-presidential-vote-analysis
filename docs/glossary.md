@@ -593,14 +593,13 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** The candidate's party as the popular-vote source records it, shown as a name in
   ordinary capitalization.
 - **Precise:** The party the popular-vote source records for the candidate. The API serves the
-  source's own code; the dashboard shows a display form of that code (underscores read as spaces and each word
-  capitalized, plus a short list of exceptions where the name is not the code's case form:
+  source's own code; the dashboard shows a display form of that code (underscores read as spaces and
+  each word capitalized, plus a short list of exceptions where the name is not the code's case form:
   `DEMOCRAT` reads "Democratic", the party's own name, owner decision, 2026-10-11, #348). The
-  download keeps the code as served. A party that is not text, or whose code has no letter or
-  digit, reads *Unrecognized value*.
-  Null outside the popular-vote window and wherever that source has no figure for the candidate.
-  The codes the public data can carry are limited by `EC_GETTER_PARTIES` in
-  `src/usvote/mit/transform.py` (D019).
+  download keeps the code as served. A party that is not text, or whose code has no letter or digit,
+  reads *Unrecognized value*. Null outside the popular-vote window and wherever that source has no
+  figure for the candidate. The codes the public data can carry are limited by `EC_GETTER_PARTIES`
+  in `src/usvote/mit/transform.py` (D019).
 - **Shown as:** `LABELS["party"]`; the cell `labels.party_cell`, through `labels.party`, which
   shows a code's display form (`labels.PARTY_DISPLAY` for the exceptions, otherwise the code's
   words in ordinary capitalization); `labels.PARTY_NOTE` as help text on a cell with no party
@@ -727,7 +726,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   `nominating_party_source`; `NARA` values share the electoral-vote pair, and `USGOV` values use
   `usgov_source_name` and `usgov_license`.
 - **Shown as:** `components.provenance_footer`; `export.preamble`; `export.EC_SOURCE`,
-  `PV_SOURCE`, `CENSUS_SOURCE`.
+  `PV_SOURCE`, `CENSUS_SOURCE`; on the API's `/docs` page, the `Provenance.ec_source`,
+  `Provenance.ec_license`, `Provenance.usgov_source`, `Provenance.usgov_source_name` and
+  `Provenance.usgov_license` field descriptions in `src/usvote/api/models.py`; in every API
+  response, `meta.provenance.redistributable_note` and the `USGOV` entry of `_SOURCES`, both
+  in `src/usvote/api/provenance.py`.
 - **Source:** `Provenance` in `src/usvote/api/models.py`; D030; D048 §6; D069(f); #275,
   carry-forward constraints; D077, Provenance.
 - **Not:** —

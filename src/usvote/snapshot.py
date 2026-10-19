@@ -510,10 +510,10 @@ def assert_modern_years_are_popular_vote(data_df: pd.DataFrame) -> None:
 def assert_count_status_reasons_are_catalogued(data_df: pd.DataFrame) -> None:
     """Assert every served ``count_status_reason`` comes from the curated map.
 
-    ``count_status_reason`` is the one free-text column on the public surface. It is
-    admissible because it is the **Archives' own sentence** — a U.S. Government work,
-    17 U.S.C. § 105 — where ``pv_state_status.note`` is UCSB prose and is not (D022 /
-    D044 §3).
+    ``count_status_reason`` is one of the two free-text columns on the public surface
+    (with ``nominating_party_note``, #386). It is admissible because it is the
+    **Archives' own sentence** — a U.S. Government work, 17 U.S.C. § 105 — where
+    ``pv_state_status.note`` is UCSB prose and is not (D022 / D044 §3).
 
     **What this guard does and does not establish** (code review, #139 — an earlier
     draft of this docstring overclaimed). It is a *containment* check: only sentences
@@ -640,7 +640,8 @@ def assert_one_nominating_party_per_candidate_year(slugged_df: pd.DataFrame) -> 
     ``(year, state, candidate)``, which :func:`usvote.join.assert_no_fan_out` reports;
     or **two values** across the candidate's state rows. The second check counts nulls
     as a value (``nunique(dropna=False)``), so a candidate-year that is NULL on some
-    rows and set on others fails too: research §9's gap in
+    rows and set on others fails too. That is the gap
+    ``.claude/specs/research-candidate-party-source.md`` §9 names in
     :func:`usvote.hybrid.assert_carried_columns_constant`, which counts with
     ``dropna=True``.
 
@@ -671,9 +672,11 @@ def assert_nominating_party_notes_are_catalogued(data_df: pd.DataFrame) -> None:
     than trusting that the warehouse was built from it. It is a **containment** check,
     as :func:`assert_count_status_reasons_are_catalogued` is: it catches a note arriving
     from anywhere else (a hand-edited warehouse, a second writer), and the catalog's own
-    review is what keeps its entries to facts from U.S. Government works. A control
-    character is refused too, so no note can carry a row or field separator into the
-    content hash or a CSV.
+    review is what keeps its entries to facts from U.S. Government works. That no
+    catalogued note carries a control character (which would put a row or field
+    separator into the content hash or a CSV) is a property of the catalog, so it is
+    tested there: ``test_no_table1_note_carries_a_control_character`` in
+    ``tests/unit/test_party.py``.
     """
     notes = data_df[NOTE_COLUMN].dropna()
     unknown = sorted(set(notes) - _ALLOWED_NOMINATING_PARTY_NOTES)
@@ -683,14 +686,6 @@ def assert_nominating_party_notes_are_catalogued(data_df: pd.DataFrame) -> None:
             f"catalog: {[n[:80] for n in unknown]}. Only the notes in "
             "usvote.party.TABLE1_ROW_NOTES may reach the public surface (D077, "
             "D022/D030)."
-        )
-    controlled = sorted(
-        n for n in set(notes) if any(ord(c) < 32 or ord(c) == 127 for c in n)
-    )
-    if controlled:
-        raise SnapshotError(
-            f"nominating_party_note value(s) carry a control character: "
-            f"{[repr(n[:80]) for n in controlled]}"
         )
 
 
@@ -713,7 +708,7 @@ def party_keys_to_slugs(
         raise SnapshotError(
             f"{len(orphans)} candidate_party key(s) match no served candidate-year: "
             f"{orphans[['year', 'candidate_id']].values.tolist()[:10]}. Every party "
-            "row must resolve to a served candidate (D077, guard parts 1-2)."
+            "row must resolve to a served candidate (D077, null guard part 2)."
         )
     return {
         (int(y), str(s))
@@ -740,10 +735,16 @@ def assert_nominating_party_nulls_have_one_cause(
 
     Equality, not a subset test: with every Table 1 key present, "NULL set within the
     population" holds by construction, and only equality also catches a value served
-    with no key behind it, or a NULL arising after the row exists (a lost ``carry=``, a
-    key drift in the join, a row stored with a NULL value). Computed as an anti-join
-    alone it would be an identity (research §2.3); here the anti-join is only the
-    expected side.
+    with no key behind it, or a NULL arising after the row exists (a key drift in the
+    join). Computed as an anti-join alone it would be an identity
+    (``.claude/specs/research-candidate-party-source.md`` §2.3); here the anti-join is
+    only the expected side.
+
+    **The roll-up read is defense in depth**, kept because D077's part 4 names both
+    tables. Today nothing can produce a NULL in the roll-up alone: the constancy guard
+    runs first, ``first`` then carries a constant value, and a dropped ``carry=`` entry
+    fails earlier, as a ``KeyError`` at the roll-up's column projection. It is there for
+    a future change to how the roll-up is derived.
     """
     cast = data_df.groupby(["year", "candidate_slug"])[
         "president_electoral_votes"

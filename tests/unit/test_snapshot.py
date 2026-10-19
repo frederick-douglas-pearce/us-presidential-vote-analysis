@@ -27,7 +27,11 @@ import pandas as pd
 import pytest
 
 from tests._helpers import non_null_sqlite_flag
-from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON, FIXTURE_PARTY_NOTE
+from tests.fixtures.api_snapshot import (
+    FIXTURE_NOT_COUNTED_REASON,
+    FIXTURE_PARTY_NOTE,
+    synthetic_party_keys_frame,
+)
 from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
@@ -50,6 +54,7 @@ from usvote.snapshot import (
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotError,
     SnapshotMeta,
+    _create_tables,
     add_candidate_slug,
     assert_no_hybrid_pv_below_mit_window,
     assert_no_pv_aggregate_below_mit_window,
@@ -166,12 +171,11 @@ def _party_keys(frame: pd.DataFrame | None = None) -> pd.DataFrame:
     """``dwh.candidate_party``'s ``(year, candidate_id)`` keys behind ``frame``.
 
     One per candidate-year whose rows carry a party, as a real warehouse has (the view
-    reads the party from that table). The null-guard tests below build their keys by
-    hand instead, so the side they doctor is the one under test.
+    reads the party from that table); the derivation is the shared fixture's. The
+    null-guard tests below doctor the keys this returns (or, for the population side,
+    the frame), so the side they change is the one under test.
     """
-    src = _ec_pv_frame() if frame is None else frame
-    keyed = src.loc[src["nominating_party"].notna(), ["year", "candidate_id"]]
-    return keyed.drop_duplicates().reset_index(drop=True)
+    return synthetic_party_keys_frame(_ec_pv_frame() if frame is None else frame)
 
 
 #: One state → one status, applied to every candidate row in that state-year. 1972
@@ -1960,17 +1964,6 @@ class TestNotesAreCatalogued:
         )
         _party_raises(frame, "not in the in-repo catalog")
 
-    def test_a_control_character_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import usvote.snapshot as snapshot_mod
-
-        bad = "A note\x1fwith a field separator."
-        monkeypatch.setattr(
-            snapshot_mod, "_ALLOWED_NOMINATING_PARTY_NOTES", frozenset({bad})
-        )
-        frame = _ec_pv_frame()
-        frame.loc[_where(frame, 1972, "Richard Nixon"), "nominating_party_note"] = bad
-        _party_raises(frame, "control character")
-
 
 class TestTheNullHasOneCause:
     """D077's null guard, part 4: the served NULL set equals the candidate-years with
@@ -2013,8 +2006,37 @@ class TestTheNullHasOneCause:
             r"NULL without a cause.*2016, 'ghost-g'",
         )
 
+    def test_the_build_reads_the_rollup_it_wrote(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The build hands the guard its own roll-up, not a second copy of ``ec_pv``.
+
+        The roll-up is wrapped to NULL one keyed candidate-year's party there only, so
+        the fact rows stay clean and only the roll-up half of the guard can fail.
+        """
+        import usvote.snapshot as snapshot_mod
+
+        real = snapshot_mod.build_national_rollup
+
+        def drifted(data_df: pd.DataFrame, hybrid_fields: pd.DataFrame) -> pd.DataFrame:
+            rollup = real(data_df, hybrid_fields)
+            hit = (rollup["year"] == 2020) & (rollup["candidate_slug"] == "cand-a")
+            assert hit.sum() == 1
+            rollup.loc[hit, ["nominating_party", "nominating_party_source"]] = None
+            return rollup
+
+        monkeypatch.setattr(snapshot_mod, "build_national_rollup", drifted)
+        _party_raises(
+            _ec_pv_frame(), r"national_rollup: .*NULL without a cause.*2020, 'cand-a'"
+        )
+
     def test_the_rollup_is_read_on_its_own(self) -> None:
-        """A NULL arising in the roll-up alone (a lost ``carry=``) fails too."""
+        """The roll-up is read on its own: a NULL there alone fails too.
+
+        Defense in depth (see the guard's docstring): no current code path produces it,
+        so the frames are built by hand here, and the build-level wiring is pinned by
+        ``test_the_build_reads_the_rollup_it_wrote``.
+        """
         data = pd.DataFrame(
             {
                 "year": [2020, 2020],
@@ -2048,9 +2070,11 @@ class TestTheStoreRefusesWhatTheWarehouseCannotHold:
             out=str(tmp_path / "snapshot.sqlite"),
         )
 
+    @pytest.mark.parametrize("table", [DATA_TABLE, ROLLUP_TABLE])
     @pytest.mark.parametrize(
         ("party", "source", "note"),
         [
+            ("bogus", "NARA", None),  # a value outside the vocabulary
             ("republican", None, None),  # a value with no source
             (None, "NARA", None),  # a source with no value
             (None, None, "A note."),  # a note with no value
@@ -2058,21 +2082,59 @@ class TestTheStoreRefusesWhatTheWarehouseCannotHold:
             ("republican", "MIT", None),  # a source outside the two
         ],
     )
-    def test_the_rollup_table_refuses(
-        self, party: str | None, source: str | None, note: str | None
+    def test_each_table_refuses(
+        self, table: str, party: str | None, source: str | None, note: str | None
     ) -> None:
-        from usvote.snapshot import _create_tables
-
+        """Both tables carry the CHECKs: the API's row endpoints read ``ec_pv`` and
+        its summaries ``national_rollup``, so neither copy may lean on the other."""
         conn = sqlite3.connect(":memory:")
         try:
             _create_tables(conn)
-            insert = (
-                f"INSERT INTO {ROLLUP_TABLE} (year, candidate, candidate_slug, "
-                "nominating_party, nominating_party_source, nominating_party_note) "
-                "VALUES (2020, 'Cand A', 'cand-a', ?, ?, ?)"
-            )
-            conn.execute(insert, ("republican", "NARA", None))  # the good shape
+            insert, base = _store_row(table)
+            conn.execute(insert, (*base, "republican", "NARA", None))  # the good shape
             with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
-                conn.execute(insert.replace("2020", "2016"), (party, source, note))
+                conn.execute(insert, (*_other_key(table, base), party, source, note))
         finally:
             conn.close()
+
+    def test_ec_pv_refuses_a_duplicate_grain_row(self) -> None:
+        """The ec_pv PRIMARY KEY (year, state, candidate_slug): the store's backstop
+        behind the build's fan-out check, which now catches a duplicate first."""
+        conn = sqlite3.connect(":memory:")
+        try:
+            _create_tables(conn)
+            insert, base = _store_row(DATA_TABLE)
+            conn.execute(insert, (*base, None, None, None))
+            with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint"):
+                conn.execute(insert, (*base, None, None, None))
+        finally:
+            conn.close()
+
+
+def _store_row(table: str) -> tuple[str, tuple[object, ...]]:
+    """An INSERT for ``table``'s NOT NULL columns plus the three party columns, and a
+    base row for its leading columns (the party values are appended by the caller)."""
+    cols: tuple[str, ...]
+    if table == DATA_TABLE:
+        cols = (
+            "year", "state", "state_usps", "candidate", "candidate_slug",
+            "pv_status", "count_status",
+        )
+        base: tuple[object, ...] = (
+            2020, "Texas", "TX", "Cand A", "cand-a", "popular_vote", "counted",
+        )
+    else:
+        cols = ("year", "candidate", "candidate_slug")
+        base = (2020, "Cand A", "cand-a")
+    party = ("nominating_party", "nominating_party_source", "nominating_party_note")
+    names = (*cols, *party)
+    insert = (
+        f"INSERT INTO {table} ({', '.join(names)}) "
+        f"VALUES ({', '.join('?' * len(names))})"
+    )
+    return insert, base
+
+
+def _other_key(table: str, base: tuple[object, ...]) -> tuple[object, ...]:
+    """``base`` under another primary key (2016), so a refusal is the CHECK's."""
+    return (2016, *base[1:])

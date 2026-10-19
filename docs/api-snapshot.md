@@ -107,14 +107,14 @@ is settled by the votes Congress counted. A reader of 1872 will see Grant at
 `national_electoral_votes: 300` and `electoral_rank: 1` and should not try to reconcile the
 rank against the cast column.
 
-`count_status_reason` is the one free-text column on the public surface, and it ships for a
-specific reason: Archives pages are works of the U.S. Government (17 U.S.C. § 105), unlike
-`pv_state_status.note`, which is verbatim UCSB prose and never leaves the warehouse. The
-build pins every served reason to the sentences in
-`usvote.transform.COUNT_STATUS_OVERRIDES` — which bounds *which* sentences can ship (a
-value from anywhere else fails the build) but does **not** by itself prove where they came
-from, since that map is also where a new correction is added. The provenance rests on review
-of the catalog, where each entry carries its Archives URL. See the note in
+`count_status_reason` is one of the two free-text columns on the public surface (with
+`nominating_party_note`, #386), and it ships for a specific reason: Archives pages are works
+of the U.S. Government (17 U.S.C. § 105), unlike `pv_state_status.note`, which is verbatim
+UCSB prose and never leaves the warehouse. The build pins every served reason to the
+sentences in `usvote.transform.COUNT_STATUS_OVERRIDES` — which bounds *which* sentences can
+ship (a value from anywhere else fails the build) but does **not** by itself prove where
+they came from, since that map is also where a new correction is added. The provenance rests
+on review of the catalog, where each entry carries its Archives URL. See the note in
 `assert_count_status_reasons_are_catalogued`.
 
 ## The five tables
@@ -182,10 +182,11 @@ that year, or the nomination was withdrawn before the electors voted (D077, rule
 The build proves the single cause: it reads the NULL set from the served column on every
 `ec_pv` and `national_rollup` row and requires it to equal the served candidate-years with
 electoral votes cast, minus the Table 1 and curated keys (D077's null guard, part 4). No
-status column is needed (D077), as `per_capita` needs none for its NULL ratio. `nominating_party_note` has a NULL of its own, meaning
-only that no note was recorded; the guard counts the value, never the note. `party` keeps
-its meaning: MIT's party, 1976 on, a check on the nominating party and never a source of it
-(D077 amending D018; `usvote/party_check.py`).
+status column is needed (D077), as `per_capita` needs none for its NULL ratio (D064(c)).
+`nominating_party_note` has a NULL of its own, meaning only that no note was recorded; the
+guard counts the value, never the note. `party` keeps its meaning: MIT's party, 1976 on, a
+check on the nominating party and never a source of it (D077 amending D018;
+`usvote/party_check.py`).
 
 ### `national_rollup` — precomputed summary
 

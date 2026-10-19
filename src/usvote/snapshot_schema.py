@@ -317,7 +317,7 @@ class SnapshotMeta:
     deliberate trade — a silently 50-year snapshot is the same class of error the
     ``pv_status`` column exists to prevent, one level up.
 
-    **Three provenances.** The first two arrived with #139 (D048): ``source`` /
+    **Four provenances.** The first two arrived with #139 (D048): ``source`` /
     ``license`` describe the **popular-vote** data (MIT / CC0-1.0) and keep their
     original names for backward compatibility; ``ec_source`` / ``ec_license`` describe
     the **electoral-college** data (the National Archives, a work of the U.S.
