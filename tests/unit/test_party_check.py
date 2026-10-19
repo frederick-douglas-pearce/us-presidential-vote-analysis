@@ -93,6 +93,17 @@ def test_a_joint_code_agrees_with_any_of_its_components() -> None:
     assert_mit_party_agrees(joint, _floor((2016, 1, "Pat Doe")), {2016})
 
 
+def test_a_joint_code_disagrees_with_a_party_outside_its_components() -> None:
+    """The twin: a joint code admits only its own components, not any MIT party."""
+    joint = _comparison(
+        (2016, "Ohio", "Pat Doe", "REPUBLICAN", 1, "democratic_populist"),
+    )
+    with pytest.raises(
+        PartyCheckError, match=r"disagrees .*\(2016, 'Ohio', 'Pat Doe'\)"
+    ):
+        assert_mit_party_agrees(joint, _floor((2016, 1, "Pat Doe")), {2016})
+
+
 def test_a_stale_exception_fails() -> None:
     with pytest.raises(PartyCheckError, match="match no disagreeing row"):
         assert_mit_party_agrees(
