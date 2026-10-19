@@ -60,6 +60,25 @@ from usvote.count_status import (
     COUNT_STATUS_VALUES,
     COUNTED_VOTES_COLUMN,
 )
+from usvote.party import (
+    ARCHIVES_CODE_COLUMN,
+    CANDIDATE_PARTY_COLUMNS,
+    NOMINATING_PARTIES,
+    NOTE_COLUMN,
+    NOTE_REQUIRED_FLOOR,
+    NOTE_REQUIRED_RULES,
+    PARTY_COLUMN,
+    RULE_SET_DOMAIN,
+    SOURCE_ARCHIVES,
+    SOURCE_COLUMN,
+    SOURCE_CURATED,
+    TABLE1_PARTY_CORRECTIONS,
+    TABLE1_ROW_NOTES,
+    TABLE1_ROW_RULES,
+    TABLE1_TOKEN_MAP,
+    CuratedPartyRow,
+)
+from usvote.years import ec_ingest_years
 
 # --- historical corrections (provenance-carrying constants) ----------------
 # 2016 faithless/"Other" electors. The Archives Table 2 for 2016 collapses the
@@ -815,6 +834,17 @@ def normalize_candidate_parties(
     return strip_footnote_markers_column(t1)
 
 
+def reconcile_table1_names(names: pd.Series) -> pd.Series:
+    """Map Table 1 name spellings onto their Table 2 form (:data:`PARTY_NAME_FIXES`).
+
+    The one place the fix is applied, shared by ``dwh.candidate``'s party columns
+    (:func:`_candidate_parties`) and ``dwh.candidate_party``
+    (:func:`build_candidate_party`), so the two cannot resolve a Table 1 row to
+    different candidates.
+    """
+    return names.replace(dict(PARTY_NAME_FIXES))
+
+
 # --- candidate dimension ---------------------------------------------------
 
 
@@ -916,7 +946,12 @@ def _candidate_states(t2_states: pd.DataFrame) -> pd.DataFrame:
 
 
 def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
-    """Table 1 -> per-candidate primary/secondary party."""
+    """Table 1 -> per-candidate primary/secondary party.
+
+    A non-authoritative summary of the printed tokens across a candidate's years, kept
+    for ``dwh.candidate.party``/``party_2``. The authority for a candidate's party in a
+    given election is :func:`build_candidate_party` (``dwh.candidate_party``, D077).
+    """
     parties = (
         t1[["president_candidate_name", "president_candidate_party"]]
         .drop_duplicates()
@@ -928,7 +963,7 @@ def _candidate_parties(t1: pd.DataFrame) -> pd.DataFrame:
             }
         )
     )
-    parties["name"] = parties["name"].replace(dict(PARTY_NAME_FIXES))
+    parties["name"] = reconcile_table1_names(parties["name"])
     # Normalize label drift (e.g. "Democratic-Republican" -> "D-R") *before*
     # aggregation, then re-dedupe so a candidate whose two labels were the same party
     # collapses to one row instead of a spurious two-party aggregation.
@@ -1906,6 +1941,347 @@ def assert_totals_equal_state_sum(votes: pd.DataFrame) -> None:
         raise TransformError(
             f"Scraped vote totals != sum across states for (year, candidate_id): "
             f"{bad.index.tolist()}"
+        )
+
+
+# --- nominating party: dwh.candidate_party (#385, D077) ---------------------
+
+#: ``dwh.candidate_party``'s key: one row per candidate-year.
+CANDIDATE_PARTY_KEY: tuple[str, str] = ("year", "candidate_id")
+
+#: A row's key before its candidate is resolved: ``(year, name)``, with the name as the
+#: candidate dimension spells it — the key every :mod:`usvote.party` constant uses.
+PartyKey = tuple[int, str]
+
+
+def _table1_tokens(
+    parsed_years: Sequence[Mapping[str, Any]],
+) -> list[tuple[int, str, str]]:
+    """Every Table 1 row as ``(year, name, printed token)``.
+
+    Names are footnote-stripped by :func:`normalize_candidate_parties` and reconciled to
+    their Table 2 spelling by :func:`reconcile_table1_names`, the same two steps
+    ``dwh.candidate``'s party columns take. Tokens are as printed: no
+    :data:`PARTY_CODE_FIXES`.
+
+    Re-derived from ``parsed_years`` although :func:`transform_parsed_years` has already
+    normalized the same parse: deliberate (#385 architect review), so neither function's
+    input or return contract widens to pass the frame along. It is one small pass over
+    two rows per year.
+    """
+    t1 = normalize_candidate_parties(parsed_years)
+    if t1.empty:
+        return []
+    names = reconcile_table1_names(t1["president_candidate_name"])
+    return [
+        (int(year), str(name), str(token))
+        for year, name, token in zip(
+            t1["year"], names, t1["president_candidate_party"], strict=True
+        )
+    ]
+
+
+def _cast_by_candidate_year(votes: pd.DataFrame) -> dict[tuple[int, int], list[int]]:
+    """Each candidate-year's cast electoral votes, one entry per ``is_total`` row."""
+    totals = votes.loc[votes["is_total"], ["year", "candidate_id", CAST_VOTES_COLUMN]]
+    cast: dict[tuple[int, int], list[int]] = {}
+    for year, candidate_id, votes_cast in totals.itertuples(index=False):
+        cast.setdefault((int(year), int(candidate_id)), []).append(int(votes_cast))
+    return cast
+
+
+def assert_every_candidate_year_has_votes_cast(
+    cast: Mapping[tuple[int, int], list[int]],
+) -> None:
+    """Null guard part 3 (research doc §2.3): every candidate-year has votes cast.
+
+    A candidate-year in the votes fact with no cast electoral vote could never earn a
+    nominating party from either source, so its served null would have a second cause.
+    Reads the **cast** measure, not the counted one: 1872 Greeley's 3 votes were cast
+    and not counted (D044), and he is a candidate-year all the same.
+    """
+    empty = sorted(key for key, values in cast.items() if sum(values) <= 0)
+    if empty:
+        raise TransformError(
+            "candidate-years with no electoral votes cast (year, candidate_id): "
+            f"{empty}"
+        )
+
+
+def assert_token_map_total(
+    table1: Sequence[tuple[int, str, str]],
+    token_map: Mapping[PartyKey, str],
+    build_years: Container[int],
+) -> None:
+    """The token map is total both ways over the years being built (research doc §4.1).
+
+    Every printed ``(year, token)`` must be mapped, and every mapped pair whose year is
+    in this build must print. Scoped to the build so a fixture slice of two years does
+    not fail on the other ingest years; the default full build checks the whole map.
+    """
+    printed = {(year, token) for year, _name, token in table1}
+    unmapped = sorted(printed - set(token_map))
+    unused = sorted(
+        pair for pair in token_map if pair[0] in build_years and pair not in printed
+    )
+    if unmapped or unused:
+        raise TransformError(
+            "the Table 1 token map is not total over this build: "
+            f"printed but unmapped {unmapped}; mapped but never printed {unused}. "
+            "Each (year, token) needs exactly one entry in "
+            "usvote.party.TABLE1_TOKEN_MAP."
+        )
+
+
+def assert_constant_keys_match_table1(
+    constants: Mapping[str, Iterable[PartyKey]],
+    table1: Sequence[tuple[int, str, str]],
+    build_years: Container[int],
+) -> None:
+    """Each correction, rule-set and note key in this build names a Table 1 row.
+
+    A stale key — a candidate respelled, or a typo in the name — would otherwise stop
+    applying without a sound. Scoped to the build years, like the token map.
+    """
+    rows = {(year, name) for year, name, _token in table1}
+    stale = {
+        label: sorted(k for k in keys if k[0] in build_years and k not in rows)
+        for label, keys in constants.items()
+    }
+    stale = {label: keys for label, keys in stale.items() if keys}
+    if stale:
+        raise TransformError(
+            f"Table 1 constants whose (year, name) key matches no Table 1 row: {stale}"
+        )
+
+
+def _resolve_candidate_years(
+    keys: Sequence[PartyKey],
+    ids: Mapping[str, int],
+    cast: Mapping[tuple[int, int], list[int]],
+    label: str,
+) -> list[int]:
+    """Null guard parts 1 and 2: each key names one candidate-year with votes cast.
+
+    Returns the ``candidate_id`` for each key, in order. Raises if a key repeats, if its
+    name is not in the candidate dimension, or if its candidate-year has no single
+    ``is_total`` row with votes cast — any of which would leave a candidate-year served
+    null for a reason other than "no row" (research doc §2.3).
+    """
+    problems: list[str] = []
+    seen: set[PartyKey] = set()
+    resolved: list[int] = []
+    for key in keys:
+        year, name = key
+        if key in seen:
+            problems.append(f"{key} appears twice")
+        seen.add(key)
+        candidate_id = ids.get(name)
+        if candidate_id is None:
+            problems.append(f"{key}: no candidate named {name!r}")
+            resolved.append(-1)
+            continue
+        values = cast.get((year, candidate_id), [])
+        if len(values) != 1:
+            problems.append(f"{key}: {len(values)} national totals rows, not 1")
+        elif values[0] <= 0:
+            problems.append(f"{key}: no electoral votes cast")
+        resolved.append(candidate_id)
+    if problems:
+        raise TransformError(
+            f"{label} rows that do not resolve to one candidate-year with votes cast: "
+            + "; ".join(problems)
+        )
+    return resolved
+
+
+def build_candidate_party(
+    parsed_years: Sequence[Mapping[str, Any]],
+    candidates_df: pd.DataFrame,
+    votes_df: pd.DataFrame,
+    *,
+    token_map: Mapping[PartyKey, str] = TABLE1_TOKEN_MAP,
+    corrections: Mapping[PartyKey, str] = TABLE1_PARTY_CORRECTIONS,
+    rules: Mapping[PartyKey, frozenset[int]] = TABLE1_ROW_RULES,
+    notes: Mapping[PartyKey, str] = TABLE1_ROW_NOTES,
+    floor: Mapping[PartyKey, frozenset[int]] = NOTE_REQUIRED_FLOOR,
+    curated: Sequence[CuratedPartyRow] = (),
+) -> pd.DataFrame:
+    """Build ``dwh.candidate_party``: each candidate-year's nominating party (D077).
+
+    One row per Archives Table 1 row (the President and Main Opponent of each built
+    year): the printed token mapped by year (:data:`~usvote.party.TABLE1_TOKEN_MAP`),
+    then any correction applied, with source ``NARA`` and the token kept as printed.
+    Then one row per ``curated`` row in a built year, with source ``USGOV`` and no
+    token. The merge happens here, once, and nowhere else. Columns are
+    :data:`~usvote.party.CANDIDATE_PARTY_COLUMNS`.
+
+    ``candidates_df`` and ``votes_df`` are :func:`transform_parsed_years`' frames: names
+    resolve to ``candidate_id`` through the candidate dimension, and the national totals
+    rows say which candidate-years had votes cast. Every constant defaults to
+    :mod:`usvote.party`'s and is a parameter so a test can hand in a broken one.
+
+    Guards, each raising :class:`TransformError`:
+
+    - **(year, candidate_id) is unique**, over Table 1 and curated rows together;
+    - **every value is in the vocabulary**;
+    - **the token map is total** both ways over the built years;
+    - **no candidate-year has both a NARA and a USGOV row** (Archives takes precedence
+      by construction: a curated row may only fill a candidate-year Table 1 does not);
+    - **no stale constant**: every correction, rule-set and note key in a built year
+      names a Table 1 row;
+    - **the null guard's warehouse parts** (research doc §2.3): every Table 1 row (1)
+      and every curated row (2) resolves to exactly one candidate-year with votes
+      cast, and (3) every candidate-year in the votes fact has votes cast;
+    - **rule sets and notes**: every rule set is drawn from
+      :data:`~usvote.party.RULE_SET_DOMAIN`, and a row resting on a rule in
+      :data:`~usvote.party.NOTE_REQUIRED_RULES` has a note that is not blank once
+      stripped;
+    - **the note floor**: every :data:`~usvote.party.NOTE_REQUIRED_FLOOR` key in a built
+      year has a row whose rule set covers its required rules.
+
+    A curated row's year must be an EC ingest year; one in an ingest year outside this
+    build is left out, as the year-scoped guards leave out unbuilt years.
+    """
+    build_years = {int(py["year"]) for py in parsed_years}
+    table1 = _table1_tokens(parsed_years)
+    cast = _cast_by_candidate_year(votes_df)
+    ids = {
+        str(name): int(candidate_id)
+        for name, candidate_id in zip(
+            candidates_df["name"], candidates_df["candidate_id"], strict=True
+        )
+    }
+
+    assert_token_map_total(table1, token_map, build_years)
+    assert_constant_keys_match_table1(
+        {"correction": corrections, "rule set": rules, "note": notes},
+        table1,
+        build_years,
+    )
+
+    ingest_years = ec_ingest_years()
+    out_of_range = sorted(
+        (row.year, row.name) for row in curated if row.year not in ingest_years
+    )
+    if out_of_range:
+        raise TransformError(
+            f"curated rows outside the EC ingest years (year, name): {out_of_range}"
+        )
+    curated_rows = [row for row in curated if row.year in build_years]
+
+    table1_keys = [(year, name) for year, name, _token in table1]
+    curated_keys = [(row.year, row.name) for row in curated_rows]
+    table1_ids = _resolve_candidate_years(table1_keys, ids, cast, "Table 1")
+    curated_ids = _resolve_candidate_years(curated_keys, ids, cast, "curated")
+    # After parts 1 and 2, so a Table 1 or curated row with no votes is reported as that
+    # row; this catches every other candidate-year.
+    assert_every_candidate_year_has_votes_cast(cast)
+
+    records: list[dict[str, Any]] = []
+    row_rules: dict[PartyKey, frozenset[int]] = {}
+    for (year, name, token), candidate_id in zip(table1, table1_ids, strict=True):
+        key = (year, name)
+        row_rules[key] = frozenset(rules.get(key, frozenset()))
+        records.append({
+            "year": year,
+            "candidate_id": candidate_id,
+            PARTY_COLUMN: corrections.get(key, token_map[(year, token)]),
+            SOURCE_COLUMN: SOURCE_ARCHIVES,
+            ARCHIVES_CODE_COLUMN: token,
+            NOTE_COLUMN: notes.get(key),
+        })
+    overlap = sorted(set(table1_keys) & set(curated_keys))
+    if overlap:
+        raise TransformError(
+            f"candidate-years with both a {SOURCE_ARCHIVES} and a {SOURCE_CURATED} row "
+            f"(year, name): {overlap}. Archives takes precedence; drop the curated row."
+        )
+    for row, candidate_id in zip(curated_rows, curated_ids, strict=True):
+        row_rules[(row.year, row.name)] = frozenset(row.rules)
+        records.append({
+            "year": row.year,
+            "candidate_id": candidate_id,
+            PARTY_COLUMN: row.party,
+            SOURCE_COLUMN: SOURCE_CURATED,
+            ARCHIVES_CODE_COLUMN: None,
+            NOTE_COLUMN: row.note,
+        })
+
+    party = pd.DataFrame.from_records(records, columns=list(CANDIDATE_PARTY_COLUMNS))
+    keys = table1_keys + curated_keys
+
+    duplicated = party.duplicated(list(CANDIDATE_PARTY_KEY), keep=False)
+    if duplicated.any():
+        raise TransformError(
+            "dwh.candidate_party is not one row per (year, candidate_id): "
+            f"{sorted(k for k, d in zip(keys, duplicated, strict=True) if d)}"
+        )
+
+    unknown = sorted(
+        (key, value)
+        for key, value in zip(keys, party[PARTY_COLUMN], strict=True)
+        if value not in NOMINATING_PARTIES
+    )
+    if unknown:
+        raise TransformError(
+            f"nominating-party values outside the vocabulary: {unknown}"
+        )
+
+    row_notes = dict(zip(keys, party[NOTE_COLUMN], strict=True))
+    assert_rule_sets_and_notes(row_rules, row_notes)
+    assert_note_floor(floor, row_rules, build_years)
+
+    return party.sort_values(list(CANDIDATE_PARTY_KEY)).reset_index(drop=True)
+
+
+def assert_rule_sets_and_notes(
+    row_rules: Mapping[PartyKey, frozenset[int]],
+    row_notes: Mapping[PartyKey, str | None],
+) -> None:
+    """Every rule set is in the domain; a note-required rule carries a real note.
+
+    Research doc §2.4: a row whose rule set includes 3, 5 or 8 must have a note, and an
+    empty or whitespace-only string is no note. Runs over Table 1 and curated rows
+    together.
+    """
+    off_domain = sorted(
+        (key, sorted(found - RULE_SET_DOMAIN))
+        for key, found in row_rules.items()
+        if found - RULE_SET_DOMAIN
+    )
+    missing_note = sorted(
+        key
+        for key, found in row_rules.items()
+        if found & NOTE_REQUIRED_RULES
+        and not (row_notes.get(key) or "").strip()
+    )
+    if off_domain or missing_note:
+        raise TransformError(
+            f"rule sets outside {sorted(RULE_SET_DOMAIN)}: {off_domain}; rows "
+            f"resting on a rule in {sorted(NOTE_REQUIRED_RULES)} with a blank note: "
+            f"{missing_note}"
+        )
+
+
+def assert_note_floor(
+    floor: Mapping[PartyKey, frozenset[int]],
+    row_rules: Mapping[PartyKey, frozenset[int]],
+    build_years: Container[int],
+) -> None:
+    """Every floor key in a built year has a row whose rule set covers its rules.
+
+    The floor is hand-written (research doc §2.4), so dropping a row's rule set — which
+    would also drop the note requirement — fails here instead of passing silently.
+    """
+    short = sorted(
+        (key, sorted(required))
+        for key, required in floor.items()
+        if key[0] in build_years and not required <= row_rules.get(key, frozenset())
+    )
+    if short:
+        raise TransformError(
+            f"note-floor rows missing, or without their required rules: {short}"
         )
 
 

@@ -34,7 +34,9 @@ Both keys **absorb the variance already handled in transform** so a foreign sour
 has to match the canonical form, never the raw one:
 
 - **Candidate** — multi-state candidates are aggregated to one row (primary `state` +
-  `state_2`), multi-party to `party`/`party_2`, and name spellings are reconciled to a
+  `state_2`), multi-party to `party`/`party_2` (a per-candidate summary of the printed
+  Table 1 tokens, not the authority for a party in a given election: that is
+  `dwh.candidate_party`, keyed by year and candidate, D077), and name spellings are reconciled to a
   single canonical form (Trump `Donald Trump`→`Donald J. Trump`, McGovern, Bob Dole,
   the Faith Spotted Eagle surname split). See [`corrections.md`](corrections.md) for the
   full catalog of name reconciliations, which double as the first instances of this

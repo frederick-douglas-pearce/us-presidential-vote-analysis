@@ -418,10 +418,27 @@ def test_the_ucsb_blocker_in_that_program_actually_blocks() -> None:
 #: subpackage — or of the DB/pandas stack — would falsify the reason it lives there.
 _APPORTIONMENT_ALLOWED_USVOTE_IMPORTS = frozenset({"usvote.years"})
 
-#: Third-party names whose presence would make the module non-importable from a pure,
-#: offline context. Deliberately the heavy stack rather than an allow-list: a new stdlib
-#: import is fine and should not need this tuple edited.
-_HEAVY_IMPORTS = ("pandas", "psycopg2", "requests", "geopandas", "bs4", "matplotlib")
+#: The import roots a dependency-free module may use besides ``usvote`` itself: the
+#: standard library, read from the running interpreter rather than written out, so a new
+#: stdlib import needs no edit here. An allow-list, not a deny-list of the heavy stack: a
+#: deny-list let ``numpy``, or any third-party name nobody thought to list, through.
+_STDLIB_ROOTS = frozenset(sys.stdlib_module_names) | {"__future__"}
+
+
+def _non_stdlib_imports(imported: set[str]) -> list[str]:
+    """The imported names whose root is neither ``usvote`` nor the standard library."""
+    return sorted(
+        name
+        for name in imported
+        if name.split(".")[0] not in _STDLIB_ROOTS and name.split(".")[0] != "usvote"
+    )
+
+
+def test_the_stdlib_allow_list_rejects_a_third_party_import() -> None:
+    """Non-vacuity for the two scans below: a third-party root is reported."""
+    assert _non_stdlib_imports(
+        {"numpy", "numpy.linalg", "json", "collections.abc", "__future__", "usvote.years"}
+    ) == ["numpy", "numpy.linalg"]
 
 
 def _imported_names(source: str) -> set[str]:
@@ -461,14 +478,10 @@ def test_the_apportionment_module_is_dependency_free() -> None:
         f"{sorted(_APPORTIONMENT_ALLOWED_USVOTE_IMPORTS)} from the package; found "
         f"{sorted(offenders)}"
     )
-    heavy = sorted(
-        name
-        for name in imported
-        if name.split(".")[0] in _HEAVY_IMPORTS
-    )
-    assert not heavy, (
-        f"usvote.apportionment must stay importable without the heavy stack; found "
-        f"{heavy}"
+    third_party = _non_stdlib_imports(imported)
+    assert not third_party, (
+        f"usvote.apportionment must import only the standard library and "
+        f"usvote.years; found {third_party}"
     )
 
 
@@ -567,3 +580,113 @@ def test_the_apportionment_module_is_top_level_not_under_a_source_subpackage() -
             f"usvote/{sub}/apportionment.py would invert D015 — the module is "
             f"election-domain and belongs at the top level"
         )
+
+
+# --- usvote/party.py and the nominating-party build (#385, D077) ------------
+
+
+def test_the_party_module_is_dependency_free() -> None:
+    """``usvote.party`` imports nothing from the package and nothing heavy.
+
+    Both :mod:`usvote.transform` (pandas) and :mod:`usvote.load` (psycopg2) import it,
+    so it must drag neither stack into the other — the :mod:`usvote.count_status`
+    shape. Unlike :mod:`usvote.apportionment` it imports no ``usvote`` module at all:
+    its year ranges are written out rather than read from :mod:`usvote.years`.
+    """
+    imported = _imported_names((PKG_ROOT / "party.py").read_text(encoding="utf-8"))
+    usvote_imports = sorted(n for n in imported if n.split(".")[0] == "usvote")
+    assert not usvote_imports, (
+        f"usvote.party must import nothing from the package; found {usvote_imports}"
+    )
+    third_party = _non_stdlib_imports(imported)
+    assert not third_party, f"usvote.party must stay stdlib-only; found {third_party}"
+
+
+_PARTY_PROGRAM = _HEAVY_BLOCK_PREAMBLE + """
+from usvote.party import NOMINATING_PARTIES, TABLE1_TOKEN_MAP, build_party_value_check
+
+assert TABLE1_TOKEN_MAP[(1912, "P")] == "progressive_1912"
+assert "no_nomination" in NOMINATING_PARTIES
+assert build_party_value_check().startswith("CHECK (nominating_party IN (")
+assert not _BLOCKED & set(sys.modules), sorted(_BLOCKED & set(sys.modules))
+print("OK")
+"""
+
+
+def test_the_party_module_imports_with_the_heavy_stack_blocked() -> None:
+    """The structural proof, catching a transitive import the scan above cannot see.
+
+    Its non-vacuity twin is :func:`test_the_heavy_stack_blocker_is_not_inert`, which
+    runs the same preamble against a module that needs pandas.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _PARTY_PROGRAM],
+        capture_output=True,
+        text=True,
+        cwd=PKG_ROOT.parents[1],
+    )
+    assert result.returncode == 0, (
+        f"usvote.party could not be imported without the heavy stack.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "OK" in result.stdout
+
+
+#: The nominating-party authority and its MIT check. D077: MIT is a check, never a
+#: source, so no PV source may read the party authority or feed the check from below.
+_PARTY_MODULES = ("usvote.party", "usvote.party_check")
+
+
+def _names_the_builder(source: str) -> bool:
+    return "build_candidate_party" in code_only(source)
+
+
+def test_no_lower_subpackage_imports_the_party_modules_or_the_builder() -> None:
+    """Nothing under ``usvote/{mit,ucsb,pv,census}/`` reaches the nominating party.
+
+    D077 makes ``dwh.candidate_party`` the authority and MIT's party a check on it. A PV
+    source importing the vocabulary, the check or the table's builder would make the
+    check read what the source itself supplied — the circularity the #140 firewall
+    above guards against for UCSB.
+    """
+    modules = _modules_under(*_LOWER_SUBPACKAGES)
+    assert modules, "found no lower-subpackage modules — the guard would pass vacuously"
+    offenders = sorted(
+        f"{py.relative_to(PKG_ROOT).as_posix()}: {what}"
+        for py in modules
+        for what in (
+            *(m for m in _PARTY_MODULES if imports(py.read_text(), m)),
+            *(["build_candidate_party"] if _names_the_builder(py.read_text()) else []),
+        )
+    )
+    assert not offenders, (
+        f"these must not reach the nominating-party build (D077): {offenders}"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from usvote import party",
+        "from usvote.party_check import assert_db_mit_party_agrees",
+        "import usvote.party",
+    ],
+)
+def test_the_party_import_guard_sees_every_spelling(line: str) -> None:
+    """Non-vacuity for the guard above: each spelling of the import is caught."""
+    assert any(imports(line, m) for m in _PARTY_MODULES)
+
+
+def test_the_builder_guard_sees_a_call_but_not_prose() -> None:
+    """Non-vacuity: a call is caught; a docstring that names the builder is not."""
+    assert _names_the_builder("from usvote import transform\n"
+                              "transform.build_candidate_party([], a, b)\n")
+    assert not _names_the_builder('"""Mentions build_candidate_party in prose."""\n')
+
+
+def test_the_party_modules_are_top_level() -> None:
+    """Both are EC-domain, beside ``spine.py``; neither belongs under a source."""
+    for name in ("party.py", "party_check.py"):
+        assert (PKG_ROOT / name).is_file()
+        for sub in _LOWER_SUBPACKAGES:
+            assert not (PKG_ROOT / sub / name).exists(), f"usvote/{sub}/{name}"

@@ -2,7 +2,8 @@
 
 Crafted units over the SQL the load stage emits — the column definitions (FK
 ``REFERENCES`` embed the schema), the create/insert order (state -> candidate ->
-votes), and the ``replace`` guard (no ``DROP`` unless opted in) — all against the
+votes -> candidate_party, the #385 / D077 nominating-party table), the party CHECKs, and
+the ``replace`` guard (no ``DROP`` unless opted in) — all against the
 recording fake connection, no live Postgres. The full-pipeline load into a real
 database lives in ``tests/integration/test_load.py``.
 """
@@ -13,7 +14,7 @@ import pandas as pd
 import pytest
 
 from tests._helpers import RecordingConnection, make_dbc, record_inserts
-from usvote import count_status
+from usvote import count_status, party
 from usvote.count_status import (
     COUNT_STATUS_COLUMN,
     COUNT_STATUS_REASON_COLUMN,
@@ -21,12 +22,22 @@ from usvote.count_status import (
     build_count_status_check,
 )
 from usvote.load import SCHEMA, TABLE_NAMES, build_table_column_defs, load_dataframes
+from usvote.party import (
+    ARCHIVES_CODE_COLUMN,
+    CANDIDATE_PARTY_COLUMNS,
+    NOTE_COLUMN,
+    PARTY_COLUMN,
+    SOURCE_COLUMN,
+    build_party_source_check,
+    build_party_source_code_check,
+    build_party_value_check,
+)
 
 # --- column definitions ----------------------------------------------------
 
 
 def test_column_defs_embed_schema_in_fk_references() -> None:
-    state, candidate, votes = (
+    state, candidate, votes, candidate_party = (
         dict(zip(TABLE_NAMES, build_table_column_defs("mart"), strict=True))[t]
         for t in TABLE_NAMES
     )
@@ -41,6 +52,9 @@ def test_column_defs_embed_schema_in_fk_references() -> None:
     votes_fks = [c for col in votes for c in col if "REFERENCES" in c]
     assert "REFERENCES mart.state" in votes_fks
     assert "REFERENCES mart.candidate" in votes_fks
+    # candidate_party references the candidate dimension in the same schema.
+    party_fks = [c for col in candidate_party for c in col if "REFERENCES" in c]
+    assert party_fks == ["REFERENCES mart.candidate"]
 
 
 def test_column_defs_default_to_dwh_schema() -> None:
@@ -86,11 +100,78 @@ def test_count_status_check_tracks_the_value_tuple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The property the test above cannot show on its own: adding a value must change the
-    # emitted SQL. Without this, a hand-written CHECK that happens to list today's three
-    # values passes forever.
+    # SQL the load stage emits. Read through build_table_column_defs, not the builder
+    # alone: a CHECK hand-written in load.py that lists today's three values would pass
+    # a test of the builder, and the test above, forever.
     monkeypatch.setattr(count_status, "COUNT_STATUS_VALUES", ("counted", "invented"))
-    assert count_status.build_count_status_check() == (
-        "CHECK (count_status IN ('counted', 'invented'))"
+    votes = dict(zip(TABLE_NAMES, build_table_column_defs(), strict=True))["votes"]
+    status = next(col for col in votes if col[0] == COUNT_STATUS_COLUMN)
+    assert status[-1] == "CHECK (count_status IN ('counted', 'invented'))"
+
+
+def _candidate_party_defs() -> dict[str, tuple[str, ...]]:
+    defs = dict(zip(TABLE_NAMES, build_table_column_defs(), strict=True))
+    return {
+        col[1] if col[0] == "CONSTRAINT" else col[0]: col
+        for col in defs["candidate_party"]
+    }
+
+
+def test_candidate_party_columns_follow_the_party_contract_in_load_order() -> None:
+    by_name = _candidate_party_defs()
+    columns = [name for name, col in by_name.items() if col[0] != "CONSTRAINT"]
+    assert tuple(columns) == CANDIDATE_PARTY_COLUMNS
+    for required in ("year", "candidate_id", PARTY_COLUMN, SOURCE_COLUMN):
+        assert "not null" in by_name[required], required
+    # Null on curated rows, and null when no note was recorded.
+    for nullable in (ARCHIVES_CODE_COLUMN, NOTE_COLUMN):
+        assert "not null" not in by_name[nullable], nullable
+
+
+def test_candidate_party_checks_are_built_from_the_party_constants() -> None:
+    """The vocabulary and the two sources have one definition each, in usvote.party."""
+    by_name = _candidate_party_defs()
+    assert by_name[PARTY_COLUMN][-1] == build_party_value_check()
+    assert by_name[SOURCE_COLUMN][-1] == build_party_source_check()
+    assert by_name["candidate_party_source_code_check"] == (
+        "CONSTRAINT", "candidate_party_source_code_check",
+        build_party_source_code_check(),
+    )
+    for code in party.NOMINATING_PARTIES:
+        assert f"'{code}'" in build_party_value_check()
+    assert build_party_source_check() == (
+        "CHECK (nominating_party_source IN ('NARA', 'USGOV'))"
+    )
+    assert build_party_source_code_check() == (
+        "CHECK ((nominating_party_source = 'NARA') = "
+        "(archives_party_code IS NOT NULL))"
+    )
+
+
+def test_candidate_party_has_a_named_composite_primary_key() -> None:
+    assert _candidate_party_defs()["candidate_party_pkey"] == (
+        "CONSTRAINT", "candidate_party_pkey", "PRIMARY KEY", "(year, candidate_id)",
+    )
+
+
+def test_party_value_check_tracks_the_vocabulary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Adding a code must change the SQL the load stage emits. Read through
+    # build_table_column_defs: a CHECK hand-written in load.py would pass a test of the
+    # builder alone.
+    monkeypatch.setattr(party, "PARTY_COMPONENTS", {"democratic": (), "invented": ()})
+    assert _candidate_party_defs()[PARTY_COLUMN][-1] == (
+        "CHECK (nominating_party IN ('democratic', 'invented'))"
+    )
+
+
+def test_party_source_check_tracks_the_source_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(party, "PARTY_SOURCES", ("NARA", "INVENTED"))
+    assert _candidate_party_defs()[SOURCE_COLUMN][-1] == (
+        "CHECK (nominating_party_source IN ('NARA', 'INVENTED'))"
     )
 
 
@@ -102,6 +183,7 @@ def _frames() -> dict[str, pd.DataFrame]:
         "state_df": pd.DataFrame({"state": ["Ohio"]}),
         "candidates_df": pd.DataFrame({"candidate_id": [1], "name": ["X"]}),
         "votes_df": pd.DataFrame({"votes_id": [1], "candidate_id": [1]}),
+        "candidate_party_df": pd.DataFrame({"year": [2020], "candidate_id": [1]}),
     }
 
 
@@ -112,16 +194,16 @@ def test_load_creates_and_inserts_in_fk_order(
     load_dataframes(make_dbc(recording_conn), **_frames())
 
     creates = [q for q in recording_conn.executed if q.startswith("CREATE TABLE")]
-    # state -> candidate -> votes, the FK-dependency order.
-    assert [f"{SCHEMA}.state", f"{SCHEMA}.candidate", f"{SCHEMA}.votes"] == [
-        q.split()[5] for q in creates
-    ]
-    # One insert per table, in the same order.
-    assert [sql.split()[2] for sql, _ in inserts] == [
+    order = [
         f"{SCHEMA}.state",
         f"{SCHEMA}.candidate",
         f"{SCHEMA}.votes",
+        f"{SCHEMA}.candidate_party",
     ]
+    # state -> candidate -> votes -> candidate_party, the FK-dependency order.
+    assert [q.split()[5] for q in creates] == order
+    # One insert per table, in the same order.
+    assert [sql.split()[2] for sql, _ in inserts] == order
 
 
 def test_load_non_destructive_by_default(

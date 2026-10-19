@@ -114,12 +114,16 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
     def seats(ec_participation: object) -> None:
         calls.append(("seats", {}))
 
+    def party(dbc: object) -> None:
+        calls.append(("party", {}))
+
     monkeypatch.setattr(warehouse, "run_ec_pipeline", ec)
     monkeypatch.setattr(warehouse, "run_mit_pipeline", mit)
     monkeypatch.setattr(warehouse, "run_ucsb_pipeline", ucsb)
     monkeypatch.setattr(warehouse, "run_census_pipeline", census)
     monkeypatch.setattr(warehouse, "rebuild_views", views)
     monkeypatch.setattr(warehouse, "assert_seats_reconcile", seats)
+    monkeypatch.setattr(warehouse, "assert_db_mit_party_agrees", party)
     monkeypatch.setattr(warehouse, "read_ec_participation", lambda _dbc: object())
     # The two #167 gates read the live views, so they are stubbed clean here rather
     # than recorded -- every test using this fixture drives the default
@@ -139,7 +143,7 @@ def test_full_build_sequences_ec_mit_ucsb_views(
         dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", years={2016, 2020}
     )
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "party", "views"]
     assert result == WarehouseResult(
         ec_rows=5,
         mit_rows=3,
@@ -175,7 +179,7 @@ def test_census_runs_after_ec_and_before_the_views_when_a_corpus_is_given(
     )
 
     names = [name for name, _ in recorder]
-    assert names == ["ec", "mit", "ucsb", "census", "seats", "views"]
+    assert names == ["ec", "mit", "ucsb", "census", "seats", "party", "views"]
     assert names.index("census") > names.index("ec")
     assert names.index("census") < names.index("views")
     assert result.census_rows == 7
@@ -241,6 +245,29 @@ def test_the_seat_reconciliation_runs_before_the_views_are_rebuilt(
     )
 
 
+def test_the_mit_party_check_runs_after_every_source_and_before_the_views(
+    dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """#385 / D077: it reads EC and MIT rows, and a breach must not leave built views.
+
+    It runs after every source, so a later source cannot change what it read, and before
+    ``rebuild_views``, for the reason the seat reconciliation does.
+    """
+    run_warehouse(
+        dbc,
+        "states.shp",
+        "mit.csv",
+        ucsb_html_dir="snap/",
+        census_corpus_dir="corpus/",
+        years={2016, 2020},
+    )
+
+    names = [name for name, _ in recorder]
+    for source in ("ec", "mit", "ucsb", "census"):
+        assert names.index(source) < names.index("party"), source
+    assert names.index("party") < names.index("views")
+
+
 def test_census_is_loaded_additively_never_destructively(
     dbc: DBC, recorder: list[tuple[str, dict[str, Any]]]
 ) -> None:
@@ -289,7 +316,7 @@ def test_ucsb_skipped_when_dir_is_none(
     # while the views still build over the EC + MIT core.
     result = run_warehouse(dbc, "states.shp", "mit.csv")
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "seats", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "seats", "party", "views"]
     assert result.ucsb_pv_rows is None
     assert result.ucsb_roster_rows is None
     assert result.sources_loaded == frozenset({SOURCE_EC, SOURCE_MIT})
@@ -302,10 +329,11 @@ def test_years_threads_to_every_source(
     run_warehouse(dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", years={1976})
 
     for name, kwargs in recorder:
-        if name == "seats":
+        if name in {"seats", "party"}:
             # The seat reconciliation deliberately takes no `years`: it reconciles the
             # whole spine the build just loaded, and a year-scoped reconciliation would
-            # be a narrower claim than the one #183 makes.
+            # be a narrower claim than the one #183 makes. The MIT party check reads
+            # what loaded, so it scopes itself to the loaded years.
             continue
         if name != "views":
             assert kwargs["years"] == {1976}, f"{name} did not receive years"
@@ -331,6 +359,7 @@ def test_close_forwarded_only_after_views(monkeypatch: pytest.MonkeyPatch) -> No
     # serve either -- same reason as the gates below.
     monkeypatch.setattr(warehouse, "read_ec_participation", lambda _dbc: object())
     monkeypatch.setattr(warehouse, "assert_seats_reconcile", lambda _frame: None)
+    monkeypatch.setattr(warehouse, "assert_db_mit_party_agrees", lambda _dbc: None)
 
     # The #167 gates read the live views, which a RecordingConnection cannot serve.
     def overlap(_dbc: object) -> OverlapReport:
@@ -456,6 +485,7 @@ def test_run_warehouse_validates_the_overlap_after_the_views_are_built(
         "mit",
         "ucsb",
         "seats",
+        "party",
         "views",
         "overlap-cells",
         "margin",
@@ -482,7 +512,7 @@ def test_validate_overlap_false_skips_both_gates(
         dbc, "states.shp", "mit.csv", ucsb_html_dir="snap/", validate_overlap=False
     )
 
-    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "views"]
+    assert [name for name, _ in recorder] == ["ec", "mit", "ucsb", "seats", "party", "views"]
     assert result.overlap is None
 
 
