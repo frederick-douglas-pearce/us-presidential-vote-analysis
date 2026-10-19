@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
@@ -32,8 +33,8 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
     # value and stop pinning the thing that matters: that a human moved it when the
     # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245,
-    # 0.5.0 -> 0.6.0 by #330.
-    assert info["version"] == "0.6.0"
+    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386.
+    assert info["version"] == "0.7.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -73,6 +74,25 @@ def test_openapi_description_reflects_live_coverage_window(client: TestClient) -
     assert "{coverage_window}" not in desc  # placeholder was substituted
 
 
+def test_openapi_description_carries_the_live_provenance_note(
+    client: TestClient, snapshot_path: str
+) -> None:
+    """The served description's provenance paragraph is the loaded snapshot's own note.
+
+    Built independently here from the snapshot's meta, the way every ``/v1`` response
+    builds ``meta.provenance``, so a live render that resolved any pair from the wrong
+    code (the curated ``usgov_*`` pair from ``ec_source``, say, #386) fails.
+    """
+    from usvote.api.models import Provenance
+    from usvote.api.repository import SnapshotRepository
+
+    meta = SnapshotRepository.open(snapshot_path).meta()
+    note = Provenance.from_snapshot_meta(meta).redistributable_note
+    desc = client.get("/openapi.json").json()["info"]["description"]
+    assert note in desc
+    assert "from U.S. Government publications — " in desc
+
+
 def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None:
     """Building the schema before startup (no open repository) must not raise.
 
@@ -86,6 +106,7 @@ def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None
         out,
         pv_status_df=synthetic_pv_status_frame(),
         per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
@@ -113,6 +134,7 @@ def test_openapi_description_carries_the_disclaimer(
         out,
         pv_status_df=synthetic_pv_status_frame(),
         per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])

@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
@@ -45,6 +46,7 @@ def test_build_refuses_a_non_redistributable_row(tmp_path: Path) -> None:
             str(tmp_path / "snap.sqlite"),
             pv_status_df=synthetic_pv_status_frame(),
             per_capita_df=synthetic_per_capita_frame(),
+            party_keys_df=synthetic_party_keys_frame(),
             build_timestamp=SNAPSHOT_TS,
         )
 
@@ -59,6 +61,7 @@ def test_build_refuses_a_non_mit_source_row(tmp_path: Path) -> None:
             str(tmp_path / "snap.sqlite"),
             pv_status_df=synthetic_pv_status_frame(),
             per_capita_df=synthetic_per_capita_frame(),
+            party_keys_df=synthetic_party_keys_frame(),
             build_timestamp=SNAPSHOT_TS,
         )
 
@@ -119,9 +122,10 @@ def test_no_endpoint_surfaces_roster_free_text(client: TestClient) -> None:
 def test_no_endpoint_surfaces_an_uncatalogued_count_reason(client: TestClient) -> None:
     """Served ``count_status_reason`` values come from the curated Archives vocabulary.
 
-    The one free-text column the public surface carries, admissible only because it is
-    a U.S. Government work (D044 §3) drawn from a closed set. Without pinning it to that
-    set, the provenance claim would be a docstring rather than a property.
+    One of the two free-text columns the public surface carries (with
+    ``nominating_party_note``, #386), admissible only because it is a U.S. Government
+    work (D044 §3) drawn from a closed set. Without pinning it to that set, the
+    provenance claim would be a docstring rather than a property.
     """
     allowed = {reason for _, reason in COUNT_STATUS_OVERRIDES.values()}
     for path in _ALL_ROW_PATHS:
@@ -180,3 +184,58 @@ def test_the_election_object_carries_no_unexpected_field(client: TestClient) -> 
         assert election is not None, f"{path}: no election object"
         unexpected = set(election) - _ALLOWED_ELECTION_FIELDS
         assert not unexpected, f"{path}: unvetted field(s) on the public surface: {unexpected}"
+
+
+# --- the nominating party (#386) --------------------------------------------
+# New sweeps beside the ones above, which stay as they were: the note is a second
+# free-text column, so it gets the count reason's treatment, and the value and source
+# get the pv_status one.
+
+
+def _party_rows(client: TestClient) -> list[tuple[str, dict]]:
+    """Every served state row and national summary row, with the path it came from."""
+    rows = []
+    for path in _ALL_ROW_PATHS:
+        body = client.get(path).json()
+        rows += [(path, row) for row in body["data"]]
+        rows += [(path, row) for row in body.get("summary", [])]
+    for year in (1860, 2016, 2020):
+        path = f"/v1/elections/{year}/summary"
+        rows += [(path, row) for row in client.get(path).json()["data"]]
+    return rows
+
+
+def test_no_endpoint_surfaces_an_uncatalogued_party_note(client: TestClient) -> None:
+    """Served ``nominating_party_note`` values come from the in-repo catalog (#386).
+
+    The build pins the column to :data:`usvote.party.TABLE1_ROW_NOTES`; this checks
+    the same property on what the API actually serves, as the count-reason sweep does.
+    """
+    from usvote.party import TABLE1_ROW_NOTES
+
+    allowed = set(TABLE1_ROW_NOTES.values())
+    rows = _party_rows(client)
+    notes = [row["nominating_party_note"] for _, row in rows]
+    assert any(note is not None for note in notes)  # the sweep sees a real note
+    for path, row in rows:
+        note = row["nominating_party_note"]
+        assert note is None or note in allowed, f"{path}: {note!r}"
+
+
+def test_every_served_party_is_in_the_vocabulary_and_nulls_travel_together(
+    client: TestClient,
+) -> None:
+    """Every served value is a vocabulary code and every source ``NARA``/``USGOV``; a
+    null value has a null source and a null note (the one-cause null, D077)."""
+    from usvote.party import PARTY_COMPONENTS, PARTY_SOURCES
+
+    rows = _party_rows(client)
+    assert {row["nominating_party"] is None for _, row in rows} == {True, False}
+    for path, row in rows:
+        value = row["nominating_party"]
+        if value is None:
+            assert row["nominating_party_source"] is None, f"{path}: {row}"
+            assert row["nominating_party_note"] is None, f"{path}: {row}"
+        else:
+            assert value in PARTY_COMPONENTS, f"{path}: {value!r}"
+            assert row["nominating_party_source"] in PARTY_SOURCES, f"{path}: {row}"

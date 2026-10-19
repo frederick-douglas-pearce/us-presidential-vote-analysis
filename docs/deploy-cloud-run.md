@@ -350,7 +350,7 @@ gcloud storage cp "$USVOTE_API_SNAPSHOT_PATH" "${BUCKET}/api_snapshot.sqlite"
 **The snapshot and the image cut over together (D034).** The API refuses at startup to serve a
 snapshot whose `schema_version` differs from the one its code was built for, so a snapshot
 built from a newer schema must be deployed from a commit carrying that schema — run the
-workflow from `main` after the schema change has merged (schema 4 arrived with #245).
+workflow from `main` after the schema change has merged (schema 5 arrived with #386).
 
 Then **Actions → Deploy (Cloud Run) → Run workflow**. The image is tagged with the new
 `snapshot_version`, Cloud Run cuts over, and the workflow **purges Cloudflare after cutover**

@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
@@ -68,6 +69,7 @@ def snapshot_path(
         out,
         pv_status_df=synthetic_status_frame,
         per_capita_df=synthetic_per_capita,
+        party_keys_df=synthetic_party_keys_frame(synthetic_frame),
         build_timestamp=SNAPSHOT_TS,
     )
     return out

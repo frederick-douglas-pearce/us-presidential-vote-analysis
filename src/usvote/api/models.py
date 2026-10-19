@@ -29,6 +29,8 @@ from usvote.api import provenance
 from usvote.snapshot_schema import (
     CENSUS_LICENSE,
     CENSUS_SOURCE,
+    CURATED_LICENSE,
+    CURATED_SOURCE,
     EC_LICENSE,
     EC_SOURCE,
     SNAPSHOT_SCHEMA_VERSION,
@@ -93,6 +95,10 @@ _EC_PV_ROW_EXAMPLE: dict[str, Any] = {
     "popular_votes": 2912790,
     "state_popular_total": 5963110,
     "reliability": "exact",
+    # Beside "REPUBLICAN" above: the two party fields use two vocabularies.
+    "nominating_party": "republican",
+    "nominating_party_source": "NARA",
+    "nominating_party_note": None,
 }
 
 # The pre-1976 shape, shown deliberately: 1872 Georgia is the row where every column
@@ -122,6 +128,16 @@ _EC_PV_PRE_1976_EXAMPLE: dict[str, Any] = {
     "popular_votes": None,
     "state_popular_total": None,
     "reliability": None,
+    # A joint nomination, a note, and a nominating party where the popular-vote party
+    # is null. The note is the served value verbatim; test_api_models pins it to
+    # usvote.party.TABLE1_ROW_NOTES so the example cannot drift from what ships.
+    "nominating_party": "liberal_republican_democratic",
+    "nominating_party_source": "NARA",
+    "nominating_party_note": (
+        "Greeley was nominated for President by both the Liberal Republicans and the "
+        "Democrats. He died on November 29, 1872, before the electors met. After his "
+        "death, electors in several states split their votes."
+    ),
 }
 
 _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
@@ -141,6 +157,9 @@ _NATIONAL_SUMMARY_EXAMPLE: dict[str, Any] = {
     "ec_share_hybrid": 0.4944,
     "pv_coverage": 1.0,
     "hybrid_score": 0.4887,
+    "nominating_party": "democratic",
+    "nominating_party_source": "NARA",
+    "nominating_party_note": None,
 }
 
 #: 2000 is the worked example: the popular vote and the electoral college split
@@ -216,6 +235,8 @@ _EX_EC_SRC = provenance.source_display(EC_SOURCE)
 _EX_EC_LIC = provenance.license_display(EC_LICENSE)
 _EX_CENSUS_SRC = provenance.source_display(CENSUS_SOURCE)
 _EX_CENSUS_LIC = provenance.license_display(CENSUS_LICENSE)
+_EX_USGOV_SRC = provenance.source_display(CURATED_SOURCE)
+_EX_USGOV_LIC = provenance.license_display(CURATED_LICENSE)
 
 _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "snapshot_version": (
@@ -233,6 +254,10 @@ _PROVENANCE_EXAMPLE: dict[str, Any] = {
     "census_source_name": _EX_CENSUS_SRC.name,
     "census_license": _EX_CENSUS_LIC.code,
     "census_license_url": _EX_CENSUS_LIC.url,
+    "usgov_source": _EX_USGOV_SRC.code,
+    "usgov_source_name": _EX_USGOV_SRC.name,
+    "usgov_license": _EX_USGOV_LIC.code,
+    "usgov_license_url": _EX_USGOV_LIC.url,
     "coverage": _COVERAGE_EXAMPLE,
     "redistributable_note": provenance.redistributable_note(
         _EX_SRC,
@@ -241,6 +266,8 @@ _PROVENANCE_EXAMPLE: dict[str, Any] = {
         ec_license=_EX_EC_LIC,
         census_source=_EX_CENSUS_SRC,
         census_license=_EX_CENSUS_LIC,
+        usgov_source=_EX_USGOV_SRC,
+        usgov_license=_EX_USGOV_LIC,
         pv_year_min=1976,
         pv_year_max=2024,
     ),
@@ -366,7 +393,14 @@ class EcPvRow(BaseModel):
         default=None, description="PV data source (None where no PV is available)."
     )
     party: str | None = Field(
-        default=None, description="Party of record (None where no PV is available)."
+        default=None,
+        description=(
+            "The candidate's party as the popular-vote source records it for this "
+            "state's vote, in that source's code (for example 'REPUBLICAN'). null "
+            "where that source has no figure for this candidate in this state, which "
+            "includes every year outside the popular-vote window. For the party that "
+            "nominated the candidate, see nominating_party."
+        ),
     )
     popular_votes: int | None = Field(
         default=None,
@@ -380,6 +414,48 @@ class EcPvRow(BaseModel):
     )
     reliability: str | None = Field(
         default=None, description="PV reliability tag (None where no PV is available)."
+    )
+    nominating_party: str | None = Field(
+        default=None,
+        description=(
+            "The party that nominated this candidate for President in this election, "
+            "as a code such as 'republican'; the same on each of the candidate's rows "
+            "for the year. A nomination by two parties at once is one code: "
+            "'liberal_republican_democratic' is Horace Greeley in 1872, nominated by "
+            "both the Liberal Republicans and the Democrats. In 1824 and 1828, a "
+            "candidate with no nomination from a national convention or caucus, and "
+            "in 1836 a Whig candidate, has the party that the value's source names "
+            "for them. 'no_nomination' is a recorded value: no party nominated this "
+            "candidate for President that year, or the nomination was withdrawn "
+            "before the electors voted. It does not mean the candidate had no party. "
+            "null means only that this dataset holds no nominating-party value for "
+            "this candidate in this election; it never stands for 'no_nomination'. "
+            "Separate from party, which is the popular-vote source's party."
+        ),
+    )
+    nominating_party_source: str | None = Field(
+        default=None,
+        description=(
+            "Where nominating_party's value comes from: 'NARA', the party the "
+            "National Archives prints for the candidate elected President and for the "
+            "main opponent in each election; or 'USGOV', a value cited from other "
+            "U.S. Government publications. Where a U.S. Government publication "
+            "records a nominating party the National Archives does not print, as for "
+            "Horace Greeley's Liberal Republican nomination in 1872, the value "
+            "follows that publication and the source stays 'NARA'. null exactly where "
+            "nominating_party is null. meta.provenance describes each source and its "
+            "license: ec_source for 'NARA', usgov_source for 'USGOV'."
+        ),
+    )
+    nominating_party_note: str | None = Field(
+        default=None,
+        description=(
+            "A short statement of fact about how nominating_party's value arose, "
+            "where this dataset records one, such as a joint nomination or a nominee "
+            "who died before the electors met. Its facts come from the same sources "
+            "as the value. null means no note is recorded; it says nothing about "
+            "whether nominating_party has a value."
+        ),
     )
 
 
@@ -407,7 +483,14 @@ class NationalSummaryRow(BaseModel):
     candidate: str = Field(description="Canonical candidate display name.")
     candidate_slug: str = Field(description="Durable public candidate id.")
     party: str | None = Field(
-        default=None, description="Party of record (None where no PV is available)."
+        default=None,
+        description=(
+            "The candidate's party as the popular-vote source records it, in that "
+            "source's code (for example 'DEMOCRAT'). null where that source has no "
+            "figure for this candidate that year, which includes every year outside "
+            "the popular-vote window. For the party that nominated the candidate, see "
+            "nominating_party."
+        ),
     )
     national_electoral_votes: int = Field(
         description="This candidate's national CAST electoral-vote total this year."
@@ -483,6 +566,49 @@ class NationalSummaryRow(BaseModel):
         description=(
             "(ec_share_hybrid + pv_share) / 2 — the average of the two ratios; highest "
             "wins. None before the popular-vote window."
+        ),
+    )
+    nominating_party: str | None = Field(
+        default=None,
+        description=(
+            "The party that nominated this candidate for President in this election, "
+            "as a code such as 'democratic'; the same value as nominating_party on "
+            "this candidate's state rows. A nomination by two parties at once is one "
+            "code: 'liberal_republican_democratic' is Horace Greeley in 1872, "
+            "nominated by both the Liberal Republicans and the Democrats. In 1824 and "
+            "1828, a candidate with no nomination from a national convention or "
+            "caucus, and in 1836 a Whig candidate, has the party that the value's "
+            "source names for them. 'no_nomination' is a recorded value: no party "
+            "nominated this candidate for President that year, or the nomination was "
+            "withdrawn before the electors voted. It does not mean the candidate had "
+            "no party. null means only that this dataset holds no nominating-party "
+            "value for this candidate in this election; it never stands for "
+            "'no_nomination'. Separate from party, which is the popular-vote source's "
+            "party."
+        ),
+    )
+    nominating_party_source: str | None = Field(
+        default=None,
+        description=(
+            "Where nominating_party's value comes from: 'NARA', the party the "
+            "National Archives prints for the candidate elected President and for the "
+            "main opponent in each election; or 'USGOV', a value cited from other "
+            "U.S. Government publications. Where a U.S. Government publication "
+            "records a nominating party the National Archives does not print, as for "
+            "Horace Greeley's Liberal Republican nomination in 1872, the value "
+            "follows that publication and the source stays 'NARA'. null exactly where "
+            "nominating_party is null. meta.provenance describes each source and its "
+            "license: ec_source for 'NARA', usgov_source for 'USGOV'."
+        ),
+    )
+    nominating_party_note: str | None = Field(
+        default=None,
+        description=(
+            "A short statement of fact about how nominating_party's value arose, "
+            "where this dataset records one, such as a joint nomination or a nominee "
+            "who died before the electors met. Its facts come from the same sources "
+            "as the value. null means no note is recorded; it says nothing about "
+            "whether nominating_party has a value."
         ),
     )
 
@@ -735,10 +861,10 @@ class Provenance(BaseModel):
     snapshot metadata** (E8-S1) so they can't drift from what was actually built; the
     human ``*_name`` / ``*_url`` / ``redistributable_note`` are the presentation of
     those codes (:mod:`usvote.api.provenance`). The note makes the D030 redistributable
-    boundary explicit: MIT (CC0), the Archives and the Census Bureau (both public
-    domain), UCSB excluded.
+    boundary explicit: MIT (CC0), the National Archives, the Census Bureau and other
+    U.S. Government publications (all public domain), UCSB excluded.
 
-    **Three provenances, because the surface has three.** The first two arrived with
+    **Four provenances, because the surface has four.** The first two arrived with
     #139 (D048): ``source`` /
     ``license`` describe the **popular-vote** data and keep their original unprefixed
     names for backward compatibility; ``ec_source`` / ``ec_license`` describe the
@@ -750,6 +876,11 @@ class Provenance(BaseModel):
     figures, which come from the Census Bureau and appear only on the per-capita
     routes. Carried on every response, as ``ec_*`` is on popular-vote-only ones, so the
     block describes the whole snapshot rather than varying by route.
+
+    **A fourth, `usgov_*`**: the source and license of nominating-party values cited
+    from U.S. Government publications other than the National Archives; their rows
+    carry `nominating_party_source` 'USGOV'. A value the National Archives prints
+    carries 'NARA' and is described by `ec_*`.
     """
 
     model_config = _config(_PROVENANCE_EXAMPLE)
@@ -760,13 +891,19 @@ class Provenance(BaseModel):
     license: str = Field(description="Popular-vote data license code, e.g. 'CC0-1.0'.")
     license_url: str = Field(description="Canonical URL for the license.")
     ec_source: str = Field(
-        description="Electoral-college data source code, e.g. 'NARA'."
+        description=(
+            "Source code for the Electoral College data, and for nominating-party "
+            "values the National Archives prints, e.g. 'NARA'."
+        )
     )
     ec_source_name: str = Field(
         description="Spelled-out EC source, e.g. 'U.S. National Archives …'."
     )
     ec_license: str = Field(
-        description="Electoral-college data license code, e.g. 'US-PD'."
+        description=(
+            "License code for the Electoral College data, and for nominating-party "
+            "values the National Archives prints, e.g. 'US-PD'."
+        )
     )
     ec_license_url: str = Field(description="Canonical URL for the EC license.")
     census_source: str = Field(
@@ -781,6 +918,22 @@ class Provenance(BaseModel):
     census_license_url: str = Field(
         description="Canonical URL for the census license."
     )
+    usgov_source: str = Field(
+        description=(
+            "Source code for nominating-party values cited from U.S. Government "
+            "publications other than the National Archives: 'USGOV', the value "
+            "nominating_party_source carries for them."
+        )
+    )
+    usgov_source_name: str = Field(
+        description=(
+            "Spelled-out name of that source, e.g. 'U.S. Government publications'."
+        )
+    )
+    usgov_license: str = Field(
+        description="License code for those values, e.g. 'US-PD'."
+    )
+    usgov_license_url: str = Field(description="Canonical URL for that license.")
     coverage: Coverage = Field(description="The year windows the snapshot contains.")
     redistributable_note: str = Field(
         description="Plain-language statement of the redistributable data boundary."
@@ -800,6 +953,8 @@ class Provenance(BaseModel):
         ec_lic = provenance.license_display(meta.ec_license)
         census_src = provenance.source_display(meta.census_source)
         census_lic = provenance.license_display(meta.census_license)
+        usgov_src = provenance.source_display(meta.usgov_source)
+        usgov_lic = provenance.license_display(meta.usgov_license)
         return cls(
             snapshot_version=meta.snapshot_version,
             source=src.code,
@@ -814,6 +969,10 @@ class Provenance(BaseModel):
             census_source_name=census_src.name,
             census_license=census_lic.code,
             census_license_url=census_lic.url,
+            usgov_source=usgov_src.code,
+            usgov_source_name=usgov_src.name,
+            usgov_license=usgov_lic.code,
+            usgov_license_url=usgov_lic.url,
             coverage=Coverage(
                 year_min=meta.year_min,
                 year_max=meta.year_max,
@@ -827,6 +986,8 @@ class Provenance(BaseModel):
                 ec_license=ec_lic,
                 census_source=census_src,
                 census_license=census_lic,
+                usgov_source=usgov_src,
+                usgov_license=usgov_lic,
                 pv_year_min=meta.pv_year_min,
                 pv_year_max=meta.pv_year_max,
             ),

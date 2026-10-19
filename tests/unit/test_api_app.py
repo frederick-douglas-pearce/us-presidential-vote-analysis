@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
@@ -60,6 +61,7 @@ def test_opens_snapshot_path_with_spaces(tmp_path: Path) -> None:
         out,
         pv_status_df=synthetic_pv_status_frame(),
         per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     repo = SnapshotRepository.open(out)
@@ -80,9 +82,9 @@ def test_schema_version_mismatch_fails_loud_at_open(
 def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
     snapshot_path: str, tmp_path: Path
 ) -> None:
-    """A v3 snapshot under a v4 server must say "schema_version 3 != 4" (#245).
+    """A v4 snapshot under a v5 server must say "schema_version 4 != 5" (#245, #386).
 
-    A v3 ``snapshot_meta`` lacks the ``census_*`` columns, so a reader that fetched the
+    A v4 ``snapshot_meta`` lacks the ``usgov_*`` columns, so a reader that fetched the
     full row before comparing versions would fail on a missing column and report "not a
     valid usvote snapshot" — the wrong diagnosis at exactly the snapshot↔image cutover
     (D034) where a mismatch is expected. This builds that older shape by dropping the
@@ -91,17 +93,17 @@ def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
     import shutil
     import sqlite3
 
-    old = tmp_path / "v3.sqlite"
+    old = tmp_path / "v4.sqlite"
     shutil.copy(snapshot_path, old)
     conn = sqlite3.connect(old)
     try:
-        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN census_source")
-        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN census_license")
-        conn.execute("UPDATE snapshot_meta SET schema_version = 3")
+        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN usgov_source")
+        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN usgov_license")
+        conn.execute("UPDATE snapshot_meta SET schema_version = 4")
         conn.commit()
     finally:
         conn.close()
-    with pytest.raises(SnapshotError, match=r"schema_version 3 != this server's 4"):
+    with pytest.raises(SnapshotError, match=r"schema_version 4 != this server's 5"):
         SnapshotRepository.open(str(old))
 
 

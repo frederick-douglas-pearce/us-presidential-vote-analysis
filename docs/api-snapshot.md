@@ -34,7 +34,7 @@ Pass `-o/--out` to override `USVOTE_API_SNAPSHOT_PATH`. The build is **reproduci
 and idempotent**: the same warehouse data always yields the same `snapshot_version`, and
 re-running overwrites the file atomically.
 
-## Two windows, three provenances
+## Two windows, four provenances
 
 The snapshot reads `ec_pv_redistributable`, which wraps `pv_redistributable` — defined
 independently as `WHERE redistributable` (MIT / CC0 only, [D016](../.claude/specs/decisions.md)
@@ -49,8 +49,9 @@ PV attached only where MIT covers it. Until [D048](../.claude/specs/decisions.md
 | | window | source | license |
 |---|---|---|---|
 | **Electoral college** — every EC column | **1824–2024** (`year_min`/`year_max`) | U.S. National Archives (`NARA`) | public domain, a work of the U.S. Government (`US-PD`) |
-| **Popular vote** — `candidate_votes`, `state_total_votes`, `party`, `source`, `reliability` | **1976–2024** (`pv_year_min`/`pv_year_max`) | MIT Election Lab (`MIT`) | `CC0-1.0` |
+| **Popular vote** — `candidate_votes`, `state_total_votes`, `party` (the popular-vote source's party, not the nominating party), `source`, `reliability` | **1976–2024** (`pv_year_min`/`pv_year_max`) | MIT Election Lab (`MIT`) | `CC0-1.0` |
 | **Per-capita population** — the `per_capita` table (#245) | **1824–2024** (the served window) | U.S. Census Bureau (`USCB`) | public domain, a work of the U.S. Government (`US-PD`) |
+| **Nominating party** — `nominating_party`, `nominating_party_source`, `nominating_party_note` (#386) | **1824–2024**, for the candidate-years that have a value (see below) | per row: U.S. National Archives (`NARA`), the two Table 1 candidates per election; U.S. Government publications (`USGOV`), curated rows | public domain, a work of the U.S. Government (`US-PD`) |
 
 Both windows are in `snapshot_meta` and in every response's `meta.provenance.coverage`, so
 coverage is **stated, never inferred from a field of nulls**. That distinction is the whole
@@ -106,14 +107,14 @@ is settled by the votes Congress counted. A reader of 1872 will see Grant at
 `national_electoral_votes: 300` and `electoral_rank: 1` and should not try to reconcile the
 rank against the cast column.
 
-`count_status_reason` is the one free-text column on the public surface, and it ships for a
-specific reason: Archives pages are works of the U.S. Government (17 U.S.C. § 105), unlike
-`pv_state_status.note`, which is verbatim UCSB prose and never leaves the warehouse. The
-build pins every served reason to the sentences in
-`usvote.transform.COUNT_STATUS_OVERRIDES` — which bounds *which* sentences can ship (a
-value from anywhere else fails the build) but does **not** by itself prove where they came
-from, since that map is also where a new correction is added. The provenance rests on review
-of the catalog, where each entry carries its Archives URL. See the note in
+`count_status_reason` is one of the two free-text columns on the public surface (with
+`nominating_party_note`, #386), and it ships for a specific reason: Archives pages are works
+of the U.S. Government (17 U.S.C. § 105), unlike `pv_state_status.note`, which is verbatim
+UCSB prose and never leaves the warehouse. The build pins every served reason to the
+sentences in `usvote.transform.COUNT_STATUS_OVERRIDES` — which bounds *which* sentences can
+ship (a value from anywhere else fails the build) but does **not** by itself prove where
+they came from, since that map is also where a new correction is added. The provenance rests
+on review of the catalog, where each entry carries its Archives URL. See the note in
 `assert_count_status_reasons_are_catalogued`.
 
 ## The five tables
@@ -137,13 +138,16 @@ than silently shipping duplicates the content hash would bless. Secondary indexe
 | `president_electoral_votes` | INTEGER | EVs this candidate's electors **cast** in this state (0 for a loser) |
 | `national_electoral_votes` | INTEGER | national **cast** EV total (window sum over the candidate's states) |
 | `president_electoral_rank`, `took_office` | INTEGER | national EC context, broadcast onto every row; both on the **counted** basis |
-| `source`, `party`, `reliability` | TEXT | PV provenance (NULL outside the popular-vote window, or where MIT has no PV) |
+| `source`, `party`, `reliability` | TEXT | PV provenance (NULL outside the popular-vote window, or where MIT has no PV); `party` is MIT's party, not the nominating party |
 | `candidate_votes`, `state_total_votes` | INTEGER | PV count and the source's provided denominator (NULL where no PV) |
 | `pv_status` | TEXT **NOT NULL** | why this state has or lacks a popular vote (see above) |
 | `president_electoral_votes_counted` | INTEGER | of the cast votes, those Congress **counted** |
 | `national_counted_electoral_votes` | INTEGER | national **counted** EV total |
 | `count_status` | TEXT **NOT NULL** | `counted` / `not_counted` / `disputed` |
 | `count_status_reason` | TEXT | the Archives' sentence explaining a non-`counted` status; NULL otherwise |
+| `nominating_party` | TEXT | the party that nominated this candidate for President this year, from the closed vocabulary in `usvote/party.py` (D077); constant per `(year, candidate_slug)`; NULL for one cause only (below) |
+| `nominating_party_source` | TEXT | `NARA` (Archives Table 1, corrections included) or `USGOV` (a curated row); NULL exactly where `nominating_party` is |
+| `nominating_party_note` | TEXT | a short sourced statement of how the value arose; NULL means no note was recorded, not a missing value |
 
 `GET /v1/candidates` (#330) is derived from this table at serve time — the distinct
 `(candidate_slug, candidate, year)` triples, grouped per slug — so it needs no table of its
@@ -168,6 +172,22 @@ exposed ([`docs/canonical-keys.md`](canonical-keys.md), D006). The durable publi
 ([`src/usvote/slug.py`](../src/usvote/slug.py); `Donald J. Trump` → `donald-j-trump`). Two
 distinct names colliding onto one slug (the same-name residual) fails the build loud.
 
+#### `nominating_party` — one cause for a null
+
+`nominating_party` is NULL for one reason only: the warehouse holds no `dwh.candidate_party`
+row for that candidate-year. Rows exist for the two Table 1 candidates per election and for
+each curated row; every other served candidate-year is NULL. NULL never stands in for
+`no_nomination`, which is a recorded value: no party nominated the candidate for President
+that year, or the nomination was withdrawn before the electors voted (D077, rules 5 and 7).
+The build proves the single cause: it reads the NULL set from the served column on every
+`ec_pv` and `national_rollup` row and requires it to equal the served candidate-years with
+electoral votes cast, minus the Table 1 and curated keys (D077's null guard, part 4). No
+status column is needed (D077), as `per_capita` needs none for its NULL ratio (D064(c)).
+`nominating_party_note` has a NULL of its own, meaning only that no note was recorded; the
+guard counts the value, never the note. `party` keeps its meaning: MIT's party, 1976 on, a
+check on the nominating party and never a source of it (D077 amending D018;
+`usvote/party_check.py`).
+
 ### `national_rollup` — precomputed summary
 
 One row per `(year, candidate_slug)` so `/v1/elections/{year}/summary` **reads** instead of
@@ -177,6 +197,9 @@ computing in a route handler: `national_electoral_votes` (cast),
 total counted once — the **non-null** `state_total_votes` per state, so a no-PV getter's
 NULL row never drops the state from the sum). Safe to precompute because the popular-vote
 window is single-source (MIT), so there is no cross-source denominator ambiguity (D017).
+`nominating_party`, `nominating_party_source` and `nominating_party_note` are carried
+unchanged from the candidate's `ec_pv` rows, on which they are constant (they are not
+resolved by `min`, as `party` is).
 
 `national_electoral_denominator` is the year's whole number of electors **appointed**, each
 state counted once — the 12th Amendment's denominator (D041). It is here so a counted total
@@ -289,7 +312,8 @@ copy equal to its census original.
 (served) and `pv_year_min`/`pv_year_max` (popular vote), `source` = MIT / `license` =
 CC0-1.0 (read from the `pv_source` reference data), `ec_source` = NARA / `ec_license` =
 US-PD, `census_source` = USCB / `census_license` = US-PD (the per-capita population, #245),
-and an informational `build_timestamp`. Feeds the API `meta` block and the ETag.
+an informational `build_timestamp`, and `usgov_source` = USGOV / `usgov_license` = US-PD
+(curated nominating-party rows, #386). Feeds the API `meta` block and the ETag.
 
 The windows are **descriptive of the snapshot's actual content**. Note that a *scoped*
 warehouse can no longer produce a snapshot at all (D048): the build derives `pv_status` over
@@ -333,3 +357,9 @@ string value from containing the hash's own delimiter characters, though, and wi
 value two different snapshots can collide; the separator closes only one such case. The
 general fix is a build guard that rejects control characters, tracked as a follow-up. The
 version went 3 → 4.
+
+**The nominating party is inside the hash** (#386). Its three columns sit on `ec_pv`, so a
+new curated row or a changed note moves `snapshot_version` with no schema change, and the
+D034 cutover fires. They are carried onto `national_rollup` as well, which the hash does not
+cover, but the values there are copies of hashed ones. The version went 4 → 5, because the
+shape of `ec_pv`, `national_rollup` and `snapshot_meta` changed.

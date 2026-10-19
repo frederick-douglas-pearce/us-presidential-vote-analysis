@@ -125,6 +125,19 @@ def test_every_shipped_example_validates() -> None:
             model.model_validate(ex)  # raises on drift
 
 
+def test_the_pre_1976_example_ships_the_served_greeley_note() -> None:
+    """The 1872 Greeley example's note is the served value verbatim (#386).
+
+    Pinned here rather than imported into ``models.py``, which may not import
+    ``usvote.party`` (the serving side's import set stays ``snapshot_schema`` + pydantic).
+    """
+    from usvote.party import TABLE1_ROW_NOTES
+
+    example = models._EC_PV_PRE_1976_EXAMPLE
+    assert example["candidate"] == "Horace Greeley"
+    assert example["nominating_party_note"] == TABLE1_ROW_NOTES[(1872, "Horace Greeley")]
+
+
 def test_key_public_models_ship_an_example() -> None:
     """The public-facing response models each advertise at least one example.
 

@@ -36,6 +36,7 @@ from usvote.count_status import (
     COUNT_STATUS_REASON_COLUMN,
     COUNTED_VOTES_COLUMN,
 )
+from usvote.party import NOTE_COLUMN, PARTY_COLUMN, SOURCE_COLUMN, TABLE1_ROW_NOTES
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -51,6 +52,21 @@ from usvote.transform import COUNT_STATUS_OVERRIDES
 FIXTURE_NOT_COUNTED_REASON = COUNT_STATUS_OVERRIDES[
     (1872, "Georgia", "Horace Greeley")
 ][1]
+
+#: A real nominating-party note, borrowed from the in-repo catalog for the reason
+#: :data:`FIXTURE_NOT_COUNTED_REASON` is: the build pins every served
+#: ``nominating_party_note`` to :data:`usvote.party.TABLE1_ROW_NOTES` (#386), so an
+#: invented note would fail it. It rides on 1860 Cand C, a synthetic candidate.
+FIXTURE_PARTY_NOTE = TABLE1_ROW_NOTES[(1872, "Horace Greeley")]
+
+#: Each synthetic candidate's nominating party (#386). Cand D is deliberately absent:
+#: it has electoral votes cast (8, in 1860) and no ``dwh.candidate_party`` row, so it is
+#: the fixture's "not in this dataset" case, served NULL.
+FIXTURE_NOMINATING_PARTY = {
+    "Cand A": "republican",
+    "Cand B": "democratic",
+    "Cand C": "whig",
+}
 
 #: Deterministic build timestamp so a snapshot's content hash (and thus the ETag) is
 #: stable across test runs. Informational only — excluded from the content hash (D028).
@@ -104,9 +120,15 @@ def api_snapshot_row(
     only the rows that deliberately exercise a rejected vote differ. That is the point:
     a fixture change that quietly perturbed the existing rows would move the content
     hash and invalidate the ETag assertions built on it.
+
+    The nominating party (#386) follows the candidate: its
+    :data:`FIXTURE_NOMINATING_PARTY` entry with source ``NARA`` (and
+    :data:`FIXTURE_PARTY_NOTE` on Cand C), or NULL in all three columns for a candidate
+    that dict does not list. A test wanting another shape edits the built frame.
     """
     if party is None:
         party = "DEMOCRAT" if candidate == "Cand B" else "REPUBLICAN"
+    nominating_party = FIXTURE_NOMINATING_PARTY.get(candidate)
     return {
         "year": year,
         "state": state,
@@ -130,6 +152,9 @@ def api_snapshot_row(
         ),
         COUNT_STATUS_COLUMN: count_status,
         COUNT_STATUS_REASON_COLUMN: count_status_reason,
+        PARTY_COLUMN: nominating_party,
+        SOURCE_COLUMN: "NARA" if nominating_party else None,
+        NOTE_COLUMN: FIXTURE_PARTY_NOTE if candidate == "Cand C" else None,
     }
 
 
@@ -287,6 +312,22 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
             ),
         ]
     )
+
+
+def synthetic_party_keys_frame(
+    frame: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """The ``dwh.candidate_party`` keys, ``(year, candidate_id)``, behind ``frame``.
+
+    One key per candidate-year whose rows carry a nominating party, which is what a real
+    warehouse has: the view reads the party from that table. ``build_snapshot`` requires
+    it (#386) as the independent side of its null guard. Defaults to
+    :func:`synthetic_ec_pv_frame`, where it keys 2016 and 2020 Cand A and B and 1860
+    Cand C, and leaves 1860 Cand D unkeyed.
+    """
+    src = synthetic_ec_pv_frame() if frame is None else frame
+    keyed = src.loc[src[PARTY_COLUMN].notna(), ["year", "candidate_id"]]
+    return keyed.drop_duplicates().reset_index(drop=True)
 
 
 def synthetic_pv_status_frame() -> pd.DataFrame:

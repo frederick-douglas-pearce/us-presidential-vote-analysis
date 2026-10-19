@@ -466,6 +466,30 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
             f"GROUP BY year, state, candidate HAVING count(*) > 1"
         )
         assert dupes.empty
+
+        # #386: the live view carries the party table's row on every state row of a
+        # keyed candidate-year, and NULL in all three columns everywhere else. The view
+        # is compared with the table itself, joined here by hand on the primary key.
+        cols = "nominating_party, nominating_party_source, nominating_party_note"
+        view = dbc.select_query_to_df(
+            f"SELECT year, candidate_id, {cols} "
+            f"FROM {SCHEMA}.{EC_PV_REDISTRIBUTABLE_VIEW}"
+        )
+        table = dbc.select_query_to_df(
+            f"SELECT year, candidate_id, {cols} FROM {SCHEMA}.candidate_party"
+        )
+        assert len(table) == 4  # two Table 1 rows in each of 2016 and 2020
+        merged = view.merge(
+            table, on=["year", "candidate_id"], how="left", suffixes=("", "_t"),
+            validate="m:1",
+        )
+        for col in cols.split(", "):
+            same = (merged[col] == merged[f"{col}_t"]) | (
+                merged[col].isna() & merged[f"{col}_t"].isna()
+            )
+            assert same.all(), merged.loc[~same]
+        assert merged["nominating_party"].notna().any()
+        assert merged["nominating_party"].isna().any()  # faithless 2016 recipients
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()
