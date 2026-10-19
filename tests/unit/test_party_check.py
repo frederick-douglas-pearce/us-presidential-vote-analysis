@@ -196,8 +196,8 @@ def test_the_db_wrapper_reads_the_floor_by_its_own_query() -> None:
     assert "cp.year >= 1976" in floor
     assert "FROM dwh.pv_votes WHERE source = 'MIT'" in floor
     assert "year >= 1976" in years
-    # The vacuity read is kept because it shares neither the PV table nor the MIT source
-    # filter with the other two reads (r1.simp.1, owner); pin that independence.
+    # The vacuity read shares neither the PV table nor the MIT source filter with the
+    # other two reads (see read_archives_years_since_mit_min); pin that independence.
     assert "FROM dwh.candidate_party" in years
     assert "pv_votes" not in years
     assert "source = 'MIT'" not in years
