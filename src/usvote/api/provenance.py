@@ -57,6 +57,9 @@ _SOURCES: dict[str, SourceDisplay] = {
     # The per-capita series' population figures (#245 / D069): the Bureau's published
     # decennial tables, a U.S. Government work — hence the same ``US-PD`` license code.
     "USCB": SourceDisplay(code="USCB", name="U.S. Census Bureau"),
+    # Curated nominating-party rows (#386 / D077): a class of publisher, as NARA, MIT
+    # and USCB each name one; each row's citations name the actual publisher.
+    "USGOV": SourceDisplay(code="USGOV", name="U.S. Government publications"),
 }
 
 #: License code → name + canonical URL. Keyed by the snapshot's ``license`` /
@@ -110,6 +113,8 @@ def redistributable_note(
     ec_license: LicenseDisplay,
     census_source: SourceDisplay,
     census_license: LicenseDisplay,
+    usgov_source: SourceDisplay,
+    usgov_license: LicenseDisplay,
     pv_year_min: int,
     pv_year_max: int,
 ) -> str:
@@ -131,6 +136,11 @@ def redistributable_note(
     come from the Census Bureau. The note enumerates where every served figure comes
     from, so leaving census out would have a per-capita response's own provenance note
     name every source except the one that produced it.
+
+    **The nominating party since #386** (D077): its values share the electoral-college
+    source, or come from cited U.S. Government publications where a row's
+    ``nominating_party_source`` is ``USGOV``. The sentence states that policy rather
+    than claiming such rows exist, so it is true before the first curated row ships.
     """
     return (
         f"Redistributable data only. Electoral-college figures come from the "
@@ -140,6 +150,9 @@ def redistributable_note(
         f"elections carry no popular vote on this surface, and each row's `pv_status` "
         f"says whether that is because none was held or because no redistributable "
         f"source reaches it. Per-capita population figures come from the "
-        f"{census_source.name} — {census_license.name}. Non-redistributable UCSB / "
+        f"{census_source.name} — {census_license.name}. Nominating parties come from "
+        f"the same Electoral College source, or, where a row's "
+        f"`nominating_party_source` is `USGOV`, from {usgov_source.name} — "
+        f"{usgov_license.name}. Non-redistributable UCSB / "
         f"American Presidency Project data is excluded from this public API surface."
     )

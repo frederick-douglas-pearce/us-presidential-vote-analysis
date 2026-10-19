@@ -57,10 +57,13 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     (CC0-1.0, read from the ``pv_source`` reference data, not hardcoded), the EC
     ``ec_source`` / ``ec_license`` (the National Archives; a U.S. Government work), the
     census ``census_source`` / ``census_license`` (the Census Bureau, for the
-    ``per_capita`` table, #245), and an **informational-only** build timestamp. Three
-    provenances, because the surface has three: most of the table is Archives EC data
-    with no popular vote at all, a ``meta`` block naming only MIT would assert MIT
-    covers 1824 (D048), and the per-capita populations are the Bureau's.
+    ``per_capita`` table, #245), the curated nominating-party ``usgov_source`` /
+    ``usgov_license`` (U.S. Government works, #386), and an **informational-only** build
+    timestamp. Four provenances, because the surface has four: most of the table is
+    Archives EC data with no popular vote at all, a ``meta`` block naming only MIT would
+    assert MIT covers 1824 (D048), the per-capita populations are the Bureau's, and a
+    curated nominating party cites other U.S. Government works (each row's
+    ``nominating_party_source`` says which pair it uses).
 
 **Version = content hash, not timestamp (D028).** ``snapshot_version`` is a SHA-256
 over the ``ec_pv`` rows in a deterministic ``ORDER BY (year, state, candidate_slug)``,
@@ -109,8 +112,21 @@ from usvote.hybrid import (
     ec_denominator_by_year,
     roll_up_national,
 )
-from usvote.join import EC_PV_REDISTRIBUTABLE_VIEW
+from usvote.join import (
+    CANDIDATE_PARTY_TABLE,
+    EC_PV_REDISTRIBUTABLE_VIEW,
+    NOMINATING_PARTY_COLUMNS,
+    assert_no_fan_out,
+)
 from usvote.load import SCHEMA
+from usvote.party import (
+    NOTE_COLUMN,
+    PARTY_COLUMN,
+    SOURCE_COLUMN,
+    TABLE1_ROW_NOTES,
+    build_party_source_check,
+    build_party_value_check,
+)
 from usvote.pv.absences import build_curated_roster
 from usvote.pv.source import (
     MIT_PV_YEAR_MIN,
@@ -127,6 +143,8 @@ from usvote.slug import candidate_slug
 from usvote.snapshot_schema import (
     CENSUS_LICENSE,
     CENSUS_SOURCE,
+    CURATED_LICENSE,
+    CURATED_SOURCE,
     DATA_COLUMNS,
     DATA_TABLE,
     EC_LICENSE,
@@ -204,6 +222,11 @@ _ROSTER_MERGE_COLUMNS: tuple[str, ...] = ("year", "state", "pv_status")
 _ALLOWED_COUNT_STATUS_REASONS: frozenset[str] = frozenset(
     reason for _, reason in COUNT_STATUS_OVERRIDES.values()
 )
+
+#: The notes ``nominating_party_note`` may carry (#386): the Table 1 rows' notes in
+#: :data:`usvote.party.TABLE1_ROW_NOTES`. The curated catalog's notes join this set when
+#: #387/#388 add that catalog. See :func:`assert_nominating_party_notes_are_catalogued`.
+_ALLOWED_NOMINATING_PARTY_NOTES: frozenset[str] = frozenset(TABLE1_ROW_NOTES.values())
 
 #: Integer-valued columns that the EC-left join returns as float64 (LEFT-JOIN NULLs make
 #: NaN). Cast to nullable ``Int64`` before hashing/writing so ``150`` never becomes
@@ -608,6 +631,140 @@ def _assert_no_pv_below_window(
             )
 
 
+def assert_one_nominating_party_per_candidate_year(slugged_df: pd.DataFrame) -> None:
+    """Assert each ``(year, candidate)`` carries one nominating party on every row.
+
+    The warehouse table is unique on ``(year, candidate_id)`` (its primary key), so on
+    the served rows a second party for one candidate-year can only arrive as one of two
+    shapes, and this fails on both (#386, AC4): a **fan-out**, two rows for one
+    ``(year, state, candidate)``, which :func:`usvote.join.assert_no_fan_out` reports;
+    or **two values** across the candidate's state rows. The second check counts nulls
+    as a value (``nunique(dropna=False)``), so a candidate-year that is NULL on some
+    rows and set on others fails too: research §9's gap in
+    :func:`usvote.hybrid.assert_carried_columns_constant`, which counts with
+    ``dropna=True``.
+
+    Run on the slugged frame **before** :func:`build_national_rollup`, whose ``first``
+    skips nulls and would roll a NULL/set mix up to the set value without a trace.
+    """
+    assert_no_fan_out(slugged_df, error_cls=SnapshotError)
+    distinct = slugged_df.groupby(["year", "candidate_slug"])[
+        list(NOMINATING_PARTY_COLUMNS)
+    ].nunique(dropna=False)
+    varying = distinct[(distinct > 1).any(axis=1)]
+    if not varying.empty:
+        raise SnapshotError(
+            f"{len(varying)} candidate-year(s) carry more than one nominating party "
+            f"(value, source or note, a NULL counted as a value) across their state "
+            f"rows: {[list(k) for k in varying.index[:10]]}. The party is one fact per "
+            "(year, candidate) (D077); a second value means the join or the warehouse "
+            "table broke that."
+        )
+
+
+def assert_nominating_party_notes_are_catalogued(data_df: pd.DataFrame) -> None:
+    """Assert every served ``nominating_party_note`` is one of the in-repo notes.
+
+    The note is the second free-text column on the public surface, after
+    ``count_status_reason``, and ships on the same terms (#386, architect B1): the build
+    pins it to a closed in-repo catalog, :data:`usvote.party.TABLE1_ROW_NOTES`, rather
+    than trusting that the warehouse was built from it. It is a **containment** check,
+    as :func:`assert_count_status_reasons_are_catalogued` is: it catches a note arriving
+    from anywhere else (a hand-edited warehouse, a second writer), and the catalog's own
+    review is what keeps its entries to facts from U.S. Government works. A control
+    character is refused too, so no note can carry a row or field separator into the
+    content hash or a CSV.
+    """
+    notes = data_df[NOTE_COLUMN].dropna()
+    unknown = sorted(set(notes) - _ALLOWED_NOMINATING_PARTY_NOTES)
+    if unknown:
+        raise SnapshotError(
+            f"{len(unknown)} nominating_party_note value(s) are not in the in-repo "
+            f"catalog: {[n[:80] for n in unknown]}. Only the notes in "
+            "usvote.party.TABLE1_ROW_NOTES may reach the public surface (D077, "
+            "D022/D030)."
+        )
+    controlled = sorted(
+        n for n in set(notes) if any(ord(c) < 32 or ord(c) == 127 for c in n)
+    )
+    if controlled:
+        raise SnapshotError(
+            f"nominating_party_note value(s) carry a control character: "
+            f"{[repr(n[:80]) for n in controlled]}"
+        )
+
+
+def party_keys_to_slugs(
+    party_keys_df: pd.DataFrame, slugged_df: pd.DataFrame
+) -> set[tuple[int, str]]:
+    """Map the ``dwh.candidate_party`` keys to served ``(year, candidate_slug)`` pairs.
+
+    ``party_keys_df`` is :func:`read_candidate_party_keys`' ``(year, candidate_id)``
+    frame, which carries no party value, so nothing here can see the served column. The
+    map comes from the view frame's own ``(year, candidate_id, candidate_slug)``. A key
+    matching no served candidate-year fails loud rather than dropping out of the
+    expected set, which would make the null guard pass a row it never checked.
+    """
+    served = slugged_df[["year", "candidate_id", "candidate_slug"]].drop_duplicates()
+    keys = party_keys_df[["year", "candidate_id"]].drop_duplicates()
+    mapped = keys.merge(served, on=["year", "candidate_id"], how="left")
+    orphans = mapped[mapped["candidate_slug"].isna()]
+    if not orphans.empty:
+        raise SnapshotError(
+            f"{len(orphans)} candidate_party key(s) match no served candidate-year: "
+            f"{orphans[['year', 'candidate_id']].values.tolist()[:10]}. Every party "
+            "row must resolve to a served candidate (D077, guard parts 1-2)."
+        )
+    return {
+        (int(y), str(s))
+        for y, s in zip(mapped["year"], mapped["candidate_slug"], strict=True)
+    }
+
+
+def assert_nominating_party_nulls_have_one_cause(
+    data_df: pd.DataFrame,
+    rollup_df: pd.DataFrame,
+    keyed: set[tuple[int, str]],
+) -> None:
+    """D077's null guard, part 4: a served NULL party has exactly one cause.
+
+    The NULL set is **read from the served column** (``nominating_party IS NULL``), once
+    on the ``ec_pv`` rows and once on the ``national_rollup`` rows. Each must equal the
+    population minus the keyed candidate-years:
+
+    - the **population** is the served candidate-years with electoral votes **cast**
+      (the sum of ``president_electoral_votes`` over their state rows is above 0), not
+      counted: 1872 Greeley has 3 cast and 0 counted and is served (D041/D046);
+    - **keyed** is :func:`party_keys_to_slugs` over ``dwh.candidate_party``'s keys, read
+      by their own query, so neither side of the comparison reads the served column.
+
+    Equality, not a subset test: with every Table 1 key present, "NULL set within the
+    population" holds by construction, and only equality also catches a value served
+    with no key behind it, or a NULL arising after the row exists (a lost ``carry=``, a
+    key drift in the join, a row stored with a NULL value). Computed as an anti-join
+    alone it would be an identity (research §2.3); here the anti-join is only the
+    expected side.
+    """
+    cast = data_df.groupby(["year", "candidate_slug"])[
+        "president_electoral_votes"
+    ].sum()
+    population = {(int(y), str(s)) for (y, s), v in cast.items() if v > 0}
+    expected = population - keyed
+    for table, df in (("ec_pv", data_df), ("national_rollup", rollup_df)):
+        nulls = df.loc[df[PARTY_COLUMN].isna(), ["year", "candidate_slug"]]
+        observed = {
+            (int(y), str(s))
+            for y, s in zip(nulls["year"], nulls["candidate_slug"], strict=True)
+        }
+        if observed != expected:
+            raise SnapshotError(
+                f"{table}: the NULL nominating_party set does not have one cause "
+                "(D077, null guard part 4). NULL without a cause (keyed, or no votes "
+                f"cast): {sorted(observed - expected)[:10]}; set though nothing keys "
+                f"it: {sorted(expected - observed)[:10]}."
+            )
+
+
 def build_national_rollup(
     data_df: pd.DataFrame, hybrid_fields: pd.DataFrame
 ) -> pd.DataFrame:
@@ -655,6 +812,11 @@ def build_national_rollup(
             "national_counted_electoral_votes": "national_counted_electoral_votes",
             "president_electoral_rank": "president_electoral_rank",
             "took_office": "took_office",
+            # #386: constant per candidate-year (asserted before this runs), so
+            # carried, never resolved.
+            PARTY_COLUMN: PARTY_COLUMN,
+            SOURCE_COLUMN: SOURCE_COLUMN,
+            NOTE_COLUMN: NOTE_COLUMN,
         },
     )
     # The appointed denominator (D041) — per *year*, not per candidate, so it merges
@@ -1043,6 +1205,7 @@ def build_snapshot(
     *,
     pv_status_df: pd.DataFrame,
     per_capita_df: pd.DataFrame,
+    party_keys_df: pd.DataFrame,
     build_timestamp: datetime | None = None,
 ) -> SnapshotMeta:
     """Build the SQLite snapshot from an ``ec_pv_redistributable``-shaped frame.
@@ -1052,8 +1215,11 @@ def build_snapshot(
     ``pv_status_df`` is the ``(year, state, pv_status)`` roster
     :func:`derive_curated_pv_status_roster` derives. ``per_capita_df`` is the census
     view frame :func:`read_per_capita` reads (#245); required, like the roster, because
-    a default would let a caller silently ship a snapshot with no per-capita table. The
-    pure core, unit-tested offline from synthetic frames (no DB).
+    a default would let a caller silently ship a snapshot with no per-capita table.
+    ``party_keys_df`` is ``dwh.candidate_party``'s ``(year, candidate_id)`` keys
+    (:func:`read_candidate_party_keys`, #386), the independent side of the nominating
+    party's null guard; required for the same reason. The pure core, unit-tested
+    offline from synthetic frames (no DB).
 
     **Why the roster arrives as an argument rather than being derived here.** The
     obvious simplification — call :func:`~usvote.pv.absences.build_curated_roster`
@@ -1116,11 +1282,14 @@ def build_snapshot(
 
     with_status = add_pv_status(ec_pv_df, pv_status_df)
     slugged = add_candidate_slug(with_status)
+    assert_one_nominating_party_per_candidate_year(slugged)
+    keyed = party_keys_to_slugs(party_keys_df, slugged)
 
     data_df = _to_int64(slugged, _INTEGER_COLUMNS)[list(DATA_COLUMNS)]
     data_df = data_df.sort_values(list(_ORDER_BY), kind="stable").reset_index(drop=True)
     assert_modern_years_are_popular_vote(data_df)
     assert_count_status_reasons_are_catalogued(data_df)
+    assert_nominating_party_notes_are_catalogued(data_df)
     assert_no_pv_below_mit_window(data_df)
 
     # The hybrid is derived from `slugged` (the join-view shape, which still carries
@@ -1140,6 +1309,7 @@ def build_snapshot(
         ),
     )
     assert_no_pv_aggregate_below_mit_window(rollup_df)
+    assert_nominating_party_nulls_have_one_cause(data_df, rollup_df, keyed)
     hybrid_summary_df = _to_int64(hybrid_summary_df, ("ec_denominator",))
     assert_no_hybrid_pv_below_mit_window(hybrid_summary_df)
     per_capita_table = build_per_capita_table(per_capita_df, data_df)
@@ -1161,6 +1331,8 @@ def build_snapshot(
         build_timestamp=ts.isoformat(),
         census_source=CENSUS_SOURCE,
         census_license=CENSUS_LICENSE,
+        usgov_source=CURATED_SOURCE,
+        usgov_license=CURATED_LICENSE,
     )
     _write_sqlite(
         out_path, data_df, rollup_df, hybrid_summary_df, per_capita_table, meta
@@ -1227,6 +1399,22 @@ def _write_sqlite(
         raise
 
 
+#: The three nominating-party columns (#386) and their table CHECKs, shared by
+#: ``ec_pv`` and ``national_rollup``, where they are the last columns before the primary
+#: key. The vocabulary CHECKs are :mod:`usvote.party`'s own builders, so the store
+#: refuses a code the warehouse could not hold. The table CHECKs make the one-cause NULL
+#: structural: value and source are NULL together, a note never stands without a value,
+#: and a note is never blank (an empty string and a NULL would read the same in a CSV).
+_NOMINATING_PARTY_DDL = (
+    f" {PARTY_COLUMN} TEXT {build_party_value_check(PARTY_COLUMN)},"
+    f" {SOURCE_COLUMN} TEXT {build_party_source_check(SOURCE_COLUMN)},"
+    f" {NOTE_COLUMN} TEXT,"
+    f" CHECK (({PARTY_COLUMN} IS NULL) = ({SOURCE_COLUMN} IS NULL)),"
+    f" CHECK ({PARTY_COLUMN} IS NOT NULL OR {NOTE_COLUMN} IS NULL),"
+    f" CHECK ({NOTE_COLUMN} IS NULL OR length(trim({NOTE_COLUMN})) > 0),"
+)
+
+
 def _create_tables(conn: sqlite3.Connection) -> None:
     """Create the five snapshot tables (+ indexes): ``ec_pv``, ``national_rollup``,
     ``hybrid_summary``, ``per_capita``, ``snapshot_meta``.
@@ -1256,6 +1444,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " national_counted_electoral_votes INTEGER,"
         " count_status TEXT NOT NULL,"
         " count_status_reason TEXT,"
+        f"{_NOMINATING_PARTY_DDL}"
         # Canonical grain (D026): one row per (year, state, candidate_slug). A PRIMARY
         # KEY makes a join-view / slug-mapping fan-out fail loud at INSERT (matching
         # national_rollup's own PK guard and the "validation is load-bearing" rule)
@@ -1289,6 +1478,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " ec_share_hybrid REAL,"
         " pv_coverage REAL,"
         " hybrid_score REAL,"
+        f"{_NOMINATING_PARTY_DDL}"
         " PRIMARY KEY (year, candidate_slug))"
     )
     conn.execute(
@@ -1355,7 +1545,9 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " ec_license TEXT NOT NULL,"
         " build_timestamp TEXT NOT NULL,"
         " census_source TEXT NOT NULL,"
-        " census_license TEXT NOT NULL)"
+        " census_license TEXT NOT NULL,"
+        " usgov_source TEXT NOT NULL,"
+        " usgov_license TEXT NOT NULL)"
     )
 
 
@@ -1405,6 +1597,19 @@ def read_redistributable(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
         f"SELECT state, state_usps FROM {schema}.{STATE_DIM}"
     )
     return ec_pv.merge(state_usps, on="state", how="left")
+
+
+def read_candidate_party_keys(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
+    """Read ``dwh.candidate_party``'s keys, ``(year, candidate_id)``, and nothing else.
+
+    The independent side of :func:`assert_nominating_party_nulls_have_one_cause`: it
+    selects no party value, so the expected NULL set cannot be derived from the column
+    it is compared against. The table exists on every warehouse since #385;
+    :func:`usvote.join.create_ec_pv_views` refuses one without it.
+    """
+    return dbc.select_query_to_df(
+        f"SELECT year, candidate_id FROM {schema}.{CANDIDATE_PARTY_TABLE}"
+    )
 
 
 def read_per_capita(dbc: DBC, *, schema: str = SCHEMA) -> pd.DataFrame:
@@ -1508,11 +1713,13 @@ def build_snapshot_from_db(
         ec_pv_df = read_redistributable(dbc, schema=schema)
         pv_status_df = derive_curated_pv_status_roster(dbc, schema=schema)
         per_capita_df = read_per_capita(dbc, schema=schema)
+        party_keys_df = read_candidate_party_keys(dbc, schema=schema)
         return build_snapshot(
             ec_pv_df,
             out_path,
             pv_status_df=pv_status_df,
             per_capita_df=per_capita_df,
+            party_keys_df=party_keys_df,
             build_timestamp=build_timestamp,
         )
     finally:

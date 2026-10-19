@@ -35,7 +35,14 @@ from usvote.api.models import (
 from usvote.api.origin_guard import install_origin_guard
 from usvote.api.repository import SnapshotRepository
 from usvote.api.routes import ResourceNotFound
-from usvote.snapshot_schema import CENSUS_LICENSE, CENSUS_SOURCE, EC_LICENSE, EC_SOURCE
+from usvote.snapshot_schema import (
+    CENSUS_LICENSE,
+    CENSUS_SOURCE,
+    CURATED_LICENSE,
+    CURATED_SOURCE,
+    EC_LICENSE,
+    EC_SOURCE,
+)
 
 #: ``Cache-Control`` for the liveness probe — never cached, unlike the ``/v1`` surface.
 _HEALTH_CACHE_CONTROL = "no-store"
@@ -63,6 +70,8 @@ _NARA = provenance.source_display(EC_SOURCE)
 _US_PD = provenance.license_display(EC_LICENSE)
 _USCB = provenance.source_display(CENSUS_SOURCE)
 _CENSUS_LICENSE = provenance.license_display(CENSUS_LICENSE)
+_USGOV = provenance.source_display(CURATED_SOURCE)
+_USGOV_LICENSE = provenance.license_display(CURATED_LICENSE)
 
 #: The popular-vote window quoted in the **static fallback** description only — the path
 #: taken when the schema is built before the lifespan opens the snapshot. The served
@@ -92,7 +101,11 @@ API_TITLE = "US Presidential Vote API"
 #: 0.5.0 -> 0.6.0 by #330: the ``/v1/candidates`` index and its ``CandidateListItem``
 #: model. Additive, hence minor. It reads an existing table, so
 #: ``SNAPSHOT_SCHEMA_VERSION`` did not move (D070(c)).
-API_VERSION = "0.6.0"
+#:
+#: 0.6.0 -> 0.7.0 by #386: three ``nominating_party`` fields on ``EcPvRow`` and
+#: ``NationalSummaryRow``, and four ``usgov_*`` fields on ``meta.provenance``. Additive,
+#: hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 4 -> 5 for the same event.
+API_VERSION = "0.7.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -164,6 +177,8 @@ API_DESCRIPTION = _render_description(
         ec_license=_US_PD,
         census_source=_USCB,
         census_license=_CENSUS_LICENSE,
+        usgov_source=_USGOV,
+        usgov_license=_USGOV_LICENSE,
         pv_year_min=_FALLBACK_PV_WINDOW[0],
         pv_year_max=_FALLBACK_PV_WINDOW[1],
     ),
@@ -254,6 +269,8 @@ def _install_live_openapi(app: FastAPI) -> None:
             ec_lic = provenance.license_display(meta.ec_license)
             census_src = provenance.source_display(meta.census_source)
             census_lic = provenance.license_display(meta.census_license)
+            usgov_src = provenance.source_display(meta.usgov_source)
+            usgov_lic = provenance.license_display(meta.usgov_license)
             info = schema["info"]
             info["description"] = _render_description(
                 f"{meta.year_min}–{meta.year_max}",
@@ -264,6 +281,8 @@ def _install_live_openapi(app: FastAPI) -> None:
                     ec_license=ec_lic,
                     census_source=census_src,
                     census_license=census_lic,
+                    usgov_source=usgov_src,
+                    usgov_license=usgov_lic,
                     pv_year_min=meta.pv_year_min,
                     pv_year_max=meta.pv_year_max,
                 ),
@@ -321,6 +340,8 @@ def _meta_block(repo: SnapshotRepository) -> dict[str, object]:
         "ec_license": meta.ec_license,
         "census_source": meta.census_source,
         "census_license": meta.census_license,
+        "usgov_source": meta.usgov_source,
+        "usgov_license": meta.usgov_license,
         "build_timestamp": meta.build_timestamp,
     }
 

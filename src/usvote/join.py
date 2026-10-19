@@ -56,6 +56,7 @@ from usvote.count_status import (
 )
 from usvote.db import DBC
 from usvote.load import SCHEMA
+from usvote.party import NOTE_COLUMN, PARTY_COLUMN, SOURCE_COLUMN
 from usvote.pv.schema import PV_SCHEMA
 from usvote.pv.source import PV_SOURCE_TABLE
 from usvote.pv.views import PV_PREFERRED_VIEW, PV_REDISTRIBUTABLE_VIEW
@@ -116,6 +117,12 @@ JOIN_KEY: tuple[str, ...] = ("year", "state", "candidate")
 #: trailing columns, so a column inserted mid-list makes ``rebuild_views`` fail against
 #: any warehouse whose views already exist ("cannot change name of view column ...").
 #: #144 shipped exactly that bug into review, which is why this note exists.
+#:
+#: The three ``nominating_party`` columns (#386, D077) come from ``dwh.candidate_party``
+#: on ``(year, candidate_id)``, its primary key, so the join cannot fan out. They are
+#: constant per candidate-year and NULL together where the table has no row for it: the
+#: one cause D077 allows. MIT's ``party`` beside them is unchanged and is never their
+#: source (D077 amending D018).
 EC_PV_COLUMNS: tuple[str, ...] = (
     "year",
     "state",
@@ -137,7 +144,17 @@ EC_PV_COLUMNS: tuple[str, ...] = (
     "national_counted_electoral_votes",
     COUNT_STATUS_COLUMN,
     COUNT_STATUS_REASON_COLUMN,
+    PARTY_COLUMN,
+    SOURCE_COLUMN,
+    NOTE_COLUMN,
 )
+
+#: The table the nominating-party columns are read from (#385 / D077). Created with the
+#: EC spine (:data:`usvote.load.TABLE_NAMES`), so every warehouse since #385 has it.
+CANDIDATE_PARTY_TABLE = "candidate_party"
+
+#: The three columns :data:`EC_PV_COLUMNS` carries from :data:`CANDIDATE_PARTY_TABLE`.
+NOMINATING_PARTY_COLUMNS: tuple[str, ...] = (PARTY_COLUMN, SOURCE_COLUMN, NOTE_COLUMN)
 
 
 class JoinError(RuntimeError):
@@ -195,6 +212,10 @@ def build_ec_pv_join_sql(
     — the
     inner-join footgun this project guards against — so :func:`assert_db_pv_matches_ec`
     must run as a precondition before this view is created.
+
+    The nominating party (#386) is a second LEFT JOIN, onto ``dwh.candidate_party``
+    at its primary key ``(year, candidate_id)``, so it adds no row; a candidate-year
+    with no row there reads NULL in all three columns.
     """
     on = " AND ".join(
         f"p.{c} = {'c.name' if c == 'candidate' else f'v.{c}'}" for c in JOIN_KEY
@@ -211,7 +232,8 @@ def build_ec_pv_join_sql(
         f" sum(v.{COUNTED_VOTES_COLUMN})"
         " OVER (PARTITION BY v.year, v.candidate_id)"
         " AS national_counted_electoral_votes,"
-        f" v.{COUNT_STATUS_COLUMN}, v.{COUNT_STATUS_REASON_COLUMN}"
+        f" v.{COUNT_STATUS_COLUMN}, v.{COUNT_STATUS_REASON_COLUMN},"
+        + ",".join(f" cp.{c}" for c in NOMINATING_PARTY_COLUMNS)
     )
     return (
         f"SELECT {cols}"
@@ -219,6 +241,8 @@ def build_ec_pv_join_sql(
         f" JOIN {schema}.candidate c ON v.candidate_id = c.candidate_id"
         f" LEFT JOIN {pv_schema}.{pv_view} p ON {on}"
         f" LEFT JOIN {pv_schema}.{PV_SOURCE_TABLE} s ON s.source = p.source"
+        f" LEFT JOIN {schema}.{CANDIDATE_PARTY_TABLE} cp"
+        " ON cp.year = v.year AND cp.candidate_id = v.candidate_id"
         " WHERE v.state IS NOT NULL"
     )
 
@@ -256,6 +280,12 @@ def create_ec_pv_views(
                 f"usvote.pv.load.build_pv_union (which creates the resolved PV views) "
                 f"before create_ec_pv_views."
             )
+    if not _relation_exists(dbc, schema, CANDIDATE_PARTY_TABLE):
+        raise JoinError(
+            f"{schema}.{CANDIDATE_PARTY_TABLE} does not exist — the warehouse predates "
+            f"the nominating-party table (#385); rebuild the EC spine with "
+            f"run_warehouse(..., replace=True) before create_ec_pv_views."
+        )
     assert_db_pv_matches_ec(dbc, PV_PREFERRED_VIEW, schema=schema, pv_schema=pv_schema)
     dbc.create_view(
         schema,
@@ -350,6 +380,8 @@ def join_ec_pv(
     candidate_df: pd.DataFrame,
     pv_df: pd.DataFrame,
     pv_source_df: pd.DataFrame | None = None,
+    *,
+    candidate_party_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """Pure-pandas mirror of :func:`build_ec_pv_join_sql` — the join oracle (D026).
 
@@ -357,7 +389,10 @@ def join_ec_pv(
     filtered out here); ``candidate_df`` carries ``candidate_id``/``name``; ``pv_df`` is
     the resolved PV series (:data:`usvote.pv.schema.SHARED_PV_COLUMNS`);
     ``pv_source_df``
-    (optional) supplies ``redistributable``. Produces :data:`EC_PV_COLUMNS`, one row per
+    (optional) supplies ``redistributable``; ``candidate_party_df`` is
+    ``dwh.candidate_party`` shape (``year``, ``candidate_id`` and
+    :data:`NOMINATING_PARTY_COLUMNS`), required so a caller cannot forget it and get
+    all-NULL parties. Produces :data:`EC_PV_COLUMNS`, one row per
     EC state row (winners *and* 0-EV losers) with PV left-joined. Used in unit tests to
     prove losers survive with their real EC votes, a getter with no PV lands NULL,
     and the
@@ -386,6 +421,14 @@ def join_ec_pv(
         )
     else:
         joined["redistributable"] = pd.NA
+    # The view joins on the table's primary key; validate="m:1" makes a duplicated key
+    # in the input fail here instead of fanning the oracle out.
+    joined = joined.merge(
+        candidate_party_df[["year", "candidate_id", *NOMINATING_PARTY_COLUMNS]],
+        on=["year", "candidate_id"],
+        how="left",
+        validate="m:1",
+    )
 
     return (
         joined[list(EC_PV_COLUMNS)]

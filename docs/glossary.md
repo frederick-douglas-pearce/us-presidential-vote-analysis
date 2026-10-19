@@ -473,6 +473,57 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** A percent change. A gap measured from the Electoral College's winner or leader.
 - **Status:** settled
 
+### Nominating party
+- **Plain:** The party that nominated the candidate for President in that election. A candidate
+  nominated by two parties at once has one value that names both. "No nomination" is an answer
+  too: no party nominated them for President that year, or the nomination was withdrawn before
+  the electors voted.
+- **Precise:** `nominating_party`, one code per (year, candidate) from the closed vocabulary
+  `PARTY_COMPONENTS` in `src/usvote/party.py`, repeated on each of the candidate's state rows and
+  carried to the national row. A joint nomination is one atomic code that declares its components
+  (`liberal_republican_democratic`, `democratic_populist`, `american_whig`). For 1824 candidates
+  outside the caucus, 1828, and the 1836 Whigs, where no national body nominated, the code is the
+  party the source of record names (D077 rule 2). `no_nomination` is a served value (rules 5 and
+  7). Null has one cause: the dataset has no row for that candidate-year. `nominating_party_source`
+  says where each value comes from: `NARA`, the party the National Archives prints for the
+  election's winner and main opponent (a value that a U.S. Government publication amends, such as
+  1872 Greeley's, keeps `NARA`), or `USGOV`, a curated row citing U.S. Government publications;
+  null exactly where the value is. A code never changes meaning: a new value or component is a new
+  code (D077).
+- **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party`,
+  `EcPvRow.nominating_party_source`, `NationalSummaryRow.nominating_party` and
+  `NationalSummaryRow.nominating_party_source` field descriptions in `src/usvote/api/models.py`.
+  Not shown on the dashboard; #389 adds its `LABELS` key and the codes' display forms.
+- **Source:** D077; `PARTY_COMPONENTS`, `NO_NOMINATION`, `TABLE1_PARTY_CORRECTIONS` and
+  `PARTY_SOURCES` in `src/usvote/party.py`; `.claude/specs/research-candidate-party-source.md`
+  §1, §2.2, §2.3, §7 (the evidence record, not an authority);
+  `posts/2026-08-25-it-takes-270-but-270-of-what.md` (Greeley, "the Democratic and Liberal
+  Republican nominee": a joint nomination in reader prose).
+- **Not:** *Party*, the popular-vote source's party: a separate field, from 1976 on, never the
+  basis of this one. Not a ballot line or a state party's label. `no_nomination` is not "no party"
+  and not a missing value, and for a withdrawn nomination it does not say the person was never
+  nominated. A null is not `no_nomination`.
+- **Status:** settled
+
+### Nominating-party note
+- **Plain:** A short sentence of fact on how a candidate's nominating party came to be what it
+  is, for example a joint nomination, or a nominee who died before the electors met. A row may
+  have none.
+- **Precise:** `nominating_party_note`, nullable text, constant per (year, candidate). It states
+  only facts its row's own citations support and adds no source. It is required where the value
+  rests on rule 3, 5 or 8, and allowed for any other exceptional case. Null means no note was
+  recorded: not that the value is missing, and not that the value is plain. Table 1 notes ship
+  from `TABLE1_ROW_NOTES` in `src/usvote/party.py`; curated notes from the catalog (#387, #388).
+  The text is a data value, served as stored.
+- **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party_note` and
+  `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`.
+  Not shown on the dashboard; #389 decides how.
+- **Source:** D077, "The row note"; research doc §2.4; `TABLE1_ROW_NOTES` (wording approved by
+  the owner, 2026-10-18, #385 plan).
+- **Not:** the value's null (*Nominating party*). Not a citation. Not the count-status reason,
+  which is the National Archives' own sentence about the count (*Count status*).
+- **Status:** settled
+
 ### No popular-vote figure in this dataset (inside the window)
 - **Plain:** A state held a popular vote in a year this dataset covers, but the dataset has no
   figure for this candidate there.
@@ -541,8 +592,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Party
 - **Plain:** The candidate's party as the popular-vote source records it, shown as a name in
   ordinary capitalization.
-- **Precise:** The party of record from the popular-vote source. The API serves the source's own
-  code; the dashboard shows a display form of that code (underscores read as spaces and each word
+- **Precise:** The party the popular-vote source records for the candidate. The API serves the
+  source's own code; the dashboard shows a display form of that code (underscores read as spaces and each word
   capitalized, plus a short list of exceptions where the name is not the code's case form:
   `DEMOCRAT` reads "Democratic", the party's own name, owner decision, 2026-10-11, #348). The
   download keeps the code as served. A party that is not text, or whose code has no letter or
@@ -553,14 +604,17 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["party"]`; the cell `labels.party_cell`, through `labels.party`, which
   shows a code's display form (`labels.PARTY_DISPLAY` for the exceptions, otherwise the code's
   words in ordinary capitalization); `labels.PARTY_NOTE` as help text on a cell with no party
-  (null or blank) and under T2, T3 and T4.
+  (null or blank) and under T2, T3 and T4; on the API's `/docs` page, the `EcPvRow.party` and
+  `NationalSummaryRow.party` field descriptions in `src/usvote/api/models.py`.
 - **Source:** `EcPvRow.party`, `NationalSummaryRow.party`; D019; D024 §5 (citing D018: party must
   not become a second source of party truth); display rule: owner decision, 2026-10-10, #348; a
   code with no letter or digit reads *Unrecognized value*: owner decision, 2026-10-13, #355 (code
   review);
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Then there is a third number" (the
-  Democratic name in reader prose).
-- **Not:** An Electoral College attribute; the dataset serves none. Not a second party record:
+  Democratic name in reader prose); D077 (amends D018: MIT's party is a check on the nominating
+  party, never a source).
+- **Not:** *Nominating party*, the party that nominated the candidate, which the dataset serves
+  as a separate field and never derives from this one. Not a second party record:
   the display form changes how a code is written, never which party a row carries.
 - **Status:** settled
 
@@ -664,15 +718,18 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Sources
-- **Plain:** Where each kind of figure comes from (electoral votes, popular votes, population):
-  the organization that publishes it, and the license it is published under.
+- **Plain:** Where each kind of figure comes from (electoral votes, popular votes, population,
+  nominating parties): the organization that publishes it, and the license it is published
+  under.
 - **Precise:** Electoral votes: `ec_source_name`, `ec_license`. Popular votes: `source_name`,
   `license`. Population: `census_source_name`, `census_license`. Rendered from
-  `meta.provenance`, never written in by hand.
+  `meta.provenance`, never written in by hand. Nominating parties: per row,
+  `nominating_party_source`; `NARA` values share the electoral-vote pair, and `USGOV` values use
+  `usgov_source_name` and `usgov_license`.
 - **Shown as:** `components.provenance_footer`; `export.preamble`; `export.EC_SOURCE`,
   `PV_SOURCE`, `CENSUS_SOURCE`.
 - **Source:** `Provenance` in `src/usvote/api/models.py`; D030; D048 §6; D069(f); #275,
-  carry-forward constraints.
+  carry-forward constraints; D077, Provenance.
 - **Not:** —
 - **Status:** settled
 
@@ -827,6 +884,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
 | 0 for a missing figure | never | a rule | Zero is a measurement; a missing figure is not. |
 | a party code in capitals | the party name in ordinary capitalization | `labels.party`, `labels.PARTY_DISPLAY` | Owner decision, 2026-10-10. |
+| "party" alone where both are meant | name which: the nominating party; the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
 | "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
 
 ## Open decisions

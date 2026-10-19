@@ -202,3 +202,9 @@ def test_the_archives_source_code_is_the_one_the_api_serves() -> None:
     assert SOURCE_ARCHIVES == snapshot_schema.EC_SOURCE
     assert (SOURCE_ARCHIVES, SOURCE_CURATED) == ("NARA", "USGOV")
     assert party.PARTY_SOURCES == (SOURCE_ARCHIVES, SOURCE_CURATED)
+
+
+def test_the_curated_source_code_is_the_one_the_api_serves() -> None:
+    # #386: snapshot_schema holds the code as a literal (the serving side may not
+    # import this module), so this pin is what keeps the two from drifting apart.
+    assert SOURCE_CURATED == snapshot_schema.CURATED_SOURCE

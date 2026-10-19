@@ -140,6 +140,11 @@ def ec_pv_frame(
     df[COUNT_STATUS_REASON_COLUMN] = [
         None if ok else _FIXTURE_REASON for ok in counted_in_full
     ]
+    # #386 appended the nominating party. usvote.hybrid reads none of the three, so
+    # they are NULL here (no dwh.candidate_party row) — present only so the fixture
+    # emits exactly EC_PV_COLUMNS, for the reason above.
+    for col in ("nominating_party", "nominating_party_source", "nominating_party_note"):
+        df[col] = None
     return df.sort_values(["year", "state", "candidate"], kind="stable").reset_index(
         drop=True
     )

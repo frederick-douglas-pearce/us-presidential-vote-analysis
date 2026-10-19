@@ -39,6 +39,8 @@ def _note() -> str:
         ec_license=provenance.license_display("US-PD"),
         census_source=provenance.source_display("USCB"),
         census_license=provenance.license_display("US-PD"),
+        usgov_source=provenance.source_display("USGOV"),
+        usgov_license=provenance.license_display("US-PD"),
         pv_year_min=1976,
         pv_year_max=2024,
     )
@@ -95,3 +97,26 @@ def test_redistributable_note_names_the_census_source() -> None:
     source — which produced the per-capita figures — must be in it (D069)."""
     note = _note()
     assert "Per-capita population figures come from the U.S. Census Bureau" in note
+
+
+def test_the_curated_party_codes_are_mapped() -> None:
+    """The curated nominating-party codes (#386) resolve, so a v5 snapshot's ``meta``
+    renders rather than failing every response with ``UnknownProvenanceCode``."""
+    from usvote.snapshot_schema import CURATED_LICENSE, CURATED_SOURCE
+
+    assert (
+        provenance.source_display(CURATED_SOURCE).name
+        == "U.S. Government publications"
+    )
+    assert provenance.license_display(CURATED_LICENSE).code == "US-PD"
+
+
+def test_redistributable_note_states_where_nominating_parties_come_from() -> None:
+    """#386: the note names the nominating party's sources as a rule (the
+    Electoral College source, or the curated one where a row says ``USGOV``), so it
+    stays true before any curated row exists."""
+    assert (
+        "Nominating parties come from the same Electoral College source, or, where a "
+        "row's `nominating_party_source` is `USGOV`, from U.S. Government "
+        "publications — Public domain"
+    ) in _note()

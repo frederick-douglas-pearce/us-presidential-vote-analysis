@@ -27,7 +27,7 @@ import pandas as pd
 import pytest
 
 from tests._helpers import non_null_sqlite_flag
-from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON
+from tests.fixtures.api_snapshot import FIXTURE_NOT_COUNTED_REASON, FIXTURE_PARTY_NOTE
 from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
@@ -53,6 +53,7 @@ from usvote.snapshot import (
     add_candidate_slug,
     assert_no_hybrid_pv_below_mit_window,
     assert_no_pv_aggregate_below_mit_window,
+    assert_nominating_party_nulls_have_one_cause,
     build_hybrid_tables,
     build_national_rollup,
     build_snapshot,
@@ -86,6 +87,18 @@ _ARCHIVES_REASON = FIXTURE_NOT_COUNTED_REASON
 #: frame carries it directly (it is the shape build_snapshot consumes).
 _USPS = {"Texas": "TX", "California": "CA", "Washington": "WA"}
 
+#: Each synthetic candidate's nominating party (#386). Faithless F is absent on purpose:
+#: votes cast and no ``dwh.candidate_party`` row, so it is served NULL. Nixon carries the
+#: one catalogued note (borrowed, as the build refuses an invented one).
+_NOMINATING_PARTY = {
+    "Richard Nixon": "republican",
+    "George McGovern": "democratic",
+    "Cand A": "republican",
+    "Cand B": "democratic",
+    "Cand C": "republican",
+    "Cand D": "democratic",
+}
+
 
 def _row(
     year: int,
@@ -110,6 +123,7 @@ def _row(
     count_status_reason: str | None = None,
 ) -> dict:
     """One ``ec_pv_redistributable`` row. NULL PV (no MIT coverage) ⇒ NULL PV columns."""
+    nominating = _NOMINATING_PARTY.get(candidate)
     return {
         "year": year,
         "state": state,
@@ -139,7 +153,25 @@ def _row(
         ),
         "count_status": count_status,
         "count_status_reason": count_status_reason,
+        # #386: from dwh.candidate_party through the view, constant per candidate-year.
+        "nominating_party": nominating,
+        "nominating_party_source": "NARA" if nominating else None,
+        "nominating_party_note": (
+            FIXTURE_PARTY_NOTE if candidate == "Richard Nixon" else None
+        ),
     }
+
+
+def _party_keys(frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    """``dwh.candidate_party``'s ``(year, candidate_id)`` keys behind ``frame``.
+
+    One per candidate-year whose rows carry a party, as a real warehouse has (the view
+    reads the party from that table). The null-guard tests below build their keys by
+    hand instead, so the side they doctor is the one under test.
+    """
+    src = _ec_pv_frame() if frame is None else frame
+    keyed = src.loc[src["nominating_party"].notna(), ["year", "candidate_id"]]
+    return keyed.drop_duplicates().reset_index(drop=True)
 
 
 #: One state → one status, applied to every candidate row in that state-year. 1972
@@ -281,6 +313,7 @@ def _build(
         str(out),
         pv_status_df=_status_frame(fact) if status is None else status,
         per_capita_df=_per_capita_frame(fact),
+        party_keys_df=_party_keys(fact),
         build_timestamp=_TS,
     )
     return out, meta
@@ -293,6 +326,7 @@ def _build_raises(frame: pd.DataFrame, status: pd.DataFrame | None = None) -> No
         "/dev/null",
         pv_status_df=_status_frame(frame) if status is None else status,
         per_capita_df=_per_capita_frame(frame),
+        party_keys_df=_party_keys(frame),
         build_timestamp=_TS,
     )
 
@@ -645,6 +679,9 @@ def test_rollup_delegates_to_the_shared_primitive() -> None:
             "national_counted_electoral_votes": "national_counted_electoral_votes",
             "president_electoral_rank": "president_electoral_rank",
             "took_office": "took_office",
+            "nominating_party": "nominating_party",
+            "nominating_party_source": "nominating_party_source",
+            "nominating_party_note": "nominating_party_note",
         },
     ).merge(
         ec_denominator_by_year(frame).rename(
@@ -724,6 +761,7 @@ def test_version_is_content_hash_independent_of_timestamp(tmp_path: Path) -> Non
     meta_a = build_snapshot(
         _ec_pv_frame(), str(out_a), pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=_TS
     )
     meta_b = build_snapshot(
@@ -731,6 +769,7 @@ def test_version_is_content_hash_independent_of_timestamp(tmp_path: Path) -> Non
         str(out_b),
         pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=datetime(2030, 1, 1, tzinfo=UTC),
     )
     assert meta_a.snapshot_version == meta_b.snapshot_version
@@ -743,6 +782,7 @@ def test_version_changes_when_data_changes(tmp_path: Path) -> None:
         str(tmp_path / "a.sqlite"),
         pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=_TS,
     )
     changed = _ec_pv_frame()
@@ -752,6 +792,7 @@ def test_version_changes_when_data_changes(tmp_path: Path) -> None:
         str(tmp_path / "b.sqlite"),
         pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=_TS,
     )
     assert base.snapshot_version != other.snapshot_version
@@ -778,8 +819,10 @@ def test_non_mit_source_fails_loud() -> None:
 
 
 def test_duplicate_grain_row_fails_loud(tmp_path: Path) -> None:
-    # The ec_pv PRIMARY KEY (year, state, candidate_slug) makes a grain fan-out fail loud
-    # at INSERT rather than silently shipping duplicates the content hash would bless.
+    # A grain fan-out fails loud rather than silently shipping duplicates the content
+    # hash would bless. Since #386 the build's own grain check catches it before the
+    # ec_pv PRIMARY KEY (year, state, candidate_slug) would at INSERT; the key stays as
+    # the store's backstop.
     frame = _ec_pv_frame()
     dup = frame[
         (frame["year"] == 2020)
@@ -787,12 +830,13 @@ def test_duplicate_grain_row_fails_loud(tmp_path: Path) -> None:
         & (frame["candidate"] == "Cand A")
     ]
     frame = pd.concat([frame, dup], ignore_index=True)
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(SnapshotError, match="fanned out"):
         build_snapshot(
             frame,
             str(tmp_path / "snapshot.sqlite"),
             pv_status_df=_status_frame(frame),
             per_capita_df=_per_capita_frame(frame),
+            party_keys_df=_party_keys(frame),
             build_timestamp=_TS,
         )
 
@@ -802,11 +846,13 @@ def test_build_is_idempotent_overwrite(tmp_path: Path) -> None:
     first = build_snapshot(
         _ec_pv_frame(), str(out), pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=_TS
     )
     second = build_snapshot(
         _ec_pv_frame(), str(out), pv_status_df=_status_frame(),
         per_capita_df=_per_capita_frame(),
+        party_keys_df=_party_keys(),
         build_timestamp=_TS
     )
     assert first.snapshot_version == second.snapshot_version
@@ -827,6 +873,7 @@ class _StubDBC:
         self._exists = exists
         self._per_capita_exists = per_capita_exists
         self.closed = False
+        self.party_key_query: str | None = None
 
     def select_query_to_df(self, query: str, close: bool = False) -> pd.DataFrame:
         if "to_regclass" in query:
@@ -841,6 +888,9 @@ class _StubDBC:
             )
         if PER_CAPITA_VIEW in query:
             return _per_capita_frame().drop(columns=["state_usps"])
+        if "candidate_party" in query:  # SELECT year, candidate_id (#386)
+            self.party_key_query = query
+            return _party_keys()
         # The view read: return the frame WITHOUT the enrichment column (the view
         # itself does not carry state_usps — read_redistributable merges it in).
         return _ec_pv_frame().drop(columns=["state_usps"])
@@ -984,6 +1034,8 @@ def test_build_from_db_reads_then_builds(
     assert meta.year_min == 1972
     assert meta.pv_year_min == 2016
     assert stub.closed
+    # The null guard's independent side reads only the keys, never a party value.
+    assert stub.party_key_query == "SELECT year, candidate_id FROM dwh.candidate_party"
 
 
 # --- #102 / E8-S8: the hybrid, flip and margin fields -----------------------
@@ -1300,9 +1352,10 @@ def test_the_schema_version_moved_for_the_new_shape() -> None:
 
     A literal, deliberately. Comparing the constant to itself would pass under any
     value; the whole obligation is that a human moved it when the shape changed, and
-    only a literal records that. 3 → 4 was #245's new ``per_capita`` table.
+    only a literal records that. 3 → 4 was #245's new ``per_capita`` table; 4 → 5 was
+    #386's nominating-party columns and curated provenance pair.
     """
-    assert SNAPSHOT_SCHEMA_VERSION == 4
+    assert SNAPSHOT_SCHEMA_VERSION == 5
 
 
 def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
@@ -1403,6 +1456,7 @@ def _pc_build(
         str(tmp_path / name),
         pv_status_df=_status_frame(),
         per_capita_df=per_capita,
+        party_keys_df=_party_keys(),
         build_timestamp=_TS,
     )
 
@@ -1414,6 +1468,7 @@ def _pc_raises(per_capita: pd.DataFrame, match: str) -> None:
             "/dev/null",
             pv_status_df=_status_frame(),
             per_capita_df=per_capita,
+            party_keys_df=_party_keys(),
             build_timestamp=_TS,
         )
 
@@ -1483,6 +1538,7 @@ def test_an_unchanged_per_capita_table_keeps_the_version(tmp_path: Path) -> None
         str(tmp_path / "b.sqlite"),
         pv_status_df=_status_frame(),
         per_capita_df=shuffled,
+        party_keys_df=_party_keys(),
         build_timestamp=datetime(2030, 1, 1, tzinfo=UTC),
     )
     assert a.snapshot_version == b.snapshot_version
@@ -1770,3 +1826,253 @@ def test_a_stale_allotment_with_matching_keys_fails_loud() -> None:
         frame.loc[nonzero, "population"] / frame.loc[nonzero, "total_electoral_votes"]
     )
     _pc_raises(frame, "differs from the served ec_pv row's total_electoral_votes")
+
+
+# --- #386: the nominating party ---------------------------------------------
+
+
+def test_the_data_columns_tail_is_pinned_to_a_literal() -> None:
+    """Everything appended since #139, in order, as a hand-written literal.
+
+    Comparing the tuple with itself, or with the built table, would pass under any
+    order; the table check above only proves the DDL and the tuple agree. Since #386 the
+    nominating party's three columns are last.
+    """
+    assert DATA_COLUMNS[15:] == (
+        "pv_status",
+        "president_electoral_votes_counted",
+        "national_counted_electoral_votes",
+        "count_status",
+        "count_status_reason",
+        "nominating_party",
+        "nominating_party_source",
+        "nominating_party_note",
+    )
+
+
+def test_the_rollup_columns_tail_is_pinned_to_a_literal() -> None:
+    assert ROLLUP_COLUMNS[9:] == (
+        "national_counted_electoral_votes",
+        "national_electoral_denominator",
+        "ec_share_full",
+        "pv_share",
+        "ec_share_hybrid",
+        "pv_coverage",
+        "hybrid_score",
+        "nominating_party",
+        "nominating_party_source",
+        "nominating_party_note",
+    )
+
+
+def test_the_snapshot_serves_the_party_on_both_tables(tmp_path: Path) -> None:
+    out, meta = _build(tmp_path)
+    data = _read(out, DATA_TABLE)
+    rollup = _read(out, ROLLUP_TABLE)
+    for table in (data, rollup):
+        d = table[table["candidate"] == "Cand D"]
+        assert set(d["nominating_party"]) == {"democratic"}
+        assert set(d["nominating_party_source"]) == {"NARA"}
+        assert d["nominating_party_note"].isna().all()
+        nixon = table[table["candidate"] == "Richard Nixon"]
+        assert set(nixon["nominating_party_note"]) == {FIXTURE_PARTY_NOTE}
+        # Faithless F: votes cast, no party row, so NULL in all three (D077).
+        f = table[table["candidate"] == "Faithless F"]
+        assert not f.empty
+        for col in (
+            "nominating_party", "nominating_party_source", "nominating_party_note"
+        ):
+            assert f[col].isna().all(), col
+    # MIT's party is served beside it, unchanged.
+    assert set(data.loc[data["candidate"] == "Cand D", "party"]) == {"DEMOCRAT"}
+    assert (meta.usgov_source, meta.usgov_license) == ("USGOV", "US-PD")
+    stored = _read(out, META_TABLE).iloc[0]
+    assert (stored["usgov_source"], stored["usgov_license"]) == ("USGOV", "US-PD")
+
+
+def test_the_party_is_inside_the_content_hash(tmp_path: Path) -> None:
+    """A curated row (#387/#388) changes only data, so the party must move the version
+    on its own or the D034 cutover never fires."""
+    _, base = _build(tmp_path)
+    changed = _ec_pv_frame()
+    changed.loc[changed["candidate"] == "Cand A", "nominating_party"] = "whig"
+    _, other = _build(tmp_path, changed)
+    assert base.snapshot_version != other.snapshot_version
+
+
+def _party_raises(
+    frame: pd.DataFrame,
+    match: str,
+    keys: pd.DataFrame | None = None,
+    error: type[Exception] = SnapshotError,
+    out: str = "/dev/null",
+) -> None:
+    with pytest.raises(error, match=match):
+        build_snapshot(
+            frame,
+            out,
+            pv_status_df=_status_frame(frame),
+            per_capita_df=_per_capita_frame(frame),
+            party_keys_df=_party_keys(frame) if keys is None else keys,
+            build_timestamp=_TS,
+        )
+
+
+def _where(
+    frame: pd.DataFrame, year: int, candidate: str, state: str | None = None
+) -> pd.Series:
+    mask = (frame["year"] == year) & (frame["candidate"] == candidate)
+    return mask if state is None else mask & (frame["state"] == state)
+
+
+class TestOnePartyPerCandidateYear:
+    """AC4: the build fails on a second party for one (year, candidate)."""
+
+    def test_two_values_across_one_candidates_rows(self) -> None:
+        frame = _ec_pv_frame()
+        frame.loc[_where(frame, 2020, "Cand A", "Texas"), "nominating_party"] = "whig"
+        _party_raises(frame, "more than one nominating party")
+
+    def test_a_null_on_some_rows_and_a_value_on_others(self) -> None:
+        frame = _ec_pv_frame()
+        texas = _where(frame, 2020, "Cand A", "Texas")
+        frame.loc[texas, ["nominating_party", "nominating_party_source"]] = None
+        _party_raises(frame, "more than one nominating party")
+
+    def test_a_note_on_some_rows_only(self) -> None:
+        frame = _ec_pv_frame()
+        frame.loc[
+            _where(frame, 1972, "Richard Nixon", "California"), "nominating_party_note"
+        ] = None
+        _party_raises(frame, "more than one nominating party")
+
+    def test_a_duplicated_row(self) -> None:
+        frame = _ec_pv_frame()
+        dup = frame[_where(frame, 2020, "Cand A", "Texas")]
+        _party_raises(pd.concat([frame, dup], ignore_index=True), "fanned out")
+
+
+class TestNotesAreCatalogued:
+    def test_an_invented_note_fails(self) -> None:
+        frame = _ec_pv_frame()
+        frame.loc[_where(frame, 1972, "Richard Nixon"), "nominating_party_note"] = (
+            "An invented note."
+        )
+        _party_raises(frame, "not in the in-repo catalog")
+
+    def test_a_control_character_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import usvote.snapshot as snapshot_mod
+
+        bad = "A note\x1fwith a field separator."
+        monkeypatch.setattr(
+            snapshot_mod, "_ALLOWED_NOMINATING_PARTY_NOTES", frozenset({bad})
+        )
+        frame = _ec_pv_frame()
+        frame.loc[_where(frame, 1972, "Richard Nixon"), "nominating_party_note"] = bad
+        _party_raises(frame, "control character")
+
+
+class TestTheNullHasOneCause:
+    """D077's null guard, part 4: the served NULL set equals the candidate-years with
+    votes cast minus the party table's keys, on ``ec_pv`` and ``national_rollup``."""
+
+    def test_a_served_null_whose_candidate_year_has_a_key(self) -> None:
+        frame = _ec_pv_frame()
+        keys = pd.concat(
+            [_party_keys(frame), pd.DataFrame([{"year": 2016, "candidate_id": 5}])]
+        )
+        _party_raises(frame, r"NULL without a cause.*2016, 'faithless-f'", keys)
+
+    def test_a_value_with_no_key_behind_it(self) -> None:
+        frame = _ec_pv_frame()
+        keys = _party_keys(frame)
+        keys = keys[~((keys["year"] == 2020) & (keys["candidate_id"] == 1))]
+        _party_raises(frame, r"set though nothing keys it.*2020, 'cand-a'", keys)
+
+    def test_a_key_matching_no_served_candidate_year(self) -> None:
+        frame = _ec_pv_frame()
+        keys = pd.concat(
+            [_party_keys(frame), pd.DataFrame([{"year": 2016, "candidate_id": 99}])]
+        )
+        _party_raises(frame, r"match no served candidate-year.*\[2016, 99\]", keys)
+
+    def test_a_null_on_a_candidate_year_with_no_votes_cast(self) -> None:
+        """Every served candidate-year has votes cast (D077 part 3); one without them
+        and without a key is NULL for a cause the guard does not allow."""
+        frame = _ec_pv_frame()
+        ghost = frame[_where(frame, 2016, "Faithless F")].copy()
+        ghost["candidate_id"] = 8
+        ghost["candidate"] = "Ghost G"
+        ghost["president_electoral_votes"] = 0
+        ghost["president_electoral_votes_counted"] = 0
+        ghost["national_electoral_votes"] = 0
+        ghost["national_counted_electoral_votes"] = 0
+        ghost["president_electoral_rank"] = 4
+        _party_raises(
+            pd.concat([frame, ghost], ignore_index=True),
+            r"NULL without a cause.*2016, 'ghost-g'",
+        )
+
+    def test_the_rollup_is_read_on_its_own(self) -> None:
+        """A NULL arising in the roll-up alone (a lost ``carry=``) fails too."""
+        data = pd.DataFrame(
+            {
+                "year": [2020, 2020],
+                "candidate_slug": ["cand-a", "cand-b"],
+                "president_electoral_votes": [38, 55],
+                "nominating_party": ["republican", "democratic"],
+            }
+        )
+        rollup = data[["year", "candidate_slug"]].assign(
+            nominating_party=["republican", None]
+        )
+        keyed = {(2020, "cand-a"), (2020, "cand-b")}
+        assert_nominating_party_nulls_have_one_cause(data, data, keyed)
+        with pytest.raises(SnapshotError, match=r"national_rollup.*2020, 'cand-b'"):
+            assert_nominating_party_nulls_have_one_cause(data, rollup, keyed)
+
+
+class TestTheStoreRefusesWhatTheWarehouseCannotHold:
+    """The DDL's CHECKs (#386): the vocabulary from ``usvote.party``, value and source
+    NULL together, no note without a value, and no blank note."""
+
+    def test_an_out_of_vocabulary_value_fails_at_insert(self, tmp_path: Path) -> None:
+        # Every guard before the write passes this frame (one value per candidate-year,
+        # no note, a key behind it), so the store's CHECK is what refuses it.
+        frame = _ec_pv_frame()
+        frame.loc[_where(frame, 2020, "Cand A"), "nominating_party"] = "bogus"
+        _party_raises(
+            frame,
+            "CHECK constraint",
+            error=sqlite3.IntegrityError,
+            out=str(tmp_path / "snapshot.sqlite"),
+        )
+
+    @pytest.mark.parametrize(
+        ("party", "source", "note"),
+        [
+            ("republican", None, None),  # a value with no source
+            (None, "NARA", None),  # a source with no value
+            (None, None, "A note."),  # a note with no value
+            ("republican", "NARA", "  "),  # a blank note
+            ("republican", "MIT", None),  # a source outside the two
+        ],
+    )
+    def test_the_rollup_table_refuses(
+        self, party: str | None, source: str | None, note: str | None
+    ) -> None:
+        from usvote.snapshot import _create_tables
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            _create_tables(conn)
+            insert = (
+                f"INSERT INTO {ROLLUP_TABLE} (year, candidate, candidate_slug, "
+                "nominating_party, nominating_party_source, nominating_party_note) "
+                "VALUES (2020, 'Cand A', 'cand-a', ?, ?, ?)"
+            )
+            conn.execute(insert, ("republican", "NARA", None))  # the good shape
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+                conn.execute(insert.replace("2020", "2016"), (party, source, note))
+        finally:
+            conn.close()

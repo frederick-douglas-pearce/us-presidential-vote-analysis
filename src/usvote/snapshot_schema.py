@@ -47,7 +47,14 @@ from dataclasses import dataclass
 #: source (the Census Bureau), so a census reload that moves a population must move the
 #: version or the D034 cutover never fires. The derived tables (``national_rollup``,
 #: ``hybrid_summary``) are still outside it, and the rule above still binds them.
-SNAPSHOT_SCHEMA_VERSION = 4
+#:
+#: ``5`` (#386 / D077) — the nominating party ships. ``ec_pv`` and ``national_rollup``
+#: gained ``nominating_party``, ``nominating_party_source`` and
+#: ``nominating_party_note``; ``snapshot_meta`` gained the curated source/license pair
+#: (``usgov_source`` / ``usgov_license``). The three columns are on ``ec_pv``, so they
+#: are inside the content hash: a later curated row (#387/#388) moves the version with
+#: no schema change. ``party`` (MIT's) is unchanged.
+SNAPSHOT_SCHEMA_VERSION = 5
 
 #: The **electoral-college** provenance codes (#139 / D048), written into
 #: ``snapshot_meta`` by every build. The PV codes are read from the ``pv_source``
@@ -70,6 +77,16 @@ EC_LICENSE = "US-PD"
 #: #180, Branch A).
 CENSUS_SOURCE = "USCB"
 CENSUS_LICENSE = "US-PD"
+
+#: The **curated nominating-party** provenance codes (#386 / D077): rows cited from
+#: U.S. Government works other than the Archives' Table 1. Written by every build
+#: whether or not a curated row exists yet, as the census pair is: the pair names the
+#: source a row's ``nominating_party_source`` may point at, and each row says which one
+#: it uses. Literals here for the EC pair's reason; ``tests/unit/test_party.py`` pins
+#: ``CURATED_SOURCE`` to :data:`usvote.party.SOURCE_CURATED`, which this module may not
+#: import without widening the serving side's import set.
+CURATED_SOURCE = "USGOV"
+CURATED_LICENSE = "US-PD"
 
 #: The five snapshot tables (the serving contract E8-S2/S3 read).
 DATA_TABLE = "ec_pv"
@@ -124,6 +141,15 @@ DATA_COLUMNS: tuple[str, ...] = (
     "national_counted_electoral_votes",
     "count_status",
     "count_status_reason",
+    # --- #386 / D077: appended, never inserted ------------------------------
+    # The nominating party, from ``dwh.candidate_party`` through the join view: constant
+    # per ``(year, candidate_slug)`` and NULL together for one cause only, no row for
+    # that candidate-year (the build proves it). The note is the second free-text column
+    # and ships for ``count_status_reason``'s reason: the build pins it to the in-repo
+    # catalog (:func:`usvote.snapshot.assert_nominating_party_notes_are_catalogued`).
+    "nominating_party",
+    "nominating_party_source",
+    "nominating_party_note",
 )
 
 #: The precomputed national roll-up columns, one row per ``(year, candidate_slug)``.
@@ -170,6 +196,12 @@ ROLLUP_COLUMNS: tuple[str, ...] = (
     # ``(ec_share_hybrid + pv_share) / 2`` — the average of two ratios, highest wins
     # (D037). NULL wherever the popular vote is, i.e. every year before the PV window.
     "hybrid_score",
+    # --- #386 / D077: appended, never inserted ------------------------------
+    # Carried unchanged from the candidate's ``ec_pv`` rows (constant there), never
+    # ``min``-resolved as MIT's ``party`` is.
+    "nominating_party",
+    "nominating_party_source",
+    "nominating_party_note",
 )
 
 #: The per-election hybrid summary's columns, in order (#102 / E8-S8).
@@ -297,6 +329,11 @@ class SnapshotMeta:
 
     The third, since #245 (D069): ``census_source`` / ``census_license`` describe the
     per-capita population figures (the U.S. Census Bureau, public domain).
+
+    The fourth, since #386 (D077): ``usgov_source`` / ``usgov_license`` describe the
+    curated nominating-party rows, cited from U.S. Government works (public domain).
+    Always written; a row's ``nominating_party_source`` says whether it uses this pair
+    or the EC one.
     """
 
     snapshot_version: str
@@ -314,3 +351,5 @@ class SnapshotMeta:
     build_timestamp: str
     census_source: str
     census_license: str
+    usgov_source: str
+    usgov_license: str

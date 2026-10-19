@@ -85,7 +85,7 @@ from typing import Any
 
 import pytest
 
-from tests._helpers import non_null_flag, non_null_sqlite_flag
+from tests._helpers import FIXTURES_DIR, non_null_flag, non_null_sqlite_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
@@ -174,6 +174,28 @@ PINNED_ABSENCES: dict[tuple[int, str], str] = {
     # Colo. Const. of 1876, Schedule s 19: the first-year legislative appointment.
     (1876, "Colorado"): PV_STATUS_LEGISLATURE_CHOSEN,
 }
+
+
+#: The schema-4 snapshot's every non-null MIT ``party`` (AC3 of #386), extracted from
+#: the live v4 artifact before the nominating party was added; see the file's own
+#: ``provenance`` key for its version and lifetime.
+V4_PARTY_FIXTURE = FIXTURES_DIR / "snapshot_v4_party.json"
+
+#: The nominating party on real rows (#386). Table 1 prints a party for each election's
+#: winner and main opponent: 1872 Grant and Greeley (Greeley's joint code is the #385
+#: correction, with its note), 2016 Trump and Clinton. Hendricks (1872, 42 votes from
+#: Greeley's electors after his death) and Colin Powell (2016, three faithless
+#: Washington electors) are outside Table 1 and have no row yet: served NULL.
+NOMINATING_PARTY_PINS: dict[tuple[int, str], str | None] = {
+    (1872, "ulysses-s-grant"): "republican",
+    (1872, "horace-greeley"): "liberal_republican_democratic",
+    (1872, "thomas-a-hendricks"): None,
+    (2016, "donald-j-trump"): "republican",
+    (2016, "hillary-clinton"): "democratic",
+    (2016, "colin-powell"): None,
+}
+#: Two Table 1 rows per served election.
+NARA_PARTY_KEYS = 2 * SERVED_YEARS
 
 
 def _corpus_fetch(html_dir: str) -> Any:
@@ -498,8 +520,78 @@ def test_snapshot_from_a_real_full_span_warehouse(
             assert conn.execute(
                 f"SELECT census_source, census_license FROM {META_TABLE}"
             ).fetchone() == ("USCB", "US-PD")
+
+            # --- #386: the nominating party -------------------------------------
+            _assert_the_nominating_party(conn)
+            _assert_mit_party_is_unchanged_from_v4(conn)
         finally:
             conn.close()
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()
+
+
+def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
+    """AC1/AC2 of #386 on the real artifact: Table 1 rows carry their party on every
+    row of both tables, and a recipient outside Table 1 is NULL in all three columns."""
+    for table in (DATA_TABLE, ROLLUP_TABLE):
+        for (year, slug), expected in NOMINATING_PARTY_PINS.items():
+            got = set(
+                conn.execute(
+                    "SELECT nominating_party, nominating_party_source, "
+                    f"nominating_party_note FROM {table} "
+                    "WHERE year = ? AND candidate_slug = ?",
+                    (year, slug),
+                ).fetchall()
+            )
+            assert len(got) == 1, (table, year, slug, got)
+            value, source, note = got.pop()
+            assert value == expected, (table, year, slug, value)
+            assert source == ("NARA" if expected else None), (table, year, slug)
+            if expected is None or slug != "horace-greeley":
+                assert note is None, (table, year, slug, note)
+            else:
+                assert note and note.startswith("Greeley was nominated"), note
+        # Every NARA candidate-year is set on all of its rows: 102 keys, no NULL among
+        # their rows (the build's null guard proves the rest; this pins the count).
+        keyed = conn.execute(
+            f"SELECT count(DISTINCT year || '/' || candidate_slug) FROM {table} "
+            "WHERE nominating_party_source = 'NARA'"
+        ).fetchone()[0]
+        assert keyed == NARA_PARTY_KEYS, (table, keyed)
+        assert conn.execute(
+            f"SELECT count(*) FROM {table} WHERE nominating_party_source = 'USGOV'"
+        ).fetchone()[0] == 0  # no curated rows until #387
+    assert conn.execute(
+        f"SELECT usgov_source, usgov_license FROM {META_TABLE}"
+    ).fetchone() == ("USGOV", "US-PD")
+
+
+def _assert_mit_party_is_unchanged_from_v4(conn: sqlite3.Connection) -> None:
+    """AC3 of #386: MIT's ``party`` is served exactly as schema 4 served it.
+
+    Compared row by row against the values the live v4 artifact served, on both tables:
+    every row the v4 file names carries the same party, and every other row is NULL.
+    The oracle is a recorded artifact, not this build, so it cannot move with the code.
+    """
+    import json
+
+    v4 = json.loads(V4_PARTY_FIXTURE.read_text())
+    expected_ec = {(y, u, s): p for y, u, s, p in v4["ec_pv"]}
+    served_ec = {
+        (y, u, s): p
+        for y, u, s, p in conn.execute(
+            f"SELECT year, state_usps, candidate_slug, party FROM {DATA_TABLE} "
+            "WHERE party IS NOT NULL"
+        )
+    }
+    assert served_ec == expected_ec
+    expected_rollup = {(y, s): p for y, s, p in v4["national_rollup"]}
+    served_rollup = {
+        (y, s): p
+        for y, s, p in conn.execute(
+            f"SELECT year, candidate_slug, party FROM {ROLLUP_TABLE} "
+            "WHERE party IS NOT NULL"
+        )
+    }
+    assert served_rollup == expected_rollup

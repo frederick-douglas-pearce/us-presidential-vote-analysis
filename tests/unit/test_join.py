@@ -27,6 +27,7 @@ from usvote.count_status import (
 )
 from usvote.hybrid import REQUIRED_JOIN_COLUMNS
 from usvote.join import (
+    CANDIDATE_PARTY_TABLE,
     EC_PV_COLUMNS,
     EC_PV_PREFERRED_VIEW,
     EC_PV_REDISTRIBUTABLE_VIEW,
@@ -35,8 +36,10 @@ from usvote.join import (
     assert_pv_matches_ec,
     assert_winners_have_pv,
     build_ec_pv_join_sql,
+    create_ec_pv_views,
     join_ec_pv,
 )
+from usvote.party import NOTE_COLUMN, PARTY_COLUMN, SOURCE_COLUMN
 from usvote.pv.schema import SHARED_PV_COLUMNS
 from usvote.pv.source import SOURCE_MIT, build_pv_source_frame
 from usvote.pv.views import PV_PREFERRED_VIEW, PV_REDISTRIBUTABLE_VIEW
@@ -101,12 +104,16 @@ def test_builder_counted_columns_are_appended_never_inserted() -> None:
         "source", "party", "candidate_votes", "state_total_votes",
         "reliability", "redistributable",
     )
-    # ... and #144's pair still sits immediately after it, ahead of #139's own pair.
+    # ... and #144's pair still sits immediately after it, ahead of #139's own pair,
+    # then #386's three nominating-party columns, appended last.
     assert EC_PV_COLUMNS[15:] == (
         COUNTED_VOTES_COLUMN,
         "national_counted_electoral_votes",
         COUNT_STATUS_COLUMN,
         COUNT_STATUS_REASON_COLUMN,
+        "nominating_party",
+        "nominating_party_source",
+        "nominating_party_note",
     )
     # ... and the SELECT list agrees, so the view's column order matches the contract.
     sql = build_ec_pv_join_sql(PV_PREFERRED_VIEW)
@@ -119,6 +126,20 @@ def test_builder_counted_columns_are_appended_never_inserted() -> None:
     )
     assert sql.index(f"v.{COUNT_STATUS_COLUMN},") < sql.index(
         f"v.{COUNT_STATUS_REASON_COLUMN}"
+    )
+    assert sql.index(f"v.{COUNT_STATUS_REASON_COLUMN}") < sql.index(
+        "cp.nominating_party,"
+    )
+    assert sql.index("cp.nominating_party,") < sql.index(
+        "cp.nominating_party_source,"
+    )
+    assert sql.index("cp.nominating_party_source,") < sql.index(
+        "cp.nominating_party_note"
+    )
+    # The SELECT list ends at the note: nothing follows it before FROM.
+    assert sql.index("cp.nominating_party_note") < sql.index(" FROM ")
+    assert sql[sql.index("cp.nominating_party_note") : sql.index(" FROM ")] == (
+        "cp.nominating_party_note"
     )
 
 
@@ -141,6 +162,19 @@ def test_builder_carries_redistributable_from_pv_source() -> None:
     assert "s.redistributable" in sql
 
 
+def test_builder_joins_the_party_table_on_its_primary_key() -> None:
+    # #386: the nominating party comes from dwh.candidate_party at (year, candidate_id),
+    # its primary key, as a LEFT JOIN: no EC row is dropped and none fans out.
+    sql = build_ec_pv_join_sql(PV_PREFERRED_VIEW)
+    assert (
+        "LEFT JOIN dwh.candidate_party cp"
+        " ON cp.year = v.year AND cp.candidate_id = v.candidate_id"
+    ) in sql
+    # MIT's party is still the resolved PV view's, never the party table's.
+    assert "p.party," in sql
+    assert "cp.party" not in sql
+
+
 def test_builder_targets_the_redistributable_view() -> None:
     sql = build_ec_pv_join_sql(PV_REDISTRIBUTABLE_VIEW)
     assert "LEFT JOIN dwh.pv_redistributable p" in sql
@@ -151,6 +185,7 @@ def test_builder_threads_the_schema() -> None:
     assert "mart.votes" in sql
     assert "mart.pv_preferred" in sql
     assert "mart.pv_source" in sql
+    assert f"mart.{CANDIDATE_PARTY_TABLE}" in sql
 
 
 # --- frame oracle: a fabricated DENSE EC + PV scenario ----------------------
@@ -233,8 +268,28 @@ def _pv() -> pd.DataFrame:
     ])[list(SHARED_PV_COLUMNS)]
 
 
+def _candidate_party() -> pd.DataFrame:
+    """``dwh.candidate_party`` rows: A and B keyed for 2020, faithless F not keyed."""
+    return pd.DataFrame(
+        [
+            {
+                "year": 2020, "candidate_id": 1, PARTY_COLUMN: "republican",
+                SOURCE_COLUMN: "NARA", "archives_party_code": "R", NOTE_COLUMN: None,
+            },
+            {
+                "year": 2020, "candidate_id": 2, PARTY_COLUMN: "democratic",
+                SOURCE_COLUMN: "NARA", "archives_party_code": "D",
+                NOTE_COLUMN: "A note.",
+            },
+        ]
+    )
+
+
 def _joined() -> pd.DataFrame:
-    return join_ec_pv(_votes(), _CANDIDATES, _pv(), build_pv_source_frame())
+    return join_ec_pv(
+        _votes(), _CANDIDATES, _pv(), build_pv_source_frame(),
+        candidate_party_df=_candidate_party(),
+    )
 
 
 def _by_key(joined: pd.DataFrame) -> dict[tuple, pd.Series]:
@@ -300,8 +355,58 @@ def test_winner_plus_pv_carries_the_provided_denominator() -> None:
 
 
 def test_oracle_without_pv_source_leaves_redistributable_null() -> None:
-    joined = join_ec_pv(_votes(), _CANDIDATES, _pv())
+    joined = join_ec_pv(
+        _votes(), _CANDIDATES, _pv(), candidate_party_df=_candidate_party()
+    )
     assert joined["redistributable"].isna().all()
+
+
+def test_the_nominating_party_lands_on_every_row_of_a_keyed_candidate_year() -> None:
+    joined = _joined()
+    a = joined[joined["candidate"] == "Winner A"]
+    b = joined[joined["candidate"] == "Loser B"]
+    assert len(a) == 4
+    assert (a[PARTY_COLUMN] == "republican").all()
+    assert (a[SOURCE_COLUMN] == "NARA").all()
+    assert a[NOTE_COLUMN].isna().all()
+    assert (b[PARTY_COLUMN] == "democratic").all()
+    assert (b[NOTE_COLUMN] == "A note.").all()
+    # MIT's party is untouched by the join: the PV fixture's value on every PV row.
+    assert (a["party"] == "DEMOCRAT").all()
+
+
+def test_an_unkeyed_candidate_year_is_null_in_all_three_columns() -> None:
+    # Faithless F has no candidate_party row: the one cause of a null (D077).
+    f = _joined().query("candidate == 'Faithless F'")
+    assert len(f) == 4
+    for column in (PARTY_COLUMN, SOURCE_COLUMN, NOTE_COLUMN):
+        assert f[column].isna().all(), column
+
+
+def test_a_duplicated_party_key_fails_rather_than_fanning_out() -> None:
+    doubled = pd.concat([_candidate_party(), _candidate_party().iloc[[0]]])
+    with pytest.raises(pd.errors.MergeError):
+        join_ec_pv(
+            _votes(), _CANDIDATES, _pv(), build_pv_source_frame(),
+            candidate_party_df=doubled,
+        )
+
+
+class _NoRelationsDBC:
+    """A DBC stand-in whose ``to_regclass`` probe finds only the named relations."""
+
+    def __init__(self, present: set[str]) -> None:
+        self.present = present
+
+    def select_query_to_df(self, sql: str) -> pd.DataFrame:
+        name = sql.split("to_regclass('")[1].split("')")[0]
+        return pd.DataFrame({"relation": [name if name in self.present else None]})
+
+
+def test_view_creation_refuses_a_warehouse_without_the_party_table() -> None:
+    dbc = _NoRelationsDBC({"dwh.pv_preferred", "dwh.pv_redistributable"})
+    with pytest.raises(JoinError, match=r"dwh\.candidate_party does not exist"):
+        create_ec_pv_views(dbc)  # type: ignore[arg-type]
 
 
 # --- guards -----------------------------------------------------------------
@@ -356,7 +461,10 @@ def test_winner_has_pv_ignores_a_loser_without_pv() -> None:
     # (55 EV), so use a genuine loser: drop Winner A's California PV (A lost CA, EC 0).
     pv = _pv()
     pv = pv[~((pv["state"] == "California") & (pv["candidate"] == "Winner A"))]
-    joined = join_ec_pv(votes, _CANDIDATES, pv, build_pv_source_frame())
+    joined = join_ec_pv(
+        votes, _CANDIDATES, pv, build_pv_source_frame(),
+        candidate_party_df=_candidate_party(),
+    )
     # A/California is a 0-EV loser now missing PV — the guard must stay quiet (only F,
     # a winner, would flag, so exempt it).
     assert_winners_have_pv(joined, exemptions={(2020, "Faithless F")})

@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
@@ -32,8 +33,8 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
     # value and stop pinning the thing that matters: that a human moved it when the
     # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245,
-    # 0.5.0 -> 0.6.0 by #330.
-    assert info["version"] == "0.6.0"
+    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386.
+    assert info["version"] == "0.7.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -86,6 +87,7 @@ def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None
         out,
         pv_status_df=synthetic_pv_status_frame(),
         per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
@@ -113,6 +115,7 @@ def test_openapi_description_carries_the_disclaimer(
         out,
         pv_status_df=synthetic_pv_status_frame(),
         per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(),
         build_timestamp=SNAPSHOT_TS,
     )
     settings = ApiSettings(snapshot_path=out, cors_origins=["http://localhost:5173"])
