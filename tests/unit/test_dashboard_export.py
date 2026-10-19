@@ -1067,6 +1067,8 @@ ELECTION_YEARS = tuple(
         if (m := re.fullmatch(r"/v1/elections/([0-9]{4})", path))
     )
 )
+# Non-vacuous: an empty tuple would make pytest skip the scan rather than fail it.
+assert {"1824", "1896", "2024"} <= set(ELECTION_YEARS), ELECTION_YEARS
 
 #: A value no cell has wording for: an underscore, so a raw rendering of it fails
 #: :func:`raw_values` wherever it lands.
