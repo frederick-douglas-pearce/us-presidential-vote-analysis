@@ -2031,6 +2031,24 @@ class TestTheNullHasOneCause:
             _ec_pv_frame(), r"national_rollup: .*NULL without a cause.*2020, 'cand-a'"
         )
 
+    def test_the_fact_rows_are_read_on_their_own(self) -> None:
+        """The mirror of the roll-up test: a NULL on the ``ec_pv`` rows alone fails, so
+        the fact-table half of the guard is pinned by itself."""
+        data = pd.DataFrame(
+            {
+                "year": [2020, 2020],
+                "candidate_slug": ["cand-a", "cand-b"],
+                "president_electoral_votes": [38, 55],
+                "nominating_party": ["republican", None],
+            }
+        )
+        rollup = data[["year", "candidate_slug"]].assign(
+            nominating_party=["republican", "democratic"]
+        )
+        keyed = {(2020, "cand-a"), (2020, "cand-b")}
+        with pytest.raises(SnapshotError, match=r"^ec_pv: .*2020, 'cand-b'"):
+            assert_nominating_party_nulls_have_one_cause(data, rollup, keyed)
+
     def test_the_rollup_is_read_on_its_own(self) -> None:
         """The roll-up is read on its own: a NULL there alone fails too.
 

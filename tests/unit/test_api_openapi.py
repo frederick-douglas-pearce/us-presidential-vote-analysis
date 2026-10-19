@@ -74,6 +74,25 @@ def test_openapi_description_reflects_live_coverage_window(client: TestClient) -
     assert "{coverage_window}" not in desc  # placeholder was substituted
 
 
+def test_openapi_description_carries_the_live_provenance_note(
+    client: TestClient, snapshot_path: str
+) -> None:
+    """The served description's provenance paragraph is the loaded snapshot's own note.
+
+    Built independently here from the snapshot's meta, the way every ``/v1`` response
+    builds ``meta.provenance``, so a live render that resolved any pair from the wrong
+    code (the curated ``usgov_*`` pair from ``ec_source``, say, #386) fails.
+    """
+    from usvote.api.models import Provenance
+    from usvote.api.repository import SnapshotRepository
+
+    meta = SnapshotRepository.open(snapshot_path).meta()
+    note = Provenance.from_snapshot_meta(meta).redistributable_note
+    desc = client.get("/openapi.json").json()["info"]["description"]
+    assert note in desc
+    assert "from U.S. Government publications — " in desc
+
+
 def test_openapi_without_lifespan_serves_static_fallback(tmp_path: Path) -> None:
     """Building the schema before startup (no open repository) must not raise.
 
