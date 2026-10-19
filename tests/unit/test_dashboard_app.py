@@ -61,13 +61,13 @@ RECORDED: dict[str, dict[str, Any]] = {
         "/v1/elections": "v1_elections.json",
         **{
             f"/v1/elections/{year}": f"v1_elections_{year}.json"
-            for year in (1824, 1860, 1868, 1872, 2016, 2024)
+            for year in (1824, 1860, 1868, 1872, 1896, 2016, 2024)
         },
         "/v1/states/GA": "v1_states_GA.json",
         # The per-capita tables, T6 and T7 (#280).
         **{
             f"/v1/elections/{year}/per-capita": f"v1_elections_{year}_per_capita.json"
-            for year in (1824, 1848, 1860, 1864, 1868, 1872, 2016, 2024)
+            for year in (1824, 1848, 1860, 1864, 1868, 1872, 1896, 2016, 2024)
         },
         **{
             f"/v1/states/{usps}/per-capita": f"v1_states_{usps}_per_capita.json"
