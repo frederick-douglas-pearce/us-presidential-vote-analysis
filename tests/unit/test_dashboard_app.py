@@ -215,9 +215,16 @@ def sentinel_meta() -> dict[str, Any]:
         "license",
         "census_source_name",
         "census_license",
+        "usgov_source_name",
+        "usgov_license",
     ):
         p[key] = f"SENTINEL-{key}"
-    for key in ("ec_license_url", "license_url", "census_license_url"):
+    for key in (
+        "ec_license_url",
+        "license_url",
+        "census_license_url",
+        "usgov_license_url",
+    ):
         p[key] = f"https://sentinel.example/{key}"
     p["snapshot_version"] = "SENTINEL-version"
     return meta
@@ -241,6 +248,12 @@ class TestRender:
             "Electoral votes: ": ("ec_source_name", "ec_license", "ec_license_url"),
             "Popular votes: ": ("source_name", "license", "license_url"),
             "Population: ": ("census_source_name", "census_license", "census_license_url"),
+            # The curated party source (#389), labeled by what it supplies.
+            "Parties the National Archives does not print: ": (
+                "usgov_source_name",
+                "usgov_license",
+                "usgov_license_url",
+            ),
         }
         assert set(by_label) == set(expected)
         for label, (name, lic, url) in expected.items():

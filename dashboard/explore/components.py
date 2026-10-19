@@ -25,12 +25,14 @@ SNAPSHOT_ID = "snapshot-version"
 #: The id of the footer's list of sources.
 PROVENANCE_ID = "provenance"
 
-#: The three sources, in display order: what each supplies, and the provenance keys
-#: naming it and its license. The CSV preamble names the same triples (#309).
+#: The four sources, in display order: what each supplies, and the provenance keys
+#: naming it and its license. The CSV preamble names the same triples (#309); the
+#: fourth, parties the National Archives does not print, arrived with #389.
 SOURCES: tuple[tuple[str, str, str, str], ...] = (
     export.EC_SOURCE,
     export.PV_SOURCE,
     export.CENSUS_SOURCE,
+    export.USGOV_SOURCE,
 )
 
 #: The degraded state's sentence. ``scripts/probe_dashboard.sh`` greps the routed root
@@ -204,8 +206,11 @@ def table(
     it did not build. The body and the CSV are built from the one list ``rows``, so the
     file holds exactly the rows the table shows, in the same order. The CSV's columns
     are the table's ``fields`` in display order, then ``extra`` (the count reason a cell
-    shows, and the keys a filter or another year needs, which the table shows only
-    inside a cell or not at all). ``notes`` are shown under the table and written into
+    shows, the party note the page shows under the table, the party's per-row source
+    (#389: per-row provenance, the one ``extra`` column that is neither shown nor a
+    key, so a reader can tell which rows the curated source supplies), and the keys a
+    filter or another year needs, which the table shows only inside a cell or not at
+    all). ``notes`` are shown under the table and written into
     the file's preamble, so what they explain is explained in both. With no rows, there
     is no table and nothing to download: ``empty`` says so. The link is the scroll
     box's next sibling, outside it, so it never scrolls away with the table.

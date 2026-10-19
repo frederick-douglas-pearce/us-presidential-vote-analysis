@@ -219,10 +219,19 @@ class TestJackson:
         assert of_type(first[6], "Strong")[0].children == "Disputed"
         assert of_type(first[6], "Span")[0].children == reason
 
-    def test_a_null_party_reads_its_null_label(self) -> None:
-        # Jackson's rows carry no party (before the popular-vote window).
+    def test_the_party_reads_its_display_form_or_its_null_label(self) -> None:
+        # #389: Jackson's 1824 rows carry the Archives' Democratic-Republican party.
         cell = table_rows(render())[0][2]
-        assert labels.NOT_IN_DATASET in texts(cell)
+        assert texts(cell) == ["Democratic-Republican"]
+        body = jackson()
+        body["data"][0].update(
+            nominating_party=None,
+            nominating_party_source=None,
+            nominating_party_note=None,
+        )
+        cell = table_rows(render(body=body))[0][2]
+        assert texts(cell) == [labels.NOT_IN_DATASET]
+        assert cell.title == labels.PARTY_NULL_NOTE
 
     def test_each_year_links_to_its_election_and_each_state_to_its_history(
         self,

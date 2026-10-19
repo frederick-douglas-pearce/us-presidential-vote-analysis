@@ -56,7 +56,7 @@ COUNT_STATUS_ID = "election-count-status"
 STATE_FIELDS = (
     "state",
     "candidate",
-    "party",
+    "nominating_party",
     "state_electoral_votes",
     "electoral_votes",
     "electoral_votes_counted",
@@ -64,16 +64,29 @@ STATE_FIELDS = (
     "pv_status",
     "popular_votes",
 )
-#: The fields T2's glossary names: its columns, and the reason its count cell shows.
-STATE_GLOSSARY = (*STATE_FIELDS, "electoral_count_status_reason")
-#: What T2's CSV adds after its columns (#309): the reason its count cell shows, and the
-#: keys its filters and its year are named by.
-STATE_EXTRA = ("electoral_count_status_reason", "state_usps", "candidate_slug", "year")
+#: The fields T2's glossary names: its columns, the reason its count cell shows, and the
+#: party note its Party notes list shows (#389).
+STATE_GLOSSARY = (
+    *STATE_FIELDS,
+    "electoral_count_status_reason",
+    "nominating_party_note",
+)
+#: What T2's CSV adds after its columns (#309): the reason its count cell shows, the
+#: party note and the party's per-row source (#389), and the keys its filters and its
+#: year are named by.
+STATE_EXTRA = (
+    "electoral_count_status_reason",
+    "nominating_party_note",
+    "nominating_party_source",
+    "state_usps",
+    "candidate_slug",
+    "year",
+)
 
 #: T3's columns, in display order, by public field name.
 NATION_FIELDS = (
     "candidate",
-    "party",
+    "nominating_party",
     "national_electoral_votes",
     "national_electoral_votes_counted",
     "national_electoral_denominator",
@@ -85,8 +98,16 @@ NATION_FIELDS = (
     "ec_share_hybrid",
     "hybrid_score",
 )
-#: What T3's CSV adds after its columns (#309): the candidate's key and the year.
-NATION_EXTRA = ("candidate_slug", "year")
+#: The fields T3's column-name list names: its columns and the party note (#389).
+NATION_GLOSSARY = (*NATION_FIELDS, "nominating_party_note")
+#: What T3's CSV adds after its columns (#309): the party note and the party's per-row
+#: source (#389), then the candidate's key and the year.
+NATION_EXTRA = (
+    "nominating_party_note",
+    "nominating_party_source",
+    "candidate_slug",
+    "year",
+)
 
 #: The election panel's fields, in display order, by public field name (#308): who led
 #: under each method, whether the popular-vote or the hybrid winner differs from the
@@ -363,7 +384,7 @@ def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html
         [
             components.state_cell(row),
             components.candidate_cell(row),
-            labels.party_cell(row["party"]),
+            labels.nominating_party_cell(row),
             labels.cell(labels.number(row["state_electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes_counted"])),
@@ -398,7 +419,7 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
     return html.Tr(
         [
             components.candidate_cell(row),
-            labels.party_cell(row["party"]),
+            labels.nominating_party_cell(row),
             labels.cell(labels.number(row["national_electoral_votes"])),
             labels.cell(labels.number(row["national_electoral_votes_counted"])),
             labels.cell(labels.number(row["national_electoral_denominator"])),
@@ -618,9 +639,15 @@ def render(
             NATION_TABLE_ID,
             _download(year, "national", "the national results", body, chosen),
             extra=NATION_EXTRA,
-            notes=(labels.PARTY_NOTE, labels.HYBRID_NOTE, labels.EC_SHARE_HYBRID_NOTE),
+            notes=(
+                labels.PARTY_NOTE,
+                labels.PARTY_NULL_NOTE,
+                labels.HYBRID_NOTE,
+                labels.EC_SHARE_HYBRID_NOTE,
+            ),
         ),
-        labels.glossary(NATION_FIELDS),
+        *labels.party_notes(summary),
+        labels.glossary(NATION_GLOSSARY),
     ]
     return html.Div(
         [
@@ -636,8 +663,9 @@ def render(
                 STATES_TABLE_ID,
                 _download(year, "by-state", "the results by state", body, chosen),
                 extra=STATE_EXTRA,
-                notes=(labels.PARTY_NOTE,),
+                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
             ),
+            *labels.party_notes(shown),
             labels.glossary(STATE_GLOSSARY),
             *nation,
             *_per_capita_section(

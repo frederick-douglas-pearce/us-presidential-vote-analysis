@@ -459,7 +459,8 @@ class TestHeaders:
         expected = {
             "state": "State",
             "candidate": "Candidate",
-            "party": "Party",
+            "nominating_party": "Party",
+            "nominating_party_note": "Party note",
             "state_electoral_votes": "Electors appointed (state)",
             "electoral_votes": "Electoral votes cast",
             "electoral_votes_counted": "Electoral votes counted",
@@ -530,8 +531,11 @@ class TestHeaders:
         assert len(glossaries) == 4
         named = [[texts(dd.children)[0] for dd in of_type(g, "Dd")] for g in glossaries]
         assert named[0] == list(MOD["PANEL_FIELDS"])
-        assert named[1] == list(MOD["STATE_FIELDS"]) + ["electoral_count_status_reason"]
-        assert named[2] == list(MOD["NATION_FIELDS"])
+        assert named[1] == list(MOD["STATE_FIELDS"]) + [
+            "electoral_count_status_reason",
+            "nominating_party_note",
+        ]
+        assert named[2] == list(MOD["NATION_FIELDS"]) + ["nominating_party_note"]
         assert named[3] == list(MOD["PER_CAPITA_FIELDS"])
         summaries = [g.children[0].children for g in glossaries]
         assert summaries == ["Field names"] + ["Column names"] * 3
@@ -602,10 +606,29 @@ class TestNullCells:
         # The note quotes the cell it explains, so the two cannot drift apart.
         assert f'"{labels.NOT_IN_DATASET}"' in labels.HAS_POPULAR_VOTE_NOTE
         assert labels.NOT_IN_DATASET == "Not in this dataset"
+        # The party's wording (#389, owner approval at the plan gate).
         assert labels.PARTY_NOTE == (
-            "Party comes from the popular-vote source, so this dataset records it only "
-            "where it has a popular-vote figure."
+            "The party column shows the party that nominated the candidate for "
+            "President in that election. In 1824 and 1828, for a candidate no national "
+            "convention or caucus nominated, and in 1836, for a Whig candidate, it "
+            "shows the party this dataset's source names for them."
         )
+        assert labels.PARTY_NULL_NOTE == (
+            'A party shown as "Not in this dataset" (an empty cell in the download) '
+            "means this dataset records no party for that candidate in that election. "
+            "It does not say whether a party nominated them."
+        )
+        assert f'"{labels.NOT_IN_DATASET}"' in labels.PARTY_NULL_NOTE
+        assert labels.NO_NOMINATION == (
+            "Without a party's nomination for President when the electors voted"
+        )
+        assert labels.NO_NOMINATION_NOTE == (
+            "Either no party nominated this candidate for President, or the "
+            "nomination was withdrawn before the electors voted. It does not mean the "
+            "candidate had no party."
+        )
+        assert labels.PARTY_NOTES_HEADING == "Party notes"
+        assert labels.PARTY_NOTE_ITEM == "{candidate}, {year}: {note}"
         assert labels.COUNT_STATUS == {
             "counted": ("Counted", None),
             "not_counted": ("Not counted", "Congress decided not to count them"),
@@ -666,15 +689,16 @@ class TestNullCells:
             # The second share is a value at every year, not a popular-vote cell.
             assert row["ec_share_hybrid"].endswith("%"), (year, row)
         assert {panel(tree)[f] for f in PV_FIELDS} == {labels.NOT_APPLICABLE}
-        # Out of AC3 by the owner's ruling (#352, option (i)): a null party keeps
-        # "Not in this dataset" with its note, as in T2; #355's party display changes
-        # only a party that is there.
+        # A null party has nothing to do with the window (#389): it reads "Not in
+        # this dataset", never the window's wording.
         null_party = [
-            r["candidate"] for r in year_body(year)["summary"] if r["party"] is None
+            r["candidate"]
+            for r in year_body(year)["summary"]
+            if r["nominating_party"] is None
         ]
         assert null_party  # the premise
         for name in null_party:
-            assert rows[name]["party"] == labels.NOT_IN_DATASET, (year, name)
+            assert rows[name]["nominating_party"] == labels.NOT_IN_DATASET, (year, name)
 
     def test_inside_the_window_t3_has_no_year_note_and_names_a_missing_figure(
         self,
@@ -688,7 +712,7 @@ class TestNullCells:
         trump = rows["Donald J. Trump"]
         assert trump["national_pv_votes"] == "62,985,062"
         assert trump["pv_share"] == "46.0%"
-        assert trump["party"] == "Republican"  # the display form (#355)
+        assert trump["nominating_party"] == "Republican"  # its display form (#389)
 
     def test_t3_reads_the_index_s_flag_and_the_coverage_years(self) -> None:
         """Doctored inputs, so a literal window in the page fails: the year-level
@@ -740,36 +764,157 @@ class TestNullCells:
             inside = PV_MIN <= row["year"] <= PV_MAX
             assert row["has_popular_vote"] is inside, row["year"]
 
-    def test_a_null_party_says_so_with_its_reason(self) -> None:
+    def test_the_three_party_states_on_real_rows(self) -> None:
+        """AC1, AC2, AC4, AC7 (#389): 1860 gives a party for the President and the Main
+        Opponent and "Not in this dataset" (with its one-cause note) for the others;
+        1896's Bryan reads one joint value."""
         tree = render(1860)
-        cells = [
-            row[MOD["STATE_FIELDS"].index("party")] for row in table_rows(tree, STATES)
+        nation = nation_rows(tree)
+        assert nation["Abraham Lincoln"]["nominating_party"] == "Republican"
+        assert nation["Stephen A. Douglas"]["nominating_party"] == "Democratic"
+        for name in ("John C. Breckinridge", "John Bell"):
+            assert nation[name]["nominating_party"] == labels.NOT_IN_DATASET, name
+        by_name = {r["candidate"]: r for r in state_rows(tree)}
+        assert by_name["Abraham Lincoln"]["nominating_party"] == "Republican"
+        index = MOD["STATE_FIELDS"].index("nominating_party")
+        null_cells = [
+            row[index]
+            for row in table_rows(tree, STATES)
+            if cell_text(row[index]) == labels.NOT_IN_DATASET
         ]
-        cells += [
-            row[MOD["NATION_FIELDS"].index("party")] for row in table_rows(tree, NATION)
+        null_cells += [
+            row[MOD["NATION_FIELDS"].index("nominating_party")]
+            for row in table_rows(tree, NATION)
+            if cell_text(row[MOD["NATION_FIELDS"].index("nominating_party")])
+            == labels.NOT_IN_DATASET
         ]
-        assert cells
-        for cell in cells:
-            assert cell.children == labels.NOT_IN_DATASET
-            assert cell.title == labels.PARTY_NOTE
-        notes = [p for p in of_type(tree, "P") if p.children == labels.PARTY_NOTE]
-        assert len(notes) == 2  # under T2 and under T3
-        # The page's party cells are what the shared cell builds (S4 reuses it).
-        shared = labels.party_cell(None)
-        assert (shared.children, getattr(shared, "title", None)) == (
-            cells[0].children,
-            cells[0].title,
+        assert null_cells
+        assert {c.title for c in null_cells} == {labels.PARTY_NULL_NOTE}
+        for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
+            shown = [p for p in of_type(tree, "P") if p.children == note]
+            assert len(shown) == 2, note  # under T2 and under T3
+        bryan = nation_rows(render(1896))["William J. Bryan"]
+        assert bryan["nominating_party"] == "Democratic and Populist"
+
+    def test_a_row_note_is_help_text_and_listed_once(self) -> None:
+        """1872 Greeley (#389): the note is the cell's help text and one Party notes
+        item under each table, however many state rows repeat it."""
+        body = year_body(1872)
+        note = next(
+            r["nominating_party_note"]
+            for r in body["summary"]
+            if r["candidate"] == "Horace Greeley"
         )
-        assert labels.party_cell("WHIG").children == "Whig"
-        assert getattr(labels.party_cell("WHIG"), "title", None) is None
-        # A blank party is no party, so it carries the note too (#355); one that is
-        # not text is unrecognized, with that note.
-        for value, shown, note in (
-            ("  ", labels.NOT_IN_DATASET, labels.PARTY_NOTE),
-            (7, labels.UNRECOGNIZED, labels.UNRECOGNIZED_NOTE),
-        ):
-            built = labels.party_cell(value)
-            assert (built.children, getattr(built, "title", None)) == (shown, note)
+        assert note
+        tree = render(1872)
+        index = MOD["NATION_FIELDS"].index("nominating_party")
+        greeley = next(
+            row[index]
+            for row in table_rows(tree, NATION)
+            if cell_text(row[0]) == "Horace Greeley"
+        )
+        assert cell_text(greeley) == "Liberal Republican and Democratic"
+        assert greeley.title == note
+        lists = [
+            d
+            for d in of_type(tree, "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+        assert len(lists) == 2  # under T2 and under T3
+        item = labels.PARTY_NOTE_ITEM.format(
+            candidate="Horace Greeley", year=1872, note=note
+        )
+        for block in lists:
+            assert [li.children for li in of_type(block, "Li")] == [item]
+
+    def test_a_no_nomination_row_reads_its_own_label(self) -> None:
+        """AC3 (#389): no row is served with ``no_nomination`` yet, so the body is
+        doctored here, never in a recorded file."""
+        body = year_body(2016)
+        for row in [*body["data"], *body["summary"]]:
+            if row["candidate"] == "Colin Powell":
+                row.update(
+                    nominating_party="no_nomination",
+                    nominating_party_source="USGOV",
+                    nominating_party_note="A doctored note.",
+                )
+        tree = render(2016, body=body)
+        index = MOD["NATION_FIELDS"].index("nominating_party")
+        powell = next(
+            row[index]
+            for row in table_rows(tree, NATION)
+            if cell_text(row[0]) == "Colin Powell"
+        )
+        assert cell_text(powell) == labels.NO_NOMINATION
+        assert labels.NO_NOMINATION not in {labels.NOT_IN_DATASET, labels.UNRECOGNIZED}
+        assert powell.title == f"{labels.NO_NOMINATION_NOTE} A doctored note."
+        items = [li.children for li in of_type(tree, "Li")]
+        assert "Colin Powell, 2016: A doctored note." in items
+
+    @pytest.mark.parametrize(
+        ("row", "shown", "title"),
+        [
+            ({"nominating_party": "whig"}, "Whig", None),
+            (
+                {"nominating_party": "whig", "nominating_party_note": "A note."},
+                "Whig",
+                "A note.",
+            ),
+            (
+                {"nominating_party": "no_nomination"},
+                labels.NO_NOMINATION,
+                labels.NO_NOMINATION_NOTE,
+            ),
+            ({"nominating_party": None}, labels.NOT_IN_DATASET, labels.PARTY_NULL_NOTE),
+            ({"nominating_party": "  "}, labels.NOT_IN_DATASET, labels.PARTY_NULL_NOTE),
+            ({}, labels.NOT_IN_DATASET, labels.PARTY_NULL_NOTE),
+            ({"nominating_party": 7}, labels.UNRECOGNIZED, labels.UNRECOGNIZED_NOTE),
+            # A closed vocabulary: exact match, never stripped or re-cased (#389).
+            (
+                {"nominating_party": " whig "},
+                labels.UNRECOGNIZED,
+                labels.UNRECOGNIZED_NOTE,
+            ),
+            ({"nominating_party": "WHIG"}, labels.UNRECOGNIZED, labels.UNRECOGNIZED_NOTE),
+            # A note that is not text with something in it is no note.
+            ({"nominating_party": "whig", "nominating_party_note": 7}, "Whig", None),
+            ({"nominating_party": "whig", "nominating_party_note": " "}, "Whig", None),
+        ],
+    )
+    def test_the_party_cell(
+        self, row: dict[str, Any], shown: str, title: str | None
+    ) -> None:
+        built = labels.nominating_party_cell(row)
+        assert (built.children, getattr(built, "title", None)) == (shown, title)
+
+    def test_the_party_notes_list(self) -> None:
+        rows = [
+            {
+                "year": 1872,
+                "candidate": "A",
+                "candidate_slug": "a",
+                "nominating_party_note": "N.",
+            },
+            {
+                "year": 1872,
+                "candidate": "A",
+                "candidate_slug": "a",
+                "nominating_party_note": "N.",
+            },
+            {"year": 1872, "candidate": "B", "candidate_slug": "b"},
+            {
+                "year": 1872,
+                "candidate": 7,
+                "candidate_slug": "c",
+                "nominating_party_note": "M.",
+            },
+        ]
+        (block,) = labels.party_notes(rows)
+        assert [li.children for li in of_type(block, "Li")] == [
+            "A, 1872: N.",
+            f"{labels.UNRECOGNIZED}, 1872: M.",
+        ]
+        assert labels.party_notes(rows[2:3]) == []
 
     @pytest.mark.parametrize(
         ("fn", "value", "shown"),
@@ -800,20 +945,14 @@ class TestNullCells:
             (labels.number, 1.5, labels.UNRECOGNIZED),  # a count is an integer
             (labels.number, "1_000", labels.UNRECOGNIZED),
             (labels.number, None, labels.NOT_IN_DATASET),
-            (labels.party, None, labels.NOT_IN_DATASET),
-            (labels.party, "", labels.NOT_IN_DATASET),
-            (labels.party, 7, labels.UNRECOGNIZED),
-            (labels.party, "_", labels.UNRECOGNIZED),  # text with no words to show
-            (labels.party, "_ _", labels.UNRECOGNIZED),
-            (labels.party, "\u200b", labels.UNRECOGNIZED),
-            (labels.party, "_\u200b", labels.UNRECOGNIZED),
-            (labels.party, "\ufeff", labels.UNRECOGNIZED),
-            (labels.party, "-", labels.UNRECOGNIZED),
-            (labels.party, "&", labels.UNRECOGNIZED),
-            (labels.party, "+", labels.UNRECOGNIZED),
-            (labels.party, "A-1", "A-1"),  # one letter or digit is enough
-            (labels.party, "123", "123"),  # a digit counts, not only a letter
-            (labels.party, " DEMOCRAT ", "Democratic"),  # trimmed before the lookup
+            (labels.nominating_party, None, labels.NOT_IN_DATASET),
+            (labels.nominating_party, "", labels.NOT_IN_DATASET),
+            (labels.nominating_party, 7, labels.UNRECOGNIZED),
+            (labels.nominating_party, "_", labels.UNRECOGNIZED),
+            (labels.nominating_party, "DEMOCRAT", labels.UNRECOGNIZED),  # MIT's code
+            (labels.nominating_party, " democratic ", labels.UNRECOGNIZED),
+            (labels.nominating_party, "democratic", "Democratic"),
+            (labels.nominating_party, "no_nomination", labels.NO_NOMINATION),
             # A blank is no value in every function the rule covers (#355's review).
             (labels.has_popular_vote, "", labels.NOT_IN_DATASET),
             (labels.has_popular_vote, " ", labels.NOT_IN_DATASET),
@@ -1985,6 +2124,10 @@ class TestWordingRules:
             "NO_NATIONAL_FIGURE",
             "HAS_POPULAR_VOTE_NOTE",
             "PARTY_NOTE",
+            "PARTY_NULL_NOTE",
+            "NO_NOMINATION",
+            "NO_NOMINATION_NOTE",
+            "PARTY_NOTES_HEADING",
             "MARGIN_NOTE",
             "EC_SHARE_HYBRID_NOTE",
             "UNRECOGNIZED",
@@ -1997,7 +2140,9 @@ class TestWordingRules:
             texts_[f"FLIP_YES[{role}]"] = labels.FLIP_YES.format(
                 method="popular-vote", role=role
             )
-        texts_ |= {f"PARTY_DISPLAY[{k}]": v for k, v in labels.PARTY_DISPLAY.items()}
+        texts_ |= {
+            f"NOMINATING_PARTY[{k}]": v for k, v in labels.NOMINATING_PARTY.items()
+        }
         texts_["NO_PV_SENTENCE"] = MOD["NO_PV_SENTENCE"].format(
             year=1860, first=1976, last=2024
         )
@@ -2115,31 +2260,33 @@ class TestEcWinnerLabel:
 
 
 class TestPartyDisplay:
-    """A party code's display form (#355): the API and the download keep the code."""
+    """The nominating party's display forms (#389): the API and the download keep the
+    code. Test-only import of ``usvote.party``, the vocabulary of record (stdlib-only;
+    the runtime imports no ``usvote``, D070(b))."""
 
-    #: Every served code's expected display form, written out.
-    EXPECTED = {"DEMOCRAT": "Democratic", "REPUBLICAN": "Republican"}
+    def test_every_code_has_a_display_form(self) -> None:
+        # A new code (a superseding D-entry) fails here until it has a form.
+        from usvote.party import NOMINATING_PARTIES
 
-    def test_every_served_code_has_its_display_form(self) -> None:
-        # Test-only: the runtime imports no ``usvote`` (D070(b)); decided at #355's
-        # plan gate. A new served code fails here until it has a form.
-        from usvote.mit.transform import EC_GETTER_PARTIES
+        assert set(labels.NOMINATING_PARTY) == set(NOMINATING_PARTIES)
 
-        assert set(self.EXPECTED) == EC_GETTER_PARTIES
-        assert {code: labels.party(code) for code in EC_GETTER_PARTIES} == (
-            self.EXPECTED
-        )
+    def test_the_forms_are_distinct_and_never_a_fallback(self) -> None:
+        forms = list(labels.NOMINATING_PARTY.values())
+        assert len(set(forms)) == len(forms)  # two codes never read as one party
+        assert not set(forms) & {labels.NOT_IN_DATASET, labels.UNRECOGNIZED}
+        assert labels.NOMINATING_PARTY["no_nomination"] == labels.NO_NOMINATION
+        assert "no party" not in labels.NO_NOMINATION.lower()
 
-    def test_the_recorded_responses_carry_only_served_codes(self) -> None:
-        """Ties the constant to what the API actually served."""
-        from usvote.mit.transform import EC_GETTER_PARTIES
+    def test_the_recorded_responses_carry_only_vocabulary_codes(self) -> None:
+        """Ties the table to what the API actually served."""
+        from usvote.party import NOMINATING_PARTIES
 
         found: set[Any] = set()
 
         def walk(node: Any) -> None:
             if isinstance(node, dict):
                 for key, value in node.items():
-                    if key == "party":
+                    if key == "nominating_party":
                         found.add(value)
                     else:
                         walk(value)
@@ -2148,33 +2295,27 @@ class TestPartyDisplay:
                     walk(child)
 
         walk(RECORDED)
-        assert found - {None} == EC_GETTER_PARTIES
-
-    @pytest.mark.parametrize(
-        ("code", "shown"),
-        [
-            ("GREEN_PARTY", "Green Party"),
-            ("PEOPLE'S", "People's"),  # str.title would give "People'S"
-            (" REPUBLICAN ", "Republican"),
-            ("whig", "Whig"),
-        ],
-    )
-    def test_the_rule(self, code: str, shown: str) -> None:
-        assert labels.party(code) == shown
+        assert found - {None} <= set(NOMINATING_PARTIES)
+        # Non-vacuous: the recordings carry both joint codes now served.
+        assert {"liberal_republican_democratic", "democratic_populist"} <= found
 
     def test_the_page_shows_the_form_and_its_downloads_keep_the_code(self) -> None:
-        """T2 and T3 show the display form; both files carry only served codes (or an
-        empty cell), never a display form. T4's file: ``test_dashboard_export.py``."""
+        """T2 and T3 show the display form; both files carry the code (or an empty
+        cell), never a display form. T4's file: ``test_dashboard_export.py``."""
         from tests.unit.test_dashboard_export import Csv, links
-        from usvote.mit.transform import EC_GETTER_PARTIES
+        from usvote.party import NOMINATING_PARTIES
 
         tree = render(2016)
-        assert nation_rows(tree)["Hillary Clinton"]["party"] == "Democratic"
-        shown = {r["party"] for r in state_rows(tree)} - {labels.NOT_IN_DATASET}
+        assert nation_rows(tree)["Hillary Clinton"]["nominating_party"] == "Democratic"
+        shown = {r["nominating_party"] for r in state_rows(tree)} - {
+            labels.NOT_IN_DATASET
+        }
         assert shown == {"Democratic", "Republican"}
         for table_id in (STATES, NATION):
             rows = Csv(links(tree)[export.link_id(table_id)].href).rows
-            assert {r["party"] for r in rows} - {""} == EC_GETTER_PARTIES, table_id
+            codes = {r["nominating_party"] for r in rows} - {""}
+            assert codes == {"democratic", "republican"}, table_id
+            assert codes <= set(NOMINATING_PARTIES)
 
 
 class TestUnrecognizedCell:
