@@ -867,6 +867,7 @@ class TestAttribution:
             ("election-per-capita", False, True, False),
             ("state-history", True, False, True),
             ("state-per-capita", False, True, False),
+            ("candidate-history", True, False, True),
         ],
     )
     def test_each_table_names_the_sources_it_carries(
@@ -1057,8 +1058,15 @@ class TestRequestBudget:
 
 # --- no raw values on a page (#355) ---------------------------------------------------
 
-#: The recorded years of the one-election view, each rendered whole.
-ELECTION_YEARS = ("1824", "1860", "1868", "1872", "2016", "2024")
+#: The recorded years of the one-election view, each rendered whole: read from the
+#: recordings, so a newly recorded year is scanned too.
+ELECTION_YEARS = tuple(
+    sorted(
+        m.group(1)
+        for path in RECORDED
+        if (m := re.fullmatch(r"/v1/elections/([0-9]{4})", path))
+    )
+)
 
 #: A value no cell has wording for: an underscore, so a raw rendering of it fails
 #: :func:`raw_values` wherever it lands.
@@ -1143,8 +1151,8 @@ def doctor(monkeypatch: pytest.MonkeyPatch, path: str, change: Any) -> None:
 #: Every field a ``labels`` function words, per row kind, by public field name: each is
 #: doctored with :data:`SENTINEL`, except a name, which is open vocabulary (a text
 #: sentinel would rightly be shown) and gets a non-text value instead. The party is a
-#: closed vocabulary since #389, so it takes the sentinel too, and its note a non-text
-#: value (a note that is not text shows nowhere).
+#: closed vocabulary since #389, so it takes the sentinel too, and its row gets a text
+#: note, so the unrecognized cell's help text is checked to win over a row note.
 STATE_ROW_FIELDS = (
     "nominating_party",
     "state_electoral_votes",
@@ -1186,6 +1194,10 @@ PANEL_WORDED_FIELDS = (
 PANEL_NAME_FIELDS = ("ec_winner", "pv_winner", "hybrid_winner")
 
 
+#: A row note on each doctored row: text with no underscore, so it is no raw value.
+DOCTORED_NOTE = "A doctored note."
+
+
 def _row(*fields: str, **others: Any) -> Any:
     """Doctor the first row: each of ``fields`` to :data:`SENTINEL`, plus ``others``."""
 
@@ -1196,9 +1208,9 @@ def _row(*fields: str, **others: Any) -> Any:
 
 
 def _election(body: dict[str, Any]) -> None:
-    _row(*STATE_ROW_FIELDS, nominating_party_note=7)(body)
+    _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE)(body)
     body["summary"][0].update(
-        dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), nominating_party_note=7
+        dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), nominating_party_note=DOCTORED_NOTE
     )
     body["election"].update(
         dict.fromkeys(PANEL_WORDED_FIELDS, SENTINEL),
@@ -1224,7 +1236,7 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/state/<usps>": (
         {"usps": "GA"},
         {
-            "/v1/states/GA": _row(*STATE_ROW_FIELDS, nominating_party_note=7),
+            "/v1/states/GA": _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE),
             "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
@@ -1232,7 +1244,7 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"slug": "andrew-jackson"},
         {
             "/v1/candidates/andrew-jackson": _row(
-                *STATE_ROW_FIELDS, nominating_party_note=7
+                *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
             )
         },
     ),
@@ -1260,8 +1272,11 @@ UNRECOGNIZED_CELLS = {
 
 
 class TestOnePartyPerRow:
-    """AC5 of #389, structurally: the popular-vote source's ``party`` appears nowhere a
-    reader of a page or a download could meet it beside the nominating party."""
+    """AC5 of #389, structurally: no header, label, field set or download names the
+    popular-vote source's ``party``. Which field a party cell reads is pinned by the
+    pre-1976 rows (MIT's ``party`` is null then): T2/T3 in
+    ``test_dashboard_election.py``, T4 in ``test_dashboard_state.py``, T5 in
+    ``test_dashboard_candidate.py``."""
 
     def test_no_page_shows_and_no_file_exports_the_popular_vote_party(
         self, monkeypatch: pytest.MonkeyPatch

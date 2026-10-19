@@ -174,8 +174,9 @@ PARTY_NULL_NOTE = (
 #: never saying a withdrawn nominee was not nominated (D077).
 NO_NOMINATION = "Without a party's nomination for President when the electors voted"
 
-#: Help text on a ``no_nomination`` cell, as the API's ``nominating_party`` description
-#: says it.
+#: Help text on a ``no_nomination`` cell: it says what the ``nominating_party`` field
+#: descriptions in ``src/usvote/api/models.py`` say, in the dashboard's wording (ba
+#: spec, #389).
 NO_NOMINATION_NOTE = (
     "Either no party nominated this candidate for President, or the nomination was "
     "withdrawn before the electors voted. It does not mean the candidate had no party."
@@ -256,10 +257,11 @@ EC_SHARE_HYBRID_NOTE = (
 
 
 #: Each nominating-party code's display form (#389, D077; owner approval at #389's plan
-#: gate). A closed table: a code outside it reads :data:`UNRECOGNIZED`, and a test pins
-#: its keys to ``usvote.party.NOMINATING_PARTIES``, so a new code fails until it has a
-#: form here. A joint nomination names its components in code order, joined by "and",
-#: never a hyphen, which would read as one party's name.
+#: gate). A closed table: a code outside it reads :data:`UNRECOGNIZED`, and
+#: ``TestPartyDisplay.test_every_code_has_a_display_form`` (the one-election view's test
+#: module) pins its keys to ``usvote.party.NOMINATING_PARTIES``, so a new code fails
+#: until it has a form here. A joint nomination names its components in code order,
+#: joined by "and", never a hyphen, which would read as one party's name.
 NOMINATING_PARTY: dict[str, str] = {
     "democratic_republican": "Democratic-Republican",
     "national_republican": "National Republican",
@@ -424,21 +426,23 @@ def nominating_party_cell(row: Mapping[str, Any]) -> html.Td:
     """A row's party cell (#389): :func:`nominating_party`, with the one help text that
     explains it. An unrecognized value carries :data:`UNRECOGNIZED_NOTE`
     (:func:`cell`); a row with a note carries the note as served, after
-    :data:`NO_NOMINATION_NOTE` on a ``no_nomination`` row; a ``no_nomination`` row
-    without one carries :data:`NO_NOMINATION_NOTE`; no party carries
-    :data:`PARTY_NULL_NOTE`; a party with no note carries none."""
+    :data:`NO_NOMINATION_NOTE` on a ``no_nomination`` row and after
+    :data:`PARTY_NULL_NOTE` on a null or blank party (defensive: the API serves no such
+    row); a ``no_nomination`` row without one carries :data:`NO_NOMINATION_NOTE`; a
+    null or blank party carries :data:`PARTY_NULL_NOTE`; a party with no note carries
+    none."""
     value = row.get("nominating_party")
     shown = nominating_party(value)
     note = _note_text(row.get("nominating_party_note"))
-    title: str | None
-    if note is not None:
-        title = f"{NO_NOMINATION_NOTE} {note}" if shown == NO_NOMINATION else note
-    elif shown == NO_NOMINATION:
-        title = NO_NOMINATION_NOTE
-    elif shown == NOT_IN_DATASET:
-        title = PARTY_NULL_NOTE
-    else:
-        title = None
+    # The rule keys on the code and the null, never on a display label.
+    lead = (
+        NO_NOMINATION_NOTE
+        if value == "no_nomination"
+        else PARTY_NULL_NOTE
+        if is_blank(value)
+        else None
+    )
+    title = note if lead is None else lead if note is None else f"{lead} {note}"
     td: html.Td = cell(shown, title=title)
     return td
 
@@ -446,23 +450,26 @@ def nominating_party_cell(row: Mapping[str, Any]) -> html.Td:
 def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
     """The visible Party notes list under a table (#389): one item per candidate-year
     among ``rows`` whose note is text with something in it, in first-seen order, each
-    candidate-year once however many state rows repeat it. A list, empty when there is
-    none, so a page splices it in place (``*party_notes(rows)``).
-    The candidate's name is shown as served, as every table shows it; one that is not
-    text with something in it reads :data:`UNRECOGNIZED`, never the raw value."""
+    candidate-year once however many state rows repeat it (keyed on the year, the slug
+    and the name, so two candidates whose slug is missing never merge). A list, empty
+    when there is none, so a page splices it in place (``*party_notes(rows)``).
+    The candidate's name is shown as served; a null or blank one reads
+    :data:`NOT_IN_DATASET` and one that is not text reads :data:`UNRECOGNIZED`
+    (:func:`_unknown`), never the raw value."""
     items: list[str] = []
-    seen: set[tuple[object, object]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for row in rows:
         note = _note_text(row.get("nominating_party_note"))
-        key = (row.get("year"), row.get("candidate_slug"))
+        name = row.get("candidate")
+        key = (repr(row.get("year")), repr(row.get("candidate_slug")), repr(name))
         if note is None or key in seen:
             continue
         seen.add(key)
-        name = row.get("candidate")
         items.append(
             PARTY_NOTE_ITEM.format(
-                candidate=name if not is_blank(name) and isinstance(name, str)
-                else UNRECOGNIZED,
+                candidate=name
+                if isinstance(name, str) and not is_blank(name)
+                else _unknown(name),
                 year=row.get("year"),
                 note=note,
             )

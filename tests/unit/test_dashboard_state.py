@@ -216,6 +216,36 @@ class TestGeorgia:
         assert len(table_rows(tree)) == len(ga_body()["data"])
         assert f"Showing {len(ga_body()['data'])} of" in " ".join(texts(tree))
 
+    def test_the_party_cell_and_the_party_notes_list(self) -> None:
+        """T4 (#389): a pre-1976 party from the nominating-party field (MIT's
+        ``party`` is null then, so a page reading it would fail here), a null with its
+        one-cause note, a row note as help text, and the Party notes list."""
+        index = MOD["FIELDS"].index("nominating_party")
+        cells = {
+            (texts(r[0])[0], texts(r[1])[0]): r[index] for r in table_rows(render())
+        }
+        assert texts(cells[("1824", "Andrew Jackson")]) == ["Democratic-Republican"]
+        clay = cells[("1824", "Henry Clay")]
+        assert texts(clay) == [labels.NOT_IN_DATASET]
+        assert clay.title == labels.PARTY_NULL_NOTE
+        note = next(
+            r["nominating_party_note"]
+            for r in ga_body()["data"]
+            if r["year"] == 1872 and r["candidate"] == "Horace Greeley"
+        )
+        assert note
+        assert cells[("1872", "Horace Greeley")].title == note
+        (block,) = [
+            d
+            for d in of_type(render(), "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+        assert [li.children for li in of_type(block, "Li")] == [
+            labels.PARTY_NOTE_ITEM.format(
+                candidate="Horace Greeley", year=1872, note=note
+            )
+        ]
+
     def test_the_heading_names_the_state_from_the_rows(self) -> None:
         _, name = MOD["render"](
             ga_body(), copy.deepcopy(INDEX), "GA", [], ga_per_capita()

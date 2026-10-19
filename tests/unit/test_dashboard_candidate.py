@@ -233,6 +233,33 @@ class TestJackson:
         assert texts(cell) == [labels.NOT_IN_DATASET]
         assert cell.title == labels.PARTY_NULL_NOTE
 
+    def test_the_party_notes_list_lists_each_year_once(self) -> None:
+        """T5 (#389): a note per candidate-year, listed once however many state rows
+        carry it, one item per year in row order. Jackson's recorded rows carry no
+        note, so two years are doctored here."""
+        body = jackson()
+        years = sorted({r["year"] for r in body["data"]})[:2]
+        for row in body["data"]:
+            if row["year"] in years:
+                row["nominating_party_note"] = f"A note for {row['year']}."
+        blocks = [
+            d
+            for d in of_type(render(body=body), "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+        assert len(blocks) == 1
+        assert [li.children for li in of_type(blocks[0], "Li")] == [
+            labels.PARTY_NOTE_ITEM.format(
+                candidate="Andrew Jackson", year=y, note=f"A note for {y}."
+            )
+            for y in years
+        ]
+        assert not [
+            d
+            for d in of_type(render(), "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+
     def test_each_year_links_to_its_election_and_each_state_to_its_history(
         self,
     ) -> None:

@@ -78,8 +78,9 @@ EC_FIELDS = frozenset(
 #: The fields whose values come from the popular-vote source. ``has_popular_vote`` is
 #: whether a year has any national popular-vote figure, and ``hybrid_score`` averages
 #: in the popular-vote share. The popular-vote source's ``party`` is in no set: no table
-#: shows or exports it since #389 (one party per candidate-year), so a table that did
-#: would fail the cover test.
+#: exports it since #389 (one party per candidate-year), so a table that did would fail
+#: ``test_the_field_sets_are_disjoint_and_cover_every_column``; ``TestOnePartyPerRow``
+#: checks that no header names it.
 POPULAR_VOTE_FIELDS = frozenset(
     {
         "popular_votes",

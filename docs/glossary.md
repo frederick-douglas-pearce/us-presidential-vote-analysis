@@ -556,9 +556,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `labels.NOT_IN_DATASET`, reached through `labels.has_popular_vote`, `labels.yes_no`,
   `labels.number`, `labels.share` (so `labels.share_cell`), `labels.census_year`,
   `labels.pv_status`, `labels.count_status`, `labels.popular_votes`, `labels.nominating_party` (with
-  `labels.PARTY_NULL_NOTE` through `labels.nominating_party_cell`), `labels._closed_value`,
-  `labels._null` (so `labels.winner`, `labels.flip`, `labels.margin`), `labels.ec_majority`,
-  `labels._null_per_capita` (so `labels.population`), `labels.persons_per_electoral_vote`.
+  `labels.PARTY_NULL_NOTE` through `labels.nominating_party_cell`), `labels.party_notes` (the Party
+  notes list's candidate name), `labels._closed_value`, `labels._null` (so `labels.winner`,
+  `labels.flip`, `labels.margin`), `labels.ec_majority`, `labels._null_per_capita` (so
+  `labels.population`), `labels.persons_per_electoral_vote`.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -807,18 +808,20 @@ articles and announcements). Every rule binds all three unless the rule states a
   people-per-electoral-vote cell whose `coverage` is and whose allotment is not zero (a zero
   allotment explains the null first). Candidate and state names are an open vocabulary: candidate
   and state names in the tables, as link text, and as the heading of a state or candidate history
-  page are shown as served (#367). A null or blank text is not this: it names no cause (*Not in this
-  dataset*), or the cause its row or year gives. No served year reaches this cell; it is defensive.
-  In a CSV download the field is written as the API served it; for a null figure with an
-  unrecognized cause, the figure's column is empty and the cause field carries the code.
+  page are shown as served (#367). In the Party notes list under a table, a candidate name that is
+  not text reads this, while the table's cell shows that name as served. A null or blank text is
+  not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
+  served year reaches this cell; it is defensive. In a CSV download the field is written as the API
+  served it; for a null figure with an unrecognized cause, the figure's column is empty and the
+  cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
   (set by `labels.cell`, and by `labels.nominating_party_cell`). Reached through `labels.pv_status`,
   `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
   `labels.per_capita_coverage`, `labels._null_per_capita`), `labels.popular_votes`,
   `labels.has_popular_vote`, `labels.yes_no`, `labels.flip`, `labels.ec_majority`, `labels.winner`,
-  `labels.nominating_party`, `labels.margin`, `labels.number`, `labels.share` (so
-  `labels.share_cell`), `labels.population`, `labels.persons_per_electoral_vote`,
-  `labels.census_year`.
+  `labels.nominating_party`, `labels.party_notes` (the Party notes list's candidate name),
+  `labels.margin`, `labels.number`, `labels.share` (so `labels.share_cell`), `labels.population`,
+  `labels.persons_per_electoral_vote`, `labels.census_year`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan

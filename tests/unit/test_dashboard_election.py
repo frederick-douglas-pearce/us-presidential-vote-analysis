@@ -764,10 +764,11 @@ class TestNullCells:
             inside = PV_MIN <= row["year"] <= PV_MAX
             assert row["has_popular_vote"] is inside, row["year"]
 
-    def test_the_three_party_states_on_real_rows(self) -> None:
-        """AC1, AC2, AC4, AC7 (#389): 1860 gives a party for the President and the Main
+    def test_a_party_and_a_null_on_real_rows(self) -> None:
+        """AC1, AC2, AC4 (#389): 1860 gives a party for the President and the Main
         Opponent and "Not in this dataset" (with its one-cause note) for the others;
-        1896's Bryan reads one joint value."""
+        1896's Bryan reads one joint value. AC7's third state, ``no_nomination``, is
+        ``test_a_no_nomination_row_reads_its_own_label``."""
         tree = render(1860)
         nation = nation_rows(tree)
         assert nation["Abraham Lincoln"]["nominating_party"] == "Republican"
@@ -869,6 +870,24 @@ class TestNullCells:
             ({"nominating_party": "  "}, labels.NOT_IN_DATASET, labels.PARTY_NULL_NOTE),
             ({}, labels.NOT_IN_DATASET, labels.PARTY_NULL_NOTE),
             ({"nominating_party": 7}, labels.UNRECOGNIZED, labels.UNRECOGNIZED_NOTE),
+            # The unrecognized note wins over a row note (labels.cell forces it).
+            (
+                {"nominating_party": 7, "nominating_party_note": "A note."},
+                labels.UNRECOGNIZED,
+                labels.UNRECOGNIZED_NOTE,
+            ),
+            # Defensive (no such row is served): a null with a note keeps the null's
+            # note first, as a no_nomination row keeps its own (owner, #389 review).
+            (
+                {"nominating_party": None, "nominating_party_note": "A note."},
+                labels.NOT_IN_DATASET,
+                f"{labels.PARTY_NULL_NOTE} A note.",
+            ),
+            (
+                {"nominating_party": "no_nomination", "nominating_party_note": "A note."},
+                labels.NO_NOMINATION,
+                f"{labels.NO_NOMINATION_NOTE} A note.",
+            ),
             # A closed vocabulary: exact match, never stripped or re-cased (#389).
             (
                 {"nominating_party": " whig "},
@@ -888,33 +907,41 @@ class TestNullCells:
         assert (built.children, getattr(built, "title", None)) == (shown, title)
 
     def test_the_party_notes_list(self) -> None:
+        def row(year: int, name: Any, slug: Any, note: Any = None) -> dict[str, Any]:
+            return {
+                "year": year,
+                "candidate": name,
+                "candidate_slug": slug,
+                "nominating_party_note": note,
+            }
+
         rows = [
-            {
-                "year": 1872,
-                "candidate": "A",
-                "candidate_slug": "a",
-                "nominating_party_note": "N.",
-            },
-            {
-                "year": 1872,
-                "candidate": "A",
-                "candidate_slug": "a",
-                "nominating_party_note": "N.",
-            },
-            {"year": 1872, "candidate": "B", "candidate_slug": "b"},
-            {
-                "year": 1872,
-                "candidate": 7,
-                "candidate_slug": "c",
-                "nominating_party_note": "M.",
-            },
+            row(1872, "Z", "z", "First."),  # first seen is listed first
+            row(1872, "A", "a", "N."),
+            row(1872, "A", "a", "N."),  # the same candidate-year again: once
+            row(1876, "A", "a", "N."),  # the same slug and note, another year: listed
+            row(1872, "E", "e", "N."),  # another candidate, the same note: listed
+            row(1872, "B", "b"),  # no note
+            row(1872, "D", "d", 7),  # a note that is not text: none
+            row(1872, "F", "f", "  "),  # a blank note: none
+            row(1872, 7, "c", "M."),  # a name that is not text
+            row(1872, None, "n", "O."),  # no name
+            row(1880, "G", None, "P."),  # two candidates with no slug never merge
+            row(1880, "H", None, "Q."),
         ]
         (block,) = labels.party_notes(rows)
+        assert of_type(block, "Strong")[0].children == labels.PARTY_NOTES_HEADING
         assert [li.children for li in of_type(block, "Li")] == [
+            "Z, 1872: First.",
             "A, 1872: N.",
+            "A, 1876: N.",
+            "E, 1872: N.",
             f"{labels.UNRECOGNIZED}, 1872: M.",
+            f"{labels.NOT_IN_DATASET}, 1872: O.",
+            "G, 1880: P.",
+            "H, 1880: Q.",
         ]
-        assert labels.party_notes(rows[2:3]) == []
+        assert labels.party_notes([row(1872, "B", "b")]) == []
 
     @pytest.mark.parametrize(
         ("fn", "value", "shown"),
@@ -2264,11 +2291,47 @@ class TestPartyDisplay:
     code. Test-only import of ``usvote.party``, the vocabulary of record (stdlib-only;
     the runtime imports no ``usvote``, D070(b))."""
 
+    #: The owner-approved display forms (#389's plan gate, 2026-10-19), written out.
+    EXPECTED = {
+        "democratic_republican": "Democratic-Republican",
+        "national_republican": "National Republican",
+        "democratic": "Democratic",
+        "anti_masonic": "Anti-Masonic",
+        "whig": "Whig",
+        "american": "American (Know-Nothing)",
+        "republican": "Republican",
+        "southern_democratic": "Southern Democratic",
+        "constitutional_union": "Constitutional Union",
+        "liberal_republican": "Liberal Republican",
+        "populist": "Populist",
+        "progressive_1912": "Progressive (1912)",
+        "progressive_1924": "Progressive (1924)",
+        "states_rights_democratic": "States' Rights Democratic",
+        "american_independent": "American Independent",
+        "libertarian": "Libertarian",
+        "liberal_republican_democratic": "Liberal Republican and Democratic",
+        "democratic_populist": "Democratic and Populist",
+        "american_whig": "American (Know-Nothing) and Whig",
+        "no_nomination": (
+            "Without a party's nomination for President when the electors voted"
+        ),
+    }
+
     def test_every_code_has_a_display_form(self) -> None:
         # A new code (a superseding D-entry) fails here until it has a form.
         from usvote.party import NOMINATING_PARTIES
 
         assert set(labels.NOMINATING_PARTY) == set(NOMINATING_PARTIES)
+        assert labels.NOMINATING_PARTY == self.EXPECTED
+
+    def test_a_joint_form_names_its_components_joined_by_and(self) -> None:
+        from usvote.party import PARTY_COMPONENTS
+
+        joint = {c: parts for c, parts in PARTY_COMPONENTS.items() if len(parts) > 1}
+        assert joint  # non-vacuous
+        for code, parts in joint.items():
+            expected = " and ".join(labels.NOMINATING_PARTY[p] for p in parts)
+            assert labels.NOMINATING_PARTY[code] == expected, code
 
     def test_the_forms_are_distinct_and_never_a_fallback(self) -> None:
         forms = list(labels.NOMINATING_PARTY.values())
