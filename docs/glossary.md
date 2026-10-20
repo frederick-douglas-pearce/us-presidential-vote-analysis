@@ -483,8 +483,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   carried to the national row. A joint nomination is one atomic code that declares its components
   (`liberal_republican_democratic`, `democratic_populist`, `american_whig`). For 1824 candidates
   outside the caucus, 1828, and the 1836 Whigs, where no national body nominated, the code is the
-  party the source of record names (D077 rule 2). `no_nomination` is a served value (rules 5 and
-  7). Null has one cause: the dataset has no row for that candidate-year. `nominating_party_source`
+  party the source of record names (D077 rule 2). A national party's endorsement counts as its
+  nomination (rule 3), and so does a U.S. Government source's statement that the person was the
+  party's candidate or nominee, or that a body of the party supported or nominated them (rule 8);
+  a value resting on either carries a note saying so (*Nominating-party note*). `no_nomination` is
+  a served value (rules 5 and 7). Null has one cause: the dataset has no row for that candidate-year. `nominating_party_source`
   says where each value comes from: `NARA`, the party the National Archives prints for the
   election's winner and main opponent (a value that a U.S. Government publication amends, such as
   1872 Greeley's, keeps `NARA`), or `USGOV`, a curated row citing U.S. Government publications;
@@ -497,8 +500,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.NO_NOMINATION`. In each T2–T5 download, `nominating_party` and
   `nominating_party_source` as served.
 - **Source:** D077; `PARTY_COMPONENTS`, `NO_NOMINATION`, `TABLE1_PARTY_CORRECTIONS` and
-  `PARTY_SOURCES` in `src/usvote/party.py`; `.claude/specs/research-candidate-party-source.md`
-  §1, §2.2, §2.3, §7 (the evidence record, not an authority);
+  `PARTY_SOURCES` in `src/usvote/party.py`; `CURATED_PARTY_ROWS` in
+  `src/usvote/party_catalog.py` (the curated values, their rule sets and citations);
+  `.claude/specs/research-candidate-party-source.md` §1, §2.2, §2.3, §7 (the evidence record,
+  not an authority);
   `posts/2026-08-25-it-takes-270-but-270-of-what.md` (Greeley, "the Democratic and Liberal
   Republican nominee": a joint nomination in reader prose).
 - **Not:** *Popular-vote source's party*: a separate field, from 1976 on, never the basis of this
@@ -509,13 +514,16 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Nominating-party note
 - **Plain:** A short sentence of fact on how a candidate's nominating party came to be what it
-  is, for example a joint nomination, or a nominee who died before the electors met. A row may
-  have none.
+  is: for example, a joint nomination, an endorsement treated as a nomination, a nominee who died
+  before the electors met, or sources that say which party the candidate ran for without naming
+  the body that nominated them. A row may have none.
 - **Precise:** `nominating_party_note`, nullable text, constant per (year, candidate). It states
   only facts its row's own citations support and adds no source. It is required where the value
   rests on rule 3, 5 or 8, and allowed for any other exceptional case. Null means no note was
   recorded: not that the value is missing, and not that the value is plain. Table 1 notes ship
-  from `TABLE1_ROW_NOTES` in `src/usvote/party.py`; curated notes from the catalog (#387, #388).
+  from `TABLE1_ROW_NOTES` in `src/usvote/party.py`; curated notes from `CURATED_PARTY_ROWS` in
+  `src/usvote/party_catalog.py` (#387; #388 adds its rows there). The rows resting on rule 8
+  share one sentence, and the two 1836 Whig rows share another.
   The text is a data value, served as stored.
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party_note` and
   `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`.
@@ -524,7 +532,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.PARTY_NOTE_ITEM`), shown as served; `LABELS["nominating_party_note"]` in their
   column-name lists; `nominating_party_note` in their downloads.
 - **Source:** D077, "The row note"; research doc §2.4; `TABLE1_ROW_NOTES` (wording approved by
-  the owner, 2026-10-18, #385 plan).
+  the owner, 2026-10-18, #385 plan); `CURATED_PARTY_ROWS` (wording approved by the owner,
+  2026-10-20, #387 plan).
 - **Not:** the value's null (*Nominating party*). Not a citation. Not the count-status reason,
   which is the National Archives' own sentence about the count (*Count status*).
 - **Status:** settled
