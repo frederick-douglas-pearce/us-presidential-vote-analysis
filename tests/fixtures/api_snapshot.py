@@ -64,6 +64,9 @@ FIXTURE_NOT_COUNTED_REASON = COUNT_STATUS_OVERRIDES[
 #: build's keyed pin (each served note and curated value must be its own row's catalog
 #: entry, #387) holds by construction. Looked up from :mod:`usvote.party_catalog`,
 #: never copied, so a catalog change cannot leave the fixture serving a stale value.
+#: Only his key, value, source and note are real: every other fact the fixture gives
+#: him (his states, votes, rank 1, took office) is synthetic, as Greeley's sentence
+#: above rides on a synthetic row.
 FIXTURE_CURATED_ROW = CURATED_BY_KEY[(1860, "John Bell")]
 
 #: Each synthetic candidate's nominating party, its source and its note (#386, #387).

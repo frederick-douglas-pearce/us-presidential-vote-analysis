@@ -5445,11 +5445,13 @@ fresh download (research doc §15). Three findings needed the owner.
 - **(a) The catalog is the third authority D077 names**, in `src/usvote/party_catalog.py`.
   It holds a source registry that states each source's public-domain basis, the rows, and
   their citations. Each citation records the source, a locator, a verbatim passage of 40
-  words or fewer, its verification date and the codes it supports. A check at import refuses
-  any of these: a row with no citation, a value outside the vocabulary, a key Table 1 already
-  covers, an unregistered source, or a joint code with a component no citation supports. The
-  build merges the catalog by default, and the snapshot pins each served value and note to
-  its own row's entry.
+  words or fewer, its verification date and the codes it supports. A check at import refuses,
+  among other defects, a row with no citation, a value outside the vocabulary, a key a Table 1
+  constant names (a correction, rule set or note), an unregistered source, or a joint code with
+  a component no citation supports. A key Table 1 covers without a constant is refused by the
+  build, which allows one row per candidate-year. The build merges the catalog by default. The
+  snapshot pins every served note to its own row's entry, and each curated value to the
+  catalog's; a Table 1 value is the build's, checked there.
 - **(b) A row's rule set follows its citations.** 1824 Crawford cites VPB p. 107 ("the
   Republican caucus nominee"), and 1924 La Follette cites the 1927 *Biographical Directory*
   ("the ticket nominated at Cleveland by the conference for progressive political action").
@@ -5458,8 +5460,8 @@ fresh download (research doc §15). Three findings needed the owner.
   accepts that the Conference for Progressive Political Action's nomination is the
   `progressive_1924` value: the body's name differs from the party name SFB-LaFollette gives
   ("the Progressive Party ticket"), so La Follette carries a note naming the conference. The
-  1836 Whigs White and Webster rest on rules 2 and 8, matching Table 1's 1836 Harrison (rule
-  2), not on rule 6, which the research doc keeps for the two 1860 Democratic nominations.
+  1836 Whigs White and Webster rest on rules 2 and 8, matching Harrison on rule 2, not on
+  rule 6, which the research doc keeps for the two 1860 Democratic nominations.
 - **(c) A member's own words in the bound Congressional Record are a federal source of
   record**, Extensions of Remarks included. Matter inserted into the Record (a reprinted
   article or letter) is not. On that basis 1972 Hospers takes `libertarian` under rule 8, from

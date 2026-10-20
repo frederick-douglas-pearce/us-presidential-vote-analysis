@@ -89,6 +89,7 @@ from tests._helpers import FIXTURES_DIR, non_null_flag, non_null_sqlite_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
+from usvote.party_catalog import CURATED_BY_KEY, RULE_8_NOTE
 from usvote.pv.absences import PV_ABSENCE_CATALOG
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -559,9 +560,20 @@ def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
             "WHERE nominating_party_source = 'NARA'"
         ).fetchone()[0]
         assert keyed == NARA_PARTY_KEYS, (table, keyed)
-        assert conn.execute(
-            f"SELECT count(*) FROM {table} WHERE nominating_party_source = 'USGOV'"
-        ).fetchone()[0] == 0  # no curated rows until #387
+        # Every catalog row is served (#387), and only those: the build's own guards
+        # prove each value and note; this pins the count and one row end to end.
+        curated = conn.execute(
+            f"SELECT count(DISTINCT year || '/' || candidate_slug) FROM {table} "
+            "WHERE nominating_party_source = 'USGOV'"
+        ).fetchone()[0]
+        assert curated == len(CURATED_BY_KEY), (table, curated)
+        assert set(
+            conn.execute(
+                "SELECT nominating_party, nominating_party_source, "
+                f"nominating_party_note FROM {table} "
+                "WHERE year = 1860 AND candidate_slug = 'john-bell'"
+            ).fetchall()
+        ) == {("constitutional_union", "USGOV", RULE_8_NOTE)}, table
     assert conn.execute(
         f"SELECT usgov_source, usgov_license FROM {META_TABLE}"
     ).fetchone() == ("USGOV", "US-PD")

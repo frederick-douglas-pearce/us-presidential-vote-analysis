@@ -928,7 +928,7 @@ a second national body for each row.
 
 The parent then re-checked every catalog citation, and every source this section names, on
 2026-10-20:
-- **Fresh downloads:** the parent fetched all 13 cited sources itself (all HTTP 200).
+- **Fresh downloads:** the parent fetched every cited source itself (all HTTP 200).
 - **Script match:** 19 of the 21 citations matched verbatim, after normalizing whitespace,
   line-end hyphenation and quotation marks.
 - **Page images:** the other two are scanned pages whose OCR is unreliable, so they were
@@ -947,6 +947,11 @@ The parent then re-checked every catalog citation, and every source this section
   Fillmore was the American Party (Know-Nothing) candidate … The Whig Party also endorsed
   Fillmore for president."
 - **No VPB passage supports Fillmore's Whig component.** LOC-1856 is its only source.
+- **1912 Taft.** §8.1's ARCH-1912 passage stops at "received 8 electoral votes each", which
+  read alone says Sherman received them. The catalog's passage runs on through "but Sherman
+  died just before the election." (re-matched on the fresh download, 2026-10-20). The page
+  goes on to say that, before the electors met, Nicholas Butler was selected to receive the
+  electoral votes from Utah and Vermont that would have gone to Sherman.
 
 ### 15.2 Stronger passages that change two rule sets (D078(b))
 

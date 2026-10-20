@@ -664,7 +664,7 @@ def assert_one_nominating_party_per_candidate_year(slugged_df: pd.DataFrame) -> 
 
 
 def assert_nominating_party_matches_catalog(data_df: pd.DataFrame) -> None:
-    """Assert every served nominating party and note is its own row's catalog entry.
+    """Assert every served note, and every curated value, is its own row's entry.
 
     The note is the second free-text column on the public surface, after
     ``count_status_reason``, so the build pins it to the in-repo catalogs rather than
@@ -672,19 +672,23 @@ def assert_nominating_party_matches_catalog(data_df: pd.DataFrame) -> None:
     **keyed** (#387): a note must belong to its own ``(year, candidate)``, not merely be
     one of the catalogued sentences. Over each distinct served row:
 
-    - a **null source** (no ``dwh.candidate_party`` row) has a null note;
+    - a **null source** (no ``dwh.candidate_party`` row) has a null value and note;
     - a ``NARA`` row is not a curated key, and its note is
       ``usvote.party.TABLE1_ROW_NOTES.get(key)``, null where that has none;
     - a ``USGOV`` row is a key of :data:`usvote.party_catalog.CURATED_BY_KEY`, and its
       value and note are that catalog row's, null included.
+
+    A ``NARA`` row's value is not checked here: Table 1 sets it in the build
+    (``transform.build_candidate_party``), which owns that check.
 
     It runs one way, served to catalog. That every catalog row reaches the warehouse is
     the build's to prove (the catalog is ``build_candidate_party``'s default), and null
     guard part 4 checks the null set. That no catalogued note or passage carries a
     control character, which would put a row or field separator into the content hash
     or a CSV, is a property of the catalogs, so it is tested there
-    (``tests/unit/test_party.py``, ``tests/unit/test_party_catalog.py``). Run on
-    ``ec_pv``; the roll-up only carries these columns after the constancy guard.
+    (``test_party.py::test_no_table1_note_carries_a_control_character``,
+    ``test_party_catalog.py::test_no_note_or_passage_carries_a_control_character``).
+    Run on ``ec_pv``; the roll-up only carries these columns after the constancy guard.
     """
     columns = ["year", "candidate", PARTY_COLUMN, SOURCE_COLUMN, NOTE_COLUMN]
     rows = data_df[columns].astype(object).where(data_df[columns].notna(), None)
@@ -694,8 +698,8 @@ def assert_nominating_party_matches_catalog(data_df: pd.DataFrame) -> None:
     ):
         key = (int(year), str(candidate))
         if source is None:
-            if note is not None:
-                problems.append(f"{key}: a note with no party row")
+            if party is not None or note is not None:
+                problems.append(f"{key}: a value or note with no party row")
         elif source == SOURCE_ARCHIVES:
             if key in CURATED_BY_KEY:
                 problems.append(f"{key}: {SOURCE_ARCHIVES} on a curated key")
@@ -1736,9 +1740,11 @@ def read_uncollected_nominating_parties(path: str | Path) -> list[tuple[int, str
     data rather than frozen. It reads the finished file read-only, so it reports what
     ships. Null guard part 4 has already proved that this null set is the
     candidate-years with votes cast minus the warehouse's party keys (D077), so no
-    second definition of the population is needed here.
+    second definition of the population is needed here. ``as_uri`` percent-encodes the
+    path, so a ``#`` or ``?`` in it cannot end the path early, and ``mode=ro`` never
+    creates a missing file.
     """
-    uri = f"file:{Path(path).resolve()}?mode=ro"
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True)) as conn:
         rows = conn.execute(
             "SELECT DISTINCT year, candidate FROM ec_pv "
@@ -1823,11 +1829,14 @@ def _run_build(environ: Mapping[str, str], out_override: str | None) -> int:
         f"{meta.candidate_count} candidates, {meta.year_min}–{meta.year_max}; "
         f"popular vote {meta.pv_year_min}–{meta.pv_year_max})."
     )
-    print(
-        format_uncollected_nominating_parties(
-            read_uncollected_nominating_parties(out_path)
-        )
-    )
+    try:
+        uncollected = read_uncollected_nominating_parties(out_path)
+    except sqlite3.Error as e:
+        # The snapshot is written and valid; only the report failed. A distinct exit
+        # code says so, rather than a traceback that reads as a failed build.
+        print(f"Coverage report failed after the write: {e}", file=sys.stderr)
+        return 4
+    print(format_uncollected_nominating_parties(uncollected))
     return 0
 
 

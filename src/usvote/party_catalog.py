@@ -85,12 +85,6 @@ SOURCES: Mapping[str, Source] = {
         "SERIALSET-08732_00_00-002-0783-0000.pdf",
         _FEDERAL_WORK,
     ),
-    "SNP": Source(
-        "U.S. Senate",
-        "Nominating Presidents",
-        "https://www.senate.gov/about/parties-leadership/nominating-presidents.htm",
-        _FEDERAL_WORK,
-    ),
     "ST-TN": Source(
         "U.S. Senate",
         "States in the Senate: Tennessee Timeline",
@@ -182,8 +176,10 @@ class CatalogEntry:
 # --- the row notes (wording by ``ba``, owner-approved 2026-10-20, #387 plan) -----
 
 #: The note on a row resting on rule 8: its sources name the party but no nominating
-#: body. Shared by every such row so that readers learn one marker. The pronoun fits
-#: every row today; a future row it does not fit needs its own wording.
+#: body. Shared by the rule-8 rows that need no other fact, so that readers learn one
+#: marker; a rule-8 row with more to say (the 1836 Whigs, Fillmore) carries its own
+#: note, which says the same. The pronoun fits every row today; a future row it does
+#: not fit needs its own wording.
 RULE_8_NOTE = (
     "This dataset's sources say which party he ran for, but do not name a convention, "
     "caucus or other body that nominated him."
@@ -223,6 +219,25 @@ def _cite(
 _VERIFIED = date(2026, 10, 20)
 
 _R8 = frozenset({8})
+
+#: VPB's Johnson chapter, p. 127, cited by both 1836 Whig rows.
+_VPB_1836_WHIGS = (
+    _cite(
+        "VPB",
+        "ch. 9, Richard Mentor Johnson, p. 127",
+        "The Whig presidential candidates were Daniel Webster, Tennessee "
+        "Senator and former Jacksonian Hugh Lawson White, and Johnson's former "
+        "commander, General William Henry Harrison.",
+        "whig",
+    ),
+    _cite(
+        "VPB",
+        "ch. 9, Richard Mentor Johnson, p. 127",
+        "they offered a series of sectional candidates nominated by local "
+        "caucuses",
+        "whig",
+    ),
+)
 
 #: The curated rows. Keys are ``(year, name)`` as the candidate dimension spells the
 #: name. Rule sets and notes follow D077 §2.4.
@@ -277,21 +292,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
             1836, "Hugh L. White", "whig", frozenset({2, 8}), WHIG_1836_NOTE
         ),
         (
-            _cite(
-                "VPB",
-                "ch. 9, Richard Mentor Johnson, p. 127",
-                "The Whig presidential candidates were Daniel Webster, Tennessee "
-                "Senator and former Jacksonian Hugh Lawson White, and Johnson's former "
-                "commander, General William Henry Harrison.",
-                "whig",
-            ),
-            _cite(
-                "VPB",
-                "ch. 9, Richard Mentor Johnson, p. 127",
-                "they offered a series of sectional candidates nominated by local "
-                "caucuses",
-                "whig",
-            ),
+            *_VPB_1836_WHIGS,
         ),
     ),
     CatalogEntry(
@@ -305,21 +306,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "unsuccessful Whig candidate for president in 1836",
                 "whig",
             ),
-            _cite(
-                "VPB",
-                "ch. 9, Richard Mentor Johnson, p. 127",
-                "The Whig presidential candidates were Daniel Webster, Tennessee "
-                "Senator and former Jacksonian Hugh Lawson White, and Johnson's former "
-                "commander, General William Henry Harrison.",
-                "whig",
-            ),
-            _cite(
-                "VPB",
-                "ch. 9, Richard Mentor Johnson, p. 127",
-                "they offered a series of sectional candidates nominated by local "
-                "caucuses",
-                "whig",
-            ),
+            *_VPB_1836_WHIGS,
         ),
     ),
     CatalogEntry(
@@ -393,7 +380,8 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "ARCH-1912",
                 "Notes",
                 "Republican Party candidate Taft, and Vice Presidential running mate "
-                "James S. Sherman, received 8 electoral votes each",
+                "James S. Sherman, received 8 electoral votes each, but Sherman died "
+                "just before the election.",
                 "republican",
             ),
         ),

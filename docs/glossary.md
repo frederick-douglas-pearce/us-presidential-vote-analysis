@@ -483,8 +483,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   carried to the national row. A joint nomination is one atomic code that declares its components
   (`liberal_republican_democratic`, `democratic_populist`, `american_whig`). For 1824 candidates
   outside the caucus, 1828, and the 1836 Whigs, where no national body nominated, the code is the
-  party the source of record names (D077 rule 2). A national party's endorsement counts as its
-  nomination (rule 3), and so does a U.S. Government source's statement that the person was the
+  party the source of record names (D077 rule 2). A national party's endorsement is treated as its
+  nomination (rule 3), and so is a U.S. Government source's statement that the person was the
   party's candidate or nominee, or that a body of the party supported or nominated them (rule 8);
   a value resting on either carries a note saying so (*Nominating-party note*). `no_nomination` is
   a served value (rules 5 and 7). Null has one cause: the dataset has no row for that candidate-year. `nominating_party_source`
@@ -522,9 +522,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   rests on rule 3, 5 or 8, and allowed for any other exceptional case. Null means no note was
   recorded: not that the value is missing, and not that the value is plain. Table 1 notes ship
   from `TABLE1_ROW_NOTES` in `src/usvote/party.py`; curated notes from `CURATED_PARTY_ROWS` in
-  `src/usvote/party_catalog.py` (#387; #388 adds its rows there). The rows resting on rule 8
-  share one sentence, and the two 1836 Whig rows share another.
-  The text is a data value, served as stored.
+  `src/usvote/party_catalog.py` (#387; #388 adds its rows there). A rule-8 row with nothing else
+  to explain carries the shared `RULE_8_NOTE`, the 1836 Whig rows share `WHIG_1836_NOTE`, and a
+  row with more to explain has a note of its own. The text is a data value, served as stored.
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party_note` and
   `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`.
   On the dashboard: the party cell's help text where a row has a note, and once per candidate and

@@ -37,6 +37,7 @@ from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_COLUMNS
 from usvote.party import TABLE1_ROW_NOTES
+from usvote.party_catalog import CURATED_BY_KEY
 from usvote.pv.absences import PV_ABSENCE_CATALOG
 from usvote.pv.source import MIT_PV_YEAR_MIN
 from usvote.pv.status import (
@@ -1973,7 +1974,7 @@ class TestOnePartyPerCandidateYear:
 
 
 class TestTheKeyedCatalogPin:
-    """Each served value and note is its own row's catalog entry (#387, D078)."""
+    """Each served note, and each curated value, is its own row's entry (#387, D078)."""
 
     def test_an_invented_note_fails_the_build(self) -> None:
         frame = _ec_pv_frame()
@@ -2024,10 +2025,27 @@ class TestTheKeyedCatalogPin:
             "not its catalog row's",
         )
 
-    def test_a_note_with_no_party_row_fails(self) -> None:
+    @pytest.mark.parametrize(
+        ("party", "note"),
+        [(None, FIXTURE_CURATED_ROW.note), ("constitutional_union", None)],
+    )
+    def test_a_value_or_note_with_no_party_row_fails(
+        self, party: str | None, note: str | None
+    ) -> None:
         _pin_raises(
-            _pin_row(1860, "Cand D", None, None, FIXTURE_CURATED_ROW.note),
-            "a note with no party row",
+            _pin_row(1860, "Cand D", party, None, note),
+            "a value or note with no party row",
+        )
+
+    def test_a_note_on_a_curated_row_with_none_fails(self) -> None:
+        """Crawford's catalog row has a null note, so any served note is wrong."""
+        crawford = CURATED_BY_KEY[(1824, "William H. Crawford")]
+        assert crawford.note is None
+        _pin_raises(
+            _pin_row(
+                1824, crawford.name, crawford.party, "USGOV", FIXTURE_CURATED_ROW.note
+            ),
+            "not its catalog row's",
         )
 
     def test_an_unknown_source_fails(self) -> None:
@@ -2283,10 +2301,24 @@ def test_the_uncollected_report_reads_the_null_set_from_the_built_file(
     assert rows == [(1860, "Cand D")]
 
 
-def test_the_uncollected_report_reads_the_file_read_only(snapshot_path: str) -> None:
-    before = Path(snapshot_path).read_bytes()
-    read_uncollected_nominating_parties(snapshot_path)
-    assert Path(snapshot_path).read_bytes() == before
+def test_the_uncollected_report_never_creates_a_file(tmp_path: Path) -> None:
+    """``mode=ro``: a read-write open would create the missing file before failing."""
+    missing = tmp_path / "missing.sqlite"
+    with pytest.raises(sqlite3.Error):
+        read_uncollected_nominating_parties(missing)
+    assert not missing.exists()
+
+
+def test_the_uncollected_report_reads_a_path_with_uri_characters(
+    snapshot_path: str, tmp_path: Path
+) -> None:
+    """A ``#`` or ``?`` in the path would end a hand-built URI's path early."""
+    import shutil
+
+    odd = tmp_path / "a#b?c%20d" / "snapshot.sqlite"
+    odd.parent.mkdir()
+    shutil.copyfile(snapshot_path, odd)
+    assert read_uncollected_nominating_parties(odd) == [(1860, "Cand D")]
 
 
 def test_the_uncollected_report_groups_by_era() -> None:
@@ -2329,3 +2361,28 @@ def test_the_build_command_prints_the_report_after_writing(
     assert "Wrote snapshot to" in printed
     assert "Nominating party not yet collected: 1 candidate-year(s)." in printed
     assert "1860 Cand D" in printed
+
+
+def test_the_build_command_exits_4_when_the_report_cannot_read_the_file(
+    snapshot_path: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A report failure after the write is not a build failure, and not a traceback."""
+    from usvote import snapshot
+
+    out = tmp_path / "built.sqlite"
+    built_meta = SnapshotMeta(**_read(Path(snapshot_path), META_TABLE).iloc[0].to_dict())
+
+    def fake_build(_dbc: object, out_path: str, *, close: bool) -> SnapshotMeta:
+        Path(out_path).write_bytes(b"not a database")
+        return built_meta
+
+    monkeypatch.setattr(snapshot, "DBC", lambda _config: object())
+    monkeypatch.setattr(snapshot, "build_snapshot_from_db", fake_build)
+    env = {"USVOTE_API_SNAPSHOT_PATH": str(out), "PGPASSWORD": "x"}
+    assert snapshot._run_build(env, None) == 4
+    captured = capsys.readouterr()
+    assert "Wrote snapshot to" in captured.out
+    assert "Coverage report failed after the write" in captured.err

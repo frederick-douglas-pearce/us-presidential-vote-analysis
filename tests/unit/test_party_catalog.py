@@ -23,17 +23,18 @@ from usvote.party_catalog import (
     CATALOG,
     CURATED_BY_KEY,
     CURATED_PARTY_ROWS,
+    FILLMORE_1856_NOTE,
+    LA_FOLLETTE_1924_NOTE,
     MAX_PASSAGE_WORDS,
     RULE_8_NOTE,
     SOURCES,
+    WHIG_1836_NOTE,
     CatalogEntry,
     Citation,
     Source,
     check_curated_catalog,
 )
 from usvote.transform import TransformError
-
-_BELL = CURATED_BY_KEY[(1860, "John Bell")]
 
 
 def _entry(
@@ -145,46 +146,45 @@ def test_a_source_with_no_basis_or_a_plain_http_url_fails() -> None:
 # --- the real catalog's content ----------------------------------------------
 
 
-def test_the_catalog_rows_and_values_are_pinned() -> None:
-    """Every key and value, hand-written (#387's C1 rows). A change needs review."""
-    assert {key: row.party for key, row in CURATED_BY_KEY.items()} == {
-        (1824, "William H. Crawford"): "democratic_republican",
-        (1824, "Henry Clay"): "democratic_republican",
-        (1832, "William Wirt"): "anti_masonic",
-        (1836, "Hugh L. White"): "whig",
-        (1836, "Daniel Webster"): "whig",
-        (1856, "Millard Fillmore"): "american_whig",
-        (1860, "John C. Breckinridge"): "southern_democratic",
-        (1860, "John Bell"): "constitutional_union",
-        (1892, "James B. Weaver"): "populist",
-        (1912, "William H. Taft"): "republican",
-        (1924, "Robert M. La Follette"): "progressive_1924",
-        (1948, "J. Strom Thurmond"): "states_rights_democratic",
-        (1968, "George C. Wallace"): "american_independent",
-        (1972, "John Hospers"): "libertarian",
+def test_the_catalog_rows_are_pinned() -> None:
+    """Every key, value, rule set and note, hand-written (#387's C1 rows, D078). A
+    change needs review. Notes are named by constant; their wording is the owner's."""
+    s8, w36 = RULE_8_NOTE, WHIG_1836_NOTE
+    assert {
+        key: (row.party, set(row.rules), row.note)
+        for key, row in CURATED_BY_KEY.items()
+    } == {
+        (1824, "William H. Crawford"): ("democratic_republican", set(), None),
+        (1824, "Henry Clay"): ("democratic_republican", {2, 8}, s8),
+        (1832, "William Wirt"): ("anti_masonic", {8}, s8),
+        (1836, "Hugh L. White"): ("whig", {2, 8}, w36),
+        (1836, "Daniel Webster"): ("whig", {2, 8}, w36),
+        (1856, "Millard Fillmore"): ("american_whig", {3, 8}, FILLMORE_1856_NOTE),
+        (1860, "John C. Breckinridge"): ("southern_democratic", {6}, None),
+        (1860, "John Bell"): ("constitutional_union", {8}, s8),
+        (1892, "James B. Weaver"): ("populist", {8}, s8),
+        (1912, "William H. Taft"): ("republican", {8}, s8),
+        (1924, "Robert M. La Follette"): (
+            "progressive_1924",
+            set(),
+            LA_FOLLETTE_1924_NOTE,
+        ),
+        (1948, "J. Strom Thurmond"): ("states_rights_democratic", {8}, s8),
+        (1968, "George C. Wallace"): ("american_independent", {8}, s8),
+        (1972, "John Hospers"): ("libertarian", {8}, s8),
     }
     assert len(CURATED_BY_KEY) == len(CATALOG) == len(CURATED_PARTY_ROWS)
 
 
-def test_crawford_and_la_follette_rest_on_no_rule() -> None:
-    """D078: their citations name the body that nominated them, so neither rests on
-    rule 8. La Follette keeps a note for the body's name; Crawford has none."""
-    crawford = CURATED_BY_KEY[(1824, "William H. Crawford")]
-    la_follette = CURATED_BY_KEY[(1924, "Robert M. La Follette")]
-    assert (crawford.rules, crawford.note) == (frozenset(), None)
-    assert la_follette.rules == frozenset()
-    assert la_follette.note and "Conference for Progressive Political Action" in (
-        la_follette.note
-    )
+def test_la_follette_s_note_names_the_body_that_nominated_him() -> None:
+    """D078(b): the body's name differs from the party the value names."""
+    assert "Conference for Progressive Political Action" in LA_FOLLETTE_1924_NOTE
 
 
-def test_every_note_required_row_has_a_note_and_rule_8_rows_share_one() -> None:
+def test_every_note_required_row_has_a_note() -> None:
     for (year, name), row in CURATED_BY_KEY.items():
         if row.rules & NOTE_REQUIRED_RULES:
             assert (row.note or "").strip(), (year, name)
-    rule_8_only = [r for r in CURATED_PARTY_ROWS if r.rules in ({8}, {2, 8})]
-    assert {r.note for r in rule_8_only} >= {RULE_8_NOTE}
-    assert _BELL.note == RULE_8_NOTE
 
 
 def test_every_value_is_a_single_code_or_its_components_are_cited() -> None:
