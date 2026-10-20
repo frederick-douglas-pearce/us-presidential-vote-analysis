@@ -581,6 +581,26 @@ class TestExactlyTheView:
                 "state-per-capita",
                 ("year", *labels.PER_CAPITA_FIELDS, "state_usps"),
             ),
+            (
+                "/candidate/<slug>",
+                "candidate-history",
+                (
+                    "year",
+                    "state",
+                    "nominating_party",
+                    "state_electoral_votes",
+                    "electoral_votes",
+                    "electoral_votes_counted",
+                    "electoral_count_status",
+                    "pv_status",
+                    "popular_votes",
+                    "electoral_count_status_reason",
+                    "nominating_party_note",
+                    "nominating_party_source",
+                    "state_usps",
+                    "candidate_slug",
+                ),
+            ),
         ],
     )
     def test_the_columns(
@@ -689,6 +709,15 @@ class TestNulls:
         history = download(tree, "state-history")
         # the premise: a null party
         assert "" in {r["nominating_party"] for r in history.rows}
+        for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
+            assert note in history.lines
+            assert note in [p.children for p in of_type(tree, "P")]
+
+    def test_the_candidate_history_carries_the_party_notes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/candidate/<slug>", monkeypatch)
+        history = download(tree, "candidate-history")
         for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
             assert note in history.lines
             assert note in [p.children for p in of_type(tree, "P")]
@@ -856,6 +885,21 @@ class TestAttribution:
             "N1",
             "N2",
             export.NULL_LINE,
+        ]
+
+    def test_the_sources_keep_the_footer_s_order(self) -> None:
+        """No table yet carries both census and party fields; the order is pinned for
+        the one that will."""
+        every = {
+            *export.POPULAR_VOTE_FIELDS,
+            *export.CENSUS_FIELDS,
+            *export.NOMINATING_PARTY_FIELDS,
+        }
+        assert export.sources(every) == [
+            export.EC_SOURCE,
+            export.PV_SOURCE,
+            export.CENSUS_SOURCE,
+            export.USGOV_SOURCE,
         ]
 
     @pytest.mark.parametrize(

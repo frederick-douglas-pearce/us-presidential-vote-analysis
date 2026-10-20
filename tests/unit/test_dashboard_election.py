@@ -828,6 +828,29 @@ class TestNullCells:
         for block in lists:
             assert [li.children for li in of_type(block, "Li")] == [item]
 
+    def test_t2_lists_only_the_notes_of_the_rows_it_shows(self) -> None:
+        """1872 filtered to Grant (#389): T2 shows none of Greeley's rows, so its Party
+        notes list is absent; T3, which the filter does not narrow, keeps his."""
+        tree = render(1872, "candidate=ulysses-s-grant")
+        assert {r["candidate"] for r in state_rows(tree)} == {"Ulysses S. Grant"}
+        lists = [
+            d
+            for d in of_type(tree, "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+        assert len(lists) == 1
+        assert [li.children for li in of_type(lists[0], "Li")] == [
+            labels.PARTY_NOTE_ITEM.format(
+                candidate="Horace Greeley",
+                year=1872,
+                note=next(
+                    r["nominating_party_note"]
+                    for r in year_body(1872)["summary"]
+                    if r["candidate"] == "Horace Greeley"
+                ),
+            )
+        ]
+
     def test_a_no_nomination_row_reads_its_own_label(self) -> None:
         """AC3 (#389): no row is served with ``no_nomination`` yet, so the body is
         doctored here, never in a recorded file."""
@@ -928,6 +951,8 @@ class TestNullCells:
             row(1872, None, "n", "O."),  # no name
             row(1880, "G", None, "P."),  # two candidates with no slug never merge
             row(1880, "H", None, "Q."),
+            row(1884, "J", "j-1", "R."),  # one name, two slugs: two candidates
+            row(1884, "J", "j-2", "R."),
         ]
         (block,) = labels.party_notes(rows)
         assert of_type(block, "Strong")[0].children == labels.PARTY_NOTES_HEADING
@@ -940,6 +965,8 @@ class TestNullCells:
             f"{labels.NOT_IN_DATASET}, 1872: O.",
             "G, 1880: P.",
             "H, 1880: Q.",
+            "J, 1884: R.",
+            "J, 1884: R.",
         ]
         assert labels.party_notes([row(1872, "B", "b")]) == []
 

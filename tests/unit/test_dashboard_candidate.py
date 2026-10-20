@@ -260,6 +260,17 @@ class TestJackson:
             if getattr(d, "className", None) == "party-notes"
         ]
 
+    def test_t5_s_column_name_list_names_the_count_reason_and_the_party_note(
+        self,
+    ) -> None:
+        named = [
+            [texts(dd.children)[0] for dd in of_type(g, "Dd")]
+            for g in of_type(render(), "Details")
+        ]
+        assert named == [
+            [*MOD["FIELDS"], "electoral_count_status_reason", "nominating_party_note"]
+        ]
+
     def test_each_year_links_to_its_election_and_each_state_to_its_history(
         self,
     ) -> None:

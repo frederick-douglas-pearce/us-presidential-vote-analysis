@@ -246,6 +246,19 @@ class TestGeorgia:
             )
         ]
 
+    def test_t4_s_column_name_list_names_the_count_reason_and_the_party_note(
+        self,
+    ) -> None:
+        named = [
+            [texts(dd.children)[0] for dd in of_type(g, "Dd")]
+            for g in of_type(render(), "Details")
+        ]
+        assert [
+            *MOD["FIELDS"],
+            "electoral_count_status_reason",
+            "nominating_party_note",
+        ] in named
+
     def test_the_heading_names_the_state_from_the_rows(self) -> None:
         _, name = MOD["render"](
             ga_body(), copy.deepcopy(INDEX), "GA", [], ga_per_capita()
