@@ -28,14 +28,15 @@ import pytest
 
 from tests._helpers import non_null_sqlite_flag
 from tests.fixtures.api_snapshot import (
+    FIXTURE_CURATED_ROW,
     FIXTURE_NOT_COUNTED_REASON,
-    FIXTURE_PARTY_NOTE,
     synthetic_party_keys_frame,
 )
 from usvote import hybrid
 from usvote.count_status import COUNT_STATUS_COUNTED, COUNT_STATUS_NOT_COUNTED
 from usvote.hybrid import ec_denominator_by_year, roll_up_national
 from usvote.join import EC_PV_COLUMNS
+from usvote.party import TABLE1_ROW_NOTES
 from usvote.pv.absences import PV_ABSENCE_CATALOG
 from usvote.pv.source import MIT_PV_YEAR_MIN
 from usvote.pv.status import (
@@ -58,12 +59,15 @@ from usvote.snapshot import (
     add_candidate_slug,
     assert_no_hybrid_pv_below_mit_window,
     assert_no_pv_aggregate_below_mit_window,
+    assert_nominating_party_matches_catalog,
     assert_nominating_party_nulls_have_one_cause,
     build_hybrid_tables,
     build_national_rollup,
     build_snapshot,
     derive_curated_pv_status_roster,
+    format_uncollected_nominating_parties,
     read_redistributable,
+    read_uncollected_nominating_parties,
 )
 from usvote.snapshot_schema import (
     CENSUS_LICENSE,
@@ -93,8 +97,10 @@ _ARCHIVES_REASON = FIXTURE_NOT_COUNTED_REASON
 _USPS = {"Texas": "TX", "California": "CA", "Washington": "WA"}
 
 #: Each synthetic candidate's nominating party (#386). Faithless F is absent on purpose:
-#: votes cast and no ``dwh.candidate_party`` row, so it is served NULL. Nixon carries the
-#: one catalogued note (borrowed, as the build refuses an invented one).
+#: votes cast and no ``dwh.candidate_party`` row, so it is served NULL. Every row here is
+#: an Archives row with no note: the build pins each note to its own row's catalog entry
+#: (#387), so a note on a synthetic candidate would fail it. The shared fixture's 1860
+#: John Bell carries the curated case.
 _NOMINATING_PARTY = {
     "Richard Nixon": "republican",
     "George McGovern": "democratic",
@@ -161,9 +167,7 @@ def _row(
         # #386: from dwh.candidate_party through the view, constant per candidate-year.
         "nominating_party": nominating,
         "nominating_party_source": "NARA" if nominating else None,
-        "nominating_party_note": (
-            FIXTURE_PARTY_NOTE if candidate == "Richard Nixon" else None
-        ),
+        "nominating_party_note": None,
     }
 
 
@@ -1879,8 +1883,6 @@ def test_the_snapshot_serves_the_party_on_both_tables(tmp_path: Path) -> None:
         assert set(d["nominating_party"]) == {"democratic"}
         assert set(d["nominating_party_source"]) == {"NARA"}
         assert d["nominating_party_note"].isna().all()
-        nixon = table[table["candidate"] == "Richard Nixon"]
-        assert set(nixon["nominating_party_note"]) == {FIXTURE_PARTY_NOTE}
         # Faithless F: votes cast, no party row, so NULL in all three (D077).
         f = table[table["candidate"] == "Faithless F"]
         assert not f.empty
@@ -1893,6 +1895,19 @@ def test_the_snapshot_serves_the_party_on_both_tables(tmp_path: Path) -> None:
     assert (meta.usgov_source, meta.usgov_license) == ("USGOV", "US-PD")
     stored = _read(out, META_TABLE).iloc[0]
     assert (stored["usgov_source"], stored["usgov_license"]) == ("USGOV", "US-PD")
+
+
+def test_a_curated_row_is_served_with_its_catalog_value_note_and_source(
+    snapshot_path: str,
+) -> None:
+    """The shared fixture's 1860 John Bell, a real catalog row, on both tables (#387)."""
+    out = Path(snapshot_path)
+    for table in (_read(out, DATA_TABLE), _read(out, ROLLUP_TABLE)):
+        bell = table[table["candidate"] == "John Bell"]
+        assert not bell.empty
+        assert set(bell["nominating_party"]) == {"constitutional_union"}
+        assert set(bell["nominating_party_source"]) == {"USGOV"}
+        assert set(bell["nominating_party_note"]) == {FIXTURE_CURATED_ROW.note}
 
 
 def test_the_party_is_inside_the_content_hash(tmp_path: Path) -> None:
@@ -1948,7 +1963,7 @@ class TestOnePartyPerCandidateYear:
         frame = _ec_pv_frame()
         frame.loc[
             _where(frame, 1972, "Richard Nixon", "California"), "nominating_party_note"
-        ] = None
+        ] = "A note on one row."
         _party_raises(frame, "more than one nominating party")
 
     def test_a_duplicated_row(self) -> None:
@@ -1957,13 +1972,110 @@ class TestOnePartyPerCandidateYear:
         _party_raises(pd.concat([frame, dup], ignore_index=True), "fanned out")
 
 
-class TestNotesAreCatalogued:
-    def test_an_invented_note_fails(self) -> None:
+class TestTheKeyedCatalogPin:
+    """Each served value and note is its own row's catalog entry (#387, D078)."""
+
+    def test_an_invented_note_fails_the_build(self) -> None:
         frame = _ec_pv_frame()
         frame.loc[_where(frame, 1972, "Richard Nixon"), "nominating_party_note"] = (
             "An invented note."
         )
-        _party_raises(frame, "not in the in-repo catalog")
+        _party_raises(frame, "is not its Table 1 note")
+
+    def test_a_real_note_on_the_wrong_row_fails(self) -> None:
+        """Greeley's catalogued note on Nixon: the containment check this replaced
+        would have passed it."""
+        _pin_raises(
+            _pin_row(1972, "Richard Nixon", note=TABLE1_ROW_NOTES[_GREELEY]),
+            "is not its Table 1 note",
+        )
+
+    def test_a_curated_note_on_an_archives_row_fails(self) -> None:
+        _pin_raises(
+            _pin_row(1972, "Richard Nixon", note=FIXTURE_CURATED_ROW.note),
+            "is not its Table 1 note",
+        )
+
+    def test_an_archives_row_on_a_curated_key_fails(self) -> None:
+        _pin_raises(
+            _pin_row(1860, "John Bell", "constitutional_union", "NARA"),
+            "NARA on a curated key",
+        )
+
+    def test_a_curated_row_not_in_the_catalog_fails(self) -> None:
+        _pin_raises(
+            _pin_row(1972, "Richard Nixon", "republican", "USGOV"),
+            "USGOV on a key not in the catalog",
+        )
+
+    @pytest.mark.parametrize(
+        ("party", "note"),
+        [
+            ("whig", FIXTURE_CURATED_ROW.note),
+            ("constitutional_union", None),
+            ("constitutional_union", "Another note."),
+        ],
+    )
+    def test_a_curated_row_whose_value_or_note_differs_fails(
+        self, party: str, note: str | None
+    ) -> None:
+        _pin_raises(
+            _pin_row(1860, "John Bell", party, "USGOV", note),
+            "not its catalog row's",
+        )
+
+    def test_a_note_with_no_party_row_fails(self) -> None:
+        _pin_raises(
+            _pin_row(1860, "Cand D", None, None, FIXTURE_CURATED_ROW.note),
+            "a note with no party row",
+        )
+
+    def test_an_unknown_source_fails(self) -> None:
+        _pin_raises(
+            _pin_row(1972, "Richard Nixon", "republican", "MIT"), "unknown source"
+        )
+
+    def test_matching_rows_of_every_kind_pass(self) -> None:
+        frame = pd.concat(
+            [
+                _pin_row(1872, "Horace Greeley", note=TABLE1_ROW_NOTES[_GREELEY]),
+                _pin_row(1972, "Richard Nixon"),
+                _pin_row(
+                    1860,
+                    "John Bell",
+                    "constitutional_union",
+                    "USGOV",
+                    FIXTURE_CURATED_ROW.note,
+                ),
+                _pin_row(1860, "Cand D", None, None),
+            ],
+            ignore_index=True,
+        )
+        assert_nominating_party_matches_catalog(frame)
+
+
+_GREELEY = (1872, "Horace Greeley")
+
+
+def _pin_row(
+    year: int,
+    candidate: str,
+    party: str | None = "republican",
+    source: str | None = "NARA",
+    note: str | None = None,
+) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "year": year,
+        "candidate": candidate,
+        "nominating_party": party,
+        "nominating_party_source": source,
+        "nominating_party_note": note,
+    }])
+
+
+def _pin_raises(frame: pd.DataFrame, match: str) -> None:
+    with pytest.raises(SnapshotError, match=match):
+        assert_nominating_party_matches_catalog(frame)
 
 
 class TestTheNullHasOneCause:
@@ -2158,3 +2270,62 @@ def _store_row(table: str) -> tuple[str, tuple[object, ...]]:
 def _other_key(table: str, base: tuple[object, ...]) -> tuple[object, ...]:
     """``base`` under another primary key (2016), so a refusal is the CHECK's."""
     return (2016, *base[1:])
+
+
+# --- the not-yet-collected report (#387, AC3) --------------------------------
+
+
+def test_the_uncollected_report_reads_the_null_set_from_the_built_file(
+    snapshot_path: str,
+) -> None:
+    """The shared fixture's one unkeyed candidate-year is 1860 Cand D."""
+    rows = read_uncollected_nominating_parties(snapshot_path)
+    assert rows == [(1860, "Cand D")]
+
+
+def test_the_uncollected_report_reads_the_file_read_only(snapshot_path: str) -> None:
+    before = Path(snapshot_path).read_bytes()
+    read_uncollected_nominating_parties(snapshot_path)
+    assert Path(snapshot_path).read_bytes() == before
+
+
+def test_the_uncollected_report_groups_by_era() -> None:
+    text = format_uncollected_nominating_parties(
+        [(1860, "Cand D"), (1872, "David Davis"), (2016, "Ron Paul")]
+    )
+    assert text.splitlines() == [
+        "Nominating party not yet collected: 3 candidate-year(s).",
+        "  before 1976 (2): 1860 Cand D; 1872 David Davis",
+        "  1976 on (1): 2016 Ron Paul",
+    ]
+    assert format_uncollected_nominating_parties([]) == (
+        "Nominating party: every served candidate-year has a value."
+    )
+
+
+def test_the_build_command_prints_the_report_after_writing(
+    snapshot_path: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``python -m usvote.snapshot`` reports what ships, read from the file it wrote."""
+    import shutil
+
+    from usvote import snapshot
+
+    out = tmp_path / "built.sqlite"
+    built_meta = SnapshotMeta(**_read(Path(snapshot_path), META_TABLE).iloc[0].to_dict())
+
+    def fake_build(_dbc: object, out_path: str, *, close: bool) -> SnapshotMeta:
+        shutil.copyfile(snapshot_path, out_path)
+        return built_meta
+
+    monkeypatch.setattr(snapshot, "DBC", lambda _config: object())
+    monkeypatch.setattr(snapshot, "build_snapshot_from_db", fake_build)
+    env = {"USVOTE_API_SNAPSHOT_PATH": str(out), "PGPASSWORD": "x"}
+    assert snapshot._run_build(env, None) == 0
+    printed = capsys.readouterr().out
+    assert "Wrote snapshot to" in printed
+    assert "Nominating party not yet collected: 1 candidate-year(s)." in printed
+    assert "1860 Cand D" in printed

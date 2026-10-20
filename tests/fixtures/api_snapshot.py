@@ -36,7 +36,14 @@ from usvote.count_status import (
     COUNT_STATUS_REASON_COLUMN,
     COUNTED_VOTES_COLUMN,
 )
-from usvote.party import NOTE_COLUMN, PARTY_COLUMN, SOURCE_COLUMN, TABLE1_ROW_NOTES
+from usvote.party import (
+    NOTE_COLUMN,
+    PARTY_COLUMN,
+    SOURCE_ARCHIVES,
+    SOURCE_COLUMN,
+    SOURCE_CURATED,
+)
+from usvote.party_catalog import CURATED_BY_KEY
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
     PV_STATUS_NOT_PARTICIPATING,
@@ -53,19 +60,25 @@ FIXTURE_NOT_COUNTED_REASON = COUNT_STATUS_OVERRIDES[
     (1872, "Georgia", "Horace Greeley")
 ][1]
 
-#: A real nominating-party note, borrowed from the in-repo catalog for the reason
-#: :data:`FIXTURE_NOT_COUNTED_REASON` is: the build pins every served
-#: ``nominating_party_note`` to :data:`usvote.party.TABLE1_ROW_NOTES` (#386), so an
-#: invented note would fail it. It rides on 1860 Cand C, a synthetic candidate.
-FIXTURE_PARTY_NOTE = TABLE1_ROW_NOTES[(1872, "Horace Greeley")]
+#: The fixture's one curated candidate-year: the real 1860 John Bell, so that the
+#: build's keyed pin (each served note and curated value must be its own row's catalog
+#: entry, #387) holds by construction. Looked up from :mod:`usvote.party_catalog`,
+#: never copied, so a catalog change cannot leave the fixture serving a stale value.
+FIXTURE_CURATED_ROW = CURATED_BY_KEY[(1860, "John Bell")]
 
-#: Each synthetic candidate's nominating party (#386). Cand D is deliberately absent:
-#: it has electoral votes cast (8, in 1860) and no ``dwh.candidate_party`` row, so it is
-#: the fixture's "not in this dataset" case, served NULL.
-FIXTURE_NOMINATING_PARTY = {
-    "Cand A": "republican",
-    "Cand B": "democratic",
-    "Cand C": "whig",
+#: Each synthetic candidate's nominating party, its source and its note (#386, #387).
+#: 2016 and 2020 Cand A and B are Archives rows with no note; 1860 John Bell is the
+#: curated row, with its catalog note. Cand D is deliberately absent: it has electoral
+#: votes cast (8, in 1860) and no ``dwh.candidate_party`` row, so it is the fixture's
+#: "not in this dataset" case, served NULL.
+FIXTURE_NOMINATING_PARTY: dict[str, tuple[str, str, str | None]] = {
+    "Cand A": ("republican", SOURCE_ARCHIVES, None),
+    "Cand B": ("democratic", SOURCE_ARCHIVES, None),
+    FIXTURE_CURATED_ROW.name: (
+        FIXTURE_CURATED_ROW.party,
+        SOURCE_CURATED,
+        FIXTURE_CURATED_ROW.note,
+    ),
 }
 
 #: Deterministic build timestamp so a snapshot's content hash (and thus the ETag) is
@@ -122,13 +135,15 @@ def api_snapshot_row(
     hash and invalidate the ETag assertions built on it.
 
     The nominating party (#386) follows the candidate: its
-    :data:`FIXTURE_NOMINATING_PARTY` entry with source ``NARA`` (and
-    :data:`FIXTURE_PARTY_NOTE` on Cand C), or NULL in all three columns for a candidate
-    that dict does not list. A test wanting another shape edits the built frame.
+    :data:`FIXTURE_NOMINATING_PARTY` entry (value, source and note), or NULL in all
+    three columns for a candidate that dict does not list. A test wanting another shape
+    edits the built frame.
     """
     if party is None:
         party = "DEMOCRAT" if candidate == "Cand B" else "REPUBLICAN"
-    nominating_party = FIXTURE_NOMINATING_PARTY.get(candidate)
+    nominating_party, party_source, party_note = FIXTURE_NOMINATING_PARTY.get(
+        candidate, (None, None, None)
+    )
     return {
         "year": year,
         "state": state,
@@ -153,8 +168,8 @@ def api_snapshot_row(
         COUNT_STATUS_COLUMN: count_status,
         COUNT_STATUS_REASON_COLUMN: count_status_reason,
         PARTY_COLUMN: nominating_party,
-        SOURCE_COLUMN: "NARA" if nominating_party else None,
-        NOTE_COLUMN: FIXTURE_PARTY_NOTE if candidate == "Cand C" else None,
+        SOURCE_COLUMN: party_source,
+        NOTE_COLUMN: party_note,
     }
 
 
@@ -250,14 +265,14 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
             #   California  — same, and where Cand D's votes are CAST but NOT COUNTED
             #   Vermont     — legislature_chosen: no popular vote was ever held
             #   Nevada      — not_participating: took no part, hence 0 electoral votes
-            # Cand C cast 10 and counted 10; Cand D cast 8 in California and Congress
+            # John Bell cast 10 and counted 10; Cand D cast 8 in California and Congress
             # counted NONE of them, so D's national counted total is 0. The counted
             # value follows D046's row rule — cast when `counted`, else 0 — rather than
             # being chosen freely: a fixture that paired `not_counted` with a non-zero
             # counted value would assert behaviour the transform cannot produce, and a
             # regression that mis-derived the measure from the status would still pass.
             api_snapshot_row(
-                year=1860, state="Texas", candidate_id=3, candidate="Cand C",
+                year=1860, state="Texas", candidate_id=3, candidate="John Bell",
                 president_ev=6, national_ev=10, rank=1, took_office=True,
                 candidate_votes=None, state_total=None, total_ev=6,
                 source=None, party=None, reliability=None, redistributable=None,
@@ -270,7 +285,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 national_counted_ev=0,
             ),
             api_snapshot_row(
-                year=1860, state="California", candidate_id=3, candidate="Cand C",
+                year=1860, state="California", candidate_id=3, candidate="John Bell",
                 president_ev=0, national_ev=10, rank=1, took_office=True,
                 candidate_votes=None, state_total=None, total_ev=8,
                 source=None, party=None, reliability=None, redistributable=None,
@@ -285,7 +300,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 count_status_reason=FIXTURE_NOT_COUNTED_REASON,
             ),
             api_snapshot_row(
-                year=1860, state="Vermont", candidate_id=3, candidate="Cand C",
+                year=1860, state="Vermont", candidate_id=3, candidate="John Bell",
                 president_ev=4, national_ev=10, rank=1, took_office=True,
                 candidate_votes=None, state_total=None, total_ev=4,
                 source=None, party=None, reliability=None, redistributable=None,
@@ -298,7 +313,7 @@ def synthetic_ec_pv_frame() -> pd.DataFrame:
                 national_counted_ev=0,
             ),
             api_snapshot_row(
-                year=1860, state="Nevada", candidate_id=3, candidate="Cand C",
+                year=1860, state="Nevada", candidate_id=3, candidate="John Bell",
                 president_ev=0, national_ev=10, rank=1, took_office=True,
                 candidate_votes=None, state_total=None, total_ev=0,
                 source=None, party=None, reliability=None, redistributable=None,
@@ -323,7 +338,7 @@ def synthetic_party_keys_frame(
     warehouse has: the view reads the party from that table. ``build_snapshot`` requires
     it (#386) as the independent side of its null guard. Defaults to
     :func:`synthetic_ec_pv_frame`, where it keys 2016 and 2020 Cand A and B and 1860
-    Cand C, and leaves 1860 Cand D unkeyed.
+    John Bell, and leaves 1860 Cand D unkeyed.
     """
     src = synthetic_ec_pv_frame() if frame is None else frame
     keyed = src.loc[src[PARTY_COLUMN].notna(), ["year", "candidate_id"]]

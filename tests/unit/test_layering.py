@@ -602,9 +602,33 @@ def test_the_party_module_is_dependency_free() -> None:
     assert not third_party, f"usvote.party must stay stdlib-only; found {third_party}"
 
 
+def test_the_party_catalog_module_imports_only_the_party_module() -> None:
+    """``usvote.party_catalog`` (#387) is stdlib-only, and its only ``usvote`` import is
+    :mod:`usvote.party`.
+
+    :mod:`usvote.transform` (pandas) imports it for its default catalog, and
+    :mod:`usvote.snapshot` for the keyed note pin, so it must stay as light as the
+    vocabulary it builds on.
+    """
+    source = (PKG_ROOT / "party_catalog.py").read_text(encoding="utf-8")
+    imported = _imported_names(source)
+    usvote_imports = sorted(n for n in imported if n.split(".")[0] == "usvote")
+    # ``_imported_names`` also lists each ``from usvote.party import X`` as
+    # ``usvote.party.X``; every one must be the party module or a name from it.
+    assert "usvote.party" in usvote_imports, usvote_imports
+    others = [
+        n for n in usvote_imports if n != "usvote.party" and not n.startswith("usvote.party.")
+    ]
+    assert not others, f"usvote.party_catalog may import only usvote.party: {others}"
+    third_party = _non_stdlib_imports(imported)
+    assert not third_party, f"usvote.party_catalog must stay stdlib-only: {third_party}"
+
+
 _PARTY_PROGRAM = _HEAVY_BLOCK_PREAMBLE + """
 from usvote.party import NOMINATING_PARTIES, TABLE1_TOKEN_MAP, build_party_value_check
+from usvote.party_catalog import CURATED_BY_KEY
 
+assert CURATED_BY_KEY[(1860, "John Bell")].party == "constitutional_union"
 assert TABLE1_TOKEN_MAP[(1912, "P")] == "progressive_1912"
 assert "no_nomination" in NOMINATING_PARTIES
 assert build_party_value_check().startswith("CHECK (nominating_party IN (")
@@ -632,9 +656,10 @@ def test_the_party_module_imports_with_the_heavy_stack_blocked() -> None:
     assert "OK" in result.stdout
 
 
-#: The nominating-party authority and its MIT check. D077: MIT is a check, never a
-#: source, so no PV source may read the party authority or feed the check from below.
-_PARTY_MODULES = ("usvote.party", "usvote.party_check")
+#: The nominating-party authorities (the vocabulary and the curated catalog) and the MIT
+#: check. D077: MIT is a check, never a source, so no PV source may read the party
+#: authority or feed the check from below.
+_PARTY_MODULES = ("usvote.party", "usvote.party_catalog", "usvote.party_check")
 
 
 def _names_the_builder(source: str) -> bool:
@@ -670,6 +695,7 @@ def test_no_lower_subpackage_imports_the_party_modules_or_the_builder() -> None:
         "from usvote import party",
         "from usvote.party_check import assert_db_mit_party_agrees",
         "import usvote.party",
+        "from usvote.party_catalog import CATALOG",
     ],
 )
 def test_the_party_import_guard_sees_every_spelling(line: str) -> None:
@@ -685,8 +711,8 @@ def test_the_builder_guard_sees_a_call_but_not_prose() -> None:
 
 
 def test_the_party_modules_are_top_level() -> None:
-    """Both are EC-domain, beside ``spine.py``; neither belongs under a source."""
-    for name in ("party.py", "party_check.py"):
+    """All three are EC-domain, beside ``spine.py``; none belongs under a source."""
+    for name in ("party.py", "party_catalog.py", "party_check.py"):
         assert (PKG_ROOT / name).is_file()
         for sub in _LOWER_SUBPACKAGES:
             assert not (PKG_ROOT / sub / name).exists(), f"usvote/{sub}/{name}"

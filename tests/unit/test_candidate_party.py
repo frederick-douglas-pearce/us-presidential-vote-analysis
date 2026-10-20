@@ -23,6 +23,7 @@ from usvote.party import (
     TABLE1_TOKEN_MAP,
     CuratedPartyRow,
 )
+from usvote.party_catalog import CURATED_BY_KEY, CURATED_PARTY_ROWS
 from usvote.transform import TransformError, build_candidate_party
 from usvote.years import ec_ingest_years
 
@@ -508,8 +509,9 @@ def test_every_committed_fixture_year_has_the_file_glob_years() -> None:
 def test_the_real_fixtures_build_two_archives_rows_per_year() -> None:
     party = _real_build(scrape.fetch_from_dir(FIXTURES_DIR), FIXTURE_YEARS)
 
-    assert party.groupby("year").size().to_dict() == dict.fromkeys(FIXTURE_YEARS, 2)
-    assert set(party["nominating_party_source"]) == {"NARA"}
+    archives = party[party["nominating_party_source"] == "NARA"]
+    assert archives.groupby("year").size().to_dict() == dict.fromkeys(FIXTURE_YEARS, 2)
+    assert set(party["nominating_party_source"]) == {"NARA", "USGOV"}
     value = {(int(r.year), r.name): r.nominating_party for r in party.itertuples()}
     code = {(int(r.year), r.name): r.archives_party_code for r in party.itertuples()}
     assert value[(1872, "Horace Greeley")] == "liberal_republican_democratic"
@@ -524,10 +526,49 @@ def test_the_real_fixtures_build_two_archives_rows_per_year() -> None:
     assert value[(1864, "Abraham Lincoln")] == "republican"
     assert value[(2024, "Kamala D. Harris")] == "democratic"
 
-    notes = party.dropna(subset=["nominating_party_note"])
+    notes = archives.dropna(subset=["nominating_party_note"])
     assert [(int(r.year), r.name) for r in notes.itertuples()] == [
         (1872, "Horace Greeley")
     ]
+
+
+def test_the_real_fixtures_build_the_catalog_rows_in_their_years() -> None:
+    """The default catalog (#387) resolves against real Archives bytes in CI.
+
+    Eight of its fourteen rows fall in a committed fixture year, so their names must
+    match the candidate dimension the real parse builds, and each must arrive once with
+    source ``USGOV``, its value and its note, and no Archives code.
+    """
+    party = _real_build(scrape.fetch_from_dir(FIXTURES_DIR), FIXTURE_YEARS)
+    curated = party[party["nominating_party_source"] == "USGOV"]
+    built = {
+        (int(r.year), r.name): (
+            r.nominating_party,
+            None if pd.isna(r.nominating_party_note) else r.nominating_party_note,
+        )
+        for r in curated.itertuples()
+    }
+    assert sorted(built) == [
+        (1824, "Henry Clay"),
+        (1824, "William H. Crawford"),
+        (1832, "William Wirt"),
+        (1836, "Daniel Webster"),
+        (1836, "Hugh L. White"),
+        (1856, "Millard Fillmore"),
+        (1860, "John Bell"),
+        (1860, "John C. Breckinridge"),
+    ]
+    assert len(curated) == len(built)
+    for key, (value, note) in built.items():
+        assert (value, note) == (CURATED_BY_KEY[key].party, CURATED_BY_KEY[key].note)
+    assert curated["archives_party_code"].isna().all()
+
+
+def test_the_build_merges_the_catalog_by_default() -> None:
+    import inspect
+
+    default = inspect.signature(build_candidate_party).parameters["curated"].default
+    assert default is CURATED_PARTY_ROWS
 
 
 @pytest.mark.skipif(
@@ -539,10 +580,78 @@ def test_the_real_corpus_builds_every_year_with_the_full_map() -> None:
     years = ec_ingest_years()
     party = _real_build(scrape.fetch_from_corpus(os.environ["USVOTE_EC_HTML_DIR"]), years)
 
-    assert len(party) == 2 * len(years)
-    assert set(party["year"]) == years
-    assert set(party["nominating_party_source"]) == {"NARA"}
+    archives = party[party["nominating_party_source"] == "NARA"]
+    assert len(archives) == 2 * len(years)
+    assert set(archives["year"]) == years
+    assert set(party["nominating_party_source"]) == {"NARA", "USGOV"}
     value = {(int(r.year), r.name): r.nominating_party for r in party.itertuples()}
     assert value[(1828, "John Quincy Adams")] == "national_republican"
     assert value[(1896, "William J. Bryan")] == "democratic_populist"
     assert value[(1912, "Theodore Roosevelt")] == "progressive_1912"
+
+
+#: The candidate-years with electoral votes cast that hold no party row after #387: the
+#: C2 rows #388 curates, and 1872 Davis, whose rule-5 question #388 settles (research
+#: doc §8.1–§8.3). Hand-written, not derived: deriving it as "cast minus Table 1 minus
+#: the catalog" would restate what the build does. #388 shrinks it.
+_NOT_YET_COLLECTED = frozenset({
+    (1832, "John Floyd"),
+    (1836, "Willie P. Mangum"),
+    (1872, "Benjamin Gratz Brown"),
+    (1872, "Charles J. Jenkins"),
+    (1872, "David Davis"),
+    (1872, "Thomas A. Hendricks"),
+    (1956, "Walter B. Jones"),
+    (1960, "Harry F. Byrd"),
+    (1976, "Ronald Reagan"),
+    (1988, "Lloyd Bentsen"),
+    (2004, "John Edwards"),
+    (2016, "Bernie Sanders"),
+    (2016, "Colin Powell"),
+    (2016, "Faith Spotted Eagle"),
+    (2016, "John Kasich"),
+    (2016, "Ron Paul"),
+})
+
+
+@pytest.mark.skipif(
+    not os.environ.get("USVOTE_EC_HTML_DIR"),
+    reason="USVOTE_EC_HTML_DIR unset — the Archives corpus lives outside the repo",
+)
+def test_the_real_corpus_builds_every_catalog_row_and_leaves_the_known_remainder() -> (
+    None
+):
+    """Every catalog row arrives once as ``USGOV`` with its value and note, no other
+    ``USGOV`` row exists, and what stays uncollected is exactly the hand-written list."""
+    fetch = scrape.fetch_from_corpus(os.environ["USVOTE_EC_HTML_DIR"])
+    state_geo = fake_state_geo()
+    links = scrape.scrape_election_links(fetch=fetch)
+    raw = scrape.scrape_raw_election_tables(links, ec_ingest_years(), fetch=fetch)
+    parsed = parse.parse_election_years(raw, set(state_geo["NAME"]))
+    candidates, _state, votes = transform.transform_parsed_years(parsed, state_geo)
+    party = build_candidate_party(parsed, candidates, votes)
+    names = dict(zip(candidates["candidate_id"], candidates["name"], strict=True))
+
+    curated = party[party["nominating_party_source"] == "USGOV"]
+    built = {
+        (int(r.year), names[r.candidate_id]): (
+            r.nominating_party,
+            None if pd.isna(r.nominating_party_note) else r.nominating_party_note,
+        )
+        for r in curated.itertuples()
+    }
+    assert len(curated) == len(built)
+    assert built == {
+        key: (row.party, row.note) for key, row in CURATED_BY_KEY.items()
+    }
+
+    totals = votes[votes["is_total"] & (votes["president_electoral_votes"] > 0)]
+    cast = {
+        (int(y), names[c])
+        for y, c in zip(totals["year"], totals["candidate_id"], strict=True)
+    }
+    keyed = {
+        (int(y), names[c])
+        for y, c in zip(party["year"], party["candidate_id"], strict=True)
+    }
+    assert cast - keyed == _NOT_YET_COLLECTED

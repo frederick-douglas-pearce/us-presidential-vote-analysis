@@ -7,8 +7,8 @@ Three fields, ``nominating_party``, ``nominating_party_source`` and
 dataset holds no party for is served ``null`` in all three, never ``no_nomination``.
 
 Served from the shared synthetic snapshot (``tests/fixtures/api_snapshot.py``): 2016 and
-2020 Cand A/B and 1860 Cand C are keyed, and 1860 Cand D (8 votes cast) is not — the
-pre-1976 case. The 1976-on case, a faithless elector's choice, gets its own small frame
+2020 Cand A/B are Archives rows, 1860 John Bell is the curated row (the real catalog
+entry, #387), and 1860 Cand D (8 votes cast) is not keyed — the pre-1976 case. The 1976-on case, a faithless elector's choice, gets its own small frame
 below (:class:`TestFaithlessRecipient`), so the shared fixture's counts stay as the
 other API tests pin them.
 """
@@ -22,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.fixtures.api_snapshot import (
-    FIXTURE_PARTY_NOTE,
+    FIXTURE_CURATED_ROW,
     api_snapshot_row,
     synthetic_ec_pv_frame,
 )
@@ -36,9 +36,11 @@ def _by_candidate(rows: list[dict[str, Any]], name: str) -> list[dict[str, Any]]
     return found
 
 
-def _assert_party(row: dict[str, Any], value: str | None, note: str | None) -> None:
+def _assert_party(
+    row: dict[str, Any], value: str | None, note: str | None, source: str = "NARA"
+) -> None:
     assert row["nominating_party"] == value, row
-    assert row["nominating_party_source"] == ("NARA" if value else None), row
+    assert row["nominating_party_source"] == (source if value else None), row
     assert row["nominating_party_note"] == note, row
 
 
@@ -69,10 +71,15 @@ class TestEveryRowEndpointServesIt:
         for row in rows:
             _assert_party(row, "republican", None)
 
-    def test_a_note_is_served_beside_its_value(self, client: TestClient) -> None:
-        rows = client.get("/v1/candidates/cand-c").json()["data"]
+    def test_a_curated_row_serves_its_value_note_and_source(
+        self, client: TestClient
+    ) -> None:
+        """1860 John Bell: the catalog's value and note, with source ``USGOV`` (#387)."""
+        rows = client.get("/v1/candidates/john-bell").json()["data"]
+        assert rows
         for row in rows:
-            _assert_party(row, "whig", FIXTURE_PARTY_NOTE)
+            _assert_party(row, "constitutional_union", FIXTURE_CURATED_ROW.note, "USGOV")
+        assert FIXTURE_CURATED_ROW.note
 
     def test_a_pre_1976_candidate_with_no_party_row_is_null(
         self, client: TestClient
@@ -97,7 +104,7 @@ class TestEveryRowEndpointServesIt:
             row["nominating_party"]
             for row in client.get("/v1/elections/1860").json()["data"]
         }
-        assert values == {"whig", None}
+        assert values == {"constitutional_union", None}
 
 
 class TestWhereItIsNotServed:

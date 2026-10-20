@@ -94,9 +94,11 @@ import os
 import sqlite3
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from contextlib import closing
 from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -122,11 +124,14 @@ from usvote.load import SCHEMA
 from usvote.party import (
     NOTE_COLUMN,
     PARTY_COLUMN,
+    SOURCE_ARCHIVES,
     SOURCE_COLUMN,
+    SOURCE_CURATED,
     TABLE1_ROW_NOTES,
     build_party_source_check,
     build_party_value_check,
 )
+from usvote.party_catalog import CURATED_BY_KEY
 from usvote.pv.absences import build_curated_roster
 from usvote.pv.source import (
     MIT_PV_YEAR_MIN,
@@ -222,11 +227,6 @@ _ROSTER_MERGE_COLUMNS: tuple[str, ...] = ("year", "state", "pv_status")
 _ALLOWED_COUNT_STATUS_REASONS: frozenset[str] = frozenset(
     reason for _, reason in COUNT_STATUS_OVERRIDES.values()
 )
-
-#: The notes ``nominating_party_note`` may carry (#386): the Table 1 rows' notes in
-#: :data:`usvote.party.TABLE1_ROW_NOTES`. The curated catalog's notes join this set when
-#: #387/#388 add that catalog. See :func:`assert_nominating_party_notes_are_catalogued`.
-_ALLOWED_NOMINATING_PARTY_NOTES: frozenset[str] = frozenset(TABLE1_ROW_NOTES.values())
 
 #: Integer-valued columns that the EC-left join returns as float64 (LEFT-JOIN NULLs make
 #: NaN). Cast to nullable ``Int64`` before hashing/writing so ``150`` never becomes
@@ -663,29 +663,57 @@ def assert_one_nominating_party_per_candidate_year(slugged_df: pd.DataFrame) -> 
         )
 
 
-def assert_nominating_party_notes_are_catalogued(data_df: pd.DataFrame) -> None:
-    """Assert every served ``nominating_party_note`` is one of the in-repo notes.
+def assert_nominating_party_matches_catalog(data_df: pd.DataFrame) -> None:
+    """Assert every served nominating party and note is its own row's catalog entry.
 
     The note is the second free-text column on the public surface, after
-    ``count_status_reason``, and ships on the same terms (#386, architect B1): the build
-    pins it to a closed in-repo catalog, :data:`usvote.party.TABLE1_ROW_NOTES`, rather
-    than trusting that the warehouse was built from it. It is a **containment** check,
-    as :func:`assert_count_status_reasons_are_catalogued` is: it catches a note arriving
-    from anywhere else (a hand-edited warehouse, a second writer), and the catalog's own
-    review is what keeps its entries to facts from U.S. Government works. That no
-    catalogued note carries a control character (which would put a row or field
-    separator into the content hash or a CSV) is a property of the catalog, so it is
-    tested there: ``test_no_table1_note_carries_a_control_character`` in
-    ``tests/unit/test_party.py``.
+    ``count_status_reason``, so the build pins it to the in-repo catalogs rather than
+    trusting that the warehouse was built from them (#386, architect B1). The pin is
+    **keyed** (#387): a note must belong to its own ``(year, candidate)``, not merely be
+    one of the catalogued sentences. Over each distinct served row:
+
+    - a **null source** (no ``dwh.candidate_party`` row) has a null note;
+    - a ``NARA`` row is not a curated key, and its note is
+      ``usvote.party.TABLE1_ROW_NOTES.get(key)``, null where that has none;
+    - a ``USGOV`` row is a key of :data:`usvote.party_catalog.CURATED_BY_KEY`, and its
+      value and note are that catalog row's, null included.
+
+    It runs one way, served to catalog. That every catalog row reaches the warehouse is
+    the build's to prove (the catalog is ``build_candidate_party``'s default), and null
+    guard part 4 checks the null set. That no catalogued note or passage carries a
+    control character, which would put a row or field separator into the content hash
+    or a CSV, is a property of the catalogs, so it is tested there
+    (``tests/unit/test_party.py``, ``tests/unit/test_party_catalog.py``). Run on
+    ``ec_pv``; the roll-up only carries these columns after the constancy guard.
     """
-    notes = data_df[NOTE_COLUMN].dropna()
-    unknown = sorted(set(notes) - _ALLOWED_NOMINATING_PARTY_NOTES)
-    if unknown:
+    columns = ["year", "candidate", PARTY_COLUMN, SOURCE_COLUMN, NOTE_COLUMN]
+    rows = data_df[columns].astype(object).where(data_df[columns].notna(), None)
+    problems: list[str] = []
+    for year, candidate, party, source, note in rows.drop_duplicates().itertuples(
+        index=False
+    ):
+        key = (int(year), str(candidate))
+        if source is None:
+            if note is not None:
+                problems.append(f"{key}: a note with no party row")
+        elif source == SOURCE_ARCHIVES:
+            if key in CURATED_BY_KEY:
+                problems.append(f"{key}: {SOURCE_ARCHIVES} on a curated key")
+            if note != TABLE1_ROW_NOTES.get(key):
+                problems.append(f"{key}: the note is not its Table 1 note")
+        elif source == SOURCE_CURATED:
+            row = CURATED_BY_KEY.get(key)
+            if row is None:
+                problems.append(f"{key}: {SOURCE_CURATED} on a key not in the catalog")
+            elif party != row.party or note != row.note:
+                problems.append(f"{key}: the value or note is not its catalog row's")
+        else:
+            problems.append(f"{key}: unknown source {source!r}")
+    if problems:
         raise SnapshotError(
-            f"{len(unknown)} nominating_party_note value(s) are not in the in-repo "
-            f"catalog: {[n[:80] for n in unknown]}. Only the notes in "
-            "usvote.party.TABLE1_ROW_NOTES may reach the public surface (D077, "
-            "D022/D030)."
+            f"{len(problems)} served nominating-party row(s) do not match the in-repo "
+            f"catalogs: {problems[:10]}. Only usvote.party.TABLE1_ROW_NOTES and "
+            "usvote.party_catalog may reach the public surface (D077, D078, D022/D030)."
         )
 
 
@@ -1290,7 +1318,7 @@ def build_snapshot(
     data_df = data_df.sort_values(list(_ORDER_BY), kind="stable").reset_index(drop=True)
     assert_modern_years_are_popular_vote(data_df)
     assert_count_status_reasons_are_catalogued(data_df)
-    assert_nominating_party_notes_are_catalogued(data_df)
+    assert_nominating_party_matches_catalog(data_df)
     assert_no_pv_below_mit_window(data_df)
 
     # The hybrid is derived from `slugged` (the join-view shape, which still carries
@@ -1701,6 +1729,42 @@ def derive_curated_pv_status_roster(dbc: DBC, *, schema: str = SCHEMA) -> pd.Dat
     return roster[list(_ROSTER_MERGE_COLUMNS)]
 
 
+def read_uncollected_nominating_parties(path: str | Path) -> list[tuple[int, str]]:
+    """Return a built snapshot's served candidate-years with no nominating party.
+
+    The coverage report #387 asks for: what is still not collected, derived from the
+    data rather than frozen. It reads the finished file read-only, so it reports what
+    ships. Null guard part 4 has already proved that this null set is the
+    candidate-years with votes cast minus the warehouse's party keys (D077), so no
+    second definition of the population is needed here.
+    """
+    uri = f"file:{Path(path).resolve()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT year, candidate FROM ec_pv "
+            "WHERE nominating_party IS NULL ORDER BY year, candidate"
+        ).fetchall()
+    return [(int(year), str(candidate)) for year, candidate in rows]
+
+
+def format_uncollected_nominating_parties(rows: Sequence[tuple[int, str]]) -> str:
+    """Render :func:`read_uncollected_nominating_parties` as a short report by era.
+
+    The eras split at :data:`MIT_PV_YEAR_MIN`, as the research doc's population does.
+    """
+    if not rows:
+        return "Nominating party: every served candidate-year has a value."
+    lines = [f"Nominating party not yet collected: {len(rows)} candidate-year(s)."]
+    for label, keep in (
+        (f"before {MIT_PV_YEAR_MIN}", lambda y: y < MIT_PV_YEAR_MIN),
+        (f"{MIT_PV_YEAR_MIN} on", lambda y: y >= MIT_PV_YEAR_MIN),
+    ):
+        era = [f"{year} {name}" for year, name in rows if keep(year)]
+        if era:
+            lines.append(f"  {label} ({len(era)}): " + "; ".join(era))
+    return "\n".join(lines)
+
+
 def build_snapshot_from_db(
     dbc: DBC,
     out_path: str,
@@ -1758,6 +1822,11 @@ def _run_build(environ: Mapping[str, str], out_override: str | None) -> int:
         f"(version {meta.snapshot_version[:12]}…, {meta.row_count} rows, "
         f"{meta.candidate_count} candidates, {meta.year_min}–{meta.year_max}; "
         f"popular vote {meta.pv_year_min}–{meta.pv_year_max})."
+    )
+    print(
+        format_uncollected_nominating_parties(
+            read_uncollected_nominating_parties(out_path)
+        )
     )
     return 0
 

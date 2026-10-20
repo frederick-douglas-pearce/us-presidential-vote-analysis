@@ -74,7 +74,7 @@ def test_build_refuses_a_non_mit_source_row(tmp_path: Path) -> None:
 _ALL_ROW_PATHS = (
     [f"/v1/elections/{y}" for y in (1860, 2016, 2020)]
     + [f"/v1/states/{s}" for s in ("TX", "CA", "VT", "NV")]
-    + [f"/v1/candidates/{slug}" for slug in ("cand-a", "cand-b", "cand-c", "cand-d")]
+    + [f"/v1/candidates/{slug}" for slug in ("cand-a", "cand-b", "cand-d", "john-bell")]
 )
 
 
@@ -206,20 +206,28 @@ def _party_rows(client: TestClient) -> list[tuple[str, dict]]:
 
 
 def test_no_endpoint_surfaces_an_uncatalogued_party_note(client: TestClient) -> None:
-    """Served ``nominating_party_note`` values come from the in-repo catalog (#386).
+    """Each served ``nominating_party_note`` is its own row's catalog note (#386, #387).
 
-    The build pins the column to :data:`usvote.party.TABLE1_ROW_NOTES`; this checks
+    The build pins every note to its own ``(year, candidate)`` entry in
+    :data:`usvote.party.TABLE1_ROW_NOTES` or :mod:`usvote.party_catalog`. This checks
     the same property on what the API actually serves, as the count-reason sweep does.
     """
     from usvote.party import TABLE1_ROW_NOTES
+    from usvote.party_catalog import CURATED_BY_KEY
 
-    allowed = set(TABLE1_ROW_NOTES.values())
     rows = _party_rows(client)
     notes = [row["nominating_party_note"] for _, row in rows]
     assert any(note is not None for note in notes)  # the sweep sees a real note
     for path, row in rows:
-        note = row["nominating_party_note"]
-        assert note is None or note in allowed, f"{path}: {note!r}"
+        key = (row["year"], row["candidate"])
+        source = row["nominating_party_source"]
+        if source == "USGOV":
+            expected = CURATED_BY_KEY[key].note
+        elif source == "NARA":
+            expected = TABLE1_ROW_NOTES.get(key)
+        else:
+            expected = None
+        assert row["nominating_party_note"] == expected, f"{path}: {row!r}"
 
 
 def test_every_served_party_is_in_the_vocabulary_and_nulls_travel_together(
