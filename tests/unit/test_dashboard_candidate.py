@@ -219,10 +219,57 @@ class TestJackson:
         assert of_type(first[6], "Strong")[0].children == "Disputed"
         assert of_type(first[6], "Span")[0].children == reason
 
-    def test_a_null_party_reads_its_null_label(self) -> None:
-        # Jackson's rows carry no party (before the popular-vote window).
+    def test_the_party_reads_its_display_form_or_its_null_label(self) -> None:
+        # #389: Jackson's 1824 rows carry the Archives' Democratic-Republican party.
         cell = table_rows(render())[0][2]
-        assert labels.NOT_IN_DATASET in texts(cell)
+        assert texts(cell) == ["Democratic-Republican"]
+        body = jackson()
+        body["data"][0].update(
+            nominating_party=None,
+            nominating_party_source=None,
+            nominating_party_note=None,
+        )
+        cell = table_rows(render(body=body))[0][2]
+        assert texts(cell) == [labels.NOT_IN_DATASET]
+        assert cell.title == labels.PARTY_NULL_NOTE
+
+    def test_the_party_notes_list_lists_each_year_once(self) -> None:
+        """T5 (#389): a note per candidate-year, listed once however many state rows
+        carry it, one item per year in row order. Jackson's recorded rows carry no
+        note, so two years are doctored here."""
+        body = jackson()
+        years = sorted({r["year"] for r in body["data"]})[:2]
+        for row in body["data"]:
+            if row["year"] in years:
+                row["nominating_party_note"] = f"A note for {row['year']}."
+        blocks = [
+            d
+            for d in of_type(render(body=body), "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+        assert len(blocks) == 1
+        assert [li.children for li in of_type(blocks[0], "Li")] == [
+            labels.PARTY_NOTE_ITEM.format(
+                candidate="Andrew Jackson", year=y, note=f"A note for {y}."
+            )
+            for y in years
+        ]
+        assert not [
+            d
+            for d in of_type(render(), "Div")
+            if getattr(d, "className", None) == "party-notes"
+        ]
+
+    def test_t5_s_column_name_list_names_the_count_reason_and_the_party_note(
+        self,
+    ) -> None:
+        named = [
+            [texts(dd.children)[0] for dd in of_type(g, "Dd")]
+            for g in of_type(render(), "Details")
+        ]
+        assert named == [
+            [*MOD["FIELDS"], "electoral_count_status_reason", "nominating_party_note"]
+        ]
 
     def test_each_year_links_to_its_election_and_each_state_to_its_history(
         self,

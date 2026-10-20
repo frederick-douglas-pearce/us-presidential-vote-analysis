@@ -44,7 +44,7 @@ STATE_ID = "candidate-state"
 FIELDS = (
     "year",
     "state",
-    "party",
+    "nominating_party",
     "state_electoral_votes",
     "electoral_votes",
     "electoral_votes_counted",
@@ -52,12 +52,19 @@ FIELDS = (
     "pv_status",
     "popular_votes",
 )
-#: The fields T5's column-name list names: its columns, and the reason its count cell
-#: shows.
-GLOSSARY = (*FIELDS, "electoral_count_status_reason")
-#: What T5's CSV adds after its columns (#309): the reason its count cell shows, and the
-#: keys its state filter and its candidate are named by.
-EXTRA = ("electoral_count_status_reason", "state_usps", "candidate_slug")
+#: The fields T5's column-name list names: its columns, the reason its count cell
+#: shows, and the party note its Party notes list shows (#389).
+GLOSSARY = (*FIELDS, "electoral_count_status_reason", "nominating_party_note")
+#: What T5's CSV adds after its columns (#309): the reason its count cell shows, the
+#: party note and the party's per-row source (#389), and the keys its state filter and
+#: its candidate are named by.
+EXTRA = (
+    "electoral_count_status_reason",
+    "nominating_party_note",
+    "nominating_party_source",
+    "state_usps",
+    "candidate_slug",
+)
 
 #: The query key this page reads besides the shared year keys: the API's state filter.
 STATE = "state"
@@ -336,7 +343,7 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
             # A year links to its one-election view (#307), a state to its history.
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
             components.state_cell(row),
-            labels.party_cell(row["party"]),
+            labels.nominating_party_cell(row),
             labels.cell(labels.number(row["state_electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes_counted"])),
@@ -389,8 +396,9 @@ def render(
                 TABLE_ID,
                 download,
                 extra=EXTRA,
-                notes=(labels.PARTY_NOTE,),
+                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
             ),
+            *labels.party_notes(shown),
             labels.glossary(GLOSSARY),
             components.provenance_footer(provenance),
         ],

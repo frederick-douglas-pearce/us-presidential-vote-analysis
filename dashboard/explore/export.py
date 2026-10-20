@@ -29,7 +29,7 @@ writes nor reads a file.
 
 Which sources a table carries is read from its field names (:func:`sources`). Every
 field a rendered table exports is in exactly one of :data:`EC_FIELDS`,
-:data:`POPULAR_VOTE_FIELDS` and :data:`CENSUS_FIELDS`
+:data:`POPULAR_VOTE_FIELDS`, :data:`CENSUS_FIELDS` and :data:`NOMINATING_PARTY_FIELDS`
 (``test_the_field_sets_are_disjoint_and_cover_every_column`` in
 ``test_dashboard_export.py``), so a later table names its sources without declaring
 them, and one exporting an unplaced field fails that test.
@@ -75,14 +75,15 @@ EC_FIELDS = frozenset(
     }
 )
 
-#: The fields whose values come from the popular-vote source. ``party`` is recorded
-#: only where a popular-vote figure is (``labels.PARTY_NOTE``), ``has_popular_vote`` is
+#: The fields whose values come from the popular-vote source. ``has_popular_vote`` is
 #: whether a year has any national popular-vote figure, and ``hybrid_score`` averages
-#: in the popular-vote share.
+#: in the popular-vote share. The popular-vote source's ``party`` is in no set: no table
+#: exports it since #389 (one party per candidate-year), so a table that did would fail
+#: ``test_the_field_sets_are_disjoint_and_cover_every_column``; ``TestOnePartyPerRow``
+#: checks that no header names it.
 POPULAR_VOTE_FIELDS = frozenset(
     {
         "popular_votes",
-        "party",
         "national_pv_votes",
         "pv_share",
         "hybrid_score",
@@ -101,6 +102,14 @@ CENSUS_FIELDS = frozenset(
     }
 )
 
+#: The nominating party's fields (#389, D077). A value the National Archives prints is
+#: credited by the Electoral College line, which a table always carries; this set adds
+#: the line for parties the National Archives does not print. Each row says which by
+#: its ``nominating_party_source``, which the download carries.
+NOMINATING_PARTY_FIELDS = frozenset(
+    {"nominating_party", "nominating_party_note", "nominating_party_source"}
+)
+
 #: Each source in preamble order: what it supplies, and the provenance keys naming it
 #: and its license (``components.SOURCES`` reads the same triples).
 EC_SOURCE = ("Electoral votes", "ec_source_name", "ec_license", "ec_license_url")
@@ -110,6 +119,12 @@ CENSUS_SOURCE = (
     "census_source_name",
     "census_license",
     "census_license_url",
+)
+USGOV_SOURCE = (
+    "Parties the National Archives does not print",
+    "usgov_source_name",
+    "usgov_license",
+    "usgov_license_url",
 )
 
 #: The preamble's last line: what an empty cell means.
@@ -180,14 +195,16 @@ def cell(value: Any) -> str:
 
 def sources(fields: Iterable[str]) -> list[tuple[str, str, str, str]]:
     """The sources a table with ``fields`` carries, in preamble order: the Electoral
-    College's always, the popular vote's and the census's when a field of theirs is
-    present."""
+    College's always, the popular vote's, the census's and the curated parties' when a
+    field of theirs is present."""
     names = set(fields)
     found = [EC_SOURCE]
     if names & POPULAR_VOTE_FIELDS:
         found.append(PV_SOURCE)
     if names & CENSUS_FIELDS:
         found.append(CENSUS_SOURCE)
+    if names & NOMINATING_PARTY_FIELDS:
+        found.append(USGOV_SOURCE)
     return found
 
 

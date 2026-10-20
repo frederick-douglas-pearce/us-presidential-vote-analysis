@@ -514,7 +514,7 @@ class TestExactlyTheView:
                 (
                     "state",
                     "candidate",
-                    "party",
+                    "nominating_party",
                     "state_electoral_votes",
                     "electoral_votes",
                     "electoral_votes_counted",
@@ -522,6 +522,8 @@ class TestExactlyTheView:
                     "pv_status",
                     "popular_votes",
                     "electoral_count_status_reason",
+                    "nominating_party_note",
+                    "nominating_party_source",
                     "state_usps",
                     "candidate_slug",
                     "year",
@@ -532,7 +534,7 @@ class TestExactlyTheView:
                 "election-nation",
                 (
                     "candidate",
-                    "party",
+                    "nominating_party",
                     "national_electoral_votes",
                     "national_electoral_votes_counted",
                     "national_electoral_denominator",
@@ -543,6 +545,8 @@ class TestExactlyTheView:
                     "pv_share",
                     "ec_share_hybrid",
                     "hybrid_score",
+                    "nominating_party_note",
+                    "nominating_party_source",
                     "candidate_slug",
                     "year",
                 ),
@@ -558,7 +562,7 @@ class TestExactlyTheView:
                 (
                     "year",
                     "candidate",
-                    "party",
+                    "nominating_party",
                     "state_electoral_votes",
                     "electoral_votes",
                     "electoral_votes_counted",
@@ -566,6 +570,8 @@ class TestExactlyTheView:
                     "pv_status",
                     "popular_votes",
                     "electoral_count_status_reason",
+                    "nominating_party_note",
+                    "nominating_party_source",
                     "candidate_slug",
                     "state_usps",
                 ),
@@ -574,6 +580,26 @@ class TestExactlyTheView:
                 "/state/<usps>",
                 "state-per-capita",
                 ("year", *labels.PER_CAPITA_FIELDS, "state_usps"),
+            ),
+            (
+                "/candidate/<slug>",
+                "candidate-history",
+                (
+                    "year",
+                    "state",
+                    "nominating_party",
+                    "state_electoral_votes",
+                    "electoral_votes",
+                    "electoral_votes_counted",
+                    "electoral_count_status",
+                    "pv_status",
+                    "popular_votes",
+                    "electoral_count_status_reason",
+                    "nominating_party_note",
+                    "nominating_party_source",
+                    "state_usps",
+                    "candidate_slug",
+                ),
             ),
         ],
     )
@@ -636,7 +662,11 @@ class TestNulls:
         recorded = RECORDED["/v1/elections/1860"]["data"]
         assert all(r["popular_votes"] is None for r in recorded)  # the premise
         assert {r["popular_votes"] for r in states.rows} == {""}
-        assert {r["party"] for r in states.rows} == {""}
+        # Breckinridge and Bell carry no party row (#389): an empty cell, as served.
+        nulls = {
+            r["candidate"] for r in states.rows if r["nominating_party"] == ""
+        }
+        assert {"John C. Breckinridge", "John Bell"} <= nulls
         nation = download(tree, "election-nation")
         assert {r["hybrid_score"] for r in nation.rows} == {""}
 
@@ -654,25 +684,43 @@ class TestNulls:
         assert "Popular votes cover 1976–2024" in states.lines
         assert export.NULL_LINE in states.lines
         assert labels.PARTY_NOTE in states.lines
+        assert labels.PARTY_NULL_NOTE in states.lines
 
     def test_the_state_history_keeps_the_served_party_code(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """#355: the page shows a party's display form; the file keeps the code."""
-        from usvote.mit.transform import EC_GETTER_PARTIES
+        """#389: the page shows a party's display form; the file keeps the code, and
+        the party's per-row source and note travel with it."""
+        from usvote.party import NOMINATING_PARTIES, PARTY_SOURCES
 
         tree, _ = render("/state/<usps>", monkeypatch)
         history = download(tree, "state-history")
-        assert {r["party"] for r in history.rows} - {""} == EC_GETTER_PARTIES
+        codes = {r["nominating_party"] for r in history.rows} - {""}
+        assert codes and codes <= set(NOMINATING_PARTIES)
+        assert {r["nominating_party_source"] for r in history.rows} - {""} <= set(
+            PARTY_SOURCES
+        )
+        assert set(labels.NOMINATING_PARTY.values()).isdisjoint(codes)
 
     def test_the_state_history_explains_its_null_party(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         tree, _ = render("/state/<usps>", monkeypatch)
         history = download(tree, "state-history")
-        assert "" in {r["party"] for r in history.rows}  # the premise: a null party
-        assert labels.PARTY_NOTE in history.lines
-        assert labels.PARTY_NOTE in [p.children for p in of_type(tree, "P")]
+        # the premise: a null party
+        assert "" in {r["nominating_party"] for r in history.rows}
+        for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
+            assert note in history.lines
+            assert note in [p.children for p in of_type(tree, "P")]
+
+    def test_the_candidate_history_carries_the_party_notes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tree, _ = render("/candidate/<slug>", monkeypatch)
+        history = download(tree, "candidate-history")
+        for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
+            assert note in history.lines
+            assert note in [p.children for p in of_type(tree, "P")]
 
     def test_the_per_capita_notes_explain_its_nulls(
         self, monkeypatch: pytest.MonkeyPatch
@@ -699,6 +747,7 @@ class TestNulls:
         shown = [p.children for p in of_type(tree, "P")]
         for note in (
             labels.PARTY_NOTE,
+            labels.PARTY_NULL_NOTE,
             labels.HYBRID_NOTE,
             labels.EC_SHARE_HYBRID_NOTE,
         ):
@@ -838,19 +887,40 @@ class TestAttribution:
             export.NULL_LINE,
         ]
 
+    def test_the_sources_keep_the_footer_s_order(self) -> None:
+        """No table yet carries both census and party fields; the order is pinned for
+        the one that will."""
+        every = {
+            *export.POPULAR_VOTE_FIELDS,
+            *export.CENSUS_FIELDS,
+            *export.NOMINATING_PARTY_FIELDS,
+        }
+        assert export.sources(every) == [
+            export.EC_SOURCE,
+            export.PV_SOURCE,
+            export.CENSUS_SOURCE,
+            export.USGOV_SOURCE,
+        ]
+
     @pytest.mark.parametrize(
-        ("table", "pv", "census"),
+        ("table", "pv", "census", "usgov"),
         [
-            ("elections-table", True, False),
-            ("election-states", True, False),
-            ("election-nation", True, False),
-            ("election-per-capita", False, True),
-            ("state-history", True, False),
-            ("state-per-capita", False, True),
+            ("elections-table", True, False, False),
+            ("election-states", True, False, True),
+            ("election-nation", True, False, True),
+            ("election-per-capita", False, True, False),
+            ("state-history", True, False, True),
+            ("state-per-capita", False, True, False),
+            ("candidate-history", True, False, True),
         ],
     )
     def test_each_table_names_the_sources_it_carries(
-        self, monkeypatch: pytest.MonkeyPatch, table: str, pv: bool, census: bool
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        table: str,
+        pv: bool,
+        census: bool,
+        usgov: bool,
     ) -> None:
         tree, _ = render(TABLES[table], monkeypatch)
         lines = download(tree, table).lines
@@ -865,6 +935,17 @@ class TestAttribution:
                 x.startswith(f"Population: {meta['census_source_name']}") for x in lines
             )
             is census
+        )
+        # The party's curated source, labeled by what it supplies (#389).
+        assert (
+            any(
+                x.startswith(
+                    "Parties the National Archives does not print: "
+                    f"{meta['usgov_source_name']} ("
+                )
+                for x in lines
+            )
+            is usgov
         )
 
     @pytest.mark.parametrize(
@@ -913,8 +994,15 @@ class TestAttribution:
     def test_the_field_sets_are_disjoint_and_cover_every_column(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        sets = (export.EC_FIELDS, export.POPULAR_VOTE_FIELDS, export.CENSUS_FIELDS)
-        assert not (sets[0] & sets[1] or sets[0] & sets[2] or sets[1] & sets[2])
+        sets = (
+            export.EC_FIELDS,
+            export.POPULAR_VOTE_FIELDS,
+            export.CENSUS_FIELDS,
+            export.NOMINATING_PARTY_FIELDS,
+        )
+        for i, a in enumerate(sets):
+            for b in sets[i + 1 :]:
+                assert not a & b
         headers = {
             field
             for tree in all_pages(monkeypatch).values()
@@ -1014,8 +1102,17 @@ class TestRequestBudget:
 
 # --- no raw values on a page (#355) ---------------------------------------------------
 
-#: The recorded years of the one-election view, each rendered whole.
-ELECTION_YEARS = ("1824", "1860", "1868", "1872", "2016", "2024")
+#: The recorded years of the one-election view, each rendered whole: read from the
+#: recordings, so a newly recorded year is scanned too.
+ELECTION_YEARS = tuple(
+    sorted(
+        m.group(1)
+        for path in RECORDED
+        if (m := re.fullmatch(r"/v1/elections/([0-9]{4})", path))
+    )
+)
+# Non-vacuous: an empty tuple would make pytest skip the scan rather than fail it.
+assert {"1824", "1896", "2024"} <= set(ELECTION_YEARS), ELECTION_YEARS
 
 #: A value no cell has wording for: an underscore, so a raw rendering of it fails
 #: :func:`raw_values` wherever it lands.
@@ -1052,10 +1149,11 @@ def reader_texts(node: Any) -> list[str]:
 
 def raw_values(tree: Any) -> list[str]:
     """Reader texts that are a raw value (#355): any text carrying an underscore, and
-    any that is exactly a served code (a party, or a closed-vocabulary value, which may
-    be one word: ``counted``, ``covered``)."""
+    any that is exactly a served code (a party, a party's source, or a closed-vocabulary
+    value, which may be one word: ``counted``, ``covered``, ``whig``)."""
     from usvote.count_status import COUNT_STATUS_VALUES
     from usvote.mit.transform import EC_GETTER_PARTIES
+    from usvote.party import NOMINATING_PARTIES, PARTY_SOURCES
     from usvote.pv.status import PV_STATUS_VALUES
     from usvote.snapshot_schema import (
         PER_CAPITA_BOUNDARY_BASIS_VALUES,
@@ -1064,6 +1162,8 @@ def raw_values(tree: Any) -> list[str]:
 
     codes = {
         *EC_GETTER_PARTIES,
+        *NOMINATING_PARTIES,
+        *PARTY_SOURCES,
         *PV_STATUS_VALUES,
         *COUNT_STATUS_VALUES,
         *PER_CAPITA_BOUNDARY_BASIS_VALUES,
@@ -1095,9 +1195,12 @@ def doctor(monkeypatch: pytest.MonkeyPatch, path: str, change: Any) -> None:
 
 
 #: Every field a ``labels`` function words, per row kind, by public field name: each is
-#: doctored with :data:`SENTINEL`, except a name or party, which is open vocabulary (a
-#: text sentinel would rightly be shown) and gets a non-text value instead.
+#: doctored with :data:`SENTINEL`, except a name, which is open vocabulary (a text
+#: sentinel would rightly be shown) and gets a non-text value instead. The party is a
+#: closed vocabulary since #389, so it takes the sentinel too, and its row gets a text
+#: note, so the unrecognized cell's help text is checked to win over a row note.
 STATE_ROW_FIELDS = (
+    "nominating_party",
     "state_electoral_votes",
     "electoral_votes",
     "electoral_votes_counted",
@@ -1105,6 +1208,7 @@ STATE_ROW_FIELDS = (
     "pv_status",
 )
 SUMMARY_ROW_FIELDS = (
+    "nominating_party",
     "national_electoral_votes",
     "national_electoral_votes_counted",
     "national_electoral_denominator",
@@ -1136,6 +1240,10 @@ PANEL_WORDED_FIELDS = (
 PANEL_NAME_FIELDS = ("ec_winner", "pv_winner", "hybrid_winner")
 
 
+#: A row note on each doctored row: text with no underscore, so it is no raw value.
+DOCTORED_NOTE = "A doctored note."
+
+
 def _row(*fields: str, **others: Any) -> Any:
     """Doctor the first row: each of ``fields`` to :data:`SENTINEL`, plus ``others``."""
 
@@ -1146,8 +1254,10 @@ def _row(*fields: str, **others: Any) -> Any:
 
 
 def _election(body: dict[str, Any]) -> None:
-    _row(*STATE_ROW_FIELDS, party=7)(body)
-    body["summary"][0].update(dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), party=7)
+    _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE)(body)
+    body["summary"][0].update(
+        dict.fromkeys(SUMMARY_ROW_FIELDS, SENTINEL), nominating_party_note=DOCTORED_NOTE
+    )
     body["election"].update(
         dict.fromkeys(PANEL_WORDED_FIELDS, SENTINEL),
         **dict.fromkeys(PANEL_NAME_FIELDS, 7),
@@ -1172,13 +1282,17 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/state/<usps>": (
         {"usps": "GA"},
         {
-            "/v1/states/GA": _row(*STATE_ROW_FIELDS, party=7),
+            "/v1/states/GA": _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE),
             "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
     "/candidate/<slug>": (
         {"slug": "andrew-jackson"},
-        {"/v1/candidates/andrew-jackson": _row(*STATE_ROW_FIELDS, party=7)},
+        {
+            "/v1/candidates/andrew-jackson": _row(
+                *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
+            )
+        },
     ),
 }
 
@@ -1190,17 +1304,71 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 UNRECOGNIZED_CELLS = {
     "/elections": {"elections-table": 2},
     "/election/<year>": {
-        "election-states": len(STATE_ROW_FIELDS) + 2,  # party, popular votes
-        "election-nation": len(SUMMARY_ROW_FIELDS) + 1,  # party
+        "election-states": len(STATE_ROW_FIELDS) + 1,  # popular votes
+        "election-nation": len(SUMMARY_ROW_FIELDS),
         "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
         "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
     },
     "/state/<usps>": {
-        "state-history": len(STATE_ROW_FIELDS) + 2,
+        "state-history": len(STATE_ROW_FIELDS) + 1,
         "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
-    "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 2},
+    "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
 }
+
+
+class TestOnePartyPerRow:
+    """AC5 of #389, structurally: no header, label, field set or download names the
+    popular-vote source's ``party``. Which field a party cell reads is pinned by the
+    pre-1976 rows (MIT's ``party`` is null then): T2/T3 in
+    ``test_dashboard_election.py``, T4 in ``test_dashboard_state.py``, T5 in
+    ``test_dashboard_candidate.py``."""
+
+    def test_no_page_shows_and_no_file_exports_the_popular_vote_party(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert "party" not in labels.LABELS
+        for name in ("EC_FIELDS", "POPULAR_VOTE_FIELDS", "CENSUS_FIELDS"):
+            assert "party" not in getattr(export, name), name
+        trees = all_pages(monkeypatch)
+        party_tables = 0
+        for key, tree in trees.items():
+            titles = {getattr(th, "title", None) for th in of_type(tree, "Th")}
+            assert "party" not in titles, key
+            for link in links(tree).values():
+                header = Csv(link.href).header
+                assert "party" not in header, key
+                party_tables += "nominating_party" in header
+        assert party_tables >= 4  # T2, T3, T4 and T5 each carry the party
+
+    def test_a_no_nomination_row_keeps_its_code_and_names_its_source(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC3 in the download (#389): the code as served, the curated source per row,
+        and the preamble's line for it. Doctored here, never in a recorded file."""
+
+        def change(body: dict[str, Any]) -> None:
+            for row in [*body["data"], *body["summary"]]:
+                if row["candidate"] == "Colin Powell":
+                    row.update(
+                        nominating_party="no_nomination",
+                        nominating_party_source="USGOV",
+                        nominating_party_note="A doctored note.",
+                    )
+
+        doctor(monkeypatch, "/v1/elections/2016", change)
+        tree, _ = render("/election/<year>", monkeypatch, year="2016")
+        for table in ("election-states", "election-nation"):
+            file = download(tree, table)
+            powell = [r for r in file.rows if r["candidate"] == "Colin Powell"]
+            assert powell, table
+            assert {r["nominating_party"] for r in powell} == {"no_nomination"}
+            assert {r["nominating_party_source"] for r in powell} == {"USGOV"}
+            assert {r["nominating_party_note"] for r in powell} == {"A doctored note."}
+            assert any(
+                line.startswith("Parties the National Archives does not print: ")
+                for line in file.lines
+            ), table
 
 
 class TestNoRawValues:

@@ -50,7 +50,7 @@ PER_CAPITA_TABLE_ID = "state-per-capita"
 FIELDS = (
     "year",
     "candidate",
-    "party",
+    "nominating_party",
     "state_electoral_votes",
     "electoral_votes",
     "electoral_votes_counted",
@@ -58,11 +58,19 @@ FIELDS = (
     "pv_status",
     "popular_votes",
 )
-#: The fields T4's glossary names: its columns, and the reason its count cell shows.
-GLOSSARY = (*FIELDS, "electoral_count_status_reason")
-#: What T4's CSV adds after its columns (#309): the reason its count cell shows, and the
-#: keys its candidate filter and its state are named by.
-EXTRA = ("electoral_count_status_reason", "candidate_slug", "state_usps")
+#: The fields T4's glossary names: its columns, the reason its count cell shows, and the
+#: party note its Party notes list shows (#389).
+GLOSSARY = (*FIELDS, "electoral_count_status_reason", "nominating_party_note")
+#: What T4's CSV adds after its columns (#309): the reason its count cell shows, the
+#: party note and the party's per-row source (#389), and the keys its candidate filter
+#: and its state are named by.
+EXTRA = (
+    "electoral_count_status_reason",
+    "nominating_party_note",
+    "nominating_party_source",
+    "candidate_slug",
+    "state_usps",
+)
 
 #: T7's columns, in display order, by public field name (#280).
 PER_CAPITA_FIELDS = ("year", *labels.PER_CAPITA_FIELDS)
@@ -356,7 +364,7 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
             # A candidate links to their history (#331).
             components.candidate_cell(row),
-            labels.party_cell(row["party"]),
+            labels.nominating_party_cell(row),
             labels.cell(labels.number(row["state_electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes"])),
             labels.cell(labels.number(row["electoral_votes_counted"])),
@@ -460,8 +468,9 @@ def render(
                 TABLE_ID,
                 _download(usps, "history", "this state's history", body, chosen, span),
                 extra=EXTRA,
-                notes=(labels.PARTY_NOTE,),
+                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
             ),
+            *labels.party_notes(shown),
             labels.glossary(GLOSSARY),
             *_per_capita_section(
                 per_capita_rows,

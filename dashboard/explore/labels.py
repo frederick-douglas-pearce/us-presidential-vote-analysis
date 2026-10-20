@@ -29,6 +29,8 @@ words shows a raw value either (#355): a null or blank names no cause
 (:data:`NOT_IN_DATASET`), and a value it has no wording for reads :data:`UNRECOGNIZED`,
 with :data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`). Candidate and state
 names are shown as served: an open vocabulary the API types as text, not codes (#367).
+The party is the nominating party (#389, D077): a closed vocabulary, each code read
+from :data:`NOMINATING_PARTY`, never word-cased from the code.
 """
 
 from __future__ import annotations
@@ -49,7 +51,9 @@ LABELS: dict[str, str] = {
     # The one-election view (#307). Series wording: appointed / cast / counted.
     "state": "State",
     "candidate": "Candidate",
-    "party": "Party",
+    # The nominating party (#389, D077): the one party a table shows, in every year.
+    "nominating_party": "Party",
+    "nominating_party_note": "Party note",
     "state_electoral_votes": "Electors appointed (state)",
     "electoral_votes": "Electoral votes cast",
     "electoral_votes_counted": "Electoral votes counted",
@@ -149,19 +153,47 @@ AFTER_WINDOW = "Popular vote held; not in this dataset yet"
 NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this state"
 NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
 
-#: Why ``party`` is often null: help text beside a null party cell.
+#: What the party column shows (#389): a table note under T2–T5 and in their
+#: downloads. The second sentence keeps the rule-2 years true (D077).
 PARTY_NOTE = (
-    "Party comes from the popular-vote source, so this dataset records it only where "
-    "it has a popular-vote figure."
+    "The party column shows the party that nominated the candidate for President in "
+    "that election. In 1824 and 1828, for a candidate no national convention or caucus "
+    "nominated, and in 1836, for a Whig candidate, it shows the party this dataset's "
+    "source names for them."
 )
+
+#: A null party's one cause (#389, D077): a null cell's help text and a table note.
+#: Dataset-first, with no promise; it is not "without a nomination".
+PARTY_NULL_NOTE = (
+    'A party shown as "Not in this dataset" (an empty cell in the download) means this '
+    "dataset records no party for that candidate in that election. It does not say "
+    "whether a party nominated them."
+)
+
+#: The ``no_nomination`` cell (#389): distinct from the null, never "no party", and
+#: never saying a withdrawn nominee was not nominated (D077).
+NO_NOMINATION = "Without a party's nomination for President when the electors voted"
+
+#: Help text on a ``no_nomination`` cell: it says what the ``nominating_party`` field
+#: descriptions in ``src/usvote/api/models.py`` say, in the dashboard's wording (ba
+#: spec, #389).
+NO_NOMINATION_NOTE = (
+    "Either no party nominated this candidate for President, or the nomination was "
+    "withdrawn before the electors voted. It does not mean the candidate had no party."
+)
+
+#: The visible list of row notes under T2–T5 (#389): its heading, and one item per
+#: candidate-year shown. Not written into a download, which carries the column.
+PARTY_NOTES_HEADING = "Party notes"
+PARTY_NOTE_ITEM = "{candidate}, {year}: {note}"
 
 #: What ``has_popular_vote: false`` means: this dataset holds no popular vote for that
 #: year, not that none was held. Never "No".
 NOT_IN_DATASET = "Not in this dataset"
 
 #: A value this module has no wording for (#355): an unknown closed-vocabulary code, a
-#: value of the wrong type, a non-finite number, one too large to show as a share,
-#: margin or ratio, or a party code with no letter or digit. Never the raw value, and
+#: value of the wrong type, a non-finite number, or one too large to show as a share,
+#: margin or ratio. Never the raw value, and
 #: never :data:`NOT_IN_DATASET`, which means the dataset holds nothing here. A download
 #: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
@@ -185,9 +217,9 @@ HAS_POPULAR_VOTE_NOTE = (
 #: popular-vote window (#308): the panel's null there, and T3's popular-vote columns
 #: and hybrid score (``national_pv_votes``, ``pv_share``, ``hybrid_score``) in a year
 #: with no popular vote. One wording for that cause in the panel and T3 (#352). A null
-#: party there reads :data:`NOT_IN_DATASET` with :data:`PARTY_NOTE` (party is null for
-#: two causes), and T2 and T4 name the window's side (:data:`BEFORE_WINDOW`,
-#: :data:`AFTER_WINDOW`).
+#: party has nothing to do with the window: in any year it reads :data:`NOT_IN_DATASET`
+#: with :data:`PARTY_NULL_NOTE` (#389). T2 and T4 name the window's side
+#: (:data:`BEFORE_WINDOW`, :data:`AFTER_WINDOW`).
 NOT_APPLICABLE = "Not in this dataset: no popular-vote figures for this year"
 
 #: A flip that happened; ``method`` is ``popular-vote`` or ``hybrid``, and ``role`` is
@@ -224,9 +256,34 @@ EC_SHARE_HYBRID_NOTE = (
 )
 
 
-#: A party code's display form where it is not the code's own words capitalized (#355).
-#: Only respells a served code: it never assigns a party (D024 §5).
-PARTY_DISPLAY: dict[str, str] = {"DEMOCRAT": "Democratic"}
+#: Each nominating-party code's display form (#389, D077; owner approval at #389's plan
+#: gate). A closed table: a code outside it reads :data:`UNRECOGNIZED`, and
+#: ``TestPartyDisplay.test_every_code_has_a_display_form`` (the one-election view's test
+#: module) pins its keys to ``usvote.party.NOMINATING_PARTIES``, so a new code fails
+#: until it has a form here. A joint nomination names its components in code order,
+#: joined by "and", never a hyphen, which would read as one party's name.
+NOMINATING_PARTY: dict[str, str] = {
+    "democratic_republican": "Democratic-Republican",
+    "national_republican": "National Republican",
+    "democratic": "Democratic",
+    "anti_masonic": "Anti-Masonic",
+    "whig": "Whig",
+    "american": "American (Know-Nothing)",
+    "republican": "Republican",
+    "southern_democratic": "Southern Democratic",
+    "constitutional_union": "Constitutional Union",
+    "liberal_republican": "Liberal Republican",
+    "populist": "Populist",
+    "progressive_1912": "Progressive (1912)",
+    "progressive_1924": "Progressive (1924)",
+    "states_rights_democratic": "States' Rights Democratic",
+    "american_independent": "American Independent",
+    "libertarian": "Libertarian",
+    "liberal_republican_democratic": "Liberal Republican and Democratic",
+    "democratic_populist": "Democratic and Populist",
+    "american_whig": "American (Know-Nothing) and Whig",
+    "no_nomination": NO_NOMINATION,
+}
 
 
 def _ec_role_is_winner(determinative: object) -> bool:
@@ -354,36 +411,80 @@ def yes_no(value: object) -> str:
     return _unknown(value)
 
 
-def _party_words(code: str) -> str:
-    """A code's own words in ordinary capitalization: underscores read as spaces, and
-    each word is upper-cased at its first letter only (``str.title`` would give
-    "People'S")."""
-    return " ".join(
-        w[:1].upper() + w[1:].lower() for w in code.replace("_", " ").split()
+def nominating_party(value: object) -> str:
+    """A nominating party's display form (#389); see :func:`_closed_value`. Exact
+    match: a code is never stripped or re-cased."""
+    return _closed_value(value, NOMINATING_PARTY)
+
+
+def _note_text(value: object) -> str | None:
+    """A row note as served, or ``None`` when it is not text with something in it."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def nominating_party_cell(row: Mapping[str, Any]) -> html.Td:
+    """A row's party cell (#389): :func:`nominating_party`, with the one help text that
+    explains it. An unrecognized value carries :data:`UNRECOGNIZED_NOTE`
+    (:func:`cell`); a row with a note carries the note as served, after
+    :data:`NO_NOMINATION_NOTE` on a ``no_nomination`` row and after
+    :data:`PARTY_NULL_NOTE` on a null or blank party (defensive: the API serves no such
+    row); a ``no_nomination`` row without one carries :data:`NO_NOMINATION_NOTE`; a
+    null or blank party carries :data:`PARTY_NULL_NOTE`; a party with no note carries
+    none."""
+    value = row.get("nominating_party")
+    shown = nominating_party(value)
+    note = _note_text(row.get("nominating_party_note"))
+    # The rule keys on the code and the null, never on a display label.
+    lead = (
+        NO_NOMINATION_NOTE
+        if value == "no_nomination"
+        else PARTY_NULL_NOTE
+        if is_blank(value)
+        else None
     )
-
-
-def party(value: object) -> str:
-    """A party's display form (#355): :data:`PARTY_DISPLAY`, else the code's words
-    capitalized; :data:`NOT_IN_DATASET` for a null or blank one (see
-    :data:`PARTY_NOTE`), and :data:`UNRECOGNIZED` for one that is not text, or in which
-    no character is a letter or digit (for example underscores, punctuation, symbols or
-    a zero-width space; owner decision at #355's review), which would otherwise show as
-    a bare-looking cell. A few letters render blank and are shown as served (#368)."""
-    if isinstance(value, str) and not is_blank(value):
-        code = value.strip()
-        if not any(ch.isalnum() for ch in code):
-            return UNRECOGNIZED
-        return PARTY_DISPLAY.get(code, _party_words(code))
-    return _unknown(value)
-
-
-def party_cell(value: object) -> html.Td:
-    """A party cell: :func:`party`, and for no party :data:`PARTY_NOTE` as its help
-    text (an unrecognized one carries :data:`UNRECOGNIZED_NOTE`)."""
-    shown = party(value)
-    td: html.Td = cell(shown, title=PARTY_NOTE if shown == NOT_IN_DATASET else None)
+    title = note if lead is None else lead if note is None else f"{lead} {note}"
+    td: html.Td = cell(shown, title=title)
     return td
+
+
+def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
+    """The visible Party notes list under a table (#389): one item per candidate-year
+    among ``rows`` whose note is text with something in it, in first-seen order, each
+    candidate-year once however many state rows repeat it (keyed on the year, the slug
+    and the name, so two candidates whose slug is missing never merge). A list, empty
+    when there is none, so a page splices it in place (``*party_notes(rows)``).
+    The candidate's name is shown as served; a null or blank one reads
+    :data:`NOT_IN_DATASET` and one that is not text reads :data:`UNRECOGNIZED`
+    (:func:`_unknown`), never the raw value."""
+    items: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        note = _note_text(row.get("nominating_party_note"))
+        name = row.get("candidate")
+        key = (repr(row.get("year")), repr(row.get("candidate_slug")), repr(name))
+        if note is None or key in seen:
+            continue
+        seen.add(key)
+        items.append(
+            PARTY_NOTE_ITEM.format(
+                candidate=name
+                if isinstance(name, str) and not is_blank(name)
+                else _unknown(name),
+                year=row.get("year"),
+                note=note,
+            )
+        )
+    if not items:
+        return []
+    return [
+        html.Div(
+            [
+                html.P(html.Strong(PARTY_NOTES_HEADING), className="note"),
+                html.Ul([html.Li(item) for item in items]),
+            ],
+            className="party-notes",
+        )
+    ]
 
 
 def popular_votes(
