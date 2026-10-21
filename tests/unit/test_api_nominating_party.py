@@ -8,9 +8,11 @@ dataset holds no party for is served ``null`` in all three, never ``no_nominatio
 
 Served from the shared synthetic snapshot (``tests/fixtures/api_snapshot.py``): 2016 and
 2020 Cand A/B are Archives rows, 1860 John Bell is the curated row (the real catalog
-entry, #387), and 1860 Cand D (8 votes cast) is not keyed — the pre-1976 case. The 1976-on case, a faithless elector's choice, gets its own small frame
-below (:class:`TestFaithlessRecipient`), so the shared fixture's counts stay as the
-other API tests pin them.
+entry, #387), and 1860 Cand D (8 votes cast) is not keyed — the pre-1976 case. The 1976-on
+cases, faithless electors' choices, get their own small frame below
+(:class:`TestFaithlessRecipient`), so the shared fixture's counts stay as the other API
+tests pin them: an unkeyed one, served null, and 2016 Colin Powell, the real catalog's
+``no_nomination`` row (#388), served with its value, source and note.
 """
 
 from __future__ import annotations
@@ -26,6 +28,11 @@ from tests.fixtures.api_snapshot import (
     api_snapshot_row,
     synthetic_ec_pv_frame,
 )
+from usvote.party import NOTE_COLUMN, PARTY_COLUMN, SOURCE_COLUMN, SOURCE_CURATED
+from usvote.party_catalog import CURATED_BY_KEY, WASHINGTON_2016_NOTE
+
+#: The real catalog's 2016 Colin Powell row, a ``no_nomination`` row (#388).
+_POWELL = CURATED_BY_KEY[(2016, "Colin Powell")]
 
 _FIELDS = ("nominating_party", "nominating_party_source", "nominating_party_note")
 
@@ -140,35 +147,49 @@ class TestTheCuratedProvenancePair:
 
 
 def _faithless_frame() -> pd.DataFrame:
-    """The shared frame plus a 2016 faithless elector's choice, ``Cand F``.
+    """The shared frame plus two 2016 faithless electors' choices.
 
-    One Texas elector pledged to Cand A votes for Cand F instead, so A's Texas votes
-    drop 38 → 37 (national 38 → 37) and F gets 1 there and 0 in California. No popular
-    vote and no party row: the shape of a real faithless recipient such as 2016's Colin
-    Powell, served null. Same ``(year, state)`` pairs as the shared frame, so its roster
-    and per-capita companions still fit.
+    Three Texas electors pledged to Cand A vote otherwise: one for ``Cand F``, two for
+    ``Colin Powell``. So A's Texas votes drop 38 → 35 (national 38 → 35); F gets 1 and
+    Powell 2 there, each 0 in California. Neither has a popular vote. Cand F has no
+    party row, so it is served null. Colin Powell carries the real catalog's
+    ``no_nomination`` row (#388): only his key, value, source and note are real; his
+    states and votes are synthetic, as 1860 John Bell's are. The build's keyed catalog
+    pin runs over him but cannot fail here, since his values are copied from the
+    catalog: the test's own expected values (the literals ``no_nomination`` and
+    ``USGOV``, and the ``WASHINGTON_2016_NOTE`` constant by name) are what would catch
+    a wrong value or the wrong note constant. Same ``(year, state)`` pairs as the
+    shared frame, so its roster and per-capita companions still fit.
     """
     frame = synthetic_ec_pv_frame()
     a_2016 = (frame["year"] == 2016) & (frame["candidate"] == "Cand A")
-    frame.loc[a_2016, "national_electoral_votes"] = 37
-    frame.loc[a_2016, "national_counted_electoral_votes"] = 37
+    frame.loc[a_2016, "national_electoral_votes"] = 35
+    frame.loc[a_2016, "national_counted_electoral_votes"] = 35
     a_tx = a_2016 & (frame["state"] == "Texas")
     counted = ["president_electoral_votes", "president_electoral_votes_counted"]
-    frame.loc[a_tx, counted] = 37
+    frame.loc[a_tx, counted] = 35
     faithless = [
         api_snapshot_row(
-            year=2016, state=state, candidate_id=9, candidate="Cand F",
-            president_ev=ev, national_ev=1, rank=3, took_office=False,
-            candidate_votes=None, state_total=None, total_ev=total,
+            year=2016, state=state, candidate_id=cid, candidate=name,
+            president_ev=ev if state == "Texas" else 0, national_ev=ev, rank=rank,
+            took_office=False, candidate_votes=None, state_total=None, total_ev=total,
             source=None, party=None, reliability=None, redistributable=None,
         )
-        for state, ev, total in (("Texas", 1, 38), ("California", 0, 55))
+        for cid, name, ev, rank in ((9, "Cand F", 1, 4), (10, _POWELL.name, 2, 3))
+        for state, total in (("Texas", 38), ("California", 55))
     ]
-    return pd.concat([frame, pd.DataFrame(faithless)], ignore_index=True)
+    out = pd.concat([frame, pd.DataFrame(faithless)], ignore_index=True)
+    powell = out["candidate"] == _POWELL.name
+    out.loc[powell, [PARTY_COLUMN, SOURCE_COLUMN, NOTE_COLUMN]] = [
+        _POWELL.party, SOURCE_CURATED, _POWELL.note,
+    ]
+    return out
 
 
 class TestFaithlessRecipient:
-    """AC2's 1976-on case: a faithless elector's choice has no party row, so null."""
+    """AC2's 1976-on case (#386): a faithless elector's choice with no party row is
+    null. #388's AC3: a catalog ``no_nomination`` row serves that closed value, and it
+    differs from the null on every field and endpoint."""
 
     @pytest.fixture
     def synthetic_frame(self) -> pd.DataFrame:
@@ -190,6 +211,27 @@ class TestFaithlessRecipient:
         for row in served:
             for field in _FIELDS:
                 assert row[field] is None, (field, row)
+
+    def test_a_no_nomination_row_serves_its_value_unlike_a_null(
+        self, client: TestClient
+    ) -> None:
+        year = client.get("/v1/elections/2016").json()
+        served = (
+            _by_candidate(year["data"], "Colin Powell")
+            + _by_candidate(year["summary"], "Colin Powell")
+            + _by_candidate(
+                client.get("/v1/elections/2016/summary").json()["data"], "Colin Powell"
+            )
+            + _by_candidate(client.get("/v1/states/TX").json()["data"], "Colin Powell")
+            + client.get("/v1/candidates/colin-powell").json()["data"]
+        )
+        assert len(served) == 7
+        for row in served:
+            assert row["nominating_party"] == "no_nomination", row
+            assert row["nominating_party_source"] == "USGOV", row
+            assert row["nominating_party_note"] == WASHINGTON_2016_NOTE, row
+        unkeyed = _by_candidate(year["data"], "Cand F")
+        assert {r["nominating_party"] for r in unkeyed} == {None}
 
     def test_the_other_candidates_keep_theirs(self, client: TestClient) -> None:
         rows = client.get("/v1/elections/2016/summary").json()["data"]

@@ -533,11 +533,12 @@ def test_the_real_fixtures_build_two_archives_rows_per_year() -> None:
 
 
 def test_the_real_fixtures_build_the_catalog_rows_in_their_years() -> None:
-    """The default catalog (#387) resolves against real Archives bytes in CI.
+    """The default catalog (#387, #388) resolves against real Archives bytes in CI.
 
-    Eight of its fourteen rows fall in a committed fixture year, so their names must
-    match the candidate dimension the real parse builds, and each must arrive once with
-    source ``USGOV``, its value and its note, and no Archives code.
+    Seventeen of its twenty-eight rows fall in a committed fixture year (eight C1 rows
+    and nine ``no_nomination`` rows), so their names must match the candidate dimension
+    the real parse builds, and each must arrive once with source ``USGOV``, its value
+    and its note, and no Archives code.
     """
     party = _real_build(scrape.fetch_from_dir(FIXTURES_DIR), FIXTURE_YEARS)
     curated = party[party["nominating_party_source"] == "USGOV"]
@@ -551,12 +552,21 @@ def test_the_real_fixtures_build_the_catalog_rows_in_their_years() -> None:
     assert sorted(built) == [
         (1824, "Henry Clay"),
         (1824, "William H. Crawford"),
+        (1832, "John Floyd"),
         (1832, "William Wirt"),
         (1836, "Daniel Webster"),
         (1836, "Hugh L. White"),
         (1856, "Millard Fillmore"),
         (1860, "John Bell"),
         (1860, "John C. Breckinridge"),
+        (1872, "Benjamin Gratz Brown"),
+        (1872, "Charles J. Jenkins"),
+        (1872, "Thomas A. Hendricks"),
+        (2016, "Bernie Sanders"),
+        (2016, "Colin Powell"),
+        (2016, "Faith Spotted Eagle"),
+        (2016, "John Kasich"),
+        (2016, "Ron Paul"),
     ]
     assert len(curated) == len(built)
     for key, (value, note) in built.items():
@@ -590,27 +600,16 @@ def test_the_real_corpus_builds_every_year_with_the_full_map() -> None:
     assert value[(1912, "Theodore Roosevelt")] == "progressive_1912"
 
 
-#: The candidate-years with electoral votes cast that hold no party row after #387: the
-#: C2 rows #388 curates, and 1872 Davis, whose rule-5 question #388 settles (research
-#: doc §8.1–§8.3). Hand-written, not derived: deriving it as "cast minus Table 1 minus
-#: the catalog" would restate what the build does. #388 shrinks it.
+#: The candidate-years with electoral votes cast that hold no party row after #388, each
+#: for its own reason (research doc §16): 1836 Mangum, because a U.S. Government work
+#: (VPB, Tyler chapter) places him among the Whigs' regional candidates "nominated at the
+#: state and local level", which bars ``no_nomination`` and names no body (§6.1); 1872
+#: Davis, because no U.S. Government work names his Labor Reform nomination or its
+#: withdrawal (rule 5). Hand-written, not derived: deriving it as "cast minus Table 1
+#: minus the catalog" would restate what the build does.
 _NOT_YET_COLLECTED = frozenset({
-    (1832, "John Floyd"),
     (1836, "Willie P. Mangum"),
-    (1872, "Benjamin Gratz Brown"),
-    (1872, "Charles J. Jenkins"),
     (1872, "David Davis"),
-    (1872, "Thomas A. Hendricks"),
-    (1956, "Walter B. Jones"),
-    (1960, "Harry F. Byrd"),
-    (1976, "Ronald Reagan"),
-    (1988, "Lloyd Bentsen"),
-    (2004, "John Edwards"),
-    (2016, "Bernie Sanders"),
-    (2016, "Colin Powell"),
-    (2016, "Faith Spotted Eagle"),
-    (2016, "John Kasich"),
-    (2016, "Ron Paul"),
 })
 
 

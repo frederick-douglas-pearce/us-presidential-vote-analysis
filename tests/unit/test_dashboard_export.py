@@ -1344,16 +1344,30 @@ class TestOnePartyPerRow:
     def test_a_no_nomination_row_keeps_its_code_and_names_its_source(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AC3 in the download (#389): the code as served, the curated source per row,
-        and the preamble's line for it. Doctored here, never in a recorded file."""
+        """AC3 in the download (#389), and #388's AC3: the code as served, the curated
+        source per row, and the preamble's line for it, for the real catalog's 2016
+        Colin Powell row (its note's colon and commas exercise the CSV's quoting); and a
+        null beside it, Ron Paul's three fields set to null, reading as empty cells.
+        Both are doctored here, never in a recorded file, so a re-recorded fixture
+        cannot quietly change either premise. Test-only import of
+        ``usvote.party_catalog`` (stdlib-only; D070(b) binds runtime modules)."""
+        from usvote.party_catalog import CURATED_BY_KEY
+
+        powell_row = CURATED_BY_KEY[(2016, "Colin Powell")]
 
         def change(body: dict[str, Any]) -> None:
             for row in [*body["data"], *body["summary"]]:
                 if row["candidate"] == "Colin Powell":
                     row.update(
-                        nominating_party="no_nomination",
+                        nominating_party=powell_row.party,
                         nominating_party_source="USGOV",
-                        nominating_party_note="A doctored note.",
+                        nominating_party_note=powell_row.note,
+                    )
+                if row["candidate"] == "Ron Paul":
+                    row.update(
+                        nominating_party=None,
+                        nominating_party_source=None,
+                        nominating_party_note=None,
                     )
 
         doctor(monkeypatch, "/v1/elections/2016", change)
@@ -1364,7 +1378,13 @@ class TestOnePartyPerRow:
             assert powell, table
             assert {r["nominating_party"] for r in powell} == {"no_nomination"}
             assert {r["nominating_party_source"] for r in powell} == {"USGOV"}
-            assert {r["nominating_party_note"] for r in powell} == {"A doctored note."}
+            assert {r["nominating_party_note"] for r in powell} == {powell_row.note}
+            paul = [r for r in file.rows if r["candidate"] == "Ron Paul"]
+            assert paul, table
+            for field in (
+                "nominating_party", "nominating_party_source", "nominating_party_note"
+            ):
+                assert {r[field] for r in paul} == {""}, (table, field)
             assert any(
                 line.startswith("Parties the National Archives does not print: ")
                 for line in file.lines

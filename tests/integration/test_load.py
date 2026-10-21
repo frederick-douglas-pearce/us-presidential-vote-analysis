@@ -57,8 +57,9 @@ def test_fixture_slice_loads_into_real_postgres(
         assert counts["state"] == len(state_df) == 51
         assert counts["candidate"] == len(candidates_df)
         assert counts["votes"] == len(votes_df)
-        # One Archives row per Table 1 row: the President and Main Opponent per year.
-        assert counts["candidate_party"] == 4
+        # One Archives row per Table 1 row (the President and Main Opponent per year),
+        # plus 2016's five catalog no_nomination rows (#388).
+        assert counts["candidate_party"] == 9
 
         # Grain: primary keys are unique (a broken grain would have raised on the
         # PK constraint at insert, but assert explicitly for a clear signal).
@@ -109,10 +110,12 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
 ) -> None:
     """#385: the nominating-party table on a real database.
 
-    1872 carries the one corrected row and the one note; 2016 carries plain rows whose
-    missing note must arrive as SQL NULL (the write boundary's NaN-to-None step). The
-    three CHECKs and the composite key are then shown to be live, since the transform's
-    own guards would otherwise hide a constraint that never reached the DDL.
+    1872 carries the one corrected Archives row with its note, and three curated
+    ``no_nomination`` rows with theirs (#388); 2016 carries plain Archives rows whose
+    missing note must arrive as SQL NULL (the write boundary's NaN-to-None step), and
+    five curated rows. The three CHECKs and the composite key are then shown to be
+    live, on an Archives row, since the transform's own guards would otherwise hide a
+    constraint that never reached the DDL.
     """
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir
@@ -134,13 +137,21 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
             f"JOIN {SCHEMA}.candidate c USING (candidate_id) ORDER BY cp.year, c.name"
         )
         by_key = {(int(r.year), r.name): r for r in rows.itertuples()}
-        assert len(by_key) == 4
+        # Four Table 1 rows, plus the catalog's no_nomination rows in these years
+        # (#388): 1872's three and 2016's five.
+        assert len(by_key) == 12
         greeley = by_key[(1872, "Horace Greeley")]
         assert greeley.nominating_party == "liberal_republican_democratic"
         assert greeley.archives_party_code == "D"
         assert "November 29, 1872" in greeley.nominating_party_note
         assert by_key[(1872, "Ulysses S. Grant")].nominating_party == "republican"
-        assert set(rows["nominating_party_source"]) == {"NARA"}
+        sources = rows.groupby("nominating_party_source")["name"].count().to_dict()
+        assert sources == {"NARA": 4, "USGOV": 8}
+        curated = rows[rows["nominating_party_source"] == "USGOV"]
+        assert set(curated["nominating_party"]) == {"no_nomination"}
+        assert curated["archives_party_code"].isna().all()
+        # Every curated row here carries a note, so the three null notes are the
+        # Table 1 rows' other than Greeley's.
         nulls = dbc.select_query_to_df(
             f"SELECT count(*) AS n FROM {SCHEMA}.candidate_party "
             "WHERE nominating_party_note IS NULL"
@@ -149,7 +160,7 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
 
         first = (
             f"(SELECT min(candidate_id) FROM {SCHEMA}.candidate_party "
-            "WHERE year = 2016)"
+            "WHERE year = 2016 AND nominating_party_source = 'NARA')"
         )
         for statement, constraint in (
             (
