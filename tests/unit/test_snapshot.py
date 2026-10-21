@@ -1991,6 +1991,13 @@ class TestTheKeyedCatalogPin:
             "is not its Table 1 note",
         )
 
+    def test_a_missing_table1_note_fails(self) -> None:
+        """Greeley's Table 1 note is required; a NULL in its place is not his note."""
+        _pin_raises(
+            _pin_row(1872, "Horace Greeley", "liberal_republican_democratic"),
+            "is not its Table 1 note",
+        )
+
     def test_a_curated_note_on_an_archives_row_fails(self) -> None:
         _pin_raises(
             _pin_row(1972, "Richard Nixon", note=FIXTURE_CURATED_ROW.note),
@@ -2323,12 +2330,12 @@ def test_the_uncollected_report_reads_a_path_with_uri_characters(
 
 def test_the_uncollected_report_groups_by_era() -> None:
     text = format_uncollected_nominating_parties(
-        [(1860, "Cand D"), (1872, "David Davis"), (2016, "Ron Paul")]
+        [(1860, "Cand D"), (1872, "David Davis"), (1976, "Cand E"), (2016, "Ron Paul")]
     )
     assert text.splitlines() == [
-        "Nominating party not yet collected: 3 candidate-year(s).",
+        "Nominating party not yet collected: 4 candidate-year(s).",
         "  before 1976 (2): 1860 Cand D; 1872 David Davis",
-        "  1976 on (1): 2016 Ron Paul",
+        "  1976 on (2): 1976 Cand E; 2016 Ron Paul",
     ]
     assert format_uncollected_nominating_parties([]) == (
         "Nominating party: every served candidate-year has a value."

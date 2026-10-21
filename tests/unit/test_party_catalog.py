@@ -16,6 +16,9 @@ from tests.unit.test_candidate_party import _build, _inputs
 from usvote.party import (
     NOTE_REQUIRED_RULES,
     PARTY_COMPONENTS,
+    TABLE1_PARTY_CORRECTIONS,
+    TABLE1_ROW_NOTES,
+    TABLE1_ROW_RULES,
     CuratedPartyRow,
     PartyContractError,
 )
@@ -75,12 +78,33 @@ def test_an_out_of_vocabulary_value_fails() -> None:
         check_curated_catalog([_entry(row)])
 
 
-def test_a_table1_key_fails() -> None:
+@pytest.mark.parametrize(
+    ("year", "name", "party"),
+    [
+        # A key of TABLE1_PARTY_CORRECTIONS (and of the other two constants).
+        (1872, "Horace Greeley", "liberal_republican_democratic"),
+        # A key of TABLE1_ROW_RULES alone, so a check narrowed to the corrections
+        # misses it.
+        (1824, "Andrew Jackson", "democratic_republican"),
+    ],
+)
+def test_a_table1_key_fails(year: int, name: str, party: str) -> None:
     """A curated row may only fill a candidate-year Table 1 does not cover."""
-    row = CuratedPartyRow(1872, "Horace Greeley", "liberal_republican_democratic")
-    citation = _citation(supports=frozenset({"liberal_republican", "democratic"}))
+    supports = frozenset(PARTY_COMPONENTS[party]) or frozenset({party})
+    entry = _entry(CuratedPartyRow(year, name, party), _citation(supports=supports))
     with pytest.raises(PartyContractError, match="is a Table 1 row"):
-        check_curated_catalog([_entry(row, citation)])
+        check_curated_catalog([entry])
+
+
+def test_the_table1_key_cases_cover_each_constant() -> None:
+    """Keeps the cases above honest: one key is the corrections' and one is only a
+    rule set's. TABLE1_ROW_NOTES has no key the other two lack today."""
+    assert (1872, "Horace Greeley") in TABLE1_PARTY_CORRECTIONS
+    jackson = (1824, "Andrew Jackson")
+    assert jackson in TABLE1_ROW_RULES
+    assert jackson not in TABLE1_PARTY_CORRECTIONS
+    assert jackson not in TABLE1_ROW_NOTES
+    assert set(TABLE1_ROW_NOTES) <= set(TABLE1_PARTY_CORRECTIONS) | set(TABLE1_ROW_RULES)
 
 
 def test_a_catalog_row_on_a_table1_candidate_year_fails_the_build() -> None:
