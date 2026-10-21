@@ -20,7 +20,9 @@ and the Table 1 constants. D077 holds the rules.
 the C2 rows (``no_nomination``) in the same shape.
 
 **Stdlib-only, like** :mod:`usvote.party`. Its only ``usvote`` import is
-:mod:`usvote.party`. ``tests/unit/test_layering.py`` enforces this.
+:mod:`usvote.party`.
+``test_layering.py::test_the_party_catalog_module_imports_only_the_party_module``
+enforces this.
 
 **A passage is verbatim** from the fetched source: 40 words or fewer, with "…" marking
 an omission. ``verified`` is the date the parent matched it against a fresh download

@@ -926,7 +926,7 @@ US-government works. Both excluded UCSB from every search and used Wikipedia onl
 aid. One re-matched §8.1's passages. The other searched for Hospers, the two Progressives, and
 a second national body for each row.
 
-The parent then re-checked every catalog citation, and every source this section names, on
+The parent then re-checked every catalog citation, and every source those citations name, on
 2026-10-20:
 - **Fresh downloads:** the parent fetched every cited source itself (all HTTP 200).
 - **Script match:** 19 of the 21 citations matched verbatim, after normalizing whitespace,

@@ -534,7 +534,8 @@ def test_snapshot_from_a_real_full_span_warehouse(
 
 def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
     """AC1/AC2 of #386 on the real artifact: Table 1 rows carry their party on every
-    row of both tables, and a recipient outside Table 1 is NULL in all three columns."""
+    row of both tables; every curated catalog row is served as USGOV (#387); and a
+    recipient outside Table 1 and the catalog is NULL in all three columns."""
     for table in (DATA_TABLE, ROLLUP_TABLE):
         for (year, slug), expected in NOMINATING_PARTY_PINS.items():
             got = set(

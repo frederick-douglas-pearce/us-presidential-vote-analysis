@@ -5445,13 +5445,16 @@ fresh download (research doc §15). Three findings needed the owner.
 - **(a) The catalog is the third authority D077 names**, in `src/usvote/party_catalog.py`.
   It holds a source registry that states each source's public-domain basis, the rows, and
   their citations. Each citation records the source, a locator, a verbatim passage of 40
-  words or fewer, its verification date and the codes it supports. A check at import refuses,
-  among other defects, a row with no citation, a value outside the vocabulary, a key a Table 1
-  constant names (a correction, rule set or note), an unregistered source, or a joint code with
-  a component no citation supports. A key Table 1 covers without a constant is refused by the
-  build, which allows one row per candidate-year. The build merges the catalog by default. The
-  snapshot pins every served note to its own row's entry, and each curated value to the
-  catalog's; a Table 1 value is the build's, checked there.
+  words or fewer, its verification date and the codes it supports. A check at import
+  (`party_catalog.check_curated_catalog`) refuses, among other defects, a row with no
+  citation, a value outside the vocabulary, a key a Table 1 constant names (a correction, rule
+  set or note), an unregistered source, or a joint code with a component no citation supports.
+  A key Table 1 covers without a constant is refused by the build's overlap guard in
+  `transform.build_candidate_party` ("Archives takes precedence";
+  `test_a_catalog_row_on_a_table1_candidate_year_fails_the_build`). The build merges the
+  catalog by default. The snapshot (`snapshot.assert_nominating_party_matches_catalog`) pins
+  every served note to its own row's entry, and each curated value to the catalog's; a Table 1
+  value is the build's, checked there.
 - **(b) A row's rule set follows its citations.** 1824 Crawford cites VPB p. 107 ("the
   Republican caucus nominee"), and 1924 La Follette cites the 1927 *Biographical Directory*
   ("the ticket nominated at Cleveland by the conference for progressive political action").
