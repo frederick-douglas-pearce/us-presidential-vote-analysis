@@ -1066,6 +1066,11 @@ reports a standing presidential nomination for any of the fourteen.
   legislature chose them up to and including 1860." That covers 1832 only by inference, so the
   note does not say "legislature", and the case is not cited. This resolves §12's South Carolina
   item: the only government prose found is McPherson, and it is unused.
+  Searched, for a presidential nomination of Floyd by any body, a Nullifier one included (the
+  plan-time agents): VPB's Van Buren and Johnson chapters (no mention of Floyd) and its Calhoun
+  chapter (p. 97, the Nullifiers' 1832 control of the legislature); the Senate's North Carolina,
+  South Carolina and Virginia timelines; the Library of Congress's 1832 guide (its table footnote
+  only); ARCH-1832; and BDUSC. None found.
 - **1872 Hendricks, Brown and Jenkins** rest on no rule: none was nominated for President, and rule
   5 belongs to Greeley's Table 1 row. Brown's vice-presidential nomination is rule 7's case (only a
   presidential nomination counts), as are Bentsen's and Edwards's.
@@ -1077,6 +1082,11 @@ reports a standing presidential nomination for any of the fourteen.
   in 1960, and Senators Holland and Hill (108 Cong. Rec. 4369, March 16, 1962) call Alabama's six
   unpledged. The Clerk's statistics do not split Alabama's Democratic vote. §6.3 applies: the note
   gives Alabama's and Oklahoma's votes with no kind, and the conflict stays unresolved.
+  Searched, for a presidential nomination of Byrd in 1960 (the plan-time agents): ARCH-1960; the
+  House Clerk's 1960 statistics; the *Statistical Abstract 1961*; CRS RL32611; the House Historian;
+  the Congressional Record of the January 6, 1961 count (107 Cong. Rec. 289) and of March 16, 1962
+  (108 Cong. Rec. 4369); and Byrd's BDUSC entry (p. 761), which does not mention the 1960 votes.
+  None found.
 - **2016.** ARCH-2016's notes call the Hawaii, Texas and Washington votes "faithless voting"; the
   notes use the word only there.
 

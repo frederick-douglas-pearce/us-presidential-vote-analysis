@@ -156,8 +156,10 @@ def _faithless_frame() -> pd.DataFrame:
     ``no_nomination`` row (#388): only his key, value, source and note are real; his
     states and votes are synthetic, as 1860 John Bell's are. The build's keyed catalog
     pin runs over him but cannot fail here, since his values are copied from the
-    catalog: the test's own literals are what would catch a wrong value or note. Same ``(year, state)`` pairs as the shared frame, so its roster and
-    per-capita companions still fit.
+    catalog: the test's own expected values (the literals ``no_nomination`` and
+    ``USGOV``, and the ``WASHINGTON_2016_NOTE`` constant by name) are what would catch
+    a wrong value or the wrong note constant. Same ``(year, state)`` pairs as the
+    shared frame, so its roster and per-capita companions still fit.
     """
     frame = synthetic_ec_pv_frame()
     a_2016 = (frame["year"] == 2016) & (frame["candidate"] == "Cand A")

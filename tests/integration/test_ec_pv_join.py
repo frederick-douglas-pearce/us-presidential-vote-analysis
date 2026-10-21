@@ -494,8 +494,8 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
         assert (merged["nominating_party"] == "no_nomination").any()
         # The NULL path. Since #388 every recipient in this slice has a party row, so
         # one is removed here (2016 Ron Paul): the plain view must keep every row and
-        # read NULL in all three columns for him, as it would if its join to the party
-        # table were ever narrowed to an inner join.
+        # read NULL in all three columns for him. An inner join to the party table
+        # would drop his rows and fail the row-count check.
         before = len(view)
         dbc.execute_query(
             f"DELETE FROM {SCHEMA}.candidate_party cp USING {SCHEMA}.candidate c "
