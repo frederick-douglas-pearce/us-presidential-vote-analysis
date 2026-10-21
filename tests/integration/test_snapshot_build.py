@@ -89,6 +89,7 @@ from tests._helpers import FIXTURES_DIR, non_null_flag, non_null_sqlite_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
+from usvote.party_catalog import CURATED_BY_KEY, RULE_8_NOTE
 from usvote.pv.absences import PV_ABSENCE_CATALOG
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -533,7 +534,8 @@ def test_snapshot_from_a_real_full_span_warehouse(
 
 def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
     """AC1/AC2 of #386 on the real artifact: Table 1 rows carry their party on every
-    row of both tables, and a recipient outside Table 1 is NULL in all three columns."""
+    row of both tables; every curated catalog row is served as USGOV (#387); and a
+    recipient outside Table 1 and the catalog is NULL in all three columns."""
     for table in (DATA_TABLE, ROLLUP_TABLE):
         for (year, slug), expected in NOMINATING_PARTY_PINS.items():
             got = set(
@@ -559,9 +561,20 @@ def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
             "WHERE nominating_party_source = 'NARA'"
         ).fetchone()[0]
         assert keyed == NARA_PARTY_KEYS, (table, keyed)
-        assert conn.execute(
-            f"SELECT count(*) FROM {table} WHERE nominating_party_source = 'USGOV'"
-        ).fetchone()[0] == 0  # no curated rows until #387
+        # Every catalog row is served (#387), and only those: the build's own guards
+        # prove each value and note; this pins the count and one row end to end.
+        curated = conn.execute(
+            f"SELECT count(DISTINCT year || '/' || candidate_slug) FROM {table} "
+            "WHERE nominating_party_source = 'USGOV'"
+        ).fetchone()[0]
+        assert curated == len(CURATED_BY_KEY), (table, curated)
+        assert set(
+            conn.execute(
+                "SELECT nominating_party, nominating_party_source, "
+                f"nominating_party_note FROM {table} "
+                "WHERE year = 1860 AND candidate_slug = 'john-bell'"
+            ).fetchall()
+        ) == {("constitutional_union", "USGOV", RULE_8_NOTE)}, table
     assert conn.execute(
         f"SELECT usgov_source, usgov_license FROM {META_TABLE}"
     ).fetchone() == ("USGOV", "US-PD")

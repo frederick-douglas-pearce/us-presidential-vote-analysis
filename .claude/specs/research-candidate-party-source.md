@@ -912,3 +912,110 @@ ballot-line and Journals entries (§0.2), the CRS passage on Byrd's Alabama elec
 rule 3's evidence. On the owner's call these fixes went to the merge gate without a further
 check, because each pass found new and smaller items.
 
+
+---
+
+## §15 — #387's catalog (2026-10-20)
+
+#387 turned §8.1's C1 rows into the curated catalog, `src/usvote/party_catalog.py`. Its
+rulings are D078. This section is the dated evidence record behind them. Like the rest of
+this doc, it is not an authority: the catalog is.
+
+**How the evidence was gathered.** Before planning, two fresh read-only agents worked from
+US-government works. Both excluded UCSB from every search and used Wikipedia only as a finding
+aid. One re-matched §8.1's passages. The other searched for Hospers, the two Progressives, and
+a second national body for each row.
+
+The parent then re-checked every catalog citation, and every source those citations name, on
+2026-10-20:
+- **Fresh downloads:** the parent fetched every cited source itself (all HTTP 200).
+- **Script match:** 19 of the 21 citations matched verbatim, after normalizing whitespace,
+  line-end hyphenation and quotation marks.
+- **Page images:** the other two are scanned pages whose OCR is unreliable, so they were
+  matched on the rendered page image:
+  - the Congressional Record, vol. 122, p. 35649, where Rep. Paul's column is interleaved with
+    its neighbor in the OCR;
+  - the 1927 *Biographical Directory*, p. 1197, where the print has a damaged "v" in
+    "Cleveland" (OCR "Clelfeland"). The passage stores "Cleveland".
+
+### 15.1 Corrections to §8.1's citations
+
+- **1856 Fillmore.** VPB's phrase "the American (Know-Nothing)" is on p. 195, in the
+  Breckinridge chapter, and does not name Fillmore. Fillmore's own chapter (p. 176) says
+  "Know-Nothing party" only. The catalog cites VPB p. 176 for the nomination. It cites
+  LOC-1856's prose for the party's name and the Whig endorsement: "Former president Millard
+  Fillmore was the American Party (Know-Nothing) candidate … The Whig Party also endorsed
+  Fillmore for president."
+- **No VPB passage supports Fillmore's Whig component.** LOC-1856 is its only source.
+- **1912 Taft.** §8.1's ARCH-1912 passage stops at "received 8 electoral votes each", which
+  read alone says Sherman received them. The catalog's passage runs on through "but Sherman
+  died just before the election." (re-matched on the fresh download, 2026-10-20). The page
+  goes on to say that, before the electors met, Nicholas Butler was selected to receive the
+  electoral votes from Utah and Vermont that would have gone to Sherman.
+
+### 15.2 Stronger passages that change two rule sets (D078(b))
+
+- **1824 Crawford:** VPB, Van Buren chapter, p. 107: "Van Buren backed the Republican caucus
+  nominee, Treasury Secretary William H. Crawford." The catalog also cites BDUSC p. 892,
+  "unsuccessful Democratic Republican candidate for President of the United States in 1824",
+  which gives the name §2.1 links to `democratic_republican`.
+- **1924 La Follette:** *Biographical Directory of the American Congress 1774–1927* (H. Doc.
+  69-783), p. 1197: "unsuccessful candidate for President of the United States in 1924 on the
+  ticket nominated at Cleveland by the conference for progressive political action". The
+  Wheeler entry (p. 1686) names the same body for the vice-presidential half.
+
+### 15.3 1972 Hospers (§8.3 resolved)
+
+**Accepted:** Rep. Ron Paul's Extensions of Remarks, October 1, 1976, bound Congressional
+Record vol. 122, pt. 27, p. 35649: "the Libertarian Party held its convention here in
+Washington. … In 1972, its presidential candidate, Prof. John Hospers of Southern California
+University, finished third in electoral votes". The university's name is the speaker's, and
+the row's note does not repeat it.
+
+**Rejected:**
+- CRS R43824 n. 36. It ends "see Project Fairvote".
+- S. Doc. 106-16 and 111-15, Table 2, note 4. A table label sourced to the House Clerk.
+- A Los Angeles newspaper article inserted by Rep. Crane, vol. 119, p. 13362.
+- Sen. Muskie's floor remark, vol. 119, p. 414. It gives affiliation only ("of the
+  Libertarian Party").
+- CRS RL30804. Affiliation only, and read from a non-government mirror.
+
+ARCH-1972 lists "John Hospers (1)" with no party.
+
+### 15.4 The two Progressives (§2.1)
+
+**For two organizations:**
+- The 1927 *Directory* names the 1924 nominating body as the Conference for Progressive
+  Political Action (15.2).
+- Rep. Berger's memorial address (S. Doc. 69-157, p. 174): "outside of the Socialist Party …
+  the progressives had no political organization of any kind".
+- The 1912 party's national-committee posts are dated through 1916 (BDUSC pp. 1636, 785).
+
+**Against:** federal sources call both years' tickets the "Progressive Party" (VPB p. 558
+n. 14; ARCH-1924). No source found says the 1912 party dissolved.
+
+`progressive_1912` and `progressive_1924` stay two codes.
+
+### 15.5 The rule-3 sweep (§12, M5)
+
+No US-government passage was found that names a second national body nominating or endorsing
+13 of the 14 rows: Crawford, Clay, Wirt, White, Webster, Fillmore (a third body),
+Breckinridge, Bell, Weaver, Taft, Thurmond, Wallace and Hospers.
+
+**1924 La Follette is the exception, and stays open (D078(d)).** Two passages are close:
+- Rep. Berger, S. Doc. 69-157, p. 174: "the Socialists of the Nation indorsed his candidacy".
+- Rep. Berger, Congressional Record vol. 66, p. 2803: "the Socialist Party of the United
+  States whole-heartedly joined the movement".
+
+The first names no party, and the second does not say the party endorsed him for President.
+No passage names a Farmer-Labor or other national party. The unions and railroad brotherhoods
+are named as organizations, not parties.
+
+**Not checked:** CRS reports on the government host (HTTP 403), the 1950 *Directory*, and the
+1925–1926 Statistical Abstracts (too large to fetch).
+
+### 15.6 What is left
+
+After #387 the uncollected list is #388's C2 rows and 1872 Davis: 16 candidate-years.
+`python -m usvote.snapshot` prints the list from each build. The gated corpus test pins it
+(`_NOT_YET_COLLECTED` in `tests/unit/test_candidate_party.py`).

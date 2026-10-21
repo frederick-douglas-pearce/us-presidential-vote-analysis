@@ -145,8 +145,9 @@ DATA_COLUMNS: tuple[str, ...] = (
     # The nominating party, from ``dwh.candidate_party`` through the join view: constant
     # per ``(year, candidate_slug)`` and NULL together for one cause only, no row for
     # that candidate-year (the build proves it). The note is the second free-text column
-    # and ships for ``count_status_reason``'s reason: the build pins it to the in-repo
-    # catalog (:func:`usvote.snapshot.assert_nominating_party_notes_are_catalogued`).
+    # and ships for ``count_status_reason``'s reason: the build pins each row's note to
+    # its own catalog entry, keyed since #387
+    # (:func:`usvote.snapshot.assert_nominating_party_matches_catalog`).
     "nominating_party",
     "nominating_party_source",
     "nominating_party_note",

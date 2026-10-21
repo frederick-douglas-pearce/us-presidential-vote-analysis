@@ -5428,3 +5428,68 @@ both D077 citations as D064(c). D077's decision is unchanged. The slip came from
 evidence record. Recorded as an appended entry because this log is append-only.
 
 ---
+
+## D078: The curated catalog's first rows: rule sets follow the citations, a member's own words in the Congressional Record are a source of record, and La Follette's Socialist endorsement stays open
+
+**Date:** 2026-10-20
+**Builds on:** D077 · **Supersedes:** the owner's #384 acceptance-gate call, recorded in D077, that 1824 Crawford rests on rule 8 · **Decided by:** the owner at #387's plan gate, after the architect's plan review; recorded by #387 (E8-S13)
+
+**Context.** #387 curates D077's C1 population: the 14 candidate-years with electoral
+votes cast that a party nominated and Archives Table 1 does not cover. Before planning, two
+fresh agents re-matched #384's passages and searched for three things: a source for 1972
+Hospers, a source for the two Progressives, and a second national nominating body for each
+row (the rule-3 sweep). The parent then re-matched every passage the catalog cites against a
+fresh download (research doc §15). Three findings needed the owner.
+
+**Decision.**
+- **(a) The catalog is the third authority D077 names**, in `src/usvote/party_catalog.py`.
+  It holds a source registry that states each source's public-domain basis, the rows, and
+  their citations. Each citation records the source, a locator, a verbatim passage of 40
+  words or fewer, its verification date and the codes it supports. A check at import
+  (`party_catalog.check_curated_catalog`) refuses, among other defects, a row with no
+  citation, a value outside the vocabulary, a key a Table 1 constant names (a correction, rule
+  set or note), an unregistered source, or a joint code with a component no citation supports.
+  A key Table 1 covers without a constant is refused by the build's overlap guard in
+  `transform.build_candidate_party` ("Archives takes precedence";
+  `test_a_catalog_row_on_a_table1_candidate_year_fails_the_build`). The build merges the
+  catalog by default. The snapshot (`snapshot.assert_nominating_party_matches_catalog`) pins
+  every served note to its own row's entry, and each curated value to the catalog's; a Table 1
+  value is the build's, checked there.
+- **(b) A row's rule set follows its citations.** 1824 Crawford cites VPB p. 107 ("the
+  Republican caucus nominee"), and 1924 La Follette cites the 1927 *Biographical Directory*
+  ("the ticket nominated at Cleveland by the conference for progressive political action").
+  Each names the body that nominated him, so neither rests on rule 8, and D077's count of
+  "twelve rows today" becomes ten, plus 1972 Hospers. Crawford carries no note. The owner
+  accepts that the Conference for Progressive Political Action's nomination is the
+  `progressive_1924` value: the body's name differs from the party name SFB-LaFollette gives
+  ("the Progressive Party ticket"), so La Follette carries a note naming the conference. The
+  1836 Whigs White and Webster rest on rules 2 and 8, matching Harrison on rule 2, not on
+  rule 6, which the research doc keeps for the two 1860 Democratic nominations.
+- **(c) A member's own words in the bound Congressional Record are a federal source of
+  record**, Extensions of Remarks included. Matter inserted into the Record (a reprinted
+  article or letter) is not. On that basis 1972 Hospers takes `libertarian` under rule 8, from
+  Rep. Ron Paul's remarks of October 1, 1976 (vol. 122, p. 35649): "In 1972, its presidential
+  candidate, Prof. John Hospers".
+- **(d) 1924 La Follette's Socialist endorsement is left open**, and he is `progressive_1924`
+  alone. The reason is narrower than "no source names the body": 1856 Fillmore's Whig
+  component already rests on a passage that names the party and no body. Rep. Berger's first
+  passage, "the Socialists of the Nation indorsed his candidacy", names no party. His second,
+  "the Socialist Party of the United States whole-heartedly joined the movement", names the
+  party but does not say it nominated, endorsed or supported him for President. Rules 3 and 8
+  need one passage that does both, and joining two passages is an inference the evidence bar
+  does not allow. A joint code could never change meaning, so shipping one early would cost a
+  superseding D-entry. Adding one later is the documented path. The item joins #394's open
+  endorsements.
+
+**Rationale.** The rule set is the catalog's per-row record of which rules a value rests on
+(D077, the row note). A rule-8 note says "the sources name the party, not the body", so it
+would be false beside a citation that names the body. Letting the rule set follow the
+strongest cited passage keeps every note true. The Congressional Record call keeps D077's bar,
+"another US-government work with its public-domain basis stated", while saying which part of
+the Record qualifies. A member's remarks are an official act; an inserted text keeps its own
+author's status. The registry records that basis per source, rather than inferring it from a
+`.gov` host, which research doc §0.2 rules out.
+
+**Related:** D077, D022, #384, #387, #388, #394.
+
+---

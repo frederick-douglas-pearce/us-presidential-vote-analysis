@@ -191,8 +191,8 @@ def test_get_candidate_unknown_404(client: TestClient) -> None:
 _EXPECTED_CANDIDATE_INDEX = [
     {"candidate_slug": "cand-a", "candidate": "Cand A", "years": [2016, 2020]},
     {"candidate_slug": "cand-b", "candidate": "Cand B", "years": [2016, 2020]},
-    {"candidate_slug": "cand-c", "candidate": "Cand C", "years": [1860]},
     {"candidate_slug": "cand-d", "candidate": "Cand D", "years": [1860]},
+    {"candidate_slug": "john-bell", "candidate": "John Bell", "years": [1860]},
 ]
 
 
@@ -313,7 +313,12 @@ def test_candidate_index_is_ordered_by_slug_not_name(snapshot_path: str) -> None
         snapshot_path, "UPDATE ec_pv SET candidate = 'Zed A' WHERE candidate_slug = 'cand-a'"
     )
     items = repo.list_candidates()
-    assert [i["candidate_slug"] for i in items] == ["cand-a", "cand-b", "cand-c", "cand-d"]
+    assert [i["candidate_slug"] for i in items] == [
+        "cand-a",
+        "cand-b",
+        "cand-d",
+        "john-bell",
+    ]
     assert items[0]["candidate"] == "Zed A"
 
 

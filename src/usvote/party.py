@@ -28,10 +28,12 @@ year ranges are written out with :func:`range` rather than read from
 (``test_the_party_module_is_dependency_free``,
 ``test_the_party_module_imports_with_the_heavy_stack_blocked``).
 
-**What is not here.** The curated catalog for candidates outside Table 1 is #387/#388's
-authority; :func:`usvote.transform.build_candidate_party` takes it as a parameter, and
-:class:`CuratedPartyRow` is the shape it takes. The MIT agreement check (D077 amends
-D018: MIT's party is a check, not a source) lives in :mod:`usvote.party_check`.
+**What is not here.** The curated catalog for candidates outside Table 1 is
+:mod:`usvote.party_catalog` (#387/#388), with its citations and source registry;
+:func:`usvote.transform.build_candidate_party` takes it as a parameter (defaulting to
+that catalog), and :class:`CuratedPartyRow` is the shape it takes. The MIT agreement
+check (D077 amends D018: MIT's party is a check, not a source) lives in
+:mod:`usvote.party_check`.
 
 **A code never changes meaning** (research doc §2.2). Adding a component, merging codes
 or adding a value makes a new code, which needs a superseding D-entry and an API
@@ -227,11 +229,24 @@ TABLE1_ROW_NOTES: Mapping[tuple[int, str], str] = {
 }
 
 #: The keys whose rule sets must cover the given rules: a hand-written floor, so a row
-#: cannot drop its rule set (and with it its note) silently (research doc §2.4). #387
-#: and #388 add their curated keys (1856 Fillmore, the twelve rule-8 rows, 1872 Davis
+#: cannot drop its rule set (and with it its note) silently (research doc §2.4). The
+#: curated keys are #387's: 1856 Fillmore (rules 3 and 8) and every curated row resting
+#: on rule 8. 1824 Crawford and 1924 La Follette left rule 8 at #387, because their
+#: citations name the body that nominated them (D078). #388 adds its keys (1872 Davis
 #: once confirmed).
 NOTE_REQUIRED_FLOOR: Mapping[tuple[int, str], frozenset[int]] = {
     (1872, "Horace Greeley"): frozenset({5}),
+    (1824, "Henry Clay"): frozenset({8}),
+    (1832, "William Wirt"): frozenset({8}),
+    (1836, "Hugh L. White"): frozenset({8}),
+    (1836, "Daniel Webster"): frozenset({8}),
+    (1856, "Millard Fillmore"): frozenset({3, 8}),
+    (1860, "John Bell"): frozenset({8}),
+    (1892, "James B. Weaver"): frozenset({8}),
+    (1912, "William H. Taft"): frozenset({8}),
+    (1948, "J. Strom Thurmond"): frozenset({8}),
+    (1968, "George C. Wallace"): frozenset({8}),
+    (1972, "John Hospers"): frozenset({8}),
 }
 
 
@@ -244,7 +259,8 @@ class CuratedPartyRow:
 
     Keyed like the Table 1 constants, by ``(year, name)`` with the candidate
     dimension's spelling. ``rules`` and ``note`` obey the same rules as a Table 1 row's.
-    Citations are #387's to shape and are not modeled here.
+    Citations are not modeled here: :class:`usvote.party_catalog.CatalogEntry` pairs a
+    row with them.
     """
 
     year: int

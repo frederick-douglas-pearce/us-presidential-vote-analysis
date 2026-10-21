@@ -78,6 +78,7 @@ from usvote.party import (
     TABLE1_TOKEN_MAP,
     CuratedPartyRow,
 )
+from usvote.party_catalog import CURATED_PARTY_ROWS
 from usvote.years import ec_ingest_years
 
 # --- historical corrections (provenance-carrying constants) ----------------
@@ -2105,7 +2106,7 @@ def build_candidate_party(
     rules: Mapping[PartyKey, frozenset[int]] = TABLE1_ROW_RULES,
     notes: Mapping[PartyKey, str] = TABLE1_ROW_NOTES,
     floor: Mapping[PartyKey, frozenset[int]] = NOTE_REQUIRED_FLOOR,
-    curated: Sequence[CuratedPartyRow] = (),
+    curated: Sequence[CuratedPartyRow] = CURATED_PARTY_ROWS,
 ) -> pd.DataFrame:
     """Build ``dwh.candidate_party``: each candidate-year's nominating party (D077).
 
@@ -2119,7 +2120,8 @@ def build_candidate_party(
     ``candidates_df`` and ``votes_df`` are :func:`transform_parsed_years`' frames: names
     resolve to ``candidate_id`` through the candidate dimension, and the national totals
     rows say which candidate-years had votes cast. Every constant defaults to
-    :mod:`usvote.party`'s and is a parameter so a test can hand in a broken one.
+    :mod:`usvote.party`'s, and ``curated`` to the catalog in :mod:`usvote.party_catalog`
+    (#387); each is a parameter so a test can hand in a broken one.
 
     Guards, each raising :class:`TransformError`:
 

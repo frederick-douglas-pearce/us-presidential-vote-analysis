@@ -28,6 +28,7 @@ from usvote.party import (
     PartyContractError,
     check_party_components,
 )
+from usvote.party_catalog import CURATED_BY_KEY
 from usvote.years import ec_ingest_years
 
 # --- the vocabulary ---------------------------------------------------------
@@ -183,9 +184,27 @@ def test_every_note_required_table1_row_has_a_note() -> None:
 
 
 def test_the_floor_is_pinned_and_covered_by_the_rule_sets() -> None:
-    assert dict(NOTE_REQUIRED_FLOOR) == {(1872, "Horace Greeley"): frozenset({5})}
+    # #387 added the curated keys: Fillmore (rules 3 and 8) and every curated row
+    # resting on rule 8. Crawford and La Follette are absent on purpose (D078).
+    assert dict(NOTE_REQUIRED_FLOOR) == {
+        (1872, "Horace Greeley"): frozenset({5}),
+        (1824, "Henry Clay"): frozenset({8}),
+        (1832, "William Wirt"): frozenset({8}),
+        (1836, "Hugh L. White"): frozenset({8}),
+        (1836, "Daniel Webster"): frozenset({8}),
+        (1856, "Millard Fillmore"): frozenset({3, 8}),
+        (1860, "John Bell"): frozenset({8}),
+        (1892, "James B. Weaver"): frozenset({8}),
+        (1912, "William H. Taft"): frozenset({8}),
+        (1948, "J. Strom Thurmond"): frozenset({8}),
+        (1968, "George C. Wallace"): frozenset({8}),
+        (1972, "John Hospers"): frozenset({8}),
+    }
     for key, required in NOTE_REQUIRED_FLOOR.items():
-        assert required <= TABLE1_ROW_RULES[key], key
+        if key in CURATED_BY_KEY:
+            assert required <= CURATED_BY_KEY[key].rules, key
+        else:
+            assert required <= TABLE1_ROW_RULES[key], key
 
 
 def test_the_greeley_note_states_the_death_and_its_date() -> None:
@@ -207,8 +226,9 @@ def test_the_archives_source_code_is_the_one_the_api_serves() -> None:
 def test_no_table1_note_carries_a_control_character() -> None:
     # #386: the snapshot serves these notes verbatim and pins every served note to this
     # catalog, so a control character here would reach the content hash (whose field
-    # and row separators are control characters) and every CSV. #387/#388 extend this
-    # to the curated catalog's notes.
+    # and row separators are control characters) and every CSV. The curated catalog's
+    # notes and passages have the same test (#387):
+    # test_party_catalog.py::test_no_note_or_passage_carries_a_control_character.
     for key, note in TABLE1_ROW_NOTES.items():
         assert not any(ord(c) < 32 or ord(c) == 127 for c in note), key
 
