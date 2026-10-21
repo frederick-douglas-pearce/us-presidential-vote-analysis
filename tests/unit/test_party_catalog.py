@@ -236,6 +236,15 @@ def test_a_citation_backing_no_code_fails_on_a_nominated_row() -> None:
         ),
         # A C2 citation backing a party: it would claim the origin passage names one.
         (_c2_entry(supports=frozenset({"republican"})), "['republican']"),
+        # A nominated row's citation backing no_nomination: the absence is a C2 row's
+        # alone, so a nominated row may not cite it.
+        (
+            _entry(
+                None,
+                _citation(supports=frozenset({"constitutional_union", NO_NOMINATION})),
+            ),
+            "['no_nomination']",
+        ),
     ],
 )
 def test_a_citation_backing_a_code_outside_the_value_fails(
