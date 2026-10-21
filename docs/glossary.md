@@ -508,15 +508,15 @@ articles and announcements). Every rule binds all three unless the rule states a
   outside the caucus, 1828, and the 1836 Whigs, where no national body nominated, the code is the
   party the source of record names (D077 rule 2). A national party's endorsement is treated as its
   nomination (rule 3), and so is a U.S. Government source's statement that the person was the
-  party's candidate or nominee, or that a body of the party supported or nominated them (rule 8);
-  a value resting on either carries a note saying so (*Nominating-party note*). `no_nomination` is
-  a served value (rules 5 and 7). Null has one cause: the dataset has no row for that candidate-year. `nominating_party_source`
-  says where each value comes from: `NARA`, the party the National Archives prints for the
-  election's winner and main opponent (a value that a U.S. Government publication amends, such as
-  1872 Greeley's, keeps `NARA`), or `USGOV`, a curated row citing U.S. Government publications;
-  for a `no_nomination` row, its citations record how the candidate received electoral votes, and
-  none states the value itself (D079); null exactly where the value is. A code never changes meaning: a new value or component is a new
-  code (D077).
+  party's candidate or nominee, or that a body of the party supported or nominated them (rule 8); a
+  value resting on either carries a note saying so (*Nominating-party note*). `no_nomination` is a
+  served value (rules 5 and 7). Null has one cause: the dataset has no row for that candidate-year.
+  `nominating_party_source` says where each value comes from: `NARA`, the party the National
+  Archives prints for the election's winner and main opponent (a value that a U.S. Government
+  publication amends, such as 1872 Greeley's, keeps `NARA`), or `USGOV`, a curated row citing U.S.
+  Government publications; null exactly where the value is. For a `no_nomination` row, its citations
+  record how the candidate received electoral votes, and none states the value itself (D079). A code
+  never changes meaning: a new value or component is a new code (D077).
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party`,
   `EcPvRow.nominating_party_source`, `NationalSummaryRow.nominating_party` and
   `NationalSummaryRow.nominating_party_source` field descriptions in `src/usvote/api/models.py`.
@@ -557,12 +557,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   Washington recipients share their state's note (`TEXAS_2016_NOTE`, `WASHINGTON_2016_NOTE`). A
   row with more to explain has a note of its own. The text is a data value, served as stored.
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party_note` and
-  `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`.
-  On the dashboard: the party cell's help text where a row has a note (on a `no_nomination` row, after
-  `labels.NO_NOMINATION_NOTE`), and once per candidate and
-  election in the Party notes list under T2–T5 (`labels.PARTY_NOTES_HEADING`,
-  `labels.PARTY_NOTE_ITEM`), shown as served; `LABELS["nominating_party_note"]` in their
-  column-name lists; `nominating_party_note` in their downloads.
+  `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`. On
+  the dashboard: the party cell's help text where a row has a note (on a `no_nomination` row, after
+  `labels.NO_NOMINATION_NOTE`), and once per candidate and election in the Party notes list under
+  T2–T5 (`labels.PARTY_NOTES_HEADING`, `labels.PARTY_NOTE_ITEM`), shown as served;
+  `LABELS["nominating_party_note"]` in their column-name lists; `nominating_party_note` in their
+  downloads.
 - **Source:** D077, "The row note"; D079 (the `no_nomination` notes); research doc §2.4, §16;
   `TABLE1_ROW_NOTES` (wording approved by the owner, 2026-10-18, #385 plan); `CURATED_PARTY_ROWS`
   (wording approved by the owner, 2026-10-20, #387 plan; the #388 notes, approved by the owner,
