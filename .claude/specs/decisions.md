@@ -5493,3 +5493,59 @@ author's status. The registry records that basis per source, rather than inferri
 **Related:** D077, D022, #384, #387, #388, #394.
 
 ---
+
+## D079: The curated catalog's C2 rows: an origin citation backs no code, a search record stands for the absence, and Mangum and Davis stay null
+
+**Date:** 2026-10-21
+**Builds on:** D077, D078 · **Decided by:** the owner at #388's plan gate (Q1 Mangum, Q2 Davis,
+the Byrd note, the notes' wording), after the architect's plan review; recorded by #388
+(E8-S14)
+
+**Context.** #388 curates D077's C2 population: the candidate-years with electoral votes cast
+that no party nominated for President. A C2 row's sources say how the votes arose; none can
+quote an absence (research doc §6.1). Two members, 1836 Mangum and 1872 Davis, did not meet the
+evidence bar. Research doc §16 is the evidence record.
+
+**Decision.**
+- **(a) A C2 citation backs no code.** `Citation.supports` names the codes a passage backs, and an
+  origin passage ("A Washington (State) elector voted for Ronald Reagan.") backs none, so it is
+  empty. A `no_nomination` row instead needs at least one citation, a note, and a `searched`
+  record of what was searched for a nomination, which `CatalogEntry` carries and which is never
+  stored or served. `party_catalog.check_curated_catalog` refuses a `no_nomination` row missing
+  any of them, an empty `supports` on any other row, and a citation backing a code that is
+  neither the value nor one of its components. `supports={"no_nomination"}` is reserved for a
+  passage that states the absence or a withdrawal, as a future Davis row under rule 5 would.
+- **(b) A C2 row rests on no rule.** Its rule set is empty: none was nominated for President, so
+  rule 5 belongs to 1872 Greeley's Table 1 row, not to the electors who then voted for Hendricks,
+  Brown or Jenkins. Brown, Bentsen and Edwards were nominated for Vice President; that is rule 7's
+  case, which is outside the rule-set domain by D077's design. The note a C2 row needs follows
+  from its value, not a rule, so the catalog check requires it, and no C2 key is added to
+  `party.NOTE_REQUIRED_FLOOR`, where an empty rule set would pin nothing.
+- **(c) A C2 note says how the votes arose**, from the row's own citations, and does not repeat
+  what `no_nomination` means. "Faithless" appears only where the cited passage uses it (ARCH-2016).
+  1960 Byrd's note names Mississippi's unpledged Democratic electors and gives Alabama's six and
+  Oklahoma's one with no kind, because US-government sources conflict on them (research doc §16.1;
+  §6.3). 1832 Floyd's note does not say South Carolina's legislature chose the electors, because
+  the only government source, *McPherson v. Blacker*, covers 1832 only by inference; that
+  resolves the South Carolina item research doc §12 passed to #388, unused.
+- **(d) 1836 Mangum stays null.** VPB places him among the Whigs' regional candidates "nominated
+  at the state and local level", a reported nomination that bars `no_nomination` (research doc
+  §6.1), and no passage names him a Whig candidate. This revises research doc §3 and §8.1, which
+  class him `no_nomination`: an evidence update, not a rule change. A single US-government passage
+  naming him a Whig candidate for President in 1836 would make him `whig` under rule 2.
+- **(e) 1872 Davis stays null, and D077's "#388 also decides Davis under rule 5" is not
+  discharged.** No US-government passage names his Labor Reform nomination or its withdrawal, and
+  public domain by age is corroboration only. The open question lives in research doc §16.2, and
+  the snapshot build's uncollected report names him on every build. A future source decides it:
+  a withdrawal makes him `no_nomination` with rule set {5} and a required note; a standing
+  nomination needs a new code by a superseding D-entry (D077).
+
+**Rationale.** Keeping `supports` true to what each passage says keeps the catalog's citation
+record honest: an origin passage backing `no_nomination` would claim a source states an absence
+it does not. The search record is where §6.1 already put the absence. Leaving Mangum and Davis
+null keeps the null single-cause and the evidence bar unbent; both are named, so neither reads as
+an oversight.
+
+**Related:** D077, D078, #384, #387, #388, #394.
+
+---

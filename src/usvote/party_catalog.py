@@ -16,8 +16,12 @@ and the Table 1 constants. D077 holds the rules.
   :func:`usvote.transform.build_candidate_party` merges.
 - :func:`check_curated_catalog` is the catalog's contract, run at import.
 
-#387 adds the C1 rows: candidates a party nominated (research doc §5, §8.1). #388 adds
-the C2 rows (``no_nomination``) in the same shape.
+#387 added the C1 rows: candidates a party nominated (research doc §5, §8.1). #388 adds
+the C2 rows (``no_nomination``) in the same shape (D079). A C2 citation records how the
+candidate's votes arose, which states no party, so its ``supports`` is empty. What
+stands for the absence of a nomination is the entry's ``searched`` record, since an
+absence cannot be quoted (research doc §6.1). 1836 Mangum and 1872 Davis have no row:
+the research doc's §16 gives each one's reason.
 
 **Stdlib-only, like** :mod:`usvote.party`. Its only ``usvote`` import is
 :mod:`usvote.party`.
@@ -36,6 +40,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from usvote.party import (
+    NO_NOMINATION,
     NOMINATING_PARTIES,
     PARTY_COMPONENTS,
     TABLE1_PARTY_CORRECTIONS,
@@ -142,6 +147,33 @@ SOURCES: Mapping[str, Source] = {
         "GPO-CRECB-1976-pt27-1-3.pdf",
         _FEDERAL_WORK + "; a member's own words, not inserted matter (D078)",
     ),
+    **{
+        f"ARCH-{year}": Source(
+            "U.S. National Archives and Records Administration",
+            f"{year} Electoral College Results",
+            f"https://www.archives.gov/electoral-college/{year}",
+            _FEDERAL_WORK,
+        )
+        for year in (1832, 1872, 1956, 1960, 1976, 1988, 2004, 2016)
+    },
+    "ST-TX": Source(
+        "U.S. Senate",
+        "States in the Senate: Texas Timeline",
+        "https://www.senate.gov/states/TX/timeline.htm",
+        _FEDERAL_WORK,
+    ),
+    "ST-NC": Source(
+        "U.S. Senate",
+        "States in the Senate: North Carolina Timeline",
+        "https://www.senate.gov/states/NC/timeline.htm",
+        _FEDERAL_WORK,
+    ),
+    "CLERK-1960": Source(
+        "U.S. House of Representatives, Clerk of the House",
+        "Statistics of the Presidential and Congressional Election of November 8, 1960",
+        "https://clerk.house.gov/member_info/electionInfo/1960election.pdf",
+        _FEDERAL_WORK,
+    ),
 }
 
 
@@ -157,7 +189,9 @@ class Citation:
 
     ``supports`` names the party codes this passage backs. For a single code it is that
     code; for a joint code, the components it backs. Across a row's citations, the union
-    must cover the value (:func:`check_curated_catalog`).
+    must cover the value (:func:`check_curated_catalog`). A ``no_nomination`` row's
+    citations say how the votes arose and back no code, so theirs is empty; only a
+    passage stating the absence or a withdrawal would back ``no_nomination`` (D079).
     """
 
     source_key: str
@@ -169,10 +203,16 @@ class Citation:
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """A curated row and the citations it rests on; a row with none is refused."""
+    """A curated row and the citations it rests on; a row with none is refused.
+
+    ``searched`` records what was searched for a nomination, and is required on a
+    ``no_nomination`` row (research doc §6.1). It is build metadata: it never reaches
+    :class:`~usvote.party.CuratedPartyRow`, so it is neither stored nor served.
+    """
 
     row: CuratedPartyRow
     citations: tuple[Citation, ...]
+    searched: str | None = None
 
 
 # --- the row notes (wording by ``ba``, owner-approved 2026-10-20, #387 plan) -----
@@ -211,16 +251,137 @@ LA_FOLLETTE_1924_NOTE = (
 )
 
 
-def _cite(
-    source_key: str, locator: str, passage: str, *supports: str
-) -> Citation:
-    return Citation(source_key, locator, passage, _VERIFIED, frozenset(supports))
-
-
-#: The date the parent matched every passage below against a fresh download (AC4).
+#: The date the parent matched each C1 passage below against a fresh download (#387,
+#: AC4).
 _VERIFIED = date(2026, 10, 20)
 
+#: The date the parent matched each C2 passage against a fresh download (#388; UTC,
+#: research doc §16).
+_VERIFIED_C2 = date(2026, 10, 21)
+
+
+def _cite(
+    source_key: str,
+    locator: str,
+    passage: str,
+    *supports: str,
+    verified: date = _VERIFIED,
+) -> Citation:
+    return Citation(source_key, locator, passage, verified, frozenset(supports))
+
+
+def _origin(source_key: str, locator: str, passage: str) -> Citation:
+    """A C2 citation: how the votes arose, backing no code (D079)."""
+    return _cite(source_key, locator, passage, verified=_VERIFIED_C2)
+
 _R8 = frozenset({8})
+
+# --- the C2 notes (wording by ``ba``, owner-approved 2026-10-21, #388 plan) ----------
+#
+# A C2 note says only how the candidate's electoral votes arose. On the dashboard it
+# follows ``labels.NO_NOMINATION_NOTE``, so none repeats that no party nominated them.
+
+#: 1832 Floyd. ARCH-1832; the year is the election's (BDUSC dates the vote 1833, when
+#: Congress counted it). No "legislature": the source naming South Carolina's
+#: legislature covers 1832 only by inference (research doc §16).
+FLOYD_1832_NOTE = (
+    "South Carolina cast 11 electoral votes for Floyd for President in 1832."
+)
+
+#: 1872 Hendricks. VPB names the Greeley fusion ticket; ARCH-1872 the scatter.
+HENDRICKS_1872_NOTE = (
+    "The Democrats and the Liberal Republicans nominated Horace Greeley for President "
+    "in 1872. Greeley died before the electors voted, and electors in several states "
+    "then voted for various candidates. Some voted for Hendricks for President."
+)
+
+#: 1872 Brown, Greeley's running mate (ARCH-1872).
+BROWN_1872_NOTE = (
+    "Brown was Horace Greeley's running mate in 1872. Greeley died before the electors "
+    "voted, and electors in several states then voted for various candidates. Some "
+    "voted for Brown for President."
+)
+
+#: 1872 Jenkins, from Georgia's electors (ARCH-1872, note 4).
+JENKINS_1872_NOTE = (
+    "Horace Greeley died before the electors voted in 1872, and electors in several "
+    "states then voted for various candidates. Two Georgia electors voted for Jenkins "
+    "for President."
+)
+
+JONES_1956_NOTE = "In 1956, one Alabama elector voted for Jones for President."
+
+#: 1960 Byrd: one sentence per passage, so the note never says the unpledged slate won
+#: Mississippi; Alabama's six and Oklahoma's one are given no kind, because U.S.
+#: Government sources disagree on it (research doc §16, D079).
+BYRD_1960_NOTE = (
+    "In 1960, Mississippi's popular vote included votes for unpledged Democratic "
+    "electors, who later agreed to support Byrd. He received electoral votes for "
+    "President from Mississippi (8), Alabama (6) and Oklahoma (1)."
+)
+
+REAGAN_1976_NOTE = (
+    "In 1976, one Washington State elector voted for Reagan for President."
+)
+
+BENTSEN_1988_NOTE = (
+    "Bentsen ran for Vice President on the Democratic ticket in 1988. One West "
+    "Virginia elector voted for him for President and for Dukakis for Vice President."
+)
+
+EDWARDS_2004_NOTE = (
+    "Edwards was the Democratic nominee for Vice President in 2004. One Minnesota "
+    "elector voted for him for both President and Vice President."
+)
+
+#: The 2016 notes, one per state; each is true of every row that carries it.
+HAWAII_2016_NOTE = (
+    "In 2016, one Hawaii elector cast a faithless vote for Bernie Sanders for "
+    "President."
+)
+TEXAS_2016_NOTE = (
+    "In 2016, two Texas electors cast faithless votes for President: one for Ron Paul "
+    "and one for John Kasich."
+)
+WASHINGTON_2016_NOTE = (
+    "In 2016, four Washington electors cast faithless votes for President: three for "
+    "Colin Powell and one for Faith Spotted Eagle."
+)
+
+# --- what was searched for each C2 row (research doc §6.1, §16) -----------------
+#
+# An absence cannot be quoted, so each C2 row records what was searched for a
+# presidential nomination. Not served. The research doc's §16 lists the works.
+
+_SEARCHED_1832 = (
+    "U.S. Government works on the 1832 election (research doc §16), for a presidential "
+    "nomination of Floyd by any body, a Nullifier one included: none found."
+)
+_SEARCHED_1872 = (
+    "VPB, BDUSC and ARCH-1872 (research doc §16), for a presidential nomination in "
+    "1872: none found; the Democrats and the Liberal Republicans nominated Greeley."
+)
+_SEARCHED_1956 = (
+    "ARCH-1956 and the U.S. Government works research doc §16 lists, for a "
+    "presidential nomination of Jones in 1956: none found."
+)
+_SEARCHED_1960 = (
+    "ARCH-1960, the House Clerk's 1960 statistics, the Statistical Abstract 1961, CRS "
+    "RL32611, the House Historian and the Congressional Record of 1961–62 (research "
+    "doc §16), for a presidential nomination of Byrd: none found."
+)
+_SEARCHED_1976 = (
+    "ARCH-1976 (research doc §16), for a 1976 presidential nomination of Reagan: none "
+    "found."
+)
+_SEARCHED_VP = (
+    "BDUSC and the Senate state timeline (research doc §16): a nomination for Vice "
+    "President that year; no presidential nomination found."
+)
+_SEARCHED_2016 = (
+    "ARCH-2016 and the BDUSC entries for Paul, Sanders and Kasich (research doc §16), "
+    "for a 2016 presidential nomination of any of the five: none found."
+)
 
 #: VPB's Johnson chapter, p. 127, cited by both 1836 Whig rows.
 _VPB_1836_WHIGS = (
@@ -239,6 +400,20 @@ _VPB_1836_WHIGS = (
         "caucuses",
         "whig",
     ),
+)
+
+#: ARCH-2016's three faithless-vote notes, each cited by every row it names.
+_ARCH_2016_HAWAII = (
+    "Due to faithless voting, the electoral votes for Hawaii were: for President, "
+    "Clinton 3 and Bernie Sanders 1"
+)
+_ARCH_2016_TEXAS = (
+    "Due to faithless voting, the electoral votes for Texas were: for President, "
+    "Trump 36, Ron Paul 1, and John Kasich 1"
+)
+_ARCH_2016_WASHINGTON = (
+    "Due to faithless voting, the electoral votes for Washington were: for President, "
+    "Clinton 8, Colin Powell 3, and Faith Spotted Eagle 1"
 )
 
 #: The curated rows. Keys are ``(year, name)`` as the candidate dimension spells the
@@ -462,6 +637,189 @@ CATALOG: tuple[CatalogEntry, ...] = (
             ),
         ),
     ),
+    # --- C2: no_nomination (#388, D079). Citations give the votes' origin. ---------
+    CatalogEntry(
+        CuratedPartyRow(1832, "John Floyd", NO_NOMINATION, note=FLOYD_1832_NOTE),
+        (
+            _origin(
+                "ARCH-1832",
+                "Electoral College Votes by State, note 5",
+                "South Carolina cast 11 votes for Floyd as President and 11 votes for "
+                "Lee as Vice President.",
+            ),
+            _origin(
+                "BDUSC",
+                "FLOYD, John, a Representative from Virginia, p. 1065",
+                "received the electoral vote of South Carolina for President in 1833",
+            ),
+        ),
+        _SEARCHED_1832,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(
+            1872, "Thomas A. Hendricks", NO_NOMINATION, note=HENDRICKS_1872_NOTE
+        ),
+        (
+            _origin(
+                "VPB",
+                "ch. 21, Thomas A. Hendricks, p. 263",
+                "The Democrats instead nominated the eccentric newspaper editor Horace "
+                "Greeley for president on a fusion ticket with liberal Republicans",
+            ),
+            _origin(
+                "ARCH-1872",
+                "Notes, note 2",
+                "Following Greeley's death, electors in several states cast their "
+                "votes variously for President or Vice President.",
+            ),
+            _origin(
+                "ARCH-1872",
+                "Electoral College Votes by State, note 6",
+                "In Maryland, Hendricks received 8 electoral votes for President",
+            ),
+        ),
+        _SEARCHED_1872,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(
+            1872, "Benjamin Gratz Brown", NO_NOMINATION, note=BROWN_1872_NOTE
+        ),
+        (
+            _origin(
+                "ARCH-1872",
+                "Notes, note 2",
+                "Following Greeley's death, electors in several states cast their "
+                "votes variously for President or Vice President. Benjamin Gratz "
+                "Brown, Greeley's running mate, received 18 electoral votes for "
+                "President",
+            ),
+            _origin(
+                "BDUSC",
+                "BROWN, Benjamin Gratz, p. 718",
+                "unsuccessful Democratic candidate for Vice President of the United "
+                "States on the ticket with Horace Greeley in 1872",
+            ),
+        ),
+        _SEARCHED_1872,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(
+            1872, "Charles J. Jenkins", NO_NOMINATION, note=JENKINS_1872_NOTE
+        ),
+        (
+            _origin(
+                "ARCH-1872",
+                "Notes, note 2",
+                "Following Greeley's death, electors in several states cast their "
+                "votes variously for President or Vice President.",
+            ),
+            _origin(
+                "ARCH-1872",
+                "Electoral College Votes by State, note 4",
+                "In Georgia, Greeley received 3 electoral votes for President, but "
+                "these were not counted … Jenkins received 2 electoral votes for "
+                "President",
+            ),
+        ),
+        _SEARCHED_1872,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(1956, "Walter B. Jones", NO_NOMINATION, note=JONES_1956_NOTE),
+        (
+            _origin(
+                "ARCH-1956",
+                "Notes; Electoral College Votes by State, For President",
+                "An Alabama elector voted for Jones and Talmadge.",
+            ),
+        ),
+        _SEARCHED_1956,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(1960, "Harry F. Byrd", NO_NOMINATION, note=BYRD_1960_NOTE),
+        (
+            _origin(
+                "CLERK-1960",
+                "Electoral and popular votes, Mississippi, footnote 4, printed pp. "
+                "50–51 (PDF pp. 51–52)",
+                "Unpledged Democratic elector vote, who later agreed to support "
+                "Senator Byrd.",
+            ),
+            _origin(
+                "ARCH-1960",
+                "Notes",
+                "Byrd received electoral votes for President from Alabama (6), "
+                "Mississippi (8) and Oklahoma (1).",
+            ),
+        ),
+        _SEARCHED_1960,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(1976, "Ronald Reagan", NO_NOMINATION, note=REAGAN_1976_NOTE),
+        (
+            _origin(
+                "ARCH-1976",
+                "Notes; Electoral College Votes by State, For President",
+                "A Washington (State) elector voted for Ronald Reagan.",
+            ),
+        ),
+        _SEARCHED_1976,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(1988, "Lloyd Bentsen", NO_NOMINATION, note=BENTSEN_1988_NOTE),
+        (
+            _origin(
+                "ST-TX",
+                "1988, November 8",
+                "Senator Lloyd M. Bentsen Jr. ran unsuccessfully for vice president on "
+                "the Democratic ticket with presidential candidate Michael Dukakis",
+            ),
+            _origin(
+                "ARCH-1988",
+                "Notes",
+                "A West Virginia elector voted for Bentsen as President and Dukakis as "
+                "Vice President.",
+            ),
+        ),
+        _SEARCHED_VP,
+    ),
+    CatalogEntry(
+        CuratedPartyRow(2004, "John Edwards", NO_NOMINATION, note=EDWARDS_2004_NOTE),
+        (
+            _origin(
+                "ST-NC",
+                "2004, July 28",
+                "Senator John Edwards of Raleigh was nominated for vice president of "
+                "the United States on the Democratic Party ticket headed by another "
+                "incumbent senator, John F. Kerry",
+            ),
+            _origin(
+                "ARCH-2004",
+                "Notes, below the state table",
+                "One Minnesota elector voted for John Edwards for both President and "
+                "Vice President.",
+            ),
+        ),
+        _SEARCHED_VP,
+    ),
+    *(
+        CatalogEntry(
+            CuratedPartyRow(2016, name, NO_NOMINATION, note=note),
+            (_origin("ARCH-2016", f"Notes, below the state table, note {mark}", text),),
+            _SEARCHED_2016,
+        )
+        for name, note, mark, text in (
+            ("Bernie Sanders", HAWAII_2016_NOTE, "*", _ARCH_2016_HAWAII),
+            ("Ron Paul", TEXAS_2016_NOTE, "***", _ARCH_2016_TEXAS),
+            ("John Kasich", TEXAS_2016_NOTE, "***", _ARCH_2016_TEXAS),
+            ("Colin Powell", WASHINGTON_2016_NOTE, "****", _ARCH_2016_WASHINGTON),
+            (
+                "Faith Spotted Eagle",
+                WASHINGTON_2016_NOTE,
+                "****",
+                _ARCH_2016_WASHINGTON,
+            ),
+        )
+    ),
 )
 
 #: The curated rows alone: the input :func:`usvote.transform.build_candidate_party`
@@ -493,6 +851,10 @@ def check_curated_catalog(
     - a passage that is blank or longer than :data:`MAX_PASSAGE_WORDS` words;
     - citations whose ``supports`` do not cover the value: every component of a joint
       code, or the code itself;
+    - a citation backing a code that is neither the value nor one of its components;
+    - a citation backing nothing, except on a ``no_nomination`` row, whose citations
+      give the votes' origin and back no code (D079);
+    - a ``no_nomination`` row with a blank note or a blank ``searched`` record;
     - a registered source whose URL is not ``https``, or whose basis is blank.
 
     Run at import over :data:`CATALOG`. The parameters let a test hand in a broken
@@ -533,6 +895,18 @@ def check_curated_catalog(
                     f"{key} has a passage of {words} words "
                     f"(1 to {MAX_PASSAGE_WORDS} allowed)"
                 )
+            allowed = set(PARTY_COMPONENTS[row.party]) | {row.party}
+            if stray := citation.supports - allowed:
+                problems.append(f"{key} has a citation backing {sorted(stray)}")
+            if not citation.supports and row.party != NO_NOMINATION:
+                problems.append(f"{key} has a citation backing no code")
+        if row.party == NO_NOMINATION:
+            # The absence is the search record's, not a passage's (research doc §6.1).
+            if not (row.note or "").strip():
+                problems.append(f"{key} is no_nomination with no note")
+            if not (entry.searched or "").strip():
+                problems.append(f"{key} is no_nomination with no searched record")
+            continue
         needed = set(PARTY_COMPONENTS[row.party]) or {row.party}
         supported = set().union(*(c.supports for c in entry.citations))
         if not needed <= supported:

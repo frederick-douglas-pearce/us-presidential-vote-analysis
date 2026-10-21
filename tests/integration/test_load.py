@@ -57,8 +57,9 @@ def test_fixture_slice_loads_into_real_postgres(
         assert counts["state"] == len(state_df) == 51
         assert counts["candidate"] == len(candidates_df)
         assert counts["votes"] == len(votes_df)
-        # One Archives row per Table 1 row: the President and Main Opponent per year.
-        assert counts["candidate_party"] == 4
+        # One Archives row per Table 1 row (the President and Main Opponent per year),
+        # plus 2016's five catalog no_nomination rows (#388).
+        assert counts["candidate_party"] == 9
 
         # Grain: primary keys are unique (a broken grain would have raised on the
         # PK constraint at insert, but assert explicitly for a clear signal).
@@ -134,13 +135,21 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
             f"JOIN {SCHEMA}.candidate c USING (candidate_id) ORDER BY cp.year, c.name"
         )
         by_key = {(int(r.year), r.name): r for r in rows.itertuples()}
-        assert len(by_key) == 4
+        # Four Table 1 rows, plus the catalog's no_nomination rows in these years
+        # (#388): 1872's three and 2016's five.
+        assert len(by_key) == 12
         greeley = by_key[(1872, "Horace Greeley")]
         assert greeley.nominating_party == "liberal_republican_democratic"
         assert greeley.archives_party_code == "D"
         assert "November 29, 1872" in greeley.nominating_party_note
         assert by_key[(1872, "Ulysses S. Grant")].nominating_party == "republican"
-        assert set(rows["nominating_party_source"]) == {"NARA"}
+        sources = rows.groupby("nominating_party_source")["name"].count().to_dict()
+        assert sources == {"NARA": 4, "USGOV": 8}
+        curated = rows[rows["nominating_party_source"] == "USGOV"]
+        assert set(curated["nominating_party"]) == {"no_nomination"}
+        assert curated["archives_party_code"].isna().all()
+        # Every curated row here carries a note, so the three null notes are the
+        # Table 1 rows' other than Greeley's.
         nulls = dbc.select_query_to_df(
             f"SELECT count(*) AS n FROM {SCHEMA}.candidate_party "
             "WHERE nominating_party_note IS NULL"

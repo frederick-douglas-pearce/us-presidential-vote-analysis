@@ -232,8 +232,11 @@ TABLE1_ROW_NOTES: Mapping[tuple[int, str], str] = {
 #: cannot drop its rule set (and with it its note) silently (research doc §2.4). The
 #: curated keys are #387's: 1856 Fillmore (rules 3 and 8) and every curated row resting
 #: on rule 8. 1824 Crawford and 1924 La Follette left rule 8 at #387, because their
-#: citations name the body that nominated them (D078). #388 adds its keys (1872 Davis
-#: once confirmed).
+#: citations name the body that nominated them (D078). #388's ``no_nomination`` rows are
+#: deliberately absent: they rest on no rule, so a floor entry would be an empty set,
+#: which pins nothing. Their note follows from their value, and the catalog check
+#: requires it (``party_catalog.check_curated_catalog``, D079). 1872 Davis stayed null
+#: at #388, so he has no row and no entry.
 NOTE_REQUIRED_FLOOR: Mapping[tuple[int, str], frozenset[int]] = {
     (1872, "Horace Greeley"): frozenset({5}),
     (1824, "Henry Clay"): frozenset({8}),

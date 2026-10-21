@@ -89,7 +89,12 @@ from tests._helpers import FIXTURES_DIR, non_null_flag, non_null_sqlite_flag
 from usvote import hybrid
 from usvote.db import DBC
 from usvote.load import SCHEMA
-from usvote.party_catalog import CURATED_BY_KEY, RULE_8_NOTE
+from usvote.party_catalog import (
+    CURATED_BY_KEY,
+    HENDRICKS_1872_NOTE,
+    RULE_8_NOTE,
+    WASHINGTON_2016_NOTE,
+)
 from usvote.pv.absences import PV_ABSENCE_CATALOG
 from usvote.pv.status import (
     PV_STATUS_LEGISLATURE_CHOSEN,
@@ -184,16 +189,23 @@ V4_PARTY_FIXTURE = FIXTURES_DIR / "snapshot_v4_party.json"
 
 #: The nominating party on real rows (#386). Table 1 prints a party for each election's
 #: winner and main opponent: 1872 Grant and Greeley (Greeley's joint code is the #385
-#: correction, with its note), 2016 Trump and Clinton. Hendricks (1872, 42 votes from
-#: Greeley's electors after his death) and Colin Powell (2016, three faithless
-#: Washington electors) are outside Table 1 and have no row yet: served NULL.
+#: correction, with its note), 2016 Trump and Clinton. David Davis (1872, one vote
+#: from Greeley's electors after his death) is outside Table 1 and the catalog (research
+#: doc §16): served NULL. The catalog's ``no_nomination`` rows are pinned separately.
 NOMINATING_PARTY_PINS: dict[tuple[int, str], str | None] = {
     (1872, "ulysses-s-grant"): "republican",
     (1872, "horace-greeley"): "liberal_republican_democratic",
-    (1872, "thomas-a-hendricks"): None,
+    (1872, "david-davis"): None,
     (2016, "donald-j-trump"): "republican",
     (2016, "hillary-clinton"): "democratic",
-    (2016, "colin-powell"): None,
+}
+
+#: Two of the catalog's ``no_nomination`` rows (#388), end to end: Hendricks (1872, 42
+#: votes from Greeley's electors after his death) and Colin Powell (2016, three
+#: faithless Washington electors), each with its own catalog note.
+NO_NOMINATION_PINS: dict[tuple[int, str], str] = {
+    (1872, "thomas-a-hendricks"): HENDRICKS_1872_NOTE,
+    (2016, "colin-powell"): WASHINGTON_2016_NOTE,
 }
 #: Two Table 1 rows per served election.
 NARA_PARTY_KEYS = 2 * SERVED_YEARS
@@ -534,8 +546,9 @@ def test_snapshot_from_a_real_full_span_warehouse(
 
 def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
     """AC1/AC2 of #386 on the real artifact: Table 1 rows carry their party on every
-    row of both tables; every curated catalog row is served as USGOV (#387); and a
-    recipient outside Table 1 and the catalog is NULL in all three columns."""
+    row of both tables; every curated catalog row is served as USGOV (#387), a
+    ``no_nomination`` row with its note (#388); and a recipient outside Table 1 and the
+    catalog is NULL in all three columns."""
     for table in (DATA_TABLE, ROLLUP_TABLE):
         for (year, slug), expected in NOMINATING_PARTY_PINS.items():
             got = set(
@@ -575,6 +588,15 @@ def _assert_the_nominating_party(conn: sqlite3.Connection) -> None:
                 "WHERE year = 1860 AND candidate_slug = 'john-bell'"
             ).fetchall()
         ) == {("constitutional_union", "USGOV", RULE_8_NOTE)}, table
+        for (year, slug), note in NO_NOMINATION_PINS.items():
+            assert set(
+                conn.execute(
+                    "SELECT nominating_party, nominating_party_source, "
+                    f"nominating_party_note FROM {table} "
+                    "WHERE year = ? AND candidate_slug = ?",
+                    (year, slug),
+                ).fetchall()
+            ) == {("no_nomination", "USGOV", note)}, (table, year, slug)
     assert conn.execute(
         f"SELECT usgov_source, usgov_license FROM {META_TABLE}"
     ).fetchone() == ("USGOV", "US-PD")

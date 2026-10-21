@@ -426,6 +426,28 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** *Electoral votes cast.*
 - **Status:** settled
 
+### Faithless vote (faithless elector)
+- **Plain:** An elector's vote for someone other than the candidate the elector had pledged to
+  support.
+- **Precise:** The National Archives' term on its 2016 page ("Due to faithless voting, the
+  electoral votes for Washington were: …"). This dataset records no pledges and has no field for
+  one. The word appears only in a nominating-party note whose own cited passage uses it. Other
+  single-elector votes (1956 Jones, 1976 Reagan, 1988 Bentsen, 2004 Edwards) are described by what
+  the elector did.
+- **Shown as:** `HAWAII_2016_NOTE`, `TEXAS_2016_NOTE`, `WASHINGTON_2016_NOTE` in
+  `src/usvote/party_catalog.py`, served as `nominating_party_note`; and, as a term, the
+  `EcPvRow.nominating_party_note` and `NationalSummaryRow.nominating_party_note` field
+  descriptions on the API's `/docs` page.
+- **Source:** U.S. House of Representatives, Office of the Historian, "Faithless Electors" (blog,
+  2020-11-17), https://history.house.gov/Blog/2020/November/11-17-Faithless-Electors/: "Many
+  states use strict rules and the threat of fines to "bind" electors to the candidate to whom they
+  pledged their vote. The Constitution does, however, allow electors to change their vote. When
+  they do, they are known as "faithless electors."" Also ARCH-2016.
+- **Not:** *Unpledged electors*, who had no pledge. Not an appointed elector who did not vote
+  (*Appointed electors*). A note never applies the word to a vote its own cited passage does not
+  call faithless.
+- **Status:** settled
+
 ### Flip (another method picks a different winner)
 - **Plain:** Whether the popular vote, or the hybrid, would have picked someone other than the
   Electoral College's winner (or, with no majority, its leader).
@@ -491,7 +513,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   says where each value comes from: `NARA`, the party the National Archives prints for the
   election's winner and main opponent (a value that a U.S. Government publication amends, such as
   1872 Greeley's, keeps `NARA`), or `USGOV`, a curated row citing U.S. Government publications;
-  null exactly where the value is. A code never changes meaning: a new value or component is a new
+  for a `no_nomination` row, its citations record how the candidate received electoral votes, and
+  none states the value itself (D079); null exactly where the value is. A code never changes meaning: a new value or component is a new
   code (D077).
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party`,
   `EcPvRow.nominating_party_source`, `NationalSummaryRow.nominating_party` and
@@ -501,7 +524,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `nominating_party_source` as served.
 - **Source:** D077; `PARTY_COMPONENTS`, `NO_NOMINATION`, `TABLE1_PARTY_CORRECTIONS` and
   `PARTY_SOURCES` in `src/usvote/party.py`; `CURATED_PARTY_ROWS` in
-  `src/usvote/party_catalog.py` (the curated values, their rule sets and citations);
+  `src/usvote/party_catalog.py` (the curated values, their rule sets and citations), the C2 rows
+  (#388, D079);
   `.claude/specs/research-candidate-party-source.md` §1, §2.2, §2.3, §7 (the evidence record,
   not an authority);
   `posts/2026-08-25-it-takes-270-but-270-of-what.md` (Greeley, "the Democratic and Liberal
@@ -513,29 +537,39 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Nominating-party note
-- **Plain:** A short sentence of fact on how a candidate's nominating party came to be what it
-  is: for example, a joint nomination, an endorsement treated as a nomination, a nominee who died
-  before the electors met, or sources that say which party the candidate ran for without naming
-  the body that nominated them. A row may have none.
+- **Plain:** A short sentence or two of fact about a candidate's nominating party. Where a party
+  nominated the candidate, it says how that came to be: for example, a joint nomination, an
+  endorsement treated as a nomination, a nominee who died before the electors met, or sources that
+  say which party the candidate ran for without naming the body that nominated them. Where no
+  party nominated the candidate, it says how they came to receive electoral votes for President,
+  for example a faithless elector's vote. A row may have none; in this dataset, every candidate
+  recorded as without a party's nomination has one.
 - **Precise:** `nominating_party_note`, nullable text, constant per (year, candidate). It states
   only facts its row's own citations support and adds no source. It is required where the value
-  rests on rule 3, 5 or 8, and allowed for any other exceptional case. Null means no note was
-  recorded: not that the value is missing, and not that the value is plain. Table 1 notes ship
-  from `TABLE1_ROW_NOTES` in `src/usvote/party.py`; curated notes from `CURATED_PARTY_ROWS` in
-  `src/usvote/party_catalog.py` (#387; #388 adds its rows there). A rule-8 row with nothing else
-  to explain carries the shared `RULE_8_NOTE`, the 1836 Whig rows share `WHIG_1836_NOTE`, and a
+  rests on rule 3, 5 or 8, and on every curated `no_nomination` row. There it says how the
+  candidate's electoral votes arose and does not repeat what `no_nomination` means (D079). It is
+  allowed for any other exceptional case. Null means no note was recorded: not that the value is
+  missing, and not that the value is plain. Table 1 notes ship from `TABLE1_ROW_NOTES` in
+  `src/usvote/party.py`; curated notes ship from `CURATED_PARTY_ROWS` in
+  `src/usvote/party_catalog.py` (#387, #388). A rule-8 row with nothing else to explain carries
+  the shared `RULE_8_NOTE`. The 1836 Whig rows share `WHIG_1836_NOTE`. The 2016 Texas and
+  Washington recipients share their state's note (`TEXAS_2016_NOTE`, `WASHINGTON_2016_NOTE`). A
   row with more to explain has a note of its own. The text is a data value, served as stored.
 - **Shown as:** on the API's `/docs` page, the `EcPvRow.nominating_party_note` and
   `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`.
-  On the dashboard: the party cell's help text where a row has a note, and once per candidate and
+  On the dashboard: the party cell's help text where a row has a note (on a `no_nomination` row, after
+  `labels.NO_NOMINATION_NOTE`), and once per candidate and
   election in the Party notes list under T2–T5 (`labels.PARTY_NOTES_HEADING`,
   `labels.PARTY_NOTE_ITEM`), shown as served; `LABELS["nominating_party_note"]` in their
   column-name lists; `nominating_party_note` in their downloads.
-- **Source:** D077, "The row note"; research doc §2.4; `TABLE1_ROW_NOTES` (wording approved by
-  the owner, 2026-10-18, #385 plan); `CURATED_PARTY_ROWS` (wording approved by the owner,
-  2026-10-20, #387 plan).
+- **Source:** D077, "The row note"; D079 (the `no_nomination` notes); research doc §2.4, §16;
+  `TABLE1_ROW_NOTES` (wording approved by the owner, 2026-10-18, #385 plan); `CURATED_PARTY_ROWS`
+  (wording approved by the owner, 2026-10-20, #387 plan; the #388 notes, approved by the owner,
+  2026-10-21, #388 plan).
 - **Not:** the value's null (*Nominating party*). Not a citation. Not the count-status reason,
-  which is the National Archives' own sentence about the count (*Count status*).
+  which is the National Archives' own sentence about the count (*Count status*). On a
+  `no_nomination` row, not the reason no party nominated the candidate: it says how the votes
+  arose.
 - **Status:** settled
 
 ### No popular-vote figure in this dataset (inside the window)
@@ -800,6 +834,25 @@ articles and announcements). Every rule binds all three unless the rule states a
   from the Electoral College winner); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one
   time it happened".
 - **Not:** *Electoral College winner, or leader with no majority* (1824).
+- **Status:** settled
+
+### Unpledged electors
+- **Plain:** Electors who, at the election, were not pledged to vote for any particular candidate
+  for President. Because they made no pledge, a vote they cast for anyone is not a faithless vote.
+  In this dataset the term appears in one note: Mississippi in 1960, where unpledged Democratic
+  electors later agreed to support Harry F. Byrd.
+- **Precise:** Used in a row note only where that row's own cited passage uses the word:
+  CLERK-1960, Mississippi table, footnote 4 ("Unpledged Democratic elector vote, who later agreed
+  to support Senator Byrd."). The note does not say the unpledged electors won Mississippi,
+  because neither cited passage says so. It gives Byrd's electoral votes by state from ARCH-1960
+  in a separate sentence. It gives no kind for his six Alabama votes or his one Oklahoma vote,
+  because U.S. Government sources disagree (D079).
+- **Shown as:** `BYRD_1960_NOTE` in `src/usvote/party_catalog.py`, served as
+  `nominating_party_note` for 1960 Byrd; on the dashboard, in the party cell's help text and the
+  Party notes list.
+- **Source:** CLERK-1960 n.4 (the passage itself sets "unpledged" against "later agreed to
+  support"); ARCH-1960; D079.
+- **Not:** *Faithless vote*: an unpledged elector had no pledge to break.
 - **Status:** settled
 
 ### Unrecognized value

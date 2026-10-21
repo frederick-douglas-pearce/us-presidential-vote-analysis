@@ -1019,3 +1019,89 @@ are named as organizations, not parties.
 After #387 the uncollected list is #388's C2 rows and 1872 Davis: 16 candidate-years.
 `python -m usvote.snapshot` prints the list from each build. The gated corpus test pins it
 (`_NOT_YET_COLLECTED` in `tests/unit/test_candidate_party.py`).
+
+---
+
+## §16 — #388's C2 rows (2026-10-21)
+
+#388 turned §8.1–§8.2's C2 rows into `no_nomination` rows in the curated catalog,
+`src/usvote/party_catalog.py`. Its rulings are D079. Like the rest of this doc, this section is
+a dated evidence record, not an authority: the catalog is.
+
+**How the evidence was gathered.** Before planning, two fresh read-only agents worked from
+US-government works, excluding UCSB from every search and using Wikipedia only as a finding aid.
+One re-matched §8's origin passages; the other searched for 1872 Davis's nomination and its
+withdrawal, a government prose source for South Carolina's legislature (§12, "Passed on"), and
+which kind of row 1960 Byrd's Alabama votes are (§5).
+
+The passages this section quotes that the catalog does not cite (*McPherson v. Blacker*, VPB's
+Tyler chapter, the *Statistical Abstract*, CRS, the House Historian, the Congressional Record, the
+1927 *Directory* on Davis) are the agents' findings, each fetched and compared by an agent; the
+parent re-matched only the catalog's citations. The parent then re-checked every catalog citation
+on 2026-10-21 (UTC):
+- **Fresh downloads:** the Archives pages for 1832, 1872, 1956, 1960, 1976, 1988, 2004 and 2016
+  (fetched 11 s apart, with a User-Agent naming this project), the Senate's Texas and North
+  Carolina timelines, BDUSC, VPB and the House Clerk's 1960 statistics (all HTTP 200).
+- **Script match:** every passage matched verbatim after normalizing whitespace, line-end
+  hyphenation and quotation marks, reading the two-column PDFs in reading order.
+- **Page image:** the Clerk's 1960 statistics are a scan with no text layer. Footnote 4, "Unpledged
+  Democratic elector vote, who later agreed to support Senator Byrd.", was read on the rendered
+  image of printed p. 51 (PDF p. 52); its marker is on Mississippi's "Others" cell under "Popular
+  votes for electors" on printed p. 50 (PDF p. 51).
+- **Locators:** VPB p. 263 (ch. 21) for Hendricks; BDUSC pp. 1065 (Floyd) and 718 (Brown);
+  ARCH-1832 note 5; ARCH-1872 notes 2, 4 and 6. Jones's and Reagan's passages do not say "for
+  President"; the same pages' state tables list them under "For President".
+
+### 16.1 The rows
+
+Fourteen candidate-years are `no_nomination`, each with origin citations, a note on how the votes
+arose and a record of what was searched: 1832 Floyd; 1872 Hendricks, Brown and Jenkins; 1956
+Jones; 1960 Byrd; 1976 Reagan; 1988 Bentsen; 2004 Edwards; and 2016 Sanders, Paul, Kasich, Powell
+and Spotted Eagle. The catalog holds the citations and notes. No US-government passage found
+reports a standing presidential nomination for any of the fourteen.
+
+- **1832 Floyd.** BDUSC dates South Carolina's vote "1833", the year Congress counted it; the
+  note gives the election year. *McPherson v. Blacker*, 146 U.S. 1, 32 (1892), says "After 1832
+  electors were chosen by general ticket in all the States excepting South Carolina, where the
+  legislature chose them up to and including 1860." That covers 1832 only by inference, so the
+  note does not say "legislature", and the case is not cited. This resolves §12's South Carolina
+  item: the only government prose found is McPherson, and it is unused.
+- **1872 Hendricks, Brown and Jenkins** rest on no rule: none was nominated for President, and rule
+  5 belongs to Greeley's Table 1 row. Brown's vice-presidential nomination is rule 7's case (only a
+  presidential nomination counts), as are Bentsen's and Edwards's.
+- **1960 Byrd.** All government sources agree on his 15 votes (Alabama 6, Mississippi 8, Oklahoma
+  1) and that Mississippi's 8 came from an unpledged Democratic slate (the Clerk's footnote above;
+  the *Statistical Abstract 1961*, Table 470, n. 3). On Alabama's 6 they conflict: CRS RL32611
+  n. 43 says six Alabama electors "voted for candidates other than those to whom they were
+  pledged", while the same report's body text and the House Historian count one faithless elector
+  in 1960, and Senators Holland and Hill (108 Cong. Rec. 4369, March 16, 1962) call Alabama's six
+  unpledged. The Clerk's statistics do not split Alabama's Democratic vote. §6.3 applies: the note
+  gives Alabama's and Oklahoma's votes with no kind, and the conflict stays unresolved.
+- **2016.** ARCH-2016's notes call the Hawaii, Texas and Washington votes "faithless voting"; the
+  notes use the word only there.
+
+### 16.2 What stays null, and why
+
+- **1836 Willie P. Mangum.** VPB, Tyler chapter, p. 139: the Whigs fielded "several regional
+  candidates, nominated at the state and local level", and Tyler "was listed as the running mate
+  … of Willie Mangum in South Carolina". That never says Mangum was nominated, but it reports a
+  nomination at some evidence level, which bars `no_nomination` (§6.1). It names no body, and no
+  passage names him a Whig candidate, so he is not C1 either. If a single US-government passage
+  names him a Whig candidate for President in 1836, rule 2's closed list ("the 1836 Whigs") makes
+  him `whig` with no new code. This revises §3 and §8.1, which class him `no_nomination`: an
+  evidence update, not a rule change (D079).
+- **1872 David Davis.** No US-government passage names his National Labor Reform nomination or its
+  withdrawal. Searched: the FJC's biography; the Senate's *Pro Tem* book (2024), whose Davis
+  biography goes from the Court to the Senate; the *Biographical Directory* editions of 1903 and
+  1927 (the latter: "a candidate for the nomination of President at Cincinnati in 1872 on the
+  Liberal-Republican ticket"); ARCH-1872; the LOC 1872 guide's prose (the vote only); the index
+  of Richardson's *Messages and Papers*; and .gov web searches. Not searched: the 1872
+  Congressional Globe, the Congressional Record on his death (1886), and the 1950 and 1989
+  Directories. Rule 5 cannot be decided on a source of record, so D077's action "#388 also
+  decides Davis" is not discharged (D079).
+
+### 16.3 What is left
+
+After #388 the uncollected list is 1836 Mangum and 1872 Davis: 2 candidate-years.
+`python -m usvote.snapshot` prints it from each build, and the gated corpus test pins it
+(`_NOT_YET_COLLECTED` in `tests/unit/test_candidate_party.py`).

@@ -2245,7 +2245,8 @@ def assert_rule_sets_and_notes(
 
     Research doc §2.4: a row whose rule set includes 3, 5 or 8 must have a note, and an
     empty or whitespace-only string is no note. Runs over Table 1 and curated rows
-    together.
+    together. A curated ``no_nomination`` row needs a note for its value, not a rule, so
+    that requirement is the catalog's (``party_catalog.check_curated_catalog``, D079).
     """
     off_domain = sorted(
         (key, sorted(found - RULE_SET_DOMAIN))

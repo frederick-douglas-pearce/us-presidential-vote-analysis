@@ -438,8 +438,9 @@ class EcPvRow(BaseModel):
         description=(
             "Where nominating_party's value comes from: 'NARA', the party the "
             "National Archives prints for the candidate elected President and for the "
-            "main opponent in each election; or 'USGOV', a value cited from other "
-            "U.S. Government publications. Where a U.S. Government publication "
+            "main opponent in each election; or 'USGOV', a value from a curated row "
+            "that cites other U.S. Government publications. Where a U.S. Government "
+            "publication "
             "records a nominating party the National Archives does not print, as for "
             "Horace Greeley's Liberal Republican nomination in 1872, the value "
             "follows that publication and the source stays 'NARA'. null exactly where "
@@ -450,10 +451,14 @@ class EcPvRow(BaseModel):
     nominating_party_note: str | None = Field(
         default=None,
         description=(
-            "A short statement of fact about how nominating_party's value arose, "
-            "where this dataset records one, such as a joint nomination or a nominee "
-            "who died before the electors met. Its facts come from the same sources "
-            "as the value. null means no note is recorded; it says nothing about "
+            "A short statement of fact about nominating_party for this candidate in "
+            "this election, where this dataset records one. Where nominating_party "
+            "names a party, the note says how that value arose, such as a joint "
+            "nomination or a nominee who died before the electors met. Where it is "
+            "'no_nomination', the note says how the candidate came to receive "
+            "electoral votes for President, such as a faithless elector's vote or "
+            "votes cast after a nominee's death. Its facts come from U.S. Government "
+            "publications. null means no note is recorded; it says nothing about "
             "whether nominating_party has a value."
         ),
     )
@@ -592,8 +597,9 @@ class NationalSummaryRow(BaseModel):
         description=(
             "Where nominating_party's value comes from: 'NARA', the party the "
             "National Archives prints for the candidate elected President and for the "
-            "main opponent in each election; or 'USGOV', a value cited from other "
-            "U.S. Government publications. Where a U.S. Government publication "
+            "main opponent in each election; or 'USGOV', a value from a curated row "
+            "that cites other U.S. Government publications. Where a U.S. Government "
+            "publication "
             "records a nominating party the National Archives does not print, as for "
             "Horace Greeley's Liberal Republican nomination in 1872, the value "
             "follows that publication and the source stays 'NARA'. null exactly where "
@@ -604,10 +610,14 @@ class NationalSummaryRow(BaseModel):
     nominating_party_note: str | None = Field(
         default=None,
         description=(
-            "A short statement of fact about how nominating_party's value arose, "
-            "where this dataset records one, such as a joint nomination or a nominee "
-            "who died before the electors met. Its facts come from the same sources "
-            "as the value. null means no note is recorded; it says nothing about "
+            "A short statement of fact about nominating_party for this candidate in "
+            "this election, where this dataset records one. Where nominating_party "
+            "names a party, the note says how that value arose, such as a joint "
+            "nomination or a nominee who died before the electors met. Where it is "
+            "'no_nomination', the note says how the candidate came to receive "
+            "electoral votes for President, such as a faithless elector's vote or "
+            "votes cast after a nominee's death. Its facts come from U.S. Government "
+            "publications. null means no note is recorded; it says nothing about "
             "whether nominating_party has a value."
         ),
     )

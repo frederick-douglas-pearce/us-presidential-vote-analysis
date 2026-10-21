@@ -478,7 +478,9 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
         table = dbc.select_query_to_df(
             f"SELECT year, candidate_id, {cols} FROM {SCHEMA}.candidate_party"
         )
-        assert len(table) == 4  # two Table 1 rows in each of 2016 and 2020
+        # Two Table 1 rows in each of 2016 and 2020, plus 2016's five catalog
+        # no_nomination rows (#388).
+        assert len(table) == 9
         merged = view.merge(
             table, on=["year", "candidate_id"], how="left", suffixes=("", "_t"),
             validate="m:1",
@@ -489,7 +491,9 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
             )
             assert same.all(), merged.loc[~same]
         assert merged["nominating_party"].notna().any()
-        assert merged["nominating_party"].isna().any()  # faithless 2016 recipients
+        # 2016's faithless recipients are keyed since #388; the slice has no null left,
+        # so the NULL path is pinned on the full-span snapshot (1872 Davis).
+        assert (merged["nominating_party"] == "no_nomination").any()
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()
