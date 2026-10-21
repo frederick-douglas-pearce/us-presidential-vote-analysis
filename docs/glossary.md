@@ -431,13 +431,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   support.
 - **Precise:** The National Archives' term on its 2016 page ("Due to faithless voting, the
   electoral votes for Washington were: …"). This dataset records no pledges and has no field for
-  one. The word appears only in a nominating-party note whose own cited passage uses it. Other
-  single-elector votes (1956 Jones, 1976 Reagan, 1988 Bentsen, 2004 Edwards) are described by what
-  the elector did.
+  one. In a nominating-party note, the word appears only where the note's own cited passage uses
+  it. Other single-elector votes (1956 Jones, 1976 Reagan, 1988 Bentsen, 2004 Edwards) are
+  described by what the elector did.
 - **Shown as:** `HAWAII_2016_NOTE`, `TEXAS_2016_NOTE`, `WASHINGTON_2016_NOTE` in
   `src/usvote/party_catalog.py`, served as `nominating_party_note`; and, as a term, the
   `EcPvRow.nominating_party_note` and `NationalSummaryRow.nominating_party_note` field
-  descriptions on the API's `/docs` page.
+  descriptions on the API's `/docs` page; and, as a term, the `EcPvRow.pv_status` field
+  description and the `EcPvRow` description on the API's `/docs` page.
 - **Source:** U.S. House of Representatives, Office of the Historian, "Faithless Electors" (blog,
   2020-11-17), https://history.house.gov/Blog/2020/November/11-17-Faithless-Electors/: "Many
   states use strict rules and the threat of fines to "bind" electors to the candidate to whom they
@@ -849,7 +850,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   because U.S. Government sources disagree (D079).
 - **Shown as:** `BYRD_1960_NOTE` in `src/usvote/party_catalog.py`, served as
   `nominating_party_note` for 1960 Byrd; on the dashboard, in the party cell's help text and the
-  Party notes list.
+  Party notes list; and, as a term, the `EcPvRow.pv_status` field description on the API's
+  `/docs` page.
 - **Source:** CLERK-1960 n.4 (the passage itself sets "unpledged" against "later agreed to
   support"); ARCH-1960; D079.
 - **Not:** *Faithless vote*: an unpledged elector had no pledge to break.

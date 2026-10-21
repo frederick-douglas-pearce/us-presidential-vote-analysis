@@ -122,18 +122,6 @@ SOURCES: Mapping[str, Source] = {
         "https://www.justice.gov/ag/bio/wirt-william",
         _FEDERAL_WORK,
     ),
-    "ARCH-1912": Source(
-        "U.S. National Archives and Records Administration",
-        "1912 Electoral College Results",
-        "https://www.archives.gov/electoral-college/1912",
-        _FEDERAL_WORK,
-    ),
-    "ARCH-1968": Source(
-        "U.S. National Archives and Records Administration",
-        "1968 Electoral College Results",
-        "https://www.archives.gov/electoral-college/1968",
-        _FEDERAL_WORK,
-    ),
     "LOC-1856": Source(
         "Library of Congress",
         "Presidential Election of 1856: A Resource Guide (the guide's own prose)",
@@ -154,7 +142,7 @@ SOURCES: Mapping[str, Source] = {
             f"https://www.archives.gov/electoral-college/{year}",
             _FEDERAL_WORK,
         )
-        for year in (1832, 1872, 1956, 1960, 1976, 1988, 2004, 2016)
+        for year in (1832, 1872, 1912, 1956, 1960, 1968, 1976, 1988, 2004, 2016)
     },
     "ST-TX": Source(
         "U.S. Senate",
@@ -265,7 +253,7 @@ def _cite(
     locator: str,
     passage: str,
     *supports: str,
-    verified: date = _VERIFIED,
+    verified: date,
 ) -> Citation:
     return Citation(source_key, locator, passage, verified, frozenset(supports))
 
@@ -348,39 +336,48 @@ WASHINGTON_2016_NOTE = (
     "Colin Powell and one for Faith Spotted Eagle."
 )
 
-# --- what was searched for each C2 row (research doc §6.1, §16) -----------------
+# --- what was searched for each C2 row (research doc §6.1, D079) -----------------
 #
 # An absence cannot be quoted, so each C2 row records what was searched for a
-# presidential nomination. Not served. The research doc's §16 lists the works.
+# presidential nomination. Each names the candidate and only the works actually
+# consulted for that row, by #388's plan-time research and the parent's re-match; some
+# rows rest on their year's Archives page alone (owner, #388 code review). Not served.
 
 _SEARCHED_1832 = (
-    "U.S. Government works on the 1832 election (research doc §16), for a presidential "
-    "nomination of Floyd by any body, a Nullifier one included: none found."
+    "VPB (the Calhoun, Van Buren and Johnson chapters), the Senate's North Carolina, "
+    "South Carolina and Virginia timelines, the Library of Congress's 1832 guide, "
+    "ARCH-1832 and BDUSC, for a presidential nomination of Floyd by any body, a "
+    "Nullifier one included: none found."
 )
 _SEARCHED_1872 = (
-    "VPB, BDUSC and ARCH-1872 (research doc §16), for a presidential nomination in "
-    "1872: none found; the Democrats and the Liberal Republicans nominated Greeley."
+    "VPB (the Hendricks chapter), ARCH-1872 and BDUSC (Brown, Hendricks), for a "
+    "presidential nomination of Hendricks, Brown or Jenkins in 1872: none found. The "
+    "Democrats and the Liberal Republicans nominated Greeley."
 )
 _SEARCHED_1956 = (
-    "ARCH-1956 and the U.S. Government works research doc §16 lists, for a "
-    "presidential nomination of Jones in 1956: none found."
+    "ARCH-1956, for a presidential nomination of Jones in 1956: none found."
 )
 _SEARCHED_1960 = (
-    "ARCH-1960, the House Clerk's 1960 statistics, the Statistical Abstract 1961, CRS "
-    "RL32611, the House Historian and the Congressional Record of 1961–62 (research "
-    "doc §16), for a presidential nomination of Byrd: none found."
+    "ARCH-1960, the House Clerk's 1960 election statistics, the Statistical Abstract "
+    "1961, CRS RL32611, the House Historian, the Congressional Record of the January "
+    "1961 count and of March 1962, and BDUSC (Byrd), for a presidential nomination of "
+    "Byrd in 1960: none found."
 )
 _SEARCHED_1976 = (
-    "ARCH-1976 (research doc §16), for a 1976 presidential nomination of Reagan: none "
-    "found."
+    "ARCH-1976, for a presidential nomination of Reagan in 1976: none found."
 )
-_SEARCHED_VP = (
-    "BDUSC and the Senate state timeline (research doc §16): a nomination for Vice "
-    "President that year; no presidential nomination found."
+_SEARCHED_1988 = (
+    "BDUSC (Bentsen), the Senate's Texas timeline and ARCH-1988: Bentsen's nomination "
+    "for Vice President in 1988; no presidential nomination found."
+)
+_SEARCHED_2004 = (
+    "BDUSC (Edwards), the Senate's North Carolina timeline and ARCH-2004: Edwards's "
+    "nomination for Vice President in 2004, after an unsuccessful bid for the "
+    "Democratic presidential nomination; no presidential nomination found."
 )
 _SEARCHED_2016 = (
-    "ARCH-2016 and the BDUSC entries for Paul, Sanders and Kasich (research doc §16), "
-    "for a 2016 presidential nomination of any of the five: none found."
+    "ARCH-2016, for a 2016 presidential nomination of Sanders, Paul, Kasich, Powell or "
+    "Spotted Eagle: none found."
 )
 
 #: VPB's Johnson chapter, p. 127, cited by both 1836 Whig rows.
@@ -392,6 +389,7 @@ _VPB_1836_WHIGS = (
         "Senator and former Jacksonian Hugh Lawson White, and Johnson's former "
         "commander, General William Henry Harrison.",
         "whig",
+        verified=_VERIFIED,
     ),
     _cite(
         "VPB",
@@ -399,6 +397,7 @@ _VPB_1836_WHIGS = (
         "they offered a series of sectional candidates nominated by local "
         "caucuses",
         "whig",
+        verified=_VERIFIED,
     ),
 )
 
@@ -428,6 +427,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "Van Buren backed the Republican caucus nominee, Treasury Secretary "
                 "William H. Crawford.",
                 "democratic_republican",
+                verified=_VERIFIED,
             ),
             _cite(
                 "BDUSC",
@@ -435,6 +435,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "unsuccessful Democratic Republican candidate for President of the "
                 "United States in 1824",
                 "democratic_republican",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -449,6 +450,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "unsuccessful presidential candidate of the Democratic Republican "
                 "Party in 1824",
                 "democratic_republican",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -461,6 +463,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "In 1831, Wirt accepted the nomination of the Anti-Masonic Party for "
                 "the presidency of the United States",
                 "anti_masonic",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -482,6 +485,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "WEBSTER, Daniel, p. 2131",
                 "unsuccessful Whig candidate for president in 1836",
                 "whig",
+                verified=_VERIFIED,
             ),
             *_VPB_1836_WHIGS,
         ),
@@ -501,6 +505,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "accepting the 1856 presidential nomination of the anti-Catholic, "
                 "anti-immigrant Know-Nothing party",
                 "american",
+                verified=_VERIFIED,
             ),
             _cite(
                 "LOC-1856",
@@ -510,6 +515,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "anti-immigrant. The Whig Party also endorsed Fillmore for president.",
                 "american",
                 "whig",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -524,6 +530,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "the southern delegates walked out. They held their own convention in "
                 "Baltimore and nominated Breckinridge as their presidential candidate.",
                 "southern_democratic",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -536,6 +543,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "Former senator John Bell of Nashville was nominated for president of "
                 "the United States by the Constitutional Union Party",
                 "constitutional_union",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -547,6 +555,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "WEAVER, James Baird, p. 2129",
                 "Populist candidate for President in 1892",
                 "populist",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -560,6 +569,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "James S. Sherman, received 8 electoral votes each, but Sherman died "
                 "just before the election.",
                 "republican",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -579,12 +589,14 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "the ticket nominated at Cleveland by the conference for progressive "
                 "political action",
                 "progressive_1924",
+                verified=_VERIFIED,
             ),
             _cite(
                 "SFB-LaFollette",
                 "Robert La Follette: A Featured Biography",
                 "ran for president on the Progressive Party ticket in 1924",
                 "progressive_1924",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -599,6 +611,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "as the nominee of the States Rights Democratic Party, and won 39 "
                 "electoral votes",
                 "states_rights_democratic",
+                verified=_VERIFIED,
             ),
             _cite(
                 "SFB-Thurmond",
@@ -606,6 +619,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "He ran as the States’ Rights Democratic (also known as Dixiecrat) "
                 "candidate for president in 1948",
                 "states_rights_democratic",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -620,6 +634,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "American Independent Party candidate Wallace received 9,906,473 "
                 "popular votes for President.",
                 "american_independent",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -634,6 +649,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "1972, its presidential candidate, Prof. John Hospers of Southern "
                 "California University, finished third in electoral votes",
                 "libertarian",
+                verified=_VERIFIED,
             ),
         ),
     ),
@@ -780,7 +796,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "Vice President.",
             ),
         ),
-        _SEARCHED_VP,
+        _SEARCHED_1988,
     ),
     CatalogEntry(
         CuratedPartyRow(2004, "John Edwards", NO_NOMINATION, note=EDWARDS_2004_NOTE),
@@ -799,7 +815,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
                 "Vice President.",
             ),
         ),
-        _SEARCHED_VP,
+        _SEARCHED_2004,
     ),
     *(
         CatalogEntry(
@@ -884,6 +900,7 @@ def check_curated_catalog(
         if not entry.citations:
             problems.append(f"{key} has no citation")
             continue
+        allowed = set(PARTY_COMPONENTS[row.party]) | {row.party}
         for citation in entry.citations:
             if citation.source_key not in sources:
                 problems.append(
@@ -895,7 +912,6 @@ def check_curated_catalog(
                     f"{key} has a passage of {words} words "
                     f"(1 to {MAX_PASSAGE_WORDS} allowed)"
                 )
-            allowed = set(PARTY_COMPONENTS[row.party]) | {row.party}
             if stray := citation.supports - allowed:
                 problems.append(f"{key} has a citation backing {sorted(stray)}")
             if not citation.supports and row.party != NO_NOMINATION:

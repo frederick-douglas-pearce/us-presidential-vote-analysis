@@ -346,7 +346,7 @@ def test_each_citation_carries_the_date_its_passage_was_matched() -> None:
 
 def test_every_catalog_key_is_spelled_as_the_archives_spell_it() -> None:
     """Offline: each key names an electoral-vote recipient in that year, spelled as the
-    committed Archives witness spells it, so a misspelt key fails here rather than only
+    committed Archives witness spells it, so a misspelled key fails here rather than only
     in the gated corpus test or a full build."""
     witness = json.loads(
         (Path(__file__).parents[1] / "fixtures" / "ec_getters_by_year.json").read_text()

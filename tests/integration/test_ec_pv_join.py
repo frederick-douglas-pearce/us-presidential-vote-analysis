@@ -491,9 +491,24 @@ def test_warehouse_builds_the_redistributable_core_end_to_end(
             )
             assert same.all(), merged.loc[~same]
         assert merged["nominating_party"].notna().any()
-        # 2016's faithless recipients are keyed since #388; the slice has no null left,
-        # so the NULL path is pinned on the full-span snapshot (1872 Davis).
         assert (merged["nominating_party"] == "no_nomination").any()
+        # The NULL path. Since #388 every recipient in this slice has a party row, so
+        # one is removed here (2016 Ron Paul): the plain view must keep every row and
+        # read NULL in all three columns for him, as it would if its join to the party
+        # table were ever narrowed to an inner join.
+        before = len(view)
+        dbc.execute_query(
+            f"DELETE FROM {SCHEMA}.candidate_party cp USING {SCHEMA}.candidate c "
+            "WHERE cp.candidate_id = c.candidate_id AND cp.year = 2016 "
+            "AND c.name = 'Ron Paul'"
+        )
+        after = dbc.select_query_to_df(
+            f"SELECT candidate, {cols} FROM {SCHEMA}.{EC_PV_REDISTRIBUTABLE_VIEW}"
+        )
+        assert len(after) == before
+        paul = after[after["candidate"] == "Ron Paul"]
+        assert not paul.empty
+        assert paul[cols.split(", ")].isna().all().all(), paul
     finally:
         dbc.delete_schema(SCHEMA, option="Cascade")
         dbc.close_connection()

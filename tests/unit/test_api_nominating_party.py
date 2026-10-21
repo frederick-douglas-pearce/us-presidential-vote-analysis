@@ -153,9 +153,10 @@ def _faithless_frame() -> pd.DataFrame:
     ``Colin Powell``. So A's Texas votes drop 38 → 35 (national 38 → 35); F gets 1 and
     Powell 2 there, each 0 in California. Neither has a popular vote. Cand F has no
     party row, so it is served null. Colin Powell carries the real catalog's
-    ``no_nomination`` row (#388): only his key, value, source and note are real, and the
-    snapshot's keyed catalog pin checks them; his states and votes are synthetic, as 1860
-    John Bell's are. Same ``(year, state)`` pairs as the shared frame, so its roster and
+    ``no_nomination`` row (#388): only his key, value, source and note are real; his
+    states and votes are synthetic, as 1860 John Bell's are. The build's keyed catalog
+    pin runs over him but cannot fail here, since his values are copied from the
+    catalog: the test's own literals are what would catch a wrong value or note. Same ``(year, state)`` pairs as the shared frame, so its roster and
     per-capita companions still fit.
     """
     frame = synthetic_ec_pv_frame()

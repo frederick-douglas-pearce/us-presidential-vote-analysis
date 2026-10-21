@@ -110,10 +110,12 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
 ) -> None:
     """#385: the nominating-party table on a real database.
 
-    1872 carries the one corrected row and the one note; 2016 carries plain rows whose
-    missing note must arrive as SQL NULL (the write boundary's NaN-to-None step). The
-    three CHECKs and the composite key are then shown to be live, since the transform's
-    own guards would otherwise hide a constraint that never reached the DDL.
+    1872 carries the one corrected Archives row with its note, and three curated
+    ``no_nomination`` rows with theirs (#388); 2016 carries plain Archives rows whose
+    missing note must arrive as SQL NULL (the write boundary's NaN-to-None step), and
+    five curated rows. The three CHECKs and the composite key are then shown to be
+    live, on an Archives row, since the transform's own guards would otherwise hide a
+    constraint that never reached the DDL.
     """
     from usvote.pipeline import run_ec_pipeline
     from usvote.scrape import fetch_from_dir
@@ -158,7 +160,7 @@ def test_candidate_party_round_trips_and_its_checks_are_live(
 
         first = (
             f"(SELECT min(candidate_id) FROM {SCHEMA}.candidate_party "
-            "WHERE year = 2016)"
+            "WHERE year = 2016 AND nominating_party_source = 'NARA')"
         )
         for statement, constraint in (
             (
