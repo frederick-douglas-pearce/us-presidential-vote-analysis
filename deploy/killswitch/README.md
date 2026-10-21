@@ -111,11 +111,24 @@ gcloud functions add-invoker-policy-binding dashboard-killswitch --project="$PRO
   --region="$REGION" --member="serviceAccount:${KS_SA}"
 ```
 
-**Un-pause:** after resolving the cause, set the serving status back. `gcloud app update`
-has no serving-status flag, so use the Admin API (or the console: App Engine → Settings →
-**Enable application**):
+**Un-pause:** after resolving the cause, set the serving status back, in three steps (#347).
+`gcloud app update` has no serving-status flag, so step 2 uses the Admin API (or the console:
+App Engine → Settings → **Enable application**):
+
+1. **Immediately before**, request the API's `/health` and confirm 200. A paused or failing
+   API would leave the dashboard's first visitors on the degraded page, so resolve that
+   first; and the request wakes the API's Cloud Run origin, which may have scaled to zero
+   while the paused dashboard sent it no keep-warm ping (D076), so the dashboard's first
+   fills find it warm.
+2. **Un-pause** (the `PATCH` below) and wait for the operation.
+3. **Make your own request the first** after it: `GET /` on `explore.`, expecting 200. A
+   new instance starts on the un-pause, and the first request absorbs its boot (and, if App
+   Engine sent no warmup, starts the refresher, which pings the API at once), so a visitor
+   does not wait for it.
 
 ```
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://api.us-presidential-election-center.org/health   # 1. expect 200, then at once:
 OP=$(curl -sS -X PATCH \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
@@ -124,6 +137,8 @@ OP=$(curl -sS -X PATCH \
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["name"].split("/")[-1])')
 gcloud app operations wait "$OP" --project=uspv-explore   # the PATCH is a long-running op
 gcloud app describe --project=uspv-explore --format='value(servingStatus)'   # SERVING
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://explore.us-presidential-election-center.org/   # 3. the first request; expect 200
 ```
 
 ## Testing a deployment
