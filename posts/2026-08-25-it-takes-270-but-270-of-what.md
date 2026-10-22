@@ -65,7 +65,7 @@ So ask this record for 1868's total and it asks back whether you want the disput
 
 ## The one time it happened
 
-Once, the House has had to choose a president. In [1824](https://www.archives.gov/electoral-college/1824), four candidates split 261 electoral votes and nobody reached 131. Jackson led with 99, thirty-two short. Every one of those 261 was appointed, cast, and counted, with nothing missing and nothing rejected. [The previous post](https://frederick-douglas-pearce.github.io/blog/2026/presidential-elections-are-messy/) was about what a record does when something is missing. This is the case where nothing is, and there still isn't a majority.
+Under the Twelfth Amendment, the House has had to choose a president once. In [1824](https://www.archives.gov/electoral-college/1824), four candidates split 261 electoral votes and nobody reached 131. Jackson led with 99, thirty-two short. Every one of those 261 was appointed, cast, and counted, with nothing missing and nothing rejected. [The previous post](https://frederick-douglas-pearce.github.io/blog/2026/presidential-elections-are-messy/) was about what a record does when something is missing. This is the case where nothing is, and there still isn't a majority.
 
 The House chose Adams, who had finished second. That's the part the record can't flatten. Jackson led the Electoral College, Adams took the presidency, and in every other election on file those two describe the same person, which makes it tempting to store one column and call it "the winner."
 
