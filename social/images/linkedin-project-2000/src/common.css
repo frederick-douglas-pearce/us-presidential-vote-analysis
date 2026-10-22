@@ -1,0 +1,5 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:630px;background:#0f0f14;color:#fff;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;overflow:hidden}
+.foot{position:absolute;bottom:14px;left:38px;right:38px;display:flex;justify-content:space-between;align-items:baseline}
+.foot .me{color:#8a8a99;font-size:20px;font-weight:300}
+.foot .src{color:#5a5a68;font-size:18px;font-weight:300}

@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="common.css"><style>
+h1{position:absolute;top:34px;width:100%;text-align:center;font-size:44px;font-weight:600}
+.sub{position:absolute;top:100px;width:100%;text-align:center;color:#c0c0c8;font-size:23px}
+.chart{position:absolute;top:168px;left:40px;right:40px;height:380px;background:#16161d;border-radius:14px}
+.axis{position:absolute;left:640px;top:58px;bottom:28px;width:2px;background:#4a4a58}
+.dir{position:absolute;top:20px;font-size:16px;color:#8a8a99;letter-spacing:.04em}
+.row{position:absolute;left:0;right:0;height:84px}
+.lab{position:absolute;left:30px;top:10px;width:330px}
+.lab b{display:block;font-size:24px;font-weight:600}
+.lab span{display:block;margin-top:6px;font-size:16px;color:#8a8a99;font-family:'DejaVu Sans Mono',monospace}
+.b{position:absolute;top:16px;height:40px;border-radius:4px}
+.v{position:absolute;top:21px;font-size:22px;font-weight:600;white-space:nowrap}
+</style>
+<h1>2000: One Election, Three Counts</h1>
+<div class="sub">Gore led the popular vote. Bush led the Electoral College and the hybrid.</div>
+<div class="chart">
+ <div class="dir" style="right:492px">◂ Gore ahead</div>
+ <div class="dir" style="left:652px">Bush ahead ▸</div>
+ <div class="axis"></div>
+ <div id="rows"></div>
+</div>
+<div class="foot"><span class="me">Frederick Pearce · Data. AI. Human.</span><span class="src">Sources: National Archives · MIT Election Lab</span></div>
+<script>
+const PX=300; // px per percentage point
+const rows=[
+ ["Electoral College","Bush 271 · Gore 266, of 538",0.9293680297397799,"Bush"],
+ ["Popular vote","Bush 47.8% · Gore 48.3%",-0.5112914484084907,"Gore"],
+ ["Hybrid","Bush 49.1% · Gore 48.9%",0.20903829066564739,"Bush"],
+];
+const c=document.getElementById('rows');
+rows.forEach(([n,s,m,w],i)=>{
+ const y=72+i*96, len=Math.abs(m)*PX, x=m>0?640+2:640-len;
+ const col=m>0?'#e0b15a':'#7fb0d9';
+ c.insertAdjacentHTML('beforeend',`<div class="row" style="top:${y}px">
+  <div class="lab"><b>${n}${n=="Hybrid"?' <i style="font-weight:400;font-style:normal;color:#8a8a99;font-size:18px">average of the two</i>':''}</b><span>${s}</span></div>
+  <div class="b" style="left:${x}px;width:${len}px;background:${col}"></div>
+  <div class="v" style="${m>0?`left:${x+len+12}px`:`right:${1120-x+12}px`};color:${col}">${w} +${Math.abs(m).toFixed(1)} pts</div></div>`);
+});
+</script>
