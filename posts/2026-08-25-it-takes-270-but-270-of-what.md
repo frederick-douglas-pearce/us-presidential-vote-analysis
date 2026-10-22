@@ -7,7 +7,7 @@ categories: ["us-presidential-vote"]
 tags: ["electoral-college", "american-history", "data-quality", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/it-takes-270-but-270-of-what-og.png
 og_card_source: social/images/2026-08-25-linkedin-it-takes-270-but-270-of-what/og-card.png
-humanizer_pass: predates
+humanizer_pass: v3.0.0
 featured: false
 ---
 
@@ -19,13 +19,13 @@ Ask how many electoral votes it takes to win the presidency and the answer comes
 
 ## Appointed, not cast
 
-Every state's electoral allotment, the number of electors it gets to appoint, is fixed well before a single vote is cast. In 2000, those allotments summed to 538. That total didn't move on election day, and it didn't move when the electors met in their state capitals that December. What moved was the second number: how many appointed electors actually cast a vote. Because Lett-Simmons declined, only 537 were recorded. Two real numbers from one election: **538 appointed, 537 cast**.
+Every state's electoral allotment, the number of electors it gets to appoint, is fixed well before a single vote is cast. In 2000, those allotments summed to 538. That total didn't move on election day, and it didn't move when the electors met in their state capitals that December. What moved was the second number: how many appointed electors actually cast a vote. Because Lett-Simmons declined, only 537 were recorded. So 2000 has two totals: **538 appointed, 537 cast**.
 
-It isn't the only time they've come apart, and the earlier case has a more ordinary explanation. In [1832](https://www.archives.gov/electoral-college/1832), two of Maryland's ten electors never voted. The [Maryland State Archives](https://msa.maryland.gov/megafile/msa/speccol/sc2900/sc2908/000001/000865/pdf/am865.pdf) records why: Joseph Kent and Gerard N. Cousin "didn't attend the Electoral College meeting because of 'ill health'". Two men were too unwell to travel that December, and the national tally came up short by exactly two: **288 appointed, 286 cast**.
+It isn't the only time they've come apart, and the earlier case has a more ordinary explanation. In [1832](https://www.archives.gov/electoral-college/1832), two of Maryland's ten electors never voted. The [Maryland State Archives](https://msa.maryland.gov/megafile/msa/speccol/sc2900/sc2908/000001/000865/pdf/am865.pdf) records why: Joseph Kent and Gerard N. Cousin "didn't attend the Electoral College meeting because of 'ill health'". The national tally came up short by exactly those two: **288 appointed, 286 cast**.
 
-The Twelfth Amendment's threshold reads against the first number, never the second. A majority of 538 appointed electors is **270**. A majority of 537 cast votes, had that been the basis, would have required only **269**. One fewer, because the total it's measured against is smaller. Bush's 271 cleared both, so nothing in 2000 turned on which applied. At 269 everything would have: a majority of the votes cast, short of a majority of the electors appointed, and the House choosing the president.
+The Twelfth Amendment's threshold reads against the first number, never the second. A majority of 538 appointed electors is 270. A majority of 537 cast votes, had that been the basis, would have required only 269. Bush's 271 cleared both, so nothing in 2000 turned on which applied. At 269 everything would have: a majority of the votes cast, short of a majority of the electors appointed, and the House choosing the president.
 
-The Constitution doesn't offer that option, so [this project](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis) keeps the two totals apart: an allotment per state, recorded once, and a vote count per candidate, checked against it. The two sit on opposite sides of the same fraction. Appointed sets the denominator, the bar a candidate has to clear. Cast fills the numerator, what each candidate received. Merge them into one column and the bar drops with the abstentions: the fewer electors who vote, the less it takes to win. Measuring against electors appointed is what fixes the bar in place.
+The Constitution doesn't offer that option, so [this project](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis) keeps the two totals apart: an allotment per state, recorded once, and a vote count per candidate, checked against it. The two sit on opposite sides of the same fraction. Appointed sets the denominator, the bar a candidate has to clear. Cast fills the numerator, what each candidate received. Merge them into one column and the bar drops with the abstentions: the fewer electors who vote, the less it takes to win.
 
 ## Then there is a third number
 
@@ -35,17 +35,17 @@ Horace Greeley, the Democratic and Liberal Republican nominee, lost the popular 
 
 Count the election three ways and get three answers. The states appointed **366** electors. Arkansas's six and Louisiana's eight never entered the count at all, so the Archives table totals **352**. Subtract the three votes cast for a dead man and refused by the House, and **349** were counted for president.
 
-Three totals, three different majorities: 184, or 177, or 175. Grant took 286 and cleared all three, which is the only reason nobody had to decide which was correct.
+Those totals set three different majorities: 184, 177, or 175. Grant took 286 and cleared all three, which is the only reason nobody had to decide which was correct.
 
-One of those numbers is hiding more than the others. The Archives says only that Arkansas and Louisiana were "unable to certify their election results", an administrative phrase for a collapse of legitimate government in both. Louisiana came out of 1872 with two rival governments, each certifying its own slate of electors. Congress received both slates and rejected both. Arkansas's governorship was disputed the same way.
+The Archives says only that Arkansas and Louisiana were "unable to certify their election results", an administrative phrase for a collapse of legitimate government in both. Louisiana came out of 1872 with two rival governments, each certifying its own slate of electors. Congress received both slates and rejected both. Arkansas's governorship was disputed the same way.
 
-Neither quarrel stayed on paper. Louisiana's produced the Colfax massacre in 1873 and an armed seizure of New Orleans the year after. Arkansas's led to the Brooks–Baxter War of 1874, fought with militia in Little Rock. The violence didn't follow from the uncounted votes. Both followed from the same problem: two governments in each state, each claiming to be the real one, with no clear authority.
+Neither quarrel stayed on paper. Louisiana's produced the Colfax massacre in 1873 and an armed seizure of New Orleans the year after. Arkansas's led to the Brooks–Baxter War of 1874, fought with militia in Little Rock. The uncounted votes and the violence had the same cause: two governments in each state, each claiming to be the real one, with no clear authority.
 
 ## When the record itself won't say
 
 For [1868](https://www.archives.gov/electoral-college/1868), the situation is worse: the official record declines to pick a number.
 
-Georgia again, for an unrelated reason four years earlier: its nine electoral votes were contested. In the Archives' own words, "the Senate and the House of Representatives could not agree whether to accept – and count – them or not." So the table ends with **two totals rows**: 285 excluding Georgia, 294 including it. Both are printed. Neither is marked correct. A majority is 143 under one and 148 under the other.
+Georgia again, for an unrelated reason four years earlier: its nine electoral votes were contested. In the Archives' own words, "the Senate and the House of Representatives could not agree whether to accept – and count – them or not." So the table ends with two totals rows: 285 excluding Georgia, 294 including it. Both are printed. Neither is marked correct. A majority is 143 under one and 148 under the other.
 
 The dispute was over whether Georgia was yet a state in good standing, and Congress saw it coming. Two days before the count, it resolved that Georgia's votes would be announced both ways.
 
@@ -53,25 +53,25 @@ On February 10, 1869, Benjamin Butler [objected on four grounds](https://www.gov
 
 Grant had 214 and won under either total, which is again why it was allowed to stand unresolved. That 294 counts only the states that had electors to appoint. Not yet readmitted to the Union, Mississippi, Texas, and Virginia appointed none, so they don't appear in the table at all.
 
-Here is where a historical curiosity turns into a schema problem. A prose footnote can hold two irreconcilable totals. A column holds one number. Something has to decide whether 1868's denominator is 285 or 294, and picking one gives the appearance of taking a side in a dispute Congress itself never settled.
+In a database, that historical curiosity becomes a schema problem. A prose footnote can hold two irreconcilable totals; a column holds one number. Something has to decide whether 1868's denominator is 285 or 294, and picking one gives the appearance of taking a side in a dispute Congress itself never settled.
 
-But those two totals disagree about the wrong thing. Georgia's nine electors were **appointed**, and nobody ever disputed that. The Twelfth Amendment's denominator asks only how many electors were appointed. What Congress deadlocked over was whether their votes should be **counted**, which is a different question, about a different number. So the denominator is 294, and no side has been taken, because the side-taking was never in the denominator.
+But those two totals disagree about the wrong thing. Georgia's nine electors were appointed, and nobody ever disputed that. The Twelfth Amendment's denominator asks only how many electors were appointed. What Congress deadlocked over was whether their votes should be counted, which is a different question, about a different number. So the denominator is 294, and no side has been taken, because the side-taking was never in the denominator.
 
-That leaves the real dispute to be recorded rather than resolved. In [the model these two years get](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/57), every vote row carries a status: counted, not counted, or disputed. Georgia's nine in 1868 are marked **disputed**, with the Archives' own sentence attached as the reason. Three of Georgia's eleven in 1872 are marked **not counted**, since the House said no, while the other eight are counted: status belongs to a vote, not to a state. Arkansas's six and Louisiana's eight are not counted either.
+That leaves the real dispute to be recorded rather than resolved. In [the model these two years get](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis/issues/57), every vote row carries a status: counted, not counted, or disputed. Georgia's nine in 1868 are marked _disputed_, with the Archives' own sentence attached as the reason. Three of Georgia's eleven in 1872 are marked _not counted_, since the House said no, while the other eight are counted: status belongs to a vote, not to a state. Arkansas's six and Louisiana's eight are not counted either.
 
-The gap between those two labels is the whole point. _Not counted_ means Congress decided no. _Disputed_ means Congress never reached a decision. A single "contested" flag covering both would be quietly asserting that 1868 was settled.
+_Not counted_ means Congress decided no. _Disputed_ means Congress never reached a decision. A single "contested" flag covering both would assert that 1868 was settled.
 
-So ask this record for 1868's total and it asks back whether you want the disputed votes in it. That isn't evasion. It's the only honest answer to a question the Senate and the House never agreed on.
+So ask this record for 1868's total and it asks back whether you want the disputed votes in it, because the Senate and the House never agreed on an answer.
 
 ## The one time it happened
 
-The House has actually had to choose a president, once. In [1824](https://www.archives.gov/electoral-college/1824), four candidates split 261 electoral votes and nobody reached 131. Jackson led with 99, **thirty-two short**. Every one of those 261 was appointed, cast, and counted: nothing missing, nothing rejected. [The previous post](https://frederick-douglas-pearce.github.io/blog/2026/presidential-elections-are-messy/) was about what a record does when something is missing. This is the case where nothing is, and there still isn't a majority. A field can fail to produce one without a single number going astray.
+Under the Twelfth Amendment, the House has had to choose a president once. In [1824](https://www.archives.gov/electoral-college/1824), four candidates split 261 electoral votes and nobody reached 131. Jackson led with 99, thirty-two short. Every one of those 261 was appointed, cast, and counted, with nothing missing and nothing rejected. [The previous post](https://frederick-douglas-pearce.github.io/blog/2026/presidential-elections-are-messy/) was about what a record does when something is missing. This is the case where nothing is, and there still isn't a majority.
 
 The House chose Adams, who had finished second. That's the part the record can't flatten. Jackson led the Electoral College, Adams took the presidency, and in every other election on file those two describe the same person, which makes it tempting to store one column and call it "the winner."
 
 So the record keeps two: whether the electoral leader cleared a majority outright, and who actually took office. For 1824 the first reads false and the second names Adams. Everywhere else they agree. A record that only tells the truth when the two line up isn't recording the second fact at all.
 
-None of this explains where 538 comes from: why the House sits at 435 seats, why the Senate contributes 100, why the District of Columbia counts for three electors instead of zero. It explains only what a majority of that number means once you have it. Appointed, not cast, not counted, and unmoved by who does or doesn't use the vote they were given.
+None of this explains where 538 comes from: why the House sits at 435 seats, why the Senate contributes 100, why the District of Columbia counts for three electors instead of zero. It explains only what a majority of that number means once you have it: a majority of the electors appointed, however many of them vote.
 
 ---
 
