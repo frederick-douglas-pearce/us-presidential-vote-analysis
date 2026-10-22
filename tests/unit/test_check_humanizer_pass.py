@@ -394,14 +394,16 @@ def test_the_real_posts_pass_with_every_listed_post_backfilled(
     chp: ModuleType, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Runs the guard over this repo's actual `posts/`, as the workflow does, and
-    then reads the four backfilled posts by name: the guard alone would stay
-    green if one of them were switched to a version or `none`, but the backfill
-    (AC6) says each carries `predates`."""
+    then reads the four backfilled posts by name. The backfill (AC6) gave each
+    `predates`, and a listed post may later record a real pass in its place
+    (posts 1 and 3 did, #403), but the guard alone would stay green if one were
+    switched to `none`: a pass declined is a different fact from one never run."""
     code = chp.main([])
     text = capsys.readouterr()
     assert code == 0, text.out + text.err
     for name in PUBLISHED_BEFORE_CONVENTION:
-        assert chp.read_pass(_REPO / "posts" / name) == "predates", name
+        value = chp.read_pass(_REPO / "posts" / name)
+        assert value == "predates" or chp._VERSION_RE.match(value), (name, value)
 
 
 # --- the workflow (AC4) ---------------------------------------------------------
