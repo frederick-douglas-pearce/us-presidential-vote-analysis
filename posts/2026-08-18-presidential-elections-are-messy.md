@@ -77,7 +77,7 @@ Had the record left the losers out, a merge would have dropped precisely the row
 
 [This project](https://github.com/frederick-douglas-pearce/us-presidential-vote-analysis) made a version of that mistake once, briefly. The first build of the merge was written defensively, on the untested assumption that a losing candidate might not appear as a row for a state they lost. It was built to tolerate an absence that, it turned out, never occurs. The danger was what that path would have done had the assumption ever been right: continue past exactly the rows the analysis depends on. What caught it was checking the record's actual shape, every year and every state, before anything was built on top of it.
 
-The merged result is [public](https://api.us-presidential-election-center.org) for the years both records cover (1976 through 2024), when a popular vote was held everywhere and none of this is in doubt. The pre-1976 years and the status record aren't in that public surface yet, for an unglamorous reason: some of the text explaining those absences comes from UCSB, which grants no republication rights, so it can be used for analysis but not for distribution.
+The merged result is [public](https://api.us-presidential-election-center.org) for the years both records cover (1976 through 2024), when a popular vote was held everywhere and none of this is in doubt. The API also serves the Electoral College record back to 1824, with each state's status in every year. The reasons in the source's own words stay out of it: some of that text comes from UCSB, which grants no republication rights, so it can be used for analysis but not for distribution.
 
 ## 1824, and which states belong in the denominator
 
