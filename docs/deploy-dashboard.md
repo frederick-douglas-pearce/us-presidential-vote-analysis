@@ -761,7 +761,7 @@ start 03:07:06.851Z), so "the first request after the start" would skip it. The 
 API's request log; the dashboard's `api ping` line corroborates.
 
 ```bash
-# Set FROM and TO first: for #347's window, FROM=2026-10-11T10:27:00Z TO=2026-10-18T10:27:00Z.
+# Set FROM and TO first (RFC 3339): after an un-pause, FROM just before it and TO now; for #347's window, FROM=2026-10-11T10:27:00Z TO=2026-10-18T10:27:00Z.
 : "${FROM:?set FROM to the start of the window to check}" "${TO:?set TO to its end}"
 gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="usvote-api" AND textPayload:"Starting new instance" AND
