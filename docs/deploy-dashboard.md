@@ -358,9 +358,10 @@ gunicorn worker (one process, so one cache) as `explore-run`, and carries no
   shows an instance, because `SERVING` does not mean one is running (after a pause of under
   3 minutes none started for 5 min 20 s, and every request failed meanwhile); then request
   `/health` again, which keeps the origin warm however long the instance took, and make
-  your own `GET /` on `explore.`. That `GET /` confirms the app serves (and, if App Engine
-  sent no warmup, is the request that starts the instance); it does not shorten the wait
-  for a visitor who arrives meanwhile. Then run the escalation queries in
+  your own `GET /` on `explore.`. That `GET /` confirms the pause is lifted (a 200 does not
+  show the page has data, since the degraded page is a 200 too;
+  [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh) checks that); it does not
+  shorten the wait for a visitor who arrives meanwhile. Then run the escalation queries in
   [keep-warm residual](#keep-warm-residual-347).
 
 ## 11. Monitoring and cost
@@ -760,7 +761,8 @@ start 03:07:06.851Z), so "the first request after the start" would skip it. The 
 API's request log; the dashboard's `api ping` line corroborates.
 
 ```bash
-FROM=2026-10-11T10:27:00Z TO=2026-10-18T10:27:00Z
+# Set FROM and TO first: for #347's window, FROM=2026-10-11T10:27:00Z TO=2026-10-18T10:27:00Z.
+: "${FROM:?set FROM to the start of the window to check}" "${TO:?set TO to its end}"
 gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="usvote-api" AND textPayload:"Starting new instance" AND
   timestamp>="'"$FROM"'" AND timestamp<"'"$TO"'"' --project=uspv-api \
@@ -807,7 +809,7 @@ gcloud logging read 'resource.type="gae_app" AND (textPayload:"api ping" OR
 
 The API logged 2017 pings, all 200; the dashboard logged 2014 that succeeded and one that
 failed. Matched line by line (within 20 s), they reconcile: 2014, less the 20:13 ping missing
-from the API's log, plus the 11:06 ping missing from the dashboard's, plus three API lines
+from the API's request log, plus the 11:06 ping missing from the dashboard's, plus three API lines
 with the `usvote-explore` user agent that match no ping the deployed dashboard logged
 (10-13 08:12:25, 08:17:26 and 09:00:04; their source is not established). Six intervals
 exceeded 7 minutes on one side or the other, and the app was `SERVING` throughout:
@@ -841,9 +843,10 @@ warmup and the refresher prefetch. The paths a page fills on a miss are its `on_
 declarations (`dashboard/explore/pages/`). Starts caused by a deploy or a measurement run
 are excluded; a start after an un-pause is not, since the un-pause procedure pre-pings the
 API, so a visitor meeting one means the procedure failed. The first two queries above are
-the test, the third rules out a pause. **Not met in this window**, so #343 is deferred
-(D080). **Run them after every un-pause, and whenever a visitor reports the degraded
-page.**
+the test; the third lists the window's pauses and un-pauses, so a qualifying start after
+one points at the un-pause procedure. **Not met in this window**, so #343 is deferred
+(D080). **Run them after every un-pause, with `FROM` just before the un-pause and `TO` now,
+and whenever a visitor reports the degraded page, with a window around the report.**
 
 ### Un-pause, re-measured (2026-10-23)
 

@@ -5591,8 +5591,9 @@ days from #346's deploy (2026-10-11T10:27Z to 2026-10-18T10:27Z), and "Un-pause,
   `REFRESH_TTL_S` after warmup before its first ping. The pre-ping keeps the origin warm for
   about 15 minutes, which a long wait for an instance can use up; the second `/health`
   renews it, so the origin is warm when the first ping is due whatever the wait. The
-  operator's `GET /` confirms the pause is lifted (and, where App Engine sends no warmup,
-  starts the instance); it does not shorten the wait for a visitor who arrives meanwhile.
+  operator's `GET /` confirms the pause is lifted; it does not shorten the wait for a
+  visitor who arrives meanwhile. Step 3 assumes App Engine starts the instance itself, as it
+  did on both un-pauses measured.
   An origin-cold measurement run skips both `/health` requests (runbook §12).
 - **(e) `SERVING` does not mean an instance.** Un-paused 2 min 41 s after a pause, the app
   reported `SERVING` but App Engine started no instance for 5 min 20 s, and every request
