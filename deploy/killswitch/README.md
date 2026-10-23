@@ -124,26 +124,40 @@ App Engine → Settings → **Enable application**):
 3. **Wait for an instance.** `SERVING` does not mean one is running: after a 13-minute
    pause one started at once, but after a pause of under 3 minutes none started for
    5 min 20 s, and every request failed with 500 or 503 meanwhile (D080). The loop below
-   waits for `gcloud app instances list` to show one.
-4. **Make your own request the first** after it: `GET /` on `explore.`, expecting 200. App
-   Engine sends the new instance a warmup request, and a request that arrives during it
-   waits for it to finish, so your request takes that wait rather than a visitor.
+   waits for `gcloud app instances list` to show one; stop it with Ctrl-C if it runs long,
+   and look at the app in the console.
+4. **Request `/health` again, then make your own `GET /` on `explore.`**, expecting 200
+   from each. The pre-ping keeps the origin warm for about 15 minutes, and the new
+   instance's first keep-warm ping comes one `REFRESH_TTL_S` (5 min) after its warmup, so
+   after a long wait in step 3 the origin may have gone cold; this request warms it again.
+   Your `GET /` confirms the pause is lifted (a 200 does not show the page has data: the
+   degraded page is a 200 too). If App Engine sent no warmup, it is also the request that
+   starts the instance. It does not shorten the wait for a visitor who arrives meanwhile.
+
+Then run the escalation queries in the dashboard runbook's
+[keep-warm residual](../../docs/deploy-dashboard.md#keep-warm-residual-347) (D080).
 
 ```
-curl -sS -o /dev/null -w '%{http_code}\n' \
-  https://api.us-presidential-election-center.org/health   # 1. expect 200, then at once:
-OP=$(curl -sS -X PATCH \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  "https://appengine.googleapis.com/v1/apps/uspv-explore?updateMask=servingStatus" \
-  -d '{"servingStatus": "SERVING"}' \
-  | python3 -c 'import sys, json; print(json.load(sys.stdin)["name"].split("/")[-1])')
-gcloud app operations wait "$OP" --project=uspv-explore   # the PATCH is a long-running op
-gcloud app describe --project=uspv-explore --format='value(servingStatus)'   # SERVING
-until [ -n "$(gcloud app instances list --project=uspv-explore --service=default \
-    --format='value(id)')" ]; do sleep 15; done   # 3. wait for an instance
-curl -sS -o /dev/null -w '%{http_code}\n' \
-  https://explore.us-presidential-election-center.org/   # 4. the first request; expect 200
+# 1. Only if the API's /health is 200, run steps 2-4:
+if [ "$(curl -sS -o /dev/null -w '%{http_code}' \
+    https://api.us-presidential-election-center.org/health)" = 200 ]; then
+  OP=$(curl -sS -X PATCH \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    "https://appengine.googleapis.com/v1/apps/uspv-explore?updateMask=servingStatus" \
+    -d '{"servingStatus": "SERVING"}' \
+    | python3 -c 'import sys, json; print(json.load(sys.stdin)["name"].split("/")[-1])')
+  gcloud app operations wait "$OP" --project=uspv-explore   # the PATCH is a long-running op
+  gcloud app describe --project=uspv-explore --format='value(servingStatus)'   # SERVING
+  # 3. Wait for an instance:
+  until [ -n "$(gcloud app instances list --project=uspv-explore --service=default \
+      --format='value(id)')" ]; do sleep 15; done
+  # 4. /health again, then the first request of your own; expect 200 from each:
+  curl -sS -o /dev/null -w '%{http_code}\n' https://api.us-presidential-election-center.org/health
+  curl -sS -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/
+else
+  echo "API /health is not 200: resolve that before un-pausing"
+fi
 ```
 
 ## Testing a deployment
