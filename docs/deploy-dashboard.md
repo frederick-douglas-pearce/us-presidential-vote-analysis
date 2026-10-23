@@ -854,6 +854,8 @@ and whenever a visitor reports the degraded page, with a window around the repor
 dashboard paused, the API's Cloudflare cache purged (Purge Everything on the zone), the
 origin idle, then `/health` and the un-pause. Dashboard version `v-9285a7370a4b-r14-a1`, API
 revision `usvote-api-00010-h7p`, no deploy that day, the canary's last run 9 hours earlier.
+Measured by #277's method: `scripts/measure_dashboard_cold_start.py`, one navigation per run
+in a fresh browser context, 390 px on 10 Mbps / 100 ms (the script's fixed settings).
 
 | Sequence 1 (Z) | |
 |---|---|
