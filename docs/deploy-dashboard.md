@@ -171,7 +171,12 @@ with `HOST=explore.us-presidential-election-center.org`. The instance-count chec
    '%{http_code}' "https://$HOST/"` no longer returns 200 (record what it returns). Meanwhile
    `https://api.us-presidential-election-center.org/health` still returns 200 and Cloud Run
    `usvote-api` keeps `max_instance_count = 1`.
-3. **Un-pause** as the kill-switch README gives, and confirm the app serves again.
+3. **Un-pause** as the kill-switch README gives: the API's `/health` returns 200
+   immediately before the `PATCH`, `gcloud app instances list` shows an instance, `/health`
+   returns 200 again, and your own `GET /` returns 200. That 200 confirms the pause is
+   lifted; it does not show the page has data, since the degraded page is a 200 too (§9).
+   For that, run [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh) against
+   `explore.`.
 
 ## 7. The deploy identity (WIF)
 
@@ -346,7 +351,18 @@ gunicorn worker (one process, so one cache) as `explore-run`, and carries no
 - **Pause by hand** (abuse, or an incident): the same `PATCH` the
   [kill-switch README](../deploy/killswitch/README.md) gives for un-pausing, with
   `{"servingStatus": "USER_DISABLED"}`, or the console's **Disable application**. `gcloud
-  app update` has no serving-status flag. Un-pause as that README says.
+  app update` has no serving-status flag. **Un-pause** as that README says, in four
+  steps (#347): request `https://api.us-presidential-election-center.org/health` and
+  confirm 200 immediately before the `PATCH` (the paused dashboard sent no keep-warm ping,
+  so this also wakes the API's origin); un-pause; wait until `gcloud app instances list`
+  shows an instance, because `SERVING` does not mean one is running (after a pause of under
+  3 minutes none started for 5 min 20 s, and every request failed meanwhile); then request
+  `/health` again, which keeps the origin warm however long the instance took, and make
+  your own `GET /` on `explore.`. That `GET /` confirms the pause is lifted (a 200 does not
+  show the page has data, since the degraded page is a 200 too;
+  [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh) checks that); it does not
+  shorten the wait for a visitor who arrives meanwhile. Then run the escalation queries in
+  [keep-warm residual](#keep-warm-residual-347).
 
 ## 11. Monitoring and cost
 
@@ -427,19 +443,28 @@ section gives the checks.) The server states worth measuring:
   warmup ran and succeeded**: its refresher then waits that long before its first cycle
   and first ping, and warmup reaches the origin only if the edge lacks `/v1/meta` or
   `/v1/elections`. If warmup failed, the refresher retries and pings at once; if it did
-  not run, the refresher starts on the first request and pings at once. Whether App Engine
-  sends warmup on an un-pause is not yet known (#347). So confirm the window from the logs
+  not run, the refresher starts on the first request and pings at once. App Engine sent
+  warmup on both un-pauses #347 watched ([un-pause](#un-pause-re-measured-2026-10-23)), but
+  confirm it each time. So confirm the window from the logs
   before each run: since the un-pause, the new instance logged `serving snapshot` (check 2
   of the restart) and no `api ping` line (the query in §11), and the API logged no request.
   An origin-cold run then needs no API deploy, only the pause, the idle wait and the
   un-pause, measured inside that window and before any request of its own wakes the
-  origin.
+  origin. So it un-pauses without the [un-pause](#10-redeploy-and-rollback) procedure's two
+  `/health` requests, keeps its wait for an instance, and sends the measured navigation in
+  place of the operator's `GET /`.
 - **API edge cold** for what the dashboard prefetches (`/v1/meta`, `/v1/elections`): the
   order matters, because a running dashboard's refresher re-reads `/v1/meta` through the
   edge every 5 minutes and so refills it. **Pause the dashboard first** (§10), then purge
   the API's Cloudflare cache, wait until the API origin is idle (it scales to zero about
   15 minutes after its last request; check as in [cold year links](#cold-year-links-310),
-  since crawlers wake it too), then un-pause and measure the first visitor. A purge alone
+  since crawlers wake it too), then un-pause and measure the first visitor. The new
+  instance's warmup then refetches `/v1/meta` and `/v1/elections` through the purged edge,
+  so warmup's fills, not the visitor's, meet the purged edge and any cold origin. A
+  visitor who arrives after warmup reads those paths from the in-process cache, and one
+  who arrives during it waits for it. A run that pre-pings `/health` (the
+  [un-pause](#10-redeploy-and-rollback) procedure) therefore measures a dashboard boot with
+  the origin warm, and is not an origin-cold run. A purge alone
   changes nothing a visitor of a prefetched path sees: the dashboard serves those from its
   in-process cache, and the purge does not change `snapshot_version`, so no refetch
   happens. A path filled on a miss (a year page, a state page; D072) is different: its
@@ -665,7 +690,7 @@ edge-warm runs (04:50Z), then 1880 and 1888.
   start put the first fill at 1.8–2.6 s, past `VISITOR_FETCH_TIMEOUT_S`, so the render gave
   up and showed "isn't responding". This is the cost D072 accepted. The first remedy is
   #346's keep-warm ping (D076); #343's backfill is the escalation if #347 finds it is not
-  enough.
+  enough, and its seven days did not ([keep-warm residual](#keep-warm-residual-347)).
 - **An abandoned fill is not cached.** Reloading 1836 two minutes later, after the state-2
   runs, reached data in 1.63 s, but both of its paths went to the origin again: the edge
   kept nothing from the request the dashboard abandoned. The Worker stores a response only
@@ -715,4 +740,161 @@ minutes apart:
   logged both lines. Classify from the API's request log, as above, not from the count of
   `api fetch` lines alone.
 - What the ping leaves uncovered (un-pause, a start with no warmup and no request, a Cloud
-  Run instance replacement) is measured over seven days in #347.
+  Run instance replacement) was measured over seven days in #347: see
+  [keep-warm residual](#keep-warm-residual-347) below.
+
+### Keep-warm residual (#347)
+
+What D076's ping leaves uncovered in real traffic. **Window:** the seven days from #346's
+deploy to `main`, `2026-10-11T10:27Z` to `2026-10-18T10:27Z` (`FROM` and `TO` below). In it:
+API revisions `usvote-api-00006-df5` and, from 2026-10-16 09:11Z, `00007-w6n` (#330's
+deploy, the window's one `deploy.yml` run); six dashboard deploys after the one that opens
+the window (`deploy-dashboard.yml`, two from feature branches); no change of the
+dashboard's serving status, so no pause or un-pause (the third query below prints nothing
+for the window); no kill-switch pause; the daily canary as usual.
+
+**API cold starts.** Every `Starting new instance` line on `usvote-api`, classified by the
+first request **that instance** served. Select it by the instance's `labels.instanceId`, not
+by time: the request that makes Cloud Run start an instance is logged at its arrival, just
+*before* the `Starting new instance` line (the 2026-10-23 pre-ping: request 03:07:06.814Z,
+start 03:07:06.851Z), so "the first request after the start" would skip it. The test is the
+API's request log; the dashboard's `api ping` line corroborates.
+
+```bash
+# Set FROM and TO first (RFC 3339): after an un-pause, FROM just before it and TO now; for #347's window, FROM=2026-10-11T10:27:00Z TO=2026-10-18T10:27:00Z.
+: "${FROM:?set FROM to the start of the window to check}" "${TO:?set TO to its end}"
+gcloud logging read 'resource.type="cloud_run_revision" AND
+  resource.labels.service_name="usvote-api" AND textPayload:"Starting new instance" AND
+  timestamp>="'"$FROM"'" AND timestamp<"'"$TO"'"' --project=uspv-api \
+  --format='value(timestamp,labels.instanceId,textPayload)'
+# For each start's INSTANCE id, the first request that instance served (none: it served none):
+gcloud logging read 'resource.type="cloud_run_revision" AND
+  resource.labels.service_name="usvote-api" AND logName:"run.googleapis.com%2Frequests" AND
+  labels.instanceId="'"$INSTANCE"'"' --project=uspv-api --order=asc --limit=1 \
+  --format='value(timestamp,httpRequest.requestUrl,httpRequest.userAgent,httpRequest.latency)'
+# Pauses and un-pauses of the dashboard (each is an UpdateApplication):
+gcloud logging read 'protoPayload.methodName:"UpdateApplication" AND
+  timestamp>="'"$FROM"'" AND timestamp<"'"$TO"'"' --project=uspv-explore \
+  --format='value(timestamp,protoPayload.methodName)'
+```
+
+| Start (Z) | Reason | First request this instance served | Class |
+|---|---|---|---|
+| 10-13 03:32:03 | autoscaling, beside a `Shutting down` | none: it shut down at 03:32:13 | served nothing |
+| 10-13 03:34:04 | autoscaling, beside a `Shutting down` | dashboard `/health` at 03:35:35, 22 ms | absorbed by the ping |
+| 10-16 09:11:12 | deployment rollout (`00007`) | none | excluded: deploy |
+| 10-16 09:11:16 | autoscaling, during that rollout | deploy smoke `curl /health` at 09:11:20 | excluded: deploy |
+| 10-16 19:50:49 | autoscaling, beside a `Shutting down` | dashboard `/health` at 19:55:37, 29 ms | absorbed by the ping |
+
+**No start was first reached by a visitor's fill.** The three outside the deploy have the
+shape of a Cloud Run instance replacement: the old instance shut down as the new one
+started, the last request before each was a ping the *old* instance answered in 3–10 ms,
+and the new instance's first request, where it served one, was the next ping.
+
+**Gaps between pings.** Pings that reached the API (`GET /health` from `usvote-explore`),
+and the dashboard's own `api ping` lines (§11), compared:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND
+  resource.labels.service_name="usvote-api" AND logName:"run.googleapis.com%2Frequests" AND
+  httpRequest.requestUrl:"/health" AND httpRequest.userAgent:"usvote-explore" AND
+  timestamp>="'"$FROM"'" AND timestamp<"'"$TO"'"' --project=uspv-api --order=asc \
+  --limit=5000 --format='value(timestamp,httpRequest.status)'
+gcloud logging read 'resource.type="gae_app" AND (textPayload:"api ping" OR
+  protoPayload.resource:"/_ah/warmup" OR protoPayload.wasLoadingRequest=true OR
+  textPayload:"serving snapshot") AND timestamp>="'"$FROM"'" AND timestamp<"'"$TO"'"' \
+  --project=uspv-explore --order=asc --limit=10000 \
+  --format='value(timestamp,labels.clone_id,protoPayload.resource,textPayload)'
+```
+
+The API logged 2017 pings, all 200; the dashboard logged 2014 that succeeded and one that
+failed. Matched line by line (within 20 s), they reconcile: 2014, less the 20:13 ping missing
+from the API's request log, plus the 11:06 ping missing from the dashboard's, plus three API lines
+with the `usvote-explore` user agent that match no ping the deployed dashboard logged
+(10-13 08:12:25, 08:17:26 and 09:00:04; their source is not established). Six intervals
+exceeded 7 minutes on one side or the other, and the app was `SERVING` throughout:
+
+| Gap (Z) | Length | Cause |
+|---|---|---|
+| 10-13 02:02 → 02:11 | 9.2 min | App Engine replaced the instance twice (02:04, 02:06), each with a warmup (5.4 s, 2.2 s); the refresher waits one `REFRESH_TTL_S` after warmup before its first ping |
+| 10-13 03:11 → 03:20 | 9.1 min | the same, twice (03:13, 03:15; warmups 7.1 s, 2.4 s) |
+| 10-17 15:06 → 15:16 | 9.6 min | the same, once (15:11; warmup 5.1 s) |
+| 10-14 17:13 → 17:23 | 10.0 min at the API | the 17:18 ping failed after 15.3 s (a TLS handshake timeout); the dashboard tried on time, and the next ping succeeded |
+| 10-14 20:08 → 20:18 | 10.0 min in the API's request log only | log loss: the dashboard logged the 20:13 ping, and the API's own access line shows it served `GET /health` 200 at 20:13:09 |
+| 10-17 11:01 → 11:11 | 10.0 min in the dashboard's log only | log loss: the API logged the 11:06 ping |
+
+- **The longest real gap was 10.0 minutes**, under the ~15 minutes after which the origin
+  scales to zero, and no API cold start sat beside any gap. The idle window was never reached.
+- **The no-warmup case did not occur.** Every dashboard instance outside a deploy started
+  with a warmup that succeeded; every deploy's instance started with the deploy probe's
+  `GET /` as its loading request and pinged about 4 s later, as soon as it was serving. No instance started with no
+  warmup and no request.
+- **App Engine replaces the pinned instance now and then**, here five times in three
+  episodes, outside any deploy. Each costs one ping interval plus the replacement time,
+  as D076 foresaw ("the same holds after App Engine recycles the instance"). An instance
+  replaced again within two minutes never pinged.
+- **Either side's log can drop a line.** Corroborate a gap from the other side before
+  calling it real, as with the missing `api fetch` line in the 2026-10-11 runs above.
+
+**Escalation to #343** (backfill every served year after the swap) is met when the first
+request a new `usvote-api` instance serves is a visitor's fill from the dashboard: a `/v1/`
+request from `usvote-explore` other than `/v1/meta` and the exact `/v1/elections`, which
+warmup and the refresher prefetch. The paths a page fills on a miss are its `on_miss`
+declarations (`dashboard/explore/pages/`). Starts caused by a deploy or a measurement run
+are excluded; a start after an un-pause is not, since the un-pause procedure pre-pings the
+API, so a visitor meeting one means the procedure failed. The first two queries above are
+the test; the third lists the window's pauses and un-pauses, so a qualifying start after
+one points at the un-pause procedure. **Not met in this window**, so #343 is deferred
+(D080). **Run them after every un-pause, with `FROM` just before the un-pause and `TO` now,
+and whenever a visitor reports the degraded page, with a window around the report.**
+
+### Un-pause, re-measured (2026-10-23)
+
+#295's sequence, with the [un-pause](#10-redeploy-and-rollback) procedure's pre-ping: the
+dashboard paused, the API's Cloudflare cache purged (Purge Everything on the zone), the
+origin idle, then `/health` and the un-pause. Dashboard version `v-9285a7370a4b-r14-a1`, API
+revision `usvote-api-00010-h7p`, no deploy that day, the canary's last run 9 hours earlier.
+Measured by #277's method: `scripts/measure_dashboard_cold_start.py`, one navigation per run
+in a fresh browser context, 390 px on 10 Mbps / 100 ms (the script's fixed settings).
+
+| Sequence 1 (Z) | |
+|---|---|
+| 02:53:59 | paused; the last keep-warm ping had reached the API at 02:51:01 |
+| ~02:59 | edge purged |
+| 03:06:06 | origin idle: `Shutting down`, no request since 02:51:01 |
+| 03:07:06.8 | pre-ping `GET /health`: 200 in 4.64 s, beside a `Starting new instance` (the origin was cold) |
+| 03:07:13.06 | un-pause done |
+| 03:07:13.6 | `/_ah/warmup` (3.92 s; the app's start took about 2.8 s of it) |
+| 03:07:17.20, 17.44 | warmup's `/v1/meta` and `/v1/elections` at the origin, 10 and 51 ms (the edge was purged) |
+| 03:07:17.5 | `serving snapshot`, 4.4 s after the un-pause |
+| 03:07:20.2 | the measured navigation's `GET /` |
+| 03:12:17.8 | first `api ping`, one `REFRESH_TTL_S` after `serving snapshot` |
+
+| Run | TTFB (s) | First data (s) | Outcome |
+|---|---|---|---|
+| #295's baseline, 2026-10-01 (no pre-ping) | 4.12 | 5.02 | data |
+| First after the un-pause, API pre-pinged | 0.17 | 1.04 | data |
+| Next two | 0.09 | 0.99–1.00 | data |
+
+- **App Engine sent warmup on the un-pause** (and again in sequence 2), so its refresher
+  waited one `REFRESH_TTL_S` before its first ping. The pre-ping kept the origin warm until
+  then.
+- **Warmup reached the origin.** With the edge purged, its two fills missed the edge, so an
+  edge-cold run's warmup wakes the origin by itself; with the pre-ping, the origin was
+  already warm and they took 10–51 ms.
+- **The measured run did not arrive during boot.** It reached the instance 2.7 s after
+  `serving snapshot` (the browser tool's own start delayed it), so it measures the first
+  visitor after boot. A visitor who arrives during boot waits for warmup to return, as
+  #295 found: in sequence 2 a `GET /` that arrived 13 ms before warmup ended was held
+  until it had. That visitor's first data is inferred, not measured: warmup's remainder plus
+  about 1 s, so about 5 s after a 3.9 s warmup. D080 accepts up to 6 s.
+
+**Sequence 2** (to measure that visitor) paused at 03:52:48 and un-paused at 03:55:29.7,
+2 min 41 s later, after a second purge and a pre-ping (200, 0.28 s). The app reported
+`SERVING`, but **App Engine started no instance for 5 min 20 s**: `gcloud app instances
+list` stayed empty, all three runs timed out, and requests failed with 500 ("Request was
+aborted after waiting too long to attempt to service your request.") or 503. The instance
+came up at 04:00:49 (warmup 1.74 s, `serving snapshot` 04:00:51.25). Sequence 1's instance
+started 0.5 s after an un-pause that followed a 13-minute pause. What governs the delay is
+not established (one sample each), so the un-pause procedure now waits for an instance,
+then requests `/health` again before the operator's own `GET /`.
