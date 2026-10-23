@@ -5549,3 +5549,63 @@ an oversight.
 **Related:** D077, D078, #384, #387, #388, #394.
 
 ---
+
+## D080: The keep-warm's residual is accepted as measured; a visitor during boot after an un-pause has a 6 s exception, and the un-pause waits for an instance
+
+**Date:** 2026-10-23
+**Builds on:** D071(g), D076 · **Amends:** D076's "The residual" and "Escalation to #343"
+bullets, which left both to #347 · **Decided by:** the owner, after the live re-measure run
+with the agent on 2026-10-23 (AskUserQuestion: the exception and its target, the gap, the
+un-pause step); #343's deferral at #347's plan gate (2026-10-21); recorded by #347 (E9)
+
+**Context.** D076 named what its ping leaves uncovered and left measuring it to #347. Runbook
+`docs/deploy-dashboard.md` §12 holds the evidence: "Keep-warm residual (#347)" for the seven
+days from #346's deploy (2026-10-11T10:27Z to 2026-10-18T10:27Z), and "Un-pause, re-measured
+(2026-10-23)" for #295's sequence run again with a pre-ping.
+
+**Decision.**
+- **(a) The residual, as measured.** Five API cold starts in the seven days: three absorbed by
+  the ping (Cloud Run instance replacements; the next ping found the instance up), two from a
+  deploy, **none first reached by a visitor's fill**. The longest real gap between pings was
+  10.0 minutes (App Engine replacing the pinned instance, or one failed ping), under the ~15
+  minutes after which the origin scales to zero; the no-warmup case did not occur.
+- **(b) The gap is accepted as measured.** No code change: a ping at instance start
+  regardless of warmup would touch the pinned `app.yaml` entrypoint and its guard, and the
+  measured gaps never let the origin idle.
+- **(c) Escalation to #343 is not met**, so #343 is deferred. The test stands as the runbook
+  states it: a `Starting new instance` on `usvote-api` first reached by a dashboard
+  `/v1/elections/...` request, not caused by a deploy, an un-pause or a measurement run. A
+  future run of those queries that finds one reopens #343.
+- **(d) The un-pause procedure** (runbook §10 and §6 probe 3, kill-switch README) has four
+  steps: `/health` returns 200 immediately before the `PATCH`, which also wakes the API
+  origin the paused dashboard stopped pinging; the `PATCH`; **wait until `gcloud app
+  instances list` shows an instance**; then the operator's own `GET /` as the first request.
+  App Engine sent `/_ah/warmup` on both un-pauses measured, so the refresher waits one
+  `REFRESH_TTL_S` before its first ping, and the pre-ping keeps the origin warm until then.
+- **(e) `SERVING` does not mean an instance.** Un-paused 2 min 41 s after a pause, the app
+  reported `SERVING` but App Engine started no instance for 5 min 20 s, and every request
+  failed (500 or 503). After a 13-minute pause the instance started 0.5 s after the un-pause.
+  The cause is not established (one sample each); step 3 of (d) covers either. That window is
+  an outage, not a slow load, and (f) does not cover it.
+- **(f) A narrowed D071(g) exception.** A visitor whose first request reaches a new instance
+  while its warmup is running, after an un-pause, may reach first data in **≤ 6 s** (set by the
+  owner); that request's TTFB includes the same wait and is held to the same 6 s, not to 1 s.
+  Such a request waits in App Engine's pending queue until warmup returns (#295; seen again
+  2026-10-23). With the pre-ping, warmup took 3.9 s and 1.7 s, mostly the app's own start, and
+  the first visitor after it reached first data in 1.04 s (TTFB 0.17 s) against #295's 5.02 s
+  (4.12 s); a visitor during warmup is therefore expected near 5 s. That figure is inferred
+  from the logs, not measured with the browser. Every other case keeps D071(g)'s targets.
+- **(g) An edge-cold run's warmup wakes the origin.** After a purge, the new instance's warmup
+  refetches `/v1/meta` and `/v1/elections` through the edge, which reaches the origin; a run
+  that pre-pings measures edge cold with the origin warm and does not count as origin cold.
+
+**Rationale.** The ping did what D076 asked of it: in a week of real traffic no visitor met a
+cold origin, so the backfill #343 would add has nothing measured to fix. The one case the ping
+cannot reach is the boot after an un-pause, which happens only after the owner or the
+kill-switch has paused the app; the procedure puts the operator's request ahead of any visitor,
+and the exception covers the visitor who arrives anyway. Waiting for an instance costs the
+operator a loop and spares visitors the failures sequence 2 produced.
+
+**Related:** D034, D071, D076, #277, #295, #343, #344, #346, #347.
+
+---

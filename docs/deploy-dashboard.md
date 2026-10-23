@@ -172,8 +172,9 @@ with `HOST=explore.us-presidential-election-center.org`. The instance-count chec
    `https://api.us-presidential-election-center.org/health` still returns 200 and Cloud Run
    `usvote-api` keeps `max_instance_count = 1`.
 3. **Un-pause** as the kill-switch README gives: the API's `/health` returns 200
-   immediately before the `PATCH`, and your own `GET /` is the first request after it. That
-   `GET /` returning 200 is the confirmation that the app serves again.
+   immediately before the `PATCH`, `gcloud app instances list` shows an instance, and your
+   own `GET /` is the first request after it. That `GET /` returning 200 is the
+   confirmation that the app serves again.
 
 ## 7. The deploy identity (WIF)
 
@@ -348,11 +349,14 @@ gunicorn worker (one process, so one cache) as `explore-run`, and carries no
 - **Pause by hand** (abuse, or an incident): the same `PATCH` the
   [kill-switch README](../deploy/killswitch/README.md) gives for un-pausing, with
   `{"servingStatus": "USER_DISABLED"}`, or the console's **Disable application**. `gcloud
-  app update` has no serving-status flag. **Un-pause** as that README says, in three
+  app update` has no serving-status flag. **Un-pause** as that README says, in four
   steps (#347): request `https://api.us-presidential-election-center.org/health` and
   confirm 200 immediately before the `PATCH` (the paused dashboard sent no keep-warm ping,
-  so this also wakes the API's origin); un-pause; then make your own `GET /` on `explore.`
-  the first request, so it absorbs the new instance's boot rather than a visitor.
+  so this also wakes the API's origin); un-pause; wait until `gcloud app instances list`
+  shows an instance, because `SERVING` does not mean one is running (after a pause of under
+  3 minutes none started for 5 min 20 s, and every request failed meanwhile); then make
+  your own `GET /` on `explore.` the first request, so it waits out the new instance's boot
+  rather than a visitor.
 
 ## 11. Monitoring and cost
 
@@ -433,8 +437,9 @@ section gives the checks.) The server states worth measuring:
   warmup ran and succeeded**: its refresher then waits that long before its first cycle
   and first ping, and warmup reaches the origin only if the edge lacks `/v1/meta` or
   `/v1/elections`. If warmup failed, the refresher retries and pings at once; if it did
-  not run, the refresher starts on the first request and pings at once. Whether App Engine
-  sends warmup on an un-pause is not yet known (#347). So confirm the window from the logs
+  not run, the refresher starts on the first request and pings at once. App Engine sent
+  warmup on both un-pauses #347 watched ([un-pause](#un-pause-re-measured-2026-10-23)), but
+  confirm it each time. So confirm the window from the logs
   before each run: since the un-pause, the new instance logged `serving snapshot` (check 2
   of the restart) and no `api ping` line (the query in §11), and the API logged no request.
   An origin-cold run then needs no API deploy, only the pause, the idle wait and the
@@ -445,7 +450,11 @@ section gives the checks.) The server states worth measuring:
   edge every 5 minutes and so refills it. **Pause the dashboard first** (§10), then purge
   the API's Cloudflare cache, wait until the API origin is idle (it scales to zero about
   15 minutes after its last request; check as in [cold year links](#cold-year-links-310),
-  since crawlers wake it too), then un-pause and measure the first visitor. A purge alone
+  since crawlers wake it too), then un-pause and measure the first visitor. The new
+  instance's warmup then refetches `/v1/meta` and `/v1/elections` through the purged edge,
+  so warmup itself reaches the origin: the first visitor meets a cold origin only if
+  warmup's fills did, and a run that pre-pings `/health` (the [un-pause](#10-redeploy-and-rollback)
+  procedure) measures edge cold with the origin warm, not an origin-cold run. A purge alone
   changes nothing a visitor of a prefetched path sees: the dashboard serves those from its
   in-process cache, and the purge does not change `snapshot_version`, so no refetch
   happens. A path filled on a miss (a year page, a state page; D072) is different: its
@@ -810,4 +819,53 @@ or the other, and the app was `SERVING` throughout:
 `Starting new instance` on `usvote-api` is first reached by a dashboard
 `/v1/elections/...` request (a visitor's fill met a cold origin), the start not caused by
 a deploy, an un-pause, or a measurement run. The first query above, with the first-request
-query for each start, is the test. **Not met in this window.**
+query for each start, is the test. **Not met in this window**, so #343 is deferred (D080).
+
+### Un-pause, re-measured (2026-10-23)
+
+#295's sequence, with the [un-pause](#10-redeploy-and-rollback) procedure's pre-ping: the
+dashboard paused, the API's Cloudflare cache purged (Purge Everything on the zone), the
+origin idle, then `/health` and the un-pause. Dashboard version `v-9285a7370a4b-r14-a1`, API
+revision `usvote-api-00010-h7p`, no deploy that day, the canary's last run 9 hours earlier.
+
+| Sequence 1 (Z) | |
+|---|---|
+| 02:53:59 | paused; the last keep-warm ping had reached the API at 02:51:01 |
+| ~02:59 | edge purged |
+| 03:06:06 | origin idle: `Shutting down`, no request since 02:51:01 |
+| 03:07:06.8 | pre-ping `GET /health`: 200 in 4.64 s, beside a `Starting new instance` (the origin was cold) |
+| 03:07:13.06 | un-pause done |
+| 03:07:13.6 | `/_ah/warmup` (3.92 s; the app's start took about 2.8 s of it) |
+| 03:07:17.20, 17.44 | warmup's `/v1/meta` and `/v1/elections` at the origin, 10 and 51 ms (the edge was purged) |
+| 03:07:17.5 | `serving snapshot`, 4.4 s after the un-pause |
+| 03:07:20.2 | the measured navigation's `GET /` |
+| 03:12:17.8 | first `api ping`, one `REFRESH_TTL_S` after `serving snapshot` |
+
+| Run | TTFB (s) | First data (s) | Outcome |
+|---|---|---|---|
+| #295's baseline, 2026-10-01 (no pre-ping) | 4.12 | 5.02 | data |
+| First after the un-pause, API pre-pinged | 0.17 | 1.04 | data |
+| Next two | 0.09 | 0.99–1.00 | data |
+
+- **App Engine sent warmup on the un-pause** (and again in sequence 2), so its refresher
+  waited one `REFRESH_TTL_S` before its first ping. The pre-ping kept the origin warm until
+  then.
+- **Warmup reached the origin.** With the edge purged, its two fills missed the edge, so an
+  edge-cold run's warmup wakes the origin by itself; with the pre-ping, the origin was
+  already warm and they took 10–51 ms.
+- **The measured run did not arrive during boot.** It reached the instance 2.7 s after
+  `serving snapshot` (the browser tool's own start delayed it), so it measures the first
+  visitor after boot. A visitor who arrives during boot waits for warmup to return, as
+  #295 found: in sequence 2 a `GET /` that arrived 13 ms before warmup ended was held
+  until it had. That visitor's first data is inferred, not measured: warmup's remainder plus
+  about 1 s, so about 5 s after a 3.9 s warmup. D080 accepts up to 6 s.
+
+**Sequence 2** (to measure that visitor) paused at 03:52:48 and un-paused at 03:55:29.7,
+2 min 41 s later, after a second purge and a pre-ping (200, 0.28 s). The app reported
+`SERVING`, but **App Engine started no instance for 5 min 20 s**: `gcloud app instances
+list` stayed empty, all three runs timed out, and requests failed with 500 ("Request was
+aborted after waiting too long to attempt to service your request.") or 503. The instance
+came up at 04:00:49 (warmup 1.74 s, `serving snapshot` 04:00:51.25). Sequence 1's instance
+started 0.5 s after an un-pause that followed a 13-minute pause. What governs the delay is
+not established (one sample each), so the un-pause procedure now waits for an instance
+before its first request.

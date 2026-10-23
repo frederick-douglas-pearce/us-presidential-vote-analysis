@@ -111,7 +111,7 @@ gcloud functions add-invoker-policy-binding dashboard-killswitch --project="$PRO
   --region="$REGION" --member="serviceAccount:${KS_SA}"
 ```
 
-**Un-pause:** after resolving the cause, set the serving status back, in three steps (#347).
+**Un-pause:** after resolving the cause, set the serving status back, in four steps (#347).
 `gcloud app update` has no serving-status flag, so step 2 uses the Admin API (or the console:
 App Engine → Settings → **Enable application**):
 
@@ -121,10 +121,13 @@ App Engine → Settings → **Enable application**):
    while the paused dashboard sent it no keep-warm ping (D076), so the dashboard's first
    fills find it warm.
 2. **Un-pause** (the `PATCH` below) and wait for the operation.
-3. **Make your own request the first** after it: `GET /` on `explore.`, expecting 200. A
-   new instance starts on the un-pause, and the first request absorbs its boot (and, if App
-   Engine sent no warmup, starts the refresher, which pings the API at once), so a visitor
-   does not wait for it.
+3. **Wait for an instance.** `SERVING` does not mean one is running: after a 13-minute
+   pause one started at once, but after a pause of under 3 minutes none started for
+   5 min 20 s, and every request failed with 500 or 503 meanwhile (D080). The loop below
+   waits for `gcloud app instances list` to show one.
+4. **Make your own request the first** after it: `GET /` on `explore.`, expecting 200. App
+   Engine sends the new instance a warmup request, and a request that arrives during it
+   waits for it to finish, so your request takes that wait rather than a visitor.
 
 ```
 curl -sS -o /dev/null -w '%{http_code}\n' \
@@ -137,8 +140,10 @@ OP=$(curl -sS -X PATCH \
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["name"].split("/")[-1])')
 gcloud app operations wait "$OP" --project=uspv-explore   # the PATCH is a long-running op
 gcloud app describe --project=uspv-explore --format='value(servingStatus)'   # SERVING
+until [ -n "$(gcloud app instances list --project=uspv-explore --service=default \
+    --format='value(id)')" ]; do sleep 15; done   # 3. wait for an instance
 curl -sS -o /dev/null -w '%{http_code}\n' \
-  https://explore.us-presidential-election-center.org/   # 3. the first request; expect 200
+  https://explore.us-presidential-election-center.org/   # 4. the first request; expect 200
 ```
 
 ## Testing a deployment
