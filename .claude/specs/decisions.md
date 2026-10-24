@@ -5669,7 +5669,11 @@ winning or the request being refused.
 **Rationale.** One hook at the routing request covers every templated page, present and
 future, with no page edits, and keeps the index's 200 and canonical link consistent with what
 renders. Rewriting the request rather than wrapping each registered layout leaves the layouts
-as they are, so tests still reach a page module through its layout's `__globals__`.
+as they are, so tests still reach a page module through its layout's `__globals__`. Wrapping
+would rely on fewer Dash internals, re-deriving the path variables from the router's pathname
+input, but it must reach every page however it is registered and still names a private input
+id; `inspect.unwrap` would answer the `__globals__` cost. Reconsider it when a Dash upgrade
+breaks a `TestDashPrivates` pin.
 
 **Related:** D071, D073, #307, #312, #326.
 

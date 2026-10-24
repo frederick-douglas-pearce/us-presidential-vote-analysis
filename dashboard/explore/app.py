@@ -51,7 +51,7 @@ import flask
 import werkzeug
 from dash import html
 
-# Dash privates, each pinned by name and behaviour in test_dashboard_app.py
+# Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
 # matcher, the query parser whose dict the router hands a layout, the card tags, and
 # the ids of the Pages router's two outputs, which name its routing request.

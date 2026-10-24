@@ -28,7 +28,9 @@ from pathlib import Path
 from typing import Any
 
 import dash
+import flask
 import pytest
+import werkzeug.exceptions
 from dash._pages import (
     _page_meta_tags,
     _parse_path_variables,
@@ -92,9 +94,11 @@ COVERAGE_VALUES = api.coverage_vars(RECORDED["/v1/elections"])
 UNSERVED_VALUES = {"year": "1825", "usps": "ZZ", "slug": "no-such-candidate"}
 
 #: A value each path variable's page accepts other than its :data:`PATH_VALUES` one:
-#: what a conflicting query key names (#326). Only the year has recorded rows; the
-#: roster lists TX and the candidate index lists ``abraham-lincoln``, so a page that
-#: let the query win would try to read rows no fixture holds.
+#: what a conflicting query key names (#326). 1860 is served, the roster lists TX and
+#: the candidate index lists ``abraham-lincoln``. Only 1860 has every read its page
+#: makes recorded: ``/v1/states/TX`` (TX has only its per-capita table) and
+#: ``/v1/candidates/abraham-lincoln`` are not, so a page that let the query win would
+#: try to read rows no fixture holds.
 OTHER_VALUES = {"year": "1860", "usps": "TX", "slug": "abraham-lincoln"}
 
 
@@ -124,6 +128,14 @@ ROUTING_POST: dict[str, Any] = {
     "changedPropIds": ["_pages_location.pathname"],
     "state": [],
 }
+
+
+def conflicting_route(pathname: Any = "/election/1824", search: Any = "?year=1860") -> Any:
+    """A routing POST body whose query names its page's path variable (#326)."""
+    body = copy.deepcopy(ROUTING_POST)
+    body["inputs"][0]["value"] = pathname
+    body["inputs"][1]["value"] = search
+    return body
 
 
 def home_layout() -> Any:
@@ -1121,7 +1133,7 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
 
 
 class TestDashPrivates:
-    """Item 2: the Dash privates app.py relies on, pinned by name and behaviour."""
+    """Item 2: the Dash privates app.py relies on, pinned by name and behavior."""
 
     def test_the_router_matcher_is_exact_and_greedy(
         self, register: Callable[..., dict[str, Any]]
@@ -1159,7 +1171,7 @@ class TestDashPrivates:
     ) -> None:
         # Why app.py strips the routing request (#326, D081): without the hook, the
         # layout receives the query's year.
-        monkeypatch.setattr(appmod, "strip_path_variables", lambda _path, search: search)
+        without_the_hook(monkeypatch)
         seen: list[Any] = []
 
         def echo(year: Any = None, **_query: Any) -> Any:
@@ -1232,29 +1244,44 @@ class TestDashPrivates:
 
 # --- every templated page validates what its layout receives (#312, item 6) ----------
 
-#: Hostile renders for a page's path variables: (path value, query), each rendered for
-#: every path variable. Each puts in the path a value the page does not serve, or one
-#: that is not a plain string at all. ``{unserved}`` is the variable's
+#: Hostile renders for a page's path variables: (path value, query part), each
+#: rendered for every path variable. Each puts in the path a value the page does not
+#: serve, or one that is not a plain string at all. ``{unserved}`` is the variable's
 #: :data:`UNSERVED_VALUES` entry and ``{served}`` its :data:`PATH_VALUES` one. The last
-#: three add a query key named after the variable, which app.py drops before the
-#: router runs (#326, D081; :class:`TestPathVariableWins`): kept as regression rows,
-#: the first of them checking that a served query value cannot rescue an unserved path.
+#: adds a query key named after the variable, which app.py drops before the router runs
+#: (#326, D081; :class:`TestPathVariableWins`): a served query value cannot rescue an
+#: unserved path, and without the hook the page would fill the served value.
 HOSTILE_RENDERS: tuple[tuple[str, str], ...] = (
     ("{unserved}", ""),
     ("{served}/x", ""),
     ("%", ""),
     ("..", ""),
     ("<script>", ""),
-    ("{unserved}", "?{name}={served}"),
-    ("{unserved}", "?{name}=1&{name}=2"),
-    ("{unserved}", "?{name}="),
+    ("{unserved}", "{name}={served}"),
+)
+
+#: Hostile values delivered by the query, on a path the page serves. app.py's hook
+#: keeps them from the layout (D081); these rows are rendered with the hook off, the
+#: case ``api.accepted`` stays behind it for, should a Dash upgrade disable it.
+QUERY_RENDERS: tuple[tuple[str, str], ...] = (
+    ("{served}", "{name}=.."),
+    ("{served}", "{name}=1&{name}=2"),
+    ("{served}", "{name}="),
 )
 
 
+def without_the_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable app.py's strip: ``_strip_routing_request`` looks it up at call time."""
+    monkeypatch.setattr(appmod, "strip_path_variables", lambda _path, search: search)
+
+
 def hostile_render_problems(
-    page: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    page: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    rows: tuple[tuple[str, str], ...] = HOSTILE_RENDERS,
 ) -> list[str]:
-    """Render a templated page through the routing POST at every hostile value.
+    """Render a templated page through the routing POST at every hostile value in
+    ``rows``.
 
     With its validation source cached, a page that validates what its layout receives
     makes no fetch, takes no fill token, answers 200 and renders no success marker.
@@ -1262,7 +1289,7 @@ def hostile_render_problems(
     template = page["path_template"]
     names = re.findall(r"<(.*?)>", template)
     problems = []
-    for value, override in HOSTILE_RENDERS:
+    for value, override in rows:
         _, calls, bucket = cached_client(monkeypatch, source=page["validate"][0])
         pathname = template
         for name in names:
@@ -1270,9 +1297,12 @@ def hostile_render_problems(
                 served=PATH_VALUES[name], unserved=UNSERVED_VALUES[name]
             )
             pathname = pathname.replace(f"<{name}>", concrete)
-        search = "".join(
-            override.format(name=name, served=PATH_VALUES[name]) for name in names
-        )
+        parts = [
+            override.format(name=name, served=PATH_VALUES[name])
+            for name in names
+            if override
+        ]
+        search = "?" + "&".join(parts) if parts else ""
         try:
             response = route(pathname, search)
         except Exception as exc:  # a failing layout may propagate under the test client
@@ -1302,13 +1332,31 @@ class TestValidateBeforeFill:
         for page in templated_pages():
             assert hostile_render_problems(page, monkeypatch) == [], page["module"]
 
+    def test_without_the_hook_every_page_refuses_a_hostile_query_value(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # D081's fallback: with app.py's hook disabled the query reaches the layout
+        # again, and the page's own validation still refuses it.
+        without_the_hook(monkeypatch)
+        register(**YEAR_PAGE)
+        for page in templated_pages():
+            assert hostile_render_problems(page, monkeypatch, QUERY_RENDERS) == [], page[
+                "module"
+            ]
+
     def test_the_check_fails_a_page_that_formats_unvalidated(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         page = register(**{**YEAR_PAGE, "layout": _unvalidated_year_layout})
+
+        def flagged(problems: list[str]) -> set[str]:
+            return {p.split(": ")[0] for p in problems if "fetched" in p or "raised" in p}
+
         problems = hostile_render_problems(page, monkeypatch)
-        flagged = {p.split(": ")[0] for p in problems if "fetched" in p or "raised" in p}
-        assert len(flagged) == len(HOSTILE_RENDERS), problems
+        assert len(flagged(problems)) == len(HOSTILE_RENDERS), problems
+        without_the_hook(monkeypatch)
+        problems = hostile_render_problems(page, monkeypatch, QUERY_RENDERS)
+        assert len(flagged(problems)) == len(QUERY_RENDERS), problems
 
     def test_an_accepted_value_still_fills_on_a_miss(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
@@ -1426,8 +1474,7 @@ class TestPathVariableWins:
     def test_the_check_fails_every_page_without_the_hook(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Looked up as a module global at call time, so this disables the strip.
-        monkeypatch.setattr(appmod, "strip_path_variables", lambda _path, search: search)
+        without_the_hook(monkeypatch)
         register(**YEAR_PAGE)
         for page in templated_pages():
             names = re.findall(r"<(.*?)>", page["path_template"])
@@ -1475,35 +1522,73 @@ class TestPathVariableWins:
         }
 
     @pytest.mark.parametrize(
-        "kwargs",
+        ("path", "body"),
         [
-            {"data": "not json", "content_type": "application/json"},
-            {"data": json.dumps(ROUTING_POST), "content_type": "text/plain"},
-            {"json": {**ROUTING_POST, "inputs": {"0": "x"}}},
-            {"json": {**ROUTING_POST, "inputs": ROUTING_POST["inputs"][:1]}},
-            {"json": {**ROUTING_POST, "inputs": ["/", "?year=1"]}},
-            {
-                "json": {
-                    **ROUTING_POST,
-                    "inputs": [
-                        {"id": "_pages_location", "property": "pathname", "value": "/"},
-                        {"id": "_pages_location", "property": "search", "value": 7},
-                    ],
-                }
-            },
-            {"json": [ROUTING_POST]},
+            # Each case is one the hook must leave alone, and each would raise or
+            # rewrite the body if the guard named beside it were deleted.
+            ("/", conflicting_route()),  # the endpoint
+            ("/_dash-update-component", {**conflicting_route(), "output": "x.y"}),
+            ("/_dash-update-component", [conflicting_route()]),  # a dict body
+            (  # a list of inputs
+                "/_dash-update-component",
+                {**conflicting_route(), "inputs": {"a": 1, "b": 2}},
+            ),
+            (  # two inputs
+                "/_dash-update-component",
+                {**conflicting_route(), "inputs": conflicting_route()["inputs"][:1]},
+            ),
+            (  # a dict location
+                "/_dash-update-component",
+                {**conflicting_route(), "inputs": ["/election/1824", {"value": "?"}]},
+            ),
+            (  # a dict query
+                "/_dash-update-component",
+                {**conflicting_route(), "inputs": [{"value": "/"}, "?year=1860"]},
+            ),
+            (  # a str pathname
+                "/_dash-update-component",
+                conflicting_route(pathname=None),
+            ),
+            (  # a str search
+                "/_dash-update-component",
+                conflicting_route(search=7),
+            ),
         ],
     )
-    def test_a_malformed_routing_request_is_left_for_dash(
-        self, kwargs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    def test_the_hook_leaves_anything_but_a_routing_request_alone(
+        self, path: str, body: Any
     ) -> None:
-        def outcome() -> Any:
-            try:
-                response = appmod.server.test_client().post(
-                    "/_dash-update-component", **kwargs
-                )
-            except Exception as exc:
-                return type(exc).__name__
+        sent = copy.deepcopy(body)
+        with appmod.server.test_request_context(path, method="POST", json=body):
+            appmod._strip_routing_request()
+            assert flask.request.get_json(silent=True) == sent
+
+    @pytest.mark.parametrize(
+        ("data", "content_type"),
+        [
+            ("not json", "application/json"),
+            (json.dumps(ROUTING_POST), "text/plain"),
+        ],
+    )
+    def test_a_body_dash_refuses_stays_refused(
+        self, data: str, content_type: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The hook parses silently and never with force=True, so Dash's own
+        # get_json() still raises on a body it would refuse without the hook.
+        with appmod.server.test_request_context(
+            "/_dash-update-component",
+            method="POST",
+            data=data,
+            content_type=content_type,
+        ):
+            appmod._strip_routing_request()
+            with pytest.raises(werkzeug.exceptions.HTTPException):
+                flask.request.get_json()
+
+        def outcome() -> tuple[int, bytes]:
+            response = appmod.server.test_client().post(
+                "/_dash-update-component", data=data, content_type=content_type
+            )
             return response.status_code, response.get_data()
 
         hooked = outcome()
