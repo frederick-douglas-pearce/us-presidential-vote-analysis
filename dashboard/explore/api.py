@@ -384,9 +384,10 @@ def cached_source(source: str, responses: dict[str, JsonObject]) -> JsonObject |
 def well_formed(path_vars: dict[str, Any]) -> bool:
     """Whether every path variable is a non-empty string.
 
-    Dash's router merges the query string over the path variables, so a layout can be
-    handed a list (``?year=1&year=2``) or an empty string (``?year=``) as well as
-    whatever the path held.
+    Dash's router merges the query string over the path variables. app.py drops a
+    query key named after one before the router runs (D081), but should a Dash upgrade
+    disable that, a layout could be handed a list (``?year=1&year=2``) or an empty
+    string (``?year=``) as well as whatever the path held.
     """
     return bool(path_vars) and all(isinstance(v, str) and v for v in path_vars.values())
 
