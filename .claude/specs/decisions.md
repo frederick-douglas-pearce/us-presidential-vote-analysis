@@ -5620,3 +5620,61 @@ visitors.
 **Related:** D034, D071, D076, #277, #295, #343, #344, #346, #347.
 
 ---
+
+## D081: On a templated page the path's value wins; a query key named after a path variable is dropped before Dash's router runs
+
+**Date:** 2026-10-24
+**Builds on:** D073 · **Amends:** D073's "What a render may fetch" and "Three Dash privates"
+bullets · **Decided by:** the owner, approving the architect's rulings at #326's plan gate
+(2026-10-24); recorded by #326 (E9)
+
+**Context.** Dash's Pages router calls a layout with the query string merged over the path
+variables, so `/election/1824?year=1872` rendered 1872 while the index answered 200 with a
+canonical link, `og:url` and card naming 1824 (D073). No shipped page writes such a key, since
+every filter goes through the page's own `query=` parser and `TestRegistryContracts` fails a
+parser that emits one; so only a hand-edited or crafted link reached it, but such a link's
+preview described a different page from the one it opened. The issue allowed either the path
+winning or the request being refused.
+
+**Decision.**
+- **The path's value wins.** `explore/app.py`'s `before_request` hook rewrites the Pages
+  routing request before Dash reads it: from its `search` input it drops every query key named
+  after a path variable of the page the `pathname` input matches (`_path_to_page`, after
+  `app.strip_relative_path`, as the router does), so the layout receives the path's value and
+  the render always matches the canonical link. Refusing was not chosen: a generic refusal
+  would need a not-found render every page owns separately.
+- **Keys are read as the router reads them** (`parse_qs(keep_blank_values=True)`): split on
+  `&` only, each part's key everything before its first `=`, then `+` and percent-escapes
+  decoded. So `?ye%61r=1872` and a bare `?year` are dropped and `?year%3Dx=1` is kept. Every
+  other part is kept byte for byte and in order.
+- **The hook is gated as Dash dispatches**, on the callback endpoint and on the request's
+  `output`, which is what Dash looks the router up by, and reads `pathname` and `search` by
+  position, as Dash hands them to the router, never by input id. It writes into the body
+  Werkzeug caches, which is the object Dash's own `get_json()` returns, and parses it with
+  `silent=True`, never `force=True`, so a body Dash refuses is still refused. A malformed body
+  is left untouched.
+- **`api.accepted` stays** on every templated layout. It still refuses a hostile *path* value
+  (`/election/..`, a greedy `1824/x`), and it is the fallback if a Dash upgrade disables the
+  hook.
+- **More Dash internals are relied on**, beside D073's three privates: the router's two output
+  ids (`dash.dash._ID_CONTENT`, `_ID_STORE`), from which the hook builds the `output` it
+  matches; the router's input positions; the dispatch endpoint's name; Werkzeug's cached
+  `get_json` object being the one Dash reads; and no `routing_callback_inputs`, which merge into
+  a layout's keywords after the query and could override a path variable again. Each is pinned
+  in `TestDashPrivates`, and `TestPathVariableWins` drives the real routing request on every
+  registered templated page, so a Dash that reads the body another way fails the build.
+- **The parser rule stays, for a new reason.** A `query=` parser still may not emit a key named
+  after a path variable: the render would now drop that key while `og:url` names it.
+
+**Rationale.** One hook at the routing request covers every templated page, present and
+future, with no page edits, and keeps the index's 200 and canonical link consistent with what
+renders. Rewriting the request rather than wrapping each registered layout leaves the layouts
+as they are, so tests still reach a page module through its layout's `__globals__`. Wrapping
+would rely on fewer Dash internals, re-deriving the path variables from the router's pathname
+input, but it must reach every page however it is registered and still names a private input
+id; `inspect.unwrap` would answer the `__globals__` cost. Reconsider it when a Dash upgrade
+breaks a `TestDashPrivates` pin.
+
+**Related:** D071, D073, #307, #312, #326.
+
+---

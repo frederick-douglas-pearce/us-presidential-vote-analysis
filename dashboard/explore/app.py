@@ -1,6 +1,6 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds four things, all host-level:
+Beyond Dash itself this module adds five things, all host-level:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -19,9 +19,13 @@ Beyond Dash itself this module adds four things, all host-level:
   ``noindex`` and neither tag. A source not cached yet counts as matched: the index
   never waits on the API (D071(g)). Dash's own page meta tags are rebuilt here
   without its ``twitter:url``, which is the raw request URL.
-  The index never decides what a render may fetch: Dash's router merges the query
-  string over the path variables, so a templated page validates what its layout
-  receives, through ``api.accepted``.
+  The index never decides what a render may fetch: a templated page validates what
+  its layout receives, through ``api.accepted``.
+- **The path's value wins** (#326, D081). Dash's router merges the query string over a
+  page's path variables, so ``/election/1824?year=1872`` would render 1872 under a
+  canonical link naming 1824. Before the router runs, :func:`strip_path_variables`
+  drops from its routing request every query key named after a path variable of the
+  page the path matches, so the render always matches the canonical link.
 - **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
   thread, and only then starts the refresher, so the instance takes traffic with a
   filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
@@ -40,17 +44,19 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote_plus, urlsplit
 
 import dash
 import flask
 import werkzeug
 from dash import html
 
-# Dash privates, each pinned by name and behaviour in test_dashboard_app.py
+# Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
-# matcher, the query parser whose dict the router hands a layout, and the card tags.
+# matcher, the query parser whose dict the router hands a layout, the card tags, and
+# the ids of the Pages router's two outputs, which name its routing request.
 from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
+from dash.dash import _ID_CONTENT, _ID_STORE
 
 from explore import api
 from explore import query as query_syntax  # `query` is resolve's parameter
@@ -245,6 +251,64 @@ server = app.server
 app.layout = html.Main(dash.page_container, className="explore")
 
 
+#: The Pages router's callback as a routing request names it in ``output`` and Dash
+#: keys it in ``callback_map``: its two outputs, in Dash's multi-output form.
+ROUTER_OUTPUT = f"..{_ID_CONTENT}.children...{_ID_STORE}.data.."
+
+#: The Flask endpoint Dash dispatches every callback request through.
+DISPATCH_ENDPOINT = app.config.routes_pathname_prefix + "_dash-update-component"
+
+
+def strip_path_variables(pathname: str, search: str) -> str:
+    """``search`` without any key named after a path variable of ``pathname``'s page.
+
+    The page is the one Dash's router matches, by its own matcher and strip. Keys are
+    read as the router's ``parse_qs(keep_blank_values=True)`` reads them: the text
+    after ``?``, split on ``&`` only, each part's key everything before its first
+    ``=`` (all of it, with no ``=``), ``+`` and percent-escapes decoded. So
+    ``ye%61r=1`` and a bare ``year`` are dropped, and ``year%3Dx=1`` (key ``year=x``)
+    is kept. Every other part is kept byte for byte, in order, empty ones included.
+    """
+    if not search.startswith("?"):
+        return search
+    _, path_vars = _path_to_page(app.strip_relative_path(pathname))
+    if not path_vars:
+        return search
+    kept = [
+        part
+        for part in search[1:].split("&")
+        if unquote_plus(part.partition("=")[0]) not in path_vars
+    ]
+    return "?" + "&".join(kept)
+
+
+def _strip_routing_request() -> None:
+    """Make the path's value win in a Pages routing request, before Dash reads it.
+
+    Gated as Dash dispatches: the callback endpoint, and the router's ``output``, which
+    is what Dash looks the callback up by. ``pathname`` and ``search`` are read by
+    position, as Dash hands them to the router, never by input id. The filtered
+    ``search`` is written into the parsed body Werkzeug caches, which is the object
+    Dash's own ``get_json()`` returns. Anything malformed is left for Dash to refuse.
+    """
+    request = flask.request
+    if request.method != "POST" or request.endpoint != DISPATCH_ENDPOINT:
+        return
+    # Never force=True: that would cache a parse Dash refuses for a non-JSON type.
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or body.get("output") != ROUTER_OUTPUT:
+        return
+    inputs = body.get("inputs")
+    if not isinstance(inputs, list) or len(inputs) < 2:
+        return
+    location, query = inputs[0], inputs[1]
+    if not isinstance(location, dict) or not isinstance(query, dict):
+        return
+    pathname, search = location.get("value"), query.get("value")
+    if isinstance(pathname, str) and isinstance(search, str):
+        query["value"] = strip_path_variables(pathname, search)
+
+
 def redirect_target(host: str, path: str, query: str) -> str | None:
     """Where a request should be sent instead, or ``None`` to serve it here."""
     name = host.split(":", 1)[0].lower().rstrip(".")
@@ -266,6 +330,7 @@ def _before_request() -> werkzeug.Response | None:
         return flask.redirect(target, code=301)
     if flask.request.path != WARMUP_PATH:  # warmup starts it after its own refresh
         api.CLIENT.ensure_refresher()
+    _strip_routing_request()
     return None
 
 
