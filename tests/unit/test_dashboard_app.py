@@ -1527,7 +1527,10 @@ class TestPathVariableWins:
             # Each case is one the hook must leave alone, and each would raise or
             # rewrite the body if the guard named beside it were deleted.
             ("/", conflicting_route()),  # the endpoint
-            ("/_dash-update-component", {**conflicting_route(), "output": "x.y"}),
+            (  # the router's output
+                "/_dash-update-component",
+                {**conflicting_route(), "output": "x.y"},
+            ),
             ("/_dash-update-component", [conflicting_route()]),  # a dict body
             (  # a list of inputs
                 "/_dash-update-component",
