@@ -1522,47 +1522,56 @@ class TestPathVariableWins:
         }
 
     @pytest.mark.parametrize(
-        ("path", "body"),
+        ("method", "path", "body"),
         [
             # Each case is one the hook must leave alone, and each would raise or
             # rewrite the body if the guard named beside it were deleted.
-            ("/", conflicting_route()),  # the endpoint
+            ("POST", "/", conflicting_route()),  # the endpoint
+            # Flask answers OPTIONS itself, but it is routed to the dispatch endpoint.
+            ("OPTIONS", "/_dash-update-component", conflicting_route()),  # the method
             (  # the router's output
+                "POST",
                 "/_dash-update-component",
                 {**conflicting_route(), "output": "x.y"},
             ),
-            ("/_dash-update-component", [conflicting_route()]),  # a dict body
+            ("POST", "/_dash-update-component", [conflicting_route()]),  # a dict body
             (  # a list of inputs
+                "POST",
                 "/_dash-update-component",
                 {**conflicting_route(), "inputs": {"a": 1, "b": 2}},
             ),
             (  # two inputs
+                "POST",
                 "/_dash-update-component",
                 {**conflicting_route(), "inputs": conflicting_route()["inputs"][:1]},
             ),
             (  # a dict location
+                "POST",
                 "/_dash-update-component",
                 {**conflicting_route(), "inputs": ["/election/1824", {"value": "?"}]},
             ),
             (  # a dict query
+                "POST",
                 "/_dash-update-component",
                 {**conflicting_route(), "inputs": [{"value": "/"}, "?year=1860"]},
             ),
             (  # a str pathname
+                "POST",
                 "/_dash-update-component",
                 conflicting_route(pathname=None),
             ),
             (  # a str search
+                "POST",
                 "/_dash-update-component",
                 conflicting_route(search=7),
             ),
         ],
     )
     def test_the_hook_leaves_anything_but_a_routing_request_alone(
-        self, path: str, body: Any
+        self, method: str, path: str, body: Any
     ) -> None:
         sent = copy.deepcopy(body)
-        with appmod.server.test_request_context(path, method="POST", json=body):
+        with appmod.server.test_request_context(path, method=method, json=body):
             appmod._strip_routing_request()
             assert flask.request.get_json(silent=True) == sent
 
