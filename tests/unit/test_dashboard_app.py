@@ -1242,6 +1242,35 @@ class TestDashPrivates:
         assert appmod.app.config.include_pages_meta is False
 
 
+class TestDarkThemeVariables:
+    """#409: style.css's dark block themes the dcc controls through Dash's variables.
+
+    A Dash upgrade that renames, adds or moves one would leave the controls on their
+    light defaults in dark mode with nothing else failing, so the installed Dash's
+    declarations are read here and compared with what the dark block sets.
+    """
+
+    DCC_BUNDLE = Path(dash.__file__).parent / "dcc" / "dash_core_components.js"
+    STYLESHEET = Path(appmod.__file__).parent / "assets" / "style.css"
+    #: Not a color: the dark block leaves it alone.
+    NOT_COLORS = frozenset({"--Dash-Spacing"})
+
+    def dash_root_blocks(self) -> list[str]:
+        # The bundle carries its CSS as JS strings, so a newline is the two characters \n.
+        bundle = self.DCC_BUNDLE.read_text(encoding="utf-8")
+        return re.findall(r":root \{((?:\\n[^{}]*?)*)\}", bundle)
+
+    def test_the_dark_block_sets_every_dash_color_variable(self) -> None:
+        blocks = self.dash_root_blocks()
+        assert blocks, "Dash no longer declares its variables on a bare :root"
+        declared = {
+            name for block in blocks for name in re.findall(r"(--Dash-[\w-]+):", block)
+        }
+        css = self.STYLESHEET.read_text(encoding="utf-8")
+        dark = css[css.index("@media (prefers-color-scheme: dark)") :]
+        assert set(re.findall(r"(--Dash-[\w-]+):", dark)) == declared - self.NOT_COLORS
+
+
 # --- every templated page validates what its layout receives (#312, item 6) ----------
 
 #: Hostile renders for a page's path variables: (path value, query part), each

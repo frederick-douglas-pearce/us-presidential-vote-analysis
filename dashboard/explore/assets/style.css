@@ -74,17 +74,20 @@ fieldset.filter legend { padding: 0; }
 }
 @media (prefers-color-scheme: dark) {
   /* The dcc controls (#409) are themed through Dash 4's --Dash-* variables, which point at
-     the named dark values here. They are set on body, not :root, because Dash declares its
-     light defaults on :root from a style it injects after this sheet, so a :root rule here
-     would lose; a menu Dash portals out of the page is still inside body. color-scheme
-     gives the native checkboxes and radios their dark form. */
-  body {
+     the named dark values here. Dash declares its light defaults on a bare :root, from a
+     style it injects after this sheet, so this selector needs the higher specificity;
+     :not([data-theme="light"]) supplies it and is the selector #359's explicit Light
+     choice will need. color-scheme, which browsers read from the root element, gives the
+     page scrollbar and the native checkboxes and radios their dark form. A test in
+     test_dashboard_app.py fails if Dash renames a variable this block sets. */
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --text: #e8e8e8;
     --text-muted: #a3a3a3;
     --surface: #1e1e1e;
     --border: #767676;
-    --rule: #666;
+    --rule: #333;
+    --disabled: #666;
     --accent: #7ab8ff;
     --hover: rgba(255, 255, 255, 0.06);
     --active: rgba(255, 255, 255, 0.12);
@@ -97,20 +100,21 @@ fieldset.filter legend { padding: 0; }
     --Dash-Fill-Interactive-Weak: var(--hover);
     --Dash-Fill-Primary-Hover: var(--hover);
     --Dash-Fill-Primary-Active: var(--active);
-    --Dash-Fill-Disabled: var(--rule);
+    --Dash-Fill-Disabled: var(--disabled);
     --Dash-Stroke-Strong: var(--border);
-    --Dash-Stroke-Weak: #333;
+    --Dash-Stroke-Weak: var(--rule);
     --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
     --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
-    color: var(--text);
-    background: #121212;
   }
+  body { color: var(--text); background: #121212; }
   a { color: var(--accent); }
   .year-buttons label { border-color: var(--accent); }
   .year-buttons label:has(input:checked) { background: var(--accent); color: #121212; }
+  /* The checked radio sits on the accent fill, so it takes the page color, not the accent. */
+  .year-buttons input[type="radio"] { accent-color: #121212; }
   .lede { color: #bbb; }
   .snapshot { color: #999; }
   .unavailable { background: #2b2610; }
   .count, .empty, .note, .reason { color: #bbb; }
-  th, td, .provenance-footer { border-color: #333; }
+  th, td, .provenance-footer { border-color: var(--rule); }
 }
