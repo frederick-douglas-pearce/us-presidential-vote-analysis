@@ -1,0 +1,65 @@
+# OG share-card brief — Post 5, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card shows a real fragment of the actual
+# record. This post's centerpiece is 1960's fifteen electoral votes for Harry F. Byrd:
+# Alabama 6, Mississippi 8, Oklahoma 1. Fourteen came from lawfully unpledged slates
+# and one, Oklahoma's, from Henry Irwin breaking his pledge to Nixon. The presidential
+# line cannot tell them apart. The vice-presidential line can: the fourteen
+# unpledged electors paired Byrd with Strom Thurmond, and Irwin alone paired him with
+# Barry Goldwater, the ticket the 1960 effort had circulated.
+#
+# So the two panels are the same three states read off the same record twice. The
+# left panel is three rows that differ only in size; the right panel repeats them
+# and one row changes name. The card shows the post's finding without a sentence of
+# explanation: the reader's eye goes straight to the one row that differs.
+#
+# Why only three rows: those are all of Byrd's votes, so there is nothing to choose
+# and no cherry-picking to defend. Every other 1960 state is a Kennedy or Nixon row and
+# would only bury the specimen. The renderer centers a short panel in the band, as it
+# does for post 1's five rows.
+#
+# Panel semantics: each row is [state and recipient, electoral votes]. The recipient
+# sits in the label because the right panel's whole point is that the recipient
+# changes; the value column stays the vote count in both panels, so the numbers line
+# up row for row.
+#
+# Data provenance: the National Archives' 1960 page,
+# https://www.archives.gov/electoral-college/1960, read 2026-10-26. Its notes:
+# "Byrd received electoral votes for President from Alabama (6), Mississippi (8) and
+# Oklahoma (1). Thurmond received electoral votes for Vice President from Alabama (6)
+# and Mississippi (8). Goldwater received 1 electoral vote for Vice President from
+# Oklahoma." The presidential column is also served by the live public API,
+# `GET /v1/elections/1960` (Byrd's rows, field `electoral_votes`), checked the same day.
+# The vice-presidential column is not in the project's data, which tracks the
+# presidential line only; the Archives page is its only source here, as the post says.
+
+[card]
+title = ["How Many Times Has Anyone", "Organized Faithless Electors?"]
+subhead = "1960: fifteen votes for Byrd look alike. The running mate tells one apart."
+series_mark = "Counted, Not Assumed · 5 of 10"
+
+# Rows are index-aligned across panels: row N is the same state's electors in both.
+[[panel]]
+label = "1960 · President"
+sublabel = "Harry F. Byrd, 15"
+mono = true
+rows = [
+  ["Alabama · Byrd", "6"],
+  ["Mississippi · Byrd", "8"],
+  ["Oklahoma · Byrd", "1"],
+]
+
+[[panel]]
+label = "1960 · Vice President"
+sublabel = "Thurmond 14, Goldwater 1"
+mono = true
+rows = [
+  ["Alabama · Thurmond", "6"],
+  ["Mississippi · Thurmond", "8"],
+  ["Oklahoma · Goldwater", "1"],
+]
