@@ -73,8 +73,41 @@ fieldset.filter legend { padding: 0; }
   .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
 }
 @media (prefers-color-scheme: dark) {
-  body { color: #e8e8e8; background: #121212; }
-  a { color: #7ab8ff; }
+  /* The dcc controls (#409) are themed through Dash 4's --Dash-* variables, which point at
+     the named dark values here. They are set on body, not :root, because Dash declares its
+     light defaults on :root from a style it injects after this sheet, so a :root rule here
+     would lose; a menu Dash portals out of the page is still inside body. color-scheme
+     gives the native checkboxes and radios their dark form. */
+  body {
+    color-scheme: dark;
+    --text: #e8e8e8;
+    --text-muted: #a3a3a3;
+    --surface: #1e1e1e;
+    --border: #767676;
+    --rule: #666;
+    --accent: #7ab8ff;
+    --hover: rgba(255, 255, 255, 0.06);
+    --active: rgba(255, 255, 255, 0.12);
+    --Dash-Text-Strong: var(--text);
+    --Dash-Text-Primary: var(--text);
+    --Dash-Text-Weak: var(--text-muted);
+    --Dash-Text-Disabled: var(--text-muted);
+    --Dash-Fill-Inverse-Strong: var(--surface);
+    --Dash-Fill-Interactive-Strong: var(--accent);
+    --Dash-Fill-Interactive-Weak: var(--hover);
+    --Dash-Fill-Primary-Hover: var(--hover);
+    --Dash-Fill-Primary-Active: var(--active);
+    --Dash-Fill-Disabled: var(--rule);
+    --Dash-Stroke-Strong: var(--border);
+    --Dash-Stroke-Weak: #333;
+    --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
+    --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
+    color: var(--text);
+    background: #121212;
+  }
+  a { color: var(--accent); }
+  .year-buttons label { border-color: var(--accent); }
+  .year-buttons label:has(input:checked) { background: var(--accent); color: #121212; }
   .lede { color: #bbb; }
   .snapshot { color: #999; }
   .unavailable { background: #2b2610; }

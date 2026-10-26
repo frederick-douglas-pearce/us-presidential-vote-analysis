@@ -674,10 +674,12 @@ An E14 story that needs a guard's allow-list widened (a `.js` asset under
 `explore/assets/`, say) makes that change in its own PR with its reason; the guard stays
 E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
 
-**Stories** (#360 lands before #359; both edit `explore/assets/style.css`):
+**Stories** (#360 has merged; #409 lands before #359; all three edit `explore/assets/style.css`):
 
 - **E14-S1** — #360: widen the layout on desktop, keep the phone column.
-- **E14-S2** — #359: light/dark theme choice (System / Light / Dark).
+- **E14-S2** — #359: light/dark theme choice (System / Light / Dark). Builds on E14-S5's
+  `dcc` theming: it moves those dark values under its `data-theme` selectors rather than
+  mapping the `--Dash-*` variables itself.
 - **E14-S3** — chart theme foundation (light/dark Plotly templates + palette).
   **Unfiled placeholder, gated on E9-S6:** filed when the first chart story is shaped, and
   lands before or with that chart. It picks each chart's template from E14-S2's
@@ -690,6 +692,12 @@ E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
   chart it calls for, such as a landing graphic, is a separate E9 story that depends on
   E14-S3. Independent of #359 (whichever lands second rebases); it adds no new color
   values.
+- **E14-S5** — #409 (`bug`, filed 2026-10-26): make the `dcc` dropdowns, year slider and
+  checklist readable in dark mode under today's `prefers-color-scheme` behavior (selected
+  values rendered light on white), plus the candidate page's year-button border. Confirms
+  in a browser the gap #359 predicted and fixes it in CSS, preferring named color values
+  E14-S2 can reuse; no toggle, script or `localStorage`. Lands before #359; independent of
+  #364.
 
 ---
 
