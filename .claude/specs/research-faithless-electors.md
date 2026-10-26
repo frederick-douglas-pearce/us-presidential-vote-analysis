@@ -9,12 +9,15 @@
 > seven private reasons. They were not. **In two centuries, exactly two people organized an attempt to
 > use the Electoral College to change who became president: Henry D. Irwin in 1960 and the Washington
 > electors in 2016.** Both solicited electors in other states; both aimed to deny the leader a
-> majority; both failed. **Every other faithless elector on record was protesting, not plotting** — and
-> two of them said outright that they would have stopped short of deciding the election.
+> majority; both failed. **No other faithless elector this survey covers (§4–§5, 1948–2016) was trying
+> to change who became president**; most were protesting, and two of them said outright that they would
+> have stopped short of deciding the election. The survey does not cover the 2004 Minnesota vote for
+> Edwards (§5) or the pre-1948 record, where 1872's Greeley electors, whose nominee had died, alone
+> cast more than a third of all faithless votes (*Chiafalo* slip op. 16).
 >
-> **1960 was the larger operation and is essentially forgotten**: 218 telegrams, a Byrd/Goldwater
-> coalition ticket, sworn Senate testimony, and a claimed arithmetic of 200 Republican plus 60
-> Democratic electors. 2016 produced seven defections nationally.
+> **1960 was the larger operation and is essentially forgotten**: telegrams to all the Republican
+> electors in the states Nixon carried, a Byrd/Goldwater coalition ticket, sworn Senate testimony, and
+> a claimed arithmetic of 200 Republican plus 60 Democratic electors. 2016 produced seven defections nationally.
 >
 > **One finding is repo-native** (§3): 1960's Byrd 15 splits AL 6 / MS 8 / OK 1, and **only the
 > Oklahoma vote was faithless.** The other 14 were *lawfully unpledged* slates run under state statute
@@ -24,6 +27,12 @@
 > **Revised 2026-09-07** by a follow-up verification pass, which added two things and changed no
 > finding above: Chiafalo's full name (§1) and the sourcing status of the name "Hamilton Electors"
 > (§10, flags 13–14).
+>
+> **Revised 2026-10-26** after Post 5's claim-by-claim audit and a glossary check found errors this note
+> carried into the draft: the protest claim's scope (above), "218 telegrams" (§1, §5), the ticket Muskie's
+> objection defended (§8), the ticket attributed to Harris (§3), the claim that only 1960 and 2016
+> solicited a bloc (§5), the missing 2004 vote (§5), and when Washington's statute replaces an elector
+> (§9). §10 flags 15–17 record them. No headline finding changed.
 
 **Date:** 2026-09-06 · **Method:** two parallel research agents (motives; calendar/mechanics), plus
 direct reads by the parent of the *Chiafalo* slip opinion, the Supreme Court docket, the House
@@ -202,7 +211,8 @@ National: Kennedy 303 · Nixon 219 · Byrd 15
 ```
 
 **The fingerprint — VERIFIED via NARA.** The 14 Southern unpledged electors voted Byrd/**Thurmond**;
-**Irwin alone voted Byrd/Goldwater** — precisely the ticket Harris circulated. The lone Goldwater
+**Irwin alone voted Byrd/Goldwater**, the ticket his own telegram proposed (wording ATTRIBUTED, §1;
+Harris urged electors to withhold their votes and, per Rosenthal, named no ticket). The lone Goldwater
 vice-presidential vote in the Archives' 1960 table is the plan's signature.
 https://www.archives.gov/electoral-college/1960
 
@@ -333,17 +343,21 @@ Government*.
 |---|---|---|---|
 | 1948 | Preston Parks (TN) | affinity / factional (arguably not faithless) | dual-slate; no stated reason |
 | 1956 | W. F. Turner (AL) | protest vs nominee — **segregationist** | own quote |
-| **1960** | **Henry D. Irwin (OK)** | **STRATEGIC — change the outcome** | 218 telegrams; sworn testimony |
+| **1960** | **Henry D. Irwin (OK)** | **STRATEGIC — change the outcome** | telegrams to every Republican elector in Nixon's states; sworn testimony |
 | 1968 | Lloyd W. Bailey (NC) | protest vs nominee (+ district-mandate + defense of the system) | own written statement |
 | 1972 | Roger MacBride (VA) | affinity / ideological | *LP News* only |
 | 1976 | Mike Padden (WA) | single-issue protest, **expressly non-decisive** | own words, twice |
 | 1988 | Margarette Leach (WV) | **protest against the system itself** | own words |
-| 2000 | Lett-Simmons (DC) | protest re DC representation | own words |
+| 2000 | Lett-Simmons (DC) | protest re DC representation (an abstention, not a faithless vote) | own words |
+| 2004 | one Minnesota elector | **not researched** | voted Edwards for both offices; served by this project's dashboard with a note (D079 catalog) |
 | **2016** | **WA three** | **STRATEGIC — change the outcome** | *Chiafalo* |
 
 **Protest is overwhelmingly the norm; strategy is the rare exception.** Six of the eight pre-2016
 instances are protest or affinity votes. **Only 1960 and 2016 were attempts to change who became
-president, and only those two solicited other electors to move as a bloc.**
+president.** Soliciting other electors does not by itself separate them: **Leach (1988) also tried to
+recruit other electors** (§4: "I tried to get the other electors to vote with me, because I thought a
+block of electors would make news"), but for attention, not to change the result. *(Corrected 2026-10-26;
+this line previously said only 1960 and 2016 solicited a bloc, which her own words contradict.)*
 
 **2016 is a scaled-up precedent of 1960 specifically, not of the tradition — and it is the smaller of
 the two.** Two structural differences worth stating: (1) 1960 had a **lawful parallel mechanism**
@@ -455,8 +469,9 @@ https://history.house.gov/Blog/2020/November/11-17-Faithless-Electors/ — all *
 - **VP Humphrey — the defeated candidate — did not preside**; he was abroad at the funeral of Trygve
   Lie, the UN's first Secretary-General. **Sen. Richard B. Russell**, President pro tempore, presided.
 - **Rep. James G. O'Hara (D-Mich.)** and **Sen. Edmund S. Muskie (D-Me.)** filed the objection — and
-  **Muskie had been Humphrey's running mate**, objecting to a vote taken from his own ticket. Joined by
-  37 more Representatives and 6 more Senators (**38 + 7**).
+  **Muskie had been Humphrey's running mate**, objecting to a vote taken from the Nixon ticket that had
+  beaten his own (Bailey was Nixon-pledged, §4). *(Corrected 2026-10-26; this line previously said "his
+  own ticket".)* Joined by 37 more Representatives and 6 more Senators (**38 + 7**).
 - **Ground: the votes "were not regularly given"** — *not* that the elector was unlawfully certified.
   CRS RL32717 draws exactly this distinction.
 - **Rep. Gerald R. Ford moved to table.** O'Hara raised a point of order under 3 U.S.C. §17 (the
@@ -516,7 +531,10 @@ The most-tested objection in the statute's history would fail at the front door 
   pledges only by removing and replacing faithless electors.**" Wash. Rev. Code §29A.56.090(3) (2019).
 
 **Consequence worth carrying forward:** in most binding states **a faithless vote never reaches
-Congress at all** — the elector is replaced and a compliant vote is transmitted. Had the 2016
+Congress at all** — the elector is replaced and a compliant vote is transmitted. In Washington the
+replacement follows the ballot, not the other way round: under Wash. Rev. Code §29A.56.090 the
+secretary of state may not count a ballot marked against the pledge, the elector who presents it
+vacates the office, and a substitute elector fills the seat and votes (checked 2026-10-26). Had the 2016
 Washington three acted under today's law, there would be **no Powell votes in the Archives' notes**,
 and the 2016 correction this project had to make would not exist.
 
@@ -566,6 +584,17 @@ and the 2016 correction this project had to make would not exist.
     concluding the phrase is absent from the record *entirely* rather than from the *Chiafalo* record.
 14. **Prefer "Peter Bret Chiafalo" to "Peter Chiafalo" in prose** — see §1. The middle name is in the
     Court's own merits-brief caption, and it is the only spelling a reader can successfully search.
+15. **"218 telegrams, ~40 replies" has no recorded source.** It appeared as a summary line in the
+    older `social/` working copy and in this note's header and §5 table, but the VERIFIED *Evening Star*
+    report (§1) says only "telegrams to all the Republican electors in the States carried by Mr.
+    Nixon", and "replies indicated **to him**". Do not publish either number unless §11's hearing record
+    supplies it.
+16. **The survey's span is 1948–2016**, not "on record". It omits the 2004 Minnesota Edwards vote and
+    everything before 1948; the 1872 Greeley electors alone are over a third of all faithless votes.
+17. **The 1960 Alabama six are classified differently by this project's served data.** The
+    curated note under D079 names only Mississippi's electors as unpledged and gives Alabama's six no
+    kind, because U.S. Government sources disagree (flag 6). §2–§3 follow the House historian and the
+    *Evening Star*; a post that links the dashboard's 1960 page shows a reader the narrower claim.
 
 ## §11 — Best unfetched source
 
