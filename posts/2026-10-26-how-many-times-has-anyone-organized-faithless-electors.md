@@ -41,7 +41,7 @@ Kennedy's own cushion that year, 303 electoral votes against a 269 majority, was
 | Mississippi | 8          | 8                 |
 | Oklahoma    | 1          | 8                 |
 
-Mississippi's eight electors and six of Alabama's eleven were, by state law, not pledged to anyone at all: a mechanism, run by statute in a handful of Southern states in that era, that let electors show up free to vote however they chose (Kirby, 27 Law & Contemp. Probs. 495 (1962) n.104; _Gray v. Mississippi_, 233 F. Supp. 139 (N.D. Miss. 1964)). Oklahoma's slate was pledged, to Nixon, and Irwin alone broke it.
+Mississippi's eight electors and six of Alabama's eleven were unpledged. A handful of Southern states in that era, these two among them, let electors run under the party label without naming any candidate for president, so those fourteen were free to vote however they chose (Kirby, 27 Law & Contemp. Probs. 495 (1962) n.104; _Gray v. Mississippi_, 233 F. Supp. 139 (N.D. Miss. 1964)). Oklahoma's slate was pledged, to Nixon, and Irwin alone broke it.
 
 Nothing in those three rows says which is which. Six votes, eight votes, one vote, all cast for the same man, in a column that cannot by itself distinguish a lawful unpledged slate from a broken pledge. The distinction survives only outside the row: the 14 unpledged electors voted Byrd for president and Strom Thurmond for vice president, while Irwin alone voted Byrd and Goldwater. That vice-presidential vote is not in this project's own data, which tracks the presidential line only; it is on the National Archives' page.
 
