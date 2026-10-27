@@ -1,0 +1,69 @@
+# OG share-card brief — Post 5, "Counted, Not Assumed".
+#
+# Committable build input: the card can be re-rendered from this file without
+# re-prompting. Render with:
+#     uv run python tooling/render-og-card.py social/images/<slug>/og-card.toml
+#
+# Rationale (not consumed by the renderer): the series premise is "read from what
+# the record actually says," so every card shows a real fragment of the actual
+# record. This post opens on 2016, the year most readers can place, so the specimen
+# is 2016's three states with faithless votes: Washington, Texas and Hawaii.
+#
+# The left panel is what the voters decided: who carried each state, and the state's
+# allotment of electors. The right panel is what the electors did with it. Rows are
+# index-aligned, so each state's winner sits beside its own winner's smaller count,
+# and the seven other names fill the slots the left panel leaves blank. A blank here
+# means "no voter in this state chose this," which is the whole point: none of the
+# seven names was on the line the state's voters decided. Post 2's card set the
+# precedent that a blank slot is deliberate, not missing data.
+#
+# Order follows the post: Washington first (the organized attempt, the three Powell
+# votes), then Texas (the two votes Trump lost), then Hawaii.
+#
+# Faith Spotted Eagle appears here as a data row only. The post no longer names her
+# in its prose; she is one of the seven votes the record carries, so leaving her out
+# would make the right panel sum to 53 of Washington's, Texas's and Hawaii's 54.
+#
+# Data provenance: the live public API at https://api.us-presidential-election-center.org,
+# `GET /v1/elections/2016`, fields `state_electoral_votes`, `electoral_votes` and
+# `popular_votes` (the latter for who carried each state), read 2026-10-27. The
+# allotments and the faithless votes are also on the National Archives' 2016 page,
+# https://www.archives.gov/electoral-college/2016, whose notes say "There were
+# faithless votes cast for president and vice president in Hawaii, Texas, and
+# Washington."
+
+[card]
+title = ["How Many Times Has Anyone", "Organized Faithless Electors?"]
+subhead = "2016: seven electors voted for someone other than the candidate who carried their state."
+series_mark = "Counted, Not Assumed · 5 of 10"
+
+# Rows are index-aligned across panels: row N is the same state's electors in both.
+[[panel]]
+label = "2016 · Carried the state"
+sublabel = "54 electors"
+mono = true
+rows = [
+  ["Washington · Clinton", "12"],
+  ["", ""],
+  ["", ""],
+  ["Texas · Trump", "38"],
+  ["", ""],
+  ["", ""],
+  ["Hawaii · Clinton", "4"],
+  ["", ""],
+]
+
+[[panel]]
+label = "2016 · Electoral votes cast"
+sublabel = "7 for someone else"
+mono = true
+rows = [
+  ["Washington · Clinton", "8"],
+  ["Washington · Colin Powell", "3"],
+  ["Washington · Faith Spotted Eagle", "1"],
+  ["Texas · Trump", "36"],
+  ["Texas · John Kasich", "1"],
+  ["Texas · Ron Paul", "1"],
+  ["Hawaii · Clinton", "3"],
+  ["Hawaii · Bernie Sanders", "1"],
+]
