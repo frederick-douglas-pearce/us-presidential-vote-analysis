@@ -13,7 +13,7 @@ featured: false
 
 In the [2016 US presidential election](https://www.archives.gov/electoral-college/2016), seven presidential electors cast their vote for someone other than the candidate who had won their state, across three states. Electors pledged to Hillary Clinton lost five votes; electors pledged to Donald Trump lost two. In the Supreme Court's own words, it was "the most in a century." Most people who follow US politics have never heard about it, though it happened within living memory of nearly everyone reading this.
 
-Three of those seven votes, and the plan behind them, have a specific precedent fifty-six years earlier: organized the same way, aimed at the same constitutional fallback, and defeated by roughly the same arithmetic. In two centuries of US presidential elections, two attempts to organize electors and change who became president ever got off the ground, Henry Irwin's in 1960 and three Washington electors' in 2016, and both failed. No other faithless elector since 1948 was trying to change who became president.
+Three of those seven votes, and the plan behind them, have a specific precedent fifty-six years earlier: organized the same way, aimed at the same constitutional fallback, and defeated by roughly the same arithmetic. In two centuries of US presidential elections, only two attempts to organize electors and change who became president ever got off the ground, Henry Irwin's in 1960 and three Washington electors' in 2016, and both failed. No other faithless elector since 1948 was trying to change who became president.
 
 ## Not seven people acting alone
 
@@ -43,9 +43,9 @@ Kennedy's own cushion that year, 303 electoral votes against a 269 majority, was
 
 Mississippi's eight electors and six of Alabama's eleven were, by state law, not pledged to anyone at all: a mechanism, run by statute in a handful of Southern states in that era, that let electors show up free to vote however they chose (Kirby, 27 Law & Contemp. Probs. 495 (1962) n.104; _Gray v. Mississippi_, 233 F. Supp. 139 (N.D. Miss. 1964)). Oklahoma's slate was pledged, to Nixon, and Irwin alone broke it.
 
-Nothing in those three rows says which is which. Six votes, eight votes, one vote, all cast for the same man, in a column that cannot by itself distinguish a lawful unpledged slate from a broken pledge. The distinction survives only outside the row: the 14 unpledged electors voted Byrd for president and Strom Thurmond for vice president, while Irwin alone voted Byrd and Goldwater, the exact ticket Harris had circulated. That vice-presidential vote is not in this project's own data, which tracks the presidential line only; it is on the National Archives' page.
+Nothing in those three rows says which is which. Six votes, eight votes, one vote, all cast for the same man, in a column that cannot by itself distinguish a lawful unpledged slate from a broken pledge. The distinction survives only outside the row: the 14 unpledged electors voted Byrd for president and Strom Thurmond for vice president, while Irwin alone voted Byrd and Goldwater. That vice-presidential vote is not in this project's own data, which tracks the presidential line only; it is on the National Archives' page.
 
-Congress drew the same line eight years later, on the floor, debating a different faithless elector. Senator Church put the general rule to Senator Muskie directly: "If Dr. Bailey had been unpledged... there would be no basis for objecting." Muskie reponded, "The Senator is correct" (115 Cong. Rec. 214, Jan. 6, 1969). It is the whole premise of this series. A record can hold fifteen identical-looking votes and still not tell you, on its own, that fourteen were routine and one was a plan to change who became president.
+Congress drew the same line eight years later, on the floor, debating a different faithless elector. Senator Church put the general rule to Senator Muskie directly: "If Dr. Bailey had been unpledged... there would be no basis for objecting." Muskie responded, "The Senator is correct" (115 Cong. Rec. 214, Jan. 6, 1969). It is the whole premise of this series. A record can hold fifteen identical-looking votes and still not tell you, on its own, that fourteen were routine and one was a plan to change who became president.
 
 ## Nobody else was trying to change the result
 
@@ -95,8 +95,6 @@ It could not happen the same way today. [3 U.S.C. §15(d)(2)(B)(i)(II)](https://
 _Chiafalo_ answered a question the Court had left open since 1952. In _Ray v. Blair_, it had upheld a state's power to require the pledge in the first place, but explicitly declined to decide whether a state could enforce it with a penalty if an elector broke it. Sixty-eight years and one more attempt to throw a US presidential election into the House later, the Court answered: yes, a state may enforce an elector's pledge.
 
 Washington itself no longer answers that question the way it did in 2016. A footnote in _Chiafalo_ notes the change: "Since the events in this case, Washington has repealed the fine. It now enforces pledges only by removing and replacing faithless electors." Under the statute now in force, a ballot marked against the elector's pledge is not counted, the elector who presents it vacates the office, and a substitute elector fills the seat and votes instead ([Wash. Rev. Code §29A.56.090(3)](https://app.leg.wa.gov/rcw/default.aspx?cite=29A.56.090) (2019)). If Chiafalo, Guerra, and John tried the same thing today, Washington would refuse to count their ballots and replace them, and the National Archives' notes on the state would carry no Colin Powell entry.
-
-One of the seven votes cast that day, next to Colin Powell's three, went to Faith Spotted Eagle.
 
 ---
 
