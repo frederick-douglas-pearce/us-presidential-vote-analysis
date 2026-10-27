@@ -6,60 +6,64 @@
 #
 # Rationale (not consumed by the renderer): the series premise is "read from what
 # the record actually says," so every card shows a real fragment of the actual
-# record. This post's centerpiece is 1960's fifteen electoral votes for Harry F. Byrd:
-# Alabama 6, Mississippi 8, Oklahoma 1. Fourteen came from lawfully unpledged slates
-# and one, Oklahoma's, from Henry Irwin breaking his pledge to Nixon. The presidential
-# line cannot tell them apart. The vice-presidential line can: the fourteen
-# unpledged electors paired Byrd with Strom Thurmond, and Irwin alone paired him with
-# Barry Goldwater, the ticket the 1960 effort had circulated.
+# record. This post opens on 2016, the year most readers can place, so the specimen
+# is 2016's three states with faithless votes: Washington, Texas and Hawaii.
 #
-# So the two panels are the same three states read off the same record twice. The
-# left panel is three rows that differ only in size; the right panel repeats them
-# and one row changes name. The card shows the post's finding without a sentence of
-# explanation: the reader's eye goes straight to the one row that differs.
+# The left panel is what the voters decided: who carried each state, and the state's
+# allotment of electors. The right panel is what the electors did with it. Rows are
+# index-aligned, so each state's winner sits beside its own winner's smaller count,
+# and the seven other names fill the slots the left panel leaves blank. A blank here
+# means "no voter in this state chose this," which is the whole point: none of the
+# seven names was on the line the state's voters decided. Post 2's card set the
+# precedent that a blank slot is deliberate, not missing data.
 #
-# Why only three rows: those are all of Byrd's votes, so there is nothing to choose
-# and no cherry-picking to defend. Every other 1960 state is a Kennedy or Nixon row and
-# would only bury the specimen. The renderer centers a short panel in the band, as it
-# does for post 1's five rows.
+# Order follows the post: Washington first (the organized attempt, the three Powell
+# votes), then Texas (the two votes Trump lost), then Hawaii.
 #
-# Panel semantics: each row is [state and recipient, electoral votes]. The recipient
-# sits in the label because the right panel's whole point is that the recipient
-# changes; the value column stays the vote count in both panels, so the numbers line
-# up row for row.
+# Faith Spotted Eagle appears here as a data row only. The post no longer names her
+# in its prose; she is one of the seven votes the record carries, so leaving her out
+# would make the right panel sum to 53 of Washington's, Texas's and Hawaii's 54.
 #
-# Data provenance: the National Archives' 1960 page,
-# https://www.archives.gov/electoral-college/1960, read 2026-10-26. Its notes:
-# "Byrd received electoral votes for President from Alabama (6), Mississippi (8) and
-# Oklahoma (1). Thurmond received electoral votes for Vice President from Alabama (6)
-# and Mississippi (8). Goldwater received 1 electoral vote for Vice President from
-# Oklahoma." The presidential column is also served by the live public API,
-# `GET /v1/elections/1960` (Byrd's rows, field `electoral_votes`), checked the same day.
-# The vice-presidential column is not in the project's data, which tracks the
-# presidential line only; the Archives page is its only source here, as the post says.
+# Data provenance: the live public API at https://api.us-presidential-election-center.org,
+# `GET /v1/elections/2016`, fields `state_electoral_votes`, `electoral_votes` and
+# `popular_votes` (the latter for who carried each state), read 2026-10-27. The
+# allotments and the faithless votes are also on the National Archives' 2016 page,
+# https://www.archives.gov/electoral-college/2016, whose notes say "There were
+# faithless votes cast for president and vice president in Hawaii, Texas, and
+# Washington."
 
 [card]
 title = ["How Many Times Has Anyone", "Organized Faithless Electors?"]
-subhead = "1960: fifteen votes for Byrd look alike. The running mate tells one apart."
+subhead = "2016: seven electors voted for someone other than the candidate who carried their state."
 series_mark = "Counted, Not Assumed · 5 of 10"
 
 # Rows are index-aligned across panels: row N is the same state's electors in both.
 [[panel]]
-label = "1960 · President"
-sublabel = "Harry F. Byrd, 15"
+label = "2016 · Carried the state"
+sublabel = "54 electors"
 mono = true
 rows = [
-  ["Alabama · Byrd", "6"],
-  ["Mississippi · Byrd", "8"],
-  ["Oklahoma · Byrd", "1"],
+  ["Washington · Clinton", "12"],
+  ["", ""],
+  ["", ""],
+  ["Texas · Trump", "38"],
+  ["", ""],
+  ["", ""],
+  ["Hawaii · Clinton", "4"],
+  ["", ""],
 ]
 
 [[panel]]
-label = "1960 · Vice President"
-sublabel = "Thurmond 14, Goldwater 1"
+label = "2016 · Electoral votes cast"
+sublabel = "7 for someone else"
 mono = true
 rows = [
-  ["Alabama · Thurmond", "6"],
-  ["Mississippi · Thurmond", "8"],
-  ["Oklahoma · Goldwater", "1"],
+  ["Washington · Clinton", "8"],
+  ["Washington · Colin Powell", "3"],
+  ["Washington · Faith Spotted Eagle", "1"],
+  ["Texas · Trump", "36"],
+  ["Texas · John Kasich", "1"],
+  ["Texas · Ron Paul", "1"],
+  ["Hawaii · Clinton", "3"],
+  ["Hawaii · Bernie Sanders", "1"],
 ]
