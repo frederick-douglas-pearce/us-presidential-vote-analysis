@@ -44,9 +44,9 @@ reaches the network: the server's audit hook refuses every non-loopback lookup a
 and writes a sentinel the session fails on (`api.fetch`'s `except` would otherwise turn a
 refusal into the degraded page), and every test fails on a browser request off the loopback
 host or a console error. Each test also checks the page is 390 px wide.
-`tests/e2e/dashboard_pages.py` holds the page ids, the field list and the expected values: the
-data ones computed from the recorded responses, the rest read from `explore`'s shipped
-constants. A page a story changes keeps its e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
+`tests/e2e/dashboard_pages.py` holds the page ids, the field list and the expected data values
+computed from the recorded responses; the tests read shared labels and constants from
+`explore` directly. A page a story changes keeps its e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
 browser test sees only the degraded state. CI runs the suite in `e2e.yml` on changes under
 `dashboard/` and the other paths D082 lists; it is advisory. pytest-playwright deletes
 `./test-results/` (traces, kept by `--tracing retain-on-failure`) at the start of every pytest

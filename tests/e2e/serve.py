@@ -63,7 +63,7 @@ def _audit(event: str, args: tuple[Any, ...]) -> None:
         host = args[0]
     elif event == "socket.getnameinfo":
         host = _host(args[0])
-    elif event in ("socket.connect", "socket.sendto"):
+    elif event in ("socket.connect", "socket.sendto", "socket.sendmsg"):
         host = _host(args[1])
     else:
         return
