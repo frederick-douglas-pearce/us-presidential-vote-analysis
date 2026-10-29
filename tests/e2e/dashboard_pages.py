@@ -96,4 +96,6 @@ def assert_rendered(page: Page, success: str) -> None:
     the degraded state is not."""
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
-    assert page.evaluate("innerWidth") == VIEWPORT["width"]
+    # Written out, not read from VIEWPORT, so editing that constant cannot move the
+    # width this suite claims to check: #306's phone, 390 px.
+    assert page.evaluate("innerWidth") == 390
