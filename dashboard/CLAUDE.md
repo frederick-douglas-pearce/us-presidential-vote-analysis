@@ -25,7 +25,27 @@ index and the shared table conventions, #306), `tests/unit/test_dashboard_electi
 `/v1/candidates/andrew-jackson`), all
 from one snapshot, which `test_every_recorded_response_is_one_snapshot` checks: test input
 only, on the `ec_state_roster_by_year.json` precedent in the root [`CLAUDE.md`](../CLAUDE.md), and a guard asserts that no
-runtime module names one (`test_no_runtime_module_names_the_test_fixtures`).
+runtime module names one (`test_no_runtime_module_names_the_test_fixtures`). Their path → file
+map is `tests/dashboard_fixtures.py`, stdlib-only so the e2e server can import it.
+
+**Browser tests (#321, D082).** `tests/e2e/` drives the app in Chromium through Playwright,
+at a 390 × 844 viewport: the home page, and the elections index's filter-to-URL chain (one
+callback per change, no loop), back and forward, a pasted filtered URL, the column-name list
+and the year slider's labels not overlapping. They carry the `e2e` marker, which the default
+run deselects. Run them with `uv run playwright install chromium` once, then
+`uv run pytest -m e2e`. `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free
+loopback port, from `dashboard/`, and stops it at session end. The server imports the app,
+replaces `api.CLIENT` with a client over the recorded responses (the seam
+`test_dashboard_app.py` uses; an unrecorded path is `ApiUnavailable`), and checks that warmup
+filled every prefetch path before it listens, since warmup answers 200 either way. No test
+reaches the network: the server's audit hook refuses every non-loopback lookup and connection
+and writes a sentinel the session fails on (`api.fetch`'s `except` would otherwise turn a
+refusal into the degraded page), and every test fails on a browser request off the loopback
+host or a console error. `tests/e2e/dashboard_pages.py` holds the ids and expected values in
+one place, the values computed from the recorded responses. A page a story changes keeps its
+e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
+browser test sees only the degraded state. CI runs the suite in `e2e.yml` on changes under
+`dashboard/` and the other paths D082 lists; it is advisory.
 
 ## Deployment
 

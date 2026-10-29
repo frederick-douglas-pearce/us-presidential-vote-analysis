@@ -22,7 +22,8 @@ fill, and the browser would then measure the second visitor. A link-preview scra
 fetching a shared link before the person clicks it does exactly that; measure that case
 on purpose, by sending the request yourself first, never by accident.
 
-Playwright is not a repo dependency; run it with uvx:
+Playwright is in the ``dev`` dependency group (#321), so ``uv run`` works after
+``uv run playwright install chromium``; uvx needs no project environment at all:
 
     uvx --with playwright python -m playwright install chromium
     uvx --with playwright python scripts/measure_dashboard_cold_start.py \\

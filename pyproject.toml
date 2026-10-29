@@ -57,6 +57,11 @@ dev = [
     "types-pyyaml>=6",
     # Notebook remains runnable during the incremental notebook->package migration.
     "jupyterlab>=4.0",
+    # The dashboard's browser tests (tests/e2e/, #321), deselected by default by the
+    # `e2e` marker below. Dev only: neither the deployed dashboard nor the API image
+    # gains them. Run `uv run playwright install chromium` once for the browser.
+    "playwright>=1.64.1",
+    "pytest-playwright>=0.10.0",
 ]
 
 # The API container's serve-time closure (D033). `usvote/api/` imports ONLY
@@ -184,9 +189,13 @@ pythonpath = ["dashboard"]
 # tests/ directory layout) is the source of truth for selection; the offline
 # suite lives under tests/unit/ and the live-DB tests under tests/integration/,
 # each carrying the marker.
-addopts = "-m 'not integration' --strict-markers"
+# The `e2e` browser tests (tests/e2e/, #321) are excluded the same way; run them with
+# `pytest -m e2e`. CI's unit job passes no `-m` of its own, so this line is the one
+# statement of what a default run selects.
+addopts = "-m 'not integration and not e2e' --strict-markers"
 markers = [
     "integration: tests that require a live Postgres database (excluded by default)",
+    "e2e: browser tests of the dashboard via Playwright (excluded by default)",
 ]
 
 # `pytest --cov=usvote` reads this. Measure the installed package, not the

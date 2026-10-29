@@ -1,0 +1,77 @@
+name: Dashboard e2e
+
+# The dashboard's browser tests (tests/e2e/, #321; D082), run with Playwright against the
+# app served from recorded API responses, so no step reaches the live API. Separate from
+# ci.yml because the browser install costs a minute or two, paid only by changes that
+# can alter what these tests check: the dashboard, its tests and fixtures, and the
+# dependency and interpreter pins. The push:main run mirrors og-card-guard.yml, so a PR
+# opened before a path joined this list is still checked once it merges.
+#
+# Advisory, as every check here: main has no branch protection, so a red run does not
+# block a merge (#260).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - "tests/e2e/**"
+      - "tests/fixtures/dashboard/**"
+      - "tests/dashboard_fixtures.py"
+      - "tests/conftest.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/workflows/e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - "tests/e2e/**"
+      - "tests/fixtures/dashboard/**"
+      - "tests/dashboard_fixtures.py"
+      - "tests/conftest.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/workflows/e2e.yml"
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      # The headless shell only, with the system libraries it needs.
+      - name: Install Chromium
+        run: uv run playwright install --with-deps --only-shell chromium
+
+      - name: Browser tests (pytest -m e2e)
+        run: uv run pytest -m e2e --tracing retain-on-failure
+
+      - name: Upload traces (on failure)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+          if-no-files-found: ignore

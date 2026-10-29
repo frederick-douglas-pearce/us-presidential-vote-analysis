@@ -3,7 +3,7 @@
 Home for tests that exercise the real load path against a database:
 ``test_db.py`` (the ``DBC`` round-trip) and ``test_load.py`` (the full EC
 pipeline into Postgres). Every test here must carry ``@pytest.mark.integration``
-so the default ``-m 'not integration'`` selection (see
+so the default ``-m 'not integration and not e2e'`` selection (see
 ``[tool.pytest.ini_options]``) skips it; CI runs them in a dedicated job with a
 Postgres service container (``uv run pytest -m integration``).
 

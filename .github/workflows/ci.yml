@@ -45,9 +45,11 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run mypy
 
-      - name: Tests (pytest, integration excluded)
+      # No `-m` here: pyproject.toml's addopts deselects the integration and e2e
+      # tiers, and a `-m` on this line would replace it (the last `-m` wins).
+      - name: Tests (pytest, integration and e2e excluded)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: uv run pytest -m "not integration" --cov=usvote
+        run: uv run pytest --cov=usvote
 
   # The live-Postgres integration tests run in a SEPARATE job so a service-
   # container/database hiccup is distinguishable from a lint/type/unit failure
