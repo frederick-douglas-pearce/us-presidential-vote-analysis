@@ -22,6 +22,7 @@ has quality gates (run via `uv`, enforced in CI):
 ```
 uv run pytest                    # unit suite (live-Postgres integration excluded)
 uv run pytest -m integration     # live-DB tests (needs USVOTE_TEST_DB_*)
+uv run pytest -m e2e             # dashboard browser tests (once: uv run playwright install chromium)
 uv run pytest --cov=usvote       # branch coverage report
 uv run ruff check                # lint: E,F,I,UP,B,SIM,C4 @ line-length 88
 uv run mypy                      # type check: src + tests
@@ -30,7 +31,9 @@ uv run mypy                      # type check: src + tests
 Test layout: unit tests are offline (no network/DB); the two live-Postgres tests
 carry `@pytest.mark.integration` (the marker, not the directory, is what selects
 them). `tests/unit/` and `tests/integration/` are the documented homes for new
-tests; `tests/fixtures/` holds saved Archives HTML replayed offline.
+tests, and `tests/e2e/` for the dashboard's browser tests, marked `e2e` and also
+deselected by default (D082; [`dashboard/CLAUDE.md`](dashboard/CLAUDE.md#tests));
+`tests/fixtures/` holds saved Archives HTML replayed offline.
 
 **UCSB fixtures (D014/D016/D022).** Every `ucsb_synthetic_*.html` fixture is hand-written: UCSB grants no reuse rights and this repo is public, so no UCSB bytes are committed (`test_no_fixture_ships_real_ucsb_bytes`). The Archives fixtures are real saved bytes. The real UCSB corpus lives outside the tree; `TestRealCorpus` in `tests/unit/test_ucsb_parse.py` (and the roster checks in `test_ucsb_transform.py`) run against it only when `USVOTE_UCSB_HTML_DIR` is set, so CI never touches UCSB. They are the only checks of the parser against real markup, so run them locally with that variable set.
 

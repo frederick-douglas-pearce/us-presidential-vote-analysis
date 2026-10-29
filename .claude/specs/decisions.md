@@ -5678,3 +5678,43 @@ breaks a `TestDashPrivates` pin.
 **Related:** D071, D073, #307, #312, #326.
 
 ---
+
+## D082: The dashboard's browser tests are a deselected `e2e` tier, run in CI only on changes that can alter what they check
+
+**Date:** 2026-10-28
+**Decided by:** the owner, at #321's plan gate (2026-10-28), on the architect's review;
+recorded by #321 (E9)
+
+**Context.** #306's manual check of the elections index, a throwaway Playwright script run
+at a phone's width, caught a real layout defect (slider labels running together), and #307's
+needed the same; each script was lost with its scratchpad. The unit suite drives the
+dashboard's callbacks in Python and never runs the browser's router, `dcc.Location`
+navigation or layout. #321 asked for the checks in the suite, and for a decision on whether
+CI runs them, since each run installs a browser.
+
+**Decision.**
+- **A third test tier, `e2e`,** beside the default offline tier and `integration`: tests
+  under `tests/e2e/`, each marked `e2e`, which `addopts` deselects. A bare `uv run pytest`
+  and `HERMETIC_TEST_CMD` select exactly what they did before. `playwright` and
+  `pytest-playwright` are in the `dev` group only, never `dashboard` or `serve`.
+- **They read recorded responses, never the live API.** `tests/e2e/serve.py` serves the app
+  with `api.CLIENT` replaced by a client over `tests/fixtures/dashboard/` (the seam
+  `test_dashboard_app.py` uses), and refuses any non-loopback name lookup or connection; the
+  browser refuses any request off the loopback host. The launcher lives under `tests/`, so the
+  deploy root's allow-list cannot ship it, and D070(b) is untouched.
+- **CI runs them in a workflow of their own, `e2e.yml`,** on pull requests and pushes to
+  `main` that touch `dashboard/`, the e2e tests or their fixtures, `tests/conftest.py`,
+  `pyproject.toml`, `uv.lock` or `.python-version`. CI's unit job passes no `-m` of its own,
+  so `addopts` is the one statement of what a default run selects.
+- **The check is advisory**, as every check in this repo: `main` has no branch protection
+  (#260).
+
+**Rationale.** The browser install, a minute or two, is paid only by changes that can alter
+what the suite checks; a suite left to be run by hand is what lost #306's script. Recorded
+responses make a run deterministic and offline, which is what lets it run in CI without the
+live API. A Playwright MCP server for exploratory checks was left out (#414 compares ways to
+load one only when needed).
+
+**Related:** D070, D071, #306, #307, #321, #414.
+
+---

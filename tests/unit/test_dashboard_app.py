@@ -41,6 +41,7 @@ from dash.development.base_component import Component
 
 from explore import api, components
 from explore import app as appmod
+from tests.dashboard_fixtures import RECORDED_FILES
 
 #: Written out rather than imported from ``explore.config``: a test that read the host
 #: from the module under test would move with it.
@@ -58,27 +59,7 @@ VERSION: str = META["provenance"]["snapshot_version"]
 #: serves a page's reads from.
 RECORDED: dict[str, dict[str, Any]] = {
     path: json.loads((FIXTURE.parent / name).read_text(encoding="utf-8"))
-    for path, name in {
-        "/v1/meta": "v1_meta.json",
-        "/v1/elections": "v1_elections.json",
-        **{
-            f"/v1/elections/{year}": f"v1_elections_{year}.json"
-            for year in (1824, 1860, 1868, 1872, 1896, 2016, 2024)
-        },
-        "/v1/states/GA": "v1_states_GA.json",
-        # The per-capita tables, T6 and T7 (#280).
-        **{
-            f"/v1/elections/{year}/per-capita": f"v1_elections_{year}_per_capita.json"
-            for year in (1824, 1848, 1860, 1864, 1868, 1872, 1896, 2016, 2024)
-        },
-        **{
-            f"/v1/states/{usps}/per-capita": f"v1_states_{usps}_per_capita.json"
-            for usps in ("GA", "TX")
-        },
-        # The candidate index (#330) and one candidate's history, T5 (#331).
-        "/v1/candidates": "v1_candidates.json",
-        "/v1/candidates/andrew-jackson": "v1_candidates_andrew-jackson.json",
-    }.items()
+    for path, name in RECORDED_FILES.items()
 }
 
 #: The concrete value each templated page is rendered at, one per path variable. Each

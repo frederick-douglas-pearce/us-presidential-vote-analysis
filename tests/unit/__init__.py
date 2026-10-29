@@ -3,7 +3,7 @@
 Home for the offline suite (and new unit tests as the package grows: the E4/E5
 ``usvote/ucsb`` and ``usvote/mit`` ports).
 
-Selection is by **marker**, not directory: the default ``-m 'not integration'``
+Selection is by **marker**, not directory: the default ``-m 'not integration and not e2e'``
 (see ``[tool.pytest.ini_options]``) is the single source of truth for what runs
 where. A test placed here must stay offline; one needing a live Postgres belongs
 in ``tests/integration/`` and must carry ``@pytest.mark.integration``.

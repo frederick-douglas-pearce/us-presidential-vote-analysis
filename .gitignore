@@ -19,6 +19,8 @@ coverage/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# pytest-playwright's traces and screenshots (tests/e2e/); it clears this at each run
+test-results/
 
 # Environment / secrets
 .env
