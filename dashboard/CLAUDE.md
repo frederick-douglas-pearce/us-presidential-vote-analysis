@@ -31,21 +31,27 @@ map is `tests/dashboard_fixtures.py`, stdlib-only so the e2e server can import i
 **Browser tests (#321, D082).** `tests/e2e/` drives the app in Chromium through Playwright,
 at a 390 × 844 viewport: the home page, and the elections index's filter-to-URL chain (one
 callback per change, no loop), back and forward, a pasted filtered URL, the column-name list
-and the year slider's labels not overlapping. They carry the `e2e` marker, which the default
+and the year slider's labels keeping a gap. They carry the `e2e` marker, which the default
 run deselects. Run them with `uv run playwright install chromium` once, then
 `uv run pytest -m e2e`. `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free
-loopback port, from `dashboard/`, and stops it at session end. The server imports the app,
+loopback port, from `dashboard/`, waits for its ready line naming that port, and stops it at
+session end. The server imports the app,
 replaces `api.CLIENT` with a client over the recorded responses (the seam
 `test_dashboard_app.py` uses; an unrecorded path is `ApiUnavailable`), and checks that warmup
-filled every prefetch path before it listens, since warmup answers 200 either way. No test
+filled the cache before it listens, since warmup answers 200 either way; its start-up checks
+are explicit, so `PYTHONOPTIMIZE` cannot strip them. No test
 reaches the network: the server's audit hook refuses every non-loopback lookup and connection
 and writes a sentinel the session fails on (`api.fetch`'s `except` would otherwise turn a
 refusal into the degraded page), and every test fails on a browser request off the loopback
-host or a console error. `tests/e2e/dashboard_pages.py` holds the ids and expected values in
-one place, the values computed from the recorded responses. A page a story changes keeps its
-e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
+host or a console error. Each test also checks the page is 390 px wide.
+`tests/e2e/dashboard_pages.py` holds the page ids, the field list and the expected values: the
+data ones computed from the recorded responses, the rest read from `explore`'s shipped
+constants. A page a story changes keeps its e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
 browser test sees only the degraded state. CI runs the suite in `e2e.yml` on changes under
-`dashboard/` and the other paths D082 lists; it is advisory.
+`dashboard/` and the other paths D082 lists; it is advisory. pytest-playwright deletes
+`./test-results/` (traces, kept by `--tracing retain-on-failure`) at the start of every pytest
+session, the default unit run included, so copy a local trace out before running pytest
+again; CI uploads them in the same job.
 
 ## Deployment
 

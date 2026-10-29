@@ -5,6 +5,8 @@ Every test here carries ``@pytest.mark.e2e``, which the default selection exclud
 ``uv run playwright install chromium``. ``conftest.py`` serves the dashboard from
 ``tests/fixtures/dashboard/`` through ``serve.py``, so no test reaches the network.
 
-Nothing in this package may do work at import: pytest imports ``conftest.py`` on every
-run, the default one included.
+pytest imports this package's modules on every run, the default one included, when it
+collects them. So nothing here may start a process or touch the network at import;
+reading the recorded responses, as ``dashboard_pages.py`` does, is the most an import
+does.
 """

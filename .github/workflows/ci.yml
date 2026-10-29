@@ -100,7 +100,7 @@ jobs:
 
       # Point the USVOTE_TEST_DB_* config (read in tests/conftest.py) at the
       # service container. `-m integration` overrides the ini's default
-      # `-m 'not integration'` (last -m wins), running ONLY these tests here.
+      # `-m 'not integration and not e2e'` (last -m wins), running ONLY these tests here.
       - name: Tests (pytest, integration only)
         env:
           USVOTE_TEST_DB_HOST: localhost

@@ -23,12 +23,10 @@ def test_home_renders_its_coverage_and_the_provenance_footer(page: Page) -> None
     page.goto("/")
     assert_rendered(page, HOME_SUCCESS)
     coverage = META["provenance"]["coverage"]
-    expect(page.locator(HOME_SUCCESS)).to_contain_text(
-        f"{coverage['year_min']}–{coverage['year_max']}"
-    )
-    expect(page.locator(HOME_SUCCESS)).to_contain_text(
-        f"{coverage['pv_year_min']}–{coverage['pv_year_max']}"
-    )
+    # The years only, not how the page joins them: pages/home.py's span format is not
+    # importable (Dash executes page modules) and is not a test's to copy.
+    for key in ("year_min", "year_max", "pv_year_min", "pv_year_max"):
+        expect(page.locator(HOME_SUCCESS)).to_contain_text(str(coverage[key]))
     expect(page.locator(f"{PROVENANCE} li")).to_have_count(len(components.SOURCES))
 
 

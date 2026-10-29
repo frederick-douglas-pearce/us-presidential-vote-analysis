@@ -1,10 +1,10 @@
 """The dashboard's recorded public API responses, by API path.
 
 Stdlib-only on purpose: the e2e server (``tests/e2e/serve.py``) imports it into the
-dashboard's own process, which must not import ``usvote`` (D070(b)), pandas or numpy,
-so it cannot live in ``tests/_helpers.py``. ``test_dashboard_app.py`` reads the same
-map. Every file under :data:`FIXTURE_DIR` has an entry, which the e2e server asserts at
-start-up.
+dashboard's own process, so it loads nothing there the deployed app lacks. That is why it
+is not in ``tests/_helpers.py``, which imports ``usvote`` and pandas.
+``test_dashboard_app.py`` reads the same map. Every ``*.json`` file directly in
+:data:`FIXTURE_DIR` has an entry, which the e2e server checks at start-up.
 """
 
 from __future__ import annotations

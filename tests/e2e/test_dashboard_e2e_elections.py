@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import re
+from collections import Counter
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ from explore import components, labels
 from tests.e2e.dashboard_pages import (
     ELECTIONS_ROWS,
     ELECTIONS_SUCCESS,
+    FIELDS,
     FILTER_OUTPUT,
     FIRST,
     GLOSSARY,
@@ -41,12 +43,13 @@ from tests.e2e.dashboard_pages import (
 
 pytestmark = pytest.mark.e2e
 
-#: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
-FIELDS = ("year", "candidate_count", "has_popular_vote")
-
 #: How long a filter change is given to fire anything further after it settled. The
 #: one deliberate wait in the suite: a loop is caught by counting, not by timing.
 SETTLE_MS = 1000
+
+#: The least horizontal space between two slider labels on one line: labels that touch
+#: read as one run-together number, the defect #306's check found.
+MIN_LABEL_GAP_PX = 4
 
 
 def url_pattern(query: str) -> re.Pattern[str]:
@@ -82,6 +85,8 @@ def test_the_column_name_list_names_each_column(page: Page) -> None:
     assert_rendered(page, ELECTIONS_SUCCESS)
     glossary = page.locator(GLOSSARY)
     glossary.locator("summary").click()
+    expect(glossary).to_have_attribute("open", "")
+    expect(glossary.locator("dt").first).to_be_visible()
     expect(glossary.locator("dt")).to_have_text([labels.LABELS[f] for f in FIELDS])
     expect(glossary.locator("dd")).to_have_text(list(FIELDS))
 
@@ -113,8 +118,8 @@ def test_one_filter_change_settles_without_a_callback_loop(page: Page) -> None:
     check_pv(page)
     assert_view(page, pv_only=True)
     page.wait_for_timeout(SETTLE_MS)
-    assert outputs.count(FILTER_OUTPUT) == 1, outputs
-    assert outputs.count(ROUTER_OUTPUT) == 1, outputs
+    # The whole list, so a loop on any output, not only these two, is caught.
+    assert Counter(outputs) == Counter([FILTER_OUTPUT, ROUTER_OUTPUT]), outputs
     assert page.evaluate("history.length") == before + 1
 
 
@@ -135,7 +140,7 @@ def test_a_pasted_filtered_url_opens_that_view(page: Page) -> None:
     assert_view(page, year_from=year_from, pv_only=True)
 
 
-def test_the_year_slider_labels_do_not_overlap(page: Page) -> None:
+def test_the_year_slider_labels_keep_apart(page: Page) -> None:
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     marks = page.locator(MARKS)
@@ -145,9 +150,9 @@ def test_the_year_slider_labels_do_not_overlap(page: Page) -> None:
     assert len(boxes) == marks.count()
     for a, b in itertools.combinations(boxes, 2):
         apart = (
-            a["x"] + a["width"] <= b["x"]
-            or b["x"] + b["width"] <= a["x"]
+            a["x"] + a["width"] + MIN_LABEL_GAP_PX <= b["x"]
+            or b["x"] + b["width"] + MIN_LABEL_GAP_PX <= a["x"]
             or a["y"] + a["height"] <= b["y"]
             or b["y"] + b["height"] <= a["y"]
         )
-        assert apart, f"slider labels overlap: {a} and {b}"
+        assert apart, f"slider labels closer than {MIN_LABEL_GAP_PX}px: {a} and {b}"

@@ -1,9 +1,10 @@
-"""What the browser tests locate and expect, in one place (#321).
+"""What the browser tests locate and expect (#321).
 
-Element ids a page module defines are written out here: Dash executes a page module
-itself, so a test cannot import one. Shared ids, labels and helpers are imported from
-``explore`` so a test follows the shipped value. Expected values come from the recorded
-responses, never literals.
+Element ids and the field list a page module defines are written out here: Dash
+executes a page module itself, so a test cannot import one. Shared ids, labels and
+helpers are imported from ``explore`` so a test follows the shipped value, and expected
+data values come from the recorded responses, never literals. It reads two recorded
+responses at import, as ``test_dashboard_app.py`` does.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ from playwright.sync_api import Locator, Page
 
 from explore import components, query
 from tests.dashboard_fixtures import FIXTURE_DIR, RECORDED_FILES
+
+#: The phone viewport #306's manual check ran at.
+VIEWPORT = {"width": 390, "height": 844}
 
 # Ids of the home page (pages/home.py).
 HOME_SUCCESS = "#coverage"
@@ -29,6 +33,8 @@ LOWER_THUMB = f"{YEARS} [role=slider].dash-slider-thumb-1"
 UPPER_THUMB = f"{YEARS} [role=slider].dash-slider-thumb-2"
 MARKS = f"{YEARS} .dash-slider-mark"
 GLOSSARY = f"{ELECTIONS_SUCCESS} details.glossary"
+#: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
+FIELDS = ("year", "candidate_count", "has_popular_vote")
 
 # Shared pieces (components.py).
 PROVENANCE = f"#{components.PROVENANCE_ID}"
@@ -86,7 +92,8 @@ def lower_thumb(page: Page) -> Locator:
 
 
 def assert_rendered(page: Page, success: str) -> None:
-    """The page rendered from data: its success marker is there, the degraded state
-    is not."""
+    """The page rendered from data at the phone's width: its success marker is there,
+    the degraded state is not."""
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
+    assert page.evaluate("innerWidth") == VIEWPORT["width"]

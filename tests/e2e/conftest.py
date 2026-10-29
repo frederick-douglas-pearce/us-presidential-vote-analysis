@@ -5,8 +5,8 @@ stops it at session end; ``base_url`` points Playwright's ``page.goto`` at it. E
 test also gets :func:`_browser_guard`, which fails it on a request off the loopback host
 or on a console error, at the 390 × 844 phone viewport #306 was checked at.
 
-pytest imports this module on every run, the default one included, so nothing here does
-work at import.
+pytest imports this module on every run, the default one included, so nothing here
+starts a process or touches the network at import.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -26,13 +24,11 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import BrowserContext, ConsoleMessage, Page, Route
 
-from tests.e2e.serve import NETWORK_SENTINEL
+from tests.e2e.dashboard_pages import VIEWPORT
+from tests.e2e.serve import NETWORK_SENTINEL, READY_LINE
 
 REPO = Path(__file__).resolve().parents[2]
 DASHBOARD = REPO / "dashboard"
-
-#: The phone viewport #306's manual check ran at.
-VIEWPORT = {"width": 390, "height": 844}
 
 #: The server imports Dash and fills its cache before it listens.
 START_TIMEOUT_S = 60.0
@@ -51,19 +47,17 @@ def _free_port() -> int:
         return port
 
 
-def _answers(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=1) as response:
-            return bool(response.status == 200)
-    except (urllib.error.URLError, OSError):
-        return False
-
-
 @pytest.fixture(scope="session")
 def dashboard_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """The dashboard served from recorded responses; yields its base URL."""
+    """The dashboard served from recorded responses; yields its base URL.
+
+    Ready means ``serve.py`` wrote :data:`READY_LINE` with this port: it writes that
+    only once its cache is filled and its socket is bound, so another process that took
+    the port in between fails the start (the child exits) instead of answering.
+    """
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
+    ready = f"{READY_LINE} {port}"
     stderr_path = tmp_path_factory.mktemp("e2e-server") / "stderr.log"
     env = {
         **os.environ,
@@ -79,15 +73,15 @@ def dashboard_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         )
         try:
             deadline = time.monotonic() + START_TIMEOUT_S
-            while not _answers(f"{base}/"):
+            while ready not in stderr_path.read_text(errors="replace"):
                 if proc.poll() is not None:
                     pytest.fail(
-                        f"the e2e server exited ({proc.returncode}) before answering:\n"
+                        f"the e2e server exited ({proc.returncode}) before it was ready:\n"
                         + stderr_path.read_text(errors="replace")
                     )
                 if time.monotonic() > deadline:
                     pytest.fail(
-                        f"the e2e server did not answer within {START_TIMEOUT_S}s:\n"
+                        f"the e2e server was not ready within {START_TIMEOUT_S}s:\n"
                         + stderr_path.read_text(errors="replace")
                     )
                 time.sleep(POLL_INTERVAL_S)

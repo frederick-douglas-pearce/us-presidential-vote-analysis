@@ -18,8 +18,11 @@ and connection. ``api.fetch``'s ``except Exception`` would turn such a refusal i
 degraded page, so the hook also writes :data:`NETWORK_SENTINEL` to stderr, which
 ``conftest.py`` fails the session on.
 
-Nothing here runs at import: ``conftest.py`` imports :data:`NETWORK_SENTINEL` and
-:data:`READY_LINE` from it.
+``conftest.py`` waits for :data:`READY_LINE` with this server's port, written only once
+the cache is filled and the socket is bound, so a session never starts against another
+process that took the port. A failed start-up check exits with its reason on stderr,
+which ``conftest.py`` prints. Nothing here runs at import: ``conftest.py`` imports the
+two markers from it.
 """
 
 from __future__ import annotations
@@ -54,13 +57,17 @@ def _host(address: Any) -> str | None:
 
 
 def _audit(event: str, args: tuple[Any, ...]) -> None:
-    if event in ("socket.getaddrinfo", "socket.gethostbyname"):
+    # Every socket audit event that names a remote host: forward and reverse lookups,
+    # then connections and datagrams.
+    if event in ("socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr"):
         host = args[0]
+    elif event == "socket.getnameinfo":
+        host = _host(args[0])
     elif event in ("socket.connect", "socket.sendto"):
         host = _host(args[1])
-        if host is None:
-            return
     else:
+        return
+    if host is None:
         return
     if isinstance(host, bytes):
         host = host.decode("ascii", "replace")
@@ -77,11 +84,12 @@ def _fixture_client() -> Any:
     from tests.dashboard_fixtures import FIXTURE_DIR, RECORDED_FILES
 
     on_disk = {path.name for path in FIXTURE_DIR.glob("*.json")}
-    assert set(RECORDED_FILES.values()) == on_disk, (
-        "tests/dashboard_fixtures.py and tests/fixtures/dashboard/ disagree: "
-        f"unmapped {sorted(on_disk - set(RECORDED_FILES.values()))}, "
-        f"missing {sorted(set(RECORDED_FILES.values()) - on_disk)}"
-    )
+    mapped = set(RECORDED_FILES.values())
+    if mapped != on_disk:
+        raise SystemExit(
+            "tests/dashboard_fixtures.py and tests/fixtures/dashboard/ disagree: "
+            f"unmapped {sorted(on_disk - mapped)}, missing {sorted(mapped - on_disk)}"
+        )
     bodies = {
         path: json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
         for path, name in RECORDED_FILES.items()
@@ -113,12 +121,13 @@ def main(port: int) -> None:
 
     api.CLIENT = _fixture_client()
 
-    # Warmup always answers 200, even when its refresh fails, so check the fill itself.
-    assert appmod.server.test_client().get("/_ah/warmup").status_code == 200
-    snapshot = api.CLIENT.snapshot
-    assert snapshot is not None, "warmup did not fill the cache from the fixtures"
-    missing = set(api.registered_prefetch_paths()) - set(snapshot.responses)
-    assert not missing, f"warmup left prefetch paths unfilled: {sorted(missing)}"
+    # Explicit checks, never ``assert``: PYTHONOPTIMIZE, inherited from the parent's
+    # environment, would strip them. Warmup always answers 200, even when its refresh
+    # fails, so the fill is checked itself: ``refresh`` swaps a snapshot in only once
+    # every prefetch path has filled.
+    status = appmod.server.test_client().get("/_ah/warmup").status_code
+    if status != 200 or api.CLIENT.snapshot is None:
+        raise SystemExit(f"warmup ({status}) did not fill the cache from the fixtures")
 
     server = make_server("127.0.0.1", port, appmod.server, threaded=True)
     sys.stderr.write(f"{READY_LINE} {port}\n")
