@@ -36,6 +36,11 @@ GLOSSARY = f"{ELECTIONS_SUCCESS} details.glossary"
 #: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
 
+# Ids of the one-election view (pages/election.py).
+ELECTION_SUCCESS = "#election"
+ELECTION_EARLIER = "#election-earlier"
+ELECTION_LATER = "#election-later"
+
 # Shared pieces (components.py).
 PROVENANCE = f"#{components.PROVENANCE_ID}"
 UNAVAILABLE = "#unavailable"
@@ -60,6 +65,24 @@ COVERAGE = ELECTIONS["meta"]["provenance"]["coverage"]
 FIRST: int = COVERAGE["year_min"]
 LAST: int = COVERAGE["year_max"]
 PV_FIRST: int = COVERAGE["pv_year_min"]
+
+
+def _recorded_year(year: int) -> bool:
+    """Whether both paths the one-election view fills for ``year`` are recorded."""
+    return all(
+        path in RECORDED_FILES
+        for path in (f"/v1/elections/{year}", f"/v1/elections/{year}/per-capita")
+    )
+
+
+_SERVED = [e["year"] for e in ELECTIONS["data"]]
+#: Two consecutive served years whose one-election views are both recorded, from the
+#: recorded index: where the browser test steps from one election to the next (#324).
+STEP_FROM, STEP_TO = next(
+    (a, b)
+    for a, b in zip(_SERVED, _SERVED[1:], strict=False)
+    if _recorded_year(a) and _recorded_year(b)
+)
 
 
 def years_shown(*, year_from: int = FIRST, pv_only: bool = False) -> list[int]:

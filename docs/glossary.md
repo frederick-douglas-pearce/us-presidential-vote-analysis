@@ -311,11 +311,18 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Election year
 - **Plain:** The year the presidential election was held.
 - **Precise:** `year`. The years served run from `meta.provenance.coverage.year_min` to
-  `year_max`, read from the response, never written as a literal.
+  `year_max`, read from the response, never written as a literal. On the one-election view, the
+  earlier and later links go to the nearest year before and after it that `/v1/elections` serves,
+  read from that index and never computed as four years before or after; a year with no served
+  year on one side has no link on that side. "Earlier" and "later" are about the years this
+  dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`); the label
   of the year control on `/candidate/<slug>`, and the lede sentence that offers it
-  (`FILTER_SENTENCE` in `pages/candidate.py`).
-- **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`.
+  (`FILTER_SENTENCE` in `pages/candidate.py`); the earlier and later links on `/election/<year>`
+  (`EARLIER_LINK` and `LATER_LINK` in `pages/election.py`) and their accessible name
+  (`ELECTION_NAV_LABEL` in `pages/election.py`).
+- **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`; the
+  earlier and later links: #324.
 - **Not:** *Census used*, which is also a year.
 - **Status:** settled
 
@@ -990,6 +997,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "not yet collected", "not yet researched" | Not in this dataset | `labels.NOT_IN_DATASET`, `labels.PARTY_NULL_NOTE` | Dataset-first, with no promise (research §2.3). |
 | "Nominating party" as a column header | Party | `LABELS["nominating_party"]` | Rule-2 rows had no national nomination. |
 | "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
+| "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `EARLIER_LINK`, `LATER_LINK` in `pages/election.py` | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
 
 ## Open decisions
 

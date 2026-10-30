@@ -156,6 +156,27 @@ NO_PV_SENTENCE = (
 #: The not-found state's sentence. The raw path value is never echoed.
 NOT_FOUND_SENTENCE = "This dataset has no presidential election for that year."
 
+#: The lede, then, on a successful render only, the sentence naming the filters it
+#: offers (#324, as the candidate history does since #331): the not-found and degraded
+#: states have no filters.
+LEDE = (
+    "Who led under the Electoral College, the popular vote and the hybrid; every "
+    "state's electoral votes for each candidate, with the popular vote where this "
+    "dataset has it; the national result; and how many people each state's electoral "
+    "votes stood for."
+)
+FILTER_SENTENCE = "Narrow the state results by state, candidate or status."
+
+#: The links to the nearest earlier and later year the index serves (#324), and the
+#: accessible name of the landmark holding them. "Earlier" and "later" are about the
+#: years this dataset serves, never a claim that no election fell between.
+NAV_ID = "election-nav"
+EARLIER_ID = "election-earlier"
+LATER_ID = "election-later"
+EARLIER_LINK = "Earlier: the {year} election"
+LATER_LINK = "Later: the {year} election"
+ELECTION_NAV_LABEL = "Earlier and later elections in this dataset"
+
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
     """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
@@ -208,6 +229,29 @@ def served_year(path_vars: dict[str, Any], body: Any) -> bool:
 
 
 VALIDATE: api.Validate = (api.ELECTIONS_PATH, served_year)
+
+
+class Neighbours(NamedTuple):
+    """The nearest year before and after one that the index serves; ``None`` where
+    there is none."""
+
+    earlier: int | None
+    later: int | None
+
+
+def neighbours(body: Any, year: int) -> Neighbours:
+    """The served years either side of ``year`` in a ``/v1/elections`` body (#324).
+
+    Pure and total: read from the index's rows (each checked by
+    :func:`explore.query.checked_year`, a malformed row skipped as :func:`served_year`
+    skips it), never computed from ``year``, so the ends and any gap in the served
+    years are right.
+    """
+    years = {y for y in map(_row_year, _year_rows(body)) if y is not None}
+    return Neighbours(
+        earlier=max((y for y in years if y < year), default=None),
+        later=min((y for y in years if y > year), default=None),
+    )
 
 
 def title(year: Any = None, **_vars: Any) -> str:
@@ -593,16 +637,35 @@ def _per_capita_section(
     ]
 
 
+def _nav(around: Neighbours) -> list[Any]:
+    """The links to the earlier and later served years, unfiltered (owner, #324's plan
+    gate); a side with no year has no link, and with neither there is no landmark."""
+    links = [
+        dcc.Link(text.format(year=year), href=f"/election/{year}", id=link_id)
+        for year, text, link_id in (
+            (around.earlier, EARLIER_LINK, EARLIER_ID),
+            (around.later, LATER_LINK, LATER_ID),
+        )
+        if year is not None
+    ]
+    if not links:
+        return []
+    # Dash takes ``aria-*`` as keyword arguments its stubs do not name.
+    aria: dict[str, Any] = {"aria-label": ELECTION_NAV_LABEL}
+    return [html.Nav(links, id=NAV_ID, **aria)]
+
+
 def render(
     body: dict[str, Any],
     index_row: dict[str, Any],
     pairs: list[tuple[str, str]],
     per_capita: dict[str, Any],
+    around: Neighbours,
 ) -> html.Div:
     """The page body for one ``/v1/elections/{year}`` response, the year's row of
     ``/v1/elections`` and its ``/per-capita`` response (all read through the same
-    view), and this page's filter pairs. The response's ``election`` key is required,
-    though its value may be null (:func:`_election`)."""
+    view), this page's filter pairs and the year's served neighbours. The response's
+    ``election`` key is required, though its value may be null (:func:`_election`)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     # The popular-vote window, checked once before any cell reads it, whatever the
@@ -652,6 +715,7 @@ def render(
     return html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
+            *_nav(around),
             *_panel(block, year, coverage),
             html.H2("Results by state"),
             _controls(rows, chosen),
@@ -706,6 +770,7 @@ def not_found() -> html.Div:
 
 def layout(year: Any = None, **params: Any) -> html.Div:
     heading = "Election"
+    lede = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated from the prefetched index before it is formatted (#312).
@@ -716,22 +781,14 @@ def layout(year: Any = None, **params: Any) -> html.Div:
                 per_capita = view.get(f"/v1/elections/{year}/per-capita")
                 index = view.get(api.ELECTIONS_PATH)
                 content = render(
-                    body, index_row(index, year), parse_filters(params), per_capita
+                    body,
+                    index_row(index, year),
+                    parse_filters(params),
+                    per_capita,
+                    neighbours(index, int(year)),
                 )
                 heading = f"The {year} election"
+                lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
-    return html.Div(
-        [
-            html.H1(heading),
-            html.P(
-                "Who led under the Electoral College, the popular vote and the "
-                "hybrid; every state's electoral votes for each candidate, with the "
-                "popular vote where this dataset has it; the national result; and how "
-                "many people each state's electoral votes stood for. Narrow the state "
-                "results by state, candidate or status.",
-                className="lede",
-            ),
-            content,
-        ]
-    )
+    return html.Div([html.H1(heading), html.P(lede, className="lede"), content])

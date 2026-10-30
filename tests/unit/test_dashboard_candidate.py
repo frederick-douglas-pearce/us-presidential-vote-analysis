@@ -470,6 +470,7 @@ def _election_tree(year: str = "1824", change: Any = None) -> tuple[Any, Any]:
         election["index_row"](INDEX, year),
         [],
         copy.deepcopy(RECORDED[f"/v1/elections/{year}/per-capita"]),
+        election["neighbours"](INDEX, int(year)),
     )
     return tree, election
 

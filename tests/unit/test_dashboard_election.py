@@ -80,7 +80,11 @@ def render(year: int, query: str = "", body: Any = None, per_capita: Any = None)
     body = year_body(year) if body is None else body
     per_capita = per_capita_body(year) if per_capita is None else per_capita
     return MOD["render"](
-        body, index_row(year), MOD["parse_filters"](parse(query)), per_capita
+        body,
+        index_row(year),
+        MOD["parse_filters"](parse(query)),
+        per_capita,
+        MOD["neighbours"](INDEX, year),
     )
 
 
@@ -722,6 +726,7 @@ class TestNullCells:
             {**index_row(1872), "has_popular_vote": True},
             [],
             per_capita_body(1872),
+            MOD["neighbours"](INDEX, 1872),
         )
         assert find(held, MOD["NO_PV_ID"]) is None
         grant = nation_rows(held)["Ulysses S. Grant"]
@@ -731,6 +736,7 @@ class TestNullCells:
             {**index_row(2016), "has_popular_vote": False},
             [],
             per_capita_body(2016),
+            MOD["neighbours"](INDEX, 2016),
         )
         assert find(missing, MOD["NO_PV_ID"]) is not None
         trump = nation_rows(missing)["Donald J. Trump"]
@@ -753,6 +759,7 @@ class TestNullCells:
             {**index_row(1872), "has_popular_vote": flag},
             [],
             per_capita_body(1872),
+            MOD["neighbours"](INDEX, 1872),
         )
         assert find(tree, MOD["NO_PV_ID"]) is not None
 
@@ -1334,6 +1341,137 @@ class TestRequestBudget:
             "/v1/elections/1872",
             "/v1/elections/1872/per-capita",
         ]
+
+
+# --- the earlier and later links (#324) ----------------------------------------------
+
+
+def nav_links(tree: Any) -> list[tuple[str, str, Any]]:
+    """The nav's links as ``(id, href, text)``; ``[]`` with no nav."""
+    nav = find(tree, MOD["NAV_ID"])
+    if nav is None:
+        return []
+    return [(link.id, link.href, link.children) for link in of_type(nav, "Link")]
+
+
+def routed_hrefs(response: Any) -> dict[str, str]:
+    """The nav's link hrefs in a routed render, by link id."""
+    nav = json_node(response.get_json(), MOD["NAV_ID"])
+    if nav is None:
+        return {}
+    return {
+        link["props"]["id"]: link["props"]["href"] for link in nav["props"]["children"]
+    }
+
+
+def lede(tree: Any) -> str:
+    (paragraph,) = [
+        p for p in of_type(tree, "P") if getattr(p, "className", None) == "lede"
+    ]
+    return str(paragraph.children)
+
+
+class TestNeighbourLinks:
+    def test_the_neighbours_are_the_index_s_nearest_years(self) -> None:
+        neighbours = MOD["neighbours"]
+        assert neighbours(INDEX, YEARS[0]) == (None, YEARS[1])
+        assert neighbours(INDEX, YEARS[-1]) == (YEARS[-2], None)
+        assert neighbours(INDEX, 1868) == (1864, 1872)
+
+    def test_a_gap_in_the_served_years_is_followed_not_computed(self) -> None:
+        """Never ``year ± 4``: with 1864 and 1872 unserved, 1868's neighbours are the
+        nearest years the index serves."""
+        gapped = copy.deepcopy(INDEX)
+        gapped["data"] = [r for r in gapped["data"] if r["year"] not in (1864, 1872)]
+        assert MOD["neighbours"](gapped, 1868) == (1860, 1876)
+
+    def test_a_malformed_row_is_skipped(self) -> None:
+        doctored = copy.deepcopy(INDEX)
+        doctored["data"] += [
+            *({**INDEX["data"][0], "year": y} for y in ("1866", True, 1867.5, 9999)),
+            {"year": None},
+            "1870",
+        ]
+        assert MOD["neighbours"](doctored, 1868) == (1864, 1872)
+
+    @pytest.mark.parametrize("body", [None, {}, {"data": "x"}, {"data": [1866]}])
+    def test_a_malformed_index_has_no_neighbours(self, body: Any) -> None:
+        assert MOD["neighbours"](body, 1868) == (None, None)
+
+    def test_a_middle_year_links_both_ways_unfiltered(self) -> None:
+        tree = render(1868, "state=GA&candidate=ulysses-s-grant")
+        assert nav_links(tree) == [
+            (MOD["EARLIER_ID"], "/election/1864", "Earlier: the 1864 election"),
+            (MOD["LATER_ID"], "/election/1872", "Later: the 1872 election"),
+        ]
+        nav = find(tree, MOD["NAV_ID"])
+        assert getattr(nav, "aria-label") == MOD["ELECTION_NAV_LABEL"]
+
+    def test_the_nav_comes_before_the_panel(self) -> None:
+        ids = [getattr(child, "id", None) for child in render(1868).children]
+        assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
+
+    def test_the_first_and_last_years_link_one_way(self) -> None:
+        assert [i for i, _, _ in nav_links(render(YEARS[0]))] == [MOD["LATER_ID"]]
+        assert [i for i, _, _ in nav_links(render(YEARS[-1]))] == [MOD["EARLIER_ID"]]
+
+    def test_with_no_neighbour_there_is_no_landmark(self) -> None:
+        tree = MOD["render"](
+            year_body(1872),
+            index_row(1872),
+            [],
+            per_capita_body(1872),
+            MOD["Neighbours"](None, None),
+        )
+        assert find(tree, MOD["NAV_ID"]) is None
+        assert tree.id == PAGE_ID
+
+    def test_the_layout_reads_the_neighbours_from_the_served_index(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gapped = copy.deepcopy(INDEX)
+        gapped["data"] = [r for r in gapped["data"] if r["year"] not in (1864, 1872)]
+        cached_client(monkeypatch)
+        api.CLIENT.snapshot.responses[api.ELECTIONS_PATH] = gapped  # type: ignore[union-attr]
+        assert routed_hrefs(route("/election/1868")) == {
+            MOD["EARLIER_ID"]: "/election/1860",
+            MOD["LATER_ID"]: "/election/1876",
+        }
+
+    def test_following_a_link_makes_only_the_target_year_s_fills(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC3 as amended at the plan gate: the target year's own fills on a miss (two
+        since #280), and none of the link's own."""
+        _, calls, _ = cached_client(monkeypatch)
+        response = route("/election/1868")
+        assert calls == ["/v1/elections/1868", "/v1/elections/1868/per-capita"]
+        calls.clear()
+        later = routed_hrefs(response)[MOD["LATER_ID"]]
+        assert PAGE_ID in routed_ids(route(later))
+        assert calls == ["/v1/elections/1872", "/v1/elections/1872/per-capita"]
+
+    def test_no_nav_and_no_filter_sentence_where_the_page_has_no_data(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        found = MOD["layout"](year="1872")
+        assert find(found, MOD["NAV_ID"]) is not None
+        assert lede(found) == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        not_found = MOD["layout"](year="1825")
+        assert find(not_found, MOD["NOT_FOUND_ID"]) is not None
+        assert find(not_found, MOD["NAV_ID"]) is None
+        assert lede(not_found) == MOD["LEDE"]
+
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        degraded = MOD["layout"](year="1872")
+        assert components.UNAVAILABLE_MESSAGE in texts(degraded)
+        assert find(degraded, MOD["NAV_ID"]) is None
+        assert lede(degraded) == MOD["LEDE"]
 
 
 # --- the title ------------------------------------------------------------------------
@@ -1960,8 +2098,16 @@ class TestPanel:
 
     def test_the_panel_comes_first_and_inside_the_success_marker(self) -> None:
         order = ids_in_order(render(2016))
-        # The success marker, then the page's own URL store, then the panel.
-        assert order[:3] == [PAGE_ID, MOD["URL_ID"], PANEL]
+        # The success marker, the page's own URL store, the earlier and later links
+        # (#324), then the panel, ahead of every table.
+        assert order[:5] == [
+            PAGE_ID,
+            MOD["URL_ID"],
+            MOD["NAV_ID"],
+            MOD["EARLIER_ID"],
+            MOD["LATER_ID"],
+        ]
+        assert order[5] == PANEL
         assert (
             order.index(PANEL)
             < order.index(STATES)
@@ -2479,6 +2625,7 @@ class TestT3Hybrid:
             {**index_row(2016), "has_popular_vote": False},
             [],
             per_capita_body(2016),
+            MOD["neighbours"](INDEX, 2016),
         )
         assert nation_rows(missing)["Donald J. Trump"]["hybrid_score"] == NOT_APPLICABLE
         held = MOD["render"](
@@ -2486,6 +2633,7 @@ class TestT3Hybrid:
             {**index_row(1872), "has_popular_vote": True},
             [],
             per_capita_body(1872),
+            MOD["neighbours"](INDEX, 1872),
         )
         grant = nation_rows(held)["Ulysses S. Grant"]
         assert grant["hybrid_score"] == labels.NO_NATIONAL_FIGURE
