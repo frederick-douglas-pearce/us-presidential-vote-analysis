@@ -1379,20 +1379,34 @@ class TestNeighbourLinks:
         assert neighbours(INDEX, 1868) == (1864, 1872)
 
     def test_a_gap_in_the_served_years_is_followed_not_computed(self) -> None:
-        """Never ``year ± 4``: with 1864 and 1872 unserved, 1868's neighbours are the
-        nearest years the index serves."""
+        """With 1864 and 1872 unserved, 1868's neighbours are the nearest years the
+        index serves."""
         gapped = copy.deepcopy(INDEX)
         gapped["data"] = [r for r in gapped["data"] if r["year"] not in (1864, 1872)]
         assert MOD["neighbours"](gapped, 1868) == (1860, 1876)
 
+    def test_a_served_year_off_the_four_year_grid_is_a_neighbour(self) -> None:
+        """Never computed from the year: no step of four, however repeated, reaches
+        1866 or 1870 from 1868, so only reading the rows finds them."""
+        off_grid = copy.deepcopy(INDEX)
+        off_grid["data"] += [{**INDEX["data"][0], "year": y} for y in (1866, 1870)]
+        assert MOD["neighbours"](off_grid, 1868) == (1866, 1870)
+
     def test_a_malformed_row_is_skipped(self) -> None:
+        """Each malformed year sits where it would be a neighbour if it were read."""
         doctored = copy.deepcopy(INDEX)
         doctored["data"] += [
-            *({**INDEX["data"][0], "year": y} for y in ("1866", True, 1867.5, 9999)),
+            *({**INDEX["data"][0], "year": y} for y in ("1866", 1867.5, 1869.0)),
             {"year": None},
             "1870",
         ]
         assert MOD["neighbours"](doctored, 1868) == (1864, 1872)
+        # A bool is not a year, though it is an int: True would be 1, below 2.
+        assert MOD["neighbours"]({"data": [{"year": True}]}, 2) == (None, None)
+        # Out of range: 10000 would be the last year's later neighbour.
+        beyond = copy.deepcopy(INDEX)
+        beyond["data"].append({**INDEX["data"][0], "year": 10000})
+        assert MOD["neighbours"](beyond, YEARS[-1]).later is None
 
     @pytest.mark.parametrize("body", [None, {}, {"data": "x"}, {"data": [1866]}])
     def test_a_malformed_index_has_no_neighbours(self, body: Any) -> None:
@@ -1406,6 +1420,8 @@ class TestNeighbourLinks:
         ]
         nav = find(tree, MOD["NAV_ID"])
         assert getattr(nav, "aria-label") == MOD["ELECTION_NAV_LABEL"]
+        # A client-side navigation, never a full page load.
+        assert not any(getattr(link, "refresh", False) for link in of_type(nav, "Link"))
 
     def test_the_nav_comes_before_the_panel(self) -> None:
         ids = [getattr(child, "id", None) for child in render(1868).children]
@@ -1431,10 +1447,11 @@ class TestNeighbourLinks:
     ) -> None:
         gapped = copy.deepcopy(INDEX)
         gapped["data"] = [r for r in gapped["data"] if r["year"] not in (1864, 1872)]
+        gapped["data"].append({**INDEX["data"][0], "year": 1866})
         cached_client(monkeypatch)
         api.CLIENT.snapshot.responses[api.ELECTIONS_PATH] = gapped  # type: ignore[union-attr]
         assert routed_hrefs(route("/election/1868")) == {
-            MOD["EARLIER_ID"]: "/election/1860",
+            MOD["EARLIER_ID"]: "/election/1866",
             MOD["LATER_ID"]: "/election/1876",
         }
 
@@ -1468,6 +1485,34 @@ class TestNeighbourLinks:
                 raise api.ApiUnavailable("down")
 
         monkeypatch.setattr(api, "CLIENT", Down())
+        degraded = MOD["layout"](year="1872")
+        assert components.UNAVAILABLE_MESSAGE in texts(degraded)
+        assert find(degraded, MOD["NAV_ID"]) is None
+        assert lede(degraded) == MOD["LEDE"]
+
+    @pytest.mark.parametrize("failure", ["unavailable", "malformed"])
+    def test_with_the_index_read_a_failed_render_shows_neither(
+        self, monkeypatch: pytest.MonkeyPatch, failure: str
+    ) -> None:
+        """The degraded state after the index was read and validated the year: a fill
+        fails, or the body makes the render refuse it. The links and the filter
+        sentence come only after the render, never between the index and the fills."""
+        target = "/v1/elections/1872/per-capita"
+        recorded, _ = fake_fetch(RECORDED)
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path == target:
+                if failure == "unavailable":
+                    raise api.ApiUnavailable(f"GET {path}: HTTP 503")
+                body = {**per_capita_body(1872), "data": []}
+                return api.Response(body=body, version=VERSION)
+            response: api.Response = recorded(path, timeout)
+            return response
+
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
         degraded = MOD["layout"](year="1872")
         assert components.UNAVAILABLE_MESSAGE in texts(degraded)
         assert find(degraded, MOD["NAV_ID"]) is None
@@ -2096,7 +2141,7 @@ class TestPanel:
         cells = panel_of(year, lambda b: b["election"].update({field: None}))
         assert cells[field] == labels.NOT_IN_DATASET
 
-    def test_the_panel_comes_first_and_inside_the_success_marker(self) -> None:
+    def test_the_panel_follows_the_links_inside_the_success_marker(self) -> None:
         order = ids_in_order(render(2016))
         # The success marker, the page's own URL store, the earlier and later links
         # (#324), then the panel, ahead of every table.

@@ -75,14 +75,19 @@ def _recorded_year(year: int) -> bool:
     )
 
 
-_SERVED = [e["year"] for e in ELECTIONS["data"]]
-#: Two consecutive served years whose one-election views are both recorded, from the
-#: recorded index: where the browser test steps from one election to the next (#324).
-STEP_FROM, STEP_TO = next(
-    (a, b)
-    for a, b in zip(_SERVED, _SERVED[1:], strict=False)
-    if _recorded_year(a) and _recorded_year(b)
-)
+def step_years() -> tuple[int, int]:
+    """Two consecutive served years whose one-election views are both recorded, from
+    the recorded index, oldest first: where the browser test steps from one election
+    to the next (#324). Called by that test, so a corpus with no such pair fails it,
+    by name, rather than every module importing this one."""
+    served = sorted(e["year"] for e in ELECTIONS["data"])
+    for earlier, later in zip(served, served[1:], strict=False):
+        if _recorded_year(earlier) and _recorded_year(later):
+            return earlier, later
+    raise AssertionError(
+        "no two consecutive served years both have recorded /v1/elections/{year} "
+        "and /per-capita responses"
+    )
 
 
 def years_shown(*, year_from: int = FIRST, pv_only: bool = False) -> list[int]:
