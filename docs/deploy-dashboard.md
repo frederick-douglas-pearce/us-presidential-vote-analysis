@@ -563,8 +563,9 @@ Then check, before measuring:
    navigation must be the first request.
 3. **Immediately before each run**, the year or state you are about to measure was not
    filled since the restart (visitors and crawlers can reach it): the same query with
-   `textPayload:"api fetch /v1/elections/<year>"` (a state: `/v1/states/<USPS>`) returns
-   nothing. With no restart in this shell, set both variables first:
+   `textPayload:"api fetch /v1/elections/<year>"` (a state: `/v1/states/<USPS>`; a state run
+   meant to make three fills, also `/v1/elections/<year_max>`, the roster) returns nothing.
+   With no restart in this shell, set both variables first:
    `PROJECT=uspv-explore RESTART_TS=$(gcloud app instances list --project=uspv-explore --service=default --format='value(instance.startTime)')`.
 
 Drilled 2026-10-10 UTC (#310): the delete completed at 04:49:37Z, the new instance started
@@ -748,12 +749,13 @@ minutes apart:
 
 What the first reader of a shared `/state/<usps>` link waits for, at D072's prefetch extent.
 The page fills three paths on a miss, in order: the roster (`/v1/elections/{year_max}`, the
-`validate` source the code is judged against), then `/v1/states/{usps}` and
+`validate` source the state's code is judged against), then `/v1/states/{usps}` and
 `/v1/states/{usps}/per-capita`, under the same render deadline and fill cap as a year page.
-The roster is the latest year's own path, shared by every state page and by
-`/election/<year_max>`, so **only the first of those pages after the cache empties makes
-three fills**; every later state link makes two. A three-fill run therefore needs its own
-[restart](#restarting-the-instance-to-empty-its-cache).
+The roster is the latest year's own path, shared by every state page, by the state picker
+`/states` and by `/election/<year_max>`, so **a state page makes three fills only when it is
+the first of those pages after the cache empties**; every later state link makes two. A
+three-fill run therefore needs its own [restart](#restarting-the-instance-to-empty-its-cache),
+and check 3 on the roster as well as the state.
 
 The method is [cold year links](#cold-year-links-310)' with state paths in place of year
 paths: check 3 on `api fetch /v1/states/<USPS>`, the edge-cold pre-check on
@@ -763,7 +765,8 @@ paths: check 3 on `api fetch /v1/states/<USPS>`, the edge-cold pre-check on
 `37af4064…`, API revision `usvote-api-00010-h7p`. No `/v1/states/` path had reached the
 origin since that revision's deploy (2026-10-21), so every state passed the edge-cold
 pre-check; the roster had (2026-10-22, from the dashboard). Four restarts (R1–R4): each new
-instance was serving its snapshot about 2 s after the delete, after a warmup of 1.30–3.12 s.
+instance was serving its snapshot 2.8–5.6 s after the delete command was issued (the command
+itself took 2–3 s to return), after a warmup of 1.30–3.12 s.
 The origin was warm from the last keep-warm ping (03:05:51Z) and the runs' own requests: each
 restart began the refresher's wait again, so no ping was logged during the runs, and the API
 logged no `Starting new instance`.
@@ -777,23 +780,29 @@ logged no `Starting new instance`.
 | R2 | ID | 03:11:21 | three, state paths edge cold | 0.22 | 1.93 | data | roster from the edge; both state paths at the origin, 6–10 ms |
 | R3 | ND | 03:12:45 | three, state paths edge cold | 0.15 | 2.14 | data | roster from the edge; both state paths at the origin, 8–11 ms |
 | R4 | NE | 03:14:10 | three, edge warm | 0.14 | 1.60 | data | no origin request |
-| R4 | NM | 03:14:46 | two, edge warm | 0.15 | 1.75 | data | `/v1/states/NM` at the origin (9 ms), five minutes after R1 filled it; per-capita from the edge |
+| R4 | NM | 03:14:46 | two: state path missed the edge, per-capita edge warm | 0.15 | 1.75 | data | `/v1/states/NM` at the origin (9 ms), five minutes after R1 filled it; per-capita from the edge |
 | R4 | OR | 03:15:24 | two, edge warm | 0.22 | 1.66 | data | no origin request |
 
 - **Every state link met D071(g)**, with three fills or two, from the edge or past it to a
-  warm origin: first data in 1.60–2.14 s. The three-fill runs with edge-cold state paths took
-  1.93–2.14 s, against 1.75–1.93 s for two. **Nothing changes:** the warm extent stays
-  D072's, and #343 stays deferred (D080).
-- **Not measured, on purpose: edge and origin cold** (owner, 2026-10-31). Forcing it takes the
-  public dashboard down for at least 15 minutes (§10). #310's three origin-cold year runs each
-  degraded on their first fill to reach the cold origin (1.8–2.6 s there, against the 1.5 s
-  `VISITOR_FETCH_TIMEOUT_S`), and a state link's first such fill meets the same cap, so it
-  would be expected to degrade the same way: the cost D072 accepts, which D076's ping keeps
-  rare (D080).
+  warm origin: first data in 1.60–2.14 s. The three-fill runs with edge-cold state
+  paths (R1–R3) took 1.93–2.14 s, against 1.75–1.93 s for the two-fill runs with both
+  state paths edge cold (R1). **Nothing changes:** the warm extent stays D072's, and #343
+  stays deferred (D080).
+- **Not measured, on purpose: edge and origin cold** (owner, 2026-10-31). Forcing it
+  pauses the public dashboard (§10) for at least the 15 minutes the origin takes to go
+  idle ([API origin cold](#12-measuring-cold-start-and-load)). #310's three origin-cold
+  year runs each degraded on their first fill to reach the cold origin (1.8–2.6 s there,
+  against the 1.5 s `VISITOR_FETCH_TIMEOUT_S`), and a state link's first such fill meets the
+  same cap, so it would be expected to degrade the same way: the cost D072 accepts, which
+  D076's ping keeps rare (D080).
 - **Not measured, on purpose: all three fills missing the edge** (the roster too, as after an
-  API deploy's purge). Inferred instead: here two edge misses cost 0.3–0.5 s against the
-  edge-warm three-fill run (NE in R4, 1.60 s, against 1.93–2.14 s), so a third would add
-  roughly 0.15–0.25 s, about 2.4 s at the slowest, still under 3 s.
+  API deploy's purge). Expected to meet the target, inferred rather than measured: #310 put a
+  fill that misses the edge, against a warm origin, at about 0.1–0.2 s, so the roster missing
+  too adds about that to runs that took 1.93–2.14 s here. The limit that decides degraded or
+  not is the server's 2.0 s `MAX_REQUEST_WAIT_S` over all three fills, not the browser's 3 s,
+  and three such fills sum to well under it. These runs cannot size one miss more finely:
+  their timings vary by more than that across states and restarts (NM took 1.75 s with two
+  misses in R1 and with one in R4).
 - **An entry at the edge can be gone minutes later.** NM's state path missed the edge in R4,
   five minutes after R1 filled it, while its per-capita path hit. Eviction or another data
   center; which is not established. As for years, classify each run from the origin log,

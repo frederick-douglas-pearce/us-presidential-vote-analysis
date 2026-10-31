@@ -836,7 +836,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or
   "State history" (a literal in `layout` there) until a name is read; in `pages/state.py`, the
   page's title (`title`, which names at most the code, never the name), its link-preview
-  `description` and its download name; and the home page's lede (`pages/home.py`).
+  `description` and T4's download name (`"this state's history"`); and the home page's lede
+  (`pages/home.py`).
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —
