@@ -34,9 +34,9 @@ callback per change, no loop), back and forward, a pasted filtered URL, the colu
 and the year slider's labels keeping a gap; and the one-election view's later link, from a
 filtered view to the next year unfiltered as a client-side navigation, and back (#324). They
 carry the `e2e` marker, which the default run deselects. Run them with
-`uv run playwright install chromium` once, then `uv run pytest -m e2e`. `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free
-loopback port, from `dashboard/`, waits for its ready line naming that port, and stops it at
-session end. The server imports the app,
+`uv run playwright install chromium` once, then `uv run pytest -m e2e`.
+`tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free loopback port, from
+`dashboard/`, waits for its ready line naming that port, and stops it at session end. The server imports the app,
 replaces `api.CLIENT` with a client over the recorded responses (the seam
 `test_dashboard_app.py` uses; an unrecorded path is `ApiUnavailable`), and checks that warmup
 filled the cache before it listens, since warmup answers 200 either way; its start-up checks
