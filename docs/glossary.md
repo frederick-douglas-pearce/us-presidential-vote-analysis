@@ -168,8 +168,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `candidate_slug`, `candidate` and the election years they appear in (*Election years a
   candidate appears in*).
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` (named by the
-  lede's `FILTER_SENTENCE` in `pages/election.py`) and `/state/<usps>`; the name, as served, as the link to the candidate history page
-  `/candidate/<slug>` in T2, T3 and T4, and as that page's heading (`pages/candidate.py`), or
+  lede's `FILTER_SENTENCE` in `pages/election.py`) and `/state/<usps>`; the name, as served, as
+  the link to the candidate history page `/candidate/<slug>` in T2, T3 and T4, and as that page's
+  heading (`pages/candidate.py`), or
   `HEADING` there until a name is read, which is also the page's title (`title`); and in
   `pages/candidate.py`, the page's link-preview `description` and its download name; on the
   API's `/docs` page, the `CandidateListItem.candidate` and `CandidateListItem.candidate_slug`
