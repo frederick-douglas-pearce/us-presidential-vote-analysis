@@ -826,14 +826,19 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### State
 - **Plain:** One of the 50 states, or the District of Columbia.
 - **Precise:** The full state name, the canonical display key; `state_usps` is the two-letter
-  code used in URLs and filters.
+  code used in URLs and filters. The state history page, `/state/<usps>`, lists one state's rows
+  in every election this dataset holds for it (T4) and its people per electoral vote in each
+  (T7); an election outside the years this dataset covers (*Years covered*) is not on it.
 - **Shown as:** `LABELS["state"]`; the state filter on `/election/<year>`, named by the lede's
   `FILTER_SENTENCE` in `pages/election.py`, and on `/candidate/<slug>`, with `STATE_PLACEHOLDER`
   and named by the lede's `FILTER_SENTENCE` or `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`;
-  `/states`; the name, as served, as the link to `/state/<usps>` in T2, T5 and T6
-  (`components.state_cell`).
+  `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
+  and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or
+  "State history" (a literal in `layout` there) until a name is read; in `pages/state.py`, the
+  page's title (`title`, which names at most the code, never the name), its link-preview
+  `description` and its download name; and the home page's lede (`pages/home.py`).
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
-  two-tier".
+  two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —
 - **Status:** settled
 
