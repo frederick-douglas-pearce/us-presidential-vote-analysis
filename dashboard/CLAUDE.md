@@ -36,8 +36,8 @@ filtered view to the next year unfiltered as a client-side navigation, and back 
 carry the `e2e` marker, which the default run deselects. Run them with
 `uv run playwright install chromium` once, then `uv run pytest -m e2e`.
 `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free loopback port, from
-`dashboard/`, waits for its ready line naming that port, and stops it at session end. The server imports the app,
-replaces `api.CLIENT` with a client over the recorded responses (the seam
+`dashboard/`, waits for its ready line naming that port, and stops it at session end. The
+server imports the app, replaces `api.CLIENT` with a client over the recorded responses (the seam
 `test_dashboard_app.py` uses; an unrecorded path is `ApiUnavailable`), and checks that warmup
 filled the cache before it listens, since warmup answers 200 either way; its start-up checks
 are explicit, so `PYTHONOPTIMIZE` cannot strip them. No test
