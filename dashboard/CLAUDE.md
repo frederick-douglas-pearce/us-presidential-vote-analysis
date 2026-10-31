@@ -33,8 +33,8 @@ at a 390 × 844 viewport: the home page, and the elections index's filter-to-URL
 callback per change, no loop), back and forward, a pasted filtered URL, the column-name list
 and the year slider's labels keeping a gap; and the one-election view's later link, from a
 filtered view to the next year unfiltered as a client-side navigation, and back (#324). They
-carry the `e2e` marker, which the default run deselects. Run them with `uv run playwright install chromium` once, then
-`uv run pytest -m e2e`. `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free
+carry the `e2e` marker, which the default run deselects. Run them with
+`uv run playwright install chromium` once, then `uv run pytest -m e2e`. `tests/e2e/conftest.py` starts `tests/e2e/serve.py` on a free
 loopback port, from `dashboard/`, waits for its ready line naming that port, and stops it at
 session end. The server imports the app,
 replaces `api.CLIENT` with a client over the recorded responses (the seam

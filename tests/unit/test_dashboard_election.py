@@ -1401,12 +1401,15 @@ class TestNeighbourLinks:
             "1870",
         ]
         assert MOD["neighbours"](doctored, 1868) == (1864, 1872)
-        # A bool is not a year, though it is an int: True would be 1, below 2.
+        # A bool is not a year, though it is an int (query.YEAR_MIN already excludes
+        # True, which is 1, so this pins the bound as much as the type).
         assert MOD["neighbours"]({"data": [{"year": True}]}, 2) == (None, None)
-        # Out of range: 10000 would be the last year's later neighbour.
-        beyond = copy.deepcopy(INDEX)
-        beyond["data"].append({**INDEX["data"][0], "year": 10000})
-        assert MOD["neighbours"](beyond, YEARS[-1]).later is None
+        # Out of range: 999 would be the first year's earlier neighbour, and 10000 the
+        # last year's later one.
+        outside = copy.deepcopy(INDEX)
+        outside["data"] += [{**INDEX["data"][0], "year": y} for y in (999, 10000)]
+        assert MOD["neighbours"](outside, YEARS[0]).earlier is None
+        assert MOD["neighbours"](outside, YEARS[-1]).later is None
 
     @pytest.mark.parametrize("body", [None, {}, {"data": "x"}, {"data": [1866]}])
     def test_a_malformed_index_has_no_neighbours(self, body: Any) -> None:
