@@ -36,6 +36,11 @@ GLOSSARY = f"{ELECTIONS_SUCCESS} details.glossary"
 #: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
 
+# Ids of the one-election view (pages/election.py).
+ELECTION_SUCCESS = "#election"
+ELECTION_EARLIER = "#election-earlier"
+ELECTION_LATER = "#election-later"
+
 # Shared pieces (components.py).
 PROVENANCE = f"#{components.PROVENANCE_ID}"
 UNAVAILABLE = "#unavailable"
@@ -60,6 +65,29 @@ COVERAGE = ELECTIONS["meta"]["provenance"]["coverage"]
 FIRST: int = COVERAGE["year_min"]
 LAST: int = COVERAGE["year_max"]
 PV_FIRST: int = COVERAGE["pv_year_min"]
+
+
+def _recorded_year(year: int) -> bool:
+    """Whether both paths the one-election view fills for ``year`` are recorded."""
+    return all(
+        path in RECORDED_FILES
+        for path in (f"/v1/elections/{year}", f"/v1/elections/{year}/per-capita")
+    )
+
+
+def step_years() -> tuple[int, int]:
+    """Two consecutive served years whose one-election views are both recorded, from
+    the recorded index, oldest first: where the browser test steps from one election
+    to the next (#324). Called by that test, so a corpus with no such pair fails it,
+    by name, rather than every module importing this one."""
+    served = sorted(e["year"] for e in ELECTIONS["data"])
+    for earlier, later in zip(served, served[1:], strict=False):
+        if _recorded_year(earlier) and _recorded_year(later):
+            return earlier, later
+    raise AssertionError(
+        "no two consecutive served years both have recorded /v1/elections/{year} "
+        "and /per-capita responses"
+    )
 
 
 def years_shown(*, year_from: int = FIRST, pv_only: bool = False) -> list[int]:
