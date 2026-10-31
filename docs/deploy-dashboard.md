@@ -798,7 +798,8 @@ logged no `Starting new instance`.
 - **Not measured, on purpose: all three fills missing the edge** (the roster too, as after an
   API deploy's purge). Expected to meet the target, inferred rather than measured: #310 put a
   fill that misses the edge, against a warm origin, at about 0.1–0.2 s, so the roster missing
-  too adds about that to runs that took 1.93–2.14 s here. The limit that decides degraded or
+  too adds at most about that (the roster was already one of the fills here, from the edge) to
+  runs that took 1.93–2.14 s here. The limit that decides degraded or
   not is the server's 2.0 s `MAX_REQUEST_WAIT_S` over all three fills, not the browser's 3 s,
   and three such fills sum to well under it. These runs cannot size one miss more finely:
   their timings vary by more than that across states and restarts (NM took 1.75 s with two
