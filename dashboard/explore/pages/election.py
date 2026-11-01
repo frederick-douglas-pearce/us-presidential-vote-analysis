@@ -153,8 +153,13 @@ NO_PV_SENTENCE = (
     "cover {first}–{last}."
 )
 
-#: The not-found state's sentence. The raw path value is never echoed.
+#: The not-found state's heading and sentence (#325). The heading also leads the
+#: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about
+#: the link: a real election outside the dataset (1820) is not found too. The raw path
+#: value is never echoed.
+NOT_FOUND_HEADING = "Election not found"
 NOT_FOUND_SENTENCE = "This dataset has no presidential election for that year."
+NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
 
 #: The lede, then, on a successful render only, the sentence naming the filters it
 #: offers (#324, as the candidate history does since #331): the not-found and degraded
@@ -255,9 +260,9 @@ def neighbours(body: Any, year: int) -> Neighbours:
 
 
 def title(year: Any = None, **_vars: Any) -> str:
-    """The page title. Called by Dash at index time with the **unvalidated** path
-    variable, so it is total and reads no API; it names the year only when the year
-    is four ASCII digits."""
+    """The page title. app.py calls it only with a year the page's ``validate``
+    accepted, or with none while that is unchecked (#325, D083); it is total anyway,
+    reads no API, and names the year only when the year is four ASCII digits."""
     if isinstance(year, str) and query.YEAR_RE.fullmatch(year):
         return f"The {year} election — {SITE_TITLE}"
     return f"Election — {SITE_TITLE}"
@@ -273,6 +278,7 @@ dash.register_page(
     on_miss=("/v1/elections/{year}", "/v1/elections/{year}/per-capita"),
     success=PAGE_ID,
     validate=VALIDATE,
+    not_found=NOT_FOUND,
     query=parse_filters,
 )
 
@@ -758,7 +764,8 @@ def index_row(index: dict[str, Any], year: str) -> dict[str, Any]:
 
 
 def not_found() -> html.Div:
-    """A year the dataset does not serve: said plainly, with the way back."""
+    """A year the dataset does not serve: said plainly, with the way back, under
+    :data:`NOT_FOUND_HEADING` and no lede (#325)."""
     return html.Div(
         [
             html.P(NOT_FOUND_SENTENCE),
@@ -770,12 +777,12 @@ def not_found() -> html.Div:
 
 def layout(year: Any = None, **params: Any) -> html.Div:
     heading = "Election"
-    lede = LEDE
+    lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated from the prefetched index before it is formatted (#312).
             if not api.accepted(view.get, VALIDATE, {"year": year}):
-                content = not_found()
+                heading, lede, content = NOT_FOUND_HEADING, None, not_found()
             else:
                 body = view.get(f"/v1/elections/{year}")
                 per_capita = view.get(f"/v1/elections/{year}/per-capita")
@@ -791,4 +798,5 @@ def layout(year: Any = None, **params: Any) -> html.Div:
                 lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
-    return html.Div([html.H1(heading), html.P(lede, className="lede"), content])
+    lead = [] if lede is None else [html.P(lede, className="lede")]
+    return html.Div([html.H1(heading), *lead, content])

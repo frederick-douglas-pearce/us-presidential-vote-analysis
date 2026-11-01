@@ -74,6 +74,11 @@ HEADING = "Candidate history"
 #: The not-found state's sentence. True for a listed slug in another letter case too, so
 #: it never says the dataset lacks the candidate; the raw path value is never echoed.
 NOT_FOUND_SENTENCE = "This link does not match any candidate in this dataset."
+#: The not-found state's heading (#325), true for that letter case too: "not found" is
+#: about the link. It also leads the page's title on a not-found link
+#: (``api.NotFound.title``, D083).
+NOT_FOUND_HEADING = "Candidate not found"
+NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
 NOT_FOUND_LINK = "Browse every election to find a candidate"
 #: The lede, then, on a successful render only, the sentence naming the filters it
 #: shows.
@@ -153,9 +158,9 @@ VALIDATE: api.Validate = (api.CANDIDATES_PATH, on_index)
 
 
 def title(**_vars: Any) -> str:
-    """The page title. Called by Dash at index time with the **unvalidated** path
-    variable, so it is total and reads no API; no name can be told from a slug, so it
-    names no candidate."""
+    """The page title. app.py calls it only with a slug the page's ``validate``
+    accepted, or with none while that is unchecked (#325, D083); it is total anyway and
+    reads no API. No name can be told from a slug, so it names no candidate."""
     return f"{HEADING} — {SITE_TITLE}"
 
 
@@ -172,6 +177,7 @@ dash.register_page(
     on_miss=(api.CANDIDATES_PATH, "/v1/candidates/{slug}"),
     success=PAGE_ID,
     validate=VALIDATE,
+    not_found=NOT_FOUND,
     query=parse_filters,
 )
 
@@ -410,7 +416,8 @@ def render(
 
 
 def not_found() -> html.Div:
-    """A slug the index does not list: said plainly, with the way back."""
+    """A slug the index does not list: said plainly, with the way back, under
+    :data:`NOT_FOUND_HEADING` and no lede (#325)."""
     return html.Div(
         [
             html.P(NOT_FOUND_SENTENCE),
@@ -423,13 +430,13 @@ def not_found() -> html.Div:
 def layout(slug: Any = None, **params: Any) -> html.Div:
     heading = HEADING
     # The filter sentence only above the filters: not on the not-found or degraded
-    # state, which show none.
-    lede = LEDE
+    # state, which show none. The not-found state shows no lede at all (#325).
+    lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated against the candidate index before it is formatted (#331, D073).
             if not api.accepted(view.get, VALIDATE, {"slug": slug}):
-                content = not_found()
+                heading, lede, content = NOT_FOUND_HEADING, None, not_found()
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/candidates/{slug}")
@@ -440,4 +447,5 @@ def layout(slug: Any = None, **params: Any) -> html.Div:
                 lede = f"{LEDE} {sentence}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
-    return html.Div([html.H1(heading), html.P(lede, className="lede"), content])
+    lead = [] if lede is None else [html.P(lede, className="lede")]
+    return html.Div([html.H1(heading), *lead, content])

@@ -170,11 +170,12 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` (named by the
   lede's `FILTER_SENTENCE` in `pages/election.py`) and `/state/<usps>`; the name, as served, as
   the link to the candidate history page `/candidate/<slug>` in T2, T3 and T4, and as that page's
-  heading (`pages/candidate.py`), or
-  `HEADING` there until a name is read, which is also the page's title (`title`); and in
-  `pages/candidate.py`, the page's link-preview `description` and its download name; on the
-  API's `/docs` page, the `CandidateListItem.candidate` and `CandidateListItem.candidate_slug`
-  field descriptions in `src/usvote/api/models.py`.
+  heading (`pages/candidate.py`), or `HEADING` there until a name is read, which is also the
+  page's title (`title`) on any link that is not refused; on a refused link, `NOT_FOUND_HEADING`
+  there, as heading and title (*Not-found state*); and in `pages/candidate.py`, the page's
+  link-preview `description` and its download name; on the API's `/docs` page, the
+  `CandidateListItem.candidate` and `CandidateListItem.candidate_slug` field descriptions in
+  `src/usvote/api/models.py`.
 - **Source:** `EcPvRow.candidate` and `candidate_slug`; D006; D007; `docs/canonical-keys.md`,
   "The two keys are two-tier"; `CandidateListItem` in `src/usvote/api/models.py`.
 - **Not:** Everyone on the ballot.
@@ -623,14 +624,32 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Not-found state (a link the dataset does not serve)
 - **Plain:** What a page says when its link names a year, a state code or a candidate link this
-  dataset does not serve.
+  dataset does not serve. Its heading and the browser tab say that the election, state or
+  candidate was not found, and so does a shared link's preview once the site has checked the
+  link; before that, the preview names no year, state or candidate.
 - **Precise:** Rendered when a page's `validate` judge refuses its path value (D073, D074). It
   never repeats the value and fills nothing built from it. Candidate links match exactly, so a
-  listed slug in another letter case is refused too.
-- **Shown as:** `NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and
-  `pages/candidate.py`; `NOT_FOUND_LINK` in `pages/candidate.py`.
-- **Source:** D073; D074; `dashboard/CLAUDE.md`, `pages/`.
-- **Not:** *Degraded state*; an empty filter result (`components.NO_ROWS`).
+  listed slug in another letter case is refused too. "Not found" is about the link: it never
+  claims that the dataset lacks the election, state or candidate, or that it did not happen. The
+  page shows its not-found heading, its sentence and its link, and no lede. Once the judge's source
+  is in the dashboard's memory, the index answers 404 with `noindex`, and the title (the browser
+  tab, `og:title` and `twitter:title`) is the not-found heading followed by the site title; before
+  then, the index answers 200 and the title is the page's generic one, which names no year or code
+  (#325). Its link-preview description is the page's `NOT_FOUND_SENTENCE`. A percent-encoded link
+  that the page's path pattern matches (`/state/G%41`, `/election/18%32%34`) is the exception: its
+  index answers 404 with `noindex` and that page's not-found title and description at once,
+  whatever is in memory. The page shows this state once its source is read; with the source cold
+  and the API unreachable, it shows the *Degraded state* under that not-found title instead
+  (D083).
+- **Shown as:** `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/election.py`,
+  `pages/state.py` and `pages/candidate.py`; the links "Browse every election in the dataset"
+  (`not_found` in `pages/election.py`), "Browse every state in the dataset" (`not_found` in
+  `pages/state.py`) and `NOT_FOUND_LINK` in `pages/candidate.py`; the title on a not-found link,
+  built in `dashboard/explore/app.py` from the heading and `config.SITE_TITLE`.
+- **Source:** D073; D074; D083; `dashboard/CLAUDE.md`, `pages/`; the heading and title: #325;
+  their reader wording: owner decision, 2026-11-01, #325.
+- **Not:** *Degraded state*; *Page not found*, a link that matches no page at all; an empty filter
+  result (`components.NO_ROWS`).
 - **Status:** settled
 
 ### Outside the popular-vote window
@@ -648,6 +667,20 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
 - **Not:** "No" (a false flip). A null inside the window, which names no cause.
+- **Status:** settled
+
+### Page not found (a link that matches no page)
+- **Plain:** What the site says when a link leads to no page on it at all.
+- **Precise:** `pages/not_found_404.py`, Dash's custom-404 page, rendered for a path no page
+  matches, including a percent-encoded path that matches no page as sent. The index answers 404
+  with `noindex`, and the title (the browser tab, `og:title` and `twitter:title`) is its heading
+  followed by the site title. It reads no data, so it has no degraded state.
+- **Shown as:** `NOT_FOUND_HEADING`, `NOT_FOUND_SENTENCE` and `NOT_FOUND_LINK` in
+  `pages/not_found_404.py`.
+- **Source:** #325; D083; `resolve` in `dashboard/explore/app.py` (Dash's `not_found_404`
+  convention); reader wording: owner decision, 2026-11-01, #325.
+- **Not:** *Not-found state*, where the link names a kind of page (an election, a state, a
+  candidate) but a value this dataset does not serve; *Degraded state*.
 - **Status:** settled
 
 ### Party
@@ -833,12 +866,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   `FILTER_SENTENCE` in `pages/election.py`, and on `/candidate/<slug>`, with `STATE_PLACEHOLDER`
   and named by the lede's `FILTER_SENTENCE` or `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`;
   `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
-  and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or
-  "State history" (a literal in `layout` there) until a name is read; in `pages/state.py`, the
-  page's title (`title`, which names at most the code, never the name), its link-preview
-  `description` and T4's download name (`"this state's history"`); its not-found state
-  (`NOT_FOUND_SENTENCE` and its link to `/states`, in `pages/state.py`); and the home page's
-  lede and its "Browse by state" link (`pages/home.py`).
+  and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or,
+  on the degraded state, "State history" (a literal in `layout` there); in `pages/state.py`, the
+  page's lede (`LEDE`), its title (`title`, which names at most the code, never the name, and
+  only once the index has checked it), its link-preview `description` and T4's download name
+  (`"this state's history"`);
+  its not-found state (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link
+  to `/states`, in `pages/state.py`); and the home page's lede and its "Browse by state" link
+  (`pages/home.py`).
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —

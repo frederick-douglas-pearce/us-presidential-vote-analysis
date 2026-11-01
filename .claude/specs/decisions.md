@@ -5718,3 +5718,69 @@ load one only when needed).
 **Related:** D070, D071, #306, #307, #321, #414.
 
 ---
+
+## D083: A not-found link's title, card and tab read as its not-found heading, and a title names a value only once it is checked
+
+**Date:** 2026-11-01
+**Builds on:** D073 (amends its list of Dash privates), D081 · **Decided by:** the owner, at
+#325's plan gate (2026-11-01), on the architect's review and `ba`'s label spec; recorded by
+#325 (E9)
+
+**Context.** D073 made a link the dataset does not serve answer 404 with `noindex`, but the
+page's `title=` callable still ran on the unvalidated path variable, so `/election/1825` carried
+`og:title` "The 1825 election — …" and, once Dash's client router ran, the same browser tab,
+over a body saying the year is not served. An unmatched path showed the bare site title over
+Dash's built-in "404 - Page not found". The static `<title>` was always the site title: the
+claim lived in the card tags and the tab. Link-preview crawlers do fetch 404 pages (Meta's did,
+in the dashboard's request logs).
+
+**Decision.**
+- **A not-found state is registered.** Every page with a `validate=` registers
+  `not_found=api.NotFound(heading, sentence)`; so does Dash's custom-404 page, which now exists
+  (`pages/not_found_404.py`, still never served as a page of its own). The not-found render's
+  `H1` is the heading, with no lede, and the title is the heading followed by the site title, so
+  the page, the tab and a preview say one thing. Headings say "… not found", about the link,
+  never "No such …": that would be false for a real election outside the dataset, a code in the
+  wrong case, or a listed candidate link in another letter case.
+- **A title names a value only once the index has checked it.** `resolve` decides the title and
+  description with the canonical link, from the same snapshot read: a refused value gets its
+  page's not-found heading and sentence; a value whose `validate` source is not cached yet (still
+  a 200, per D073) gets the page's title called with no variables, which names no year, code or
+  slug; an accepted one gets the page's own. An unmatched path gets the custom-404 page's. A
+  percent-encoded path gets the not-found state of the page Dash's router matches on the raw
+  path (it renders that page's not-found state), chosen by the match alone: the raw path's
+  variables reach no title.
+- **The index builds the card tags itself** from that title and description, and writes the
+  title, HTML-escaped, as `<title>` (Dash interpolates it unescaped). It no longer calls Dash's
+  `_page_meta_tags`, which would call the registry's title and read the snapshot a second time.
+  A found page's static `<title>` is now its page title rather than the bare site title.
+- **The tab follows the same rule.** Dash's router calls the registry's `title` after the
+  layout, in the same request, and its client sets `document.title` from it. app.py's
+  `follow_validation` wraps each validated page's registry `title` to judge from the snapshot in
+  memory, never filling or waiting; a layout's fill on a miss lands before the call, so a cold
+  refused value reads as not found too. A page title is therefore called only with an accepted
+  value or none.
+- **Dash privates relied on**, each pinned in `TestDashPrivates`: `_path_to_page` and
+  `_parse_query_string` (D073), and now the router reading `page["title"]` from the registry per
+  request after the layout, and the clientside callback setting `document.title` from it (with
+  `update_title=None`). `_page_meta_tags` is no longer relied on.
+- **Accepted:** two windows, both only during a snapshot swap, and two cases where the page
+  degrades. A swap between the layout and the title gives the generic title over a not-found
+  body; a fill on a miss that names the new version degrades the page while the tab reads
+  "… not found". A degraded render of an accepted value keeps that value's title over the
+  degraded heading, as before. A percent-encoded path's 404 carries its matched page's not-found title even when the render degrades (its source cold
+  and the API down): the status and the title still agree, and routing the encoded branch
+  through the check instead would pass raw-path variables to a judge and put a generic card over
+  the common cold-but-up not-found body (#325's scope ruling).
+- **Not taken here:** refusing a value by its shape before the source is cached (`/state/ga`
+  while the roster is cold answers 200 with the generic title); filed as #422.
+
+**Rationale.** One rule, decided in one place for the index and judged by the same helper for
+the router, keeps the three title surfaces from disagreeing; constants keep a not-found title
+total and free of request text. Naming no value before the check keeps D071(g)'s index that
+never waits on the API, at the cost of a generic preview title for a valid state or candidate
+link while its source is cold.
+
+**Related:** D071, D073, D081, #312, #325, #422.
+
+---

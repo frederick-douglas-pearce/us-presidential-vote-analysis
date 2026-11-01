@@ -800,7 +800,11 @@ class TestSharedPieces:
         ]
         assert in_cycles({"a": {"b"}, "b": set()}) == []
 
-    @pytest.mark.parametrize("module", sorted(dash.page_registry))
+    @pytest.mark.parametrize(
+        "module",
+        # The custom-404 page reads no data, so it has no provenance to show (#325).
+        sorted(m for m, p in dash.page_registry.items() if not appmod.is_not_found_page(p)),
+    )
     def test_every_page_renders_the_shared_footer(
         self, monkeypatch: pytest.MonkeyPatch, module: str
     ) -> None:
@@ -836,6 +840,9 @@ class TestSharedPieces:
         footer_ids = component_ids(components.provenance_footer(META["provenance"]))
         assert {components.PROVENANCE_ID, components.SNAPSHOT_ID} <= footer_ids
         for module, page in dash.page_registry.items():
+            if appmod.is_not_found_page(page):
+                assert "success" not in page, module  # reads no data (#325)
+                continue
             assert page["success"] not in footer_ids, module
         assert (
             dash.page_registry["pages.home"]["success"] == home_module()["COVERAGE_ID"]

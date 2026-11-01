@@ -53,6 +53,7 @@ TABLES = {
 #: is guarded by ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
 READS_BEFORE = {
     "/": ["/v1/meta"],
+    "/not-found-404": [],  # the custom-404 page reads no data (#325)
     "/elections": ["/v1/elections"],
     "/election/<year>": [
         "/v1/elections",

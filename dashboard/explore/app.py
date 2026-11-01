@@ -1,6 +1,6 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds five things, all host-level:
+Beyond Dash itself this module adds six things, all host-level:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -17,10 +17,19 @@ Beyond Dash itself this module adds five things, all host-level:
   source it names (a template source resolved from the cached index, #279), one whose
   percent-escapes change it when decoded, or Dash's custom 404 page, answers 404 with
   ``noindex`` and neither tag. A source not cached yet counts as matched: the index
-  never waits on the API (D071(g)). Dash's own page meta tags are rebuilt here
-  without its ``twitter:url``, which is the raw request URL.
+  never waits on the API (D071(g)). The page's card tags are built here, without
+  Dash's ``twitter:url``, which is the raw request URL.
   The index never decides what a render may fetch: a templated page validates what
   its layout receives, through ``api.accepted``.
+- **A title that names only what the index has checked** (#325, D083). :func:`resolve`
+  also decides the title and description, which the index writes as ``<title>`` and
+  the card tags. A not-found path's are its page's ``not_found=`` heading and
+  sentence (:class:`~explore.api.NotFound`), or the custom-404 page's; a path whose
+  ``validate`` source is not cached yet gets the page's title called with no
+  variables, which names no year or code. Dash's client router sets the browser tab
+  from the registry's ``title`` after the layout ran, so :func:`follow_validation`
+  wraps each validated page's ``title`` to follow the same rule from the snapshot in
+  memory.
 - **The path's value wins** (#326, D081). Dash's router merges the query string over a
   page's path variables, so ``/election/1824?year=1872`` would render 1872 under a
   canonical link naming 1824. Before the router runs, :func:`strip_path_variables`
@@ -39,9 +48,11 @@ Beyond Dash itself this module adds five things, all host-level:
 
 from __future__ import annotations
 
+import enum
 import html as html_escaping
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote_plus, urlsplit
@@ -53,9 +64,9 @@ from dash import html
 
 # Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
-# matcher, the query parser whose dict the router hands a layout, the card tags, and
-# the ids of the Pages router's two outputs, which name its routing request.
-from dash._pages import _page_meta_tags, _parse_query_string, _path_to_page
+# matcher, the query parser whose dict the router hands a layout, and the ids of the
+# Pages router's two outputs, which name its routing request.
+from dash._pages import _parse_query_string, _path_to_page
 from dash.dash import _ID_CONTENT, _ID_STORE
 
 from explore import api
@@ -86,19 +97,137 @@ def canonical_url(path: str) -> str:
 
 @dataclass(frozen=True)
 class Resolution:
-    """What a request path is: its canonical URL and ``og:url``, or neither (a 404)."""
+    """What a request path is: its canonical URL and ``og:url``, or neither (a 404);
+    its title and description; and the page whose card it shows (#325)."""
 
     canonical: str | None
     og_url: str | None
+    title: str
+    description: str
+    page: Mapping[str, Any]
 
     @property
     def found(self) -> bool:
         return self.canonical is not None
 
 
-NOT_FOUND = Resolution(canonical=None, og_url=None)
-
 _VARIABLE_RE = re.compile("<(.*?)>")
+
+#: The module name, last segment, of Dash's custom-404 page: its router renders that
+#: page for a path no page matches (``pages/not_found_404.py``).
+NOT_FOUND_MODULE = "not_found_404"
+
+
+def is_not_found_page(page: Mapping[str, Any]) -> bool:
+    """Whether ``page`` is Dash's custom-404 page, by the test Dash's router uses."""
+    return str(page.get("module", "")).split(".")[-1] == NOT_FOUND_MODULE
+
+
+class Check(enum.Enum):
+    """A page's verdict on path variables, from the snapshot already in memory."""
+
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+    UNCHECKED = "unchecked"
+
+
+def checked(
+    page: Mapping[str, Any], path_vars: dict[str, Any], snapshot: api.Snapshot | None
+) -> Check:
+    """``page``'s ``validate`` verdict on ``path_vars``, never filling or waiting.
+
+    A page with no ``validate`` accepts. Malformed variables are refused even with the
+    source cold; a cached source the judge rejects refuses; a source not cached yet
+    (or no snapshot at all) leaves the value unchecked, which the index counts as
+    matched (D073).
+    """
+    validate: api.Validate | None = page.get("validate")
+    if validate is None:
+        return Check.ACCEPTED
+    if not api.well_formed(path_vars):
+        return Check.REFUSED
+    body = (
+        api.cached_source(validate[0], snapshot.responses)
+        if snapshot is not None
+        else None
+    )
+    if body is None:
+        return Check.UNCHECKED
+    return Check.ACCEPTED if api.judge(validate, path_vars, body) else Check.REFUSED
+
+
+#: The page dict key holding a validated page's own ``title``, once
+#: :func:`follow_validation` has put its wrapper in ``title``.
+_OWN_TITLE = "explore_own_title"
+
+
+def _call(value: Any, path_vars: dict[str, Any] | None) -> str:
+    """A page's title or description, called as Dash calls one when it is callable."""
+    if callable(value):
+        return str(value(**path_vars) if path_vars else value())
+    return str(value)
+
+
+def page_text(
+    page: Mapping[str, Any], key: str, path_vars: dict[str, Any] | None
+) -> str:
+    """``page``'s own ``title`` or ``description``, given only checked variables.
+
+    ``path_vars`` are passed only once :func:`checked` accepted them; ``None`` calls a
+    callable with no variables, which every templated page makes name no value.
+    """
+    if key == "title":
+        value = page.get(_OWN_TITLE, page.get("title", SITE_TITLE))
+    else:
+        value = page.get(key, "")
+    return _call(value, path_vars)
+
+
+def follow_validation(page: dict[str, Any]) -> None:
+    """Make a validated page's registry ``title`` follow its ``validate`` (#325, D083).
+
+    Dash's Pages router calls ``page["title"]`` with the path variables after the
+    layout, in the same request, and its client sets the browser tab from the result.
+    The wrapper reads the snapshot in memory once: a refused value gets the page's
+    not-found title, an unchecked one the page's own title with no variables, an
+    accepted one its own title. The layout fills a cold source on a miss before the
+    router calls this, so a refused value reads as not found from a cold start too.
+    Called with no variables, it is the page's own. Idempotent; a page with a
+    ``validate`` and no :class:`~explore.api.NotFound` fails here, at import.
+    """
+    if page.get("validate") is None or _OWN_TITLE in page:
+        return
+    not_found = page.get("not_found")
+    if not isinstance(not_found, api.NotFound):
+        raise RuntimeError(f"{page.get('module')} has a validate and no not_found")
+    page[_OWN_TITLE] = page["title"]
+
+    def title(**path_vars: Any) -> str:
+        if not path_vars:
+            return page_text(page, "title", None)
+        verdict = checked(page, path_vars, api.CLIENT.snapshot)
+        if verdict is Check.REFUSED:
+            return not_found.title
+        return page_text(
+            page, "title", path_vars if verdict is Check.ACCEPTED else None
+        )
+
+    page["title"] = title
+
+
+def _not_found(page: Mapping[str, Any] | None) -> Resolution:
+    """A 404's resolution: ``page``'s not-found state, else the custom-404 page's."""
+    shown: Mapping[str, Any] = NOT_FOUND_PAGE
+    if page and isinstance(page.get("not_found"), api.NotFound):
+        shown = page
+    not_found: api.NotFound = shown["not_found"]
+    return Resolution(
+        canonical=None,
+        og_url=None,
+        title=not_found.title,
+        description=not_found.sentence,
+        page=shown,
+    )
 
 
 def raw_path(environ: dict[str, Any]) -> str | None:
@@ -127,29 +256,28 @@ def resolve(
     ``path`` is the decoded request path and ``raw`` the path as sent, when known.
     Dash's router matches the browser's still-encoded ``location.pathname``, so a path
     that decoding changes would match differently there; no page path needs an escape,
-    so such a path is junk and is not found. ``snapshot`` is read once by the caller
-    and never waited on: a page's ``validate`` source missing from it counts as
-    matched, never as rejected.
+    so such a path is junk and is not found. Its title is the not-found state of the
+    page the raw path matches, else the custom-404 page's: Dash's matcher passes a
+    ``%``, and that page's ``validate`` judge refuses it, so the router renders that
+    page's not-found state once its source is read (with the source cold and the API
+    down it renders the degraded state instead, under this 404's title: accepted,
+    D083). The raw path only chooses which constant, and its variables reach no
+    title. ``snapshot`` is read once by the caller and never waited on: a page's
+    ``validate`` source missing from it counts as matched, never as rejected, and the
+    title then names no value.
     """
     if raw is not None and raw != path:
-        return NOT_FOUND
+        return _not_found(_path_to_page(raw.strip("/"))[0])
     page, path_vars = _path_to_page(path.strip("/"))
     # Dash's own custom-404 convention: its router renders this module for a path no
     # page matches, and it must not be served as a page of its own.
-    if not page or page["module"].split(".")[-1] == "not_found_404":
-        return NOT_FOUND
+    if not page or is_not_found_page(page):
+        return _not_found(None)
     path_vars = path_vars or {}
-    validate: api.Validate | None = page.get("validate")
-    if validate is not None:
-        if not api.well_formed(path_vars):
-            return NOT_FOUND
-        body = (
-            api.cached_source(validate[0], snapshot.responses)
-            if snapshot is not None
-            else None
-        )
-        if body is not None and not api.judge(validate, path_vars, body):
-            return NOT_FOUND
+    verdict = checked(page, path_vars, snapshot)
+    if verdict is Check.REFUSED:
+        return _not_found(page)
+    shown_vars = path_vars if verdict is Check.ACCEPTED else None
     template = page.get("path_template")
     concrete = (
         _VARIABLE_RE.sub(lambda m: path_vars[m.group(1)], template)
@@ -163,7 +291,37 @@ def resolve(
         pairs = parser(_parse_query_string(f"?{query}") if query else {})
         # De-duplicated, so a repeated filter names the same URL as a single one.
         og_url += query_syntax.encode_search(pairs)
-    return Resolution(canonical=canonical, og_url=og_url)
+    return Resolution(
+        canonical=canonical,
+        og_url=og_url,
+        title=page_text(page, "title", shown_vars),
+        description=page_text(page, "description", shown_vars),
+        page=page,
+    )
+
+
+def card_tags(resolution: Resolution, root: str) -> list[dict[str, str]]:
+    """The page's card tags, as Dash 4.4.1's ``_page_meta_tags`` builds them but from
+    the resolution's title and description, and without its ``twitter:url`` (the raw
+    request URL). ``root`` is the request's URL root, for an assets image."""
+    page = resolution.page
+    image = page.get("image", "")
+    if image:
+        image = app.get_asset_url(image)
+    assets_image_url = "".join([root, image.lstrip("/")]) if image else None
+    image_url = page.get("image_url") or assets_image_url or ""
+    title, description = resolution.title, resolution.description
+    return [
+        {"name": "description", "content": description},
+        {"property": "twitter:card", "content": "summary_large_image"},
+        {"property": "twitter:title", "content": title},
+        {"property": "twitter:description", "content": description},
+        {"property": "twitter:image", "content": image_url},
+        {"property": "og:title", "content": title},
+        {"property": "og:type", "content": "website"},
+        {"property": "og:description", "content": description},
+        {"property": "og:image", "content": image_url},
+    ]
 
 
 def _tag(name: str, attributes: dict[str, Any]) -> str:
@@ -183,19 +341,17 @@ class ExploreDash(dash.Dash):
     """Dash with a canonical link and ``og:url`` from the matched page, and 404s."""
 
     def index(self, *args: Any, **kwargs: Any) -> Any:
-        # Resolved once, against one read of the snapshot: the status and the tags
-        # below come from the same answer even if the refresher swaps meanwhile.
+        # Resolved once, against one read of the snapshot: the status, the title and
+        # the tags below come from the same answer even if the refresher swaps
+        # meanwhile. The cards are built here, never by Dash's _page_meta_tags, which
+        # would call the registry's title and so read the snapshot again (#325).
         resolution = resolve(
             flask.request.path,
             flask.request.query_string.decode("utf-8", "replace"),
             api.CLIENT.snapshot,
             raw_path(flask.request.environ),
         )
-        cards = [
-            meta
-            for meta in _page_meta_tags(self, self.backend.request_adapter())
-            if meta.get("property") != "twitter:url"  # the raw request URL
-        ]
+        cards = card_tags(resolution, flask.request.url_root)
         if resolution.found:
             own = [
                 _tag("meta", {"property": "og:url", "content": resolution.og_url}),
@@ -204,7 +360,11 @@ class ExploreDash(dash.Dash):
         else:
             own = [_tag("meta", {"name": "robots", "content": "noindex"})]
         # Dash's card tags lead and ours follow its own metas, as Dash orders them.
-        setattr(flask.g, _G_TAGS, ([_tag("meta", meta) for meta in cards], own))
+        setattr(
+            flask.g,
+            _G_TAGS,
+            ([_tag("meta", meta) for meta in cards], own, resolution.title),
+        )
         page = super().index(*args, **kwargs)
         if not resolution.found:
             return flask.make_response(page, 404)
@@ -224,11 +384,12 @@ class ExploreDash(dash.Dash):
         tags = getattr(flask.g, _G_TAGS, None)
         if tags is None:  # never recompute: the status was decided from these
             raise RuntimeError("interpolate_index outside ExploreDash.index")
-        cards, own = tags
+        cards, own, page_title = tags
         metas = "\n      ".join([*cards, f"{metas}", *own])
         return super().interpolate_index(
             metas=metas,
-            title=title,
+            # Escaped here: Dash interpolates the title into the HTML unescaped.
+            title=html_escaping.escape(page_title, quote=True),
             css=css,
             config=config,
             scripts=scripts,
@@ -249,6 +410,16 @@ app = ExploreDash(
 )
 server = app.server
 app.layout = html.Main(dash.page_container, className="explore")
+
+#: The custom-404 page, found as Dash's router finds it: its not-found state is the
+#: title of every 404 that is not a page's own.
+NOT_FOUND_PAGE: dict[str, Any] = next(
+    (page for page in dash.page_registry.values() if is_not_found_page(page)), {}
+)
+if not isinstance(NOT_FOUND_PAGE.get("not_found"), api.NotFound):
+    raise RuntimeError("no custom-404 page registers an api.NotFound")
+for _page in dash.page_registry.values():
+    follow_validation(_page)
 
 
 #: The Pages router's callback as a routing request names it in ``output`` and Dash
