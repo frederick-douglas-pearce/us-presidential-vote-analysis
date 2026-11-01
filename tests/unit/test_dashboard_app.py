@@ -1351,6 +1351,32 @@ def test_status_and_tags_come_from_one_snapshot_read(
     assert head.one("meta", "property", "og:title", "content") == expected
 
 
+@pytest.mark.parametrize("warm_first", [True, False])
+def test_an_accepted_value_s_title_comes_from_the_same_snapshot_read(
+    monkeypatch: pytest.MonkeyPatch, warm_first: bool
+) -> None:
+    """The accepted path is the one where the registry's wrapped title would read the
+    snapshot again (it judges the value): the index calls the page's own title
+    instead, so a swap mid-request cannot pair a canonical 200 with a title from the
+    other answer (#325's acceptance gate, mutant M17)."""
+    page = dash.page_registry["pages.election"]
+    cold = api.Snapshot(version=VERSION, responses={api.META_PATH: META})
+    warm = api.Snapshot(
+        version=VERSION,
+        responses={api.META_PATH: META, api.ELECTIONS_PATH: RECORDED[api.ELECTIONS_PATH]},
+    )
+    client = AlternatingClient([warm, cold] if warm_first else [cold, warm])
+    monkeypatch.setattr(api, "CLIENT", client)
+    status, head, body = get("/election/1824")
+    assert client.reads == 1
+    assert status == 200
+    path_vars = {"year": "1824"} if warm_first else None
+    expected = appmod.page_text(page, "title", path_vars)
+    assert ("1824" in expected) is warm_first  # accepted names the year; cold does not
+    assert page_title(body) == expected
+    assert head.one("meta", "property", "og:title", "content") == expected
+
+
 def concrete_page_path(page: dict[str, Any]) -> str:
     template = page.get("path_template")
     if not template:
