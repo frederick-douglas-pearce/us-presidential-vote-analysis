@@ -5764,11 +5764,11 @@ in the dashboard's request logs).
   `_parse_query_string` (D073), and now the router reading `page["title"]` from the registry per
   request after the layout, and the clientside callback setting `document.title` from it (with
   `update_title=None`). `_page_meta_tags` is no longer relied on.
-- **Accepted:** two windows, both only during a snapshot swap. A swap between the layout and the
-  title gives the generic title over a not-found body; a fill on a miss that names the new
-  version degrades the page while the tab reads "… not found". A degraded render of an accepted
-  value keeps that value's title over the degraded heading, as before. A percent-encoded path's
-  404 carries its matched page's not-found title even when the render degrades (its source cold
+- **Accepted:** two windows, both only during a snapshot swap, and two cases where the page
+  degrades. A swap between the layout and the title gives the generic title over a not-found
+  body; a fill on a miss that names the new version degrades the page while the tab reads
+  "… not found". A degraded render of an accepted value keeps that value's title over the
+  degraded heading, as before. A percent-encoded path's 404 carries its matched page's not-found title even when the render degrades (its source cold
   and the API down): the status and the title still agree, and routing the encoded branch
   through the check instead would pass raw-path variables to a judge and put a generic card over
   the common cold-but-up not-found body (#325's scope ruling).

@@ -1,10 +1,12 @@
-"""The one-election view's earlier and later links in a browser (#324).
+"""The one-election view in a browser: its earlier and later links (#324), and an
+unserved year's not-found state (#325).
 
 From a filtered view, the later link opens the next served year's own view
 unfiltered, as a client-side navigation (a marker set on ``window`` before the click
 survives it, which a full page load would clear), and back returns to the view it
-left. No console error and no off-host request are asserted for every test by
-``conftest._browser_guard``.
+left. ``conftest._browser_guard`` fails every test on an off-host request, or on any
+console error other than those it names with ``expected_console_error``, each as many
+times as named.
 """
 
 from __future__ import annotations

@@ -262,9 +262,9 @@ def resolve(
     page's not-found state once its source is read (with the source cold and the API
     down it renders the degraded state instead, under this 404's title: accepted,
     D083). The raw path only chooses which constant, and its variables reach no
-    title. ``snapshot`` is read
-    once by the caller and never waited on: a page's ``validate`` source missing from
-    it counts as matched, never as rejected, and the title then names no value.
+    title. ``snapshot`` is read once by the caller and never waited on: a page's
+    ``validate`` source missing from it counts as matched, never as rejected, and the
+    title then names no value.
     """
     if raw is not None and raw != path:
         return _not_found(_path_to_page(raw.strip("/"))[0])

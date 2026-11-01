@@ -636,7 +636,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   tab, `og:title` and `twitter:title`) is the not-found heading followed by the site title; before
   then, the index answers 200 and the title is the page's generic one, which names no year or code
   (#325). Its link-preview description is the page's `NOT_FOUND_SENTENCE`. A percent-encoded link
-  that the page's path pattern matches shows this state too.
+  that the page's path pattern matches (`/state/G%41`, `/election/18%32%34`) is the exception: its
+  index answers 404 with `noindex` and that page's not-found title and description at once,
+  whatever is in memory. The page shows this state once its source is read; with the source cold
+  and the API unreachable, it shows the *Degraded state* under that not-found title instead
+  (D083).
 - **Shown as:** `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/election.py`,
   `pages/state.py` and `pages/candidate.py`; the links "Browse every election in the dataset"
   (`not_found` in `pages/election.py`), "Browse every state in the dataset" (`not_found` in
@@ -864,8 +868,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
   and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or,
   on the degraded state, "State history" (a literal in `layout` there); in `pages/state.py`, the
-  page's lede (`LEDE`), its title (`title`, which names at most the code, never the name, and only once the index has
-  checked it), its link-preview `description` and T4's download name (`"this state's history"`);
+  page's lede (`LEDE`), its title (`title`, which names at most the code, never the name, and
+  only once the index has checked it), its link-preview `description` and T4's download name
+  (`"this state's history"`);
   its not-found state (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link
   to `/states`, in `pages/state.py`); and the home page's lede and its "Browse by state" link
   (`pages/home.py`).
