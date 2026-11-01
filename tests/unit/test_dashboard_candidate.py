@@ -618,7 +618,9 @@ class TestRequestBudget:
         assert slug not in text
         assert MOD["FILTER_SENTENCE"] not in text
         assert MOD["FILTER_SENTENCE_ONE_YEAR"] not in text
-        assert MOD["LEDE"] in text
+        # The not-found heading, and no lede: it describes a page not there (#325).
+        assert MOD["NOT_FOUND_HEADING"] in text
+        assert MOD["LEDE"] not in text
 
     def test_cold_an_unlisted_slug_costs_one_fill_of_the_index_only(
         self, monkeypatch: pytest.MonkeyPatch

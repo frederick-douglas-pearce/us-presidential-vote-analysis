@@ -88,8 +88,22 @@ PER_CAPITA_FILTER_NOTE = (
 CANDIDATE = "candidate"
 PV_STATUS = "pv_status"
 
-#: The not-found state's sentence. The raw path value is never echoed.
+#: The not-found state's heading and sentence (#325). The heading also leads the
+#: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about
+#: the link: ``/state/ga`` is refused though Georgia is served. The raw path value is
+#: never echoed.
+NOT_FOUND_HEADING = "State not found"
 NOT_FOUND_SENTENCE = "This dataset has no state with that code."
+NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
+
+#: The lede, shown above the history and on the degraded state, never on the not-found
+#: state (#325).
+LEDE = (
+    "This state's electoral votes for each candidate in every election this dataset "
+    "holds for it, with the popular vote where the dataset has it, and how many people "
+    "its electoral votes stood for. Narrow the rows by year, candidate or popular-vote "
+    "status."
+)
 
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
@@ -143,9 +157,9 @@ VALIDATE: api.Validate = (api.ROSTER_PATH, on_roster)
 
 
 def title(usps: Any = None, **_vars: Any) -> str:
-    """The page title. Called by Dash at index time with the **unvalidated** path
-    variable, so it is total and reads no API; it names the code only when it is a
-    USPS code."""
+    """The page title. app.py calls it only with a code the page's ``validate``
+    accepted, or with none while that is unchecked (#325, D083); it is total anyway,
+    reads no API, and names the code only when it is a USPS code."""
     if isinstance(usps, str) and query.USPS_RE.fullmatch(usps):
         return f"{usps} — state history — {SITE_TITLE}"
     return f"State history — {SITE_TITLE}"
@@ -163,6 +177,7 @@ dash.register_page(
     on_miss=(api.ROSTER_PATH, "/v1/states/{usps}", "/v1/states/{usps}/per-capita"),
     success=PAGE_ID,
     validate=VALIDATE,
+    not_found=NOT_FOUND,
     query=parse_filters,
 )
 
@@ -492,7 +507,8 @@ def render(
 
 
 def not_found() -> html.Div:
-    """A code the dataset does not serve: said plainly, with the way back."""
+    """A code the dataset does not serve: said plainly, with the way back, under
+    :data:`NOT_FOUND_HEADING` and no lede (#325)."""
     return html.Div(
         [
             html.P(NOT_FOUND_SENTENCE),
@@ -504,11 +520,12 @@ def not_found() -> html.Div:
 
 def layout(usps: Any = None, **params: Any) -> html.Div:
     heading = "State history"
+    lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated from the roster before it is formatted (#279, D074).
             if not api.accepted(view.get, VALIDATE, {"usps": usps}):
-                content = not_found()
+                heading, lede, content = NOT_FOUND_HEADING, None, not_found()
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/states/{usps}")
@@ -518,16 +535,5 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
                 )
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
-    return html.Div(
-        [
-            html.H1(heading),
-            html.P(
-                "This state's electoral votes for each candidate in every election "
-                "this dataset holds for it, with the popular vote where the dataset "
-                "has it, and how many people its electoral votes stood for. Narrow "
-                "the rows by year, candidate or popular-vote status.",
-                className="lede",
-            ),
-            content,
-        ]
-    )
+    lead = [] if lede is None else [html.P(lede, className="lede")]
+    return html.Div([html.H1(heading), *lead, content])

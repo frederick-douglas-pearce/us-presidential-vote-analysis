@@ -360,7 +360,7 @@ class TestRender:
         found = of_type(PAGE["layout"](year="1872"), "H1")
         missing = of_type(PAGE["layout"](year="1825"), "H1")
         assert [h.children for h in found] == ["The 1872 election"]
-        assert [h.children for h in missing] == ["Election"]
+        assert [h.children for h in missing] == [MOD["NOT_FOUND_HEADING"]]  # #325
 
     def test_the_window_is_read_from_coverage_not_literals(self) -> None:
         def new_york(pv_year_min: int) -> set[str]:
@@ -1481,7 +1481,10 @@ class TestNeighbourLinks:
         not_found = MOD["layout"](year="1825")
         assert find(not_found, MOD["NOT_FOUND_ID"]) is not None
         assert find(not_found, MOD["NAV_ID"]) is None
-        assert lede(not_found) == MOD["LEDE"]
+        # No lede at all: it describes a page that is not there (#325).
+        assert not [
+            p for p in of_type(not_found, "P") if getattr(p, "className", None) == "lede"
+        ]
 
         class Down:
             def view(self) -> Any:
@@ -1529,7 +1532,7 @@ class TestNeighbourLinks:
     ("year", "named"),
     [
         ("1872", True),
-        ("1825", True),  # #325: a not-found title is a follow-up
+        ("1825", True),  # the page's own title: app.py calls it only once accepted
         (None, False),
         ("", False),
         (["1872"], False),
@@ -1540,7 +1543,8 @@ class TestNeighbourLinks:
 def test_the_title_is_total_and_names_only_a_four_digit_year(
     year: Any, named: bool
 ) -> None:
-    title = PAGE["title"](year=year)
+    # The page's own title; the registry's is app.py's wrapper (#325, D083).
+    title = MOD["title"](year=year)
     assert isinstance(title, str)
     assert (f"The {year} election" in title) is named
     assert "<" not in title

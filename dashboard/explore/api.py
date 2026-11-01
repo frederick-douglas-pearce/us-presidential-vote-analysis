@@ -68,8 +68,9 @@ templates of the page's path variables or of :data:`COVERAGE_VARS`, such as
 declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts each page's
 success marker. A templated page also registers ``validate=(source, judge)``
 (:data:`Validate`) and calls :func:`accepted` before formatting a path variable into an
-API path; a page that reads filters registers ``query=`` its parser. ``app.py`` uses
-both for the canonical link, ``og:url`` and the 404 (#312).
+API path, and ``not_found=`` its :class:`NotFound`; a page that reads filters registers
+``query=`` its parser. ``app.py`` uses them for the canonical link, ``og:url``, the 404
+(#312) and the not-found title (#325).
 """
 
 from __future__ import annotations
@@ -83,13 +84,13 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import dash
 
 from explore import query
-from explore.config import API_BASE, API_HOST
+from explore.config import API_BASE, API_HOST, SITE_TITLE
 
 log = logging.getLogger(__name__)
 
@@ -289,6 +290,24 @@ def snapshot_version_of(meta: JsonObject) -> str:
 #: in ``on_miss`` — a literal, or a template over :data:`COVERAGE_VARS` (#279) — and is
 #: never built from a path variable, so judging a value never fills a path made from it.
 Validate = tuple[str, Callable[[dict[str, Any], JsonObject], bool]]
+
+
+class NotFound(NamedTuple):
+    """A page's not-found state, registered as ``not_found=`` (#325, D083).
+
+    Every page with a ``validate`` registers one, and so does the custom-404 page,
+    ``pages/not_found_404.py``. The heading is the not-found render's ``H1`` and leads
+    its title, so the page, the browser tab and a link preview say one thing; the
+    sentence is the render's text under it and the link preview's description. Both are
+    constants: they never repeat the path value.
+    """
+
+    heading: str
+    sentence: str
+
+    @property
+    def title(self) -> str:
+        return f"{self.heading} — {SITE_TITLE}"
 
 
 def placeholders(template: str) -> set[str]:

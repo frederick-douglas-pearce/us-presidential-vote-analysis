@@ -723,7 +723,8 @@ class TestIndex:
     ],
 )
 def test_the_title_is_total_and_names_only_a_usps_code(usps: Any, named: bool) -> None:
-    title = PAGE["title"](usps=usps)
+    # The page's own title; the registry's is app.py's wrapper (#325, D083).
+    title = MOD["title"](usps=usps)
     assert isinstance(title, str)
     assert (f"{usps} — state history" in title) is named
     assert "<" not in title

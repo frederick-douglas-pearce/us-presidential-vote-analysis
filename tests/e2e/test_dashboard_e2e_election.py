@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import re
 
+import dash
 import pytest
 from playwright.sync_api import Page, expect
 
+import explore.app  # noqa: F401  (registers the pages, whose not-found states it reads)
 from tests.e2e.dashboard_pages import (
     ELECTION_EARLIER,
     ELECTION_LATER,
@@ -51,3 +53,20 @@ def test_the_later_link_opens_the_next_election_and_back_returns(page: Page) -> 
     )
     page.go_back()
     assert_year(page, earlier, FILTERED)
+
+
+@pytest.mark.expected_console_error(
+    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
+)
+def test_an_unserved_year_reads_as_not_found_in_the_tab_and_the_page(
+    page: Page,
+) -> None:
+    """#325: Dash's client router sets the tab from the page's title after the layout
+    ran, so only a browser shows that the tab follows the year's validation. The
+    document's own 404 is the one console error, and the guard requires it."""
+    not_found = dash.page_registry["pages.election"]["not_found"]
+    response = page.goto("/election/1825")
+    assert response is not None and response.status == 404
+    expect(page.get_by_role("heading", level=1)).to_have_text(not_found.heading)
+    expect(page).to_have_title(not_found.title)
+    expect(page.locator("#election-not-found")).to_contain_text(not_found.sentence)

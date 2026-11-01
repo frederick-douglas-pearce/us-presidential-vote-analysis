@@ -376,7 +376,15 @@ def rendered_ids(text):
     return _ids(_json.loads(text)["response"]["_pages_content"])
 
 
-PAGES = sorted(dash.page_registry.values(), key=concrete)
+# The custom-404 page (#325) reads no data, so it has no success marker and no
+# degraded state; each run routes an unmatched path to it below instead.
+(NOT_FOUND_PAGE,) = [
+    p for p in dash.page_registry.values() if appmod.is_not_found_page(p)
+]
+assert NOT_FOUND_PAGE is appmod.NOT_FOUND_PAGE
+PAGES = sorted(
+    (p for p in dash.page_registry.values() if p is not NOT_FOUND_PAGE), key=concrete
+)
 for page in PAGES:
     assert page.get("success"), f"{{page['module']}} declares no success marker"
 """
@@ -442,6 +450,10 @@ for page in PAGES:
     assert "isn't responding" in text, path  # offline: degraded
     # The marker is a success signal only if the degraded state never carries it.
     assert page["success"] not in rendered_ids(text), (path, page["success"])
+# A path no page matches renders the custom-404 page, offline or not (#325).
+text = route(client, "/no-such-view")
+assert "page-not-found" in rendered_ids(text)
+assert "isn't responding" not in text
 """
         + _ALL_MODULES_LOADED
         + _RESULT
@@ -554,6 +566,12 @@ text = route(client, "/candidate/no-such-candidate")
 assert candidate_page["success"] == "candidate", candidate_page["success"]
 assert "candidate" not in rendered_ids(text)
 assert "candidate-not-found" in rendered_ids(text)
+assert "isn't responding" not in text
+assert REQUESTED == requested_before, (REQUESTED, requested_before)
+
+# A path no page matches (#325): the custom-404 page, which requests nothing.
+text = route(client, "/no-such-view")
+assert "page-not-found" in rendered_ids(text)
 assert "isn't responding" not in text
 assert REQUESTED == requested_before, (REQUESTED, requested_before)
 (states_page,) = [p for p in PAGES if p.get("path") == "/states"]

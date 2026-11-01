@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import copy
+import html
 import html.parser
 import http.client
 import http.server
@@ -41,6 +42,7 @@ from dash.development.base_component import Component
 
 from explore import api, components
 from explore import app as appmod
+from explore.config import SITE_TITLE
 from tests.dashboard_fixtures import RECORDED_FILES
 
 #: Written out rather than imported from ``explore.config``: a test that read the host
@@ -311,7 +313,7 @@ class TestRender:
         """Dash's router takes the first match, so a page whose concrete path routes
         to another page is never rendered (#307)."""
         for module, page in dash.page_registry.items():
-            if page["module"].split(".")[-1] == "not_found_404":
+            if appmod.is_not_found_page(page):
                 continue
             routed, _ = _path_to_page(concrete_page_path(page).strip("/"))
             assert routed.get("module") == page["module"], module
@@ -418,6 +420,9 @@ def _unvalidated_year_layout(year: Any = None, **_query: Any) -> Any:
     return dash.html.Div(str(len(body)), id="fake-year")
 
 
+#: The fake year page's not-found state (#325): every validated page registers one.
+FAKE_NOT_FOUND = api.NotFound("Fake election not found", "No such fake election.")
+
 YEAR_PAGE: dict[str, Any] = {
     "path_template": "/fake-election/<year>",
     "layout": _validated_year_layout,
@@ -425,6 +430,7 @@ YEAR_PAGE: dict[str, Any] = {
     "on_miss": ("/v1/elections/{year}",),
     "success": "fake-year",
     "validate": FAKE_VALIDATE,
+    "not_found": FAKE_NOT_FOUND,
 }
 
 
@@ -446,7 +452,7 @@ def register() -> Iterator[Callable[..., dict[str, Any]]]:
         routed, _ = _path_to_page(concrete.strip("/"))
         assert not routed, (concrete, routed.get("module"))
         for other in dash.page_registry.values():
-            if other["module"].split(".")[-1] == "not_found_404":
+            if appmod.is_not_found_page(other):
                 continue
             taken = concrete_page_path(other).strip("/")
             shared = _parse_path_variables(taken, template.strip("/"))
@@ -454,6 +460,8 @@ def register() -> Iterator[Callable[..., dict[str, Any]]]:
         dash.register_page(module, **page)
         modules.append(module)
         registered: dict[str, Any] = dash.page_registry[module]
+        # As app.py does to every page Dash registered at import (#325).
+        appmod.follow_validation(registered)
         return registered
 
     yield add
@@ -819,23 +827,39 @@ def test_hostile_text_where_a_canonical_is_still_emitted(
     assert head.og_url == url(f"/fake-election/1860?state={quoted}")
 
 
-def test_card_tags_escape_a_callable_title_that_echoes_the_path(
-    register: Callable[..., dict[str, Any]],
+def page_title(body: str) -> str:
+    """The text of a page's ``<title>`` element, entities decoded."""
+    found = re.findall(r"<title>(.*?)</title>", body, re.DOTALL)
+    assert len(found) == 1, found
+    return html.unescape(str(found[0]))
+
+
+def test_card_tags_and_title_escape_a_callable_title_that_echoes_the_path(
+    register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Dash calls a callable title with the decoded path variables: only ``_tag``'s
-    escape stands between them and the card tags."""
+    """A title names a path value only once ``validate`` accepted it (#325), so the
+    hostile value reaches the title here through a judge that accepts anything, with
+    its source cached: only ``_tag``'s escape stands between it and the card tags, and
+    only app.py's between it and ``<title>``, which Dash interpolates unescaped."""
     register(
-        **YEAR_PAGE,
+        **{
+            **YEAR_PAGE,
+            "validate": (api.ELECTIONS_PATH, lambda path_vars, body: True),
+        },
         title=lambda year=None, **_q: f"Election {year}",
         description=lambda year=None, **_q: f"Results for {year}",
     )
+    cached_client(monkeypatch)
     quoted = urllib.parse.quote(HOSTILE, safe="")
-    status, head, body = get(
-        f"/fake-election/{quoted}", unencoded=True
-    )  # cold: matched
+    status, head, body = get(f"/fake-election/{quoted}", unencoded=True)
     assert status == 200
     assert_no_markup(body)
+    # Not vacuous: the hostile text is in every title, as text.
+    assert page_title(body) == f"Election {HOSTILE}"
     assert head.one("meta", "property", "og:title", "content") == f"Election {HOSTILE}"
+    assert head.one("meta", "property", "twitter:title", "content") == (
+        f"Election {HOSTILE}"
+    )
     assert head.one("meta", "name", "description", "content") == f"Results for {HOSTILE}"
     for tag, attrs in head.tags:
         if tag == "meta":
@@ -933,13 +957,190 @@ class TestEncodedPath:
 
 
 class TestNotFoundPage:
-    def test_dash_s_custom_404_page_is_not_served_as_a_page(
-        self, register: Callable[..., dict[str, Any]]
-    ) -> None:
-        register("not_found_404", path="/not-found-404", layout=dash.html.P("gone"))
-        TestNotFound.assert_not_found("/not-found-404")
+    def test_dash_s_custom_404_page_is_not_served_as_a_page(self) -> None:
+        TestNotFound.assert_not_found(concrete_page_path(appmod.NOT_FOUND_PAGE))
         _, head, _ = get("/")
         assert head.canonical == url("/")
+
+
+def h1_text(response: Any) -> list[str]:
+    """The text of every ``H1`` in a routing response's rendered page."""
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "H1":
+                found.append(str(node.get("props", {}).get("children")))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(response.get_json()["response"]["_pages_content"])
+    return found
+
+
+def store_title(response: Any) -> str:
+    """The title Dash's router hands the client, which sets ``document.title``."""
+    return str(response.get_json()["response"]["_pages_store"]["data"]["title"])
+
+
+def has_lede(response: Any) -> bool:
+    return '"className":"lede"' in response.get_data(as_text=True).replace(" ", "")
+
+
+def validated_pages() -> list[dict[str, Any]]:
+    return [page for page in dash.page_registry.values() if page.get("validate")]
+
+
+class TestNotFoundTitle:
+    """#325, D083: a not-found path's title, card and tab read as its body does, and a
+    title names a value only once the index has checked it is served."""
+
+    def test_every_validated_page_and_only_those_and_the_404_page_register_one(
+        self,
+    ) -> None:
+        validated = validated_pages()
+        assert len(validated) >= 3
+        for page in dash.page_registry.values():
+            not_found = page.get("not_found")
+            if page.get("validate") or appmod.is_not_found_page(page):
+                assert isinstance(not_found, api.NotFound), page["module"]
+                assert all(isinstance(f, str) and f for f in not_found), page["module"]
+            else:
+                assert not_found is None, page["module"]
+        assert [
+            p for p in dash.page_registry.values() if appmod.is_not_found_page(p)
+        ] == [appmod.NOT_FOUND_PAGE]
+
+    def test_a_validate_without_a_not_found_fails_at_registration(self) -> None:
+        page = {"module": "x", "title": "t", "validate": FAKE_VALIDATE}
+        with pytest.raises(RuntimeError, match="no not_found"):
+            appmod.follow_validation(page)
+
+    @pytest.mark.parametrize("module", [p["module"] for p in validated_pages()])
+    def test_a_refused_value_reads_as_not_found_everywhere(
+        self, monkeypatch: pytest.MonkeyPatch, module: str
+    ) -> None:
+        page = dash.page_registry[module]
+        not_found: api.NotFound = page["not_found"]
+        cached_client(monkeypatch, source=page["validate"][0])
+        concrete = re.sub(
+            r"<(.*?)>", lambda m: UNSERVED_VALUES[m.group(1)], page["path_template"]
+        )
+        status, head, body = get(concrete)
+        assert status == 404
+        assert page_title(body) == not_found.title
+        for tag in ("og:title", "twitter:title"):
+            assert head.one("meta", "property", tag, "content") == not_found.title
+        assert head.one("meta", "name", "description", "content") == not_found.sentence
+        for tag in ("og:description", "twitter:description"):
+            assert head.one("meta", "property", tag, "content") == not_found.sentence
+        routed = route(concrete)
+        assert store_title(routed) == not_found.title
+        assert [f"{h} — {SITE_TITLE}" for h in h1_text(routed)] == [not_found.title]
+        assert not has_lede(routed)
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            p["module"]
+            for p in validated_pages()
+            if p["validate"][0] != api.ELECTIONS_PATH  # always prefetched: never cold
+        ],
+    )
+    def test_a_cold_source_names_no_value_then_the_fill_refuses_it(
+        self, monkeypatch: pytest.MonkeyPatch, module: str
+    ) -> None:
+        page = dash.page_registry[module]
+        client, _, _ = cached_client(monkeypatch)
+        (source,) = [p for p in source_paths(page["validate"][0]) if p != api.ELECTIONS_PATH]
+        assert client.snapshot is not None
+        assert source not in client.snapshot.responses  # cold, so not vacuous
+        concrete = re.sub(
+            r"<(.*?)>", lambda m: UNSERVED_VALUES[m.group(1)], page["path_template"]
+        )
+        status, head, body = get(concrete)
+        generic = appmod.page_text(page, "title", None)
+        assert status == 200
+        assert page_title(body) == generic
+        assert head.one("meta", "property", "og:title", "content") == generic
+        assert not any(value in generic for value in UNSERVED_VALUES.values())
+        # The layout's fill lands before Dash's router calls the title.
+        routed = route(concrete)
+        assert source in client.snapshot.responses
+        assert store_title(routed) == page["not_found"].title
+        assert [f"{h} — {SITE_TITLE}" for h in h1_text(routed)] == [
+            page["not_found"].title
+        ]
+
+    @pytest.mark.parametrize("module", [p["module"] for p in validated_pages()])
+    def test_an_accepted_value_keeps_the_page_s_own_title(
+        self, monkeypatch: pytest.MonkeyPatch, module: str
+    ) -> None:
+        page = dash.page_registry[module]
+        cached_client(monkeypatch, source=page["validate"][0])
+        concrete = concrete_page_path(page)
+        _, path_vars = _path_to_page(concrete.strip("/"))
+        own = appmod.page_text(page, "title", path_vars)
+        assert own == page[appmod._OWN_TITLE](**path_vars)
+        status, head, body = get(concrete)
+        assert status == 200
+        assert page_title(body) == own
+        assert head.one("meta", "property", "og:title", "content") == own
+        assert store_title(route(concrete)) == own
+
+    @pytest.mark.parametrize("path", ["/no-such-view", "/election", "/%2F"])
+    def test_a_path_no_page_matches_reads_page_not_found(self, path: str) -> None:
+        not_found: api.NotFound = appmod.NOT_FOUND_PAGE["not_found"]
+        status, head, body = get(path)
+        assert status == 404
+        assert page_title(body) == not_found.title
+        assert head.one("meta", "property", "og:title", "content") == not_found.title
+
+    def test_the_404_page_s_body_and_tab_read_as_its_title(self) -> None:
+        not_found: api.NotFound = appmod.NOT_FOUND_PAGE["not_found"]
+        routed = route("/no-such-view")
+        assert "page-not-found" in routed_ids(routed)
+        assert store_title(routed) == not_found.title
+        assert [f"{h} — {SITE_TITLE}" for h in h1_text(routed)] == [not_found.title]
+
+    def test_an_encoded_path_takes_the_heading_of_the_page_the_router_renders(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dash's router matches the encoded path, so /election/18%32%34 renders the
+        election page's not-found state; its title says so, from a constant."""
+        election = dash.page_registry["pages.election"]
+        cached_client(monkeypatch)
+        status, head, body = get("/election/18%32%34")
+        assert status == 404
+        assert page_title(body) == election["not_found"].title
+        routed = route("/election/18%32%34")
+        assert "election-not-found" in routed_ids(routed)
+        assert store_title(routed) == election["not_found"].title
+
+    @pytest.mark.parametrize("value", [None, "", ["1824"], "<script>", HOSTILE, "1825"])
+    def test_the_wrapped_title_is_total_and_never_names_a_refused_value(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        value: Any,
+    ) -> None:
+        page = register(**YEAR_PAGE, title=lambda year=None, **_q: f"Election {year}")
+        cached_client(monkeypatch)
+        title = page["title"](year=value)
+        assert title == FAKE_NOT_FOUND.title
+        assert page["title"](year="1824") == "Election 1824"
+        assert page["title"]() == "Election None"  # no variables: its own title
+
+    def test_follow_validation_is_idempotent(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        page = register(**YEAR_PAGE)
+        wrapper = page["title"]
+        appmod.follow_validation(page)
+        assert page["title"] is wrapper
 
 
 def test_a_repeated_filter_names_the_same_og_url_as_a_single_one(
@@ -988,6 +1189,7 @@ def test_an_empty_variable_in_a_multi_variable_template_is_not_found_even_cold(
         layout=dash.html.P("pair"),
         prefetch=(api.ELECTIONS_PATH,),
         validate=(api.ELECTIONS_PATH, lambda path_vars, body: True),
+        not_found=FAKE_NOT_FOUND,
     )
     TestNotFound.assert_not_found("/pair//b")
     assert get("/pair/a/b")[0] == 200
@@ -1041,12 +1243,16 @@ class AlternatingClient:
 
 
 @pytest.mark.parametrize("cold_first", [True, False])
+@pytest.mark.parametrize("path", ["/fake-election/1825", "/election/1825"])
 def test_status_and_tags_come_from_one_snapshot_read(
     register: Callable[..., dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
     cold_first: bool,
+    path: str,
 ) -> None:
-    """A swap mid-request cannot give a 404 with a canonical, or a 200 without one."""
+    """A swap mid-request cannot give a 404 with a canonical, or a 200 without one, or
+    a title from the other answer. On a real page too, whose registry title
+    follow_validation wraps: the index never calls it (#325)."""
     register(**YEAR_PAGE)
     cold = api.Snapshot(version=VERSION, responses={api.META_PATH: META})
     warm = api.Snapshot(
@@ -1055,10 +1261,16 @@ def test_status_and_tags_come_from_one_snapshot_read(
     )
     client = AlternatingClient([cold, warm] if cold_first else [warm, cold])
     monkeypatch.setattr(api, "CLIENT", client)
-    status, head, _ = get("/fake-election/1825")
+    status, head, body = get(path)
     assert client.reads == 1
     assert (status == 200) is (head.canonical is not None)
     assert status == (200 if cold_first else 404)
+    page, _ = _path_to_page(path.strip("/"))
+    expected = (
+        appmod.page_text(page, "title", None) if cold_first else page["not_found"].title
+    )
+    assert page_title(body) == expected
+    assert head.one("meta", "property", "og:title", "content") == expected
 
 
 def concrete_page_path(page: dict[str, Any]) -> str:
@@ -1076,7 +1288,6 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
     index calls (a parser, a callable title or description, a validate) reads the API.
     Dash's custom-404 module is the one exception: it is never served as a page."""
     register(**YEAR_PAGE, query=fake_parser)
-    register("not_found_404", path="/not-found-404", layout=dash.html.P("gone"))
 
     def no_fetch(path: str, timeout: float = 0) -> api.Response:
         raise AssertionError(f"the index fetched {path}")
@@ -1100,7 +1311,7 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
     checked = 0
     for page in list(dash.page_registry.values()):
         concrete = concrete_page_path(page)
-        if page["module"].split(".")[-1] == "not_found_404":
+        if appmod.is_not_found_page(page):
             TestNotFound.assert_not_found(concrete)
             continue
         for path in {concrete, concrete.rstrip("/") + "/"}:
@@ -1201,15 +1412,20 @@ class TestDashPrivates:
             ("/_dash-update-component", True)
         ]
 
-    def test_the_card_tags_are_exactly_these(self) -> None:
+    def test_the_card_tags_are_dash_s_without_twitter_url(self) -> None:
+        """app.py builds the card tags itself (#325); they stay Dash's set, less the raw
+        request URL. Dash's builder is read here as the reference, never at runtime."""
         with appmod.server.test_request_context("/"):
-            tags = _page_meta_tags(appmod.app, appmod.app.backend.request_adapter())
-        keys = [tag.get("property") or tag.get("name") for tag in tags]
+            dash_tags = _page_meta_tags(
+                appmod.app, appmod.app.backend.request_adapter()
+            )
+            resolution = appmod.resolve("/", "", None)
+            ours = appmod.card_tags(resolution, flask.request.url_root)
+        keys = [tag.get("property") or tag.get("name") for tag in ours]
         # A Dash that starts emitting og:url or a canonical from request.url fails here.
         assert keys == [
             "description",
             "twitter:card",
-            "twitter:url",
             "twitter:title",
             "twitter:description",
             "twitter:image",
@@ -1218,9 +1434,54 @@ class TestDashPrivates:
             "og:description",
             "og:image",
         ]
+        assert [t for t in dash_tags if t.get("property") != "twitter:url"] == ours
+
+    def test_the_index_never_calls_dash_s_card_builder(self) -> None:
+        """Dash's builder calls the registry's title, which follow_validation wraps to
+        read the snapshot: the index's one snapshot read would become two (#325)."""
+        tree = ast.parse(Path(appmod.__file__).read_text(encoding="utf-8"))
+        names = {
+            node.id if isinstance(node, ast.Name) else node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name | ast.Attribute)
+        } | {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        assert "_page_meta_tags" not in names
 
     def test_pages_meta_is_off_so_dash_adds_no_second_set(self) -> None:
         assert appmod.app.config.include_pages_meta is False
+
+    def test_the_router_reads_the_registry_title_per_request_after_the_layout(
+        self, register: Callable[..., dict[str, Any]]
+    ) -> None:
+        """follow_validation (#325) relies on both: the wrapper put in the registry is
+        what the router calls, and a layout's fill on a miss has landed by then."""
+        events: list[str] = []
+
+        def layout(**_q: Any) -> Any:
+            events.append("layout")
+            return dash.html.P("x")
+
+        def title(**_q: Any) -> str:
+            events.append("title")
+            return "first"
+
+        page = register("fake_order", path="/fake-order", layout=layout, title=title)
+        assert store_title(route("/fake-order")) == "first"
+        assert events == ["layout", "title"]
+        page["title"] = lambda **_q: "replaced"
+        assert store_title(route("/fake-order")) == "replaced"
+
+    def test_the_client_sets_the_tab_from_the_router_s_title(self) -> None:
+        """The browser tab is the router's title (Dash's clientside callback), with no
+        "Updating…" title between: the tab half of #325 rests on both."""
+        _, _, body = get("/")
+        assert "document.title = data.title" in body
+        assert appmod.app.config.update_title is None
 
 
 class TestDarkThemeVariables:
@@ -2446,7 +2707,9 @@ def coverage_problems(
     if client.views > 1:  # each view pins its own snapshot: one render, one view
         problems.append(f"opened {client.views} views")
     marker = page.get("success")
-    if not marker:
+    if appmod.is_not_found_page(page):
+        pass  # reads no data, so it has no success to mark (#325)
+    elif not marker:
         problems.append("no success marker declared")
     elif marker not in component_ids(rendered):
         problems.append(f"success marker {marker!r} not rendered")
@@ -2672,6 +2935,8 @@ PAGE_API_NAMES = {
     "CANDIDATES_PATH",
     "Validate",
     "accepted",
+    # A constant pair a page registers as ``not_found=`` (#325); reads nothing.
+    "NotFound",
     # Pure functions of a body the page already read through its view.
     "coverage_vars",
     "roster",
