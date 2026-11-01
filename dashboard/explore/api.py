@@ -67,8 +67,8 @@ templates of the page's path variables or of :data:`COVERAGE_VARS`, such as
 ``TestRegistryCoverage`` checks every read a page's layout makes against these
 declarations, and the D070(b) guard in ``test_dashboard_guards.py`` asserts each page's
 success marker. A templated page also registers ``validate=(source, judge)``
-(:data:`Validate`) and calls :func:`accepted` before formatting a path variable into an
-API path, and ``not_found=`` its :class:`NotFound`; a page that reads filters registers
+(:data:`Validate`) and ``not_found=`` its :class:`NotFound`, and calls :func:`accepted`
+before formatting a path variable into an API path; a page that reads filters registers
 ``query=`` its parser. ``app.py`` uses them for the canonical link, ``og:url``, the 404
 (#312) and the not-found title (#325).
 """

@@ -624,8 +624,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Not-found state (a link the dataset does not serve)
 - **Plain:** What a page says when its link names a year, a state code or a candidate link this
-  dataset does not serve. Its heading, the browser tab and a shared link's preview say the same
-  thing: that the election, state or candidate was not found.
+  dataset does not serve. Its heading and the browser tab say that the election, state or
+  candidate was not found, and so does a shared link's preview once the site has checked the
+  link; before that, the preview names no year, state or candidate.
 - **Precise:** Rendered when a page's `validate` judge refuses its path value (D073, D074). It
   never repeats the value and fills nothing built from it. Candidate links match exactly, so a
   listed slug in another letter case is refused too. "Not found" is about the link: it never
@@ -863,7 +864,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
   and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or,
   on the degraded state, "State history" (a literal in `layout` there); in `pages/state.py`, the
-  page's title (`title`, which names at most the code, never the name, and only once the index has
+  page's lede (`LEDE`), its title (`title`, which names at most the code, never the name, and only once the index has
   checked it), its link-preview `description` and T4's download name (`"this state's history"`);
   its not-found state (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link
   to `/states`, in `pages/state.py`); and the home page's lede and its "Browse by state" link

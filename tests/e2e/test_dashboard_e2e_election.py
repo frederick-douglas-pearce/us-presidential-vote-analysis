@@ -58,15 +58,37 @@ def test_the_later_link_opens_the_next_election_and_back_returns(page: Page) -> 
 @pytest.mark.expected_console_error(
     "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
 )
-def test_an_unserved_year_reads_as_not_found_in_the_tab_and_the_page(
-    page: Page,
-) -> None:
-    """#325: Dash's client router sets the tab from the page's title after the layout
-    ran, so only a browser shows that the tab follows the year's validation. The
-    document's own 404 is the one console error, and the guard requires it."""
+def test_an_unserved_year_loads_as_a_404_with_its_not_found_heading(page: Page) -> None:
+    """#325: a shared link to an unserved year, opened directly. The document's own 404
+    is the one console error, and the guard requires it exactly once. The title here
+    is the server's ``<title>``, which the router's title then matches; the next test
+    is what shows the tab following the router."""
     not_found = dash.page_registry["pages.election"]["not_found"]
     response = page.goto("/election/1825")
     assert response is not None and response.status == 404
     expect(page.get_by_role("heading", level=1)).to_have_text(not_found.heading)
     expect(page).to_have_title(not_found.title)
     expect(page.locator("#election-not-found")).to_contain_text(not_found.sentence)
+
+
+def test_the_tab_follows_the_router_to_an_unserved_year(page: Page) -> None:
+    """#325: the tab follows the year's validation, not the server's ``<title>``. From
+    a served year, whose tab names it, a client-side navigation (as a ``dcc.Link``
+    makes one: ``pushState``, then Dash's ``_dashprivate_pushstate`` event) loads no
+    document, so only Dash's router, through ``follow_validation``'s title, can change
+    the tab to the unserved year's not-found title."""
+    not_found = dash.page_registry["pages.election"]["not_found"]
+    earlier, _ = step_years()
+    page.goto(f"/election/{earlier}")
+    assert_year(page, earlier)
+    expect(page).to_have_title(re.compile(re.escape(f"The {earlier} election")))
+    page.evaluate("window.__e2e_mark = 1")
+    page.evaluate(
+        """() => {
+            window.history.pushState({}, "", "/election/1825");
+            window.dispatchEvent(new CustomEvent("_dashprivate_pushstate"));
+        }"""
+    )
+    expect(page.get_by_role("heading", level=1)).to_have_text(not_found.heading)
+    expect(page).to_have_title(not_found.title)
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load in between

@@ -257,9 +257,12 @@ def resolve(
     Dash's router matches the browser's still-encoded ``location.pathname``, so a path
     that decoding changes would match differently there; no page path needs an escape,
     so such a path is junk and is not found. Its title is the not-found state of the
-    page the raw path matches, which is the one the router renders (a ``%`` passes no
-    page's path-variable pattern), else the custom-404 page's: the raw path only
-    chooses which constant, and its variables reach no title. ``snapshot`` is read
+    page the raw path matches, else the custom-404 page's: Dash's matcher passes a
+    ``%``, and that page's ``validate`` judge refuses it, so the router renders that
+    page's not-found state once its source is read (with the source cold and the API
+    down it renders the degraded state instead, under this 404's title: accepted,
+    D083). The raw path only chooses which constant, and its variables reach no
+    title. ``snapshot`` is read
     once by the caller and never waited on: a page's ``validate`` source missing from
     it counts as matched, never as rejected, and the title then names no value.
     """

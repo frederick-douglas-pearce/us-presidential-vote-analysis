@@ -5767,7 +5767,13 @@ in the dashboard's request logs).
 - **Accepted:** two windows, both only during a snapshot swap. A swap between the layout and the
   title gives the generic title over a not-found body; a fill on a miss that names the new
   version degrades the page while the tab reads "… not found". A degraded render of an accepted
-  value keeps that value's title over the degraded heading, as before.
+  value keeps that value's title over the degraded heading, as before. A percent-encoded path's
+  404 carries its matched page's not-found title even when the render degrades (its source cold
+  and the API down): the status and the title still agree, and routing the encoded branch
+  through the check instead would pass raw-path variables to a judge and put a generic card over
+  the common cold-but-up not-found body (#325's scope ruling).
+- **Not taken here:** refusing a value by its shape before the source is cached (`/state/ga`
+  while the roster is cold answers 200 with the generic title); filed as #422.
 
 **Rationale.** One rule, decided in one place for the index and judged by the same helper for
 the router, keeps the three title surfaces from disagreeing; constants keep a not-found title
@@ -5775,6 +5781,6 @@ total and free of request text. Naming no value before the check keeps D071(g)'s
 never waits on the API, at the cost of a generic preview title for a valid state or candidate
 link while its source is cold.
 
-**Related:** D071, D073, D081, #312, #325.
+**Related:** D071, D073, D081, #312, #325, #422.
 
 ---

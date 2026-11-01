@@ -1047,7 +1047,9 @@ class TestNotFoundTitle:
         [
             p["module"]
             for p in validated_pages()
-            if p["validate"][0] != api.ELECTIONS_PATH  # always prefetched: never cold
+            # A prefetched source is cold only before the first snapshot, which
+            # test_before_the_first_snapshot_no_title_names_a_value covers.
+            if p["validate"][0] != api.ELECTIONS_PATH
         ],
     )
     def test_a_cold_source_names_no_value_then_the_fill_refuses_it(
@@ -1089,15 +1091,31 @@ class TestNotFoundTitle:
         assert status == 200
         assert page_title(body) == own
         assert head.one("meta", "property", "og:title", "content") == own
-        assert store_title(route(concrete)) == own
+        routed = route(concrete)
+        assert store_title(routed) == own
+        assert has_lede(routed)  # so the not-found test's "no lede" can fail
 
-    @pytest.mark.parametrize("path", ["/no-such-view", "/election", "/%2F"])
-    def test_a_path_no_page_matches_reads_page_not_found(self, path: str) -> None:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/no-such-view",
+            "/election",
+            "/%2F",
+            # Raw, it matches no page; decoded, it is /election/1825. The router
+            # matches the raw path, so the title must come from the raw match.
+            "/election%2F1825",
+        ],
+    )
+    def test_a_path_no_page_matches_reads_page_not_found(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
         not_found: api.NotFound = appmod.NOT_FOUND_PAGE["not_found"]
+        cached_client(monkeypatch)
         status, head, body = get(path)
         assert status == 404
         assert page_title(body) == not_found.title
         assert head.one("meta", "property", "og:title", "content") == not_found.title
+        assert "page-not-found" in routed_ids(route(path))
 
     def test_the_404_page_s_body_and_tab_read_as_its_title(self) -> None:
         not_found: api.NotFound = appmod.NOT_FOUND_PAGE["not_found"]
@@ -1133,6 +1151,66 @@ class TestNotFoundTitle:
         assert title == FAKE_NOT_FOUND.title
         assert page["title"](year="1824") == "Election 1824"
         assert page["title"]() == "Election None"  # no variables: its own title
+
+    @pytest.mark.parametrize("value", [None, "", ["x"], "<script>", HOSTILE, "unserved"])
+    @pytest.mark.parametrize("state", ["warm", "no snapshot", "source cold"])
+    @pytest.mark.parametrize("module", [p["module"] for p in validated_pages()])
+    def test_every_real_page_s_registry_title_is_total_and_names_no_refused_value(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        module: str,
+        state: str,
+        value: Any,
+    ) -> None:
+        """AC3 on the title Dash's router calls (the registry's, which
+        follow_validation wraps), for every validated page, its source warm, before
+        any snapshot, and with only the index cached. Called directly, so the
+        unchecked branch is reached without a failing fill."""
+        page = dash.page_registry[module]
+        (var,) = re.findall(r"<(.*?)>", page["path_template"])
+        if value == "unserved":
+            value = UNSERVED_VALUES[var]
+        if state == "warm":
+            cached_client(monkeypatch, source=page["validate"][0])
+        elif state == "source cold":
+            client, _, _ = cached_client(monkeypatch)
+            assert client.snapshot is not None
+            if page["validate"][0] == api.ELECTIONS_PATH:
+                pytest.skip("its source is the prefetched index: cached with it")
+        else:
+            client = offline_client()
+            client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+            monkeypatch.setattr(api, "CLIENT", client)
+            assert api.CLIENT.snapshot is None
+        title = page["title"](**{var: value})
+        generic = appmod.page_text(page, "title", None)
+        assert isinstance(title, str)
+        assert title in {page["not_found"].title, generic}
+        if isinstance(value, str) and value:
+            assert value not in title.replace(SITE_TITLE, "")
+        if state != "warm" and api.well_formed({var: value}):
+            assert title == generic  # unchecked: the page's own, with no variables
+
+    @pytest.mark.parametrize("module", [p["module"] for p in validated_pages()])
+    def test_before_the_first_snapshot_no_title_names_a_value(
+        self, monkeypatch: pytest.MonkeyPatch, module: str
+    ) -> None:
+        """Every validated page, the election page included: with no snapshot yet,
+        a served or unserved value answers 200 with the page's generic title."""
+        page = dash.page_registry[module]
+        client = offline_client()
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setattr(api, "CLIENT", client)
+        assert api.CLIENT.snapshot is None
+        generic = appmod.page_text(page, "title", None)
+        (var,) = re.findall(r"<(.*?)>", page["path_template"])
+        for values in (PATH_VALUES, UNSERVED_VALUES):
+            concrete = page["path_template"].replace(f"<{var}>", values[var])
+            status, head, body = get(concrete)
+            assert status == 200, concrete
+            assert page_title(body) == generic
+            assert head.one("meta", "property", "og:title", "content") == generic
+            assert not any(v in generic for v in values.values()), generic
 
     def test_follow_validation_is_idempotent(
         self, register: Callable[..., dict[str, Any]]

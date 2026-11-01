@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -35,17 +36,18 @@ START_TIMEOUT_S = 60.0
 POLL_INTERVAL_S = 0.2
 STOP_TIMEOUT_S = 5.0
 
-#: The marker a test names one console error it causes on purpose with, in full, so
-#: the guard below lets that one message through and no other (#325: a page whose
-#: own document answers 404 logs Chrome's resource error).
+#: The marker a test names a console error it causes on purpose with, in full, once per
+#: occurrence: the guard below requires the test's console errors to be exactly the
+#: named ones, each as many times as it is named, and no other (#325: a page whose own
+#: document answers 404 logs Chrome's resource error once).
 EXPECTED_CONSOLE_ERROR = "expected_console_error"
 
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        f"{EXPECTED_CONSOLE_ERROR}(text): one console error a browser test causes on "
-        "purpose, matched in full",
+        f"{EXPECTED_CONSOLE_ERROR}(text): one occurrence of a console error a browser "
+        "test causes on purpose, matched in full",
     )
 
 
@@ -134,8 +136,8 @@ def _browser_guard(
     context: BrowserContext, page: Page, request: pytest.FixtureRequest
 ) -> Iterator[None]:
     """Fails the test on any request off the loopback host or any console error,
-    except the ones it names with :data:`EXPECTED_CONSOLE_ERROR`, each of which must
-    then occur.
+    except the ones it names with :data:`EXPECTED_CONSOLE_ERROR`, which must then occur
+    exactly as many times as they are named.
 
     The route is on the context, so it covers every page the test opens. It sees only
     what the browser requests; ``serve.py``'s audit hook covers the server.
@@ -156,11 +158,12 @@ def _browser_guard(
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
     assert not off_host, f"requests off the loopback host: {off_host}"
-    expected = [
+    expected = Counter(
         marker.args[0]
         for marker in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)
-    ]
-    missing = [text for text in expected if text not in errors]
-    assert not missing, f"expected console errors that did not occur: {missing}"
-    unexpected = [text for text in errors if text not in expected]
-    assert not unexpected, f"console errors: {unexpected}"
+    )
+    seen = Counter(errors)
+    # Counted, so a second error with an expected text (another 404) fails too.
+    assert seen == expected, (
+        f"console errors: {dict(seen)}; expected exactly: {dict(expected)}"
+    )
