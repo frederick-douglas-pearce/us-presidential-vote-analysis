@@ -1,0 +1,130 @@
+# The governing census: sources and checks
+
+Each per-capita row reads the population of one census, its **governing census**
+(`governing_census_year`): the census whose apportionment of House seats was in force at the
+election. The dashboard explains the choice in one line under each per-capita table,
+`labels.GOVERNING_CENSUS_NOTE`:
+
+> Each election uses the census that set the state's electoral votes, not the nearest one: 2020
+> uses the 2010 census, and 1924 and 1928 use 1910, because Congress did not redistribute House
+> seats after the 1920 census.
+
+This page records the sources for that note and the check of the pipeline's election → census
+mapping (`GOVERNING_CENSUS_BY_ELECTION` in `src/usvote/apportionment.py`) against them, so the
+research is not repeated (#356). Checked 2026-11-02.
+
+## Findings
+
+| Claim in the note | Finding | Sources |
+|---|---|---|
+| Congress did not redistribute House seats after the 1920 census. | **Confirmed.** No apportionment act followed the 1920 census, the only census in US history without one. The next apportionment came under the act of June 18, 1929, which made reapportionment automatic from the 1930 census. | [1] note 2; [2]; [3] |
+| 1924 and 1928 use the 1910 census. | **Confirmed.** The 1910 census was apportioned by the act of August 8, 1911, effective after March 3, 1913, and stayed in force until the 1930 census's apportionment. Every state's allotment is the same in 1912, 1916, 1920, 1924 and 1928. | [1] note 2; [4]; this dataset (below) |
+| 2020 uses the 2010 census. | **Confirmed.** A census's apportionment takes effect with the Congress that begins in January of the year ending in 3, so the 2010 census set the 2012, 2016 and 2020 allotments, and the 2020 census's first set 2024. | [5]; [6]; [7]; this dataset |
+| Each election uses the census that set the state's electoral votes. | **True for every state-year except those below.** 2,152 of the 2,174 non-zero state allotments outside DC equal two plus the House seats apportioned from the governing census. The others had their seats set some other way (next section). For those rows the governing census is still the census whose apportionment was in force, but it did not set that state's electoral votes. | [1] notes 3, 5, 7; [8] |
+
+The note's three examples stand. Its opening clause overstates for the rows in the next section;
+rewording it is #423 (owner decision, 2026-11-02, at #356's acceptance-criterion 4).
+
+## Where a census did not set a state's electoral votes
+
+A state's electoral votes equal its senators plus its representatives (U.S. Const. art. II, § 1,
+cl. 2; 3 U.S.C. § 3), so a census sets them through the House apportionment. Three kinds of row
+take their seats from somewhere else:
+
+- **States admitted between censuses (22 state-years).** "As new states joined the Union, the
+  House assigned a specific number of Representatives to that state," and the next census's
+  apportionment replaced it ([1] note 3). Arkansas and Michigan 1836 and 1840; Florida, Iowa,
+  Texas and Wisconsin 1848; Minnesota and Oregon 1860; Nevada 1864 and 1868; Nebraska 1868;
+  Colorado 1876 and 1880; Utah 1896 and 1900; Oklahoma 1908 (five seats, [5] note 3); Alaska and
+  Hawaii 1960 (one seat each, [5] note 1). West Virginia 1864 and 1868 belongs here too: its three
+  seats came out of Virginia's 1860 allotment when it was formed in 1863 ([1] note 7).
+- **California, 1852–1860.** Its 1850 census returns were incomplete when the apportionment law
+  passed in 1852, so Congress allowed it two representatives, "as prescribed in the act of
+  admission," until the next census ([1] note 5). The Historian's table lists those two seats under
+  1850, so the comparison above counts these rows as matches.
+- **The District of Columbia, from 1964.** Its electors are set by the Twenty-third Amendment: as
+  many as it would have if it were a state, but no more than the least populous state ([8]). No
+  census apportionment sets them.
+
+These rows still show the population of the census whose apportionment was in force, where it
+has one. Texas 1848 has none: Texas was not part of the United States at the 1840 census, so the
+row carries no population (`no_governing_figure`).
+
+Arizona and New Mexico (1912) are not exceptions: the 1911 act provided their seats in advance of
+admission ([1] note 4; [3]).
+
+## Each census and the first election it governed
+
+The first election a census governed is the first one at which the allotments it set appear. In
+this dataset every change in a state's allotment, between two elections at which it had one,
+falls on an election in this table's third column, or on the first election after it at which a
+state that had none took part again (1868 and 1872, after the Civil War). No allotment changes
+at any other election.
+
+| Census | Apportionment | First election governed | Elections governed |
+|---|---|---|---|
+| 1820 | Act of March 7, 1822 | 1824 | 1824, 1828 |
+| 1830 | Act of May 22, 1832 | 1832 | 1832–1840 |
+| 1840 | Act of June 25, 1842 | 1844 | 1844, 1848 |
+| 1850 | Act of May 23, 1850 (amended 1852) | 1852 | 1852–1860 |
+| 1860 | Act of March 4, 1862 | 1864 | 1864, 1868 |
+| 1870 | Acts of February 2 and May 30, 1872 | 1872 | 1872–1880 |
+| 1880 | Act of February 25, 1882 | 1884 | 1884, 1888 |
+| 1890 | Act of February 7, 1891 | 1892 | 1892–1900 |
+| 1900 | Act of January 16, 1901 | 1904 | 1904, 1908 |
+| 1910 | Act of August 8, 1911 | 1912 | 1912–1928 |
+| 1920 | none | — | — |
+| 1930 | Automatic, act of June 18, 1929 | 1932 | 1932–1940 |
+| 1940 onward | Automatic (2 U.S.C. § 2a; method set by the act of November 15, 1941) | the census year plus 2 or 4: 1944, 1952, 1964, 1972, 1984, 1992, 2004, 2012, 2024 | through the next census's first election |
+
+Act dates are as the Census Bureau lists them ([3], [9], [10]). 1824 is the first election in this
+dataset.
+
+## How the mapping was checked
+
+`governing_census_year` returns the latest census at or before two years before the election
+that produced an apportionment, skipping 1920. The check, run 2026-11-02 against the API snapshot
+built 2026-10-21 (read only):
+
+1. **Mapping.** Every one of the 2,204 per-capita rows carries the census
+   `GOVERNING_CENSUS_BY_ELECTION` gives for its year: 0 disagreements over 51 elections, 1824–2024.
+2. **Change years.** For each state, comparing each non-zero allotment with its previous
+   non-zero one, the changes fall at 1832, 1844, 1852, 1864, 1872, 1884, 1892, 1904, 1912, 1932,
+   1944, 1952, 1964, 1972, 1984, 1992, 2004, 2012 and 2024, each the first election after an
+   apportioning census. The only others are seven states at 1868 and three at 1872 whose previous
+   allotment was 1860's: each had none in between, so its first 1860-census allotment shows at
+   its return. No allotment changes in 1916–1928.
+3. **Per state-year.** Each non-zero allotment outside DC was compared with two plus the seats
+   the House Historian's table ([1], transcribed by hand; every column sums to the table's Total
+   row) gives the state under its governing census. 2,152 of 2,174 match; the 22 that do not are
+   exactly the admission-act rows listed above. The 14 zero-allotment rows (eleven states in 1864,
+   and Mississippi, Texas and Virginia in 1868) were left out.
+
+The mapping agrees with the findings for every election year, so nothing was filed against it.
+The unit test `tests/unit/test_apportionment.py` pins the same mapping year by year.
+
+## Sources
+
+1. Office of the Historian, U.S. House of Representatives. "Representatives Apportioned to Each
+   State (1st to 24th Census, 1790–2020)." <https://history.house.gov/Institution/Apportionment/state_apportionment_pdf_2021/>
+   (linked from <https://history.house.gov/Institution/Apportionment/Apportionment/>).
+2. Office of the Historian, U.S. House of Representatives. "The Permanent Apportionment Act of
+   1929." <https://history.house.gov/Historical-Highlights/1901-1950/The-Permanent-Apportionment-Act-of-1929/>
+3. U.S. Census Bureau. "Apportionment Legislation 1890 – Present."
+   <https://www.census.gov/about/history/historical-censuses-and-surveys/census-programs-surveys/decennial-census/legislation-1890-present.html>
+4. Act of August 8, 1911, ch. 5, 37 Stat. 13 (Pub. L. 62-5), § 1: "after the third day of March,
+   nineteen hundred and thirteen." <https://www.govinfo.gov/link/statute/37/13>
+5. U.S. Census Bureau. "Congressional Apportionment: Historical Apportionment Data (1910–2020)."
+   <https://www.census.gov/data/tables/time-series/dec/apportionment-data-text.html>
+6. National Archives. "Distribution of Electoral Votes" (U.S. Electoral College): "The
+   allocations below are based on the 2020 Census. They are effective for the 2024 and 2028
+   presidential elections." <https://www.archives.gov/electoral-college/allocation>
+7. 2 U.S.C. § 2a (act of June 18, 1929, ch. 28, § 22, 46 Stat. 26; amended November 15, 1941,
+   ch. 470, 55 Stat. 761), and Congressional Research Service, *Apportionment and Redistricting
+   Process for the U.S. House of Representatives*, R45951. <https://www.law.cornell.edu/uscode/text/2/2a>
+8. U.S. Const. amend. XXIII, § 1 (ratified March 29, 1961).
+   <https://www.archives.gov/founding-docs/amendments-11-27>
+9. U.S. Census Bureau. "Apportionment Legislation 1790 – 1830."
+   <https://www.census.gov/about/history/historical-censuses-and-surveys/census-programs-surveys/decennial-census/legislation-1790-1830.html>
+10. U.S. Census Bureau. "Apportionment Legislation 1840 – 1880."
+    <https://www.census.gov/about/history/historical-censuses-and-surveys/census-programs-surveys/decennial-census/legislation-1840-1880.html>
