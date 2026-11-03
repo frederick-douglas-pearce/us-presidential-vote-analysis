@@ -250,9 +250,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   1913, yet 1912's electors follow the 1910 apportionment. Nor is it the nearest census. By the
   proviso, 2020 reads 2010 (the 2020 census was apportioned in 2021, after electors were
   chosen), and 1924 and 1928 read 1910 (Congress made no apportionment after the 1920 census, the
-  only census without one). Since the act of June 18, 1929, each census is apportioned without a
-  new act of Congress; the 1930 census was the first apportioned that way, and 1932 the first
-  election its apportionment set. `governing_census_year` in `src/usvote/apportionment.py`
+  only census without one). The act of June 18, 1929 provided for
+  apportioning each census; the 1930 census was the first apportioned under it, and 1932 the first
+  election its apportionment set. The 1940 census's seats were fixed by a further act, of November
+  15, 1941, which also amended the 1929 act so that each later census is apportioned without a new
+  act of Congress. `governing_census_year` in `src/usvote/apportionment.py`
   computes the year: the latest census, taken at least two years before the election, that
   produced an apportionment, which skips 1920. `GOVERNING_CENSUS_BY_ELECTION` is that function
   over every election in the dataset. This is the vintage axis of D066(b): which census supplies

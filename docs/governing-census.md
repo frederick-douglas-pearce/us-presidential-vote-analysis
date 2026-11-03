@@ -22,7 +22,7 @@ mapping against them, so the research is not repeated (#356). Checked 2026-11-02
 
 | Claim in the note | Finding | Sources |
 |---|---|---|
-| Congress did not redistribute House seats after the 1920 census. | **Confirmed.** No apportionment act followed the 1920 census, the only census in US history without one. The next apportionment came under the act of June 18, 1929, which made reapportionment automatic from the 1930 census. | [1] note 2; [2]; [3] |
+| Congress did not redistribute House seats after the 1920 census. | **Confirmed.** No apportionment act followed the 1920 census, the only census in US history without one. The next apportionment came under the act of June 18, 1929, which provided for apportioning each census; the 1930 census was the first apportioned under it. | [1] note 2; [2]; [3] |
 | 1924 and 1928 use the 1910 census. | **Confirmed.** With no apportionment after the 1920 census, electors were chosen in 1924 and 1928 under the existing one, the 1910 census's (the act of August 8, 1911). Every state's allotment is the same in 1912, 1916, 1920, 1924 and 1928. | [1] note 2; [4]; [11]; [12]; this dataset (below) |
 | 2020 uses the 2010 census. | **Confirmed.** The President transmits each apportionment at the first regular session of the Eighty-second Congress (1951) "and of each fifth Congress thereafter", so the 2020 census's came in 2021, after the 2020 electors were chosen. 2020 therefore used the existing 2010 apportionment, which had set 2012 and 2016 as well; the 2020 census's first set 2024. | [6]; [7]; [12]; this dataset |
 | Each election uses the census that set the state's electoral votes. | **True for every state-year except those in the next section.** 2,152 of the 2,174 non-zero state allotments outside DC equal two plus the House seats apportioned from the governing census. The other 22 are the admission rows and West Virginia's two rows listed below. California 1852–1860 matches the table, but its seats came from its admission act; DC is outside the count. For all of these the governing census is still the census of the latest apportionment, but it did not set that state's electoral votes. | [1] notes 3, 5, 7; [8] |
@@ -36,15 +36,16 @@ A state's electoral votes equal its senators plus its representatives (U.S. Cons
 cl. 2; [11]; [12]), so a census sets them through the House apportionment. Some rows take their
 seats from somewhere else:
 
-- **A state at the elections between its admission and the next census's apportionment (20
-  state-years).** "As new states joined the Union, the House assigned a specific number of
+- **A state at the elections before the first apportionment that included it, with the seats
+  the House assigned at its admission (20 state-years).** "As new states joined the Union, the House assigned a specific number of
   Representatives to that state," and the next census's apportionment replaced it ([1] note 3).
   Arkansas and Michigan 1836 and 1840; Florida, Iowa, Texas and Wisconsin 1848; Minnesota and
   Oregon 1860; Nevada 1864 and 1868; Nebraska 1868; Colorado 1876 and 1880; Utah 1896 and 1900;
   Oklahoma 1908 (five seats, [5] note 3); Alaska and Hawaii 1960 (one seat each, [5] note 1).
 - **West Virginia, 1864 and 1868 (2 state-years).** When it was formed in 1863 it was assigned
-  three of Virginia's 1860 seats ([1] note 7), so these rows match no census's figure for West
-  Virginia.
+  three of Virginia's 1860 seats ([1] note 7), and the first apportionment that included it was
+  the 1870 census's. So these rows match no West Virginia figure under their governing (1860)
+  census; the Historian's table first lists West Virginia under 1870.
 - **California, 1852–1860.** Its 1850 census returns were incomplete when the apportionment law
   passed in 1852, so Congress allowed it two representatives, "as prescribed in the act of
   admission," until the next census ([1] note 5). The Historian's table lists those two seats under
@@ -64,8 +65,8 @@ admission ([1] note 4; [3]).
 
 The first election a census governed is the first one at which the allotments it set appear. In
 this dataset every change in a state's allotment, between two elections at which it had one,
-falls on an election in this table's third column, or on 1868, when seven states that had none in
-1864 took part again after the Civil War. No allotment changes at any other election.
+falls on an election in this table's third column, or on 1868, when eight states that had none in
+1864 took part again after the Civil War (seven of them with a changed allotment). No allotment changes at any other election.
 
 | Census | Apportionment | First election governed | Elections governed |
 |---|---|---|---|
@@ -80,8 +81,9 @@ falls on an election in this table's third column, or on 1868, when seven states
 | 1900 | Act of January 16, 1901 | 1904 | 1904, 1908 |
 | 1910 | Act of August 8, 1911 | 1912 | 1912–1928 |
 | 1920 | none | — | — |
-| 1930 | Automatic, act of June 18, 1929 | 1932 | 1932–1940 |
-| 1940 onward | Automatic (2 U.S.C. § 2a; method set by the act of November 15, 1941) | the census year plus 2 or 4: 1944, 1952, 1964, 1972, 1984, 1992, 2004, 2012, 2024 | until the next census's first election |
+| 1930 | Under the act of June 18, 1929 | 1932 | 1932–1940 |
+| 1940 | Act of November 15, 1941, which fixed the seats by the method of equal proportions (2 U.S.C. § 2b) | 1944 | 1944, 1948 |
+| 1950 onward | Automatic (2 U.S.C. § 2a, as amended by the act of November 15, 1941) | the census year plus 2 or 4: 1952, 1964, 1972, 1984, 1992, 2004, 2012, 2024 | until the next census's first election |
 
 Act dates are as the Census Bureau lists them ([3], [9], [10]). 1824 is the first election in this
 dataset.
@@ -99,8 +101,9 @@ at or before two years before the election, that produced an apportionment, so 1
 2. **Change years.** For each state, comparing each non-zero allotment with its previous
    non-zero one, the changes fall at 1832, 1844, 1852, 1864, 1872, 1884, 1892, 1904, 1912, 1932,
    1944, 1952, 1964, 1972, 1984, 1992, 2004, 2012 and 2024, each the first election after an
-   apportioning census. The only other is 1868, for seven states that had no allotment in 1864: the
-   1860 census's allotment is their first since 1860's. Mississippi, Texas and Virginia also had
+   apportioning census. The only other is 1868: eight states that had no allotment in 1864 took
+   part again, and for seven of them the 1860 census's allotment differs from their 1860 election
+   allotment (Florida's is unchanged). Mississippi, Texas and Virginia also had
    none in 1868 and returned in 1872, on the 1870 census's allotment. No allotment changes in
    1916–1928.
 3. **Per state-year.** Each non-zero allotment outside DC was compared with two plus the seats
@@ -113,7 +116,7 @@ The mapping agrees with the findings for every election year, so nothing was fil
 Two tests already pin it: `test_the_mapping_matches_the_hand_written_oracle` in
 `tests/unit/test_apportionment.py` (every election, against a hand-written list), and
 `test_the_allotment_change_years_match_this_mapping` in `tests/integration/test_census_conform.py`
-(check 2, against `dwh.votes`).
+(the change years over 1908–1936, the span around the 1920 gap, against `dwh.votes`).
 
 ## Sources
 
@@ -125,7 +128,8 @@ Two tests already pin it: `test_the_mapping_matches_the_hand_written_oracle` in
 3. U.S. Census Bureau. "Apportionment Legislation 1890 – Present."
    <https://www.census.gov/about/history/historical-censuses-and-surveys/census-programs-surveys/decennial-census/legislation-1890-present.html>
 4. Act of August 8, 1911, ch. 5, 37 Stat. 13 (Pub. L. 62-5), § 1: "after the third day of March,
-   nineteen hundred and thirteen." <https://www.govinfo.gov/link/statute/37/13>
+   nineteen hundred and thirteen, the House of Representatives shall be composed of four hundred
+   and thirty-three Members". <https://www.govinfo.gov/link/statute/37/13>
 5. U.S. Census Bureau. "Congressional Apportionment: Historical Apportionment Data (1910–2020)."
    <https://www.census.gov/data/tables/time-series/dec/apportionment-data-text.html>
 6. National Archives. "Distribution of Electoral Votes" (U.S. Electoral College): "The
@@ -147,7 +151,7 @@ Two tests already pin it: `test_the_mapping_matches_the_hand_written_oracle` in
     President and Vice President, thus to be chosen, should come into office: Provided always,
     That where no apportionment of Representatives shall have been made after any enumeration, at
     the time of choosing electors, then the number of electors shall be according to the existing
-    apportionment." <https://www.govinfo.gov/link/statute/1/239> (text as transcribed at
+    apportionment of Senators and Representatives." <https://www.govinfo.gov/link/statute/1/239> (text as transcribed at
     <https://en.wikisource.org/wiki/Presidential_Succession_Act_1792>).
 12. 3 U.S.C. § 3 (June 25, 1948, ch. 644, 62 Stat. 672), which carries the same rule and
     proviso today. <https://www.law.cornell.edu/uscode/text/3/3>
