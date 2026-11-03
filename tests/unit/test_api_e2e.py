@@ -202,7 +202,8 @@ def test_the_per_candidate_hybrid_fields_reach_the_summary_rows(
         ):
             assert field in row, f"{field} must surface on the summary row"
             assert row[field] is not None
-        # The D037/A safety property, visible to a consumer.
+        # The D037/A safety property, visible to a consumer. The dashboard's T3 shows
+        # only ec_share_full beside hybrid_score and relies on it (#358, D084).
         assert row["ec_share_full"] == row["ec_share_hybrid"]
         # The hybrid really is the average of the two ratios, not a ratio of sums.
         assert row["hybrid_score"] == pytest.approx(

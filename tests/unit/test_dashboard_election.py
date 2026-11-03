@@ -1,5 +1,5 @@
 """The one-election view, T2 and T3 (#307), T6, every state's persons per electoral
-vote (#280), and the election panel with T3's hybrid columns (#308).
+vote (#280), and the election panel with T3's hybrid column (#308).
 
 Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872,
 2016 and 2024, and ``/v1/elections/{year}/per-capita`` for those years and 1848 and 1864
@@ -487,7 +487,7 @@ class TestHeaders:
             "population": "Population (from that census)",
             "boundary_basis": "Borders used",
             "persons_per_electoral_vote": "People per electoral vote",
-            # The election panel and T3's hybrid columns (#308), approved 2026-10-08;
+            # The election panel and T3's hybrid column (#308), approved 2026-10-08;
             # the winner and flip rows reworded to the glossary (#352). ``ec_winner``'s
             # is the label with no ``ec_determinative`` in hand; the panel's follows it
             # (#355, ``TestEcWinnerLabel``).
@@ -1929,7 +1929,7 @@ class TestPerCapitaCells:
         assert labels.per_capita_coverage(value) == labels.NOT_IN_DATASET
 
 
-# --- the election panel and T3's hybrid columns (#308) --------------------------------
+# --- the election panel and T3's hybrid column (#308) ---------------------------------
 
 PANEL = MOD["PANEL_ID"]
 PANEL_FIELDS: tuple[str, ...] = MOD["PANEL_FIELDS"]
@@ -2429,24 +2429,23 @@ class TestWordingRules:
         )
 
     def test_the_approved_notes_are_pinned(self) -> None:
-        """Approved by the owner in place on the #352 branch deploy: pinned as shipped,
-        so a reword is a deliberate change here, and the panel's every fixed string
-        stays pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
+        """Approved by the owner: ``MARGIN_NOTE`` in place on the #352 branch deploy
+        (2026-10-12), ``UNRECOGNIZED_NOTE`` at #354's plan gate (2026-10-15). Pinned as
+        shipped, so a reword is a deliberate change here, and the panel's every fixed
+        string stays pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
         assert labels.MARGIN_NOTE == (
             "A margin is the gap, in percentage points, between the first- and "
             "second-place candidates under that method. Each method ranks the "
             "candidates on its own."
         )
-        # Drafted with the glossary (#355); approved at #354's plan gate.
+        # Drafted with the glossary (#355); approved at #354's plan gate, 2026-10-15.
         assert labels.UNRECOGNIZED_NOTE == (
             "This dataset holds a value that this page has no label for."
         )
 
-    def test_the_approved_notes_show_where_they_explain(self) -> None:
-        tree = render(1872)
-        panel_notes = [p.children for p in of_type(find(tree, PANEL), "P")]
+    def test_the_margin_note_shows_in_the_panel(self) -> None:
+        panel_notes = [p.children for p in of_type(find(render(1872), PANEL), "P")]
         assert labels.MARGIN_NOTE in panel_notes
-        assert labels.HYBRID_NOTE in panel_notes
 
     def test_the_footer_names_the_data_version(self) -> None:
         footer = find(render(1872), components.SNAPSHOT_ID)
@@ -2680,9 +2679,12 @@ class TestT3Hybrid:
         assert grant["hybrid_score"] == labels.NO_NATIONAL_FIGURE
 
     def test_t3_shows_the_electoral_share_once(self) -> None:
-        """#358: under the only coverage policy, (b), the hybrid's input share equals
-        ``ec_share_full``, so T3 shows one electoral share and no note about a repeat.
-        Pinned as a literal, since the header tests derive from ``NATION_FIELDS``."""
+        """#358: under the shipped coverage policy, (b) (D038), the hybrid's input share
+        equals ``ec_share_full``, so T3 shows one electoral share and no note about a
+        repeat. Pinned as a literal, since
+        ``test_each_header_is_its_label_with_the_raw_field_name`` and
+        ``test_the_glossaries_name_every_column_and_the_count_reason`` derive T3's headers
+        and column-name list from ``NATION_FIELDS``."""
         assert MOD["NATION_FIELDS"] == (
             "candidate",
             "nominating_party",
@@ -2708,7 +2710,11 @@ class TestT3Hybrid:
         assert labels.HYBRID_NOTE in shown
 
     def test_t3_never_reads_the_served_hybrid_share(self) -> None:
-        """A served ``ec_share_hybrid`` that differed would still not reach T3."""
+        """A served ``ec_share_hybrid`` that differed would still not reach T3. T3 shows
+        ``ec_share_full`` beside ``hybrid_score`` under ``labels.HYBRID_NOTE``, which is
+        true only while the two shares are equal: the shipped policy, (b), checked on the
+        build side by ``test_the_two_ec_shares_are_equal_under_the_shipped_policy``
+        (``test_snapshot.py``). Shipping policy (c) must revisit T3 (D084)."""
         body = year_body(2016)
         first = body["summary"][0]
         first["ec_share_hybrid"] = 0.999

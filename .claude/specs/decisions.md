@@ -5784,3 +5784,38 @@ link while its source is cold.
 **Related:** D071, D073, D081, #312, #325, #422.
 
 ---
+
+## D084: T3 shows one electoral share; shipping coverage policy (c) must revisit it
+
+**Date:** 2026-11-02
+**Builds on:** D037, D038 · **Decided by:** the owner, at #358's plan gate (2026-11-02) and on
+the architect's scope ruling in its code review; recorded by #358 (E9)
+
+**Context.** T3, the national results on `/election/<year>`, showed both `ec_share_full` and
+`ec_share_hybrid`, with a note explaining that the second repeats the first. Under D038's shipped
+coverage policy, (b), the two are equal for every year (`src/usvote/hybrid.py` sets one to the
+other). Policy (c) is kept in `COVERAGE_POLICIES` as an unshipped seam, reachable from Python
+only. The API serves both shares so a consumer can check the equality.
+
+**Decision.**
+- T3 shows `ec_share_full` only, on the page and in its download; `labels.EC_SHARE_HYBRID_NOTE`
+  and `LABELS["ec_share_hybrid"]` are deleted, and the field is in no export field set, so no
+  dashboard page shows it and no download carries it. The API is unchanged.
+- T3 now relies on the equality: it shows `ec_share_full` beside `hybrid_score` under
+  `labels.HYBRID_NOTE`, which says the score averages the electoral share and the popular-vote
+  share. **A change that ships policy (c) must revisit T3** (show the hybrid's input share again,
+  or reword the note). The build-side equality tests
+  (`test_the_two_ec_shares_are_equal_under_the_shipped_policy` in `tests/unit/test_snapshot.py`,
+  and the summary-row check in `tests/unit/test_api_e2e.py`) say so where that change would have
+  to edit them.
+- Not taken: detecting a divergence at render time on the dashboard, a fixture-equality test on
+  the dashboard side, and an exact pin of T3's notes (#358's scope ruling).
+
+**Rationale.** A column identical to its neighbour on every served year gives the reader
+nothing, and a note about an internal input explains a detail the reader cannot act on. Shipping
+(c) would already supersede D038 and change the views, the snapshot and the API docs; that
+change is where T3 is revisited, and the record sits in the tests it must edit.
+
+**Related:** D037, D038, #352, #358.
+
+---

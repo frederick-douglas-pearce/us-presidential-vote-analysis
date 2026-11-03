@@ -1236,7 +1236,8 @@ def test_the_two_ec_shares_are_equal_under_the_shipped_policy(
     The published coverage policy never restricts the electoral share, so no coverage
     rule can manufacture a majority that did not exist. Both columns ship precisely so
     a consumer can check that rather than take it on trust; this test is the same check
-    on the build side.
+    on the build side. The dashboard's T3 shows only ``ec_share_full`` beside
+    ``hybrid_score`` and relies on this equality (#358, D084).
     """
     out, _ = _build(tmp_path)
     conn = sqlite3.connect(out)

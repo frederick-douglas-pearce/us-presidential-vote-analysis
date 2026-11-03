@@ -1317,6 +1317,20 @@ UNRECOGNIZED_CELLS = {
 }
 
 
+def test_no_label_or_field_set_names_the_hybrid_share() -> None:
+    """#358: ``ec_share_hybrid`` has no label and is in no field set, so no table can
+    show it (``labels.header`` reads ``LABELS``) or export it
+    (``test_the_field_sets_are_disjoint_and_cover_every_column``)."""
+    assert "ec_share_hybrid" not in labels.LABELS
+    for name in (
+        "EC_FIELDS",
+        "POPULAR_VOTE_FIELDS",
+        "CENSUS_FIELDS",
+        "NOMINATING_PARTY_FIELDS",
+    ):
+        assert "ec_share_hybrid" not in getattr(export, name), name
+
+
 class TestOnePartyPerRow:
     """AC5 of #389, structurally: no header, label, field set or download names the
     popular-vote source's ``party``. Which field a party cell reads is pinned by the
