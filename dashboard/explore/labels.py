@@ -91,8 +91,7 @@ LABELS: dict[str, str] = {
     "hybrid_margin": "Hybrid margin (percentage points)",
     "ec_determinative": "Electoral College majority",
     "pv_coverage": "Share of electors appointed by states that held a popular vote",
-    # T3's hybrid columns (#308). ``pv_coverage`` above means the same on a summary row.
-    "ec_share_hybrid": "Electoral share in the hybrid",
+    # T3's hybrid column (#308). ``pv_coverage`` above means the same on a summary row.
     "hybrid_score": "Hybrid score",
 }
 
@@ -198,9 +197,9 @@ NOT_IN_DATASET = "Not in this dataset"
 #: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
 
-#: The help text every :data:`UNRECOGNIZED` cell carries (#355, drafted with the
-#: glossary for the owner's review in place). One sentence, true on the panel too, which
-#: has no download.
+#: The help text every :data:`UNRECOGNIZED` cell carries (#355). Wording approved by the
+#: owner at #354's plan gate, 2026-10-15. One sentence, true on the panel too, which has
+#: no download.
 UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for."
 
 
@@ -241,18 +240,11 @@ HYBRID_NOTE = (
     "share; the candidate with the highest score wins it."
 )
 
-#: What the panel's three margins measure (#352; drafted for the owner's review in
-#: place).
+#: What the panel's three margins measure (#352). Wording approved by the owner in
+#: place on the #352 branch deploy, 2026-10-12.
 MARGIN_NOTE = (
     "A margin is the gap, in percentage points, between the first- and second-place "
     "candidates under that method. Each method ranks the candidates on its own."
-)
-
-#: Why T3 shows the electoral share twice (#352; drafted for the owner's review in
-#: place). True by configuration: the only coverage policy is (b) (D038, D042 §2).
-EC_SHARE_HYBRID_NOTE = (
-    "The hybrid uses each candidate's electoral share as it is, so the hybrid's "
-    "electoral share repeats it. Both are shown so you can check that."
 )
 
 
@@ -708,6 +700,6 @@ def ec_majority(value: object) -> str:
 
 def share_cell(value: object) -> str:
     """A share the schema makes nullable though the API fills it for every year
-    (``ec_share_full``, ``ec_share_hybrid``, ``pv_coverage``): a null names no cause,
-    as :func:`share` reads one."""
+    (``ec_share_full``, ``pv_coverage``): a null names no cause, as :func:`share` reads
+    one."""
     return share(value)

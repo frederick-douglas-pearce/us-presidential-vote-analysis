@@ -48,8 +48,13 @@ from urllib.parse import quote
 from dash import html
 
 #: The fields whose values come from the Electoral College source or are derived from
-#: it (``pv_status`` from the in-repo absence catalog, ``ec_share_hybrid`` and
-#: ``pv_coverage`` from the electoral counts), and the row keys.
+#: it (``pv_status`` from the in-repo absence catalog, ``pv_coverage`` from the
+#: electoral counts), and the row keys. ``ec_share_hybrid`` is in no set: no table shows
+#: or exports it since #358 (it equals ``ec_share_full`` under the shipped policy), so
+#: a table that did would fail
+#: ``test_the_field_sets_are_disjoint_and_cover_every_column``;
+#: ``test_no_label_or_field_set_names_the_hybrid_share`` (``test_dashboard_export.py``)
+#: and ``test_t3_shows_the_electoral_share_once`` pin its absence.
 EC_FIELDS = frozenset(
     {
         "year",
@@ -70,7 +75,6 @@ EC_FIELDS = frozenset(
         "electoral_rank",
         "took_office",
         "ec_share_full",
-        "ec_share_hybrid",
         "pv_coverage",
     }
 )
