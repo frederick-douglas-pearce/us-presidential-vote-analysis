@@ -36,8 +36,9 @@ A state's electoral votes equal its senators plus its representatives (U.S. Cons
 cl. 2; [11]; [12]), so a census sets them through the House apportionment. Some rows take their
 seats from somewhere else:
 
-- **A state at the elections before the first apportionment that included it, with the seats
-  the House assigned at its admission (20 state-years).** "As new states joined the Union, the House assigned a specific number of
+- **A state, other than West Virginia (next item), at the elections before the first
+  apportionment that included it, with the seats the House assigned at its admission (20
+  state-years).** "As new states joined the Union, the House assigned a specific number of
   Representatives to that state," and the next census's apportionment replaced it ([1] note 3).
   Arkansas and Michigan 1836 and 1840; Florida, Iowa, Texas and Wisconsin 1848; Minnesota and
   Oregon 1860; Nevada 1864 and 1868; Nebraska 1868; Colorado 1876 and 1880; Utah 1896 and 1900;
@@ -66,7 +67,8 @@ admission ([1] note 4; [3]).
 The first election a census governed is the first one at which the allotments it set appear. In
 this dataset every change in a state's allotment, between two elections at which it had one,
 falls on an election in this table's third column, or on 1868, when eight states that had none in
-1864 took part again after the Civil War (seven of them with a changed allotment). No allotment changes at any other election.
+1864 took part again after the Civil War (seven of them with a changed allotment). No allotment
+changes at any other election.
 
 | Census | Apportionment | First election governed | Elections governed |
 |---|---|---|---|
@@ -151,7 +153,8 @@ Two tests already pin it: `test_the_mapping_matches_the_hand_written_oracle` in
     President and Vice President, thus to be chosen, should come into office: Provided always,
     That where no apportionment of Representatives shall have been made after any enumeration, at
     the time of choosing electors, then the number of electors shall be according to the existing
-    apportionment of Senators and Representatives." <https://www.govinfo.gov/link/statute/1/239> (text as transcribed at
+    apportionment of Senators and Representatives."
+    <https://www.govinfo.gov/link/statute/1/239> (text as transcribed at
     <https://en.wikisource.org/wiki/Presidential_Succession_Act_1792>).
 12. 3 U.S.C. § 3 (June 25, 1948, ch. 644, 62 Stat. 672), which carries the same rule and
     proviso today. <https://www.law.cornell.edu/uscode/text/3/3>
