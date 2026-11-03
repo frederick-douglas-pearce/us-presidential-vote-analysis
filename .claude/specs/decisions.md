@@ -5811,7 +5811,7 @@ only. The API serves both shares so a consumer can check the equality.
 - Not taken: detecting a divergence at render time on the dashboard, a fixture-equality test on
   the dashboard side, and an exact pin of T3's notes (#358's scope ruling).
 
-**Rationale.** A column identical to its neighbour on every served year gives the reader
+**Rationale.** A column identical to another column of the same table on every served year gives the reader
 nothing, and a note about an internal input explains a detail the reader cannot act on. Shipping
 (c) would already supersede D038 and change the views, the snapshot and the API docs; that
 change is where T3 is revisited, and the record sits in the tests it must edit.
