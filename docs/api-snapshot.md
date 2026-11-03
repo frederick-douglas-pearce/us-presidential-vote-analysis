@@ -278,7 +278,7 @@ one state's figure once per candidate. `PRIMARY KEY (year, state)`; indexed on `
 |---|---|---|
 | `year` | INTEGER | election year (the view's `election_year`) |
 | `state` / `state_usps` | TEXT | full name and USPS code |
-| `governing_census_year` | INTEGER | the census whose apportionment was in force — 2020 reads 2010, and 1924/1928 read 1910 |
+| `governing_census_year` | INTEGER | the census of the latest apportionment made before the election's electors were chosen (`docs/governing-census.md`) — 2020 reads 2010, and 1924/1928 read 1910 |
 | `total_electoral_votes` | INTEGER | the appointed allotment, the ratio's denominator (public name `state_electoral_votes`) |
 | `population` | INTEGER, nullable | the governing census's resident population |
 | `population_series` | TEXT, nullable | `resident`; NULL exactly where `population` is |
