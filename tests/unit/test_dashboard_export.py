@@ -544,7 +544,6 @@ class TestExactlyTheView:
                     "national_pv_votes",
                     "ec_share_full",
                     "pv_share",
-                    "ec_share_hybrid",
                     "hybrid_score",
                     "nominating_party_note",
                     "nominating_party_source",
@@ -741,8 +740,8 @@ class TestNulls:
     def test_the_national_file_carries_t3_s_notes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """T3's notes (#352 adds the second share's) show under it and travel in its
-        file, as every table note does."""
+        """T3's notes show under it and travel in its file, as every table note does;
+        since #358 none explains a repeated electoral share."""
         tree, _ = render("/election/<year>", monkeypatch, year="1872")
         lines = download(tree, "election-nation").lines
         shown = [p.children for p in of_type(tree, "P")]
@@ -750,10 +749,11 @@ class TestNulls:
             labels.PARTY_NOTE,
             labels.PARTY_NULL_NOTE,
             labels.HYBRID_NOTE,
-            labels.EC_SHARE_HYBRID_NOTE,
         ):
             assert note in lines
             assert note in shown
+        # #358: one electoral share, so no note explains a repeat.
+        assert not [line for line in lines if "electoral share repeats it" in line]
 
     def test_the_elections_file_says_what_false_means(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1218,7 +1218,6 @@ SUMMARY_ROW_FIELDS = (
     "national_pv_votes",
     "ec_share_full",
     "pv_share",
-    "ec_share_hybrid",
     "hybrid_score",
 )
 PER_CAPITA_ROW_FIELDS = (

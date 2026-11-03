@@ -95,7 +95,6 @@ NATION_FIELDS = (
     "national_pv_votes",
     "ec_share_full",
     "pv_share",
-    "ec_share_hybrid",
     "hybrid_score",
 )
 #: The fields T3's column-name list names: its columns and the party note (#389).
@@ -481,7 +480,6 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
             # Nullable in the API's schema, though real for every served year.
             labels.cell(labels.share_cell(row["ec_share_full"])),
             labels.cell(_national_pv(row["pv_share"], has_popular_vote, True)),
-            labels.cell(labels.share_cell(row["ec_share_hybrid"])),
             # On T3's year rule, so the row agrees with itself.
             labels.cell(_national_pv(row["hybrid_score"], has_popular_vote, True)),
         ]
@@ -712,7 +710,6 @@ def render(
                 labels.PARTY_NOTE,
                 labels.PARTY_NULL_NOTE,
                 labels.HYBRID_NOTE,
-                labels.EC_SHARE_HYBRID_NOTE,
             ),
         ),
         *labels.party_notes(summary),

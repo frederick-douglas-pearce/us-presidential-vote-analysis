@@ -446,13 +446,13 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** `ec_share_full` = counted ÷ appointed. No coverage policy can move it, and it is
   the only input to `ec_determinative`. Because some appointed electors never vote, shares can sum
   to less than 100% (D041). `ec_share_hybrid` is the electoral share fed into the hybrid; under
-  the only configured policy, (b), it equals `ec_share_full`, and it is served separately so that
-  can be checked.
-- **Shown as:** `LABELS["ec_share_full"]`, `LABELS["ec_share_hybrid"]` (T3); `labels.share_cell`;
-  `labels.EC_SHARE_HYBRID_NOTE` under T3.
+  the only configured policy, (b), it equals `ec_share_full`, and the API serves it separately so
+  that can be checked.
+- **Shown as:** `LABELS["ec_share_full"]` (T3); `labels.share_cell`. `ec_share_hybrid` is on no
+  dashboard page and in no download since #358; the API serves it.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
-  D042 §2; D046 §4; help-text wording (`labels.EC_SHARE_HYBRID_NOTE`): approved by the owner in
-  place on the #352 branch deploy, 2026-10-12.
+  D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
+  2026-11-02, #358.
 - **Not:** A share of the votes cast.
 - **Status:** settled
 
@@ -525,8 +525,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   highest score. Null outside the popular-vote window. The denominator policy is (b) (D038), and
   `pv_coverage` flags a year whose popular vote covers only some states.
 - **Shown as:** `LABELS["hybrid_score"]`, `LABELS["hybrid_winner"]`, `LABELS["hybrid_margin"]`,
-  `LABELS["hybrid_flip"]`, `LABELS["ec_share_hybrid"]`; help text `labels.HYBRID_NOTE` (panel and
-  T3).
+  `LABELS["hybrid_flip"]`; help text `labels.HYBRID_NOTE` (panel, and under T3 and in its
+  download's preamble).
 - **Source:** `NationalSummaryRow.hybrid_score`; `ElectionSummary.hybrid_winner`; D037; D038;
   `docs/pv-coverage.md`.
 - **Not:** A forecast or an endorsement. Help text says what it computes and nothing about its
@@ -1052,7 +1052,6 @@ Every `LABELS` key and the entry that defines it.
 | `hybrid_margin` | Margin |
 | `ec_determinative` | Electoral College majority |
 | `pv_coverage` | Share of electors from popular-vote states |
-| `ec_share_hybrid` | Electoral share |
 | `hybrid_score` | Hybrid |
 
 ---

@@ -48,8 +48,8 @@ from urllib.parse import quote
 from dash import html
 
 #: The fields whose values come from the Electoral College source or are derived from
-#: it (``pv_status`` from the in-repo absence catalog, ``ec_share_hybrid`` and
-#: ``pv_coverage`` from the electoral counts), and the row keys.
+#: it (``pv_status`` from the in-repo absence catalog, ``pv_coverage`` from the
+#: electoral counts), and the row keys.
 EC_FIELDS = frozenset(
     {
         "year",
@@ -70,7 +70,6 @@ EC_FIELDS = frozenset(
         "electoral_rank",
         "took_office",
         "ec_share_full",
-        "ec_share_hybrid",
         "pv_coverage",
     }
 )

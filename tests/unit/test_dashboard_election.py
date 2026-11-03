@@ -503,7 +503,6 @@ class TestHeaders:
             "pv_coverage": (
                 "Share of electors appointed by states that held a popular vote"
             ),
-            "ec_share_hybrid": "Electoral share in the hybrid",
             "hybrid_score": "Hybrid score",
         }
         assert {k: labels.LABELS[k] for k in expected} == expected
@@ -690,8 +689,8 @@ class TestNullCells:
         for row in rows.values():
             for field in ("national_pv_votes", "pv_share", "hybrid_score"):
                 assert row[field] == labels.NOT_APPLICABLE, (year, field)
-            # The second share is a value at every year, not a popular-vote cell.
-            assert row["ec_share_hybrid"].endswith("%"), (year, row)
+            # The electoral share is a value at every year, not a popular-vote cell.
+            assert row["ec_share_full"].endswith("%"), (year, row)
         assert {panel(tree)[f] for f in PV_FIELDS} == {labels.NOT_APPLICABLE}
         # A null party has nothing to do with the window (#389): it reads "Not in
         # this dataset", never the window's wording.
@@ -2307,7 +2306,6 @@ class TestPanel:
             labels.UNRECOGNIZED,
             labels.UNRECOGNIZED_NOTE,
             *(labels.LABELS[f] for f in PANEL_FIELDS),
-            labels.LABELS["ec_share_hybrid"],
             labels.LABELS["hybrid_score"],
         ]
         assert [t for t in prose if evaluative.search(t)] == []
@@ -2381,7 +2379,6 @@ class TestWordingRules:
             "NO_NOMINATION_NOTE",
             "PARTY_NOTES_HEADING",
             "MARGIN_NOTE",
-            "EC_SHARE_HYBRID_NOTE",
             "UNRECOGNIZED",
             "UNRECOGNIZED_NOTE",
             "EC_WINNER",
@@ -2431,32 +2428,25 @@ class TestWordingRules:
             "figure for the year; it does not say whether a popular vote was held."
         )
 
-    def test_the_drafted_notes_are_pinned(self) -> None:
-        """Drafted for the owner's review in place (#352): pinned as shipped, so a
-        reword is a deliberate change here, and the panel's every fixed string stays
-        pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
+    def test_the_approved_notes_are_pinned(self) -> None:
+        """Approved by the owner in place on the #352 branch deploy: pinned as shipped,
+        so a reword is a deliberate change here, and the panel's every fixed string
+        stays pinned (``test_no_panel_text_calls_the_hybrid_better``)."""
         assert labels.MARGIN_NOTE == (
             "A margin is the gap, in percentage points, between the first- and "
             "second-place candidates under that method. Each method ranks the "
             "candidates on its own."
         )
-        assert labels.EC_SHARE_HYBRID_NOTE == (
-            "The hybrid uses each candidate's electoral share as it is, so the hybrid's "
-            "electoral share repeats it. Both are shown so you can check that."
-        )
-        # Drafted with the glossary (#355) for the owner's review in place.
+        # Drafted with the glossary (#355); approved at #354's plan gate.
         assert labels.UNRECOGNIZED_NOTE == (
             "This dataset holds a value that this page has no label for."
         )
 
-    def test_the_drafted_notes_show_where_they_explain(self) -> None:
+    def test_the_approved_notes_show_where_they_explain(self) -> None:
         tree = render(1872)
         panel_notes = [p.children for p in of_type(find(tree, PANEL), "P")]
         assert labels.MARGIN_NOTE in panel_notes
         assert labels.HYBRID_NOTE in panel_notes
-        shown = [p.children for p in of_type(tree, "P")]
-        assert labels.EC_SHARE_HYBRID_NOTE in shown
-        assert labels.EC_SHARE_HYBRID_NOTE not in panel_notes
 
     def test_the_footer_names_the_data_version(self) -> None:
         footer = find(render(1872), components.SNAPSHOT_ID)
@@ -2655,19 +2645,18 @@ class TestT3Hybrid:
     def test_1824_hybrid_scores_are_not_applicable(self) -> None:
         rows = nation_rows(render(1824))
         assert {r["hybrid_score"] for r in rows.values()} == {NOT_APPLICABLE}
-        assert rows["Andrew Jackson"]["ec_share_hybrid"] == "37.9%"
+        assert rows["Andrew Jackson"]["ec_share_full"] == "37.9%"
 
     def test_2016_scores_and_a_candidate_with_no_figure(self) -> None:
         rows = nation_rows(render(2016))
         assert rows["Donald J. Trump"]["hybrid_score"] == "51.3%"
         assert rows["Hillary Clinton"]["hybrid_score"] == "45.2%"
-        assert rows["Hillary Clinton"]["ec_share_hybrid"] == "42.2%"
+        assert rows["Hillary Clinton"]["ec_share_full"] == "42.2%"
         assert rows["Colin Powell"]["hybrid_score"] == labels.NO_NATIONAL_FIGURE
 
     @pytest.mark.parametrize("year", PANEL_YEARS)
     def test_every_hybrid_cell_is_labeled(self, year: int) -> None:
         for row in nation_rows(render(year)).values():
-            assert row["ec_share_hybrid"].endswith("%"), (year, row)
             assert row["hybrid_score"] not in ("", "None", "No", "0"), (year, row)
 
     def test_t3_reads_the_index_s_flag_for_the_hybrid_score(self) -> None:
@@ -2690,13 +2679,42 @@ class TestT3Hybrid:
         grant = nation_rows(held)["Ulysses S. Grant"]
         assert grant["hybrid_score"] == labels.NO_NATIONAL_FIGURE
 
-    def test_a_null_hybrid_share_names_no_cause(self) -> None:
-        body = year_body(2016)
-        body["summary"][0]["ec_share_hybrid"] = None
-        rows = nation_rows(render(2016, body=body))
-        assert rows[body["summary"][0]["candidate"]]["ec_share_hybrid"] == (
-            labels.NOT_IN_DATASET
+    def test_t3_shows_the_electoral_share_once(self) -> None:
+        """#358: under the only coverage policy, (b), the hybrid's input share equals
+        ``ec_share_full``, so T3 shows one electoral share and no note about a repeat.
+        Pinned as a literal, since the header tests derive from ``NATION_FIELDS``."""
+        assert MOD["NATION_FIELDS"] == (
+            "candidate",
+            "nominating_party",
+            "national_electoral_votes",
+            "national_electoral_votes_counted",
+            "national_electoral_denominator",
+            "electoral_rank",
+            "took_office",
+            "national_pv_votes",
+            "ec_share_full",
+            "pv_share",
+            "hybrid_score",
         )
+        tree = render(2016)
+        titles = [h.title for h in of_type(find(tree, NATION), "Th")]
+        assert "ec_share_hybrid" not in titles
+        assert {"ec_share_full", "hybrid_score"} <= set(titles)
+        shown = " ".join(texts(tree))
+        assert "Electoral share in the hybrid" not in shown
+        assert "electoral share repeats it" not in shown
+        # Non-vacuity: the scan reads the page's headers and notes.
+        assert labels.LABELS["ec_share_full"] in shown
+        assert labels.HYBRID_NOTE in shown
+
+    def test_t3_never_reads_the_served_hybrid_share(self) -> None:
+        """A served ``ec_share_hybrid`` that differed would still not reach T3."""
+        body = year_body(2016)
+        first = body["summary"][0]
+        first["ec_share_hybrid"] = 0.999
+        row = nation_rows(render(2016, body=body))[first["candidate"]]
+        assert "99.9%" not in row.values()
+        assert row["ec_share_full"] == labels.share(first["ec_share_full"])
 
 
 class TestPanelCells:
