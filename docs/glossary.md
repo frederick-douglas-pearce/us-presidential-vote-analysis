@@ -233,35 +233,62 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Census used (governing census)
-- **Plain:** The census that Congress was using, at the time of the election, to share House
-  seats (and so electoral votes) among the states. Its population figure for the state, where it
-  has one, is the one shown. For most states that census also set the state's electoral votes.
-  It did not for a state whose House seats Congress set when admitting it, or for DC from 1964.
-- **Precise:** `governing_census_year`: the census whose apportionment was in force at the
-  election, read from `GOVERNING_CENSUS_BY_ELECTION`, which is a lookup and not a formula. It is
-  not the nearest census: 2020 reads 2010, and 1924 and 1928 read 1910, because Congress passed no
-  apportionment after the 1920 census. Apportionment has been automatic since the 1930 census and
-  was first used in 1932. This is the vintage axis of D066(b): which census supplies the figure. It
-  is not always where the state's allotment came from (D066(b)'s third axis). For a state whose
-  House seats Congress assigned at admission, between censuses, for California 1852–1860 (two seats
-  under its admission act), and for DC from 1964 (the Twenty-third Amendment), the allotment did
-  not come from this census. The row still shows this census's population. `docs/governing-census.md`
-  lists the rows.
+- **Plain:** The census used for the latest redistribution of House seats among the states made
+  before the election. Electoral votes follow House seats, so that redistribution also shared out
+  the electoral votes. Its population figure for the state, where it has one, is the one shown.
+  For most states and years that census also set the state's electoral votes. It did not for a
+  state at the elections between its admission and the first redistribution of House seats that
+  included it, for California from 1852 to 1860, or for DC from 1964.
+- **Precise:** `governing_census_year`: the census of the apportionment that the rule for
+  electors applies at that election. A state's electors equal the senators and representatives it
+  is entitled to when the President chosen takes office, except that where no apportionment has
+  been made after the latest census at the time electors are chosen, the existing apportionment
+  applies (Act of March 1, 1792, ch. 8, § 1, 1 Stat. 239; the same rule and proviso are in
+  3 U.S.C. § 3). So it is the census of the latest apportionment made before electors are chosen,
+  not the one the sitting House was elected under: at the November 1912 election the House still
+  sat on the 1900 apportionment, because the act of August 8, 1911 took effect after March 3,
+  1913, yet 1912's electors follow the 1910 apportionment. Nor is it the nearest census. By the
+  proviso, 2020 reads 2010 (the 2020 census was apportioned in 2021, after electors were
+  chosen), and 1924 and 1928 read 1910 (Congress made no apportionment after the 1920 census, the
+  only census without one). Since the act of June 18, 1929, each census is apportioned without a
+  new act of Congress; the 1930 census was the first apportioned that way, and 1932 the first
+  election its apportionment set. `governing_census_year` in `src/usvote/apportionment.py`
+  computes the year: the latest census, taken at least two years before the election, that
+  produced an apportionment, which skips 1920. `GOVERNING_CENSUS_BY_ELECTION` is that function
+  over every election in the dataset. This is the vintage axis of D066(b): which census supplies
+  the figure. It is not always where the state's allotment came from (D066(b)'s third axis). The
+  allotment did not come from this census for a state at the elections between its admission and
+  the first apportionment that included it (West Virginia 1864 and 1868 among them: its three
+  seats came out of Virginia's 1860 allotment when it was formed in 1863), for California
+  1852–1860 (two seats under its admission act, which the House Historian's table lists under
+  1850), and for DC from 1964 (the Twenty-third Amendment). The row still shows this census's
+  population, where it has one. `docs/governing-census.md` lists the rows.
 - **Shown as:** `LABELS["governing_census_year"]`; help text `labels.GOVERNING_CENSUS_NOTE`
-  under T6 and T7.
-- **Source:** `PerCapitaRow.governing_census_year`; `GOVERNING_CENSUS_BY_ELECTION` in
-  `src/usvote/apportionment.py`; D064; D066(b); `docs/governing-census.md` (#356), which records
-  the citations for the help text's historical claim, finds the mapping right for every election,
-  and lists the rows where the census used did not set the state's electoral votes;
+  under T6 and T7; on the API's `/docs` page, the `PerCapitaRow.governing_census_year` field
+  description in `src/usvote/api/models.py`.
+- **Source:** `PerCapitaRow.governing_census_year`; `governing_census_year` in
+  `src/usvote/apportionment.py`, which computes it, and `GOVERNING_CENSUS_BY_ELECTION` there, that
+  function over every election; `tests/unit/test_apportionment.py`, which pins the mapping to a
+  hand-written list of every election; D060(b) ("a derivation plus a named exception set"); D064;
+  D066(b); the rule for electors: Act of March 1, 1792, ch. 8, § 1, 1 Stat. 239, and 3 U.S.C. § 3
+  (June 25, 1948, ch. 644, 62 Stat. 672); `docs/governing-census.md` (#356), which records the
+  citations for the help text's historical claim, finds the mapping right for every election, and
+  lists the rows where the census used did not set the state's electoral votes;
   `posts/2026-09-03-how-did-we-get-to-538-electors.md`, "The decade Congress skipped" (the 1920
   gap, and the 1910 map electing 1924 and 1928); header wording: owner decision, 2026-10-10, #348;
-  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12.
+  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12; this definition
+  (Plain: the census of the latest apportionment made before electors are chosen; Precise: the
+  rule for electors, anchored to the term of the President chosen, with its proviso): owner
+  decision, 2026-11-02, #356 code review.
 - **Not:** The census nearest the election. Not, in every row, the census that set the state's
   electoral votes (see **Precise**). Not a population figure in every row: 1848 Texas has none
   (*Census figure*).
 - **Status:** settled; wording pending (#423: `labels.GOVERNING_CENSUS_NOTE` says each election
-  "uses the census that set the state's electoral votes", which does not hold for a state whose
-  House seats Congress set at admission, or for DC from 1964)
+  "uses the census that set the state's electoral votes", which does not hold for a state at the
+  elections between its admission and the first apportionment that included it, for California
+  1852–1860, or for DC from 1964. #379: the `PerCapitaRow.governing_census_year` field description
+  in `src/usvote/api/models.py` says "in force at this election", which does not hold for 1912 and
+  the other elections two years after a census)
 
 ### Count status
 - **Plain:** Whether Congress counted the electoral votes that were cast: counted; not counted,
@@ -1042,7 +1069,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. In the API's published text, null is the JSON value and is written "null", never "None" (owner decision, 2026-10-15, #374). |
 | "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | `LABELS["coverage"]`, `LABELS["pv_coverage"]`; years covered: the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`, `export.preamble` | The project uses the word for three different things. |
 | "counted" for anything but votes | used, covers, included | a rule (see Wording rules) | "Counted" is reserved for vote counts (owner decision, 2026-10-10). |
-| "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state whose House seats Congress set at admission, and for DC from 1964 (`docs/governing-census.md`). `labels.GOVERNING_CENSUS_NOTE` still says it until #423. |
+| "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state at the elections between its admission and the first redistribution of House seats that included it, for California 1852–1860, and for DC from 1964 (`docs/governing-census.md`). `labels.GOVERNING_CENSUS_NOTE` still says it until #423. |
 | "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
 | "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
@@ -1076,7 +1103,10 @@ decision and who makes it.
   `src/usvote/api/models.py`. #379 rewrites all of them. The owner approves the rewrite, on a
   label spec from `ba`.
 - **Census used**: `labels.GOVERNING_CENSUS_NOTE` says each election "uses the census that set
-  the state's electoral votes", which does not hold for a state whose House seats Congress set at
-  admission, or for DC from 1964 (`docs/governing-census.md`, #356). The census the note names is
-  right for every election. #423 rewords the note. The owner approves the rewrite, on a label
-  spec from `ba`.
+  the state's electoral votes", which does not hold for a state at the elections between its
+  admission and the first apportionment that included it, for California 1852–1860, or for DC
+  from 1964 (`docs/governing-census.md`, #356). The census the note names is right for every
+  election. #423 rewords the note. The owner approves the rewrite, on a label spec from `ba`.
+  Separately, the API's `PerCapitaRow.governing_census_year` description says "in force at this
+  election" and uses "apportionment" in prose; #379 rewords it (owner decision, 2026-11-02), on a
+  label spec from `ba`.
