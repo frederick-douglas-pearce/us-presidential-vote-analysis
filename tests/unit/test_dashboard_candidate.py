@@ -195,7 +195,7 @@ class TestJackson:
         assert heading == "Andrew Jackson"
         assert several is True
 
-    @pytest.mark.parametrize("name", [None, "", "  ", 7])
+    @pytest.mark.parametrize("name", [None, "", "  ", 7, True])
     def test_a_blank_name_keeps_the_generic_heading(self, name: Any) -> None:
         body = jackson()
         body["data"][0]["candidate"] = name
@@ -517,6 +517,9 @@ def test_t4_links_each_candidate_to_their_history() -> None:
         {"candidate": ""},
         {"candidate": "  "},
         {"candidate": None},
+        # Not text, so not a name to link (PR #390, cr.6; #367's labels.has_text).
+        {"candidate": 5},
+        {"candidate": True},
     ],
     ids=repr,
 )
@@ -541,7 +544,9 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
     if "candidate" in row and row["candidate"] is None:
-        return  # the election page sorts by name, which a null name breaks (#367)
+        # The election page sorts its dropdown by name, which a null name breaks. No
+        # served page reaches that: the API types the name as required text (#367).
+        return
 
     def doctor(body: dict[str, Any]) -> None:
         for r in [*body["data"], *body["summary"]]:

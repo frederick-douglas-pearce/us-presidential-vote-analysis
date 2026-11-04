@@ -159,10 +159,6 @@ def year_buttons(
     )
 
 
-def _has_text(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
-
-
 def state_cell(row: dict[str, Any]) -> html.Td:
     """The state's name, linked to its history (#279) when its code is a USPS code."""
     usps = row["state_usps"]
@@ -179,7 +175,7 @@ def candidate_cell(row: dict[str, Any]) -> html.Td:
     ``str``, so a null slug must not reach it, or a page that renders today degrades.
     """
     slug, name = row["candidate_slug"], row["candidate"]
-    if isinstance(slug, str) and query.is_slug(slug) and _has_text(name):
+    if isinstance(slug, str) and query.is_slug(slug) and labels.has_text(name):
         return html.Td(dcc.Link(name, href=f"/candidate/{slug}"))
     return html.Td(str(name))
 

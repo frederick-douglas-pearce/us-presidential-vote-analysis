@@ -411,7 +411,7 @@ def render(
         id=PAGE_ID,
     )
     name = rows[0]["candidate"]
-    heading = name if isinstance(name, str) and name.strip() else HEADING
+    heading = name if labels.has_text(name) else HEADING
     return content, heading, several
 
 

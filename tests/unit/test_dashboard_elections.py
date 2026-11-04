@@ -901,6 +901,57 @@ class TestSharedPieces:
         assert PAGE_ID not in component_ids(tree)
 
 
+class TestHasText:
+    """``labels.has_text``, the one test of whether a name, a note or a reason has
+    text to show (#367)."""
+
+    @pytest.mark.parametrize("value", ["Andrew Jackson", " x ", "5"])
+    def test_text_with_something_in_it(self, value: str) -> None:
+        assert labels.has_text(value) is True
+
+    # 5 and True are the trap: a bare ``not labels.is_blank(value)`` is true of both,
+    # and would link a name that is not text (PR #390, cr.6).
+    @pytest.mark.parametrize("value", [None, "", "  ", "\t\n", 5, True, 0.0, ["x"]])
+    def test_anything_else(self, value: object) -> None:
+        assert labels.has_text(value) is False
+
+    def test_no_shared_or_page_module_strips_text_but_is_blank(self) -> None:
+        """Keeps the test in one place: a bare ``.strip()`` in a shared module or a
+        page, outside ``labels.is_blank``, is a second copy of it."""
+        found = []
+        paths = [PACKAGE / name for name in SHARED_MODULES]
+        paths += sorted((PACKAGE / "pages").glob("*.py"))
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            allowed = {
+                id(node)
+                for fn in ast.walk(tree)
+                if isinstance(fn, ast.FunctionDef) and fn.name == "is_blank"
+                for node in ast.walk(fn)
+            }
+            found += [
+                f"{path.name}:{node.lineno}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "strip"
+                and not node.args
+                and id(node) not in allowed
+            ]
+        assert found == []
+
+    def test_the_guard_sees_a_bare_strip(self) -> None:
+        source = "def f(v):\n    return isinstance(v, str) and v.strip()\n"
+        calls = [
+            n
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "strip"
+        ]
+        assert len(calls) == 1
+
+
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path"] == "/elections"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)

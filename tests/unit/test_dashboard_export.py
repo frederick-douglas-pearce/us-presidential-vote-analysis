@@ -1412,7 +1412,7 @@ class TestNoRawValues:
     doctored as ``DOCTORED`` says: every doctored cell then reads "Unrecognized value"
     with its help text, never the raw value, and ``UNRECOGNIZED_CELLS`` pins how many
     per table, so a doctored cell that reads otherwise fails. Candidate and state names
-    are shown as served (#367)."""
+    are shown as served: the API types them as required text (#367)."""
 
     def test_every_registered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         pages = all_pages(monkeypatch)
