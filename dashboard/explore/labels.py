@@ -28,8 +28,10 @@ name in a label, cell or note, and "counted" only for vote counts. No cell this 
 words shows a raw value either (#355): a null or blank names no cause
 (:data:`NOT_IN_DATASET`), and a value it has no wording for reads :data:`UNRECOGNIZED`,
 with :data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`). Candidate and state
-names are shown as served: an open vocabulary the API types as required text, not
-codes, so no served name reaches that rule (#367).
+names in table rows are shown as served, an open vocabulary, not codes (#367): the API
+types them as required text, so a served row never carries a null or non-text name,
+though that type does not rule out a blank one. The panel's winners are nullable and
+read through :func:`winner`.
 The party is the nominating party (#389, D077): a closed vocabulary, each code read
 from :data:`NOMINATING_PARTY`, never word-cased from the code.
 """
@@ -302,9 +304,10 @@ def is_blank(value: object) -> bool:
 
 
 def has_text(value: object) -> TypeGuard[str]:
-    """Text with something in it (#367): the one test of whether a name, a note or a
-    reason can be shown as served. Never a bare ``not is_blank(value)``, which is true
-    of a value that is not text, such as ``5``."""
+    """Text with something in it (#367): the shared predicate wherever a page decides
+    whether text is shown, such as a candidate link, a heading, a winner, a note or a
+    reason. Never a bare ``not is_blank(value)``, which is true of a value that is not
+    text, such as ``5``."""
     return isinstance(value, str) and not is_blank(value)
 
 

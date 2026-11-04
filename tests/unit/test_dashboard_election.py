@@ -955,6 +955,7 @@ class TestNullCells:
             row(1872, "F", "f", "  "),  # a blank note: none
             row(1872, 7, "c", "M."),  # a name that is not text
             row(1872, None, "n", "O."),  # no name
+            row(1872, "  ", "s", "S."),  # a blank name
             row(1880, "G", None, "P."),  # two candidates with no slug never merge
             row(1880, "H", None, "Q."),
             row(1884, "J", "j-1", "R."),  # one name, two slugs: two candidates
@@ -969,6 +970,7 @@ class TestNullCells:
             "E, 1872: N.",
             f"{labels.UNRECOGNIZED}, 1872: M.",
             f"{labels.NOT_IN_DATASET}, 1872: O.",
+            f"{labels.NOT_IN_DATASET}, 1872: S.",
             "G, 1880: P.",
             "H, 1880: Q.",
             "J, 1884: R.",
