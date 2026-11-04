@@ -28,7 +28,10 @@ name in a label, cell or note, and "counted" only for vote counts. No cell this 
 words shows a raw value either (#355): a null or blank names no cause
 (:data:`NOT_IN_DATASET`), and a value it has no wording for reads :data:`UNRECOGNIZED`,
 with :data:`UNRECOGNIZED_NOTE` as its help text (:func:`cell`). Candidate and state
-names are shown as served: an open vocabulary the API types as text, not codes (#367).
+names in table rows are shown as served, an open vocabulary, not codes (#367): the API
+types them as required text, so a served row never carries a null or non-text name,
+though that type does not rule out a blank one. The panel's winners are nullable and
+read through :func:`winner`.
 The party is the nominating party (#389, D077): a closed vocabulary, each code read
 from :data:`NOMINATING_PARTY`, never word-cased from the code.
 """
@@ -37,7 +40,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
 from dash import html
 
@@ -300,6 +303,14 @@ def is_blank(value: object) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def has_text(value: object) -> TypeGuard[str]:
+    """Text with something in it (#367): the shared predicate wherever a page decides
+    whether text is shown, such as a candidate link, a heading, a winner, a note or a
+    reason. Never a bare ``not is_blank(value)``, which is true of a value that is not
+    text, such as ``5``."""
+    return isinstance(value, str) and not is_blank(value)
+
+
 def _finite(value: object) -> float | None:
     """A number as a finite float, or ``None`` for anything else: a bool, a value of no
     numeric type, an integer no float can hold, or a non-finite number. Each of those
@@ -411,7 +422,7 @@ def nominating_party(value: object) -> str:
 
 def _note_text(value: object) -> str | None:
     """A row note as served, or ``None`` when it is not text with something in it."""
-    return value if isinstance(value, str) and value.strip() else None
+    return value if has_text(value) else None
 
 
 def nominating_party_cell(row: Mapping[str, Any]) -> html.Td:
@@ -459,9 +470,7 @@ def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
         seen.add(key)
         items.append(
             PARTY_NOTE_ITEM.format(
-                candidate=name
-                if isinstance(name, str) and not is_blank(name)
-                else _unknown(name),
+                candidate=name if has_text(name) else _unknown(name),
                 year=row.get("year"),
                 note=note,
             )
@@ -522,7 +531,7 @@ def count_status(status: object, reason: object) -> list[Any]:
     if meaning is None:
         return [label]
     parts: list[Any] = [html.Strong(label), f" ({meaning})"]
-    if isinstance(reason, str) and reason.strip():
+    if has_text(reason):
         parts += [html.Br(), html.Span(reason, className="reason")]
     return parts
 
@@ -657,7 +666,7 @@ def winner(value: object, applicable: bool) -> str:
     shown whatever the year, as :func:`popular_votes` shows a figure; a blank is no
     name, and a value that is not text reads :data:`UNRECOGNIZED`.
     """
-    if isinstance(value, str) and not is_blank(value):
+    if has_text(value):
         return value
     return _unknown(value, _null(applicable))
 

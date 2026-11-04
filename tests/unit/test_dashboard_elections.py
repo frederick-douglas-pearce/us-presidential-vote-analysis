@@ -901,6 +901,21 @@ class TestSharedPieces:
         assert PAGE_ID not in component_ids(tree)
 
 
+class TestHasText:
+    """``labels.has_text``, the shared predicate for whether a name, a note or a reason
+    has text to show (#367)."""
+
+    @pytest.mark.parametrize("value", ["Andrew Jackson", " x ", "5"])
+    def test_text_with_something_in_it(self, value: str) -> None:
+        assert labels.has_text(value) is True
+
+    # 5 and True are the trap: a bare ``not labels.is_blank(value)`` is true of both,
+    # and would link a name that is not text (PR #390, cr.6).
+    @pytest.mark.parametrize("value", [None, "", "  ", "\t\n", 5, True, 0.0, ["x"]])
+    def test_anything_else(self, value: object) -> None:
+        assert labels.has_text(value) is False
+
+
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path"] == "/elections"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
