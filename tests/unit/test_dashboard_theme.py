@@ -682,6 +682,29 @@ class TestThemeHeadScript:
         stylesheets = [i for i, item in enumerate(items) if item[0] == "stylesheet"]
         assert stylesheets and at < min(stylesheets)
 
+    @pytest.mark.parametrize(
+        ("path", "own"),
+        [
+            ("/", '<link rel="canonical"'),
+            ("/elections", '<link rel="canonical"'),
+            ("/no-such-view", '<meta name="robots"'),
+        ],
+    )
+    def test_the_head_runs_dash_metas_then_the_theme_script_then_the_cards(
+        self, path: str, own: str
+    ) -> None:
+        # The order interpolate_index states and dashboard/CLAUDE.md records: Dash's
+        # own metas (charset first), the theme script, the card tags, then ours.
+        body = appmod.server.test_client().get(path).get_data(as_text=True)
+        positions = [
+            body.find('<meta charset="UTF-8">'),
+            body.find(appmod.THEME_HEAD_SCRIPT),
+            body.find('<meta name="description"'),  # the first card tag
+            body.find(own),
+        ]
+        assert -1 not in positions, (path, positions)
+        assert positions == sorted(positions), (path, positions)
+
     def test_the_head_script_applies_only_an_explicit_choice_and_survives_storage(
         self,
     ) -> None:
