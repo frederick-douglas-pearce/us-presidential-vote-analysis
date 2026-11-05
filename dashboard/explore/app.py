@@ -1,6 +1,6 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds six things, all host-level:
+Beyond Dash itself this module adds seven things, all host-level:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -44,6 +44,10 @@ Beyond Dash itself this module adds six things, all host-level:
   calling every page's ``layout()`` on the first request and embedding the result in
   every index page. The index HTML therefore carries no data and never waits on the
   API, which is what keeps a link preview's time to first byte short (D071(g)).
+- **No local plotly.js** (#430). :meth:`ExploreDash._setup_plotlyjs` registers dcc's
+  plotly.js by its CDN address only, so the app never serves the 4.8 MB file, which
+  no page uses yet; and a component-suite path Dash never registered answers 404
+  (Flask's default body) rather than 500.
 """
 
 from __future__ import annotations
@@ -60,7 +64,8 @@ from urllib.parse import quote, unquote_plus, urlsplit
 import dash
 import flask
 import werkzeug
-from dash import html
+import werkzeug.exceptions
+from dash import dcc, html
 
 # Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
@@ -337,8 +342,38 @@ def _tag(name: str, attributes: dict[str, Any]) -> str:
 _G_TAGS = "explore_head_tags"
 
 
+#: dcc's bundled plotly.js, as ``Dash._setup_plotlyjs`` names it in the ``plotly``
+#: package.
+PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
+
+
 class ExploreDash(dash.Dash):
     """Dash with a canonical link and ``og:url`` from the matched page, and 404s."""
+
+    def _setup_plotlyjs(self) -> None:
+        """Register plotly.js by its CDN address only, so the app never serves it.
+
+        ``Dash.__init__`` calls this, before any request, to append dcc's plotly.js
+        entry to the module-global ``dcc._js_dist`` (#430). Marked ``external_only``,
+        Dash's resource filter keeps only the CDN address, so the package path is
+        never registered and its component-suite route refuses it. Only the entry this
+        call added is marked, and anything but exactly one such entry fails the
+        import. A Dash private, pinned in ``TestDashPrivates``. ``Dash.get_dist``
+        registers raw entries without the filter, but only for a callback declared
+        with ``_allow_dynamic_callbacks``, which no callback here is. Pointing
+        graphs at the CDN is #432's; until then no page may render a graph, since the
+        renderer would request the local path.
+        """
+        before = len(dcc._js_dist)
+        super()._setup_plotlyjs()
+        added = dcc._js_dist[before:]
+        if not (
+            len(added) == 1
+            and added[0].get("namespace") == "plotly"
+            and added[0].get("relative_package_path") == PLOTLYJS_PACKAGE_PATH
+        ):
+            raise RuntimeError(f"unexpected plotly.js entries from Dash: {added!r}")
+        added[0]["external_only"] = True
 
     def index(self, *args: Any, **kwargs: Any) -> Any:
         # Resolved once, against one read of the snapshot: the status, the title and
@@ -410,6 +445,20 @@ app = ExploreDash(
 )
 server = app.server
 app.layout = html.Main(dash.page_container, className="explore")
+
+
+@server.errorhandler(dash.exceptions.DependencyException)
+def _unregistered_suite_path(_error: Exception) -> werkzeug.exceptions.NotFound:
+    """A component-suite path Dash never registered answers 404, not 500 (#430).
+
+    Dash raises ``DependencyException`` only from ``_validate.validate_js_path``,
+    for a file its component-suite route was never told to serve (plotly.js among
+    them, above), and registers no handler for it; its own source leaves "add a
+    handler for components suites errors to return 404" as a to-do. The body is
+    Werkzeug's default, and the request logs no traceback.
+    """
+    return werkzeug.exceptions.NotFound()
+
 
 #: The custom-404 page, found as Dash's router finds it: its not-found state is the
 #: title of every 404 that is not a page's own.

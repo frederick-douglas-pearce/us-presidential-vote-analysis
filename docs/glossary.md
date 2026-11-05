@@ -723,7 +723,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #325; D083; `resolve` in `dashboard/explore/app.py` (Dash's `not_found_404`
   convention); reader wording: owner decision, 2026-11-01, #325.
 - **Not:** *Not-found state*, where the link names a kind of page (an election, a state, a
-  candidate) but a value this dataset does not serve; *Degraded state*.
+  candidate) but a value this dataset does not serve; *Degraded state*. A request for a file the
+  site does not serve (for example a script under `/_dash-component-suites/`, #430), which answers
+  the web server's default 404 with no text of ours and no page.
 - **Status:** settled
 
 ### Party

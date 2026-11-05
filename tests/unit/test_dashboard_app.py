@@ -1587,6 +1587,120 @@ class TestDashPrivates:
         assert "document.title = data.title" in body
         assert appmod.app.config.update_title is None
 
+    def test_dcc_s_plotlyjs_entry_is_the_one_app_py_marks(self) -> None:
+        """#430: the entry ``Dash._setup_plotlyjs`` adds, with app.py's mark. A Dash
+        that reshapes it, adds a second one, or stops calling the method app.py
+        overrides fails here, before the file could be served again."""
+        entries = [e for e in dash.dcc._js_dist if e.get("namespace") == "plotly"]
+        assert len(entries) == 1
+        (entry,) = entries
+        assert set(entry) == {
+            "relative_package_path",
+            "external_url",
+            "namespace",
+            "async",
+            "external_only",
+        }
+        assert entry["relative_package_path"] == PLOTLYJS_PACKAGE_PATH
+        assert entry["external_only"] is True
+        assert entry["async"] == "eager"
+        # The one address #432 points graphs at, from the same call.
+        assert entry["external_url"] == appmod.app._plotlyjs_url
+        assert re.fullmatch(
+            r"https://cdn\.plot\.ly/plotly-[0-9.]+\.min\.js", entry["external_url"]
+        )
+
+    def test_external_only_keeps_only_the_cdn_address(self) -> None:
+        """#430: Dash's filter, as the app runs it (served locally, no eager loading),
+        drops the package path of an ``external_only`` entry, so the path is never
+        registered; and keeps it a dynamic resource, so no page gains a script tag."""
+        (entry,) = [e for e in dash.dcc._js_dist if e.get("namespace") == "plotly"]
+        assert appmod.app.config.serve_locally is True
+        assert appmod.app.config.eager_loading is False
+        resources = dash.resources.Resources(
+            "js", dash.resources.ResourceConfig(serve_locally=True, eager_loading=False)
+        )
+        marked: Any = dict(entry, external_only=True)
+        assert resources._filter_resources([marked]) == [
+            {
+                "external_url": entry["external_url"],
+                "dynamic": True,
+                "namespace": "plotly",
+            }
+        ]
+        # The control: without the mark, Dash keeps the package path, which is what
+        # registers the file and lets the app serve it.
+        unmarked: Any = {k: v for k, v in entry.items() if k != "external_only"}
+        assert resources._filter_resources([unmarked]) == [
+            {
+                "relative_package_path": PLOTLYJS_PACKAGE_PATH,
+                "dynamic": True,
+                "namespace": "plotly",
+            }
+        ]
+
+    def test_an_unregistered_suite_path_raises_dependency_exception(self) -> None:
+        """#430: app.py's 404 handler keys on the exception Dash's component-suite
+        route raises for a path it never registered."""
+        with pytest.raises(dash.exceptions.DependencyException):
+            dash._validate.validate_js_path({"dash": set()}, "dash", "no/such.js")
+        with pytest.raises(dash.exceptions.DependencyException):
+            dash._validate.validate_js_path({}, "plotly", PLOTLYJS_PACKAGE_PATH)
+
+
+#: dcc's bundled plotly.js, inside the ``plotly`` package, as Dash names it.
+PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
+PLOTLYJS_SUITE_PATH = f"/_dash-component-suites/plotly/{PLOTLYJS_PACKAGE_PATH}"
+
+
+class TestPlotlyjsNotServed:
+    """#430: the app serves no copy of plotly.js, which no page uses yet."""
+
+    def test_the_plotlyjs_path_answers_404_and_is_never_registered(self) -> None:
+        response = appmod.server.test_client().get(PLOTLYJS_SUITE_PATH)
+        assert response.status_code == 404
+        assert b"plotly" not in response.data.lower()
+        assert len(response.data) < 1000
+        assert "plotly" not in appmod.app.registered_paths
+        # The control: Dash did register its resources on that request, so the check
+        # above is not passing because registration never ran.
+        assert "dash" in appmod.app.registered_paths
+
+    def test_any_unregistered_suite_path_answers_404(self) -> None:
+        for path in (
+            "/_dash-component-suites/dash/no/such.js",
+            "/_dash-component-suites/no_such_package/x.js",
+        ):
+            assert appmod.server.test_client().get(path).status_code == 404, path
+
+    def test_a_registered_suite_file_is_still_served(self) -> None:
+        """The handler changes only the refusal: Dash's own bundles still load."""
+        _, _, body = get("/")
+        srcs = re.findall(r'<script src="([^"]+)"', body)
+        suite = [s for s in srcs if s.startswith("/_dash-component-suites/dash/")]
+        assert suite
+        response = appmod.server.test_client().get(suite[0])
+        assert response.status_code == 200
+        assert response.data
+
+    def test_no_page_loads_plotlyjs_or_names_its_address(self) -> None:
+        """Rendered pages are unchanged: no script tag names plotly.js or an off-site
+        host, and the client config carries no plotly.js address (#432 adds one on
+        purpose, pointing graphs at the CDN)."""
+        _, _, body = get("/")
+        srcs = re.findall(r"<script[^>]*\ssrc=\"([^\"]+)\"", body)
+        assert srcs
+        for src in srcs:
+            assert "plotly" not in src.lower(), src
+            assert src.startswith("/") and not src.startswith("//"), src
+        config = re.search(
+            r'<script id="_dash-config" type="application/json">(.*?)</script>',
+            body,
+            re.DOTALL,
+        )
+        assert config is not None
+        assert "plotlyjs_url" not in json.loads(html.unescape(config.group(1)))
+
 
 class TestDarkThemeVariables:
     """#409: style.css's dark block themes the dcc controls through Dash's variables.
