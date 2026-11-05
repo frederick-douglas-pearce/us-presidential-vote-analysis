@@ -362,7 +362,7 @@ THEME_EXPLICIT: tuple[str, ...] = tuple(
 #: ``<html>`` before the stylesheet applies, so a reload never flashes the other
 #: palette. Any other stored value is System, and storage that throws (a browser
 #: refusing ``localStorage``) leaves System. The e2e test
-#: ``test_refused_storage_keeps_the_choice_for_the_page`` makes the storage getter
+#: ``test_refused_storage_keeps_the_choice_for_the_document`` makes the storage getter
 #: throw, and the e2e suite's browser guard fails on any page error, so the ``try`` is
 #: pinned there. A constant built from constants: it carries no request
 #: text. No CSP exists today; if one arrives, this script's hash must be computed from
@@ -479,7 +479,8 @@ class ExploreDash(dash.Dash):
             ]
         else:
             own = [_tag("meta", {"name": "robots", "content": "noindex"})]
-        # Dash's card tags lead and ours follow its own metas, as Dash orders them.
+        # Dash's own metas lead, then the theme script, then the card tags and ours
+        # (see interpolate_index).
         setattr(
             flask.g,
             _G_TAGS,

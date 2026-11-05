@@ -7,8 +7,9 @@ what a chart's callback would see, and the probe records the palette ``<html>`` 
 at each call. The device's setting is Playwright's emulated ``prefers-color-scheme``.
 
 A test that asserts something did *not* happen waits for the event that could have
-caused it (a real ``change`` event from the device's setting), then makes a change whose
-effect it can count, so a spurious write that landed late still shows in the count.
+caused it (the choice's callback, or a real ``change`` event from the device's setting),
+then makes a change whose effect it can count, so a spurious write that landed late
+still shows in the count.
 """
 
 from __future__ import annotations
@@ -476,7 +477,7 @@ Object.defineProperty(window, "localStorage", {
 """
 
 
-def test_refused_storage_keeps_the_choice_for_the_page(page: Page) -> None:
+def test_refused_storage_keeps_the_choice_for_the_document(page: Page) -> None:
     page.emulate_media(color_scheme="light")
     page.add_init_script(REFUSED_STORAGE)
     page.goto("/")

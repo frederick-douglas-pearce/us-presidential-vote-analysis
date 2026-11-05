@@ -666,7 +666,7 @@ class TestThemeHeadScript:
     @pytest.mark.parametrize(
         "path", ["/", "/elections", "/election/1824", "/no-such-view", "/state/ZZ"]
     )
-    def test_every_index_response_leads_its_head_with_the_theme_script(
+    def test_every_index_response_runs_the_theme_script_before_any_stylesheet(
         self, path: str
     ) -> None:
         body = appmod.server.test_client().get(path).get_data(as_text=True)

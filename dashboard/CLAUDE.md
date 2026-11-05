@@ -42,8 +42,9 @@ the moment `<body>` is inserted and in the frame before first paint), the colors
 kind of control paints following an explicit choice against the device, the checked pill
 under focus and hover, the focused radio's role, name and state, one row at 390 px, one
 device listener per document, the store following the device only under System, and
-refused storage. A test that asserts something did not happen waits for a real `change`
-event of the device's setting, then makes a countable change as a barrier.
+refused storage. A test that asserts something did not happen waits for the event that
+could have caused it (the choice's callback, or a real `change` event of the device's
+setting), then makes a countable change as a barrier.
 `serve.py` adds one thing the production app lacks for them, the **theme probe**: a hidden
 div that a test-only clientside callback writes from the store holding the theme in
 effect, the shape of a chart's re-template callback, so the tests see the store and prove
@@ -87,7 +88,9 @@ A Plotly Dash app (D071) that is **not part of the `usvote` package** and import
 `labels.THEME_CONTROL`), the `Main` landmark holding `dash.page_container`, and the
 `dcc.Store` `components.THEME_STORE_ID`, which holds the **theme in effect**, `light` or
 `dark`, never the choice (glossary: *Theme choice*, *Theme in effect*). `THEME_HEAD_SCRIPT`
-leads every index response's head, ahead of Dash's stylesheets: it applies a stored
+follows Dash's own metas in every index response's head (so `<meta charset>` stays in the
+first 1024 bytes, `test_meta_charset_sits_in_the_first_1024_bytes`) and precedes every
+stylesheet: it applies a stored
 `light` or `dark` (`THEME_STORAGE_KEY`; any other value is System, and a storage error
 leaves System) as `data-theme` on `<html>` before first paint. No CSP exists; if one
 arrives, that script's hash must be computed from the constant, since `app.csp_hashes()`
