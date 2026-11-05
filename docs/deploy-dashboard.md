@@ -327,6 +327,16 @@ not arrive, and the check is not running. The `noindex` tag is what shows the 40
 app's own (only its index emits it): a 404 without it came from somewhere in front of the
 app, and the request never reached the check.
 
+**After a deploy, check that the app serves no copy of plotly.js** (#430, §11). The script
+path answers 404 (Flask's default body):
+
+```bash
+curl -sI https://explore.us-presidential-election-center.org/_dash-component-suites/plotly/package_data/plotly.min.js | head -1  # HTTP/2 404
+```
+
+A **200** with `content-length: 4815814` means the deployed version still registers the
+file.
+
 `app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
 gunicorn worker (one process, so one cache) as `explore-run`, and carries no
 `env_variables`; `tests/unit/test_dashboard_guards.py` pins each of those.
@@ -397,6 +407,22 @@ kill-switch (§3–§4) pause the app at 100%, well inside the $10/month ceiling
 exposure:** the origin is DNS-only, so Cloudflare does not stand in front of it, and abuse
 could run up egress before the budget's alerts (which lag by hours) fire the kill-switch.
 That is one of D071's flip conditions.
+
+**No local plotly.js (#430).** Dash registers dcc's bundled plotly.js as a servable
+component-suite file, and the instance answered every request for it itself, compressing
+it each time: the largest response the site could be made to send, though no page draws a
+graph. The app now registers it by its CDN address only (`ExploreDash._setup_plotlyjs`), so
+the script path answers 404 (Flask's default body), as does any component-suite path Dash
+never registered. Pointing graphs at the CDN is #432's. The record, from
+`curl -sI https://explore.us-presidential-election-center.org/_dash-component-suites/plotly/package_data/plotly.min.js`:
+
+| When | Status | Body |
+|---|---|---|
+| Before (2026-11-05) | `HTTP/2 200` | `content-length: 4815814`; 1,472,154 bytes with `Accept-Encoding: gzip` |
+| After the deploy | pending | expected `HTTP/2 404` (the post-deploy check in §9) |
+
+Other component-suite files over 500 KB the app still serves, none used by any page, are
+#439. A standing canary check for the 404 is #440.
 
 **The keep-warm ping (D076).** The refresher GETs the API's `/health` once per refresh
 interval (5 min), so the API origin does not scale to zero while the dashboard runs. That is
