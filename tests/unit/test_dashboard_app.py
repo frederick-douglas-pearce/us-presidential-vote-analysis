@@ -1428,6 +1428,13 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
     assert checked >= 3  # "/", and the fake year page with and without a slash
 
 
+#: dcc's bundled plotly.js, inside the ``plotly`` package, as Dash names it (#430).
+#: Written out rather than imported from ``explore.app``, so a test does not move with
+#: the module under test.
+PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
+PLOTLYJS_SUITE_PATH = f"/_dash-component-suites/plotly/{PLOTLYJS_PACKAGE_PATH}"
+
+
 class TestDashPrivates:
     """Item 2: the Dash privates app.py relies on, pinned by name and behavior."""
 
@@ -1611,15 +1618,15 @@ class TestDashPrivates:
         )
 
     def test_external_only_keeps_only_the_cdn_address(self) -> None:
-        """#430: Dash's filter, as the app runs it (served locally, no eager loading),
-        drops the package path of an ``external_only`` entry, so the path is never
-        registered; and keeps it a dynamic resource, so no page gains a script tag."""
+        """#430: the app's own script filter, with the config it runs on after a
+        request (served locally, no eager loading), drops the package path of an
+        ``external_only`` entry, so the path is never registered; and keeps it a
+        dynamic resource, so no page gains a script tag."""
         (entry,) = [e for e in dash.dcc._js_dist if e.get("namespace") == "plotly"]
-        assert appmod.app.config.serve_locally is True
-        assert appmod.app.config.eager_loading is False
-        resources = dash.resources.Resources(
-            "js", dash.resources.ResourceConfig(serve_locally=True, eager_loading=False)
-        )
+        get("/")  # Dash's _setup_server settles the scripts' config on a request
+        assert appmod.app.scripts.config.serve_locally is True
+        assert appmod.app.scripts.config.eager_loading is False
+        resources = appmod.app.scripts._resources
         marked: Any = dict(entry, external_only=True)
         assert resources._filter_resources([marked]) == [
             {
@@ -1647,10 +1654,6 @@ class TestDashPrivates:
         with pytest.raises(dash.exceptions.DependencyException):
             dash._validate.validate_js_path({}, "plotly", PLOTLYJS_PACKAGE_PATH)
 
-
-#: dcc's bundled plotly.js, inside the ``plotly`` package, as Dash names it.
-PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
-PLOTLYJS_SUITE_PATH = f"/_dash-component-suites/plotly/{PLOTLYJS_PACKAGE_PATH}"
 
 
 class TestPlotlyjsNotServed:
@@ -1683,10 +1686,12 @@ class TestPlotlyjsNotServed:
         assert response.status_code == 200
         assert response.data
 
-    def test_no_page_loads_plotlyjs_or_names_its_address(self) -> None:
-        """Rendered pages are unchanged: no script tag names plotly.js or an off-site
-        host, and the client config carries no plotly.js address (#432 adds one on
-        purpose, pointing graphs at the CDN)."""
+    def test_the_index_has_no_plotlyjs_script_or_address(self) -> None:
+        """The index shell every page shares is unchanged: no script tag names
+        plotly.js or an off-site host, and the client config carries no plotly.js
+        address (#432 adds one on purpose, pointing graphs at the CDN). This reads the
+        index only: plotly.js would load lazily when a ``dcc.Graph`` renders, which no
+        test here checks (#432's ``TestEveryChart`` will)."""
         _, _, body = get("/")
         srcs = re.findall(r"<script[^>]*\ssrc=\"([^\"]+)\"", body)
         assert srcs

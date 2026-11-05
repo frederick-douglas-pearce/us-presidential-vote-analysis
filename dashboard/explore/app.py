@@ -359,10 +359,15 @@ class ExploreDash(dash.Dash):
         never registered and its component-suite route refuses it. Only the entry this
         call added is marked, and anything but exactly one such entry fails the
         import. A Dash private, pinned in ``TestDashPrivates``. ``Dash.get_dist``
-        registers raw entries without the filter, but only for a callback declared
-        with ``_allow_dynamic_callbacks``, which no callback here is. Pointing
-        graphs at the CDN is #432's; until then no page may render a graph, since the
-        renderer would request the local path.
+        registers entries without the filter, but only for a component library first
+        imported inside a callback; dcc is imported at startup, so this entry is never
+        re-registered that way. Accepted residual: ``dcc._js_dist`` is module-global,
+        so a second ``dash.Dash()`` built later in the same process would append an
+        unmarked entry, which this app would then register and serve; none is built
+        (production imports only this app). Pointing graphs at the CDN is #432's;
+        until then no page may render a graph, since the renderer would request the
+        local path. No test enforces that yet; #432 plans the guard
+        (``TestEveryChart``).
         """
         before = len(dcc._js_dist)
         super()._setup_plotlyjs()
@@ -453,9 +458,10 @@ def _unregistered_suite_path(_error: Exception) -> werkzeug.exceptions.NotFound:
 
     Dash raises ``DependencyException`` only from ``_validate.validate_js_path``,
     for a file its component-suite route was never told to serve (plotly.js among
-    them, above), and registers no handler for it; its own source leaves "add a
-    handler for components suites errors to return 404" as a to-do. The body is
-    Werkzeug's default, and the request logs no traceback.
+    them, above). Dash's Flask backend maps ``InvalidResourceError`` to 404 but
+    registers nothing for ``DependencyException``, so without this handler such a
+    path answers 500 and logs a traceback. The body is Flask's default 404 body
+    (Werkzeug's ``NotFound``).
     """
     return werkzeug.exceptions.NotFound()
 
