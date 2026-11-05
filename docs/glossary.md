@@ -924,6 +924,38 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** —
 - **Status:** settled
 
+### Theme choice (System, Light or Dark)
+- **Plain:** How the site looks: light pages, dark pages, or System, which follows the light or
+  dark setting of the reader's device. System is the starting choice. A choice is remembered in
+  that browser and applies on every page. If the browser won't let the site save it, the choice
+  lasts until the page is reloaded or opened in a new tab.
+- **Precise:** The viewer's color preference for the dashboard, one of three choices. System is
+  the absence of a saved choice: the page follows `prefers-color-scheme`. Light and Dark override
+  it in both directions. A choice is saved in the browser's `localStorage` under
+  `THEME_STORAGE_KEY` (`dashboard/explore/app.py`) and applied as `data-theme` on `<html>` before
+  first paint. Where the browser refuses `localStorage`, the choice lasts for the document: it
+  carries across in-site (client-side) navigation to other pages, but not a reload or a new tab.
+  It describes the page, not the data: it is never in the URL, `og:url`, a CSV download or any
+  API request.
+- **Shown as:** the theme control on every page, built in `app.layout`
+  (`dashboard/explore/app.py`) by `components.theme_control`: its legend `labels.THEME_CONTROL`
+  and its three radio labels, `labels.THEME_CHOICES`. The stored values `light` and `dark` are
+  never shown.
+- **Source:** #359 (the three choices, System as the default, remembered per browser, nothing in
+  the URL); reader wording: owner decision, 2026-11-05, #359.
+- **Not:** *Theme in effect*, which is always light or dark. A chart's color palette (#432).
+- **Status:** settled
+
+### Theme in effect (the resolved theme)
+- **Plain:** Whether the page is showing its light or its dark colors right now.
+- **Precise:** `light` or `dark`: the *Theme choice* when it is Light or Dark; under System, the
+  device's current `prefers-color-scheme`, updated when that setting changes. Held in the
+  `dcc.Store` `components.THEME_STORE_ID`, so charts can re-template without a reload (#432).
+- **Shown as:** nowhere as text; readers see it only as the page's colors.
+- **Source:** #359, acceptance criterion "Expose the resolved theme to Dash"; #432.
+- **Not:** *Theme choice*, which can also be System.
+- **Status:** settled
+
 ### Took office
 - **Plain:** Whether the candidate became president for that term.
 - **Precise:** `took_office`, a recorded yes or no.

@@ -94,9 +94,11 @@ ROUTES = {
 FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
 #: Every callback output once Dash has registered them all, before and after #309: the
-#: Pages router's two and each filtered page's URL. A download adds none.
+#: Pages router's two, each filtered page's URL, and the theme callback's store and
+#: radio group (#359). A download adds none.
 CALLBACK_OUTPUTS = {
     ".._pages_content.children..._pages_store.data..",
+    "..theme-in-effect.data...theme-control.value..",
     "_pages_dummy.children",
     "elections-url.search",
     "election-url.search",
