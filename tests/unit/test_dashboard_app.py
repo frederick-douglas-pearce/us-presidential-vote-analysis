@@ -1655,7 +1655,6 @@ class TestDashPrivates:
             dash._validate.validate_js_path({}, "plotly", PLOTLYJS_PACKAGE_PATH)
 
 
-
 class TestPlotlyjsNotServed:
     """#430: the app serves no copy of plotly.js, which no page uses yet."""
 
