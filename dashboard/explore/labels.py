@@ -209,11 +209,16 @@ UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for.
 #: spec, approved by the owner at #359's plan gate, 2026-11-05). Not a ``LABELS`` key.
 THEME_CONTROL = "Theme"
 
-#: Each theme choice, in display order: the internal value (the stored choice and
-#: ``data-theme``, never shown) and its radio label (#359). System, the starting
-#: choice, follows the device's light or dark setting.
+#: The internal value of the System theme choice (#359): the starting choice, which
+#: follows the device's light or dark setting. Never stored and never set as
+#: ``data-theme``: System is the absence of both.
+THEME_SYSTEM = "system"
+
+#: Each theme choice, in display order: the internal value, never shown (for Light and
+#: Dark, the stored choice and ``data-theme``; System is neither stored nor set), and
+#: its radio label (#359).
 THEME_CHOICES: dict[str, str] = {
-    "system": "System",
+    THEME_SYSTEM: "System",
     "light": "Light",
     "dark": "Dark",
 }

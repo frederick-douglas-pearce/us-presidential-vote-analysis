@@ -25,11 +25,9 @@ THEME_CONTROL_ID = "theme-control"
 
 #: The id of the ``dcc.Store`` holding the theme in effect (#359): ``"light"`` or
 #: ``"dark"``, never the reader's choice, which can also be System. A chart's callback
-#: takes it as an input to re-template without a reload (#432), on these terms, kept in
-#: ``dashboard/CLAUDE.md``: the store changes only after the palette has, so a callback
-#: reading ``getComputedStyle`` sees the new colors; its ``data`` is ``None`` until the
-#: theme callback's first call, and a consumer returns ``no_update`` on ``None``; and it
-#: stays ``storage_type="memory"``.
+#: takes it as an input to re-template without a reload (#432), on the terms of the
+#: store's contract in ``dashboard/CLAUDE.md`` (the ``app.py`` bullet), its one
+#: statement.
 THEME_STORE_ID = "theme-in-effect"
 
 #: The id of the paragraph carrying the snapshot version.
@@ -173,14 +171,21 @@ def year_buttons(
 
 
 def theme_control() -> html.Fieldset:
-    """The theme choice (#359): System, Light and Dark as an inline radio group named by
-    :data:`labels.THEME_CONTROL`, in the pill look :func:`year_buttons` uses.
+    """The theme choice (#359): :data:`labels.THEME_CHOICES` as inline radios in a
+    fieldset named by :data:`labels.THEME_CONTROL`, in the pill look
+    :func:`year_buttons` uses.
 
-    A radio group, not a cycling button, so a screen reader announces the checked
-    choice and the arrow keys move it natively. Its ``value`` here is System; the theme
-    callback in ``app.py`` corrects it from ``<html data-theme>`` on its first call. No
-    ``persistence``: Dash's storage applies only after the page mounts, too late for
-    the head script, which is what keeps the choice.
+    Radios, not a cycling button, so the focused element is a native radio carrying its
+    label's name and its checked state, and the arrow keys move the choice natively.
+    Accepted residual (#359's review, owner decision): Dash 4 wraps the radios in an
+    unnamed ``role=listbox`` whose ``label role=option`` elements nest an interactive
+    control, as it does for :func:`year_buttons` and every ``dcc.Checklist``; the
+    site-wide fix is #444.
+    ``test_the_focused_choice_is_a_named_checked_radio`` (e2e) pins what the control
+    relies on. Its ``value`` here is System; the theme callback in ``app.py`` corrects
+    it from ``<html data-theme>`` on its first call. No ``persistence``: Dash's storage
+    applies only after the page mounts, too late for the head script, which is what
+    keeps the choice.
     """
     return html.Fieldset(
         [
@@ -191,7 +196,7 @@ def theme_control() -> html.Fieldset:
                     {"label": label, "value": value}
                     for value, label in labels.THEME_CHOICES.items()
                 ],
-                value="system",
+                value=labels.THEME_SYSTEM,
                 inline=True,
                 className="year-buttons",
             ),

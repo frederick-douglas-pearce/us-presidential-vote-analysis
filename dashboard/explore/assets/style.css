@@ -1,7 +1,10 @@
-/* Color tokens (#359). Every color on the page is one of these custom properties, and
-   every rule below the three palette blocks names colors only through var(). The list
-   is closed: TestThemeTokens (test_dashboard_app.py) pins it, and E14-S3 (#432) reads
-   chart colors from it, appending its own tokens to the same list.
+/* Color tokens (#359). Every color a rule below the three palette blocks sets is one of
+   these custom properties, named through var(). Two kinds of color are not tokens:
+   in light, the dcc controls paint with Dash's own defaults (its --Dash-* variables,
+   which only the dark blocks map onto tokens), and the dark blocks set Dash's two
+   --Dash-Shading-* values as literals. The list is closed: TestThemeTokens
+   (tests/unit/test_dashboard_theme.py) pins it and this comment's list of it, and
+   E14-S3 (#432) reads chart colors from it, appending its own tokens to the same list.
 
    Page tokens, by role:
      --page            the page background
@@ -16,8 +19,9 @@
    Control tokens (#409), which the dcc controls paint with through Dash's --Dash-*
    variables. In light, Dash's own light defaults paint the controls, so each light
    value here is a copy of the one Dash variable named beside it, pinned to the
-   installed Dash by a test; in dark, the two dark blocks map Dash's variables onto
-   these tokens:
+   installed Dash by
+   test_each_light_control_token_copies_the_dash_default_it_names (TestThemeTokens);
+   in dark, the two dark blocks map Dash's variables onto these tokens:
      --text-muted      weak and disabled control text
      --surface         a control's background
      --border          a control's strong stroke
@@ -32,8 +36,9 @@
    <html> before first paint. Both dark selectors have specificity (0,2,0), above the
    bare :root Dash declares its light defaults on, from a style it injects after this
    sheet; color-scheme, which browsers read from the root element, gives the page
-   scrollbar and the native checkboxes and radios their form. A test in
-   test_dashboard_app.py fails if Dash renames a variable the dark blocks set. */
+   scrollbar and the native checkboxes and radios their form. TestDarkThemeVariables
+   (tests/unit/test_dashboard_theme.py) fails if Dash renames a variable the dark
+   blocks set. */
 :root {
   color-scheme: light;
   /* Not a color: the readable measure (#360). */
@@ -149,6 +154,9 @@ body {
   justify-content: flex-end;
 }
 .site-header .theme-control legend { float: left; margin: 0.25rem 0.5rem 0 0; }
+/* Inline beside the floated legend, so the fieldset's width counts both and the three
+   choices keep one row (a block here would wrap "Dark" under the legend). */
+.site-header .theme-control .year-buttons { display: inline-flex; flex-wrap: nowrap; }
 h1 { font-size: 1.6rem; line-height: 1.25; margin: 0.5rem 0 0.75rem; }
 h2 { font-size: 1.15rem; margin: 1.75rem 0 0.5rem; }
 ul { padding-left: 1.25rem; margin: 0; }
@@ -176,6 +184,12 @@ fieldset.filter legend { padding: 0; }
 /* The checked radio sits on the accent fill, so it takes the text color on that fill. */
 .year-buttons input[type="radio"] { margin-right: 0.3rem; accent-color: var(--on-accent); }
 .year-buttons label:has(input:checked) { background: var(--accent); color: var(--on-accent); }
+/* Dash colors a hovered or focused option with --Dash-Fill-Interactive-Strong, from a
+   (0,3,1) rule it injects after this sheet, which would put the checked pill's text in
+   the accent on the accent fill. This (0,3,2) rule keeps it on --on-accent; the Dash
+   selector it outranks is pinned in TestThemeTokens. */
+.year-buttons label:has(input:checked):hover,
+.year-buttons label:has(input:checked):focus-within { color: var(--on-accent); }
 .table-scroll { overflow-x: auto; }
 .table-scroll table { min-width: 36rem; }
 /* T1 has three short columns: it fits a phone, so it never scrolls. */

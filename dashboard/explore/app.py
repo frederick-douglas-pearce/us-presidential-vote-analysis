@@ -1,6 +1,7 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds eight things, all host-level:
+Beyond Dash itself this module adds eight things: seven host-level, and the theme
+choice, which lives in the browser:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -354,13 +355,16 @@ THEME_STORAGE_KEY = "explore-theme"
 
 #: The choices that set ``data-theme`` on ``<html>``: every theme choice but System.
 THEME_EXPLICIT: tuple[str, ...] = tuple(
-    value for value in labels.THEME_CHOICES if value != "system"
+    value for value in labels.THEME_CHOICES if value != labels.THEME_SYSTEM
 )
 
 #: The inline head script (#359): a saved explicit choice becomes ``data-theme`` on
 #: ``<html>`` before the stylesheet applies, so a reload never flashes the other
-#: palette. Any other stored value is System, and storage that throws (a private
-#: window) leaves System. A constant built from constants: it carries no request
+#: palette. Any other stored value is System, and storage that throws (a browser
+#: refusing ``localStorage``) leaves System. The e2e test
+#: ``test_refused_storage_keeps_the_choice_for_the_page`` makes the storage getter
+#: throw, and the e2e suite's browser guard fails on any page error, so the ``try`` is
+#: pinned there. A constant built from constants: it carries no request
 #: text. No CSP exists today; if one arrives, this script's hash must be computed from
 #: this constant, since ``app.csp_hashes()`` covers only Dash's own inline scripts.
 THEME_HEAD_SCRIPT = (
@@ -377,8 +381,9 @@ THEME_HEAD_SCRIPT = (
 #: choice the head script applied from ``<html data-theme>``, returns it to the radio
 #: group, and registers one listener for the device's light or dark setting. A later
 #: call is the reader's choice: it sets or removes ``data-theme`` and saves or clears
-#: the stored choice (a private window keeps it for the page only). Every call reports
-#: the theme in effect as the palette the stylesheet applied, ``color-scheme`` on
+#: the stored choice (where storage is refused, the choice lasts until a reload).
+#: Every call reports the theme in effect as the palette the stylesheet applied,
+#: ``color-scheme`` on
 #: ``<html>``, so the selector logic lives only in ``style.css``; and the store is
 #: written only after the palette changed, and only when the theme in effect differs
 #: from what it holds. The listener pushes the theme in effect with ``set_props``
@@ -391,13 +396,14 @@ THEME_CALLBACK = (
     f" var explicit = {json.dumps(list(THEME_EXPLICIT))};"
     f" var key = {json.dumps(THEME_STORAGE_KEY)};"
     f" var store = {json.dumps(components.THEME_STORE_ID)};"
+    f" var system = {json.dumps(labels.THEME_SYSTEM)};"
     " function inEffect() {"
     ' return window.getComputedStyle(root).colorScheme === "dark" ? "dark" : "light"; }'
     " var corrected = clientside.no_update;"
     " if (!window.exploreThemeReady) {"
     " window.exploreThemeReady = true;"
     ' var applied = root.getAttribute("data-theme");'
-    ' corrected = explicit.indexOf(applied) >= 0 ? applied : "system";'
+    " corrected = explicit.indexOf(applied) >= 0 ? applied : system;"
     ' window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",'
     " function () { var now = inEffect();"
     " if (now !== window.exploreThemeInEffect) {"
@@ -499,8 +505,10 @@ class ExploreDash(dash.Dash):
         if tags is None:  # never recompute: the status was decided from these
             raise RuntimeError("interpolate_index outside ExploreDash.index")
         cards, own, page_title = tags
-        # The theme script leads the head, ahead of Dash's stylesheets (#359).
-        metas = "\n      ".join([THEME_HEAD_SCRIPT, *cards, f"{metas}", *own])
+        # Dash's own metas lead, so <meta charset> sits inside the first 1024 bytes the
+        # encoding prescan reads; the theme script follows them, ahead of Dash's
+        # stylesheets (#359); then the card tags and ours.
+        metas = "\n      ".join([f"{metas}", THEME_HEAD_SCRIPT, *cards, *own])
         return super().interpolate_index(
             metas=metas,
             # Escaped here: Dash interpolates the title into the HTML unescaped.

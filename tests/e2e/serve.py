@@ -23,9 +23,13 @@ test-only clientside callback from the store holding the theme in effect to that
 the shape of a chart's re-template callback (#432). A ``dcc.Store`` is not in the DOM,
 so the probe is how a browser test sees the store's value, and it proves that both of
 the store's writers (the theme callback's output and its listener's ``set_props``)
-trigger a dependent callback, which is what charts rely on. It is purely additive: it
-writes only its own div and a call count, and ``TestThemeControl``
-(``test_dashboard_app.py``) pins the production app's callbacks without it.
+trigger a dependent callback, which is what charts rely on. Each call also records the
+palette ``<html>`` shows at that moment (its computed ``color-scheme``), so a test can
+check the store's contract that it changes only after the palette has. It is purely
+additive: it writes only its own div and two ``window`` records, and
+``TestThemeControl`` (``tests/unit/test_dashboard_theme.py``) pins the production app's
+theme callback without it, as ``CALLBACK_OUTPUTS`` (``test_dashboard_export.py``) pins
+every production callback.
 
 ``conftest.py`` waits for :data:`READY_LINE` with this server's port, written only once
 the cache is filled and the socket is bound, so a session never starts against another
@@ -47,10 +51,12 @@ NETWORK_SENTINEL = "E2E-SERVER-NETWORK-REFUSED"
 #: Written to stderr once the cache is filled and the server is listening.
 READY_LINE = "E2E-SERVER-READY"
 
-#: The theme probe's div; its text is the store's value, and ``window`` counts the
-#: probe's calls in :data:`THEME_PROBE_CALLS`.
+#: The theme probe's div; its text is the store's value. ``window`` counts the probe's
+#: calls in :data:`THEME_PROBE_CALLS` and records, in :data:`THEME_PROBE_SEEN`, each
+#: value it received with the palette ``<html>`` showed when it ran.
 THEME_PROBE_ID = "theme-probe"
 THEME_PROBE_CALLS = "exploreThemeProbeCalls"
+THEME_PROBE_SEEN = "exploreThemeProbeSeen"
 
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -135,8 +141,12 @@ def _add_theme_probe(appmod: Any) -> None:
     clientside_callback(
         "function (theme) {"
         f" window.{THEME_PROBE_CALLS} = (window.{THEME_PROBE_CALLS} || 0) + 1;"
-        " return theme === null || theme === undefined"
-        " ? window.dash_clientside.no_update : theme; }",
+        " if (theme === null || theme === undefined) {"
+        " return window.dash_clientside.no_update; }"
+        " var shown = getComputedStyle(document.documentElement).colorScheme;"
+        f" window.{THEME_PROBE_SEEN} = (window.{THEME_PROBE_SEEN} || []).concat("
+        "[[theme, shown]]);"
+        " return theme; }",
         Output(THEME_PROBE_ID, "children"),
         Input(components.THEME_STORE_ID, "data"),
     )

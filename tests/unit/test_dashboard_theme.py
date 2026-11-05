@@ -354,13 +354,15 @@ COLOR_FUNCTION = re.compile(
 def color_literals(css: str) -> list[str]:
     """Every color literal in a declaration value outside the three palette blocks:
     ``selector: property: value`` for each offender. Comments and selectors are never
-    scanned, nor quoted strings and ``var()`` references."""
+    scanned, nor quoted strings and the name a ``var()`` references; its fallback is."""
     offenders = []
     for context, selector, body in rules(strip_comments(css)):
         if (context, selector) in PALETTE_BLOCKS:
             continue
         for name, value in declarations(body):
-            scanned = re.sub(r"var\([^)]*\)", "", re.sub(r"(['\"]).*?\1", "", value))
+            # Only the reference itself is dropped: a var() fallback is scanned.
+            unquoted = re.sub(r"(['\"]).*?\1", "", value)
+            scanned = re.sub(r"var\(\s*--[\w-]+\s*,?", "", unquoted)
             words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", scanned)}
             named = (words & (NAMED_COLORS | SYSTEM_COLORS)) - ALLOWED_KEYWORDS
             if HEX.search(scanned) or COLOR_FUNCTION.search(scanned) or named:
@@ -467,15 +469,42 @@ class TestThemeTokens:
                 for name in block(key)
                 if name.startswith("--") and not name.startswith("--Dash-")
             }
-            assert declared - NOT_COLORS == set(TOKENS), key
+            # --measure, the one non-color, is the light block's alone.
+            expected = set(TOKENS) | (NOT_COLORS if key == LIGHT else set())
+            assert declared == expected, key
 
     def test_the_light_block_is_the_one_bare_root_and_sets_color_scheme(self) -> None:
         assert block(LIGHT)["color-scheme"] == "light"
         assert block(MEDIA_DARK)["color-scheme"] == "dark"
         assert block(EXPLICIT_DARK)["color-scheme"] == "dark"
-        # Only the light block declares --measure, and no dark block maps Dash's
-        # variables in light.
+        # The light block maps none of Dash's variables: in light, Dash's own paint.
         assert not any(name.startswith("--Dash-") for name in block(LIGHT))
+
+    def test_the_header_comment_lists_exactly_the_closed_list(self) -> None:
+        css = STYLESHEET.read_text(encoding="utf-8")
+        header = css[: css.index("*/")]
+        listed = re.findall(r"^ {5}(--[\w-]+) {2,}\S", header, flags=re.M)
+        assert len(listed) == len(set(listed))
+        assert set(listed) == set(TOKENS)
+
+    def test_the_checked_pill_outranks_dashs_hover_and_focus_color(self) -> None:
+        # Dash's rule (0,3,1), a private of the installed dcc, injected after our
+        # sheet: it would color a hovered or focused option's text with the accent.
+        # The bundle carries its CSS as JS strings: a newline is the two characters \n.
+        raw = DCC_BUNDLE.read_text(encoding="utf-8").replace("\\n", " ")
+        bundle = " ".join(raw.split())
+        option = ".dash-options-list-option:not(:has(input[disabled]))"
+        assert f"{option}:hover, {option}:focus-within {{" in bundle
+        assert "color: var(--Dash-Fill-Interactive-Strong);" in bundle
+        # Ours, (0,3,2), keeps the checked pill's text on --on-accent in both states.
+        rule = {
+            selector.strip(): body
+            for _, selectors, body in shipped_rules()
+            for selector in selectors.split(",")
+        }
+        for state in ("hover", "focus-within"):
+            body = rule[f".year-buttons label:has(input:checked):{state}"]
+            assert dict(declarations(body)) == {"color": "var(--on-accent)"}
 
     def test_the_two_dark_blocks_are_identical(self) -> None:
         assert block(MEDIA_DARK) == block(EXPLICIT_DARK)
@@ -510,6 +539,9 @@ class TestThemeTokens:
             "a { color: CanvasText; }",
             "a { border: 1px solid Tomato; }",
             "@media (min-width: 1px) { a { color: #fff; } }",
+            "a { color: var(--text, #f00); }",
+            "a { color: var(--text, red); }",
+            "a { border-color: var(--rule, rgb(1, 2, 3)); }",
             ":root { --page: #fff; } a { outline-color: navy; }",
         ],
     )
@@ -661,6 +693,25 @@ class TestThemeHeadScript:
         assert re.search(r"try \{.*localStorage.*\} catch", script)
         assert script.count("setAttribute") == 1
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/elections",
+            "/election/1824",
+            "/states",
+            "/candidate/andrew-jackson",
+            "/no-such-view",
+        ],
+    )
+    def test_meta_charset_sits_in_the_first_1024_bytes(self, path: str) -> None:
+        # The HTML encoding prescan reads only the first 1024 bytes; the theme script
+        # follows Dash's own metas, so it never pushes <meta charset> past them.
+        body = appmod.server.test_client().get(path).get_data()
+        start = body.find(b'<meta charset="UTF-8">')
+        assert start >= 0
+        assert start + len(b'<meta charset="UTF-8">') <= 1024, start
+
     def test_no_inline_script_can_close_its_own_tag(self) -> None:
         # json.dumps does not escape "</", and Dash writes an inline clientside
         # callback into an inline <script> too.
@@ -752,8 +803,13 @@ class TestThemeControl:
             if fed:
                 assert ".search" not in key and ".pathname" not in key, key
 
-    def test_the_installed_renderer_exposes_set_props(self) -> None:
-        # The listener pushes the theme in effect with dash_clientside.set_props.
-        bundles = list(RENDERER_BUNDLE.glob("dash_renderer*.js"))
-        assert bundles
-        assert any("set_props" in b.read_text(encoding="utf-8") for b in bundles)
+    def test_the_served_renderer_defines_dash_clientside_set_props(self) -> None:
+        # The listener pushes the theme in effect with dash_clientside.set_props. The
+        # string "set_props" also names a worker message type in the bundle, so the
+        # assignment itself is matched, in the minified bundle production serves.
+        bundle = (RENDERER_BUNDLE / "dash_renderer.min.js").read_text(encoding="utf-8")
+        assert re.search(
+            r"(\w+)=window\.dash_clientside=window\.dash_clientside\|\|\{\};"
+            r"\1\.set_props=function",
+            bundle,
+        )
