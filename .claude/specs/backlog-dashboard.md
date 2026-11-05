@@ -605,24 +605,46 @@ _Story of epic #N (E9 — public dashboard)._
 
 ---
 
-### E9-S6: Phase 2 — charts and metrics (placeholder — unfiled)
+### E9-S6: Phase 2 — charts and metrics
 
-> **Shape gated on the research spike (E9-S1) and Phase 1 (E9-S3–S5).** Not ready to
-> implement, and not filed as an issue until Phase 1 ships. This will likely split into one
-> story per chart. The gate is Fred's judgment of what Phase 1 shows is worth charting,
-> informed by analytics if S1 finds cookie-less analytics available.
+> **Shaped and filed 2026-11-05** (`pm` proposal, `architect` review, Fred's decisions). The issue
+> bodies are authoritative; this section records the frame they share.
 
-Individual charts and headline metrics, each checkable against its Phase 1 table.
-Candidates to evaluate, not commitments: EC share vs PV share per election; the
-three-method winners and flips across 1976–2024; margins under each method; a state map
-per election; persons-per-electoral-vote drift over time (the Post 4 sequel).
+**Conventions every chart follows**
+- Every chart has a stable ID, `C1, C2, …`, in order of filing. IDs are never renumbered or reused;
+  a retired ID stays retired. The chart's DOM id doubles as a fragment link (`/elections#c2`), so
+  narrative tabs (S7) can point at it without touching D073's canonical link or `og:url`.
+- Built only through `components.chart` (E14-S3, #432), with a companion table holding the same
+  values. Titles describe the chart; a caption may state a finding or carry narrative. All chart text
+  comes from `labels` under a `ba` spec.
+- A chart is progressive enhancement: plotly.js loads lazily from plotly's CDN (no SRI, risk recorded
+  in a decision entry), and the page's success marker and tables never depend on it.
+- Each chart reconciles against a Phase 1 table or a served figure, and states its window (EC 1824+,
+  popular vote from `meta.provenance.coverage`). Candidate shares use **counted** votes (2016 Trump =
+  304 of 538); state totals use the **appointed** allotment.
+- No hybrid series in S6: the hybrid waits for S7's labeled opinion tab.
+- Cross-election data comes from two routes with no query parameters, filled on first use (D074(ii)'s
+  precedent; D072 unchanged): #431 (every election's national summary) and #428 (every state's
+  per-election row). #343's backfill stays deferred.
 
-- Each chart names the Phase 1 table it reconciles against, and states which window it
-  uses (EC 1824+ or popular vote 1976+).
-- Any new data shape a chart needs is filed as its **own** story under D070(c), naming the
-  chart.
-- Each chart story depends on **E14-S3**, the chart theme foundation (see
-  [E14](#e14-dashboard-ui-split-out-of-e9-2026-10-12)), and does not style itself.
+**Filed**
+- #430 — stop serving Dash's bundled plotly.js (live gap, `priority:high`; first)
+- #433 — C1: electoral vs popular-vote share per candidate, dashed majority line (`/election/<year>`)
+- #434 — C2: the leader's electoral share against the majority line, every election (`/elections`)
+- #435 — C3: every state's persons per electoral vote (`/election/<year>`)
+- #436 — C4, C5: electors appointed and popular votes per election, one-state filter (`/elections`)
+- #437 — headline metrics on `/elections`, under a bounded dashboard-side summary rule (new D-entry)
+- #429 — research (`priority:low`): the spread of persons per electoral vote over time, accounting
+  for the three-elector floor
+
+**Order:** #430 → #359 → #432 → #433 → #435; #431 → #434 (after #432) → #437; #428 + #431 → #436.
+
+**Later tier** (tracker rows): margins with the years the winners differed; one state's allotment
+and persons per electoral vote over time; popular-vote coverage over time; electoral votes outside
+the top two; candidates winning electoral votes; allotment changes per election; a state × year
+participation grid (served by #428's `pv_status`); appointed vs cast vs counted; a state map
+(Plotly's USA-states mode, geometry from plotly's CDN at runtime). Faithless votes per election
+cannot be charted: the record has no pledged-vs-cast field.
 
 ### E9-S7: Phase 3 — narrative tabs (placeholder — unfiled)
 
@@ -680,10 +702,10 @@ E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
 - **E14-S2** — #359: light/dark theme choice (System / Light / Dark). Builds on E14-S5's
   `dcc` theming: it moves those dark values under its `data-theme` selectors rather than
   mapping the `--Dash-*` variables itself.
-- **E14-S3** — chart theme foundation (light/dark Plotly templates + palette).
-  **Unfiled placeholder, gated on E9-S6:** filed when the first chart story is shaped, and
-  lands before or with that chart. It picks each chart's template from E14-S2's
-  `data-theme`.
+- **E14-S3** — #432: chart theme foundation. Filed 2026-11-05 with E9-S6's first charts: the
+  `components.chart` builder and chart-ID registry, light and dark templates read from #359's CSS
+  tokens, contrast and WCAG 1.4.1 tests, plotly.js from its CDN, and figure text under the wording
+  scan. After #359 (which now also exposes the resolved theme to Dash) and #430; before C1 (#433).
 - **E14-S4** — #364: use the desktop width at the top of each page (a two-column top on the
   one-election page, filter dropdowns in a row, and the landing, elections-index and
   state-history pages). **Gated on a design research pass** (the `dataviz` skill plus
