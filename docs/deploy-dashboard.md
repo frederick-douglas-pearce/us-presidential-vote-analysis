@@ -419,7 +419,7 @@ never registered. Pointing graphs at the CDN is #432's. The record, from
 | When | Status | Body |
 |---|---|---|
 | Before (2026-11-05) | `HTTP/2 200` | `content-length: 4815814`; 1,472,154 bytes with `Accept-Encoding: gzip` |
-| After the deploy | pending | expected `HTTP/2 404` (the post-deploy check in §9) |
+| After (2026-11-05, deploy run 42028422287 of 62155d2) | `HTTP/2 404` | `content-length: 207`, Flask's default 404 body |
 
 Other component-suite files over 500 KB the app still serves, none used by any page, are
 #439. A standing canary check for the 404 is #440.
