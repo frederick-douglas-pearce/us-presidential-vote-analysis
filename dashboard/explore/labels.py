@@ -205,6 +205,19 @@ UNRECOGNIZED = "Unrecognized value"
 #: no download.
 UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for."
 
+#: The theme control's name, the legend of its radio group on every page (#359; ba
+#: spec, approved by the owner at #359's plan gate, 2026-11-05). Not a ``LABELS`` key.
+THEME_CONTROL = "Theme"
+
+#: Each theme choice, in display order: the internal value (the stored choice and
+#: ``data-theme``, never shown) and its radio label (#359). System, the starting
+#: choice, follows the device's light or dark setting.
+THEME_CHOICES: dict[str, str] = {
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+}
+
 
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the

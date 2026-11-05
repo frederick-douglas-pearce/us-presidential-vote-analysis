@@ -1,94 +1,75 @@
-/* Two layouts (#360). The page is up to 72rem wide at any width, but running text, the
-   panel, the filters and the short lists keep a readable measure (--measure) and only
-   tables use the rest. A phone is narrower than the measure, so it sees one column and
-   scrolls sideways only inside a table. From 64rem up the side padding grows and the
-   States list goes to three columns; the widest tables fit without scrolling from about
-   1280px. */
-:root { --measure: 42rem; }
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 1rem;
-  line-height: 1.5;
-  color: #1a1a1a;
-  background: #fff;
-}
-.explore {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 1.25rem 1rem 3rem;
-}
-h1 { font-size: 1.6rem; line-height: 1.25; margin: 0.5rem 0 0.75rem; }
-h2 { font-size: 1.15rem; margin: 1.75rem 0 0.5rem; }
-ul { padding-left: 1.25rem; margin: 0; }
-li { margin: 0.25rem 0; }
-a { color: #0b5cad; }
-.label { font-weight: 600; }
-.lede { color: #444; }
-.snapshot { margin-top: 2rem; font-size: 0.75rem; color: #666; }
-.snapshot code { overflow-wrap: anywhere; }
-.unavailable { margin-top: 1.5rem; padding: 0.75rem 1rem; border-left: 4px solid #b58900; background: #fdf6e3; }
-.next { margin-top: 1.25rem; }
-.filters { margin: 1rem 0 0.5rem; }
-.filters .label { display: block; margin-bottom: 0.25rem; }
-.filters input[type="checkbox"] { margin-right: 0.35rem; }
-.count, .empty { color: #444; margin: 0.75rem 0 0.5rem; }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #ddd; }
-th { font-weight: 600; cursor: help; }
-.filters .filter { margin-bottom: 0.5rem; }
-/* The candidate history's year control (#331): a fieldset with no frame, each choice a button. */
-fieldset.filter { border: 0; padding: 0; margin-left: 0; margin-right: 0; min-width: 0; }
-fieldset.filter legend { padding: 0; }
-.year-buttons label { display: inline-block; margin: 0 0.35rem 0.35rem 0; padding: 0.25rem 0.6rem; border: 1px solid #0b5cad; border-radius: 1rem; cursor: pointer; }
-.year-buttons input[type="radio"] { margin-right: 0.3rem; }
-.year-buttons label:has(input:checked) { background: #0b5cad; color: #fff; }
-.table-scroll { overflow-x: auto; }
-.table-scroll table { min-width: 36rem; }
-/* T1 has three short columns: it fits a phone, so it never scrolls. */
-.table-scroll #elections-table { min-width: 0; }
-.download { margin: 0.5rem 0; font-size: 0.875rem; }
-.note { color: #444; font-size: 0.875rem; }
-.reason { font-size: 0.875rem; color: #444; }
-.glossary { margin-top: 1rem; font-size: 0.875rem; }
-.glossary dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
-.glossary dd { margin: 0; }
-/* The label column stops at half the width and wraps, so a long label never widens the page on a phone. */
-.panel dl { display: grid; grid-template-columns: fit-content(50%) 1fr; gap: 0.35rem 1rem; margin: 0.5rem 0; }
-.panel .glossary dl { grid-template-columns: fit-content(60%) 1fr; }
-.panel dt, .panel dd { overflow-wrap: anywhere; }
-.panel dt { font-weight: 600; cursor: help; }
-.panel dd { margin: 0; }
-.panel .glossary dt { font-weight: normal; cursor: auto; }
-.provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid #ddd; }
-/* The readable measure. T1 and the States list are here too: at full width their few
-   short columns would spread thin. */
-.explore p, .glossary, .panel, .filters, .unavailable, .states, .provenance-footer ul,
-.table-scroll #elections-table { max-width: var(--measure); }
-@media (min-width: 64rem) {
-  .explore { padding-left: 2rem; padding-right: 2rem; }
-  /* The gap leaves room for each column's bullets, which sit outside its text. */
-  .states { columns: 3; column-gap: 2rem; }
-  /* Padding, not margin: a margin at the top of a column is dropped, so the columns would not line up. */
-  .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
+/* Color tokens (#359). Every color on the page is one of these custom properties, and
+   every rule below the three palette blocks names colors only through var(). The list
+   is closed: TestThemeTokens (test_dashboard_app.py) pins it, and E14-S3 (#432) reads
+   chart colors from it, appending its own tokens to the same list.
+
+   Page tokens, by role:
+     --page            the page background
+     --text            body text
+     --text-secondary  ledes, counts, notes and reasons
+     --text-faint      the snapshot line
+     --accent          links, and the border and fill of a choice pill
+     --on-accent       text and the checked radio on the accent fill
+     --rule            table and footer rules
+     --callout         the degraded state's fill
+     --callout-edge    the degraded state's edge
+   Control tokens (#409), which the dcc controls paint with through Dash's --Dash-*
+   variables. In light, Dash's own light defaults paint the controls, so each light
+   value here is a copy of the one Dash variable named beside it, pinned to the
+   installed Dash by a test; in dark, the two dark blocks map Dash's variables onto
+   these tokens:
+     --text-muted      weak and disabled control text
+     --surface         a control's background
+     --border          a control's strong stroke
+     --disabled        a disabled control's fill
+     --hover           a hovered option's fill
+     --active          a pressed option's fill
+
+   Three palette blocks, each declaring every token. Light is the bare :root below.
+   Dark is two identical blocks, so that an explicit choice wins in both directions:
+   the device's dark setting, unless the reader chose Light, and the reader's Dark
+   choice, whatever the device says. The head script in app.py sets data-theme on
+   <html> before first paint. Both dark selectors have specificity (0,2,0), above the
+   bare :root Dash declares its light defaults on, from a style it injects after this
+   sheet; color-scheme, which browsers read from the root element, gives the page
+   scrollbar and the native checkboxes and radios their form. A test in
+   test_dashboard_app.py fails if Dash renames a variable the dark blocks set. */
+:root {
+  color-scheme: light;
+  /* Not a color: the readable measure (#360). */
+  --measure: 42rem;
+  --page: #fff;
+  --text: #1a1a1a;
+  --text-secondary: #444;
+  --text-faint: #666;
+  --accent: #0b5cad;
+  --on-accent: #fff;
+  --rule: #ddd;
+  --callout: #fdf6e3;
+  --callout-edge: #b58900;
+  --text-muted: rgba(0, 12, 51, 0.65); /* --Dash-Text-Weak */
+  --surface: #fff; /* --Dash-Fill-Inverse-Strong */
+  --border: rgba(0, 18, 77, 0.45); /* --Dash-Stroke-Strong */
+  --disabled: rgba(0, 24, 102, 0.1); /* --Dash-Fill-Disabled */
+  --hover: rgba(0, 18, 77, 0.04); /* --Dash-Fill-Primary-Hover */
+  --active: rgba(0, 18, 77, 0.08); /* --Dash-Fill-Primary-Active */
 }
 @media (prefers-color-scheme: dark) {
-  /* The dcc controls (#409) are themed through Dash 4's --Dash-* variables, which point at
-     the named dark values here. Dash declares its light defaults on a bare :root, from a
-     style it injects after this sheet, so this selector needs the higher specificity;
-     :not([data-theme="light"]) supplies it and is the selector #359's explicit Light
-     choice will need. color-scheme, which browsers read from the root element, gives the
-     page scrollbar and the native checkboxes and radios their dark form. A test in
-     test_dashboard_app.py fails if Dash renames a variable this block sets. */
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+    --page: #121212;
     --text: #e8e8e8;
+    --text-secondary: #bbb;
+    --text-faint: #999;
+    --accent: #7ab8ff;
+    --on-accent: #121212;
+    --rule: #333;
+    --callout: #2b2610;
+    --callout-edge: #b58900;
     --text-muted: #a3a3a3;
     --surface: #1e1e1e;
     --border: #767676;
-    --rule: #333;
     --disabled: #666;
-    --accent: #7ab8ff;
     --hover: rgba(255, 255, 255, 0.06);
     --active: rgba(255, 255, 255, 0.12);
     --Dash-Text-Strong: var(--text);
@@ -106,15 +87,121 @@ fieldset.filter legend { padding: 0; }
     --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
     --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
   }
-  body { color: var(--text); background: #121212; }
-  a { color: var(--accent); }
-  .year-buttons label { border-color: var(--accent); }
-  .year-buttons label:has(input:checked) { background: var(--accent); color: #121212; }
-  /* The checked radio sits on the accent fill, so it takes the page color, not the accent. */
-  .year-buttons input[type="radio"] { accent-color: #121212; }
-  .lede { color: #bbb; }
-  .snapshot { color: #999; }
-  .unavailable { background: #2b2610; }
-  .count, .empty, .note, .reason { color: #bbb; }
-  th, td, .provenance-footer { border-color: var(--rule); }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121212;
+  --text: #e8e8e8;
+  --text-secondary: #bbb;
+  --text-faint: #999;
+  --accent: #7ab8ff;
+  --on-accent: #121212;
+  --rule: #333;
+  --callout: #2b2610;
+  --callout-edge: #b58900;
+  --text-muted: #a3a3a3;
+  --surface: #1e1e1e;
+  --border: #767676;
+  --disabled: #666;
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(255, 255, 255, 0.12);
+  --Dash-Text-Strong: var(--text);
+  --Dash-Text-Primary: var(--text);
+  --Dash-Text-Weak: var(--text-muted);
+  --Dash-Text-Disabled: var(--text-muted);
+  --Dash-Fill-Inverse-Strong: var(--surface);
+  --Dash-Fill-Interactive-Strong: var(--accent);
+  --Dash-Fill-Interactive-Weak: var(--hover);
+  --Dash-Fill-Primary-Hover: var(--hover);
+  --Dash-Fill-Primary-Active: var(--active);
+  --Dash-Fill-Disabled: var(--disabled);
+  --Dash-Stroke-Strong: var(--border);
+  --Dash-Stroke-Weak: var(--rule);
+  --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
+  --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
+}
+
+/* Two layouts (#360). The page is up to 72rem wide at any width, but running text, the
+   panel, the filters and the short lists keep a readable measure (--measure) and only
+   tables use the rest. A phone is narrower than the measure, so it sees one column and
+   scrolls sideways only inside a table. From 64rem up the side padding grows and the
+   States list goes to three columns; the widest tables fit without scrolling from about
+   1280px. */
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--page);
+}
+.explore {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+/* The theme control (#359), above every page, aligned with the page's column. */
+.site-header {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.site-header .theme-control legend { float: left; margin: 0.25rem 0.5rem 0 0; }
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0.5rem 0 0.75rem; }
+h2 { font-size: 1.15rem; margin: 1.75rem 0 0.5rem; }
+ul { padding-left: 1.25rem; margin: 0; }
+li { margin: 0.25rem 0; }
+a { color: var(--accent); }
+.label { font-weight: 600; }
+.lede { color: var(--text-secondary); }
+.snapshot { margin-top: 2rem; font-size: 0.75rem; color: var(--text-faint); }
+.snapshot code { overflow-wrap: anywhere; }
+.unavailable { margin-top: 1.5rem; padding: 0.75rem 1rem; border-left: 4px solid var(--callout-edge); background: var(--callout); }
+.next { margin-top: 1.25rem; }
+.filters { margin: 1rem 0 0.5rem; }
+.filters .label { display: block; margin-bottom: 0.25rem; }
+.filters input[type="checkbox"] { margin-right: 0.35rem; }
+.count, .empty { color: var(--text-secondary); margin: 0.75rem 0 0.5rem; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; cursor: help; }
+.filters .filter { margin-bottom: 0.5rem; }
+/* Single-choice pills (#331, and the theme control, #359): a fieldset with no frame, each
+   choice a button. */
+fieldset.filter { border: 0; padding: 0; margin-left: 0; margin-right: 0; min-width: 0; }
+fieldset.filter legend { padding: 0; }
+.year-buttons label { display: inline-block; margin: 0 0.35rem 0.35rem 0; padding: 0.25rem 0.6rem; border: 1px solid var(--accent); border-radius: 1rem; cursor: pointer; }
+/* The checked radio sits on the accent fill, so it takes the text color on that fill. */
+.year-buttons input[type="radio"] { margin-right: 0.3rem; accent-color: var(--on-accent); }
+.year-buttons label:has(input:checked) { background: var(--accent); color: var(--on-accent); }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { min-width: 36rem; }
+/* T1 has three short columns: it fits a phone, so it never scrolls. */
+.table-scroll #elections-table { min-width: 0; }
+.download { margin: 0.5rem 0; font-size: 0.875rem; }
+.note { color: var(--text-secondary); font-size: 0.875rem; }
+.reason { font-size: 0.875rem; color: var(--text-secondary); }
+.glossary { margin-top: 1rem; font-size: 0.875rem; }
+.glossary dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
+.glossary dd { margin: 0; }
+/* The label column stops at half the width and wraps, so a long label never widens the page on a phone. */
+.panel dl { display: grid; grid-template-columns: fit-content(50%) 1fr; gap: 0.35rem 1rem; margin: 0.5rem 0; }
+.panel .glossary dl { grid-template-columns: fit-content(60%) 1fr; }
+.panel dt, .panel dd { overflow-wrap: anywhere; }
+.panel dt { font-weight: 600; cursor: help; }
+.panel dd { margin: 0; }
+.panel .glossary dt { font-weight: normal; cursor: auto; }
+.provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
+/* The readable measure. T1 and the States list are here too: at full width their few
+   short columns would spread thin. */
+.explore p, .glossary, .panel, .filters, .unavailable, .states, .provenance-footer ul,
+.table-scroll #elections-table { max-width: var(--measure); }
+@media (min-width: 64rem) {
+  .explore, .site-header { padding-left: 2rem; padding-right: 2rem; }
+  /* The gap leaves room for each column's bullets, which sit outside its text. */
+  .states { columns: 3; column-gap: 2rem; }
+  /* Padding, not margin: a margin at the top of a column is dropped, so the columns would not line up. */
+  .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
 }
