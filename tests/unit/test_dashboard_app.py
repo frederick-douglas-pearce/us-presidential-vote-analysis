@@ -1655,6 +1655,59 @@ class TestDashPrivates:
             dash._validate.validate_js_path({}, "plotly", PLOTLYJS_PACKAGE_PATH)
 
 
+#: The plotly.js entry ``Dash._setup_plotlyjs`` appends, as the override checks it.
+PLOTLYJS_ENTRY = {
+    "relative_package_path": PLOTLYJS_PACKAGE_PATH,
+    "external_url": "https://cdn.plot.ly/plotly-0.0.0.min.js",
+    "namespace": "plotly",
+    "async": "eager",
+}
+
+
+class TestPlotlyjsOverride:
+    """#430: app.py's ``_setup_plotlyjs`` marks only the one entry Dash's call adds,
+    and fails the import on any other addition. Driven against a fake Dash call and
+    a throwaway ``dcc._js_dist``, so the shared app is never rebuilt."""
+
+    @staticmethod
+    def run_override(
+        monkeypatch: pytest.MonkeyPatch, added: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        existing = {"namespace": "dash", "relative_package_path": "dcc/x.js"}
+        monkeypatch.setattr(dash.dcc, "_js_dist", [existing])
+
+        def dash_s(_self: Any) -> None:
+            dash.dcc._js_dist.extend(copy.deepcopy(added))
+
+        monkeypatch.setattr(dash.Dash, "_setup_plotlyjs", dash_s)
+        appmod.ExploreDash._setup_plotlyjs(object.__new__(appmod.ExploreDash))
+        return list(dash.dcc._js_dist)
+
+    def test_the_one_added_entry_is_marked_and_nothing_else(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dist = self.run_override(monkeypatch, [PLOTLYJS_ENTRY])
+        assert dist[0] == {"namespace": "dash", "relative_package_path": "dcc/x.js"}
+        assert dist[1] == {**PLOTLYJS_ENTRY, "external_only": True}
+
+    @pytest.mark.parametrize(
+        "added",
+        [
+            [],
+            [PLOTLYJS_ENTRY, PLOTLYJS_ENTRY],
+            [{**PLOTLYJS_ENTRY, "relative_package_path": "package_data/other.js"}],
+            [{**PLOTLYJS_ENTRY, "namespace": "dash"}],
+        ],
+        ids=["none", "two", "other-path", "other-namespace"],
+    )
+    def test_any_other_addition_fails_and_marks_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, added: list[dict[str, Any]]
+    ) -> None:
+        with pytest.raises(RuntimeError, match="unexpected plotly.js entries"):
+            self.run_override(monkeypatch, added)
+        assert not any("external_only" in entry for entry in dash.dcc._js_dist)
+
+
 class TestPlotlyjsNotServed:
     """#430: the app serves no copy of plotly.js, which no page uses yet."""
 
