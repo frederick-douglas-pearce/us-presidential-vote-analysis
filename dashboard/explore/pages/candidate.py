@@ -179,6 +179,9 @@ dash.register_page(
     validate=VALIDATE,
     not_found=NOT_FOUND,
     query=parse_filters,
+    # The site navigation link this page marks (#448):
+    # no candidate index exists, so the candidate history marks no link.
+    nav=None,
 )
 
 

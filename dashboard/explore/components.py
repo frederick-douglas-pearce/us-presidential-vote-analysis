@@ -1,8 +1,9 @@
 """View pieces every page shares: the provenance footer, the degraded state (#306), the
 year-range slider every year-filtered table uses (#279), the candidate history's
 single-choice year control (#331), the linked state and candidate cells (#279, #331),
-the table itself with its CSV download (#309), and the theme control and the id of the
-store holding the theme in effect (#359), which charts read (#432).
+the table itself with its CSV download (#309), the theme control and the id of the
+store holding the theme in effect (#359), which charts read (#432), and the site
+navigation (#448).
 
 Pure functions of what a page already read, so they read no API: a page reads through
 its own render-scoped view and hands them what it read.
@@ -226,6 +227,79 @@ def theme_control() -> html.Div:
     named: dict[str, Any] = {"aria-label": labels.THEME_CONTROL}
     return html.Div(
         buttons, id=THEME_CONTROL_ID, role="group", className="theme-control", **named
+    )
+
+
+#: The id of the site navigation (#448), the ``nav`` landmark in the site header.
+SITE_NAV_ID = "site-nav"
+
+#: The site navigation's in-app links (#448), in order: each link's key (what a page's
+#: ``nav=`` may name in ``dash.register_page``), its id and its path, which
+#: :func:`site_nav`, app.py's current-page table and its callback all read. The order,
+#: the labels and the site-name link's form are :func:`site_nav`'s own;
+#: ``test_in_app_links_are_dcc_links_to_their_paths`` (``test_dashboard_nav.py``) fails
+#: if the bar and this table diverge. The ids are static: the bar renders once per
+#: document, in ``app.layout``.
+NAV_LINKS: dict[str, tuple[str, str]] = {
+    "home": ("nav-home", "/"),
+    "elections": ("nav-elections", "/elections"),
+    "states": ("nav-states", "/states"),
+}
+
+#: Each in-app link's key, mapped to its id (#448): the one projection of
+#: :data:`NAV_LINKS` the callback and the tests read.
+NAV_LINK_IDS: dict[str, str] = {key: link_id for key, (link_id, _) in NAV_LINKS.items()}
+
+#: The id of the API docs link, the bar's one link off this site (#448).
+NAV_API_DOCS_ID = "nav-api-docs"
+
+
+def site_nav(docs_href: str) -> html.Nav:
+    """The site navigation (#448): the site name, linked home, then Elections, States
+    and API docs, as the ``nav`` landmark's direct children.
+
+    ``docs_href`` is the API's ``/docs`` address, which app.py builds from
+    ``config.API_BASE``: this module imports nothing from ``explore`` but the shared
+    modules. The bar reads no data. The in-app links are ``dcc.Link``, so they navigate
+    client-side; API docs is an ordinary same-tab link that the dashboard never fetches.
+    ``dcc.Link`` renders no ``aria-*`` attribute, so the current-page marker
+    (``aria-current``) is written onto the links in the browser by app.py's
+    ``NAV_CALLBACK``, which reports the link it marked in the nav's ``data-current``.
+    The layout renders no ``data-current``, so its presence shows the callback ran.
+    The site name's accessible name is the full name at every width: the short form is
+    always shown and the rest is visually hidden on a narrow screen, never
+    ``display: none`` (WCAG 2.5.3). The theme toggle is the header's next child, not
+    part of this landmark, which holds only links.
+    """
+    home, elections, states = (NAV_LINKS[k] for k in ("home", "elections", "states"))
+    named: dict[str, Any] = {"aria-label": labels.SITE_NAV_LABEL}
+    return html.Nav(
+        [
+            dcc.Link(
+                # One inline span, so the link (a flex container) has one item and the
+                # space that opens the rest of the name is kept, not trimmed.
+                html.Span(
+                    [
+                        labels.SITE_NAME_SHORT,
+                        html.Span(labels.SITE_NAME_REST, className="site-name-rest"),
+                    ]
+                ),
+                href=home[1],
+                id=home[0],
+                className="site-name",
+            ),
+            dcc.Link(labels.NAV_ELECTIONS, href=elections[1], id=elections[0]),
+            dcc.Link(labels.NAV_STATES, href=states[1], id=states[0]),
+            html.A(
+                labels.NAV_API_DOCS,
+                href=docs_href,
+                id=NAV_API_DOCS_ID,
+                title=labels.NAV_API_DOCS_TITLE,
+            ),
+        ],
+        id=SITE_NAV_ID,
+        className="site-nav",
+        **named,
     )
 
 

@@ -413,7 +413,14 @@ def test_each_position_is_a_named_pressed_button_chosen_from_the_keyboard(
     group = page.get_by_role("group", name=labels.THEME_CONTROL)
     expect(group.get_by_role("button")).to_have_count(len(labels.THEME_CHOICES))
     expect(page.locator("header [role=listbox], header [role=option]")).to_have_count(0)
-    # The header comes first: Tab reaches Dark, then Auto, then Light.
+    # The header comes first: Tab passes the site navigation's four links (#448), then
+    # reaches Dark, then Auto, then Light.
+    for link_id in [
+        *components.NAV_LINK_IDS.values(),
+        components.NAV_API_DOCS_ID,
+    ]:
+        page.keyboard.press("Tab")
+        expect(page.locator(":focus")).to_have_id(link_id)
     for choice in labels.THEME_CHOICES:
         page.keyboard.press("Tab")
         focused = page.locator(":focus")

@@ -28,6 +28,12 @@ from tests.e2e.dashboard_pages import (
 
 pytestmark = pytest.mark.e2e
 
+#: The earlier and later links' landmark name (#324), apart from the site
+#: navigation's (#448), read from the page module through its layout.
+ELECTION_NAV_LABEL = dash.page_registry["pages.election"]["layout"].__globals__[
+    "ELECTION_NAV_LABEL"
+]
+
 #: A filter the starting view applies, so the step shows that none carries over.
 FILTERED = "?state=GA"
 
@@ -43,7 +49,7 @@ def test_the_later_link_opens_the_next_election_and_back_returns(page: Page) -> 
     earlier, later = step_years()
     page.goto(f"/election/{earlier}{FILTERED}")
     assert_year(page, earlier, FILTERED)
-    expect(page.get_by_role("navigation")).to_have_count(1)
+    expect(page.get_by_role("navigation", name=ELECTION_NAV_LABEL)).to_have_count(1)
     link = page.locator(ELECTION_LATER)
     expect(link).to_have_attribute("href", f"/election/{later}")
     page.evaluate("window.__e2e_mark = 1")

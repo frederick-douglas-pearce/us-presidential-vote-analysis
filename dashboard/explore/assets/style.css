@@ -143,19 +143,78 @@ body {
   color: var(--text);
   background: var(--page);
 }
-.explore {
+/* The page's column and the site header share one width rule, so the header's ends line
+   up with the page's content at every width (#448). */
+.explore, .site-header {
   max-width: 72rem;
   margin: 0 auto;
-  padding: 1.25rem 1rem 3rem;
 }
-/* The site header (#359), above every page, aligned with the page's column. */
+.explore { padding: 1.25rem 1rem 3rem; }
+/* The site header (#359, #448), above every page: the site navigation, then the theme
+   toggle. One row at a phone's width (the e2e suite checks 390 px); it wraps rather than
+   scrolling sideways when the text is larger or the screen narrower (WCAG 1.4.10). */
 .site-header {
-  max-width: 72rem;
-  margin: 0 auto;
   padding: 0.75rem 1rem 0;
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 0.375rem;
+}
+/* The site navigation (#448): the site name at the left, the three links pushed right
+   beside the toggle. Its links are the nav's own children, with no list, so the page's
+   list indent and margins never reach them. */
+.site-nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+}
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.site-nav .site-name { margin-right: auto; color: var(--text); font-weight: 600; }
+.site-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The current page's link, or its section's: an underline, never color alone, drawn from
+   the aria-current the navigation callback writes, so what is seen is what assistive
+   technology hears. A decoration, which forced colors keep. */
+.site-nav a[aria-current="page"],
+.site-nav a[aria-current="true"] {
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.3em;
+}
+/* The rest of the site name: visually hidden on a narrow screen, so the link's name stays
+   the full name, and shown from 45rem up, where the whole name fits on the row even in a
+   wide fallback font (DejaVu Sans, the CI runner's). white-space: pre keeps the space
+   that opens it, which an absolutely positioned (blockified) box would otherwise
+   collapse, so the name never reads "Explore— US…". */
+.site-name-rest {
+  white-space: pre;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+}
+@media (min-width: 45rem) {
+  .site-name-rest {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+  }
 }
 /* Text read by assistive technology and not shown: the theme buttons' names. */
 .visually-hidden {
@@ -172,7 +231,7 @@ body {
 /* The theme toggle (#447): three icon buttons, Dark, Auto, Light. No toggle rule names
    the site header, so a navigation bar (#448) can hold it. The gap is wider than the
    focus ring reaches (offset plus width), so a ring never lands on a neighbor's accent
-   fill (test_the_gap_clears_the_focus_ring). The browser's button look is reset, so
+   fill (test_each_gap_clears_the_focus_ring). The browser's button look is reset, so
    what paints is the tokens below: an unselected icon in --text-secondary on the page. */
 .theme-control { display: inline-flex; gap: 0.375rem; }
 .theme-control button {
@@ -181,8 +240,8 @@ body {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
   margin: 0;
   padding: 0;
   border: 0;

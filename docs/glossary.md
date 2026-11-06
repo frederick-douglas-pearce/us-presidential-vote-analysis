@@ -16,9 +16,11 @@ is also listed under **Open decisions**. Wording still under review in an open p
 not marked here; that pull request carries it.
 
 **This file records what terms mean; the code ships the wording.** The dashboard's shipped
-wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, and the null
-and help-text constants), with a few page-level sentences in `dashboard/explore/components.py`,
-`dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`. The API's
+wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, the null
+and help-text constants, and the names of the site's controls and links), with a few page-level
+sentences in `dashboard/explore/components.py`, `dashboard/explore/export.py` and the modules
+under `dashboard/explore/pages/`, and the site title in `dashboard/explore/config.py`
+(`SITE_TITLE`). The API's
 published text is its `/docs` page (also served at `/redoc` and `/openapi.json`) and the text of
 its responses other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
 what that includes. It ships from five files under `src/usvote/api/`:
@@ -873,6 +875,58 @@ articles and announcements). Every rule binds all three unless the rule states a
   covered*).
 - **Status:** settled
 
+### Site name (this site)
+- **Plain:** The name of this website, where these tables are: "Explore — US Presidential
+  Election Center", shortened to "Explore" on a narrow screen. "This site" means these pages
+  only.
+- **Precise:** The pages served at `config.CANONICAL_HOST` (D071(c)). The full form is
+  `config.SITE_TITLE`'s text; the short form is its first word, so the visible short name is
+  the start of the site-name link's accessible name, which is the full form at every width
+  (WCAG 2.5.3). The API's `/docs` page, at `config.API_HOST`, is not on this site. The home
+  page's heading, "US Presidential Election Center", is the full form without "Explore —".
+- **Shown as:** the browser tab and link previews (`config.SITE_TITLE`), as the title of `/`
+  (`pages/home.py`) and after the heading on a not-found link (`api.NotFound.title`, in
+  `dashboard/explore/api.py`); the site navigation's link to `/` (`labels.SITE_NAME_SHORT`,
+  always shown, and `labels.SITE_NAME_REST`, shown from 45rem up and visually hidden below);
+  "this site" in `NOT_FOUND_SENTENCE` in `pages/not_found_404.py`; the home page's heading
+  (`labels.HOME_HEADING`, in `layout` in `pages/home.py`).
+- **Source:** `config.SITE_TITLE`; `config.CANONICAL_HOST`; D071(c); the short form and the
+  link's accessible name: #448; reader wording: owner decision at #448's plan gate, 2026-11-06
+  ("Explore" for now; the owner may switch the short form to "Home" once it is seen on the
+  built page).
+- **Not:** The *Dataset*. The API, which serves the dataset from its own address.
+  "Dashboard", the project's own word for these pages, which no reader-facing string in
+  `dashboard/explore/` uses.
+- **Status:** settled
+
+### Site navigation (the bar at the top of every page)
+- **Plain:** The row of links at the top of every page: the site's name, which goes to the home
+  page, then links to the list of elections, the list of states and the API's documentation
+  page. The theme toggle sits at the end of the same row. The link for the part of the site the
+  reader is in is marked.
+- **Precise:** A `nav` landmark named `labels.SITE_NAV_LABEL`, inside the site header and
+  before `Main`, on every page, including every not-found state, the degraded state and the
+  custom 404 page; the theme toggle follows it in the header, outside the landmark (D086). It
+  reads no data. The site-name link carries `aria-current="page"` on `/`, as Elections does on
+  `/elections` and States on `/states`. Elections carries `aria-current="true"` on
+  `/election/<year>` and States on `/state/<usps>`, matched by route, so a link the dataset does
+  not serve marks its section too: the mark names the section, not the page being read. Nothing
+  is marked on `/candidate/<slug>` or the custom 404 page. Elections, States and the site name
+  navigate client-side. API docs is an ordinary same-tab link to the API's `/docs` page, which
+  is not on this site (*Site name*).
+- **Shown as:** `labels.SITE_NAV_LABEL` (read by assistive technology, not shown);
+  `labels.SITE_NAME_SHORT` and `labels.SITE_NAME_REST`; `labels.NAV_ELECTIONS`,
+  `labels.NAV_STATES`, `labels.NAV_API_DOCS`; the API docs link's tooltip,
+  `labels.NAV_API_DOCS_TITLE`; then, in the header, the theme toggle (*Theme choice*). Built by
+  `components.site_nav`, placed in `app.layout` (`dashboard/explore/app.py`).
+- **Source:** #448 (owner decisions fixed in the issue and the owner's comment, 2026-11-06);
+  D086; reader wording: owner decision at #448's plan gate, 2026-11-06.
+- **Not:** The earlier and later links on `/election/<year>` and their landmark
+  (`ELECTION_NAV_LABEL`, *Election year*). The in-body "Browse…" links on the home page and the
+  not-found states, which stay. A menu: the bar has at most four entries at the right, the
+  toggle counted, and never collapses.
+- **Status:** settled
+
 ### Sources
 - **Plain:** Where each kind of figure comes from (electoral votes, popular votes, population,
   parties): the organization that publishes it, and the license it is published under.
@@ -918,7 +972,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`"this state's history"`);
   its not-found state (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link
   to `/states`, in `pages/state.py`); and the home page's lede and its "Browse by state" link
-  (`pages/home.py`).
+  (`pages/home.py`). The site navigation's States link, `labels.NAV_STATES`, goes to `/states`
+  and is marked on `/states` and on `/state/<usps>`.
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —
@@ -938,9 +993,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   the browser refuses `localStorage`, the choice lasts for the document: it carries across
   in-site (client-side) navigation to other pages, but not a reload or a new tab. It describes
   the page, not the data: it is never in the URL, `og:url`, a CSV download or any API request.
-- **Shown as:** the theme toggle in the site header on every page, built in `app.layout`
-  (`dashboard/explore/app.py`) by `components.theme_control`: three icon buttons in the order
-  Dark, Auto, Light. Each button's name, `labels.THEME_CHOICES`, is hidden text inside it, read
+- **Shown as:** the theme toggle, after the site navigation (*Site navigation*) in the site
+  header on every page, placed in `app.layout` (`dashboard/explore/app.py`) and built by
+  `components.theme_control`: three icon buttons in the order Dark, Auto, Light. Each button's name, `labels.THEME_CHOICES`, is hidden text inside it, read
   by assistive technology. Each button's tooltip is `labels.THEME_TITLES`. The group's name,
   `labels.THEME_CONTROL`, is read by assistive technology and not shown on the page. The stored
   values `light` and `dark` are never shown.

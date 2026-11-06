@@ -38,6 +38,7 @@ from dash._pages import (
     _parse_query_string,
     _path_to_page,
 )
+from dash.dash import _ID_CONTENT, _ID_LOCATION
 from dash.development.base_component import Component
 
 from explore import api, components
@@ -1504,10 +1505,12 @@ class TestDashPrivates:
         appmod.server.test_client().get("/")  # Dash registers its router on a request
         assert ROUTING_POST["output"] == appmod.ROUTER_OUTPUT
         router = appmod.app.callback_map[appmod.ROUTER_OUTPUT]
-        # The hook reads pathname and search at these positions.
+        # The hook reads pathname and search at these positions. The site navigation's
+        # marker follows the same Location's pathname, by its id (#448).
+        assert _ID_LOCATION == "_pages_location"
         assert router["inputs"] == [
-            {"id": "_pages_location", "property": "pathname"},
-            {"id": "_pages_location", "property": "search"},
+            {"id": _ID_LOCATION, "property": "pathname"},
+            {"id": _ID_LOCATION, "property": "search"},
         ]
         assert router["inputs_state_indices"] == {"pathname_": 0, "search_": 1}
         assert router["state"] == []
@@ -1522,6 +1525,30 @@ class TestDashPrivates:
         assert [(r.rule, "POST" in (r.methods or ())) for r in rules] == [
             ("/_dash-update-component", True)
         ]
+
+    def test_the_routers_location_sits_outside_the_content_it_swaps(self) -> None:
+        # The site navigation's callback reads this Location's pathname (#448): it is a
+        # direct child of page_container, beside the content the router replaces, so a
+        # client-side navigation never re-mounts it.
+        children = dash.page_container.children
+        location = [c for c in children if getattr(c, "id", None) == _ID_LOCATION]
+        assert len(location) == 1
+        assert type(location[0]).__name__ == "Location"
+        content = [c for c in children if getattr(c, "id", None) == _ID_CONTENT]
+        assert len(content) == 1
+        inside = getattr(content[0], "children", None) or []
+        assert location[0] not in (inside if isinstance(inside, list) else [inside])
+
+    def test_dcc_link_renders_no_aria_attribute(self) -> None:
+        # Why NAV_CALLBACK writes aria-current onto the links in the browser rather
+        # than as a callback output (#448, D086): dcc.Link takes no aria-* prop. If an
+        # upgrade adds one, this fails and the marker can become a declared output.
+        link = dash.dcc.Link("x", href="/")
+        assert link._valid_wildcard_attributes == []
+        assert "aria-current" not in link.available_properties
+        with pytest.raises(TypeError, match="aria-current"):
+            aria: dict[str, Any] = {"aria-current": "page"}
+            dash.dcc.Link("x", href="/", **aria)
 
     def test_the_card_tags_are_dash_s_without_twitter_url(self) -> None:
         """app.py builds the card tags itself (#325); they stay Dash's set, less the raw

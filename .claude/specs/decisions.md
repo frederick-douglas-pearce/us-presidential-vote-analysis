@@ -5859,3 +5859,56 @@ deploy-root allow-list cannot drop.
 **Related:** D071, #359, #444, #447, #448.
 
 ---
+
+## D086: The site navigation holds at most four entries and never collapses; each page names the link it marks; where Dash renders no `aria-*`, the inline callback writes it
+
+**Date:** 2026-11-06
+**Builds on:** D085 · **Decided by:** the owner, in #448 and at its plan gate, and the architect,
+at #448's design gate (2026-11-06); recorded by #448 (E14)
+
+**Context.** #448 added a top navigation bar to every dashboard page: the site name, linked home,
+then Elections, States and API docs, then the theme toggle (#447). The bar sits in `app.layout`'s
+header, outside `dash.page_container`, so a client-side navigation never re-renders it, and its
+current-page marker must follow the URL in the browser. The design gate found that `dcc.Link`
+renders no `aria-*` attribute (it accepts none; `_valid_wildcard_attributes` is empty in Dash
+4.4.1), and that matching a path by its first segment would mark Elections on `/election` and
+`/elections/x`, which Dash's router matches to no page.
+
+**Decision.**
+- **At most four entries at the right, counting the theme toggle**, so the bar fits one row at
+  390 px with no collapse or hamburger menu. A fifth entry needs an owner decision and a
+  collapse-menu story first. The toggle follows the `nav` inside the header, so the landmark named
+  for site navigation holds only links.
+- **Each page names the link it marks**, with `nav=` in `dash.register_page` (a
+  `components.NAV_LINKS` key, or `None`); `app.py` builds `NAV_TABLE` from the registry at import
+  and fails the import for a page without one. A page marks its own link with
+  `aria-current="page"`; a detail page marks its index's link with `aria-current="true"`
+  (`/election/<year>` marks Elections, `/state/<usps>` States), and the candidate history and the
+  custom 404 page mark nothing. The marker is matched by Dash's router rule with the app served
+  at the root (`strip_relative_path` then strips only slashes; `app.py` refuses at import any
+  other `requests_pathname_prefix`): `_path_to_page`, slashes stripped, never decoded, each
+  page's template then path, in registry order. So a not-found year still marks its section and
+  a path the router matches to no page marks nothing.
+- **The marker's input is the Pages router's own Location** (`dash.dash._ID_LOCATION`, a Dash
+  private pinned in `TestDashPrivates`): it agrees with what the router routes on by
+  construction, and a second Location would be a component able to write the URL that only needs
+  to read it.
+- **Carve-out from D085's "never set on the element directly".** Where Dash renders no `aria-*`
+  attribute for a component (`dcc.Link`), the inline clientside callback writes it onto the element
+  itself, and the stylesheet draws the visible state from that attribute; the callback's declared
+  output is a React-owned `data-*` on a container (`data-current` on the `nav`). React manages no
+  such attribute on the element, so nothing overwrites the write. If a Dash upgrade lets
+  `dcc.Link` take `aria-*`, the pin `test_dcc_link_renders_no_aria_attribute` fails, and the
+  marker can become a declared output.
+
+**Rationale.** The cap is what keeps one row at a phone's width without a menu, which would be a
+second widget inside an inline callback. Declaring the mark beside each page's other registry keys
+keeps the table and the router from drifting: a page's own mark is one line in its
+`register_page`. A new link, such as a future candidate index, is not: it is a fifth entry, which
+the cap routes to an owner decision and a collapse-menu story, and it needs a `NAV_LINKS` key, a
+label and an entry in `components.site_nav`.
+Drawing the marker from `aria-current` means what is seen is what assistive technology hears.
+
+**Related:** D071, D085, #359, #444, #446, #447, #448.
+
+---

@@ -500,6 +500,21 @@ TOGGLE_PAINT = (
 )
 
 
+#: The site navigation's marker rule (#448): the current page's link, or its section's.
+MARKED = '.site-nav a[aria-current="page"], .site-nav a[aria-current="true"]'
+
+#: What the site navigation paints (#448), read from its own rules, as TOGGLE_PAINT is:
+#: (selector, the property naming the foreground token, the minimum ratio). Every one
+#: sits on the page: the bar has no fill. Link text is text (AA); the marker's underline
+#: and the focus ring are graphics (3:1).
+NAV_PAINT = (
+    ("a", "color", 4.5),
+    (".site-nav .site-name", "color", 4.5),
+    (MARKED, "text-decoration-color", 3.0),
+    (".site-nav a:focus-visible", "outline", 3.0),
+)
+
+
 def toggle_rule(selector: str, context: str | None = None) -> dict[str, str]:
     """The declarations of the one shipped rule whose selector reads ``selector``,
     inside the at-rule ``context`` (``None``: at the top level)."""
@@ -701,17 +716,94 @@ class TestThemeContrast:
         ratio = contrast(parse_color(palette[token_in(rule[foreground])]), ground)
         assert ratio >= NON_TEXT, (theme, selector, foreground, round(ratio, 2))
 
-    def test_the_gap_clears_the_focus_ring(self) -> None:
-        # A ring reaches offset plus width past its button; a narrower gap would put
-        # it on a selected neighbor's accent fill, accent on accent (1:1).
-        gap = toggle_rule(".theme-control")["gap"]
-        focus = toggle_rule(".theme-control button:focus-visible")
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize(("selector", "foreground", "minimum"), NAV_PAINT)
+    def test_the_site_navigation_meets_its_contrast(
+        self, theme: str, selector: str, foreground: str, minimum: float
+    ) -> None:
+        rule = toggle_rule(selector)
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        ratio = contrast(parse_color(palette[token_in(rule[foreground])]), page)
+        assert ratio >= minimum, (theme, selector, foreground, round(ratio, 2))
+
+    def test_the_site_navigation_paints_what_nav_paint_measures(self) -> None:
+        # NAV_PAINT's premises (#448's review): the global `a` rule is what colors the
+        # nav's links, and nothing behind the bar is filled, so every pair sits on
+        # --page. A nav rule that set a color or a fill would paint a pair no test reads.
+        # Every context counts, media queries included; the forced-colors block, where
+        # system colors repaint everything, names no nav rule at all.
+        named = r"\.site-(?:header|nav|name)\b"
+        nav_rules = [
+            (at, " ".join(prelude.split()), dict(declarations(body)))
+            for at, prelude, body in shipped_rules()
+            if re.search(named, prelude)
+        ]
+        assert nav_rules
+        assert any(at is not None for at, _, _ in nav_rules)  # the media rules are read
+        for at, prelude, rule in nav_rules:
+            assert at != FORCED_COLORS, prelude
+            assert not {"background", "background-color"} & set(rule), (at, prelude)
+            # The site name alone sets a color, NAV_PAINT's second pair.
+            if prelude != ".site-nav .site-name":
+                assert "color" not in rule, (at, prelude)
+        assert toggle_rule(".site-nav .site-name")["color"] == "var(--text)"
+
+    def test_the_bar_layout_declarations_are_pinned(self) -> None:
+        # The declarations the e2e fit checks cannot see in every font or at every
+        # width (#448's acceptance gate): the full name's breakpoint, the wrap that
+        # keeps the toggle on screen when the row is too narrow, and the toggle's
+        # 24 px buttons, which keep 16 px of slack at 390 px in CI's DejaVu Sans.
+        shown = toggle_rule(".site-name-rest", "@media (min-width: 45rem)")
+        assert shown["position"] == "static" and shown["clip-path"] == "none"
+        assert [
+            at for at, p, _ in shipped_rules() if " ".join(p.split()) == ".site-name-rest"
+        ] == [None, "@media (min-width: 45rem)"]
+        assert toggle_rule(".site-header")["flex-wrap"] == "wrap"
+        assert toggle_rule(".site-nav")["flex-wrap"] == "wrap"
+        button = toggle_rule(".theme-control button")
+        assert (button["width"], button["height"]) == ("1.5rem", "1.5rem")
+
+    def test_the_rest_of_the_site_name_keeps_its_space(self) -> None:
+        # The rest opens with a space, which an absolutely positioned (blockified) box
+        # may collapse, so the name would read "Explore— US…" (#448's review). The e2e
+        # name check does not discriminate in Chromium, so the declaration is pinned
+        # here.
+        assert toggle_rule(".site-name-rest")["white-space"] == "pre"
+        assert labels.SITE_NAME_REST.startswith(" ")
+
+    def test_the_marker_is_an_underline_not_color_alone(self) -> None:
+        # WCAG 1.4.1: the current link differs by a decoration, which forced colors
+        # keep, and the other links carry none.
+        marked = toggle_rule(MARKED)
+        assert marked["text-decoration-line"] == "underline"
+        assert marked["text-decoration-thickness"] == "2px"
+        assert toggle_rule(".site-nav a")["text-decoration"] == "none"
+
+    @pytest.mark.parametrize(
+        ("gap_selector", "focus_selector"),
+        [
+            (".theme-control", ".theme-control button:focus-visible"),
+            (".site-nav", ".site-nav a:focus-visible"),
+            (".site-header", ".site-nav a:focus-visible"),
+            (".site-header", ".theme-control button:focus-visible"),
+        ],
+    )
+    def test_each_gap_clears_the_focus_ring(
+        self, gap_selector: str, focus_selector: str
+    ) -> None:
+        # A ring reaches offset plus width past its control. Only one control is
+        # focused at a time, so the risk is one ring landing on a neighbor, such as a
+        # selected toggle position's accent fill, accent on accent (1:1): the gap must
+        # exceed one ring's reach (API docs then Dark sit across the header's gap, #448).
+        gap = toggle_rule(gap_selector)["gap"]
+        focus = toggle_rule(focus_selector)
         width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
         offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
         rem = re.fullmatch(r"([\d.]+)rem", gap)
         assert width and offset and rem, (gap, focus)
         reach = int(width.group(1)) + int(offset.group(1))
-        assert float(rem.group(1)) * 16 > reach, (gap, reach)
+        assert float(rem.group(1)) * 16 > reach, (gap_selector, gap, reach)
 
     def test_the_unselected_button_paints_on_the_page(self) -> None:
         # What makes the "on the page" pairs above true: no fill and no UA button look.
@@ -873,6 +965,15 @@ def texts(node: Any) -> list[str]:
     return found
 
 
+def toggle_group() -> Any:
+    """The theme toggle's group in the shared layout's header: the header's last child,
+    after the site navigation (#448)."""
+    header = appmod.app.layout.children[0]
+    group = header.children[-1]
+    assert getattr(group, "id", None) == components.THEME_CONTROL_ID
+    return group
+
+
 class TestThemeControl:
     def test_the_layout_holds_the_toggle_above_main_and_the_store(self) -> None:
         layout = appmod.app.layout
@@ -897,7 +998,7 @@ class TestThemeControl:
         ]
 
     def test_the_toggle_is_three_named_buttons_dark_auto_light(self) -> None:
-        group = appmod.app.layout.children[0].children
+        group = toggle_group()
         assert list(labels.THEME_CHOICES) == ["dark", labels.THEME_AUTO, "light"]
         assert [type(b).__name__ for b in group.children] == ["Button"] * 3
         assert [b.id for b in group.children] == list(
@@ -918,8 +1019,7 @@ class TestThemeControl:
             assert name.children == labels.THEME_CHOICES[value]
 
     def test_the_toggle_names_are_its_choices_and_no_raw_value(self) -> None:
-        header = appmod.app.layout.children[0]
-        shown = texts(header)
+        shown = texts(toggle_group())
         assert shown == list(labels.THEME_CHOICES.values())
         assert not any("_" in text for text in shown)
         assert not set(shown) & set(labels.THEME_CHOICES)  # never the internal value
@@ -1113,8 +1213,11 @@ class TestThemeSelected:
     def test_no_toggle_rule_names_the_site_header(self) -> None:
         # #448 moves the toggle into a navigation bar: no rule for it names the header,
         # by class or by element, under any combinator.
+        # Nor the site navigation, the bar beside it (#448).
         toggle = [p for _, p, _ in shipped_rules() if re.search(r"[.#]theme-", p)]
         assert toggle
         for prelude in toggle:
             assert ".site-header" not in prelude, prelude
+            assert ".site-nav" not in prelude, prelude
             assert not re.search(r"(^|[\s>+~,])header\b", prelude), prelude
+            assert not re.search(r"(^|[\s>+~,])nav\b", prelude), prelude
