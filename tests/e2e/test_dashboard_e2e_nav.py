@@ -1,6 +1,6 @@
 """The site navigation in a browser (#448): one row at a phone's width on every page
 template, a wrap rather than a sideways scroll at 320 px, the full site name from
-40rem, the current-page marker after a direct load, a client-side navigation, a filter
+45rem, the current-page marker after a direct load, a client-side navigation, a filter
 change and back and forward, Tab order, and in-app links that load no document.
 
 The marker is ``aria-current`` on the link, which ``NAV_CALLBACK`` writes in the
@@ -42,8 +42,10 @@ NOT_FOUND_ERROR = (
 NAV = f"#{components.SITE_NAV_ID}"
 LINK_IDS = {key: link_id for key, (link_id, _) in components.NAV_LINKS.items()}
 
-#: The slack the bar keeps at 390 px in Chromium's Noto Sans, so SF Pro, a little
-#: wider, still fits on one row (the architect's margin, #448).
+#: The slack the bar keeps at 390 px, so a wider font still fits on one row (the
+#: architect's margin for SF Pro, #448). CI's DejaVu Sans is the widest checked: at
+#: 8 px gaps and 28 px toggle buttons it left 4 px, so the gaps are 6 px and the
+#: buttons 24 px (owner decision, PR #451).
 MIN_SLACK_PX = 16
 
 #: How long a test waits for a callback that should not change anything.
@@ -172,7 +174,7 @@ def test_the_bar_wraps_rather_than_scrolls_at_320_px(page: Page) -> None:
     assert max(found["rights"]) <= 320, found
 
 
-def test_the_full_site_name_shows_from_40rem(page: Page) -> None:
+def test_the_full_site_name_shows_from_45rem(page: Page) -> None:
     rest = page.locator(f"{NAV} .site-name-rest")
     name = page.get_by_role("link", name=config.SITE_TITLE, exact=True)
     page.goto("/elections")
@@ -185,12 +187,12 @@ def test_the_full_site_name_shows_from_40rem(page: Page) -> None:
         .inner_text()
         .startswith(labels.SITE_NAME_SHORT)
     )
-    page.set_viewport_size({"width": 640, "height": 844})
+    page.set_viewport_size({"width": 720, "height": 844})
     expect(name).to_have_count(1)
     assert rest.evaluate("e => e.getBoundingClientRect().width") > 100
     found = measure(page)
     assert max(found["tops"]) < min(found["bottoms"]), found
-    assert not any(found["overflow"]) and found["page"] == 640, found
+    assert not any(found["overflow"]) and found["page"] == 720, found
 
 
 @pytest.mark.parametrize("path", template_params())

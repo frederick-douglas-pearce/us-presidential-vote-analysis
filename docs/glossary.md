@@ -887,7 +887,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** the browser tab and link previews (`config.SITE_TITLE`), as the title of `/`
   (`pages/home.py`) and after the heading on a not-found link (built in
   `dashboard/explore/app.py`); the site navigation's link to `/` (`labels.SITE_NAME_SHORT`,
-  always shown, and `labels.SITE_NAME_REST`, shown from 40rem up and visually hidden below);
+  always shown, and `labels.SITE_NAME_REST`, shown from 45rem up and visually hidden below);
   "this site" in `NOT_FOUND_SENTENCE` in `pages/not_found_404.py`; the home page's heading
   (`labels.HOME_HEADING`, in `layout` in `pages/home.py`).
 - **Source:** `config.SITE_TITLE`; `config.CANONICAL_HOST`; D071(c); the short form and the
