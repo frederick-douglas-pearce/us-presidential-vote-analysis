@@ -179,12 +179,6 @@ def year_buttons(
     )
 
 
-def _aria(name: str, value: str) -> dict[str, Any]:
-    """A wildcard ``aria-*`` prop, which Dash's html components accept but which no
-    Python keyword can name."""
-    return {f"aria-{name}": value}
-
-
 def theme_control() -> html.Div:
     """The theme toggle (#359, #447): one button per :data:`labels.THEME_CHOICES`, in
     the order Dark, Auto, Light, in a group named by :data:`labels.THEME_CONTROL`.
@@ -200,32 +194,38 @@ def theme_control() -> html.Div:
     Buttons with ``aria-pressed``, not a radio group: ``dash.html`` has no ``Input``,
     and ``dcc.RadioItems`` renders an unnamed ``role=listbox`` (#444), so a radio group
     would need hand-written arrow-key handling in the inline callback (architect ruling,
-    #447). Accepted residuals: three Tab stops rather than one, and activating the
-    pressed button again leaves it pressed. The ids are static
+    #447). Accepted residuals: three Tab stops rather than one; activating the
+    pressed button again leaves it pressed; and until the theme callback's first call,
+    about one render after the header mounts, assistive technology hears Auto as
+    pressed even where a saved choice is already applied and visibly selected (owner
+    decision, #447's review: leaving ``aria-pressed`` off until then would change the
+    buttons' role mid-load, and telling the server the choice would break "the theme
+    never reaches the server"). The ids are static
     (:data:`THEME_BUTTON_IDS`), so the toggle renders once per document: a navigation
     bar (#448) places this one and never a copy.
     """
-    return html.Div(
-        [
+    buttons = []
+    for value, label in labels.THEME_CHOICES.items():
+        # aria-* props have no Python keyword: a typed dict, as pages/election.py does.
+        hidden: dict[str, Any] = {"aria-hidden": "true"}
+        pressed: dict[str, Any] = {
+            "aria-pressed": "true" if value == labels.THEME_AUTO else "false"
+        }
+        buttons.append(
             html.Button(
                 [
-                    html.Span(
-                        className=f"theme-icon theme-icon-{value}",
-                        **_aria("hidden", "true"),
-                    ),
+                    html.Span(className=f"theme-icon theme-icon-{value}", **hidden),
                     html.Span(label, className="visually-hidden"),
                 ],
                 id=THEME_BUTTON_IDS[value],
                 type="button",
                 title=labels.THEME_TITLES[value],
-                **_aria("pressed", "true" if value == labels.THEME_AUTO else "false"),
+                **pressed,
             )
-            for value, label in labels.THEME_CHOICES.items()
-        ],
-        id=THEME_CONTROL_ID,
-        role="group",
-        className="theme-control",
-        **_aria("label", labels.THEME_CONTROL),
+        )
+    named: dict[str, Any] = {"aria-label": labels.THEME_CONTROL}
+    return html.Div(
+        buttons, id=THEME_CONTROL_ID, role="group", className="theme-control", **named
     )
 
 

@@ -946,7 +946,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   values `light` and `dark` are never shown.
 - **Source:** #359 (the three choices, the device's setting as the default, remembered per
   browser, nothing in the URL); reader wording: owner decision, 2026-11-05, #359; the order
-  Dark, Auto, Light and the name Auto (formerly System): owner decision, 2026-11-05, #447.
+  Dark, Auto, Light and the name Auto (formerly System): owner decision, 2026-11-05, #447; the
+  three tooltips (`labels.THEME_TITLES`): owner approval at #447's plan gate, 2026-11-05.
 - **Not:** *Theme in effect*, which is always light or dark. A chart's color palette (#432).
 - **Status:** settled
 

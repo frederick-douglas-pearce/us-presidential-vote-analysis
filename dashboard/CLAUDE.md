@@ -43,8 +43,10 @@ selected position (its first frame), the colors each kind of control paints foll
 explicit choice against the device, the candidate page's checked year pill under focus
 and hover, the toggle's selected position under focus and hover, each position's role,
 name and pressed state reached by Tab and chosen with Enter or Space, the visible
-selection agreeing with `aria-pressed`, the pressed position chosen again changing
-nothing, forced colors, one row at 390 px (reporting the toggle's width), one device
+selection agreeing with `aria-pressed`, the selection moving with a hand-set `data-theme`
+while `aria-pressed` stays (the stylesheet draws it), the pressed position chosen again
+changing nothing, forced colors (each icon at 3:1 on its button and the selected border
+visible, in both forced palettes; Chromium's emulation only), one row at 390 px (reporting the toggle's width), one device
 listener per document, the store following the device only under Auto, and refused
 storage. A test that asserts something did not happen waits for the event that
 could have caused it (the choice's callback, or a real `change` event of the device's
@@ -96,8 +98,8 @@ toggle (`components.theme_control`: a `role="group"` named by `labels.THEME_CONT
 `dark`, never the choice (glossary: *Theme choice*, *Theme in effect*). The buttons' ids are
 `components.THEME_BUTTON_IDS`, the one source for the layout, the callback and the
 stylesheet's selectors; they are static, so the toggle renders **once per document**, and a
-navigation bar (#448) places it and never a copy. Every toggle rule is scoped to
-`.theme-control`, never to the header. `THEME_HEAD_SCRIPT`
+navigation bar (#448) places it and never a copy. No toggle rule names the site header
+(`test_no_toggle_rule_names_the_site_header`), so #448 can move it. `THEME_HEAD_SCRIPT`
 follows Dash's own metas in every index response's head (so `<meta charset>` stays in the
 first 1024 bytes, `test_meta_charset_sits_in_the_first_1024_bytes`) and precedes every
 stylesheet: it applies a stored
@@ -131,9 +133,14 @@ setting unless the reader chose Light and the reader's Dark choice, both above D
 defaults they name, pinned to the installed bundle
 (`test_each_light_control_token_copies_the_dash_default_it_names`). No rule outside the
 three blocks names a color, `var()` fallbacks included
-(`test_no_rule_outside_the_palette_blocks_names_a_color`); that lint skips quoted strings, so
+(`test_no_rule_outside_the_palette_blocks_names_a_color`), except system colors inside the
+one `@media (forced-colors: active)` block, where a `var()` is flagged instead (the lint's
+`FORCED_COLORS` context; that block paints the toggle's icons `ButtonText` on `ButtonFace`,
+since `forced-color-adjust: none` would otherwise leave them in an author token and the
+selected icon vanished on a forced light palette); that lint skips quoted strings, so
 the toggle's icons, Tabler SVGs drawn as CSS masks over `currentColor` from percent-encoded
-`data:` URIs, are scanned by their own test (`test_no_icon_names_a_color`). Tabler's MIT
+`data:` URIs, are scanned by their own test (`test_no_icon_names_a_color`, through the
+same `color_words` scan) and parsed as SVG (`test_each_icon_is_a_well_formed_svg_image`). Tabler's MIT
 notice ships beside the icon rules in `style.css` (D085). `TestThemeContrast` holds
 text and links to WCAG AA in both palettes over the colors that paint, and the toggle's icons
 and focus ring to 3:1, read from the toggle's own rules (its other pairs are hand-listed; a

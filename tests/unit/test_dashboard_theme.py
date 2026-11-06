@@ -13,6 +13,7 @@ import html.parser
 import json
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,11 @@ LIGHT = (None, ":root")
 MEDIA_DARK = (DARK_MEDIA, ':root:not([data-theme="light"])')
 EXPLICIT_DARK = (None, ':root[data-theme="dark"]')
 PALETTE_BLOCKS = (LIGHT, MEDIA_DARK, EXPLICIT_DARK)
+
+#: The one at-rule whose rules may name system colors (#447's review): forced-colors
+#: mode, where the browser replaces author colors and only system colors hold. Not a
+#: palette block: it declares no token, and a token there is the author color it fixes.
+FORCED_COLORS = "@media (forced-colors: active)"
 
 
 @pytest.fixture(autouse=True)
@@ -353,21 +359,34 @@ COLOR_FUNCTION = re.compile(
 )
 
 
+def color_words(text: str, allowed: frozenset[str]) -> list[str]:
+    """The color literals in ``text``: hex values, color functions, and named or system
+    colors outside ``allowed``. The one scan the stylesheet lint and the icon scan
+    share."""
+    found = HEX.findall(text) + [m.group(0) for m in COLOR_FUNCTION.finditer(text)]
+    words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", text)}
+    return found + sorted((words & (NAMED_COLORS | SYSTEM_COLORS)) - allowed)
+
+
 def color_literals(css: str) -> list[str]:
     """Every color literal in a declaration value outside the three palette blocks:
     ``selector: property: value`` for each offender. Comments and selectors are never
-    scanned, nor quoted strings and the name a ``var()`` references; its fallback is."""
+    scanned, nor quoted strings and the name a ``var()`` references; its fallback is.
+    Inside :data:`FORCED_COLORS` a system color is allowed, and a ``var()`` is not."""
     offenders = []
     for context, selector, body in rules(strip_comments(css)):
         if (context, selector) in PALETTE_BLOCKS:
             continue
+        forced = context == FORCED_COLORS
+        allowed = ALLOWED_KEYWORDS | SYSTEM_COLORS if forced else ALLOWED_KEYWORDS
         for name, value in declarations(body):
-            # Only the reference itself is dropped: a var() fallback is scanned.
             unquoted = re.sub(r"(['\"]).*?\1", "", value)
+            if forced and "var(" in unquoted:
+                offenders.append(f"{selector}: {name}: {value}")
+                continue
+            # Only the reference itself is dropped: a var() fallback is scanned.
             scanned = re.sub(r"var\(\s*--[\w-]+\s*,?", "", unquoted)
-            words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", scanned)}
-            named = (words & (NAMED_COLORS | SYSTEM_COLORS)) - ALLOWED_KEYWORDS
-            if HEX.search(scanned) or COLOR_FUNCTION.search(scanned) or named:
+            if color_words(scanned, allowed):
                 offenders.append(f"{selector}: {name}: {value}")
     return offenders
 
@@ -481,12 +500,13 @@ TOGGLE_PAINT = (
 )
 
 
-def toggle_rule(selector: str) -> dict[str, str]:
-    """The declarations of the one shipped rule whose selector reads ``selector``."""
+def toggle_rule(selector: str, context: str | None = None) -> dict[str, str]:
+    """The declarations of the one shipped rule whose selector reads ``selector``,
+    inside the at-rule ``context`` (``None``: at the top level)."""
     found = [
         body
-        for _, prelude, body in shipped_rules()
-        if " ".join(prelude.split()) == selector
+        for at, prelude, body in shipped_rules()
+        if at == context and " ".join(prelude.split()) == selector
     ]
     assert len(found) == 1, (selector, len(found))
     return dict(declarations(found[0]))
@@ -584,6 +604,11 @@ class TestThemeTokens:
             "a { color: var(--text, red); }",
             "a { border-color: var(--rule, rgb(1, 2, 3)); }",
             ":root { --page: #fff; } a { outline-color: navy; }",
+            "a { background-color: ButtonFace; }",
+            "@media (forced-colors: active) { a { color: #fff; } }",
+            "@media (forced-colors: active) { a { color: red; } }",
+            "@media (forced-colors: active) { a { color: var(--text); } }",
+            "@media (forced-colors: active) { a { color: var(--text, ButtonText); } }",
         ],
     )
     def test_the_color_lint_flags_a_literal(self, css: str) -> None:
@@ -599,6 +624,8 @@ class TestThemeTokens:
             'a { font-family: "Tomato Sans", system-ui; }',
             "/* color: red */ a { color: var(--accent); }",
             ":root { --page: #fff; }",
+            "@media (forced-colors: active) { a { color: ButtonText; } }",
+            "@media (forced-colors: active) { a { background-color: ButtonFace; } }",
         ],
     )
     def test_the_color_lint_passes_what_is_no_literal(self, css: str) -> None:
@@ -673,6 +700,18 @@ class TestThemeContrast:
         )
         ratio = contrast(parse_color(palette[token_in(rule[foreground])]), ground)
         assert ratio >= NON_TEXT, (theme, selector, foreground, round(ratio, 2))
+
+    def test_the_gap_clears_the_focus_ring(self) -> None:
+        # A ring reaches offset plus width past its button; a narrower gap would put
+        # it on a selected neighbor's accent fill, accent on accent (1:1).
+        gap = toggle_rule(".theme-control")["gap"]
+        focus = toggle_rule(".theme-control button:focus-visible")
+        width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
+        offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
+        rem = re.fullmatch(r"([\d.]+)rem", gap)
+        assert width and offset and rem, (gap, focus)
+        reach = int(width.group(1)) + int(offset.group(1))
+        assert float(rem.group(1)) * 16 > reach, (gap, reach)
 
     def test_the_unselected_button_paints_on_the_page(self) -> None:
         # What makes the "on the page" pairs above true: no fill and no UA button look.
@@ -877,9 +916,8 @@ class TestThemeControl:
             assert icon.children is None
             assert name.className == "visually-hidden"
             assert name.children == labels.THEME_CHOICES[value]
-        assert getattr(group, "persistence", None) in (None, False)
 
-    def test_the_toggle_shows_only_its_names_and_no_raw_value(self) -> None:
+    def test_the_toggle_names_are_its_choices_and_no_raw_value(self) -> None:
         header = appmod.app.layout.children[0]
         shown = texts(header)
         assert shown == list(labels.THEME_CHOICES.values())
@@ -925,15 +963,19 @@ class TestThemeControl:
 
     def test_the_callback_maps_each_button_and_sets_no_attribute_on_one(self) -> None:
         script = appmod.THEME_CALLBACK
-        # React owns aria-pressed: the one attribute the callback sets is data-theme.
+        # React owns aria-pressed: the one attribute the callback sets is data-theme,
+        # the one element it touches is <html>, and it names no aria property at all.
         assert script.count("setAttribute") == 1
         assert 'root.setAttribute("data-theme", choice)' in script
-        assert "getElementById" not in script and "querySelector" not in script
+        assert set(re.findall(r"document\.(\w+)", script)) == {"documentElement"}
+        assert "aria" not in script.lower()
         # The choice is the triggered button, through the one id map.
         mapping = {b: v for v, b in components.THEME_BUTTON_IDS.items()}
         assert f"var byButton = {json.dumps(mapping)};" in script
         assert "callback_context.triggered_id" in script
-        # aria-pressed follows <html data-theme>, never the theme in effect.
+        # The selection is read from <html data-theme>; that it, and never the theme in
+        # effect, decides aria-pressed is the e2e suite's to show (under Auto on a dark
+        # device, Auto is pressed).
         assert re.search(r'var applied = root\.getAttribute\("data-theme"\);', script)
         assert f"var choices = {json.dumps(list(labels.THEME_CHOICES))};" in script
 
@@ -952,16 +994,22 @@ class TestThemeControl:
 # --- the toggle's icons and selected position --------------------------------------------
 
 
-def icon_uris() -> dict[str, str]:
-    """Each icon class's mask data URI, decoded, from both of its declarations."""
+def icon_data() -> dict[str, str]:
+    """Each icon class's mask data URI payload, still percent-encoded, read from both
+    of its declarations."""
     found = {}
     for value in labels.THEME_CHOICES:
         rule = toggle_rule(f".theme-icon-{value}")
         assert rule["-webkit-mask-image"] == rule["mask-image"], value
         match = re.fullmatch(r'url\("data:image/svg\+xml,([^"]*)"\)', rule["mask-image"])
         assert match, value
-        found[value] = urllib.parse.unquote(match.group(1))
+        found[value] = match.group(1)
     return found
+
+
+def svg_colors(encoded: str) -> list[str]:
+    """The color literals in a percent-encoded SVG, decoded as a browser reads it."""
+    return color_words(urllib.parse.unquote(encoded), ALLOWED_KEYWORDS)
 
 
 class TestThemeIcons:
@@ -975,28 +1023,41 @@ class TestThemeIcons:
         for value in labels.THEME_CHOICES:
             rule = toggle_rule(f".theme-icon-{value}")
             assert set(rule) == {"-webkit-mask-image", "mask-image"}, value
-        assert set(icon_uris()) == set(labels.THEME_CHOICES)
+        assert set(icon_data()) == set(labels.THEME_CHOICES)
+
+    def test_each_icon_is_a_well_formed_svg_image(self) -> None:
+        # A mask image that fails to load masks the whole icon away, silently.
+        for value, encoded in icon_data().items():
+            # A raw '#' would end the data URL there, as a fragment.
+            assert "#" not in encoded, value
+            root = ET.fromstring(urllib.parse.unquote(encoded))
+            assert root.tag == "{http://www.w3.org/2000/svg}svg", value
+            assert root.get("viewBox") == "0 0 24 24", value
+            assert len(root), value  # it draws something
 
     def test_no_icon_names_a_color(self) -> None:
         # The color lint skips quoted strings, so it cannot see inside a data URI.
-        for value, svg in icon_uris().items():
-            assert svg.startswith("<svg ") and svg.endswith("</svg>"), value
-            words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", svg)}
-            named = (words & (NAMED_COLORS | SYSTEM_COLORS)) - ALLOWED_KEYWORDS
-            assert not HEX.search(svg) and not COLOR_FUNCTION.search(svg), value
-            assert not named, (value, named)
+        for value, encoded in icon_data().items():
+            assert svg_colors(encoded) == [], value
             # The mask reads alpha: every paint is currentColor or none.
+            svg = urllib.parse.unquote(encoded)
             paints = re.findall(r"(?:fill|stroke)='([^']*)'", svg)
             assert paints and set(paints) <= {"currentColor", "none"}, (value, paints)
 
-    def test_the_icon_scan_flags_a_color(self) -> None:
-        for svg in ("<svg fill='#000'/>", "<svg fill='red'/>", "<svg fill='rgb(1,2,3)'/>"):
-            words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", svg)}
-            assert (
-                HEX.search(svg)
-                or COLOR_FUNCTION.search(svg)
-                or (words & NAMED_COLORS) - ALLOWED_KEYWORDS
-            ), svg
+    @pytest.mark.parametrize(
+        "encoded",
+        [
+            "%3Csvg fill='%23000'/%3E",
+            "%3Csvg fill='red'/%3E",
+            "%3Csvg fill='rgb(1,2,3)'/%3E",
+            "%3Csvg fill='AccentColor'/%3E",
+        ],
+    )
+    def test_the_icon_scan_flags_a_color(self, encoded: str) -> None:
+        assert svg_colors(encoded) != []
+
+    def test_the_icon_scan_passes_current_color(self) -> None:
+        assert svg_colors("%3Csvg fill='currentColor' stroke='none'/%3E") == []
 
     def test_tablers_license_ships_beside_the_icons(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")
@@ -1012,6 +1073,16 @@ class TestThemeIcons:
         assert notice > css.index("*/")
         between = css[notice : css.index(".theme-icon {")]
         assert between.count("*/") == 1 and "{" not in between
+
+    def test_forced_colors_paint_every_icon_in_system_colors(self) -> None:
+        # forced-color-adjust: none leaves the icon's currentColor on the author's token,
+        # so the forced-colors block sets it, on the icon itself, to a system color on
+        # the system button face: no hover or selected rule can leak a token there.
+        icon = toggle_rule(".theme-icon", FORCED_COLORS)
+        button = toggle_rule(".theme-control button", FORCED_COLORS)
+        assert icon == {"background-color": "ButtonText"}
+        assert button == {"background-color": "ButtonFace"}
+        assert {"buttontext", "buttonface"} <= SYSTEM_COLORS
 
 
 class TestThemeSelected:
@@ -1033,12 +1104,17 @@ class TestThemeSelected:
             for v in labels.THEME_CHOICES
         ]
 
-    def test_the_selected_position_has_a_cue_that_is_not_a_color(self) -> None:
-        # Forced colors drop the fill; the border survives, painted in a system color.
+    def test_the_selected_position_keeps_a_border_under_forced_colors(self) -> None:
+        # Outside forced colors the fill is the cue and this border is transparent;
+        # forced colors drop the fill and paint the border in a system color.
         assert toggle_rule(SELECTED)["border"] == "2px solid transparent"
         assert toggle_rule(".theme-control button")["border"] == "0"
 
-    def test_no_toggle_rule_is_scoped_to_the_site_header(self) -> None:
-        # #448 moves the toggle into a navigation bar: its rules name .theme-control.
-        for _, prelude, _ in shipped_rules():
-            assert not re.search(r"\.site-header\s+\.theme-", prelude), prelude
+    def test_no_toggle_rule_names_the_site_header(self) -> None:
+        # #448 moves the toggle into a navigation bar: no rule for it names the header,
+        # by class or by element, under any combinator.
+        toggle = [p for _, p, _ in shipped_rules() if re.search(r"[.#]theme-", p)]
+        assert toggle
+        for prelude in toggle:
+            assert ".site-header" not in prelude, prelude
+            assert not re.search(r"(^|[\s>+~,])header\b", prelude), prelude

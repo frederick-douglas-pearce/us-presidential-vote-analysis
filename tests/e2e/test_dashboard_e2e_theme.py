@@ -519,20 +519,104 @@ def test_choosing_the_pressed_position_again_changes_nothing(page: Page) -> None
     assert_selected(page, "light")
 
 
-def test_forced_colors_keep_the_icons_and_a_selection_cue(page: Page) -> None:
-    page.emulate_media(color_scheme="light", forced_colors="active")
+def _channels(color: str) -> tuple[float, float, float, float]:
+    match = re.fullmatch(
+        r"rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)", color.strip()
+    )
+    assert match, color
+    r, g, b = (float(match.group(i)) for i in (1, 2, 3))
+    return (r, g, b, float(match.group(4) or 1))
+
+
+def _contrast(foreground: str, background: str) -> float:
+    """WCAG 2's ratio of two opaque computed colors."""
+
+    def luminance(color: str) -> float:
+        def channel(c: float) -> float:
+            c /= 255
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+        r, g, b, alpha = _channels(color)
+        assert alpha == 1, color
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+    lighter, darker = sorted((luminance(foreground), luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+#: Each theme button's painted background (the page's where it is transparent), its
+#: icon's painted color, and its top border's width and color.
+FORCED_PAINT = f"""() => {{
+  var page = getComputedStyle(document.body).backgroundColor;
+  return {json.dumps(list(components.THEME_BUTTON_IDS.values()))}.map(function (id) {{
+    var button = document.getElementById(id);
+    var style = getComputedStyle(button);
+    var ground = style.backgroundColor;
+    if (ground === "rgba(0, 0, 0, 0)" || ground === "transparent") {{ ground = page; }}
+    return {{
+      ground: ground,
+      icon: getComputedStyle(button.querySelector(".theme-icon")).backgroundColor,
+      adjust: getComputedStyle(button.querySelector(".theme-icon")).forcedColorAdjust,
+      borderWidth: style.borderTopWidth,
+      borderColor: style.borderTopColor,
+    }};
+  }});
+}}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_forced_colors_paint_every_icon_and_the_selection_border(
+    page: Page, scheme: str
+) -> None:
+    """In each forced palette, with each position selected: every icon paints at 3:1
+    or more against its button, and the selected position's border is visible (its
+    color differs from its button's), the cue that survives the dropped fill. Checked
+    in Chromium's forced-colors emulation, which the e2e tier runs (advisory, D082)."""
+    page.emulate_media(color_scheme=scheme, forced_colors="active")  # type: ignore[arg-type]
     page.goto("/")
     assert_rendered(page, HOME_SUCCESS)
-    adjust = page.locator(f"{CONTROL} .theme-icon").evaluate_all(
-        "icons => icons.map(i => getComputedStyle(i).forcedColorAdjust)"
-    )
-    assert adjust == ["none"] * len(labels.THEME_CHOICES)
-    choose(page, "dark")
-    widths = [
-        button(page, value).evaluate("e => getComputedStyle(e).borderTopWidth")
-        for value in labels.THEME_CHOICES
-    ]
-    assert widths == ["2px" if v == "dark" else "0px" for v in labels.THEME_CHOICES]
+    for choice in labels.THEME_CHOICES:
+        choose(page, choice)
+        page.mouse.move(0, 0)  # no hover on any button
+        seen: list[dict[str, str]] = page.evaluate(FORCED_PAINT)
+        for value, paint in zip(labels.THEME_CHOICES, seen, strict=True):
+            assert paint["adjust"] == "none", (choice, value, paint)
+            ratio = _contrast(paint["icon"], paint["ground"])
+            assert ratio >= 3, (scheme, choice, value, paint, round(ratio, 2))
+            if value == choice:
+                assert paint["borderWidth"] == "2px", (choice, paint)
+                assert paint["borderColor"] != paint["ground"], (choice, paint)
+            else:
+                assert paint["borderWidth"] == "0px", (choice, value, paint)
+
+
+@pytest.mark.parametrize("os_scheme", ["light", "dark"])
+def test_the_stylesheet_draws_the_selection_from_the_theme_attribute(
+    page: Page, os_scheme: str
+) -> None:
+    """Setting ``<html data-theme>`` by hand, with no callback, moves the visible
+    selection and leaves ``aria-pressed`` where it was: the stylesheet, not the
+    pressed state, draws the selected position."""
+    page.emulate_media(color_scheme=os_scheme)  # type: ignore[arg-type]
+    page.goto("/")
+    assert_rendered(page, HOME_SUCCESS)
+    assert_selected(page, AUTO)
+    for attribute, drawn in [("dark", "dark"), ("light", "light"), (None, AUTO)]:
+        if attribute is None:
+            page.evaluate("document.documentElement.removeAttribute('data-theme')")
+        else:
+            page.evaluate(
+                "document.documentElement.setAttribute('data-theme',"
+                f" {json.dumps(attribute)})"
+            )
+        seen: dict[str, Any] = page.evaluate(FILLS)
+        accent = rgb(seen["accent"])
+        pairs = zip(labels.THEME_CHOICES, seen["fills"], strict=True)
+        assert [value for value, fill in pairs if fill == accent] == [drawn], seen
+        for value in labels.THEME_CHOICES:
+            expect(button(page, value)).to_have_attribute(
+                "aria-pressed", "true" if value == AUTO else "false"
+            )
 
 
 def test_the_store_follows_the_device_only_under_auto(page: Page) -> None:

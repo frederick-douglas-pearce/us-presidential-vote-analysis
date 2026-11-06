@@ -394,14 +394,18 @@ _THEME_BY_BUTTON = {
 #: the device's light or dark setting. A later call is the reader's choice, the button
 #: ``callback_context.triggered_id`` names: it sets or removes ``data-theme`` and
 #: saves or clears the stored choice (where storage is refused, the choice lasts until
-#: a reload); a trigger naming no theme button changes nothing. Every call derives the
-#: three buttons' ``aria-pressed`` from ``<html data-theme>``, the attribute the
-#: stylesheet draws the selected position from, never from the theme in effect (under
-#: Auto on a dark device, Auto is pressed). React owns ``aria-pressed``: the callback
-#: returns it and never sets an attribute on a button. Every call reports the theme in
-#: effect as the palette the stylesheet applied, ``color-scheme`` on ``<html>``, so
-#: the selector logic lives only in ``style.css``; and the store is written only after
-#: the palette changed, and only when the theme in effect differs from what it holds.
+#: a reload). A later call whose trigger names no theme button returns ``no_update``
+#: for every output and touches nothing: it fails closed, since treating an unknown
+#: trigger as a choice would read as Auto and clear the saved choice (a defense against
+#: a Dash change to ``triggered_id``; no call reaches it today). Every other call
+#: derives the three buttons' ``aria-pressed`` from ``<html data-theme>``, the
+#: attribute the stylesheet draws the selected position from, never from the theme in
+#: effect (under Auto on a dark device, Auto is pressed). React owns ``aria-pressed``:
+#: the callback returns it and never sets an attribute on a button. Every other call
+#: also reports the theme in effect as the palette the stylesheet applied,
+#: ``color-scheme`` on ``<html>``, so the selector logic lives only in ``style.css``;
+#: and the store is written only after the palette changed, and only when the theme in
+#: effect differs from what it holds.
 #: The listener pushes the theme in effect with ``set_props`` whenever the device's
 #: setting changes it, which under an explicit choice it never does.
 THEME_CALLBACK = (
