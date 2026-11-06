@@ -46,9 +46,9 @@ name and pressed state reached by Tab and chosen with Enter or Space, the visibl
 selection agreeing with `aria-pressed`, the selection moving with a hand-set `data-theme`
 while `aria-pressed` stays (the stylesheet draws it), the pressed position chosen again
 changing nothing, forced colors (each icon at 3:1 on its button and the selected border
-visible, in both forced palettes; Chromium's emulation only), one row at 390 px (reporting the toggle's width), one device
-listener per document, the store following the device only under Auto, and refused
-storage. A test that asserts something did not happen waits for the event that
+opaque and at 3:1, in both forced palettes; Chromium's emulation only), one row at 390 px
+(reporting the toggle's width), one device listener per document, the store following
+the device only under Auto, and refused storage. A test that asserts something did not happen waits for the event that
 could have caused it (the choice's callback, or a real `change` event of the device's
 setting), then makes a countable change as a barrier.
 `serve.py` adds one thing the production app lacks for them, the **theme probe**: a hidden

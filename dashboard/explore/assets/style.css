@@ -172,8 +172,8 @@ body {
 /* The theme toggle (#447): three icon buttons, Dark, Auto, Light. No toggle rule names
    the site header, so a navigation bar (#448) can hold it. The gap is wider than the
    focus ring reaches (offset plus width), so a ring never lands on a neighbor's accent
-   fill (test_the_gap_clears_the_focus_ring). The browser's button look is reset, so what paints is the
-   tokens below: an unselected icon in --text-secondary on the page. */
+   fill (test_the_gap_clears_the_focus_ring). The browser's button look is reset, so
+   what paints is the tokens below: an unselected icon in --text-secondary on the page. */
 .theme-control { display: inline-flex; gap: 0.375rem; }
 .theme-control button {
   appearance: none;
@@ -209,12 +209,14 @@ body {
   border: 2px solid transparent;
 }
 /* Each icon is a mask over the button's text color, so it paints in currentColor and
-   names no color of its own. forced-color-adjust: none keeps forced colors from
-   replacing its background with the backplate, which would hide it; its currentColor
-   would then still be the author's token, so the forced-colors block below sets it to
-   a system color. The -webkit- longhands are for Chrome and Edge
-   before 120, inside the browser baseline (:has()). Each data URI is percent-encoded,
-   with no semicolon, and names no color (test_no_icon_names_a_color).
+   names no color of its own. forced-color-adjust: none takes the icon out of
+   forced-color adjustment, so in forced colors its colors come only from the
+   forced-colors block below, the same in every engine (its currentColor would otherwise
+   still be the author's token). Without it, the block's system colors would be exempt
+   from forcing anyway, so in Chromium the block alone would suffice; only Chromium is
+   checked. The -webkit- longhands are for Chrome and Edge before 120, inside the
+   browser baseline (:has()). Each data URI is percent-encoded, with no semicolon, and
+   names no color (test_no_icon_names_a_color).
 
    The icons are Tabler Icons (@tabler/icons 3.24.0: filled/moon, outline/sun-moon,
    filled/sun), adapted as percent-encoded SVG data URIs, under this license:

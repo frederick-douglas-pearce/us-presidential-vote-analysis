@@ -569,8 +569,8 @@ def test_forced_colors_paint_every_icon_and_the_selection_border(
     page: Page, scheme: str
 ) -> None:
     """In each forced palette, with each position selected: every icon paints at 3:1
-    or more against its button, and the selected position's border is visible (its
-    color differs from its button's), the cue that survives the dropped fill. Checked
+    or more against its button, and the selected position's border is visible (opaque,
+    and at 3:1 against its button), the cue that survives the dropped fill. Checked
     in Chromium's forced-colors emulation, which the e2e tier runs (advisory, D082)."""
     page.emulate_media(color_scheme=scheme, forced_colors="active")  # type: ignore[arg-type]
     page.goto("/")
@@ -578,6 +578,10 @@ def test_forced_colors_paint_every_icon_and_the_selection_border(
     for choice in labels.THEME_CHOICES:
         choose(page, choice)
         page.mouse.move(0, 0)  # no hover on any button
+        # No focus either: Chromium paints a focused button's transparent border in its
+        # focus color at 0.8 alpha, a focus cue of its own; this checks the selected
+        # position's cue at rest.
+        page.evaluate("document.activeElement.blur()")
         seen: list[dict[str, str]] = page.evaluate(FORCED_PAINT)
         for value, paint in zip(labels.THEME_CHOICES, seen, strict=True):
             assert paint["adjust"] == "none", (choice, value, paint)
@@ -585,7 +589,10 @@ def test_forced_colors_paint_every_icon_and_the_selection_border(
             assert ratio >= 3, (scheme, choice, value, paint, round(ratio, 2))
             if value == choice:
                 assert paint["borderWidth"] == "2px", (choice, paint)
-                assert paint["borderColor"] != paint["ground"], (choice, paint)
+                # Visible: opaque (a transparent border is no cue) and at 3:1.
+                assert _channels(paint["borderColor"])[3] == 1, (choice, paint)
+                border = _contrast(paint["borderColor"], paint["ground"])
+                assert border >= 3, (scheme, choice, paint, round(border, 2))
             else:
                 assert paint["borderWidth"] == "0px", (choice, value, paint)
 
@@ -600,6 +607,9 @@ def test_the_stylesheet_draws_the_selection_from_the_theme_attribute(
     page.emulate_media(color_scheme=os_scheme)  # type: ignore[arg-type]
     page.goto("/")
     assert_rendered(page, HOME_SUCCESS)
+    # The barrier: the theme callback's first call has run (it writes the store the
+    # probe reads), so no late first call can move aria-pressed after the hand-set.
+    assert_painted(page, os_scheme)
     assert_selected(page, AUTO)
     for attribute, drawn in [("dark", "dark"), ("light", "light"), (None, AUTO)]:
         if attribute is None:
