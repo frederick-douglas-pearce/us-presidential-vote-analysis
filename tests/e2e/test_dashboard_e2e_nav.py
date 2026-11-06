@@ -177,9 +177,12 @@ def test_the_bar_wraps_rather_than_scrolls_at_320_px(page: Page) -> None:
 
 
 def chromium_name(page: Page, selector: str) -> str:
-    """The element's accessible name as Chromium computes it, from its accessibility
-    tree: Playwright's role locators compute names their own way, from DOM text, so
-    only this sees a space the browser collapsed."""
+    """The element's accessible name as Chromium's accessibility tree computes it, what
+    a screen reader on Chromium hears; Playwright's role locators compute names their
+    own way, from DOM text. In Chromium the name keeps its space with or without
+    ``.site-name-rest``'s ``white-space: pre``, so this does not pin that declaration:
+    ``test_the_rest_of_the_site_name_keeps_its_space`` (``test_dashboard_theme.py``)
+    does."""
     client = page.context.new_cdp_session(page)
     root = client.send("DOM.getDocument")["root"]["nodeId"]
     node = client.send("DOM.querySelector", {"nodeId": root, "selector": selector})

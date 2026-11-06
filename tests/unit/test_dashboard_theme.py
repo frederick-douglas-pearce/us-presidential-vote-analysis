@@ -731,17 +731,31 @@ class TestThemeContrast:
         # NAV_PAINT's premises (#448's review): the global `a` rule is what colors the
         # nav's links, and nothing behind the bar is filled, so every pair sits on
         # --page. A nav rule that set a color or a fill would paint a pair no test reads.
+        # Every context counts, media queries included; the forced-colors block, where
+        # system colors repaint everything, names no nav rule at all.
+        named = r"\.site-(?:header|nav|name)\b"
         nav_rules = [
-            (prelude, dict(declarations(body)))
+            (at, " ".join(prelude.split()), dict(declarations(body)))
             for at, prelude, body in shipped_rules()
-            if at is None and re.search(r"\.site-(?:header|nav|name)\b", prelude)
+            if re.search(named, prelude)
         ]
         assert nav_rules
-        for prelude, rule in nav_rules:
-            assert not {"background", "background-color"} & set(rule), prelude
-            if ".site-name" not in prelude:
-                assert "color" not in rule, prelude
+        assert any(at is not None for at, _, _ in nav_rules)  # the media rules are read
+        for at, prelude, rule in nav_rules:
+            assert at != FORCED_COLORS, prelude
+            assert not {"background", "background-color"} & set(rule), (at, prelude)
+            # The site name alone sets a color, NAV_PAINT's second pair.
+            if prelude != ".site-nav .site-name":
+                assert "color" not in rule, (at, prelude)
         assert toggle_rule(".site-nav .site-name")["color"] == "var(--text)"
+
+    def test_the_rest_of_the_site_name_keeps_its_space(self) -> None:
+        # The rest opens with a space, which an absolutely positioned (blockified) box
+        # may collapse, so the name would read "Explore— US…" (#448's review). The e2e
+        # name check does not discriminate in Chromium, so the declaration is pinned
+        # here.
+        assert toggle_rule(".site-name-rest")["white-space"] == "pre"
+        assert labels.SITE_NAME_REST.startswith(" ")
 
     def test_the_marker_is_an_underline_not_color_alone(self) -> None:
         # WCAG 1.4.1: the current link differs by a decoration, which forced colors
