@@ -202,6 +202,9 @@ def test_the_full_site_name_shows_from_45rem(page: Page) -> None:
     # Narrow: the rest is clipped, and the link's name is still the full site title.
     assert rest.evaluate("e => e.getBoundingClientRect().width") <= 1
     assert chromium_name(page, home) == config.SITE_TITLE
+    # Just under the 45rem breakpoint (720 px) the rest is still clipped.
+    page.set_viewport_size({"width": 704, "height": 844})
+    assert rest.evaluate("e => e.getBoundingClientRect().width") <= 1
     page.set_viewport_size({"width": 720, "height": 844})
     assert rest.evaluate("e => e.getBoundingClientRect().width") > 100
     assert chromium_name(page, home) == config.SITE_TITLE

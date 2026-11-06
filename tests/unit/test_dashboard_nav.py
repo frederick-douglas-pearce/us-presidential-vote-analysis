@@ -269,6 +269,9 @@ class TestCurrentPage:
         )
         assert entry("/states", None, "elections").current == "true"
         assert entry("/", None, "home").current == "page"
+        # A templated page is a detail page even where its path equals its link's
+        # target: it marks "true", never "page" (no registered page is one today).
+        assert entry("/elections", "/elections/<x>", "elections").current == "true"
 
 
 class TestNavCallback:
@@ -285,6 +288,11 @@ class TestNavCallback:
             " || path === entry.path) { hit = entry; } }"
         ) in script
         assert script.count("new RegExp(") == 1
+        # First match wins, as in the router: the loop stops at the first hit. Today
+        # no path matches two pages, so only this pin notices a last-match loop.
+        assert (
+            "for (var i = 0; i < table.length && hit === null; i++) {" in script
+        )
         assert "window.location.pathname" in script
         # Never decoded: Dash's router matches the still-encoded pathname.
         assert "decode" not in script.lower()

@@ -749,6 +749,21 @@ class TestThemeContrast:
                 assert "color" not in rule, (at, prelude)
         assert toggle_rule(".site-nav .site-name")["color"] == "var(--text)"
 
+    def test_the_bar_layout_declarations_are_pinned(self) -> None:
+        # The declarations the e2e fit checks cannot see in every font or at every
+        # width (#448's acceptance gate): the full name's breakpoint, the wrap that
+        # keeps the toggle on screen when the row is too narrow, and the toggle's
+        # 24 px buttons, which keep 16 px of slack at 390 px in CI's DejaVu Sans.
+        shown = toggle_rule(".site-name-rest", "@media (min-width: 45rem)")
+        assert shown["position"] == "static" and shown["clip-path"] == "none"
+        assert [
+            at for at, p, _ in shipped_rules() if " ".join(p.split()) == ".site-name-rest"
+        ] == [None, "@media (min-width: 45rem)"]
+        assert toggle_rule(".site-header")["flex-wrap"] == "wrap"
+        assert toggle_rule(".site-nav")["flex-wrap"] == "wrap"
+        button = toggle_rule(".theme-control button")
+        assert (button["width"], button["height"]) == ("1.5rem", "1.5rem")
+
     def test_the_rest_of_the_site_name_keeps_its_space(self) -> None:
         # The rest opens with a space, which an absolutely positioned (blockified) box
         # may collapse, so the name would read "Explore— US…" (#448's review). The e2e
