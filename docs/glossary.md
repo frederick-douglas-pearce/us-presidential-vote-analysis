@@ -924,36 +924,41 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** —
 - **Status:** settled
 
-### Theme choice (System, Light or Dark)
-- **Plain:** How the site looks: light pages, dark pages, or System, which follows the light or
-  dark setting of the reader's device. System is the starting choice. A choice is remembered in
+### Theme choice (Dark, Auto or Light)
+- **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
+  dark setting of the reader's device. Auto is the starting choice. A choice is remembered in
   that browser and applies on every page. If the browser won't let the site save it, the choice
   lasts until the page is reloaded or opened in a new tab.
-- **Precise:** The viewer's color preference for the dashboard, one of three choices. System is
-  the absence of a saved choice: the page follows `prefers-color-scheme`. Light and Dark override
-  it in both directions. A choice is saved in the browser's `localStorage` under
-  `THEME_STORAGE_KEY` (`dashboard/explore/app.py`) and applied as `data-theme` on `<html>` before
-  first paint. Where the browser refuses `localStorage`, the choice lasts for the document: it
-  carries across in-site (client-side) navigation to other pages, but not a reload or a new tab.
-  It describes the page, not the data: it is never in the URL, `og:url`, a CSV download or any
-  API request.
-- **Shown as:** the theme control on every page, built in `app.layout`
-  (`dashboard/explore/app.py`) by `components.theme_control`: its legend `labels.THEME_CONTROL`
-  and its three radio labels, `labels.THEME_CHOICES`. The stored values `light` and `dark` are
-  never shown.
-- **Source:** #359 (the three choices, System as the default, remembered per browser, nothing in
-  the URL); reader wording: owner decision, 2026-11-05, #359.
+- **Precise:** The viewer's color preference for the dashboard, one of three choices. Auto is
+  the absence of a saved choice: the page follows `prefers-color-scheme`. Dark and Light override
+  it in both directions. Auto stays selected whenever no choice is saved, whichever palette the
+  device's setting gives. Its internal value, `labels.THEME_AUTO` (`"auto"`), is never stored or
+  shown. A choice is saved in the browser's `localStorage` under `THEME_STORAGE_KEY`
+  (`dashboard/explore/app.py`) and applied as `data-theme` on `<html>` before first paint. Where
+  the browser refuses `localStorage`, the choice lasts for the document: it carries across
+  in-site (client-side) navigation to other pages, but not a reload or a new tab. It describes
+  the page, not the data: it is never in the URL, `og:url`, a CSV download or any API request.
+- **Shown as:** the theme toggle in the site header on every page, built in `app.layout`
+  (`dashboard/explore/app.py`) by `components.theme_control`: three icon buttons in the order
+  Dark, Auto, Light. Each button's name, `labels.THEME_CHOICES`, is hidden text inside it, read
+  by assistive technology. Each button's tooltip is `labels.THEME_TITLES`. The group's name,
+  `labels.THEME_CONTROL`, is read by assistive technology and not shown on the page. The stored
+  values `light` and `dark` are never shown.
+- **Source:** #359 (the three choices, the device's setting as the default, remembered per
+  browser, nothing in the URL); reader wording: owner decision, 2026-11-05, #359; the order
+  Dark, Auto, Light and the name Auto (formerly System): owner decision, 2026-11-05, #447; the
+  three tooltips (`labels.THEME_TITLES`): owner approval at #447's plan gate, 2026-11-05.
 - **Not:** *Theme in effect*, which is always light or dark. A chart's color palette (#432).
 - **Status:** settled
 
 ### Theme in effect (the resolved theme)
 - **Plain:** Whether the page is showing its light or its dark colors right now.
-- **Precise:** `light` or `dark`: the *Theme choice* when it is Light or Dark; under System, the
+- **Precise:** `light` or `dark`: the *Theme choice* when it is Light or Dark; under Auto, the
   device's current `prefers-color-scheme`, updated when that setting changes. Held in the
   `dcc.Store` `components.THEME_STORE_ID`, so charts can re-template without a reload (#432).
 - **Shown as:** nowhere as text; readers see it only as the page's colors.
 - **Source:** #359, acceptance criterion "Expose the resolved theme to Dash"; #432.
-- **Not:** *Theme choice*, which can also be System.
+- **Not:** *Theme choice*, which can also be Auto.
 - **Status:** settled
 
 ### Took office

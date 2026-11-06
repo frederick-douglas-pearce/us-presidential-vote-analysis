@@ -205,22 +205,34 @@ UNRECOGNIZED = "Unrecognized value"
 #: no download.
 UNRECOGNIZED_NOTE = "This dataset holds a value that this page has no label for."
 
-#: The theme control's name, the legend of its radio group on every page (#359; ba
-#: spec, approved by the owner at #359's plan gate, 2026-11-05). Not a ``LABELS`` key.
+#: The accessible name of the theme toggle's group on every page (#359, #447; ba spec,
+#: approved by the owner at #359's plan gate, 2026-11-05). Read by assistive
+#: technology, not shown. Not a ``LABELS`` key.
 THEME_CONTROL = "Theme"
 
-#: The internal value of the System theme choice (#359): the starting choice, which
-#: follows the device's light or dark setting. Never stored and never set as
-#: ``data-theme``: System is the absence of both.
-THEME_SYSTEM = "system"
+#: The internal value of the Auto theme choice (#447, formerly System, #359): the
+#: starting choice, which follows the device's light or dark setting. Never stored,
+#: never shown and never set as ``data-theme``: Auto is the absence of both. It names
+#: the Auto button's id (``components.THEME_BUTTON_IDS``).
+THEME_AUTO = "auto"
 
-#: Each theme choice, in display order: the internal value, never shown (for Light and
-#: Dark, the stored choice and ``data-theme``; System is neither stored nor set), and
-#: its radio label (#359).
+#: Each theme choice, in display order (Dark, Auto, Light: owner decision, #447): the
+#: internal value, never shown (for Dark and Light, the stored choice and
+#: ``data-theme``; Auto is neither stored nor set), and the button's accessible name,
+#: hidden text inside it (ba spec, approved at #447's plan gate, 2026-11-05).
 THEME_CHOICES: dict[str, str] = {
-    THEME_SYSTEM: "System",
-    "light": "Light",
     "dark": "Dark",
+    THEME_AUTO: "Auto",
+    "light": "Light",
+}
+
+#: Each theme button's tooltip, its ``title`` (#447; ba spec, approved at #447's plan
+#: gate, 2026-11-05): the name for Dark and Light, whose icons are clear; for Auto,
+#: what it does, since a sun-moon icon can read as switching by the time of day.
+THEME_TITLES: dict[str, str] = {
+    "dark": "Dark",
+    THEME_AUTO: "Auto: follows your device's light or dark setting",
+    "light": "Light",
 }
 
 

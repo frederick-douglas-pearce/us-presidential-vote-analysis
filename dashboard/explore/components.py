@@ -20,11 +20,20 @@ from dash import dcc, html
 
 from explore import export, labels, query
 
-#: The id of the theme control's radio group (#359), in ``app.layout`` on every page.
+#: The id of the theme toggle's group (#359, #447), in ``app.layout`` on every page.
 THEME_CONTROL_ID = "theme-control"
 
+#: Each theme button's id, keyed by its choice (#447): the one source for the layout,
+#: the theme callback's inputs and outputs, its id-to-choice map, and the selectors in
+#: ``style.css`` that show the selected position (pinned by
+#: ``test_the_selected_rules_name_exactly_the_button_ids``). The ids are static, so the
+#: toggle renders once per document.
+THEME_BUTTON_IDS: dict[str, str] = {
+    value: f"theme-{value}" for value in labels.THEME_CHOICES
+}
+
 #: The id of the ``dcc.Store`` holding the theme in effect (#359): ``"light"`` or
-#: ``"dark"``, never the reader's choice, which can also be System. A chart's callback
+#: ``"dark"``, never the reader's choice, which can also be Auto. A chart's callback
 #: takes it as an input to re-template without a reload (#432), on the terms of the
 #: store's contract in ``dashboard/CLAUDE.md`` (the ``app.py`` bullet), its one
 #: statement.
@@ -170,38 +179,53 @@ def year_buttons(
     )
 
 
-def theme_control() -> html.Fieldset:
-    """The theme choice (#359): :data:`labels.THEME_CHOICES` as inline radios in a
-    fieldset named by :data:`labels.THEME_CONTROL`, in the pill look
-    :func:`year_buttons` uses.
+def theme_control() -> html.Div:
+    """The theme toggle (#359, #447): one button per :data:`labels.THEME_CHOICES`, in
+    the order Dark, Auto, Light, in a group named by :data:`labels.THEME_CONTROL`.
 
-    Radios, not a cycling button, so the focused element is a native radio carrying its
-    label's name and its checked state, and the arrow keys move the choice natively.
-    Accepted residual (#359's review, owner decision): Dash 4 wraps the radios in an
-    unnamed ``role=listbox`` whose ``label role=option`` elements nest an interactive
-    control, as it does for :func:`year_buttons` and every ``dcc.Checklist``; the
-    site-wide fix is #444.
-    ``test_the_focused_choice_is_a_named_checked_radio`` (e2e) pins what the control
-    relies on. Its ``value`` here is System; the theme callback in ``app.py`` corrects
-    it from ``<html data-theme>`` on its first call. No ``persistence``: Dash's storage
-    applies only after the page mounts, too late for the head script, which is what
-    keeps the choice.
+    Each button's accessible name is its choice's text, visually hidden inside it; its
+    icon is decorative and hidden from assistive technology, and its tooltip is
+    :data:`labels.THEME_TITLES`. ``aria-pressed`` exposes the selected position: Auto
+    here, as the strings ``"true"`` and ``"false"``; the theme callback in ``app.py``
+    corrects it from ``<html data-theme>`` on its first call. The visible selection is
+    drawn by ``style.css`` from ``<html data-theme>`` itself, which the head script sets
+    before first paint, so it is right on the first frame.
+
+    Buttons with ``aria-pressed``, not a radio group: ``dash.html`` has no ``Input``,
+    and ``dcc.RadioItems`` renders an unnamed ``role=listbox`` (#444), so a radio group
+    would need hand-written arrow-key handling in the inline callback (architect ruling,
+    #447). Accepted residuals: three Tab stops rather than one; activating the
+    pressed button again leaves it pressed; and until the theme callback's first call,
+    about one render after the header mounts, assistive technology hears Auto as
+    pressed even where a saved choice is already applied and visibly selected (owner
+    decision, #447's review: leaving ``aria-pressed`` off until then would change the
+    buttons' role mid-load, and telling the server the choice would break "the theme
+    never reaches the server"). The ids are static
+    (:data:`THEME_BUTTON_IDS`), so the toggle renders once per document: a navigation
+    bar (#448) places this one and never a copy.
     """
-    return html.Fieldset(
-        [
-            html.Legend(labels.THEME_CONTROL, className="label"),
-            dcc.RadioItems(
-                id=THEME_CONTROL_ID,
-                options=[
-                    {"label": label, "value": value}
-                    for value, label in labels.THEME_CHOICES.items()
+    buttons = []
+    for value, label in labels.THEME_CHOICES.items():
+        # aria-* props have no Python keyword: a typed dict, as pages/election.py does.
+        hidden: dict[str, Any] = {"aria-hidden": "true"}
+        pressed: dict[str, Any] = {
+            "aria-pressed": "true" if value == labels.THEME_AUTO else "false"
+        }
+        buttons.append(
+            html.Button(
+                [
+                    html.Span(className=f"theme-icon theme-icon-{value}", **hidden),
+                    html.Span(label, className="visually-hidden"),
                 ],
-                value=labels.THEME_SYSTEM,
-                inline=True,
-                className="year-buttons",
-            ),
-        ],
-        className="filter theme-control",
+                id=THEME_BUTTON_IDS[value],
+                type="button",
+                title=labels.THEME_TITLES[value],
+                **pressed,
+            )
+        )
+    named: dict[str, Any] = {"aria-label": labels.THEME_CONTROL}
+    return html.Div(
+        buttons, id=THEME_CONTROL_ID, role="group", className="theme-control", **named
     )
 
 

@@ -5819,3 +5819,43 @@ change is where T3 is revisited, and the record sits in the tests it must edit.
 **Related:** D037, D038, #352, #358.
 
 ---
+
+## D085: A single choice is a group of `aria-pressed` buttons where Dash has no native radio; a third-party asset carries its notice in the shipped file
+
+**Date:** 2026-11-05
+**Builds on:** D071 · **Decided by:** the architect, at #447's design gate, and the owner, at its
+plan gate (2026-11-05); recorded by #447 (E14)
+
+**Context.** #447 replaced the theme choice's radio pills (#359) with a three-position icon
+toggle: Dark, Auto, Light. `dash.html` has no `Input` component, so a native radio cannot be built
+outside `dcc.RadioItems`, and Dash 4 renders `dcc.RadioItems` as an unnamed `role=listbox` of
+`role=option` labels that each wrap a native input (#444's residual). The icons are copied from
+Tabler Icons (MIT), and the deploy root ships only `.css` under `explore/assets/`
+(`_deploy_root_file_allowed` in `tests/unit/test_dashboard_guards.py`).
+
+**Decision.**
+- **A single choice that `dcc.RadioItems` would otherwise carry, and that must not inherit #444's
+  markup, is a `role="group"` named by its label constant, holding one `html.Button(type="button")`
+  per choice with `aria-pressed`** (`components.theme_control` is the instance). Each button's name
+  is visually hidden text inside it; its icon is `aria-hidden`. Enter and Space choose natively. A
+  radiogroup of `role="radio"` buttons was not taken: its roving tabindex and arrow keys would need
+  a document `keydown` listener written inside an inline clientside callback, which no unit test can
+  reach. Accepted residuals: one Tab stop per choice, and pressing the pressed button again leaves
+  it pressed. #444 may reuse or reject this for the year buttons and the elections checklist.
+- **The visible selection is drawn by the stylesheet from the state the page already holds**
+  (here `<html data-theme>`, set before first paint), and `aria-pressed` is a callback output derived
+  from that same state, never set on the element directly: React owns it.
+- **A third-party asset copied into the dashboard carries its copyright and permission notice
+  inside the file that ships it**, beside the copied material (Tabler's MIT text sits in a comment
+  next to the icon rules in `explore/assets/style.css`), because a notice anywhere outside the
+  deploy root does not travel with the copy.
+
+**Rationale.** The buttons meet #447's accessibility criteria (named, state exposed, keyboard,
+no listbox) with only the browser's native behavior, which keeps the inline callback to state, not
+widget code. Drawing the selection from the attribute the head script sets keeps the first frame
+right without waiting for Dash. Keeping the notice in the shipped file is the one placement the
+deploy-root allow-list cannot drop.
+
+**Related:** D071, #359, #444, #447, #448.
+
+---

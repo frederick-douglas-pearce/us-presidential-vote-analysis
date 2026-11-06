@@ -49,11 +49,12 @@ choice, which lives in the browser:
   plotly.js by its CDN address only, so the app never serves the 4.8 MB file, which
   no page uses yet; and a component-suite path Dash never registered answers 404
   (Flask's default body) rather than 500.
-- **The theme choice** (#359). A head script applies a saved Light or Dark choice to
-  ``<html>`` before first paint, so a reload never flashes the other palette; the
-  shared layout carries the control (:func:`~explore.components.theme_control`) above
-  every page and the store holding the theme in effect, which one inline clientside
-  callback keeps current. Nothing about it reaches the server, the URL or ``og:url``.
+- **The theme choice** (#359, #447). A head script applies a saved Dark or Light
+  choice to ``<html>`` before first paint, so a reload never flashes the other
+  palette; the shared layout carries the toggle
+  (:func:`~explore.components.theme_control`) above every page and the store holding
+  the theme in effect, which one inline clientside callback keeps current. Nothing
+  about it reaches the server, the URL or ``og:url``.
 """
 
 from __future__ import annotations
@@ -350,18 +351,19 @@ _G_TAGS = "explore_head_tags"
 
 
 #: The ``localStorage`` key holding the reader's theme choice (#359). Only an explicit
-#: choice is stored; System is the key's absence.
+#: choice is stored; Auto is the key's absence.
 THEME_STORAGE_KEY = "explore-theme"
 
-#: The choices that set ``data-theme`` on ``<html>``: every theme choice but System.
+#: The choices that set ``data-theme`` on ``<html>``: every theme choice but Auto, in
+#: the toggle's order (Dark, Light).
 THEME_EXPLICIT: tuple[str, ...] = tuple(
-    value for value in labels.THEME_CHOICES if value != labels.THEME_SYSTEM
+    value for value in labels.THEME_CHOICES if value != labels.THEME_AUTO
 )
 
 #: The inline head script (#359): a saved explicit choice becomes ``data-theme`` on
 #: ``<html>`` before the stylesheet applies, so a reload never flashes the other
-#: palette. Any other stored value is System, and storage that throws (a browser
-#: refusing ``localStorage``) leaves System. The e2e test
+#: palette. Any other stored value is Auto, and storage that throws (a browser
+#: refusing ``localStorage``) leaves Auto. The e2e test
 #: ``test_refused_storage_keeps_the_choice_for_the_document`` makes the storage getter
 #: throw, and the e2e suite's browser guard fails on any page error, so the ``try`` is
 #: pinned there. A constant built from constants: it carries no request
@@ -377,48 +379,72 @@ THEME_HEAD_SCRIPT = (
     " })();</script>"
 )
 
-#: The theme callback (#359), run in the browser. Its first call per document reads the
-#: choice the head script applied from ``<html data-theme>``, returns it to the radio
-#: group, and registers one listener for the device's light or dark setting. A later
-#: call is the reader's choice: it sets or removes ``data-theme`` and saves or clears
-#: the stored choice (where storage is refused, the choice lasts until a reload).
-#: Every call reports the theme in effect as the palette the stylesheet applied,
-#: ``color-scheme`` on
-#: ``<html>``, so the selector logic lives only in ``style.css``; and the store is
-#: written only after the palette changed, and only when the theme in effect differs
-#: from what it holds. The listener pushes the theme in effect with ``set_props``
-#: whenever the device's setting changes it, which under an explicit choice it never
-#: does.
+#: The theme buttons' ids, in the toggle's order: the theme callback's inputs and
+#: ``aria-pressed`` outputs (#447).
+THEME_BUTTONS: tuple[str, ...] = tuple(components.THEME_BUTTON_IDS.values())
+
+#: Each theme button's id, mapped to its choice, for the theme callback (#447).
+_THEME_BY_BUTTON = {
+    button: value for value, button in components.THEME_BUTTON_IDS.items()
+}
+
+#: The theme callback (#359, #447), run in the browser. Its inputs are the three
+#: buttons' ``n_clicks`` (in the toggle's order, and never read: a button's starts at
+#: 0) and its state the store. Its first call per document registers one listener for
+#: the device's light or dark setting. A later call is the reader's choice, the button
+#: ``callback_context.triggered_id`` names: it sets or removes ``data-theme`` and
+#: saves or clears the stored choice (where storage is refused, the choice lasts until
+#: a reload). A later call whose trigger names no theme button returns ``no_update``
+#: for every output and touches nothing: it fails closed, since treating an unknown
+#: trigger as a choice would read as Auto and clear the saved choice (a defense against
+#: a Dash change to ``triggered_id``; no call reaches it today). Every other call
+#: derives the three buttons' ``aria-pressed`` from ``<html data-theme>``, the
+#: attribute the stylesheet draws the selected position from, never from the theme in
+#: effect (under Auto on a dark device, Auto is pressed). React owns ``aria-pressed``:
+#: the callback returns it and never sets an attribute on a button. Every other call
+#: also reports the theme in effect as the palette the stylesheet applied,
+#: ``color-scheme`` on ``<html>``, so the selector logic lives only in ``style.css``;
+#: and the store is written only after the palette changed, and only when the theme in
+#: effect differs from what it holds.
+#: The listener pushes the theme in effect with ``set_props`` whenever the device's
+#: setting changes it, which under an explicit choice it never does.
 THEME_CALLBACK = (
-    "function (choice, current) {"
+    "function () {"
     " var clientside = window.dash_clientside;"
+    " var current = arguments[arguments.length - 1];"
     " var root = document.documentElement;"
     f" var explicit = {json.dumps(list(THEME_EXPLICIT))};"
+    f" var choices = {json.dumps(list(labels.THEME_CHOICES))};"
+    f" var byButton = {json.dumps(_THEME_BY_BUTTON)};"
     f" var key = {json.dumps(THEME_STORAGE_KEY)};"
     f" var store = {json.dumps(components.THEME_STORE_ID)};"
-    f" var system = {json.dumps(labels.THEME_SYSTEM)};"
+    f" var auto = {json.dumps(labels.THEME_AUTO)};"
     " function inEffect() {"
     ' return window.getComputedStyle(root).colorScheme === "dark" ? "dark" : "light"; }'
-    " var corrected = clientside.no_update;"
     " if (!window.exploreThemeReady) {"
     " window.exploreThemeReady = true;"
-    ' var applied = root.getAttribute("data-theme");'
-    " corrected = explicit.indexOf(applied) >= 0 ? applied : system;"
     ' window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",'
     " function () { var now = inEffect();"
     " if (now !== window.exploreThemeInEffect) {"
     " window.exploreThemeInEffect = now;"
     " clientside.set_props(store, {data: now}); } });"
     " } else {"
+    " var choice = byButton[clientside.callback_context.triggered_id];"
+    " if (choice === undefined) {"
+    " return choices.map(function () { return clientside.no_update; })"
+    ".concat([clientside.no_update]); }"
     " var chosen = explicit.indexOf(choice) >= 0;"
     ' if (chosen) { root.setAttribute("data-theme", choice); }'
     ' else { root.removeAttribute("data-theme"); }'
     " try { if (chosen) { window.localStorage.setItem(key, choice); }"
     " else { window.localStorage.removeItem(key); } } catch (error) {}"
     " }"
+    ' var applied = root.getAttribute("data-theme");'
+    " var selected = explicit.indexOf(applied) >= 0 ? applied : auto;"
     " var now = inEffect();"
     " window.exploreThemeInEffect = now;"
-    " return [now === current ? clientside.no_update : now, corrected];"
+    " return [now === current ? clientside.no_update : now].concat("
+    ' choices.map(function (value) { return value === selected ? "true" : "false"; }));'
     " }"
 )
 
@@ -533,9 +559,9 @@ app = ExploreDash(
     update_title=None,  # type: ignore[arg-type]  # Dash documents None: no "Updating…"
 )
 server = app.server
-# The theme control sits in a header above every page's main landmark, and the store
+# The theme toggle sits in a header above every page's main landmark, and the store
 # beside both: Pages navigation swaps only page_container, so neither is re-mounted
-# and the theme callback's first call runs once per document (#359).
+# and the theme callback's first call runs once per document (#359, #447).
 app.layout = html.Div(
     [
         html.Header(components.theme_control(), className="site-header"),
@@ -546,8 +572,8 @@ app.layout = html.Div(
 clientside_callback(
     THEME_CALLBACK,
     Output(components.THEME_STORE_ID, "data"),
-    Output(components.THEME_CONTROL_ID, "value"),
-    Input(components.THEME_CONTROL_ID, "value"),
+    *[Output(button, "aria-pressed") for button in THEME_BUTTONS],
+    *[Input(button, "n_clicks") for button in THEME_BUTTONS],
     State(components.THEME_STORE_ID, "data"),
 )
 
