@@ -519,6 +519,42 @@ def test_choosing_the_pressed_position_again_changes_nothing(page: Page) -> None
     assert_selected(page, "light")
 
 
+#: Runs the shipped theme callback once with a trigger that names no theme button,
+#: as a Dash change to ``triggered_id`` would, and reports whether every output was
+#: ``no_update``. The callback reads ``callback_context`` only while it runs, as Dash
+#: sets it for a call.
+UNKNOWN_TRIGGER = f"""() => {{
+  var clientside = window.dash_clientside;
+  var callback = eval("(" + {json.dumps(appmod.THEME_CALLBACK)} + ")");
+  clientside.callback_context = {{triggered_id: "no-such-button"}};
+  try {{
+    var outputs = callback(1, 1, 1, "dark");
+  }} finally {{
+    delete clientside.callback_context;
+  }}
+  return {{
+    count: outputs.length,
+    allNoUpdate: outputs.every(function (o) {{ return o === clientside.no_update; }}),
+  }};
+}}"""
+
+
+def test_an_unknown_trigger_changes_nothing(page: Page) -> None:
+    """The callback fails closed: a trigger naming no theme button returns no_update
+    for every output and leaves the applied and saved choice alone, where reading it
+    as a choice would fall to Auto and clear the saved Dark."""
+    page.emulate_media(color_scheme="light")
+    page.goto("/")
+    assert_rendered(page, HOME_SUCCESS)
+    choose(page, "dark")
+    assert_painted(page, "dark")
+    result: dict[str, Any] = page.evaluate(UNKNOWN_TRIGGER)
+    assert result == {"count": len(labels.THEME_CHOICES) + 1, "allNoUpdate": True}
+    assert theme_attribute(page) == "dark"
+    assert stored(page) == "dark"
+    assert_selected(page, "dark")
+
+
 def _channels(color: str) -> tuple[float, float, float, float]:
     match = re.fullmatch(
         r"rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)", color.strip()
