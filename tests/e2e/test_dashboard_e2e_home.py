@@ -33,6 +33,7 @@ def test_home_renders_its_coverage_and_the_provenance_footer(page: Page) -> None
 def test_homes_link_opens_the_elections_index(page: Page) -> None:
     page.goto("/")
     assert_rendered(page, HOME_SUCCESS)
-    page.locator('a[href="/elections"]').click()
+    # Home's own link, in the page body: the site navigation links there too (#448).
+    page.locator('main a[href="/elections"]').click()
     expect(page).to_have_url(re.compile(r"/elections$"))
     assert_rendered(page, ELECTIONS_SUCCESS)

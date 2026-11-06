@@ -236,6 +236,45 @@ THEME_TITLES: dict[str, str] = {
 }
 
 
+#: The accessible name of the site navigation, the ``nav`` landmark at the top of every
+#: page (#448; ba spec, approved at #448's plan gate, 2026-11-06). Read by assistive
+#: technology, not shown: a screen reader adds "navigation", so it is heard as "Site
+#: navigation", apart from the one-election view's earlier and later links. Not a
+#: ``LABELS`` key.
+SITE_NAV_LABEL = "Site"
+
+#: The site name's short form, the site-name link's visible text at every width (#448;
+#: ba spec, approved at #448's plan gate, 2026-11-06; the owner may switch it to "Home"
+#: once seen on the built page). The first word of ``config.SITE_TITLE``. Not a
+#: ``LABELS`` key.
+SITE_NAME_SHORT = "Explore"
+
+#: The rest of the site name, after :data:`SITE_NAME_SHORT` (#448; ba spec, approved
+#: at #448's plan gate, 2026-11-06): shown at wide widths and visually hidden at
+#: narrow ones, so the link's accessible name is the full name, ``config.SITE_TITLE``'s
+#: text, at every width and starts with what is shown (WCAG 2.5.3). Not a ``LABELS``
+#: key.
+SITE_NAME_REST = " — US Presidential Election Center"
+
+#: The home page's heading (#277; one constant since #448, which the site name sits
+#: beside): the full site name without "Explore —". Not a ``LABELS`` key.
+HOME_HEADING = "US Presidential Election Center"
+
+#: The site navigation's three links, in order (#448; labels fixed by the owner in the
+#: issue, confirmed by ba, approved at #448's plan gate, 2026-11-06). Not ``LABELS``
+#: keys.
+NAV_ELECTIONS = "Elections"
+NAV_STATES = "States"
+NAV_API_DOCS = "API docs"
+
+#: The API docs link's tooltip, its ``title`` (#448; ba spec, approved at #448's plan
+#: gate, 2026-11-06). It says "Opens", never "new tab": the link opens in the same tab.
+#: Not a ``LABELS`` key.
+NAV_API_DOCS_TITLE = (
+    "How to read this dataset from your own software. Opens the API's documentation."
+)
+
+
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
 #: raw ``false``. It says nothing about whether a popular vote was held.

@@ -33,6 +33,9 @@ dash.register_page(
     prefetch=(api.ELECTIONS_PATH,),
     on_miss=(api.ROSTER_PATH,),
     success=PAGE_ID,
+    # The site navigation link this page marks (#448):
+    # the state picker marks its own link.
+    nav="states",
 )
 
 

@@ -12,7 +12,7 @@ from typing import Any
 import dash
 from dash import dcc, html
 
-from explore import api, components
+from explore import api, components, labels
 from explore.config import SITE_TITLE
 
 #: The element only a successful render carries: the coverage list, home's own content.
@@ -34,6 +34,9 @@ dash.register_page(
     # Rendered only from a successful read: this page's success contract, asserted by
     # the D070(b) guard in test_dashboard_guards.py.
     success=COVERAGE_ID,
+    # The site navigation link this page marks (#448):
+    # the home page marks the site name.
+    nav="home",
 )
 
 
@@ -86,7 +89,7 @@ def layout(**_query: Any) -> html.Div:
         body = components.unavailable()
     return html.Div(
         [
-            html.H1("US Presidential Election Center"),
+            html.H1(labels.HOME_HEADING),
             html.P(
                 "Tables and charts over the public election data. Start with the list "
                 "of elections, or a state's history; more views are on their way.",

@@ -1,7 +1,7 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds eight things: seven host-level, and the theme
-choice, which lives in the browser:
+Beyond Dash itself this module adds nine things: seven host-level, and two that live
+in the browser, the theme choice and the site navigation's current-page marker:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -55,6 +55,12 @@ choice, which lives in the browser:
   (:func:`~explore.components.theme_control`) above every page and the store holding
   the theme in effect, which one inline clientside callback keeps current. Nothing
   about it reaches the server, the URL or ``og:url``.
+- **The site navigation** (#448). The header holds the site navigation
+  (:func:`~explore.components.site_nav`) before the toggle. Each page names the link
+  it marks with ``nav=`` in ``dash.register_page``; :data:`NAV_TABLE` gathers them
+  from the registry, and :data:`NAV_CALLBACK`, an inline clientside callback on the
+  Pages router's own Location, matches the pathname as the router does and writes
+  ``aria-current`` onto the marked link, with no server round trip.
 """
 
 from __future__ import annotations
@@ -77,14 +83,15 @@ from dash import Input, Output, State, clientside_callback, dcc, html
 
 # Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
-# matcher, the query parser whose dict the router hands a layout, and the ids of the
-# Pages router's two outputs, which name its routing request.
+# matcher, the query parser whose dict the router hands a layout, the ids of the
+# Pages router's two outputs, which name its routing request, and the id of its
+# Location, whose pathname the site navigation's marker follows (#448).
 from dash._pages import _parse_query_string, _path_to_page
-from dash.dash import _ID_CONTENT, _ID_STORE
+from dash.dash import _ID_CONTENT, _ID_LOCATION, _ID_STORE
 
 from explore import api, components, labels
 from explore import query as query_syntax  # `query` is resolve's parameter
-from explore.config import CANONICAL_HOST, SITE_TITLE
+from explore.config import API_BASE, CANONICAL_HOST, SITE_TITLE
 
 log = logging.getLogger(__name__)
 
@@ -448,6 +455,63 @@ THEME_CALLBACK = (
     " }"
 )
 
+#: The API's ``/docs`` page, the site navigation's one link off this site (#448): built
+#: from the one API base, never a second host literal, and only ever an ``href``.
+API_DOCS_URL = f"{API_BASE}/docs"
+
+
+@dataclass(frozen=True)
+class NavEntry:
+    """One registered page in the site navigation's current-page table (#448).
+
+    ``path`` and ``pattern`` are what Dash's router matches the page by
+    (``_path_to_page``): its path and, for a templated page, its template as an
+    anchored regex, each with the leading and trailing slashes stripped. ``link`` is
+    the ``components.NAV_LINKS`` key the page marks, or ``None``; ``current`` is the
+    ``aria-current`` value: ``"page"`` when that link goes to this page, ``"true"``
+    when it goes to the page's index.
+    """
+
+    path: str
+    pattern: str | None
+    link: str | None
+    current: str | None
+
+
+#: The static parts of every page path, which a pattern carries unescaped, so a pattern
+#: means the same in Python's ``re`` and in JavaScript (#448).
+_STATIC_PATH_RE = re.compile(r"[a-z0-9/-]*")
+
+
+def nav_entry(page: Mapping[str, Any]) -> NavEntry:
+    """``page``'s entry in the current-page table, from its ``nav=`` key (#448).
+
+    Every registered page declares ``nav=``, a ``components.NAV_LINKS`` key or
+    ``None``; a page without one, or with another value, fails the import. A
+    template's variables become ``[\\s\\S]*``, as fnmatch's ``*`` in Dash's router
+    matches a ``/`` too (so ``/election/1824/x`` is the one-election view).
+    """
+    if "nav" not in page:
+        raise RuntimeError(f"{page.get('module')} registers no nav= (#448)")
+    link = page["nav"]
+    if link is not None and link not in components.NAV_LINKS:
+        raise RuntimeError(f"{page.get('module')} registers an unknown nav={link!r}")
+    path = str(page["path"]).strip("/")
+    template = page.get("path_template")
+    pattern = None
+    if template:
+        stripped = str(template).strip("/")
+        statics = re.split(r"<.*?>", stripped)
+        if not all(_STATIC_PATH_RE.fullmatch(part) for part in statics):
+            raise RuntimeError(f"{page.get('module')} has a template to escape")
+        pattern = "^" + r"[\s\S]*".join(statics) + "$"
+    current = None
+    if link is not None:
+        target = components.NAV_LINKS[link][1].strip("/")
+        current = "page" if target == path and not template else "true"
+    return NavEntry(path=path, pattern=pattern, link=link, current=current)
+
+
 #: dcc's bundled plotly.js, as ``Dash._setup_plotlyjs`` names it in the ``plotly``
 #: package.
 PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
@@ -559,15 +623,67 @@ app = ExploreDash(
     update_title=None,  # type: ignore[arg-type]  # Dash documents None: no "Updating…"
 )
 server = app.server
-# The theme toggle sits in a header above every page's main landmark, and the store
-# beside both: Pages navigation swaps only page_container, so neither is re-mounted
-# and the theme callback's first call runs once per document (#359, #447).
+# The site navigation and the theme toggle after it sit in a header above every page's
+# main landmark, and the store beside both: Pages navigation swaps only page_container,
+# so none is re-mounted, and the theme callback's first call runs once per document
+# (#359, #447, #448).
 app.layout = html.Div(
     [
-        html.Header(components.theme_control(), className="site-header"),
+        html.Header(
+            [components.site_nav(API_DOCS_URL), components.theme_control()],
+            className="site-header",
+        ),
         html.Main(dash.page_container, className="explore"),
         dcc.Store(id=components.THEME_STORE_ID, storage_type="memory"),
     ]
+)
+
+#: The site navigation's current-page table (#448): one entry per registered page, in
+#: the registry's order, which is the order Dash's router tries them in.
+NAV_TABLE: tuple[NavEntry, ...] = tuple(
+    nav_entry(page) for page in dash.page_registry.values()
+)
+
+#: Each in-app link's key, mapped to its id, for the navigation callback.
+_NAV_LINK_IDS = {key: link_id for key, (link_id, _) in components.NAV_LINKS.items()}
+
+#: The site navigation's callback (#448), run in the browser on the Pages router's own
+#: Location, so it follows the pathname the router routes on, in the same dispatch: on
+#: the first load (before the Location reports a pathname it reads
+#: ``window.location.pathname``), after a client-side navigation and after back and
+#: forward. It matches the pathname as ``_path_to_page`` does, against
+#: :data:`NAV_TABLE`: leading and trailing slashes stripped, never decoded (the router
+#: matches the still-encoded pathname), each page in order by its template's pattern,
+#: then its path, the first match winning; a pathname no page matches marks nothing.
+#: ``dcc.Link`` renders no ``aria-*`` attribute, so the callback writes
+#: ``aria-current`` onto the marked link itself and removes it from the others (React
+#: manages no such attribute there, so nothing overwrites it; ``"false"`` is never
+#: written), and returns the marked link's key, or ``""``, as the nav's
+#: ``data-current``. The stylesheet draws the marker from ``aria-current``.
+NAV_CALLBACK = (
+    "function (pathname) {"
+    f" var table = {json.dumps([entry.__dict__ for entry in NAV_TABLE])};"
+    f" var ids = {json.dumps(_NAV_LINK_IDS)};"
+    ' var path = typeof pathname === "string" ? pathname : window.location.pathname;'
+    ' path = path.replace(/^\\/+|\\/+$/g, "");'
+    " var hit = null;"
+    " for (var i = 0; i < table.length && hit === null; i++) {"
+    " var entry = table[i];"
+    " if ((entry.pattern !== null && new RegExp(entry.pattern).test(path))"
+    " || path === entry.path) { hit = entry; } }"
+    ' var marked = hit !== null && hit.link !== null ? hit.link : "";'
+    " Object.keys(ids).forEach(function (key) {"
+    " var link = document.getElementById(ids[key]);"
+    " if (link === null) { return; }"
+    ' if (key === marked) { link.setAttribute("aria-current", hit.current); }'
+    ' else { link.removeAttribute("aria-current"); } });'
+    " return marked;"
+    " }"
+)
+clientside_callback(
+    NAV_CALLBACK,
+    Output(components.SITE_NAV_ID, "data-current"),
+    Input(_ID_LOCATION, "pathname"),
 )
 clientside_callback(
     THEME_CALLBACK,

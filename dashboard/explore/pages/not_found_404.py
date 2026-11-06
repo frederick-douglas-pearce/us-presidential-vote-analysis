@@ -33,6 +33,9 @@ dash.register_page(
     prefetch=(),
     on_miss=(),
     not_found=NOT_FOUND,
+    # The site navigation link this page marks (#448):
+    # a link that matches no page marks nothing.
+    nav=None,
 )
 
 

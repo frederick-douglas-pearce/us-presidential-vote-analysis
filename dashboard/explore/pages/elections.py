@@ -71,6 +71,9 @@ dash.register_page(
     on_miss=(),
     success=PAGE_ID,
     query=parse_filters,
+    # The site navigation link this page marks (#448):
+    # the elections index marks its own link.
+    nav="elections",
 )
 
 

@@ -100,6 +100,7 @@ CALLBACK_OUTPUTS = {
     ".._pages_content.children..._pages_store.data..",
     "..theme-in-effect.data...theme-dark.aria-pressed...theme-auto.aria-pressed"
     "...theme-light.aria-pressed..",
+    "site-nav.data-current",
     "_pages_dummy.children",
     "elections-url.search",
     "election-url.search",
