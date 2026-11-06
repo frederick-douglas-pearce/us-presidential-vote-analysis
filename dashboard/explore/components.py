@@ -234,14 +234,21 @@ def theme_control() -> html.Div:
 SITE_NAV_ID = "site-nav"
 
 #: The site navigation's in-app links (#448), in order: each link's key (what a page's
-#: ``nav=`` names in ``dash.register_page``), its id and its path. The keys are the one
-#: source for the layout, app.py's current-page table and its callback. The ids are
-#: static: the bar renders once per document, in ``app.layout``.
+#: ``nav=`` may name in ``dash.register_page``), its id and its path, which
+#: :func:`site_nav`, app.py's current-page table and its callback all read. The order,
+#: the labels and the site-name link's form are :func:`site_nav`'s own;
+#: ``test_in_app_links_are_dcc_links_to_their_paths`` (``test_dashboard_nav.py``) fails
+#: if the bar and this table diverge. The ids are static: the bar renders once per
+#: document, in ``app.layout``.
 NAV_LINKS: dict[str, tuple[str, str]] = {
     "home": ("nav-home", "/"),
     "elections": ("nav-elections", "/elections"),
     "states": ("nav-states", "/states"),
 }
+
+#: Each in-app link's key, mapped to its id (#448): the one projection of
+#: :data:`NAV_LINKS` the callback and the tests read.
+NAV_LINK_IDS: dict[str, str] = {key: link_id for key, (link_id, _) in NAV_LINKS.items()}
 
 #: The id of the API docs link, the bar's one link off this site (#448).
 NAV_API_DOCS_ID = "nav-api-docs"
@@ -258,13 +265,13 @@ def site_nav(docs_href: str) -> html.Nav:
     ``dcc.Link`` renders no ``aria-*`` attribute, so the current-page marker
     (``aria-current``) is written onto the links in the browser by app.py's
     ``NAV_CALLBACK``, which reports the link it marked in the nav's ``data-current``.
+    The layout renders no ``data-current``, so its presence shows the callback ran.
     The site name's accessible name is the full name at every width: the short form is
     always shown and the rest is visually hidden on a narrow screen, never
     ``display: none`` (WCAG 2.5.3). The theme toggle is the header's next child, not
     part of this landmark, which holds only links.
     """
     home, elections, states = (NAV_LINKS[k] for k in ("home", "elections", "states"))
-    current: dict[str, Any] = {"data-current": ""}
     named: dict[str, Any] = {"aria-label": labels.SITE_NAV_LABEL}
     return html.Nav(
         [
@@ -293,7 +300,6 @@ def site_nav(docs_href: str) -> html.Nav:
         id=SITE_NAV_ID,
         className="site-nav",
         **named,
-        **current,
     )
 
 

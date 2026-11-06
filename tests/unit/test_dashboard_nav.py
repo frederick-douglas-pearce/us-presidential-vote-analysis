@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import dash
@@ -19,6 +20,7 @@ from dash._pages import _path_to_page
 
 from explore import api, components, config, labels
 from explore import app as appmod
+from tests.nav_marks import MARKS
 from tests.unit.test_dashboard_app import offline_client
 
 
@@ -73,7 +75,9 @@ class TestStructure:
         nav = site_nav()
         assert nav.id == components.SITE_NAV_ID
         assert nav.className == "site-nav"
-        assert getattr(nav, "data-current") == ""
+        # No data-current until the callback's first run writes one, so its presence
+        # shows the callback ran (an e2e "no mark" check waits on it).
+        assert "data-current" not in nav.to_plotly_json()["props"]
 
     def test_the_landmark_is_named_apart_from_the_election_views_nav(self) -> None:
         name = getattr(site_nav(), "aria-label")
@@ -99,7 +103,7 @@ class TestStructure:
         assert len([*right, toggle]) == 4
         assert name.className == "site-name"
         assert [n.id for n in nav.children] == [
-            *(link_id for link_id, _ in components.NAV_LINKS.values()),
+            *components.NAV_LINK_IDS.values(),
             components.NAV_API_DOCS_ID,
         ]
         assert [text(n) for n in right] == [
@@ -128,7 +132,11 @@ class TestStructure:
         assert docs.title == labels.NAV_API_DOCS_TITLE
 
     def test_no_page_marks_success_with_a_header_element(self) -> None:
-        # The bar renders from no data, so it is never a page's success marker.
+        # The bar renders from no data, so it is never a page's success marker. That it
+        # reads none is held elsewhere: site_nav takes only a URL string, components
+        # imports no api (TestSharedPieces.test_the_shared_modules_read_no_api, in
+        # test_dashboard_elections.py), and the e2e degraded template, /state/TX, still
+        # shows the bar.
         ids = {getattr(n, "id", None) for n in nodes(header())} - {None}
         assert ids
         successes = {page.get("success") for page in dash.page_registry.values()} - {
@@ -139,12 +147,10 @@ class TestStructure:
 
 
 class TestWording:
-    def test_the_full_name_is_the_site_title_and_starts_with_the_short_form(
-        self,
-    ) -> None:
-        full = labels.SITE_NAME_SHORT + labels.SITE_NAME_REST
-        assert full == config.SITE_TITLE
-        assert full.startswith(labels.SITE_NAME_SHORT)  # WCAG 2.5.3
+    def test_the_full_name_is_the_site_title(self) -> None:
+        # The link's name is short + rest, so it starts with what is shown (WCAG 2.5.3);
+        # it must also be the site title, which a short form like "Home" would break.
+        assert labels.SITE_NAME_SHORT + labels.SITE_NAME_REST == config.SITE_TITLE
         assert config.SITE_TITLE.endswith(labels.HOME_HEADING)
 
     def test_the_site_name_link_shows_the_short_form_and_names_the_full(self) -> None:
@@ -173,8 +179,11 @@ class TestWording:
 
 
 def js_match(pathname: str) -> appmod.NavEntry | None:
-    """What NAV_CALLBACK's matcher returns, run in Python on the embedded table: strip
-    leading and trailing slashes, never decode, first pattern or path match wins."""
+    """The rule NAV_CALLBACK implements, run in Python on the embedded table: strip
+    leading and trailing slashes, never decode, first pattern or path match wins. The
+    JS itself runs on the same corpus in the browser
+    (``test_the_registered_callback_marks_every_path``, ``test_dashboard_e2e_nav.py``);
+    ``TestNavCallback`` pins its strip and match lines."""
     path = re.sub(r"^/+|/+$", "", pathname)
     for entry in appmod.NAV_TABLE:
         if (entry.pattern is not None and re.search(entry.pattern, path)) or (
@@ -182,31 +191,6 @@ def js_match(pathname: str) -> appmod.NavEntry | None:
         ):
             return entry
     return None
-
-
-#: Each path, the link it marks and its ``aria-current``, or ``None`` for no mark.
-MARKS: dict[str, tuple[str, str] | None] = {
-    "/": ("home", "page"),
-    "//": ("home", "page"),
-    "/elections": ("elections", "page"),
-    "/elections/": ("elections", "page"),
-    "/elections/x": None,
-    "/election": None,
-    "/election/1824": ("elections", "true"),
-    "/election/1825": ("elections", "true"),
-    "/election/1824/x": ("elections", "true"),
-    "/election//1824": ("elections", "true"),
-    "/election/%31824": ("elections", "true"),
-    "/%65lections": None,
-    "/Elections": None,
-    "/states": ("states", "page"),
-    "/state/GA": ("states", "true"),
-    "/state/ga": ("states", "true"),
-    "/state/ZZ": ("states", "true"),
-    "/candidate/andrew-jackson": None,
-    "/not-found-404": None,
-    "/no-such": None,
-}
 
 
 class TestCurrentPage:
@@ -232,7 +216,8 @@ class TestCurrentPage:
     @pytest.mark.parametrize("path", sorted(MARKS))
     def test_the_matcher_agrees_with_dashs_router(self, path: str) -> None:
         entry = js_match(path)
-        page, _ = _path_to_page(path.strip("/"))
+        # The router's own strip, so the oracle does not share the model's assumption.
+        page, _ = _path_to_page(appmod.app.strip_relative_path(path))
         module = page.get("module") if page else None
         chosen = (
             next(
@@ -291,13 +276,27 @@ class TestNavCallback:
         script = appmod.NAV_CALLBACK
         table = [entry.__dict__ for entry in appmod.NAV_TABLE]
         assert f"var table = {json.dumps(table)};" in script
-        ids = {key: link_id for key, (link_id, _) in components.NAV_LINKS.items()}
-        assert f"var ids = {json.dumps(ids)};" in script
+        assert f"var ids = {json.dumps(components.NAV_LINK_IDS)};" in script
         # The router's strip, both ends, and the fallback before the Location reports.
         assert r'path = path.replace(/^\/+|\/+$/g, "");' in script
+        # The match line, literally: the rule js_match models, and no flags.
+        assert (
+            "if ((entry.pattern !== null && new RegExp(entry.pattern).test(path))"
+            " || path === entry.path) { hit = entry; } }"
+        ) in script
+        assert script.count("new RegExp(") == 1
         assert "window.location.pathname" in script
         # Never decoded: Dash's router matches the still-encoded pathname.
         assert "decode" not in script.lower()
+
+    def test_the_app_is_served_at_the_root_as_the_matcher_assumes(self) -> None:
+        # The JS strips only slashes, which is all the router strips at the root; app.py
+        # refuses any other prefix at import, so a prefixed deployment fails loudly
+        # rather than losing the marker.
+        assert appmod.app.config.requests_pathname_prefix == "/"
+        assert appmod.app.strip_relative_path("//election/1824/") == "election/1824"
+        source = Path(appmod.__file__).read_text(encoding="utf-8")
+        assert 'if app.config.requests_pathname_prefix != "/":' in source
 
     def test_it_writes_aria_current_and_never_false(self) -> None:
         script = appmod.NAV_CALLBACK
@@ -318,7 +317,7 @@ class TestNavCallback:
         nav_ids = {
             components.SITE_NAV_ID,
             components.NAV_API_DOCS_ID,
-            *(link_id for link_id, _ in components.NAV_LINKS.values()),
+            *components.NAV_LINK_IDS.values(),
         }
         for other, other_spec in appmod.app.callback_map.items():
             if other == key:

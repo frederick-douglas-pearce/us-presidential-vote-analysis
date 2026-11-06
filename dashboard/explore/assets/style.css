@@ -192,8 +192,11 @@ body {
 }
 /* The rest of the site name: visually hidden on a narrow screen, so the link's name stays
    the full name, and shown from 45rem up, where the whole name fits on the row even in a
-   wide fallback font (DejaVu Sans, the CI runner's). */
+   wide fallback font (DejaVu Sans, the CI runner's). white-space: pre keeps the space
+   that opens it, which an absolutely positioned (blockified) box would otherwise
+   collapse, so the name never reads "Explore— US…". */
 .site-name-rest {
+  white-space: pre;
   position: absolute;
   width: 1px;
   height: 1px;

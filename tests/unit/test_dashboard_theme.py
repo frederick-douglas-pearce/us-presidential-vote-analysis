@@ -727,6 +727,22 @@ class TestThemeContrast:
         ratio = contrast(parse_color(palette[token_in(rule[foreground])]), page)
         assert ratio >= minimum, (theme, selector, foreground, round(ratio, 2))
 
+    def test_the_site_navigation_paints_what_nav_paint_measures(self) -> None:
+        # NAV_PAINT's premises (#448's review): the global `a` rule is what colors the
+        # nav's links, and nothing behind the bar is filled, so every pair sits on
+        # --page. A nav rule that set a color or a fill would paint a pair no test reads.
+        nav_rules = [
+            (prelude, dict(declarations(body)))
+            for at, prelude, body in shipped_rules()
+            if at is None and re.search(r"\.site-(?:header|nav|name)\b", prelude)
+        ]
+        assert nav_rules
+        for prelude, rule in nav_rules:
+            assert not {"background", "background-color"} & set(rule), prelude
+            if ".site-name" not in prelude:
+                assert "color" not in rule, prelude
+        assert toggle_rule(".site-nav .site-name")["color"] == "var(--text)"
+
     def test_the_marker_is_an_underline_not_color_alone(self) -> None:
         # WCAG 1.4.1: the current link differs by a decoration, which forced colors
         # keep, and the other links carry none.
@@ -747,9 +763,10 @@ class TestThemeContrast:
     def test_each_gap_clears_the_focus_ring(
         self, gap_selector: str, focus_selector: str
     ) -> None:
-        # A ring reaches offset plus width past its control; a gap no wider than both
-        # neighbors' reach would let rings meet or land on a selected toggle position's
-        # accent fill (API docs then Dark sit across the header's gap, #448).
+        # A ring reaches offset plus width past its control. Only one control is
+        # focused at a time, so the risk is one ring landing on a neighbor, such as a
+        # selected toggle position's accent fill, accent on accent (1:1): the gap must
+        # exceed one ring's reach (API docs then Dark sit across the header's gap, #448).
         gap = toggle_rule(gap_selector)["gap"]
         focus = toggle_rule(focus_selector)
         width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
@@ -758,18 +775,6 @@ class TestThemeContrast:
         assert width and offset and rem, (gap, focus)
         reach = int(width.group(1)) + int(offset.group(1))
         assert float(rem.group(1)) * 16 > reach, (gap_selector, gap, reach)
-
-    def test_the_gap_clears_the_focus_ring(self) -> None:
-        # A ring reaches offset plus width past its button; a narrower gap would put
-        # it on a selected neighbor's accent fill, accent on accent (1:1).
-        gap = toggle_rule(".theme-control")["gap"]
-        focus = toggle_rule(".theme-control button:focus-visible")
-        width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
-        offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
-        rem = re.fullmatch(r"([\d.]+)rem", gap)
-        assert width and offset and rem, (gap, focus)
-        reach = int(width.group(1)) + int(offset.group(1))
-        assert float(rem.group(1)) * 16 > reach, (gap, reach)
 
     def test_the_unselected_button_paints_on_the_page(self) -> None:
         # What makes the "on the page" pairs above true: no fill and no UA button look.

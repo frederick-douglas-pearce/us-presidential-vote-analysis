@@ -416,7 +416,7 @@ def test_each_position_is_a_named_pressed_button_chosen_from_the_keyboard(
     # The header comes first: Tab passes the site navigation's four links (#448), then
     # reaches Dark, then Auto, then Light.
     for link_id in [
-        *(link_id for link_id, _ in components.NAV_LINKS.values()),
+        *components.NAV_LINK_IDS.values(),
         components.NAV_API_DOCS_ID,
     ]:
         page.keyboard.press("Tab")

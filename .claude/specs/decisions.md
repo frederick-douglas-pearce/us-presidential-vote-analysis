@@ -5884,9 +5884,11 @@ renders no `aria-*` attribute (it accepts none; `_valid_wildcard_attributes` is 
   and fails the import for a page without one. A page marks its own link with
   `aria-current="page"`; a detail page marks its index's link with `aria-current="true"`
   (`/election/<year>` marks Elections, `/state/<usps>` States), and the candidate history and the
-  custom 404 page mark nothing. The marker is matched by Dash's router rule (`_path_to_page`:
-  slashes stripped, never decoded, each page's template then path, in registry order), so a
-  not-found year still marks its section and a path the router matches to no page marks nothing.
+  custom 404 page mark nothing. The marker is matched by Dash's router rule with the app served
+  at the root (`strip_relative_path` then strips only slashes; `app.py` refuses at import any
+  other `requests_pathname_prefix`): `_path_to_page`, slashes stripped, never decoded, each
+  page's template then path, in registry order. So a not-found year still marks its section and
+  a path the router matches to no page marks nothing.
 - **The marker's input is the Pages router's own Location** (`dash.dash._ID_LOCATION`, a Dash
   private pinned in `TestDashPrivates`): it agrees with what the router routes on by
   construction, and a second Location would be a component able to write the URL that only needs
@@ -5901,7 +5903,10 @@ renders no `aria-*` attribute (it accepts none; `_valid_wildcard_attributes` is 
 
 **Rationale.** The cap is what keeps one row at a phone's width without a menu, which would be a
 second widget inside an inline callback. Declaring the mark beside each page's other registry keys
-keeps the table and the router from drifting, and a future candidate index is a one-line change.
+keeps the table and the router from drifting: a page's own mark is one line in its
+`register_page`. A new link, such as a future candidate index, is not: it is a fifth entry, which
+the cap routes to an owner decision and a collapse-menu story, and it needs a `NAV_LINKS` key, a
+label and an entry in `components.site_nav`.
 Drawing the marker from `aria-current` means what is seen is what assistive technology hears.
 
 **Related:** D071, D085, #359, #444, #446, #447, #448.

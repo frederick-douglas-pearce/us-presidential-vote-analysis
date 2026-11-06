@@ -59,7 +59,8 @@ in the browser, the theme choice and the site navigation's current-page marker:
   (:func:`~explore.components.site_nav`) before the toggle. Each page names the link
   it marks with ``nav=`` in ``dash.register_page``; :data:`NAV_TABLE` gathers them
   from the registry, and :data:`NAV_CALLBACK`, an inline clientside callback on the
-  Pages router's own Location, matches the pathname as the router does and writes
+  Pages router's own Location, matches the pathname as the router does with the app
+  at the root (the only prefix it is served under, checked at import) and writes
   ``aria-current`` onto the marked link, with no server round trip.
 """
 
@@ -623,6 +624,14 @@ app = ExploreDash(
     update_title=None,  # type: ignore[arg-type]  # Dash documents None: no "Updating…"
 )
 server = app.server
+# The site navigation's marker matches a pathname as Dash's router does only with the
+# app at the root, where ``strip_relative_path`` strips nothing but slashes (#448's
+# review): served under a prefix, the marker would vanish while routing still worked.
+if app.config.requests_pathname_prefix != "/":
+    raise RuntimeError(
+        "NAV_CALLBACK assumes the app is served at the root, not under "
+        f"{app.config.requests_pathname_prefix!r}"
+    )
 # The site navigation and the theme toggle after it sit in a header above every page's
 # main landmark, and the store beside both: Pages navigation swaps only page_container,
 # so none is re-mounted, and the theme callback's first call runs once per document
@@ -644,15 +653,13 @@ NAV_TABLE: tuple[NavEntry, ...] = tuple(
     nav_entry(page) for page in dash.page_registry.values()
 )
 
-#: Each in-app link's key, mapped to its id, for the navigation callback.
-_NAV_LINK_IDS = {key: link_id for key, (link_id, _) in components.NAV_LINKS.items()}
-
 #: The site navigation's callback (#448), run in the browser on the Pages router's own
 #: Location, so it follows the pathname the router routes on, in the same dispatch: on
 #: the first load (before the Location reports a pathname it reads
 #: ``window.location.pathname``), after a client-side navigation and after back and
-#: forward. It matches the pathname as ``_path_to_page`` does, against
-#: :data:`NAV_TABLE`: leading and trailing slashes stripped, never decoded (the router
+#: forward. It matches the pathname as ``_path_to_page`` does with the app at the root
+#: (enforced above), against :data:`NAV_TABLE`: leading and trailing slashes stripped,
+#: which is all ``strip_relative_path`` strips there, never decoded (the router
 #: matches the still-encoded pathname), each page in order by its template's pattern,
 #: then its path, the first match winning; a pathname no page matches marks nothing.
 #: ``dcc.Link`` renders no ``aria-*`` attribute, so the callback writes
@@ -663,7 +670,7 @@ _NAV_LINK_IDS = {key: link_id for key, (link_id, _) in components.NAV_LINKS.item
 NAV_CALLBACK = (
     "function (pathname) {"
     f" var table = {json.dumps([entry.__dict__ for entry in NAV_TABLE])};"
-    f" var ids = {json.dumps(_NAV_LINK_IDS)};"
+    f" var ids = {json.dumps(components.NAV_LINK_IDS)};"
     ' var path = typeof pathname === "string" ? pathname : window.location.pathname;'
     ' path = path.replace(/^\\/+|\\/+$/g, "");'
     " var hit = null;"

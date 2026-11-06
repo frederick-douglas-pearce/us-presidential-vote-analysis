@@ -1,14 +1,15 @@
 """The site navigation in a browser (#448): one row at a phone's width on every page
 template, a wrap rather than a sideways scroll at 320 px, the full site name from
-45rem, the current-page marker after a direct load, a client-side navigation, a filter
-change and back and forward, Tab order, and in-app links that load no document.
+45rem, the bar's ends lined up with the page's content at the wide layout, the
+current-page marker after a direct load, a client-side navigation, a filter change and
+back and forward, the registered callback on every path of the shared corpus, Tab
+order, and in-app links that load no document and make no other request.
 
 The marker is ``aria-current`` on the link, which ``NAV_CALLBACK`` writes in the
-browser and reports as the nav's ``data-current``. A navigation that should mark nothing
-starts from a marked page, so the cleared state shows the callback ran on the new path;
-a direct load that marks nothing is read after the page body rendered (the callback runs
-in the same initial pass as the router, which renders the body) and a settle. ``conftest._browser_guard`` fails every test on an off-host request, so
-no test follows the API docs link.
+browser and reports as the nav's ``data-current``. The layout renders no
+``data-current``, so ``data-current=""`` ("nothing marked") is present only once the
+callback has run. ``conftest._browser_guard`` fails every test on an off-host request,
+so no test follows the API docs link.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from tests.e2e.dashboard_pages import (
     assert_rendered,
     step_years,
 )
+from tests.nav_marks import MARKS
 
 pytestmark = pytest.mark.e2e
 
@@ -40,7 +42,7 @@ NOT_FOUND_ERROR = (
     "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
 )
 NAV = f"#{components.SITE_NAV_ID}"
-LINK_IDS = {key: link_id for key, (link_id, _) in components.NAV_LINKS.items()}
+LINK_IDS = components.NAV_LINK_IDS
 
 #: The slack the bar keeps at 390 px, so a wider font still fits on one row (the
 #: architect's margin for SF Pro, #448). CI's DejaVu Sans is the widest checked: at
@@ -148,8 +150,8 @@ def test_the_bar_keeps_one_row_at_a_phones_width(page: Page, path: str) -> None:
     open_page(page, path)
     assert page.evaluate("innerWidth") == 390
     found = measure(page)
-    # One row: every entry overlaps every other vertically (the 24 px links and the
-    # 28 px toggle are centered, so their tops differ).
+    # One row: every entry overlaps every other vertically, which holds whether or not
+    # the entries' heights match (they are centered on the row).
     assert max(found["tops"]) < min(found["bottoms"]), found
     # No label wraps or is cut: each link one 24 px line, nothing overflowing.
     assert not any(found["overflow"]) and not found["navOverflow"], found
@@ -174,22 +176,32 @@ def test_the_bar_wraps_rather_than_scrolls_at_320_px(page: Page) -> None:
     assert max(found["rights"]) <= 320, found
 
 
+def chromium_name(page: Page, selector: str) -> str:
+    """The element's accessible name as Chromium computes it, from its accessibility
+    tree: Playwright's role locators compute names their own way, from DOM text, so
+    only this sees a space the browser collapsed."""
+    client = page.context.new_cdp_session(page)
+    root = client.send("DOM.getDocument")["root"]["nodeId"]
+    node = client.send("DOM.querySelector", {"nodeId": root, "selector": selector})
+    tree = client.send(
+        "Accessibility.getPartialAXTree",
+        {"nodeId": node["nodeId"], "fetchRelatives": False},
+    )
+    client.detach()
+    return str(tree["nodes"][0]["name"]["value"])
+
+
 def test_the_full_site_name_shows_from_45rem(page: Page) -> None:
     rest = page.locator(f"{NAV} .site-name-rest")
-    name = page.get_by_role("link", name=config.SITE_TITLE, exact=True)
+    home = f"#{LINK_IDS['home']}"
     page.goto("/elections")
     page.locator(ELECTIONS_SUCCESS).wait_for()
-    # Narrow: the short form shows, the rest is clipped, and the name is the full one.
-    expect(name).to_have_count(1)
+    # Narrow: the rest is clipped, and the link's name is still the full site title.
     assert rest.evaluate("e => e.getBoundingClientRect().width") <= 1
-    assert (
-        page.locator(f"{NAV} .site-name")
-        .inner_text()
-        .startswith(labels.SITE_NAME_SHORT)
-    )
+    assert chromium_name(page, home) == config.SITE_TITLE
     page.set_viewport_size({"width": 720, "height": 844})
-    expect(name).to_have_count(1)
     assert rest.evaluate("e => e.getBoundingClientRect().width") > 100
+    assert chromium_name(page, home) == config.SITE_TITLE
     found = measure(page)
     assert max(found["tops"]) < min(found["bottoms"]), found
     assert not any(found["overflow"]) and found["page"] == 720, found
@@ -198,8 +210,6 @@ def test_the_full_site_name_shows_from_45rem(page: Page) -> None:
 @pytest.mark.parametrize("path", template_params())
 def test_a_direct_load_marks_the_pages_link(page: Page, path: str) -> None:
     open_page(page, path)
-    if TEMPLATES[path][1] is None:
-        page.wait_for_timeout(SETTLE_MS)
     expect_marked(page, TEMPLATES[path][1])
 
 
@@ -236,17 +246,17 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))
-    seen: list[tuple[str, str]] = []
+    seen: list[tuple[str, str, str]] = []
 
     def on_request(request: Request) -> None:
+        # Every request the page makes, of every kind: the router's one POST is named
+        # by the output it asks for, anything else by its method, type and path.
         path = urlsplit(request.url).path
-        if request.resource_type == "document":
-            seen.append(("document", path))
-        elif path.endswith(("_dash-layout", "_dash-dependencies")):
-            seen.append(("bootstrap", path))
-        elif request.method == "POST" and path == UPDATE_PATH:
+        if request.method == "POST" and path == UPDATE_PATH:
             body: Any = request.post_data_json
-            seen.append(("callback", body["output"]))
+            seen.append(("callback", "POST", body["output"]))
+        else:
+            seen.append((request.resource_type, request.method, path))
 
     page.on("request", on_request)
     page.evaluate("window.__e2e_mark = 1")
@@ -260,10 +270,73 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
         assert_rendered(page, success)
         expect_marked(page, mark)
         page.wait_for_timeout(SETTLE_MS)
-        # The router's one request, and nothing else: no document, no re-bootstrap,
-        # and no request for the marker, which runs in the browser.
-        assert seen == [("callback", ROUTER_OUTPUT)], (key, seen)
+        # The router's one request, and nothing else: no document, no re-bootstrap, no
+        # asset, and no request for the marker, which runs in the browser.
+        assert seen == [("callback", "POST", ROUTER_OUTPUT)], (key, seen)
     assert page.evaluate("window.__e2e_mark") == 1
+
+
+def test_the_bar_lines_up_with_the_content_at_the_wide_layout(page: Page) -> None:
+    # #360's desktop layout: the bar keeps one row, and its ends sit on the page's
+    # content edges (the site name on the left, the toggle on the right).
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto("/elections")
+    page.locator(ELECTIONS_SUCCESS).wait_for()
+    found = measure(page)
+    assert max(found["tops"]) < min(found["bottoms"]), found
+    edges = page.evaluate(
+        """() => {
+            const box = e => e.getBoundingClientRect();
+            const main = document.querySelector("main.explore");
+            const style = getComputedStyle(main);
+            return {
+                left: box(main).left + parseFloat(style.paddingLeft),
+                right: box(main).right - parseFloat(style.paddingRight),
+                name: box(document.getElementById(__HOME__)).left,
+                toggle: box(document.getElementById(__TOGGLE__)).right,
+            };
+        }""".replace("__HOME__", json.dumps(LINK_IDS["home"])).replace(
+            "__TOGGLE__", json.dumps(components.THEME_CONTROL_ID)
+        )
+    )
+    assert abs(edges["name"] - edges["left"]) <= 0.5, edges
+    assert abs(edges["toggle"] - edges["right"]) <= 0.5, edges
+
+
+def test_the_registered_callback_marks_every_path(page: Page) -> None:
+    # The JS itself, on the shared corpus the unit suite's Python model also reads:
+    # the function Dash registered for the nav's output, called with each path, its
+    # return and the links' aria-current read after each call. Found through
+    # _dash-dependencies, a Dash-private shape, acceptable in this advisory suite.
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    expect_marked(page, ("elections", "page"))
+    results: dict[str, Any] = page.evaluate(
+        """async ([output, ids, paths]) => {
+            const deps = await (await fetch("/_dash-dependencies")).json();
+            const spec = deps.find(d => d.output === output).clientside_function;
+            const fn = window.dash_clientside[spec.namespace][spec.function_name];
+            const out = {};
+            for (const path of paths) {
+                const marked = fn(path);
+                const current = {};
+                for (const [key, id] of Object.entries(ids)) {
+                    current[key] = document.getElementById(id).getAttribute(
+                        "aria-current");
+                }
+                out[path] = {marked, current};
+            }
+            return out;
+        }""",
+        [f"{components.SITE_NAV_ID}.data-current", LINK_IDS, list(MARKS)],
+    )
+    for path, mark in MARKS.items():
+        got = results[path]
+        assert got["marked"] == ("" if mark is None else mark[0]), (path, got)
+        expected: dict[str, str | None] = dict.fromkeys(LINK_IDS)
+        if mark is not None:
+            expected[mark[0]] = mark[1]
+        assert got["current"] == expected, (path, got)
 
 
 def test_the_marker_follows_the_earlier_later_link_and_a_filter(page: Page) -> None:

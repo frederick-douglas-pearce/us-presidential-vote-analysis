@@ -885,8 +885,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   (WCAG 2.5.3). The API's `/docs` page, at `config.API_HOST`, is not on this site. The home
   page's heading, "US Presidential Election Center", is the full form without "Explore —".
 - **Shown as:** the browser tab and link previews (`config.SITE_TITLE`), as the title of `/`
-  (`pages/home.py`) and after the heading on a not-found link (built in
-  `dashboard/explore/app.py`); the site navigation's link to `/` (`labels.SITE_NAME_SHORT`,
+  (`pages/home.py`) and after the heading on a not-found link (`api.NotFound.title`, in
+  `dashboard/explore/api.py`); the site navigation's link to `/` (`labels.SITE_NAME_SHORT`,
   always shown, and `labels.SITE_NAME_REST`, shown from 45rem up and visually hidden below);
   "this site" in `NOT_FOUND_SENTENCE` in `pages/not_found_404.py`; the home page's heading
   (`labels.HOME_HEADING`, in `layout` in `pages/home.py`).
@@ -900,9 +900,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Site navigation (the bar at the top of every page)
-- **Plain:** The row at the top of every page: the site's name, which goes to the home page,
-  then links to the list of elections, the list of states and the API's documentation page,
-  then the theme toggle. The link for the part of the site the reader is in is marked.
+- **Plain:** The row of links at the top of every page: the site's name, which goes to the home
+  page, then links to the list of elections, the list of states and the API's documentation
+  page. The theme toggle sits at the end of the same row. The link for the part of the site the
+  reader is in is marked.
 - **Precise:** A `nav` landmark named `labels.SITE_NAV_LABEL`, inside the site header and
   before `Main`, on every page, including every not-found state, the degraded state and the
   custom 404 page; the theme toggle follows it in the header, outside the landmark (D086). It

@@ -243,7 +243,7 @@ THEME_TITLES: dict[str, str] = {
 #: ``LABELS`` key.
 SITE_NAV_LABEL = "Site"
 
-#: The site name's short form, the site-name link's visible text at every width (#448;
+#: The site name's short form, shown at every width, alone below 45rem (#448;
 #: ba spec, approved at #448's plan gate, 2026-11-06; the owner may switch it to "Home"
 #: once seen on the built page). The first word of ``config.SITE_TITLE``. Not a
 #: ``LABELS`` key.
@@ -256,8 +256,10 @@ SITE_NAME_SHORT = "Explore"
 #: key.
 SITE_NAME_REST = " — US Presidential Election Center"
 
-#: The home page's heading (#277; one constant since #448, which the site name sits
-#: beside): the full site name without "Explore —". Not a ``LABELS`` key.
+#: The home page's heading (#277; a constant since #448, whose
+#: ``test_the_full_name_is_the_site_title`` pins it as
+#: the end of ``config.SITE_TITLE``): the full site name without "Explore —". The site
+#: navigation sits above it, in the header. Not a ``LABELS`` key.
 HOME_HEADING = "US Presidential Election Center"
 
 #: The site navigation's three links, in order (#448; labels fixed by the owner in the
