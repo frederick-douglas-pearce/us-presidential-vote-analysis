@@ -1,6 +1,6 @@
-"""The theme choice (#359): the color tokens in ``style.css``, their contrast, the head
-script that applies a saved choice before first paint, and the control and store in the
-shared layout.
+"""The theme choice (#359, #447): the color tokens in ``style.css``, their contrast, the
+head script that applies a saved choice before first paint, the toggle's icons, and the
+toggle and store in the shared layout.
 
 What these tests read is the shipped source: the stylesheet, the installed Dash bundles
 and the app. What the browser does with them (no flash, persistence, following the
@@ -10,7 +10,9 @@ device, the store triggering a chart's callback) is ``tests/e2e/test_dashboard_e
 from __future__ import annotations
 
 import html.parser
+import json
 import re
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -456,6 +458,45 @@ CONTROL_PAIRS = (
 
 AA = 4.5
 
+#: WCAG 1.4.11's ratio for a graphic or a focus indicator against what is next to it.
+NON_TEXT = 3.0
+
+#: The theme toggle's selected-position rule (#447), as its selector reads in
+#: ``style.css``: one rule for the three positions, each under its ``data-theme``.
+SELECTED = (
+    ':root[data-theme="dark"] #theme-dark, :root:not([data-theme]) #theme-auto, '
+    ':root[data-theme="light"] #theme-light'
+)
+
+#: What the theme toggle paints (#447), read from its own rules so the pairs cannot
+#: drift from the stylesheet: (selector, the property naming the foreground token, the
+#: property naming the background token, or None for the page). The unselected
+#: button's background is transparent, so its icon sits on the page.
+TOGGLE_PAINT = (
+    (".theme-control button", "color", None),
+    (".theme-control button:hover", "color", None),
+    (SELECTED, "color", "background"),
+    (SELECTED, "background", None),
+    (".theme-control button:focus-visible", "outline", None),
+)
+
+
+def toggle_rule(selector: str) -> dict[str, str]:
+    """The declarations of the one shipped rule whose selector reads ``selector``."""
+    found = [
+        body
+        for _, prelude, body in shipped_rules()
+        if " ".join(prelude.split()) == selector
+    ]
+    assert len(found) == 1, (selector, len(found))
+    return dict(declarations(found[0]))
+
+
+def token_in(value: str) -> str:
+    """The one token a declaration value names through ``var()``."""
+    (token,) = re.findall(r"var\((--[\w-]+)\)", value)
+    return str(token)
+
 
 # --- the tokens ------------------------------------------------------------------------
 
@@ -616,6 +657,30 @@ class TestThemeContrast:
         ratio = contrast(parse_color(painted(theme, foreground)), ground)
         assert ratio >= AA, (theme, foreground, background, round(ratio, 2))
 
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize(("selector", "foreground", "background"), TOGGLE_PAINT)
+    def test_the_theme_toggle_meets_non_text_contrast(
+        self, theme: str, selector: str, foreground: str, background: str | None
+    ) -> None:
+        # Icons and the focus ring are graphics: 3:1 (WCAG 1.4.11), in each state.
+        rule = toggle_rule(selector)
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        ground = (
+            page
+            if background is None
+            else over(parse_color(palette[token_in(rule[background])]), page)
+        )
+        ratio = contrast(parse_color(palette[token_in(rule[foreground])]), ground)
+        assert ratio >= NON_TEXT, (theme, selector, foreground, round(ratio, 2))
+
+    def test_the_unselected_button_paints_on_the_page(self) -> None:
+        # What makes the "on the page" pairs above true: no fill and no UA button look.
+        rule = toggle_rule(".theme-control button")
+        assert rule["background"] == "transparent"
+        assert rule["appearance"] == "none"
+        assert rule["border"] == "0"
+
     def test_the_contrast_helper_fails_low_contrast_and_composites_alpha(self) -> None:
         white = (255.0, 255.0, 255.0, 1.0)
         assert contrast(parse_color("#000"), white) == pytest.approx(21)
@@ -710,8 +775,9 @@ class TestThemeHeadScript:
     ) -> None:
         script = appmod.THEME_HEAD_SCRIPT
         assert script.startswith("<script>") and script.endswith("</script>")
-        assert appmod.THEME_EXPLICIT == ("light", "dark")
-        assert '["light", "dark"]' in script
+        # In the toggle's order since #447 (Dark, Auto, Light): the same behavior.
+        assert appmod.THEME_EXPLICIT == ("dark", "light")
+        assert '["dark", "light"]' in script
         assert f'"{appmod.THEME_STORAGE_KEY}"' in script
         assert re.search(r"try \{.*localStorage.*\} catch", script)
         assert script.count("setAttribute") == 1
@@ -769,7 +835,7 @@ def texts(node: Any) -> list[str]:
 
 
 class TestThemeControl:
-    def test_the_layout_holds_the_control_above_main_and_the_store(self) -> None:
+    def test_the_layout_holds_the_toggle_above_main_and_the_store(self) -> None:
         layout = appmod.app.layout
         header, main, store = layout.children
         assert type(header).__name__ == "Header"
@@ -783,25 +849,53 @@ class TestThemeControl:
             for n in nodes(header)
             if getattr(n, "id", None) == components.THEME_CONTROL_ID
         ]
-        assert type(group).__name__ == "RadioItems"
-        assert [o["value"] for o in group.options] == list(labels.THEME_CHOICES)
-        assert [o["label"] for o in group.options] == list(
-            labels.THEME_CHOICES.values()
+        assert type(group).__name__ == "Div"
+        assert group.role == "group"
+        assert getattr(group, "aria-label") == labels.THEME_CONTROL
+        # #444's markup is not inherited: no dcc choice control anywhere in the header.
+        assert not [
+            n for n in nodes(header) if type(n).__name__ in ("RadioItems", "Checklist")
+        ]
+
+    def test_the_toggle_is_three_named_buttons_dark_auto_light(self) -> None:
+        group = appmod.app.layout.children[0].children
+        assert list(labels.THEME_CHOICES) == ["dark", labels.THEME_AUTO, "light"]
+        assert [type(b).__name__ for b in group.children] == ["Button"] * 3
+        assert [b.id for b in group.children] == list(
+            components.THEME_BUTTON_IDS.values()
         )
-        assert group.value == "system"
+        for value, button in zip(labels.THEME_CHOICES, group.children, strict=True):
+            assert button.id == f"theme-{value}"
+            assert button.type == "button"
+            assert button.title == labels.THEME_TITLES[value]
+            # Strings, Dash's prop type: Auto pressed until the first call corrects it.
+            pressed = "true" if value == labels.THEME_AUTO else "false"
+            assert getattr(button, "aria-pressed") == pressed
+            icon, name = button.children
+            assert icon.className == f"theme-icon theme-icon-{value}"
+            assert getattr(icon, "aria-hidden") == "true"
+            assert icon.children is None
+            assert name.className == "visually-hidden"
+            assert name.children == labels.THEME_CHOICES[value]
         assert getattr(group, "persistence", None) in (None, False)
 
-    def test_the_control_is_named_by_its_legend_and_shows_no_raw_value(self) -> None:
+    def test_the_toggle_shows_only_its_names_and_no_raw_value(self) -> None:
         header = appmod.app.layout.children[0]
-        (legend,) = [n for n in nodes(header) if type(n).__name__ == "Legend"]
-        assert legend.children == labels.THEME_CONTROL
         shown = texts(header)
-        assert shown == [labels.THEME_CONTROL, *labels.THEME_CHOICES.values()]
+        assert shown == list(labels.THEME_CHOICES.values())
         assert not any("_" in text for text in shown)
-        assert not set(shown) & set(labels.THEME_CHOICES)  # never the stored value
+        assert not set(shown) & set(labels.THEME_CHOICES)  # never the internal value
+
+    def test_the_titles_name_each_position_and_auto_says_what_it_does(self) -> None:
+        assert list(labels.THEME_TITLES) == list(labels.THEME_CHOICES)
+        for value in ("dark", "light"):
+            assert labels.THEME_TITLES[value] == labels.THEME_CHOICES[value]
+        auto = labels.THEME_TITLES[labels.THEME_AUTO]
+        assert auto.startswith(labels.THEME_CHOICES[labels.THEME_AUTO] + ":")
 
     def test_one_clientside_callback_drives_the_store_and_never_the_url(self) -> None:
         assert appmod.server.test_client().get("/").status_code == 200
+        buttons = list(components.THEME_BUTTON_IDS.values())
         theme = [
             key
             for key, spec in appmod.app.callback_map.items()
@@ -809,12 +903,14 @@ class TestThemeControl:
             or any(i["id"] == components.THEME_STORE_ID for i in spec["inputs"])
         ]
         assert theme == [
-            f"..{components.THEME_STORE_ID}.data...{components.THEME_CONTROL_ID}.value.."
+            f"..{components.THEME_STORE_ID}.data..."
+            + "...".join(f"{b}.aria-pressed" for b in buttons)
+            + ".."
         ]
         spec = appmod.app.callback_map[theme[0]]
-        assert spec["inputs"] == [
-            {"id": components.THEME_CONTROL_ID, "property": "value"}
-        ]
+        # The three buttons in the toggle's order, then the store as the last state:
+        # THEME_CALLBACK reads the store as its last argument.
+        assert spec["inputs"] == [{"id": b, "property": "n_clicks"} for b in buttons]
         assert spec["state"] == [{"id": components.THEME_STORE_ID, "property": "data"}]
         assert "callback" not in spec  # clientside: no Python function runs
         # Nothing the theme feeds writes a URL: the theme never enters it or og:url.
@@ -822,9 +918,24 @@ class TestThemeControl:
             fed = {i["id"] for i in other["inputs"]} & {
                 components.THEME_STORE_ID,
                 components.THEME_CONTROL_ID,
+                *buttons,
             }
             if fed:
                 assert ".search" not in key and ".pathname" not in key, key
+
+    def test_the_callback_maps_each_button_and_sets_no_attribute_on_one(self) -> None:
+        script = appmod.THEME_CALLBACK
+        # React owns aria-pressed: the one attribute the callback sets is data-theme.
+        assert script.count("setAttribute") == 1
+        assert 'root.setAttribute("data-theme", choice)' in script
+        assert "getElementById" not in script and "querySelector" not in script
+        # The choice is the triggered button, through the one id map.
+        mapping = {b: v for v, b in components.THEME_BUTTON_IDS.items()}
+        assert f"var byButton = {json.dumps(mapping)};" in script
+        assert "callback_context.triggered_id" in script
+        # aria-pressed follows <html data-theme>, never the theme in effect.
+        assert re.search(r'var applied = root\.getAttribute\("data-theme"\);', script)
+        assert f"var choices = {json.dumps(list(labels.THEME_CHOICES))};" in script
 
     def test_the_served_renderer_defines_dash_clientside_set_props(self) -> None:
         # The listener pushes the theme in effect with dash_clientside.set_props. The
@@ -836,3 +947,98 @@ class TestThemeControl:
             r"\1\.set_props=function",
             bundle,
         )
+
+
+# --- the toggle's icons and selected position --------------------------------------------
+
+
+def icon_uris() -> dict[str, str]:
+    """Each icon class's mask data URI, decoded, from both of its declarations."""
+    found = {}
+    for value in labels.THEME_CHOICES:
+        rule = toggle_rule(f".theme-icon-{value}")
+        assert rule["-webkit-mask-image"] == rule["mask-image"], value
+        match = re.fullmatch(r'url\("data:image/svg\+xml,([^"]*)"\)', rule["mask-image"])
+        assert match, value
+        found[value] = urllib.parse.unquote(match.group(1))
+    return found
+
+
+class TestThemeIcons:
+    def test_each_icon_is_a_prefixed_and_unprefixed_mask_of_the_text_color(self) -> None:
+        icon = toggle_rule(".theme-icon")
+        assert icon["background-color"] == "currentColor"
+        assert icon["forced-color-adjust"] == "none"
+        # Chrome and Edge before 120 support only the -webkit- mask.
+        for part in ("repeat", "position", "size"):
+            assert icon[f"-webkit-mask-{part}"] == icon[f"mask-{part}"], part
+        for value in labels.THEME_CHOICES:
+            rule = toggle_rule(f".theme-icon-{value}")
+            assert set(rule) == {"-webkit-mask-image", "mask-image"}, value
+        assert set(icon_uris()) == set(labels.THEME_CHOICES)
+
+    def test_no_icon_names_a_color(self) -> None:
+        # The color lint skips quoted strings, so it cannot see inside a data URI.
+        for value, svg in icon_uris().items():
+            assert svg.startswith("<svg ") and svg.endswith("</svg>"), value
+            words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", svg)}
+            named = (words & (NAMED_COLORS | SYSTEM_COLORS)) - ALLOWED_KEYWORDS
+            assert not HEX.search(svg) and not COLOR_FUNCTION.search(svg), value
+            assert not named, (value, named)
+            # The mask reads alpha: every paint is currentColor or none.
+            paints = re.findall(r"(?:fill|stroke)='([^']*)'", svg)
+            assert paints and set(paints) <= {"currentColor", "none"}, (value, paints)
+
+    def test_the_icon_scan_flags_a_color(self) -> None:
+        for svg in ("<svg fill='#000'/>", "<svg fill='red'/>", "<svg fill='rgb(1,2,3)'/>"):
+            words = {w.lower() for w in re.findall(r"[A-Za-z][\w-]*", svg)}
+            assert (
+                HEX.search(svg)
+                or COLOR_FUNCTION.search(svg)
+                or (words & NAMED_COLORS) - ALLOWED_KEYWORDS
+            ), svg
+
+    def test_tablers_license_ships_beside_the_icons(self) -> None:
+        css = STYLESHEET.read_text(encoding="utf-8")
+        notice = css.index("Copyright (c) 2020-2024 Paweł Kuna")
+        assert "@tabler/icons 3.24.0" in css
+        for line in (
+            "Permission is hereby granted, free of charge,",
+            "The above copyright notice and this permission notice shall be included",
+            'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND',
+        ):
+            assert css.index(line) > notice, line
+        # In the comment just before the icon rules, never in the header comment.
+        assert notice > css.index("*/")
+        between = css[notice : css.index(".theme-icon {")]
+        assert between.count("*/") == 1 and "{" not in between
+
+
+class TestThemeSelected:
+    def test_the_selected_rules_name_exactly_the_button_ids(self) -> None:
+        (prelude,) = [
+            p
+            for _, p, _ in shipped_rules()
+            if " ".join(p.split()) == SELECTED
+        ]
+        conditions = {
+            "dark": ':root[data-theme="dark"]',
+            labels.THEME_AUTO: ":root:not([data-theme])",
+            "light": ':root[data-theme="light"]',
+        }
+        assert set(conditions) == set(labels.THEME_CHOICES)
+        selectors = [" ".join(p.split()) for p in prelude.split(",")]
+        assert selectors == [
+            f"{conditions[v]} #{components.THEME_BUTTON_IDS[v]}"
+            for v in labels.THEME_CHOICES
+        ]
+
+    def test_the_selected_position_has_a_cue_that_is_not_a_color(self) -> None:
+        # Forced colors drop the fill; the border survives, painted in a system color.
+        assert toggle_rule(SELECTED)["border"] == "2px solid transparent"
+        assert toggle_rule(".theme-control button")["border"] == "0"
+
+    def test_no_toggle_rule_is_scoped_to_the_site_header(self) -> None:
+        # #448 moves the toggle into a navigation bar: its rules name .theme-control.
+        for _, prelude, _ in shipped_rules():
+            assert not re.search(r"\.site-header\s+\.theme-", prelude), prelude
