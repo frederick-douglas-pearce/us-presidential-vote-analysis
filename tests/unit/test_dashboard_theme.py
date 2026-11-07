@@ -1029,6 +1029,11 @@ class TestChartColors:
         ratio = contrast(parse_color(text), parse_color(ground))
         assert ratio >= AA, (theme, round(ratio, 2))
 
+    def test_a_chart_keeps_no_browser_margin(self) -> None:
+        """The figure element's default margin (1em 40px) would narrow every chart by
+        80 px on a phone (#432's review); ``.chart`` takes it away."""
+        assert toggle_rule(".chart") == {"margin": "0"}
+
     def test_every_chart_token_but_the_grid_is_checked(self) -> None:
         charted = {t for t in TOKENS if t.startswith("--chart-")}
         assert charted == set(CHART_MARKS) | {"--chart-grid"}

@@ -161,6 +161,39 @@ def _off_host(url: str) -> bool:
     return parts.scheme not in LOCAL_SCHEMES and parts.hostname != "127.0.0.1"
 
 
+def guard_problems(
+    off_host: list[str],
+    fetches: int,
+    expected_fetches: int,
+    errors: list[str],
+    named: list[tuple[str, bool]],
+) -> list[str]:
+    """What the browser guard fails a test on, as a pure function so it can be tested
+    without a browser (#432's acceptance gate, ``test_dashboard_e2e_guard.py``): a
+    request off the loopback host; a plotly.js fetch count other than the test
+    declared; and console errors other than those it named, each ``(text, repeats)``.
+    A named error must occur exactly as often as it is named, or, with ``repeats``
+    (one Dash logs without end, #432), at least once; so a second error with an
+    expected text (another 404) fails too."""
+    problems = []
+    if off_host:
+        problems.append(f"requests off the loopback host: {off_host}")
+    if fetches != expected_fetches:
+        problems.append(f"plotly.js fetched {fetches} times; expected {expected_fetches}")
+    repeating = {text for text, repeats in named if repeats}
+    expected = Counter(text for text, _ in named if text not in repeating)
+    seen = Counter(errors)
+    missing = sorted(text for text in repeating if not seen[text])
+    if missing:
+        problems.append(f"console errors that never occurred: {missing}")
+    counted = Counter({t: n for t, n in seen.items() if t not in repeating})
+    if counted != expected:
+        problems.append(
+            f"console errors: {dict(counted)}; expected exactly: {dict(expected)}"
+        )
+    return problems
+
+
 @pytest.fixture(autouse=True)
 def _browser_guard(
     context: BrowserContext, page: Page, request: pytest.FixtureRequest
@@ -201,20 +234,9 @@ def _browser_guard(
     page.on("console", on_console)
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
-    assert not off_host, f"requests off the loopback host: {off_host}"
-    assert len(fetches) == expected_fetches, (
-        f"plotly.js fetched {len(fetches)} times; expected {expected_fetches}"
-    )
-    markers = list(request.node.iter_markers(EXPECTED_CONSOLE_ERROR))
-    repeating = {m.args[0] for m in markers if m.kwargs.get("repeats", False)}
-    expected = Counter(m.args[0] for m in markers if m.args[0] not in repeating)
-    seen = Counter(errors)
-    # A repeating error (one Dash logs without end, #432) must occur at least once;
-    # every other is counted, so a second error with an expected text (another 404)
-    # fails too.
-    missing = sorted(text for text in repeating if not seen[text])
-    assert not missing, f"console errors that never occurred: {missing}"
-    counted = Counter({t: n for t, n in seen.items() if t not in repeating})
-    assert counted == expected, (
-        f"console errors: {dict(counted)}; expected exactly: {dict(expected)}"
-    )
+    named = [
+        (m.args[0], bool(m.kwargs.get("repeats", False)))
+        for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)
+    ]
+    problems = guard_problems(off_host, len(fetches), expected_fetches, errors, named)
+    assert problems == [], problems

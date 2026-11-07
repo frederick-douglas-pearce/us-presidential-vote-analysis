@@ -273,6 +273,11 @@ class TestColorAllowlist:
             ({"data": [{"marker": {"color": "#fff"}}]}, "data[0].marker.color"),
             ({"data": [{"marker": {"color": "red"}}]}, "data[0].marker.color"),
             ({"data": [{"marker": {"color": [1, 2]}}]}, "data[0].marker.color"),
+            # A list of tokens colors points one by one: only colorway takes a list.
+            (
+                {"data": [{"marker": {"color": ["var(--chart-1)", "var(--chart-2)"]}}]},
+                "data[0].marker.color",
+            ),
             ({"data": [{"marker": {"color": 3}}]}, "data[0].marker.color"),
             (
                 {"data": [{"line": {"color": "var(--chart-1) "}}]},
@@ -325,6 +330,7 @@ class TestColorAllowlist:
             {"data": [], "config": {}},
             {"data": [], "layout": []},
             {"data": "x"},
+            {"data": ["x"]},
             [],
         ],
     )
@@ -347,6 +353,21 @@ class TestColorIsNeverTheOnlyCarrier:
                 trace(mode="markers", marker={"symbol": "square"}),
                 True,
             ),
+            # A symbol only counts where the trace draws markers.
+            (trace(mode="lines"), trace(mode="lines", marker={"symbol": "x"}), False),
+            # Shown text names a scatter series only where the trace draws text.
+            (
+                trace(mode="markers", name="A", text="A"),
+                trace(mode="markers", name="B", text="B"),
+                False,
+            ),
+            (
+                trace(mode="markers+text", name="A", text="A"),
+                trace(mode="markers+text", name="B", text="B"),
+                True,
+            ),
+            # Different types differ in shape, though neither draws a counted channel.
+            (trace(mode="text"), trace("pie"), True),
             # A dash only counts where the trace draws a line.
             (trace(mode="markers"), trace(mode="markers", line={"dash": "dot"}), False),
             (trace(mode="lines"), trace(mode="lines", line={"dash": "dot"}), True),
@@ -517,6 +538,7 @@ class TestMarkupNumbersAndOverrides:
             {"yaxis": {"tickformat": ",.3~"}},
             {"yaxis": {"tickformat": "n"}},
             {"yaxis": {"tickformat": "E"}},
+            {"yaxis": {"tickformat": "s.2"}},  # not a d3 format at all
             # Bars that touch: no gap between locations, or stacked or overlaid.
             {"bargap": 0},
             {"barmode": "stack"},
