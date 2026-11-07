@@ -5964,8 +5964,74 @@ already serves.
   renderer's error boundary remounts it, so the console logs the script's error event without end,
   about 130 times a second. A bare `dcc.Graph` with no callback does the same: it is Dash 4.4.1's
   behavior. #432 ships no chart a reader sees, so it is accepted here; #452 stops the loop before
-  C1 (#433), which depends on it.
+  C1 (#433), which depends on it (stopped by D088, #452).
 
 **Related:** D070, D071, D086, #430, #432, #433, #452.
+
+---
+
+## D088: A chart's graph mounts only after plotly.js has loaded, once per document; a blocked CDN costs one error and no loop
+
+**Date:** 2026-11-07
+**Builds on:** D082, D087 · **Amends:** D087's "Lazily" and "With no SRI" bullets and its "A
+blocked CDN makes Dash loop" residual · **Decided by:** the owner, on #452 (2026-11-07: plan as
+revised by the architect; keep this fix after 4.5.0 was found to bound the loop, and file no
+upstream report), and the architect, at #452's design gate; recorded by #452 (E14-S3)
+
+**Context.** D087 left dcc's lazy `Graph` to load plotly.js, and #432's blocked-CDN browser test
+found Dash looping when that load fails. A spike on #452 (Dash 4.4.1, Chromium) placed it: in a
+minimal `use_pages=True` app with one `dcc.Graph` and a MATCH figure callback, an aborted CDN
+request made the console log the script's error `Event` 294 times, and the figure callback run 149
+times, in 3 s; the same app without Pages logged it twice and stopped. dcc's factory holds the
+load as `Promise.resolve(window.Plotly||new Promise(<append the script>))`, so it never runs its
+own load when `window.Plotly` is already set. Dash 4.5.0 (2026-10-29) ships the same loader but
+bounds the loop: the same minimal app under Pages logs the error event twice and stops. The likely
+cause is its plotly/dash#3881 (callback-returned children no longer remounted on every update, a
+4.2.0 regression), which is inferred and not bisected. The app pins 4.4.1, and the upgrade is #456.
+
+**Decision.**
+- **No `dcc.Graph` is in any server-rendered layout or server callback's output.**
+  `components.chart` renders the chart's `role="img"` wrapper as an empty **mount point**
+  (`charts.mount_id`). `TestEveryChart` fails any `dcc.Graph` in a rendered layout (the shared one
+  included) and checks each mount point by identity, and a lint fails a runtime module that calls
+  `Graph`.
+- **The app's mount callback loads plotly.js and then mounts the graph.**
+  `charts.CHART_MOUNT_CALLBACK`, an inline clientside MATCH callback on the chart's source store
+  (so once per mount), returns a Promise. It checks `window.Plotly` first, on every call;
+  otherwise every chart shares one load, a Promise kept on `window` (`charts.PLOTLYJS_MEMO`), set
+  before anything waits on it and never cleared. The load appends
+  `<script src=window._dashPlotlyJSURL async>`, the address the renderer sets from `_config`
+  (D087's, no second literal), and resolves `true` once the script has defined `window.Plotly`
+  and `false` on its error, after `charts.PLOTLYJS_TIMEOUT_MS` (30 s, dcc's own wait), or with no
+  address (logged once). It never rejects and the callback never throws. Loaded, it returns the
+  graph as Dash component JSON (type and namespace read from `dcc.Graph`, the config
+  `CHART_CONFIG`, hidden), and `CHART_CALLBACK` draws it as before; dcc's loader finds
+  `window.Plotly` and never runs. Not loaded, it returns `no_update`.
+- **No retry within a document.** A reader whose CDN is blocked is usually blocked for good (an
+  extension or a proxy), so a retry on every chart page would fail every time, and a retry after
+  the timeout could load plotly.js twice. A reload retries.
+- **Lazy still holds** (D087): the script is appended only when a page's first chart mounts, so a
+  page with no chart never fetches it.
+- **No SRI is now a choice, not a limit.** The app's loader could carry `integrity` and
+  `crossorigin="anonymous"`: the CDN file answers with `access-control-allow-origin: *` and is
+  byte-identical to the installed `plotly.min.js` (checked 2026-11-07). #455 adds it.
+
+**Residual risks, accepted.**
+- **A blocked or timed-out load** (amends D087's loop residual): the page, the chart's title,
+  caption and table pointer, and its companion table render; the mount point stays empty; the
+  browser logs its own resource error once per document, and nothing repeats. The timeout ends the
+  wait without cancelling the fetch; a script that lands later serves the next mount.
+- **Dash privates relied on:** a clientside callback returning a component as JSON, MATCH outputs
+  absent from every layout (allowed only by `suppress_callback_exceptions=True`, pinned in
+  `test_dashboard_charts.py`), dcc's `window.Plotly` short-circuit and the renderer's
+  `window._dashPlotlyJSURL` (both pinned in `TestDashPrivates`).
+- **The browser tests are advisory** (D082): a Dash upgrade that broke mounting a graph from
+  component JSON would make every chart vanish while the unit gate stays green. On any Dash bump,
+  run the chart browser tests (`tests/e2e/test_dashboard_e2e_charts.py`) by hand.
+- **Why keep this on 4.5.0:** it does not depend on how Dash remounts a failed graph, it costs one
+  error rather than three, and dcc's loader never runs. No upstream report was filed, because the
+  latest release already bounds the loop (owner, #452).
+
+**Related:** D070, D082, D087, #432, #433, #436, #452, #455, #456.
 
 ---
