@@ -5,8 +5,9 @@ plotly.js is fetched from its CDN address only where a chart mounts, fulfilled f
 installed file by the browser guard, which counts every fetch (``plotlyjs_fetches``;
 zero for every other test). A chart is drawn in the theme in effect, redrawn on a theme
 switch with no reload and no server round trip, and its table pointer moves within the
-page. If the CDN is blocked, the page, the chart's title and caption and its table still
-render, though Dash then logs an error without end (D087's residual).
+page. If the CDN is blocked, the page, the chart's title, caption and pointer and its
+table still render, with one console error and no loop: no graph mounts until plotly.js
+has loaded, and the load is never retried within a document (#452, D088).
 """
 
 from __future__ import annotations
@@ -21,7 +22,16 @@ from playwright.sync_api import Page, Request, expect
 from explore import charts, components, labels
 from tests.e2e.conftest import plotlyjs_file, plotlyjs_url
 from tests.e2e.dashboard_pages import ELECTIONS_SUCCESS, HOME_SUCCESS, assert_rendered
-from tests.e2e.serve import CHART_ID, CHART_PAGE, CHART_SUCCESS, CHART_TABLE
+from tests.e2e.serve import (
+    CHART_ID,
+    CHART_PAGE,
+    CHART_SUCCESS,
+    CHART_TABLE,
+    THEME_PROBE_CALLS,
+    TWO_CHART_IDS,
+    TWO_CHARTS_PAGE,
+    TWO_CHARTS_SUCCESS,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -175,27 +185,171 @@ def test_the_drawing_is_named_by_the_chart_title(page: Page) -> None:
     expect(page.get_by_role("img", name="A test chart")).to_have_count(1)
 
 
-#: Chrome's error for the refused script, once.
+#: Chrome's error for the refused script: the one console error a blocked CDN causes,
+#: once per document (#452). Before #452, a mounted ``dcc.Graph`` rethrew its rejected
+#: load on every render and Dash logged the script's error event without end.
 BLOCKED_RESOURCE = "Failed to load resource: net::ERR_FAILED"
-#: dcc's lazy graph rethrows its rejected load on every render and Dash's error
-#: boundary remounts it, so Dash logs the script's error event without end, about 130
-#: times a second, the same with a bare ``dcc.Graph`` and no callback: Dash 4.4.1's own
-#: behavior, an accepted residual of #432 (D087) with a follow-up before C1.
-BLOCKED_EVENT = "Event"
+#: Long enough for the old loop to have logged hundreds of errors (12 by 300 ms, 256
+#: by 2 s, #432's measure), so "bounded" is observed rather than assumed.
+LOOP_WINDOW_MS = 2000
+MOUNT = f"{CHART} .chart-graph"
+
+
+def assert_blocked_chart(page: Page) -> None:
+    """The chart page as a blocked CDN leaves it: the title, caption, pointer and table,
+    an empty mount point, and no plotly.js."""
+    expect(page.locator(f"{CHART} .chart-title")).to_have_text("A test chart")
+    expect(page.locator(f"{CHART} figcaption")).to_contain_text("A caption.")
+    expect(page.locator(f"{CHART} figcaption a")).to_have_text(
+        labels.CHART_TABLE_POINTER
+    )
+    expect(page.locator(f"#{CHART_TABLE}")).to_be_visible()
+    assert page.locator(MOUNT).evaluate("el => el.childElementCount") == 0
+    expect(page.locator(f"{CHART} .js-plotly-plot")).to_have_count(0)
+    assert page.evaluate("typeof window.Plotly") == "undefined"
+
+
+def wait_out_the_loop(page: Page) -> None:
+    """A countable change that re-renders (a theme switch, which the chart callback
+    would answer), then the old loop's window: any repeat would land in it."""
+    calls = page.evaluate(f"window.{THEME_PROBE_CALLS} || 0")
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    page.wait_for_function(f"(window.{THEME_PROBE_CALLS} || 0) > {calls}")
+    page.wait_for_timeout(LOOP_WINDOW_MS)
 
 
 @pytest.mark.plotlyjs_fetches(1, abort=True)
 @pytest.mark.expected_console_error(BLOCKED_RESOURCE)
-@pytest.mark.expected_console_error(BLOCKED_EVENT, repeats=True)
 def test_a_blocked_cdn_leaves_the_page_and_its_table(page: Page) -> None:
+    # The guard's exact count is the bound: one resource error, nothing repeated.
     page.goto(CHART_PAGE)
     assert_rendered(page, f"#{CHART_SUCCESS}")
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    wait_out_the_loop(page)
+    assert_blocked_chart(page)
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(BLOCKED_RESOURCE)
+def test_after_a_blocked_load_a_return_to_the_chart_makes_no_second_fetch(
+    page: Page,
+) -> None:
+    # No retry within a document (D088): a reload is how a reader retries.
+    page.goto(CHART_PAGE)
+    assert_rendered(page, f"#{CHART_SUCCESS}")
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.NAV_LINK_IDS['elections']}").click()
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    page.go_back()
+    assert_rendered(page, f"#{CHART_SUCCESS}")
+    wait_out_the_loop(page)
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load
+    assert_blocked_chart(page)
+
+
+TWO = [f"#{charts.dom_id(c)}" for c in TWO_CHART_IDS]
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_two_charts_on_a_page_share_one_load(page: Page) -> None:
+    page.goto(TWO_CHARTS_PAGE)
+    assert_rendered(page, f"#{TWO_CHARTS_SUCCESS}")
+    for chart in TWO:
+        page.locator(f"{chart} .barlayer .point path").first.wait_for()
+        expect(page.locator(f"{chart} .js-plotly-plot")).to_have_count(1)
     page.wait_for_timeout(SETTLE_MS)
-    expect(page.locator(f"{CHART} .chart-title")).to_have_text("A test chart")
-    expect(page.locator(f"{CHART} figcaption")).to_contain_text("A caption.")
-    expect(page.locator(f"#{CHART_TABLE}")).to_be_visible()
-    expect(page.locator(FIRST_BAR)).to_have_count(0)
+    cdn = plotlyjs_url()
+    assert page.evaluate(
+        "cdn => document.querySelectorAll(`script[src='${cdn}']`).length", cdn
+    ) == 1
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(BLOCKED_RESOURCE)
+def test_two_blocked_charts_cost_one_fetch_and_one_error(page: Page) -> None:
+    page.goto(TWO_CHARTS_PAGE)
+    assert_rendered(page, f"#{TWO_CHARTS_SUCCESS}")
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    wait_out_the_loop(page)
+    for chart in TWO:
+        mount = page.locator(f"{chart} .chart-graph")
+        assert mount.evaluate("el => el.childElementCount") == 0
     assert page.evaluate("typeof window.Plotly") == "undefined"
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_app_loads_the_only_plotlyjs_script(page: Page) -> None:
+    # dcc's loader never ran: it finds window.Plotly and appends nothing (#452).
+    open_chart(page)
+    page.wait_for_timeout(SETTLE_MS)
+    cdn = plotlyjs_url()
+    assert page.evaluate(
+        "cdn => document.querySelectorAll(`script[src='${cdn}']`).length", cdn
+    ) == 1
+    assert page.evaluate(f"window.{charts.PLOTLYJS_MEMO} instanceof Promise") is True
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_a_return_to_the_chart_draws_it_in_the_theme_chosen_away(page: Page) -> None:
+    open_chart(page)
+    light = first_fill(page)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.NAV_LINK_IDS['elections']}").click()
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    page.wait_for_function("getComputedStyle(document.documentElement)"
+                           ".colorScheme === 'dark'")
+    page.go_back()
+    assert_rendered(page, f"#{CHART_SUCCESS}")
+    page.locator(FIRST_BAR).first.wait_for()
+    expect(page.locator(FIRST_BAR).first).not_to_have_css("fill", light)
+    assert first_fill(page) == rgb(token(page, "--chart-1"))
+    assert painted(page)["paper"] == rgb(token(page, "--page"))
+    assert token(page, "--page") == "#121212"
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load
+
+
+#: The mount callback's key in ``/_dash-dependencies``: its one output.
+MOUNT_OUTPUT = '{"chart":["MATCH"],"type":"explore-chart-mount"}.children'
+
+#: Finds the registered mount function and calls it for chart ``x1`` (#452).
+CALL_MOUNT = """async ([output]) => {
+    const deps = await (await fetch("/_dash-dependencies")).json();
+    const spec = deps.find(d => d.output === output).clientside_function;
+    const fn = window.dash_clientside[spec.namespace][spec.function_name];
+    const result = await fn({}, {type: "explore-chart-mount", chart: "x1"});
+    return result === window.dash_clientside.no_update ? "no_update" : result;
+}"""
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_registered_mount_function_returns_the_graph_once_loaded(
+    page: Page,
+) -> None:
+    open_chart(page)
+    result: Any = page.evaluate(CALL_MOUNT, [MOUNT_OUTPUT])
+    assert result == {
+        "type": "Graph",
+        "namespace": "dash_core_components",
+        "props": {
+            "config": charts.CHART_CONFIG,
+            "style": {"visibility": "hidden"},
+            "id": charts.graph_id("x1"),
+        },
+    }
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(BLOCKED_RESOURCE)
+def test_the_registered_mount_function_does_nothing_after_a_failed_load(
+    page: Page,
+) -> None:
+    page.goto(CHART_PAGE)
+    assert_rendered(page, f"#{CHART_SUCCESS}")
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    assert page.evaluate(CALL_MOUNT, [MOUNT_OUTPUT]) == "no_update"
+    page.wait_for_timeout(SETTLE_MS)  # the guard then sees no second fetch
 
 
 #: The chart callback's key in ``/_dash-dependencies``: its two outputs.
