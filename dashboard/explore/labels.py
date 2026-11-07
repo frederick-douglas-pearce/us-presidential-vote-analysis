@@ -276,6 +276,14 @@ NAV_API_DOCS_TITLE = (
     "How to read this dataset from your own software. Opens the API's documentation."
 )
 
+#: The link that ends every chart's caption (#432; ba spec, approved at #432's plan
+#: gate, 2026-11-07), to the chart's companion table on the same page.
+#: ``components.chart`` writes the closing period as plain text after the link. It
+#: never says "the same" or "all" (a filter can narrow the table and not the chart),
+#: nor "above", "below" or "hover" (it must read right when the chart could not load).
+#: Not a ``LABELS`` key.
+CHART_TABLE_POINTER = "See this chart's numbers in a table on this page"
+
 
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the

@@ -513,6 +513,7 @@ assert api.CLIENT.snapshot.version == _VERSION
 assert client.get("/").status_code == 200
 assert "/" in [concrete(page) for page in PAGES]
 rendered = set()
+by_page = {{}}
 for page in PAGES:
     path = concrete(page)
     # The candidate history's render makes the first fills on a miss
@@ -521,6 +522,7 @@ for page in PAGES:
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])
     rendered |= rendered_ids(text)
+    by_page[page.get("path_template") or page["path"]] = rendered_ids(text)
     if path == "/":
         assert _VERSION in text
 # Every table's CSV (#309) is built in these renders, under this guard. That a download
@@ -528,6 +530,24 @@ for page in PAGES:
 # link_problems and TestRequestBudget in test_dashboard_export.py.
 missing = set({DOWNLOAD_IDS!r}) - rendered
 assert not missing, ("a table rendered no download link", missing)
+
+# Every live registered chart (#432) renders on its own page, under this guard.
+from explore import charts as _charts
+
+
+def unrendered_charts(registry):
+    return sorted(
+        chart_id
+        for chart_id, row in registry.items()
+        if not row.retired and _charts.dom_id(chart_id) not in by_page.get(row.page, set())
+    )
+
+
+assert not unrendered_charts(_charts.CHARTS), unrendered_charts(_charts.CHARTS)
+# Non-vacuity: a live row no page renders fails; a retired one is not required.
+assert unrendered_charts(
+    {{"C9": _charts.Chart("/elections", "t"), "C8": _charts.Chart("/elections", "t", True)}}
+) == ["C9"]
 
 for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)
@@ -966,6 +986,11 @@ BANNED_MODULES = frozenset(
         "shutil",
         "tempfile",
         "builtins",
+        # Figures are plain dicts (#432): plotly.express needs pandas, which the
+        # deployed group lacks, and plotly.graph_objects is a second way to build one.
+        # The whole package is banned, since ``from plotly import express`` and plotly's
+        # lazy ``plotly.graph_objects`` attribute would pass a dotted-name rule.
+        "plotly",
     }
 )
 
@@ -1080,6 +1105,11 @@ def test_the_runtime_modules_are_the_expected_ones() -> None:
         ("def fetch():\n    return urllib.request.urlopen(u)\n", CHOKEPOINT, True),
         ("import json\njson.load(f)\n", PACKAGE / "app.py", True),
         ("import json\njson.loads(s)\n", PACKAGE / "app.py", False),
+        # #432: every way to reach plotly's figure builders.
+        ("import plotly.express as px\n", PACKAGE / "charts.py", True),
+        ("import plotly.graph_objects as go\n", PACKAGE / "charts.py", True),
+        ("from plotly import express\n", PACKAGE / "charts.py", True),
+        ("import plotly\nplotly.graph_objects.Figure()\n", PACKAGE / "charts.py", True),
     ],
 )
 def test_the_lint_rules_flag_what_they_should(

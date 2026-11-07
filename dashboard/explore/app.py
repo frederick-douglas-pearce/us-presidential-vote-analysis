@@ -80,7 +80,7 @@ import dash
 import flask
 import werkzeug
 import werkzeug.exceptions
-from dash import Input, Output, State, clientside_callback, dcc, html
+from dash import MATCH, Input, Output, State, clientside_callback, dcc, html
 
 # Dash privates, each pinned by name and behavior in test_dashboard_app.py
 # (TestDashPrivates), so an upgrade that moves one fails the build: the router's own
@@ -90,7 +90,7 @@ from dash import Input, Output, State, clientside_callback, dcc, html
 from dash._pages import _parse_query_string, _path_to_page
 from dash.dash import _ID_CONTENT, _ID_LOCATION, _ID_STORE
 
-from explore import api, components, labels
+from explore import api, charts, components, labels
 from explore import query as query_syntax  # `query` is resolve's parameter
 from explore.config import API_BASE, CANONICAL_HOST, SITE_TITLE
 
@@ -707,6 +707,13 @@ clientside_callback(
     NAV_CALLBACK,
     Output(components.SITE_NAV_ID, "data-current"),
     Input(_ID_LOCATION, "pathname"),
+)
+clientside_callback(
+    charts.CHART_CALLBACK,
+    Output(charts.graph_id(MATCH), "figure"),
+    Output(charts.graph_id(MATCH), "style"),
+    Input(charts.source_id(MATCH), "data"),
+    Input(components.THEME_STORE_ID, "data"),
 )
 clientside_callback(
     THEME_CALLBACK,

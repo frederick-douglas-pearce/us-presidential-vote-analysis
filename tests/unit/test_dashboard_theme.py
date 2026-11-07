@@ -1251,9 +1251,18 @@ class TestThemeControl:
         buttons = list(components.THEME_BUTTON_IDS.values())
         theme = [
             key
-            for key, spec in appmod.app.callback_map.items()
+            for key in appmod.app.callback_map
             if components.THEME_STORE_ID in key
-            or any(i["id"] == components.THEME_STORE_ID for i in spec["inputs"])
+        ]
+        # The store's one reader is the chart callback (#432), which redraws charts.
+        readers = [
+            key
+            for key, spec in appmod.app.callback_map.items()
+            if any(i["id"] == components.THEME_STORE_ID for i in spec["inputs"])
+        ]
+        assert readers == [
+            '..{"chart":["MATCH"],"type":"explore-chart-graph"}.figure'
+            '...{"chart":["MATCH"],"type":"explore-chart-graph"}.style..'
         ]
         assert theme == [
             f"..{components.THEME_STORE_ID}.data..."
@@ -1267,14 +1276,17 @@ class TestThemeControl:
         assert spec["state"] == [{"id": components.THEME_STORE_ID, "property": "data"}]
         assert "callback" not in spec  # clientside: no Python function runs
         # Nothing the theme feeds writes a URL: the theme never enters it or og:url.
+        # Ids are compared as JSON: a pattern-matching id (a chart's) is a dict.
+        sources = {
+            json.dumps(name)
+            for name in (components.THEME_STORE_ID, components.THEME_CONTROL_ID, *buttons)
+        }
+        fed_keys = []
         for key, other in appmod.app.callback_map.items():
-            fed = {i["id"] for i in other["inputs"]} & {
-                components.THEME_STORE_ID,
-                components.THEME_CONTROL_ID,
-                *buttons,
-            }
-            if fed:
+            if {json.dumps(i["id"]) for i in other["inputs"]} & sources:
+                fed_keys.append(key)
                 assert ".search" not in key and ".pathname" not in key, key
+        assert set(readers) <= set(fed_keys)  # non-vacuity: the chart callback is fed
 
     def test_the_callback_maps_each_button_and_sets_no_attribute_on_one(self) -> None:
         script = appmod.THEME_CALLBACK

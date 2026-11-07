@@ -24,7 +24,7 @@ import pytest
 from dash import html
 from dash.development.base_component import Component
 
-from explore import api, components, export, labels
+from explore import api, charts, components, export, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     RECORDED,
@@ -94,9 +94,12 @@ ROUTES = {
 FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
 #: Every callback output once Dash has registered them all, before and after #309: the
-#: Pages router's two, each filtered page's URL, and the theme callback's store and
-#: its three buttons' pressed states (#359, #447). A download adds none.
+#: Pages router's two, each filtered page's URL, the theme callback's store and its
+#: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
+#: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
+    '..{"chart":["MATCH"],"type":"explore-chart-graph"}.figure'
+    '...{"chart":["MATCH"],"type":"explore-chart-graph"}.style..',
     ".._pages_content.children..._pages_store.data..",
     "..theme-in-effect.data...theme-dark.aria-pressed...theme-auto.aria-pressed"
     "...theme-light.aria-pressed..",
@@ -250,7 +253,183 @@ def unbuilt_tables(
     return tree, ids - set(built)
 
 
+def chart_render(
+    build: Callable[[], Any], monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, list[str]]:
+    """``build()``'s tree, and the chart IDs ``components.chart`` built during that call
+    (recorded through a wrapper; pages call it by attribute)."""
+    built: list[str] = []
+    real = components.chart
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        built.append(args[0] if args else kwargs["chart_id"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(components, "chart", recording)
+    tree = build()
+    monkeypatch.setattr(components, "chart", real)
+    return tree, built
+
+
+def _contains(node: Any, wanted: str) -> bool:
+    """Whether a component with id ``wanted`` sits in ``node``'s subtree."""
+    if isinstance(node, (list, tuple)):
+        return any(_contains(child, wanted) for child in node)
+    if isinstance(node, Component):
+        return getattr(node, "id", None) == wanted or _contains(
+            getattr(node, "children", None), wanted
+        )
+    return False
+
+
+def chart_problems(tree: Any, key: str, built: list[str], success: str) -> list[str]:
+    """What is wrong with the charts in one page's ``tree`` (#432): a graph
+    ``components.chart`` did not build, one with an unregistered ID, one on a page other
+    than its registry row's, one rendered without its companion table, and a success
+    marker that is a chart or sits inside one."""
+    problems = []
+    live = {
+        charts.dom_id(chart_id): chart_id
+        for chart_id, row in charts.CHARTS.items()
+        if not row.retired
+    }
+    built_doms = {charts.dom_id(chart_id) for chart_id in built}
+    tables = {getattr(t, "id", None) for t in of_type(tree, "Table")}
+    for graph in of_type(tree, "Graph"):
+        graph_id = getattr(graph, "id", None)
+        dom = graph_id.get("chart") if isinstance(graph_id, dict) else None
+        if dom not in built_doms:
+            problems.append(f"{key}: a graph not built by components.chart: {graph_id}")
+        if dom not in live:
+            problems.append(f"{key}: a graph with an unregistered ID: {graph_id}")
+            continue
+        row = charts.CHARTS[live[dom]]
+        if row.page != key:
+            problems.append(f"{key}: {live[dom]} belongs on {row.page}")
+        if row.table not in tables:
+            problems.append(f"{key}: {live[dom]} has no companion table {row.table}")
+    for figure in of_type(tree, "Figure"):
+        if figure.id in live and (figure.id == success or _contains(figure, success)):
+            problems.append(f"{key}: the success marker is inside chart {figure.id}")
+    return problems
+
+
+#: A test figure (#432): two bar series told apart by a pattern, with every kind of
+#: figure text the raw-value scan reads, all plain.
+TEST_FIGURE: dict[str, Any] = {
+    "data": [
+        {
+            "type": "bar",
+            "name": "Electoral share",
+            "x": ["A", "B"],
+            "y": [0.5, 0.4],
+            "marker": {"color": "var(--chart-1)"},
+            "hovertemplate": "%{x}: %{y:.1%} of electors<extra></extra>",
+        },
+        {
+            "type": "bar",
+            "name": "Popular-vote share",
+            "x": ["A", "B"],
+            "y": [0.48, 0.45],
+            "marker": {"color": "var(--chart-2)", "pattern": {"shape": "/"}},
+            "hovertemplate": "%{x}: %{y:.1%} of %{customdata.pv_share}<extra>%{fullData.name}</extra>",
+            "customdata": [{"pv_share": 1}, {"pv_share": 2}],
+        },
+    ],
+    "layout": {
+        "title": {"text": "Each candidate's two shares"},
+        "xaxis": {"title": {"text": "Candidate"}, "ticktext": ["A", "B"]},
+        "yaxis": {"title": {"text": "Share"}},
+        "legend": {"title": {"text": "Measure"}},
+        "annotations": [{"text": "Majority", "x": 0, "y": 0.5}],
+    },
+}
+
+
 # --- coverage is structural -----------------------------------------------------------
+
+
+class TestEveryChart:
+    """Every chart is built by ``components.chart`` (#432), with a registered ID, on its
+    registry row's page, beside its companion table, and is never a page's success
+    marker. No page renders a chart before C1 (#433); the checks run on every page now
+    and on test registries below."""
+
+    def test_every_rendered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for page in dash.page_registry.values():
+            key = page_key(page)
+            tree, built = chart_render(
+                functools.partial(lambda k: render(k, monkeypatch)[0], key), monkeypatch
+            )
+            # The custom-404 page reads no data and declares no success marker.
+            success = page.get("success", "")
+            assert chart_problems(tree, key, built, success) == [], key
+
+    def test_no_success_marker_is_a_registered_chart(self) -> None:
+        doms = {charts.dom_id(chart_id) for chart_id in charts.CHARTS}
+        assert not doms & {page.get("success") for page in dash.page_registry.values()}
+
+    def test_a_graph_built_by_hand_or_unregistered_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+        by_hand = dash.dcc.Graph(id=charts.graph_id("c2"))
+
+        def layout() -> Any:
+            built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
+            table = html.Table(id="elections-table")
+            return html.Div([built, table, by_hand, dash.dcc.Graph(id="plain")])
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert built == ["C1"]
+        assert chart_problems(tree, "/elections", built, "elections") == [
+            "/elections: a graph not built by components.chart: "
+            "{'type': 'explore-chart-graph', 'chart': 'c2'}",
+            "/elections: a graph with an unregistered ID: "
+            "{'type': 'explore-chart-graph', 'chart': 'c2'}",
+            "/elections: a graph not built by components.chart: plain",
+            "/elections: a graph with an unregistered ID: plain",
+        ]
+
+    def test_a_chart_on_the_wrong_page_or_without_its_table_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+
+        def layout() -> Any:
+            return html.Div(
+                [components.chart("C1", TEST_FIGURE, "elections-table", "Caption")]
+            )
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert chart_problems(tree, "/states", built, "states") == [
+            "/states: C1 belongs on /elections",
+            "/states: C1 has no companion table elections-table",
+        ]
+
+    def test_a_success_marker_inside_a_chart_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+
+        def layout() -> Any:
+            built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
+            return html.Div([built, html.Table(id="elections-table")])
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert chart_problems(tree, "/elections", built, "elections") == []
+        assert chart_problems(tree, "/elections", built, "c1") == [
+            "/elections: the success marker is inside chart c1"
+        ]
+        assert chart_problems(tree, "/elections", built, "c1-title") == [
+            "/elections: the success marker is inside chart c1"
+        ]
 
 
 class TestEveryTable:
@@ -1141,6 +1320,9 @@ def reader_texts(node: Any) -> list[str]:
     if isinstance(node, Component):
         if type(node).__name__ == "Code":
             return []
+        node_id = getattr(node, "id", None)
+        if isinstance(node_id, dict) and node_id.get("type") == charts.SOURCE_TYPE:
+            return figure_texts(getattr(node, "data", None))
         own: list[str] = []
         for option in getattr(node, "options", None) or []:
             label = option.get("label") if isinstance(option, dict) else option
@@ -1150,6 +1332,51 @@ def reader_texts(node: Any) -> list[str]:
             own.append(placeholder)
         return own + reader_texts(getattr(node, "children", None))
     raise TypeError(f"unexpected node {node!r}")
+
+
+#: What a hover or text template carries that a reader never sees as written: a
+#: ``%{…}`` placeholder (filled with a value, or a field path such as
+#: ``%{customdata.pv_share}``) and the ``<extra>`` box's markup.
+_TEMPLATE_CODE = re.compile(r"%\{[^}]*\}|</?extra>|<br>")
+
+
+def figure_texts(figure: Any) -> list[str]:
+    """Every string a chart's figure shows a reader (#432): axis, legend and chart
+    titles, tick text, trace names, hover and text templates (placeholders and markup
+    removed) and annotations. The chart title reaches the page as HTML, so a built
+    chart's title is scanned as ordinary children too."""
+    if not isinstance(figure, dict):
+        return []
+    found: list[str] = []
+    found_layout = figure.get("layout")
+    layout: dict[str, Any] = found_layout if isinstance(found_layout, dict) else {}
+
+    def title(part: Any) -> None:
+        text = part.get("title") if isinstance(part, dict) else None
+        text = text.get("text") if isinstance(text, dict) else text
+        if isinstance(text, str):
+            found.append(text)
+
+    title(layout)
+    for key, part in layout.items():
+        if re.fullmatch(r"[xy]axis\d*", key) and isinstance(part, dict):
+            title(part)
+            found += [str(t) for t in part.get("ticktext") or []]
+    title(layout.get("legend"))
+    found += [
+        str(note["text"])
+        for note in layout.get("annotations") or []
+        if isinstance(note, dict) and "text" in note
+    ]
+    for trace in figure.get("data") or []:
+        if not isinstance(trace, dict):
+            continue
+        for field in ("name", "hovertemplate", "texttemplate", "text"):
+            value = trace.get(field)
+            for text in value if isinstance(value, list) else [value]:
+                if isinstance(text, str):
+                    found.append(_TEMPLATE_CODE.sub(" ", text))
+    return [text for text in found if text.strip()]
 
 
 def raw_values(tree: Any) -> list[str]:
@@ -1479,3 +1706,37 @@ class TestNoRawValues:
             placeholder="covered",
         )
         assert raw_values(dropdown) == ["popular_vote", "covered"]
+
+    def test_a_chart_s_figure_text_is_scanned(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#432: a chart's figure text is reader text: a raw value in any of its kinds
+        fails, while a hover placeholder naming a field (``%{customdata.pv_share}``)
+        does not."""
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+        built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
+        assert raw_values(built) == []
+        texts = reader_texts(built)
+        for shown in ("Each candidate's two shares", "Candidate", "Share", "Measure"):
+            assert shown in texts, shown
+        assert "Majority" in texts and "Electoral share" in texts
+        for path in (
+            ("layout", "xaxis", "title", "text"),
+            ("layout", "legend", "title", "text"),
+            ("layout", "annotations", 0, "text"),
+            ("layout", "xaxis", "ticktext", 1),
+            ("data", 0, "name"),
+            ("data", 1, "hovertemplate"),
+        ):
+            doctored = copy.deepcopy(TEST_FIGURE)
+            part: Any = doctored
+            for step in path[:-1]:
+                part = part[step]
+            part[path[-1]] = "ec_share_full"
+            if path[:2] == ("data", 0):
+                doctored["data"][0]["marker"]["pattern"] = {"shape": "x"}
+            chart = components.chart("C1", doctored, "elections-table", "Caption")
+            assert raw_values(chart) == ["ec_share_full"], path
+
