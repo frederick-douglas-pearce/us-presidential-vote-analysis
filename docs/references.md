@@ -20,7 +20,48 @@ date); **Useful for** (posts or topics it could support).
 
 ## News coverage
 
-Newest first.
+Newest first. The week after the 2026 midterms produced a burst of coverage of the compact.
+The earliest found is Axios on Nov. 4, which *The New Republic* cites the same day; the USA
+TODAY piece two days later does its own interviews.
+
+### Owens Hubler, "2026 State Legislative Elections: The Results and What They Mean" (2026-11-06)
+
+Katy Owens Hubler, ["2026 State Legislative Elections: The Results and What They
+Mean"](https://www.ncsl.org/state-legislatures-news/details/2026-state-legislative-elections-the-results-and-what-they-mean),
+National Conference of State Legislatures, Nov. 6, 2026.
+
+- **Reports:** six new Democratic trifectas (Arizona, Michigan, Minnesota, Nevada,
+  Pennsylvania, Wisconsin) and no new Republican ones, with 12 chambers flipping from
+  Republican to Democratic. Results were unofficial at publication. Doesn't mention the compact.
+- **Checked here:** not checkable against this project's record, which holds presidential
+  results only. Re-check the trifecta list after certification.
+- **Useful for:** the source for which states changed hands, ahead of any news outlet's list.
+
+### Levy and Berman, "America Finally Has the Votes to End the Electoral College" (2026-11-05)
+
+Pema Levy and Ari Berman, ["America Finally Has the Votes to End the Electoral
+College"](https://www.motherjones.com/politics/2026/11/midterms-electoral-college-popular-vote-compact/),
+*Mother Jones*, Nov. 5, 2026.
+
+- **Reports:** new Democratic trifectas in Arizona, Michigan, Nevada, Pennsylvania and
+  Wisconsin, worth 61 electoral votes (64 if Alaska, uncalled at the time, also goes that way),
+  against the 48 the compact still needs. Quotes Patrick Rosenstiel of National Popular Vote. An
+  argument for the compact.
+- **Checked here (2026-11-06):** the 61 matches the 2024 allotments (see the Kenning entry).
+- **Useful for:** how supporters are framing the moment.
+
+### Rashid, "Democrats Win Enough Seats Nationwide to End Electoral College" (2026-11-04)
+
+Hafiz Rashid, ["Democrats Win Enough Seats Nationwide to End Electoral
+College"](https://newrepublic.com/post/217594/democrats-seats-nationwide-end-electoral-college),
+*The New Republic*, Nov. 4, 2026.
+
+- **Reports:** the same five non-member states as *Mother Jones*, at 61 electoral votes, for a
+  potential 283. Links Axios for the state list, plus NationalPopularVote.com, the National
+  Constitution Center, Congress.gov and the Cato Institute. Notes the filibuster as an obstacle
+  if Congress must consent. No interviews.
+- **Checked here (2026-11-06):** the 61 and 283 match the 2024 allotments.
+- **Useful for:** the earliest readable account of the five-state arithmetic.
 
 ### Kenning, "Could Democrats change how Americans vote for president?" (2026-11-06)
 
@@ -38,13 +79,61 @@ president?"](https://www.usatoday.com/story/news/politics/elections/2026/11/06/d
   setbacks: Nevada's 2019 veto and a failed 2023 bill in Michigan.
 - **Checked here (2026-11-06):** the compact's [state-status
   page](https://www.nationalpopularvote.com/state-status) confirms 222 electoral votes across 19
-  jurisdictions, with Minnesota already among them. Using the 2024 allotments served by this
-  project's API (in force through 2028), the four non-member states are Michigan 15, Nevada 6,
-  Pennsylvania 19 and Wisconsin 10. Together that's 50, bringing the total to 272, two more
-  than 270. Every one of the four is needed: without Nevada the total is 266, without Wisconsin
-  262, without Michigan 257, without Pennsylvania 253.
+  jurisdictions, with Minnesota already among them. NCSL's results roundup (above) counts six
+  new Democratic trifectas, adding Arizona to the article's five; results are unofficial until
+  certified. Using the 2024 allotments served by this project's API (in force through 2028),
+  the five non-members among them are Arizona 11, Michigan 15, Nevada 6, Pennsylvania 19 and
+  Wisconsin 10. All five would bring the compact to 283. Pennsylvania and Michigan are each
+  necessary: without Pennsylvania the total is 264, without Michigan 268. With both, any two of
+  Arizona, Wisconsin and Nevada are enough, and any one alone is not. The article's four
+  non-members without Arizona reach 272.
 - **Useful for:** a dated update to *222 Votes Away*; a dashboard announcement; any post that
   touches the compact's path to 270.
+
+### Campbell, "The National Popular Vote Interstate Compact: Federalism at Its Best" (2026-10-25)
+
+Hugh J. Campbell Jr., ["The National Popular Vote Interstate Compact: Federalism at Its
+Best"](https://thefulcrum.us/elections/national-popular-vote-interstate-compact-npvic), *The
+Fulcrum*, Oct. 25, 2026.
+
+- **Reports:** written before the election, a path to 270 through Michigan, Pennsylvania,
+  Arizona and Nevada (51 electoral votes), with Wisconsin and New Hampshire as alternates. A
+  contributor's argument for the compact.
+- **Checked here (2026-11-06):** the 51 matches the 2024 allotments.
+- **Useful for:** the pre-election version of the arithmetic.
+
+### Lopez, "Virginia joins a national effort to ensure only popular vote winners become president" (2026-04-14)
+
+Ashley Lopez, ["Virginia joins a national effort to ensure only popular vote winners become
+president"](https://www.npr.org/2026/04/14/nx-s1-5742595/virginia-popular-vote-compact), NPR,
+Apr. 14, 2026.
+
+- **Reports:** Gov. Abigail Spanberger's signing, which brought the compact to 18 states plus
+  DC and 222 electoral votes. Quotes Alyssa Cass and Patrick Rosenstiel of National Popular Vote
+  and Virginia Delegate Dan Helmer, and cites the opposing view of Patrick Valencia, now Iowa's
+  deputy solicitor general. Rosenstiel expects a court challenge once the compact reaches 270.
+- **Checked here (2026-11-06):** the 222 matches the compact's state-status page.
+- **Useful for:** the dated source for the 222 cited throughout the series.
+
+### Found, not yet read
+
+Titles and dates from search results; the pages refuse automated readers. Read signed in
+before citing, and move each into the list above once read.
+
+- Axios, ["Democrats' midterm gains could sideline Electoral College by
+  2028"](https://www.axios.com/2026/11/04/democrats-electoral-college-popular-vote-2028), Nov. 4,
+  2026. The earliest post-election piece found; *The New Republic* cites it for the state list,
+  and search snippets say it quotes Derek Muller on the Compact Clause.
+- Snopes, ["Can Democrats effectively abolish Electoral College after midterm
+  wins?"](https://www.snopes.com/news/2026/11/05/democrats-abolish-electoral-college/), Nov. 5,
+  2026. A fact-check of the same question.
+- Andrew Prokop, "A decades-long plan to abolish the Electoral College may finally pay off",
+  *Vox*, early May 2026 (summarized by [Political
+  Wire](https://politicalwire.com/2026/05/05/plan-to-abolish-electoral-college-gets-closer-to-reality/)
+  on May 5). A pre-election piece framing the 2026 races as the compact's opening.
+- America First Policy Institute, [*Bill Analysis: The National Popular Vote Interstate
+  Compact*](https://www.americafirstpolicy.com/assets/uploads/files/Bill_Analysis-_the_National_Popular_Vote_Interstate_Compact.pdf),
+  Sept. 2026. An argument against the compact, for balance.
 
 ## Surveys and polling
 
