@@ -391,12 +391,15 @@ def chart(
 
     It renders an HTML ``figure`` with the chart's DOM id (``c1``, also a fragment
     link): the chart title as page text (a paragraph, since a chart cannot know the
-    page's outline), so it shows and wraps when plotly.js cannot load; the graph inside
-    a ``role="img"`` wrapper named by that title, which hides the drawing's SVG from
-    assistive technology; the store holding the unresolved figure; and the caption,
-    ending with :data:`labels.CHART_TABLE_POINTER`, a link to the companion table. The
-    graph is rendered hidden and with no figure: ``charts.CHART_CALLBACK`` draws it in
-    the theme in effect and shows it, so it never flashes plotly's own colors. Raises
+    page's outline), so it shows and wraps when plotly.js cannot load; the chart's
+    mount point, a ``role="img"`` wrapper named by that title, which hides the
+    drawing's SVG from assistive technology; the store holding the unresolved figure;
+    and the caption, ending with :data:`labels.CHART_TABLE_POINTER`, a link to the
+    companion table. The mount point is rendered empty, never with a ``dcc.Graph``
+    (#452): ``charts.CHART_MOUNT_CALLBACK`` puts the graph in it, hidden and with no
+    figure, only once plotly.js has loaded, and ``charts.CHART_CALLBACK`` then draws it
+    in the theme in effect and shows it, so it never flashes plotly's own colors and a
+    blocked CDN leaves the mount point empty, with no loop. Raises
     ``ValueError`` for anything else, which is a page's bug, never a reader's input.
     """
     row = charts.CHARTS.get(chart_id)
@@ -418,17 +421,11 @@ def chart(
     dom = charts.dom_id(chart_id)
     title_id = f"{dom}-title"
     named: dict[str, Any] = {"aria-labelledby": title_id}
-    # dcc types config as its own TypedDict; the shared one is a plain dict.
-    config: Any = charts.CHART_CONFIG
     return html.Figure(
         [
             html.P(text, id=title_id, className="chart-title"),
             html.Div(
-                dcc.Graph(
-                    id=charts.graph_id(dom),
-                    config=config,
-                    style={"visibility": "hidden"},
-                ),
+                id=charts.mount_id(dom),
                 role="img",
                 className="chart-graph",
                 **named,

@@ -23,7 +23,9 @@ import pytest
 
 from explore import app as appmod
 from explore import charts, components, labels
+from tests.unit.test_dashboard_elections import of_type
 from tests.unit.test_dashboard_export import TEST_FIGURE
+from tests.unit.test_dashboard_guards import RUNTIME_MODULES
 from tests.unit.test_dashboard_theme import (
     EXPLICIT_DARK,
     LIGHT,
@@ -184,13 +186,18 @@ class TestChartBuilder:
         assert store.id == charts.source_id("c1")
         assert type(caption).__name__ == "Figcaption"
 
-    def test_the_graph_starts_hidden_with_no_figure_and_the_shared_config(self) -> None:
-        graph = build().children[1].children
-        assert type(graph).__name__ == "Graph"
-        assert graph.id == charts.graph_id("c1")
-        assert graph.style == {"visibility": "hidden"}
-        assert getattr(graph, "figure", None) is None
-        assert graph.config == charts.CHART_CONFIG
+    def test_the_mount_point_is_empty_and_no_graph_is_built(self) -> None:
+        # #452: the graph is put in by the mount callback once plotly.js has loaded.
+        built = build()
+        mount = built.children[1]
+        assert mount.id == charts.mount_id("c1")
+        assert mount.className == "chart-graph"
+        assert getattr(mount, "children", None) is None
+        assert of_type(built, "Graph") == []
+
+    def test_the_mount_id(self) -> None:
+        assert charts.mount_id("c1") == {"type": "explore-chart-mount", "chart": "c1"}
+        assert len({charts.MOUNT_TYPE, charts.GRAPH_TYPE, charts.SOURCE_TYPE}) == 3
 
     def test_the_store_holds_the_figure_without_its_title(self) -> None:
         store = build().children[2]
@@ -708,3 +715,136 @@ class TestChartCallback:
         template, _ = json.JSONDecoder().raw_decode(script[start:])
         assert template == charts.TEMPLATE
         assert "figure.layout.template = resolve(template);" in script
+
+
+# --- the mount callback (#452) ---------------------------------------------------------
+
+
+def graph_calls(source: str) -> list[str]:
+    """Every call that builds a ``dcc.Graph`` in ``source`` (#452): a call whose callee
+    is named ``Graph`` (``dcc.Graph(...)``, ``dash.dcc.Graph(...)``, ``Graph(...)``) or
+    is a name bound to ``Graph`` by an import (``from dash.dcc import Graph as G``).
+    Reading ``dcc.Graph._type`` is not a call, so it passes. A runtime module that built
+    one, in a layout or a server-side callback's return, would mount a graph before
+    plotly.js has loaded and bring Dash's blocked-CDN loop back."""
+    tree = ast.parse(source)
+    aliases = {"Graph"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            aliases |= {a.asname or a.name for a in node.names if a.name == "Graph"}
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in aliases:
+            calls.append(f"line {node.lineno}: {ast.unparse(func)}(...)")
+    return calls
+
+
+class TestMountCallback:
+    KEY = '{"chart":["MATCH"],"type":"explore-chart-mount"}.children'
+
+    def test_no_runtime_module_builds_a_graph(self) -> None:
+        assert RUNTIME_MODULES, "no runtime modules found"
+        found = {
+            str(path): calls
+            for path in RUNTIME_MODULES
+            if (calls := graph_calls(path.read_text(encoding="utf-8")))
+        }
+        assert found == {}
+
+    @pytest.mark.parametrize(
+        ("source", "caught"),
+        [
+            ("from dash import dcc\ndcc.Graph(id='x')\n", True),
+            ("import dash\ndash.dcc.Graph()\n", True),
+            ("from dash.dcc import Graph\nGraph()\n", True),
+            ("from dash.dcc import Graph as G\nG(figure={})\n", True),
+            ("from dash import dcc as d\nd.Graph()\n", True),
+            ("from dash import dcc\nt = dcc.Graph._type\n", False),
+            ("from dash import dcc\ndcc.Store(id='s')\n", False),
+        ],
+    )
+    def test_the_lint_catches_every_way_to_build_one(
+        self, source: str, caught: bool
+    ) -> None:
+        assert bool(graph_calls(source)) is caught
+
+    def test_one_clientside_match_callback_on_the_source_with_the_mount_id(
+        self,
+    ) -> None:
+        assert appmod.server.test_client().get("/").status_code == 200
+        spec = appmod.app.callback_map[self.KEY]
+        assert spec["inputs"] == [
+            {"id": '{"chart":["MATCH"],"type":"explore-chart-source"}', "property": "data"}
+        ]
+        assert spec["state"] == [
+            {"id": '{"chart":["MATCH"],"type":"explore-chart-mount"}', "property": "id"}
+        ]
+        assert "callback" not in spec  # clientside: no Python function runs
+        mounted = [k for k in appmod.app.callback_map if charts.MOUNT_TYPE in k]
+        assert mounted == [self.KEY]
+
+    def test_the_graph_outputs_are_in_no_layout_so_callback_exceptions_are_off(
+        self,
+    ) -> None:
+        # The mount and chart callbacks output to a graph no layout holds (#452), which
+        # Dash allows only with suppress_callback_exceptions.
+        assert appmod.app.config.suppress_callback_exceptions is True
+
+    def test_it_returns_dccs_own_graph_with_the_shared_config_hidden(self) -> None:
+        script = charts.CHART_MOUNT_CALLBACK
+        start = script.index("var graph = ") + len("var graph = ")
+        graph, _ = json.JSONDecoder().raw_decode(script[start:])
+        assert graph == {
+            "type": dash.dcc.Graph._type,
+            "namespace": dash.dcc.Graph._namespace,
+            "props": {"config": charts.CHART_CONFIG, "style": {"visibility": "hidden"}},
+        }
+        assert (graph["type"], graph["namespace"]) == ("Graph", "dash_core_components")
+        assert (
+            ' props.id = {type: "explore-chart-graph", chart: mount.chart};' in script
+        )
+        assert (
+            " return {type: graph.type, namespace: graph.namespace, props: props}; });"
+        ) in script
+
+    def test_it_loads_plotlyjs_once_per_document_from_dashs_address(self) -> None:
+        script = charts.CHART_MOUNT_CALLBACK
+        assert script.startswith("function (source, mount) {")
+        assert f'var memo = "{charts.PLOTLYJS_MEMO}";' in script
+        # window.Plotly first, on every call; then one memo, set before any wait and
+        # never cleared.
+        assert script.index("if (window.Plotly) { return Promise.resolve(true); }") < (
+            script.index("if (!window[memo]) {")
+        )
+        assert "window[memo] = new Promise(function (resolve) {" in script
+        assert script.count("window[memo] =") == 1
+        assert "delete " not in script
+        assert " var address = window._dashPlotlyJSURL;" in script
+        assert "if (typeof address !== 'string') {" in script
+        assert f"}}, {charts.PLOTLYJS_TIMEOUT_MS});" in script
+        assert charts.PLOTLYJS_TIMEOUT_MS == 30_000
+        assert "resolve(Boolean(window.Plotly))" in script
+        assert "if (!loaded) { return clientside.no_update; }" in script
+        assert script.count("document.body.appendChild(script)") == 1
+
+    def test_it_never_rejects_throws_or_builds_html(self) -> None:
+        script = charts.CHART_MOUNT_CALLBACK
+        for banned in (
+            "reject",
+            "throw",
+            "eval",
+            "innerHTML",
+            "Function(",
+            "setAttribute",
+            "fetch(",
+            "integrity",
+            "location",
+            "history",
+            "XMLHttpRequest",
+            "sendBeacon",
+        ):
+            assert banned not in script, banned

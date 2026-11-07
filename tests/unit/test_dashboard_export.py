@@ -98,6 +98,7 @@ FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 #: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
 #: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
+    '{"chart":["MATCH"],"type":"explore-chart-mount"}.children',
     '..{"chart":["MATCH"],"type":"explore-chart-graph"}.figure'
     '...{"chart":["MATCH"],"type":"explore-chart-graph"}.style..',
     ".._pages_content.children..._pages_store.data..",
@@ -284,15 +285,29 @@ def _contains(node: Any, wanted: str) -> bool:
     return False
 
 
+def mount_points(tree: Any) -> list[Any]:
+    """Every chart mount point in ``tree`` (#452): a ``Div`` whose pattern id is of
+    ``charts.MOUNT_TYPE``."""
+    return [
+        div
+        for div in of_type(tree, "Div")
+        if isinstance(getattr(div, "id", None), dict)
+        and div.id.get("type") == charts.MOUNT_TYPE
+    ]
+
+
 def chart_problems(
     tree: Any, key: str, built: list[tuple[str, Any]], success: str
 ) -> list[str]:
-    """What is wrong with the charts in one page's ``tree`` (#432): a graph that is not
-    the one inside a figure ``components.chart`` returned (compared by identity, so a
-    hand-built graph reusing a built chart's id is caught), one with an unregistered ID,
-    one on a page other than its registry row's, one rendered without its companion
-    table, a chart naming a token that is not a declared color token, and a success
-    marker that is a chart or sits inside one.
+    """What is wrong with the charts in one page's ``tree`` (#432, #452): any
+    ``dcc.Graph`` at all (a graph is only ever put in a mount point by the mount
+    callback, once plotly.js has loaded, so one in a layout would bring Dash's
+    blocked-CDN loop back); a chart mount point that is not the one inside a figure
+    ``components.chart`` returned (compared by identity, so a hand-built mount point
+    reusing a built chart's id is caught), one with an unregistered ID, one on a page
+    other than its registry row's, one rendered without its companion table; a chart
+    naming a token that is not a declared color token; and a success marker that is a
+    chart or sits inside one.
 
     It reads the one tree it is given: ``TestEveryChart`` hands it each page's default
     render, so a companion table that only a filter empties is not seen here (that
@@ -305,15 +320,21 @@ def chart_problems(
         for chart_id, row in charts.CHARTS.items()
         if not row.retired
     }
-    from_builder = {id(g) for _, figure in built for g in of_type(figure, "Graph")}
+    problems += [
+        f"{key}: a dcc.Graph in a rendered layout: {getattr(g, 'id', None)}"
+        for g in of_type(tree, "Graph")
+    ]
+    from_builder = {id(m) for _, figure in built for m in mount_points(figure)}
     tables = {getattr(t, "id", None) for t in of_type(tree, "Table")}
-    for graph in of_type(tree, "Graph"):
-        graph_id = getattr(graph, "id", None)
-        dom = graph_id.get("chart") if isinstance(graph_id, dict) else None
-        if id(graph) not in from_builder:
-            problems.append(f"{key}: a graph not built by components.chart: {graph_id}")
+    for mount in mount_points(tree):
+        mount_id = mount.id
+        dom = mount_id.get("chart")
+        if id(mount) not in from_builder:
+            problems.append(
+                f"{key}: a chart mount point not built by components.chart: {mount_id}"
+            )
         if dom not in live:
-            problems.append(f"{key}: a graph with an unregistered ID: {graph_id}")
+            problems.append(f"{key}: a chart with an unregistered ID: {mount_id}")
             continue
         row = charts.CHARTS[live[dom]]
         if row.page != key:
@@ -372,8 +393,8 @@ TEST_FIGURE: dict[str, Any] = {
 class TestEveryChart:
     """Every chart is built by ``components.chart`` (#432), with a registered ID, on its
     registry row's page, beside its companion table, and is never a page's success
-    marker. No page renders a chart before C1 (#433); the checks run on every page now
-    and on test registries below."""
+    marker; and no layout holds a ``dcc.Graph`` (#452). No page renders a chart before
+    C1 (#433); the checks run on every page now and on test registries below."""
 
     def test_every_rendered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for page in dash.page_registry.values():
@@ -385,33 +406,58 @@ class TestEveryChart:
             success = page.get("success", "")
             assert chart_problems(tree, key, built, success) == [], key
 
-    def test_a_graph_built_by_hand_or_unregistered_fails(
+    def test_the_shared_layout_holds_no_graph_and_no_chart(self) -> None:
+        # #452: the header, main and stores every page sits in.
+        assert of_type(appmod.app.layout, "Graph") == []
+        assert mount_points(appmod.app.layout) == []
+
+    def test_a_mount_point_built_by_hand_or_unregistered_or_any_graph_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
             charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
         )
-        by_hand = dash.dcc.Graph(id=charts.graph_id("c2"))
-        # A graph reusing the built chart's own id, outside the figure it returned.
-        twin = dash.dcc.Graph(id=charts.graph_id("c1"))
+        by_hand = html.Div(id=charts.mount_id("c2"), role="img")
+        # A mount point reusing the built chart's own id, outside the figure it returned.
+        twin = html.Div(id=charts.mount_id("c1"), role="img")
+        # A graph anywhere, even with a chart's own graph id (#452).
+        graph = dash.dcc.Graph(id=charts.graph_id("c1"))
 
         def layout() -> Any:
             built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
             table = html.Table(id="elections-table")
-            return html.Div([built, table, by_hand, dash.dcc.Graph(id="plain"), twin])
+            plain = dash.dcc.Graph(id="plain")
+            return html.Div([built, table, by_hand, plain, twin, graph])
 
         tree, built = chart_render(layout, monkeypatch)
         assert [chart_id for chart_id, _ in built] == ["C1"]
         assert chart_problems(tree, "/elections", built, "elections") == [
-            "/elections: a graph not built by components.chart: "
-            "{'type': 'explore-chart-graph', 'chart': 'c2'}",
-            "/elections: a graph with an unregistered ID: "
-            "{'type': 'explore-chart-graph', 'chart': 'c2'}",
-            "/elections: a graph not built by components.chart: plain",
-            "/elections: a graph with an unregistered ID: plain",
-            "/elections: a graph not built by components.chart: "
+            "/elections: a dcc.Graph in a rendered layout: plain",
+            "/elections: a dcc.Graph in a rendered layout: "
             "{'type': 'explore-chart-graph', 'chart': 'c1'}",
+            "/elections: a chart mount point not built by components.chart: "
+            "{'type': 'explore-chart-mount', 'chart': 'c2'}",
+            "/elections: a chart with an unregistered ID: "
+            "{'type': 'explore-chart-mount', 'chart': 'c2'}",
+            "/elections: a chart mount point not built by components.chart: "
+            "{'type': 'explore-chart-mount', 'chart': 'c1'}",
         ]
+
+    def test_a_built_chart_passes_and_holds_no_graph(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+
+        def layout() -> Any:
+            built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
+            return html.Div([built, html.Table(id="elections-table")])
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert len(mount_points(tree)) == 1
+        assert of_type(tree, "Graph") == []
+        assert chart_problems(tree, "/elections", built, "elections") == []
 
     def test_a_chart_naming_an_undeclared_token_fails(
         self, monkeypatch: pytest.MonkeyPatch
