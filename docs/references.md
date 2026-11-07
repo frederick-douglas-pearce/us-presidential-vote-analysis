@@ -48,6 +48,30 @@ president?"](https://www.usatoday.com/story/news/politics/elections/2026/11/06/d
 
 ## Surveys and polling
 
+Newest first.
+
+### DeSilver and Gramlich, "Most Americans favor big changes to the political system that likely would require amending the Constitution" (2026-07-28)
+
+Drew DeSilver and John Gramlich, ["Most Americans favor big changes to the political system
+that likely would require amending the
+Constitution"](https://www.pewresearch.org/short-reads/2026/07/28/most-americans-favor-big-changes-to-the-political-system-that-likely-would-require-amending-the-constitution/),
+Pew Research Center, July 28, 2026.
+
+- **Reports:** a roundup of earlier Pew surveys on reforms that would likely need a
+  constitutional amendment. It brings in no new Electoral College survey: the popular-vote
+  figures (63% change, 35% keep; Democrats 80%, Republicans 46%) are the Aug.–Sept. 2024 survey
+  in the Kiley entry below. What it adds is the full trend: 61/35 in November 2000, 51/44 in
+  November 2016 (the low point), 55/43 in January 2021, 63/35 in 2022, 65/33 in 2023 and 63/35
+  in 2024 (change/keep, by survey date). Pew notes that surveys before 2020 were by telephone and
+  asked about "amending the Constitution" rather than "changing the system". The other
+  proposals, each from a 2023 survey or earlier: congressional term limits (87%), maximum age
+  limits for elected officials in Washington (79%) and for Supreme Court justices (74%), limits
+  on campaign spending (72%), and the Equal Rights Amendment (78%, 2020).
+- **Checked here (2026-11-06):** read from Pew's page; public opinion isn't in this project's
+  record, so there's nothing to check against.
+- **Useful for:** the most recent Pew citation for popular-vote preference, with the trend from
+  2000 on one page. When citing the figure, give the 2024 survey date, not this article's.
+
 ### Kiley, "Majority of Americans continue to favor moving away from Electoral College" (2024-09-25)
 
 Jocelyn Kiley, ["Majority of Americans continue to favor moving away from Electoral
