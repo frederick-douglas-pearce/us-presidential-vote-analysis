@@ -53,11 +53,15 @@ under PV or the hybrid, and **how would the margins differ?**
 **Current-events relevance.** The National Popular Vote Interstate Compact
 ([written explanation](https://www.nationalpopularvote.com/written-explanation))
 currently holds 222 of the 270 electoral votes needed to activate. It cites exactly
-the statistics this pipeline would produce — 5 of 47 presidents took office without
-the popular-vote lead; battleground concentration; 2024's ~240k national PV margin
+the statistics this pipeline would produce — 5 of 47 presidencies began with someone
+who had not led the popular vote; battleground concentration; 2024's ~240k national PV margin
 decided by a few thousand swing-state votes. A cleanly joined EC+PV dataset on a
 shared state/candidate model does not appear to exist publicly anywhere. That
 scarcity is itself a motivation: the dataset is a deliverable, not just an input.
+
+Since the 2026 midterms, national coverage has turned to whether the compact could
+reach 270 in time for 2028; that coverage, and the arithmetic checked against this
+project's record, is collected in [`references.md`](references.md).
 
 ## Guiding stars
 
