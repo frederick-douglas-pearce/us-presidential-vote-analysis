@@ -2,8 +2,8 @@
 year-range slider every year-filtered table uses (#279), the candidate history's
 single-choice year control (#331), the linked state and candidate cells (#279, #331),
 the table itself with its CSV download (#309), the theme control and the id of the
-store holding the theme in effect (#359), which charts read (#432), and the site
-navigation (#448).
+store holding the theme in effect (#359), which charts read (#432), the site
+navigation (#448), and the chart builder (#432).
 
 Pure functions of what a page already read, so they read no API: a page reads through
 its own render-scoped view and hands them what it read.
@@ -14,12 +14,13 @@ its own render-scoped view and hands them what it read.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from dash import dcc, html
 
-from explore import export, labels, query
+from explore import charts, export, labels, query
 
 #: The id of the theme toggle's group (#359, #447), in ``app.layout`` on every page.
 THEME_CONTROL_ID = "theme-control"
@@ -374,3 +375,74 @@ def table(
         export.link(table_id, download, text),
         *shown,
     ]
+
+
+def chart(
+    chart_id: str, figure: dict[str, Any], table_id: str, caption: str
+) -> html.Figure:
+    """A chart (#432): the one way to build one, as :func:`table` is for tables.
+
+    ``chart_id`` is a live ID in :data:`explore.charts.CHARTS`, read at call time, and
+    ``table_id`` its registered companion table. ``figure`` is a plain Plotly figure
+    dict that passes :func:`explore.charts.figure_problems` (colors only as token
+    references, its own hover text, series told apart by more than color) and carries
+    its chart title, plain text, in ``layout.title.text``. ``caption`` is the chart's
+    caption, which may state a finding.
+
+    It renders an HTML ``figure`` with the chart's DOM id (``c1``, also a fragment
+    link): the chart title as page text (a paragraph, since a chart cannot know the
+    page's outline), so it shows and wraps when plotly.js cannot load; the graph inside
+    a ``role="img"`` wrapper named by that title, which hides the drawing's SVG from
+    assistive technology; the store holding the unresolved figure; and the caption,
+    ending with :data:`labels.CHART_TABLE_POINTER`, a link to the companion table. The
+    graph is rendered hidden and with no figure: ``charts.CHART_CALLBACK`` draws it in
+    the theme in effect and shows it, so it never flashes plotly's own colors. Raises
+    ``ValueError`` for anything else, which is a page's bug, never a reader's input.
+    """
+    row = charts.CHARTS.get(chart_id)
+    if row is None or row.retired:
+        raise ValueError(f"{chart_id!r} is not a live registered chart")
+    if table_id != row.table:
+        raise ValueError(f"{chart_id}'s companion table is {row.table!r}")
+    if not labels.has_text(caption):
+        raise ValueError(f"{chart_id} has no caption")
+    source = copy.deepcopy(figure)
+    layout = source.get("layout") if isinstance(source, dict) else None
+    title = layout.pop("title", None) if isinstance(layout, dict) else None
+    text = title.get("text") if isinstance(title, dict) else None
+    if not (isinstance(text, str) and labels.has_text(text)) or "<" in text:
+        raise ValueError(f"{chart_id} has no plain-text chart title")
+    problems = charts.figure_problems(source)
+    if problems:
+        raise ValueError(f"{chart_id}: {problems}")
+    dom = charts.dom_id(chart_id)
+    title_id = f"{dom}-title"
+    named: dict[str, Any] = {"aria-labelledby": title_id}
+    # dcc types config as its own TypedDict; the shared one is a plain dict.
+    config: Any = charts.CHART_CONFIG
+    return html.Figure(
+        [
+            html.P(text, id=title_id, className="chart-title"),
+            html.Div(
+                dcc.Graph(
+                    id=charts.graph_id(dom),
+                    config=config,
+                    style={"visibility": "hidden"},
+                ),
+                role="img",
+                className="chart-graph",
+                **named,
+            ),
+            dcc.Store(id=charts.source_id(dom), data=source),
+            html.Figcaption(
+                [
+                    caption,
+                    " ",
+                    html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}"),
+                    ".",
+                ]
+            ),
+        ],
+        id=dom,
+        className="chart",
+    )

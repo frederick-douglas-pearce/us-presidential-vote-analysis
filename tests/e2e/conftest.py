@@ -3,7 +3,10 @@
 ``dashboard_server`` starts ``serve.py`` once per session on a free loopback port and
 stops it at session end; ``base_url`` points Playwright's ``page.goto`` at it. Every
 test also gets :func:`_browser_guard`, which fails it on a request off the loopback host
-or on a console error, at the 390 × 844 phone viewport #306 was checked at.
+or on a console error, at the 390 × 844 phone viewport #306 was checked at. The one
+off-host address it answers is plotly.js's on its CDN (#432), fulfilled from the
+installed file and counted: a test names how many fetches it expects with
+:data:`PLOTLYJS_FETCHES`, and every other test expects none.
 
 pytest imports this module on every run, the default one included, so nothing here
 starts a process or touches the network at import.
@@ -43,12 +46,39 @@ STOP_TIMEOUT_S = 5.0
 EXPECTED_CONSOLE_ERROR = "expected_console_error"
 
 
+#: The marker a test names its plotly.js fetches with (#432): how many requests for
+#: the CDN address it expects (0 without the marker), and ``abort=True`` to refuse
+#: them, as a blocked CDN would, rather than fulfill them from the installed file.
+PLOTLYJS_FETCHES = "plotlyjs_fetches"
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        f"{EXPECTED_CONSOLE_ERROR}(text): one occurrence of a console error a browser "
-        "test causes on purpose, matched in full",
+        f"{EXPECTED_CONSOLE_ERROR}(text, repeats=False): one occurrence of a console "
+        "error a browser test causes on purpose, matched in full; with repeats=True, "
+        "one or more",
     )
+    config.addinivalue_line(
+        "markers",
+        f"{PLOTLYJS_FETCHES}(count, abort=False): how many times the test fetches "
+        "plotly.js from its CDN address, fulfilled from the installed file or aborted",
+    )
+
+
+def plotlyjs_url() -> str:
+    """The CDN address the app sends graphs to: Dash's, from the installed plotly."""
+    from explore import app as appmod
+
+    url: str = appmod.app._plotlyjs_url
+    return url
+
+
+def plotlyjs_file() -> Path:
+    """The installed plotly.js, which the guard serves for the CDN address."""
+    import plotly  # type: ignore[import-untyped]
+
+    return Path(plotly.__file__).parent / "package_data" / "plotly.min.js"
 
 
 #: Schemes a page uses without a request to any host: the CSV download link is a
@@ -131,6 +161,39 @@ def _off_host(url: str) -> bool:
     return parts.scheme not in LOCAL_SCHEMES and parts.hostname != "127.0.0.1"
 
 
+def guard_problems(
+    off_host: list[str],
+    fetches: int,
+    expected_fetches: int,
+    errors: list[str],
+    named: list[tuple[str, bool]],
+) -> list[str]:
+    """What the browser guard fails a test on, as a pure function so it can be tested
+    without a browser (#432's acceptance gate, ``test_dashboard_e2e_guard.py``): a
+    request off the loopback host; a plotly.js fetch count other than the test
+    declared; and console errors other than those it named, each ``(text, repeats)``.
+    A named error must occur exactly as often as it is named, or, with ``repeats``
+    (one Dash logs without end, #432), at least once; so a second error with an
+    expected text (another 404) fails too."""
+    problems = []
+    if off_host:
+        problems.append(f"requests off the loopback host: {off_host}")
+    if fetches != expected_fetches:
+        problems.append(f"plotly.js fetched {fetches} times; expected {expected_fetches}")
+    repeating = {text for text, repeats in named if repeats}
+    expected = Counter(text for text, _ in named if text not in repeating)
+    seen = Counter(errors)
+    missing = sorted(text for text in repeating if not seen[text])
+    if missing:
+        problems.append(f"console errors that never occurred: {missing}")
+    counted = Counter({t: n for t, n in seen.items() if t not in repeating})
+    if counted != expected:
+        problems.append(
+            f"console errors: {dict(counted)}; expected exactly: {dict(expected)}"
+        )
+    return problems
+
+
 @pytest.fixture(autouse=True)
 def _browser_guard(
     context: BrowserContext, page: Page, request: pytest.FixtureRequest
@@ -144,8 +207,22 @@ def _browser_guard(
     """
     off_host: list[str] = []
     errors: list[str] = []
+    cdn = plotlyjs_url()
+    marker = request.node.get_closest_marker(PLOTLYJS_FETCHES)
+    expected_fetches = marker.args[0] if marker else 0
+    abort = bool(marker and marker.kwargs.get("abort", False))
+    fetches: list[str] = []
 
     def refuse(route: Route) -> None:
+        if route.request.url == cdn:
+            fetches.append(route.request.url)
+            if abort:
+                route.abort()
+            else:
+                route.fulfill(
+                    path=plotlyjs_file(), content_type="application/javascript"
+                )
+            return
         off_host.append(route.request.url)
         route.abort()
 
@@ -157,13 +234,9 @@ def _browser_guard(
     page.on("console", on_console)
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
-    assert not off_host, f"requests off the loopback host: {off_host}"
-    expected = Counter(
-        marker.args[0]
-        for marker in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)
-    )
-    seen = Counter(errors)
-    # Counted, so a second error with an expected text (another 404) fails too.
-    assert seen == expected, (
-        f"console errors: {dict(seen)}; expected exactly: {dict(expected)}"
-    )
+    named = [
+        (m.args[0], bool(m.kwargs.get("repeats", False)))
+        for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)
+    ]
+    problems = guard_problems(off_host, len(fetches), expected_fetches, errors, named)
+    assert problems == [], problems

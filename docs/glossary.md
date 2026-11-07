@@ -17,12 +17,12 @@ not marked here; that pull request carries it.
 
 **This file records what terms mean; the code ships the wording.** The dashboard's shipped
 wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, the null
-and help-text constants, and the names of the site's controls and links), with a few page-level
-sentences in `dashboard/explore/components.py`, `dashboard/explore/export.py` and the modules
-under `dashboard/explore/pages/`, and the site title in `dashboard/explore/config.py`
-(`SITE_TITLE`). The API's
-published text is its `/docs` page (also served at `/redoc` and `/openapi.json`) and the text of
-its responses other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
+and help-text constants, the names of the site's controls and links, and every chart's text),
+with a few page-level sentences in `dashboard/explore/components.py`,
+`dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`, and the site
+title in `dashboard/explore/config.py` (`SITE_TITLE`). The API's published text is its
+`/docs` page (also served at `/redoc` and `/openapi.json`) and the text of its responses
+other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
 what that includes. It ships from five files under `src/usvote/api/`:
 
 - `models.py`: field descriptions, response-model docstrings, and the prose inside response
@@ -122,6 +122,15 @@ articles and announcements). Every rule binds all three unless the rule states a
   these words (`governing_census_year`, `no_governing_figure`) is written as served. *Source:*
   owner decision, 2026-10-10, #348; the API exception: owner decision, 2026-10-15, #374.
   *Status:* settled; wording pending (#379: merged API text does not yet follow this rule).
+- **A chart title describes; a caption may state a finding.** A chart title says what the chart
+  shows, never what it finds. Its caption may state a finding or carry narrative. A finding is a
+  historical claim: it is checked before it is published and is never critical of a source
+  (*Editorial guardrails*). An argument for the hybrid belongs only in its labeled opinion tab
+  (*Hybrid*). Every chart's text (chart title, axis titles, trace names, legend title, hover text,
+  annotations, caption, and any text written in place of tick numbers) ships from `labels.py`
+  under a `ba` spec. *Source:* owner decision, 2026-11-05, #432;
+  `.claude/specs/backlog-dashboard.md`, E9-S6, "Conventions every chart follows".
+  *Status:* settled.
 
 ---
 
@@ -293,6 +302,73 @@ articles and announcements). Every rule binds all three unless the rule states a
   1852–1860, or for DC from 1964. #379: the `PerCapitaRow.governing_census_year` field description
   in `src/usvote/api/models.py` says "in force at this election", which does not hold for 1912 and
   the other elections two years after a census)
+
+### Chart (C1, C2, …)
+- **Plain:** A drawing of some of this dataset's numbers on a page, with a title, a caption under
+  it and a link to the table on the same page that holds its numbers. The tables are the record.
+  A chart is another way to see it, and the page works without one.
+- **Precise:** Built only by `components.chart(chart_id, figure, table_id, caption)`. It is an
+  HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
+  (`figcaption`). The title is written as page text (a paragraph, not a heading), so it shows and
+  wraps even when the drawing cannot load. The caption ends with the table pointer,
+  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a
+  chart with no title or no caption, and a series whose hover text would be plotly's own: each
+  series writes its own hover text or shows none. The chart title is plain text and says what
+  the chart shows; the caption may state a finding (*A chart title describes; a caption may
+  state a finding*). Assistive technology names the drawing by the chart
+  title and skips what is drawn inside it; the companion table carries the numbers. Pointing at a
+  mark shows only the hover text written for that series, for the nearest point. Axis numbers are
+  written in full with thousands separators, as the tables write them, never shortened ("80M",
+  "1.2B"). The legend is only a key: clicking it hides nothing. A reader cannot zoom or drag a
+  chart, and no toolbar shows on it. Every chart has a **chart ID**, `C<n>`, issued in order of
+  story filing. An ID is never renumbered or reused, and a retired ID stays retired. The closed
+  registry `CHARTS` in `dashboard/explore/charts.py` maps each ID to its page and its companion
+  table. The chart's element id is the ID in lower case (`c1`), so `/elections#c2` is a link to
+  that chart. The part after `#` never reaches the server and changes neither the canonical link
+  nor `og:url`. Readers meet the ID only in such a link, never in page text. Colors come from the
+  page's theme tokens and follow the *Theme in effect*: switching the theme redraws every chart on
+  the page, with no reload and no request. Series always differ by more than color. The drawing
+  needs plotly.js, which the browser fetches from plotly's CDN when the page's first chart
+  mounts; a page with no chart fetches nothing from it. If the fetch fails, the drawing's space
+  stays empty, and the title, the caption, the pointer and the page's tables still show. A chart
+  is never a page's success marker. A chart has no download of its own: its companion table's CSV
+  carries its numbers.
+- **Shown as:** `components.chart`, which writes each chart's title as page text above the
+  drawing (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below
+  it; `labels.CHART_TABLE_POINTER`; each chart's own wording (title, axis titles, trace names,
+  legend title, hover text, annotations, caption) in `labels.py`; the axis number format, the
+  hover behavior and the inert legend in `charts.TEMPLATE`, and the absent toolbar in
+  `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. No page renders a chart yet; C1
+  (#433) is the first and updates this sentence. The home page's lede (`pages/home.py`) already
+  says "Tables and charts".
+- **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
+  "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
+  caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
+  SRI), recorded in D087; owner decisions at #432's plan gate, 2026-11-06 (the table pointer's
+  wording, no toolbar, no chart IDs in reader text); `CHARTS` and `dom_id`, `TEMPLATE` and
+  `CHART_CONFIG` in `dashboard/explore/charts.py`.
+- **Not:** A *figure*: in this file and on the page, a figure is a number ("no popular-vote
+  figure"), and Plotly's and HTML's word for a chart stays in code. Not a page's title (the
+  browser tab, `og:title`): a chart has a chart title. Not a stand-in for its companion table.
+  Not a column-name list.
+- **Status:** settled
+
+### Companion table
+- **Plain:** The table on the same page that holds a chart's numbers. The link at the end of the
+  chart's caption goes to it, and its download is how to take those numbers away.
+- **Precise:** The table that each chart's registry row names by its element id.
+  `components.chart` refuses any other table. The table pointer links to `#<table id>`, the table
+  element itself, below the table's heading. Every chart's pointer has the same text; the caption
+  it ends tells the reader which chart it belongs to. Like every table, it is built by
+  `components.table` with its own CSV. A filter on the page can narrow the table without
+  narrowing the chart, so the pointer says only that the chart's numbers are in a table on the
+  page, never that the table shows "the same" or "all" of them.
+- **Shown as:** `labels.CHART_TABLE_POINTER`, at the end of each chart's caption.
+- **Source:** #432 ("a pointer to the table on the page that holds the same values"); E9-S6
+  conventions ("a companion table holding the same values"); `CHARTS` in
+  `dashboard/explore/charts.py`; the pointer's wording: owner decision, 2026-11-06, #432.
+- **Not:** The chart's caption. A table on another page. The column-name list under the table.
+- **Status:** settled
 
 ### Count status
 - **Plain:** Whether Congress counted the electoral votes that were cast: counted; not counted,
@@ -1010,8 +1086,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** Whether the page is showing its light or its dark colors right now.
 - **Precise:** `light` or `dark`: the *Theme choice* when it is Light or Dark; under Auto, the
   device's current `prefers-color-scheme`, updated when that setting changes. Held in the
-  `dcc.Store` `components.THEME_STORE_ID`, so charts can re-template without a reload (#432).
-- **Shown as:** nowhere as text; readers see it only as the page's colors.
+  `dcc.Store` `components.THEME_STORE_ID`. The chart callback (`CHART_CALLBACK` in
+  `dashboard/explore/charts.py`) reads it to redraw every chart on the page in that palette, with
+  no reload and no request.
+- **Shown as:** Nowhere as text; readers see it only as the page's colors, a chart's included.
 - **Source:** #359, acceptance criterion "Expose the resolved theme to Dash"; #432.
 - **Not:** *Theme choice*, which can also be Auto.
 - **Status:** settled
@@ -1178,6 +1256,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "not yet collected", "not yet researched" | Not in this dataset | `labels.NOT_IN_DATASET`, `labels.PARTY_NULL_NOTE` | Dataset-first, with no promise (research §2.3). |
 | "Nominating party" as a column header | Party | `LABELS["nominating_party"]` | Rule-2 rows had no national nomination. |
 | "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
+| "figure" for a chart | chart | a rule | In this file and on the page a figure is a number ("no popular-vote figure"). Plotly and HTML call the chart a figure. |
+| "C1", "C2" … in page text | the chart's title | a rule | A chart ID is a registry key and a link fragment; readers know a chart by its title (owner decision, 2026-11-06, #432). |
 | "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `EARLIER_LINK`, `LATER_LINK` in `pages/election.py` | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
 
 ## Open decisions
