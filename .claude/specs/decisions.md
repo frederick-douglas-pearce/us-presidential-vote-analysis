@@ -5912,3 +5912,53 @@ Drawing the marker from `aria-current` means what is seen is what assistive tech
 **Related:** D071, D085, #359, #444, #446, #447, #448.
 
 ---
+
+## D087: Charts load plotly.js from plotly's CDN, lazily and with no SRI; the app still serves no copy
+
+**Date:** 2026-11-06
+**Builds on:** D071, D086 · **Decided by:** the owner, on #432 (2026-11-05: CDN, lazy, no SRI), and
+the architect, at #432's design gate (2026-11-07); recorded by #432 (E14-S3)
+
+**Context.** A `dcc.Graph` needs plotly.js, about 4.8 MB. #430 stopped the app serving dcc's
+bundled copy, which no page used, so until #432 no page could render a graph. Dash 4.4.1's renderer
+reads `serve_locally` from the client config in exactly one place, to set
+`window._dashPlotlyJSURL` to the local package path or to the config's `plotlyjs_url`, and Dash
+sends `plotlyjs_url` only when `serve_locally` is false. dcc's `Graph` loads plotly.js inside its
+async factory, when the first graph mounts: it appends `<script src=window._dashPlotlyJSURL async>`
+with no `integrity` or `crossOrigin` attribute, and skips the fetch when `window.Plotly` is
+already loaded.
+
+**Decision.**
+- **plotly.js comes from plotly's CDN.** `ExploreDash._config()` sends the browser
+  `serve_locally: false` and `plotlyjs_url = self._plotlyjs_url`, the address Dash derives from
+  the installed plotly (`https://cdn.plot.ly/plotly-<version>.min.js`), so there is no second
+  literal and the version follows `uv.lock`. The app-wide `serve_locally` stays true: every other
+  asset is still served from the app, and the app still serves no plotly.js (#430).
+- **Lazily.** No page's index carries a plotly.js script; dcc fetches it when the first chart
+  mounts, so it is never on the first data cell's path, and a page with no chart never fetches it.
+  A chart is progressive enhancement: it is never a page's success marker, and if the fetch fails
+  the page, the chart's title, caption and table pointer, and its companion table still render.
+- **With no SRI.** dcc injects the script without an `integrity` attribute, and the app does not
+  patch the loader.
+
+**Rationale.** The alternative, an eager SRI-tagged script in every page's index, would put 4.8 MB
+on every page, chart or not, before its first data cell, against D071(g)'s budget; and serving the
+file from the app's single F1 instance would spend its egress and memory on a static file a CDN
+already serves.
+
+**Residual risks, accepted.**
+- **No subresource integrity.** A compromised or altered file at the versioned CDN address would
+  run in the dashboard's origin on chart pages. The address is pinned to the locked version, and
+  the dashboard holds no secret or session a script could take, but nothing verifies the bytes.
+- **A third-party request.** A reader's browser contacts `cdn.plot.ly` on chart pages only, which
+  tells plotly's CDN that the reader opened one. No page without a chart makes the request.
+- **A future CSP** needs `script-src https://cdn.plot.ly` (beside the inline theme script's hash,
+  D085) or every chart silently disappears.
+- **The versioned file must exist.** If plotly withdrew it, every chart would vanish while the
+  tables still worked, so nothing would fail loudly. After a deploy that changes the plotly
+  version, check that the address answers 200 (`curl -sI` on the `plotlyjs_url` the live
+  `_dash-config` names).
+
+**Related:** D070, D071, D086, #430, #432, #433.
+
+---

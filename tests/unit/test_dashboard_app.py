@@ -30,6 +30,7 @@ from typing import Any
 
 import dash
 import flask
+import plotly  # type: ignore[import-untyped]
 import pytest
 import werkzeug.exceptions
 from dash._pages import (
@@ -1435,6 +1436,10 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
 PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
 PLOTLYJS_SUITE_PATH = f"/_dash-component-suites/plotly/{PLOTLYJS_PACKAGE_PATH}"
 
+#: The installed Dash bundles whose plotly.js loading #432 relies on.
+RENDERER_BUILD = Path(dash.__file__).parent / "dash-renderer" / "build"
+DCC_JS = Path(dash.__file__).parent / "dcc" / "dash_core_components.js"
+
 
 class TestDashPrivates:
     """Item 2: the Dash privates app.py relies on, pinned by name and behavior."""
@@ -1644,6 +1649,87 @@ class TestDashPrivates:
             r"https://cdn\.plot\.ly/plotly-[0-9.]+\.min\.js", entry["external_url"]
         )
 
+    def test_the_config_points_graphs_at_the_cdn(self) -> None:
+        """#432: the client config tells the browser ``serve_locally: false`` and
+        carries ``plotlyjs_url``, Dash's own address, while the app still serves its
+        other assets locally. A Dash that stops reading these keys fails the bundle
+        pins below."""
+        config = appmod.app._config()
+        assert config["serve_locally"] is False
+        assert config["plotlyjs_url"] == appmod.app._plotlyjs_url
+        assert appmod.app.config.serve_locally is True
+        # The control: Dash's own config sends no address while serving locally,
+        # which is why the override must set both keys.
+        dash_s = dash.Dash._config(appmod.app)
+        assert dash_s["serve_locally"] is True
+        assert "plotlyjs_url" not in dash_s
+
+    def test_the_address_is_plotly_s_cdn_for_the_installed_plotlyjs(self) -> None:
+        """#432: one address, derived by Dash from the installed plotly: its host is
+        ``cdn.plot.ly`` and its version is the installed plotly.js's, as the bundled
+        file's own banner names it."""
+        from plotly.offline import (  # type: ignore[import-untyped]
+            get_plotlyjs_version,
+        )
+
+        url = urllib.parse.urlsplit(appmod.app._plotlyjs_url)
+        version = get_plotlyjs_version()
+        assert (url.scheme, url.netloc) == ("https", "cdn.plot.ly")
+        assert url.path == f"/plotly-{version}.min.js"
+        assert not url.query and not url.fragment
+        bundled = Path(plotly.__file__).parent / PLOTLYJS_PACKAGE_PATH
+        with bundled.open(encoding="utf-8") as handle:
+            banner = handle.read(200)
+        assert re.search(rf"\* plotly\.js v{re.escape(version)}\n", banner), banner
+
+    @pytest.mark.parametrize("bundle", ["dash_renderer.min.js", "dash_renderer.dev.js"])
+    def test_the_renderer_chooses_the_plotlyjs_address_from_the_config(
+        self, bundle: str
+    ) -> None:
+        """#432: the renderer reads ``serve_locally`` in one place, to set
+        ``window._dashPlotlyJSURL`` to the local package path or to ``plotlyjs_url``,
+        in the minified bundle and the development one alike."""
+        text = (RENDERER_BUILD / bundle).read_text(encoding="utf-8")
+        assert text.count("serve_locally") == 1
+        flat = " ".join(text.split())
+        local = (
+            '"".concat({c}.requests_pathname_prefix, '
+            '"_dash-component-suites/plotly/package_data/plotly.min.js")'
+        )
+        if bundle.endswith(".min.js"):
+            match = re.search(
+                r'(\w+)\.serve_locally\?window\._dashPlotlyJSURL=""\.concat\(\1\.'
+                r'requests_pathname_prefix,"_dash-component-suites/plotly/package_data/'
+                r'plotly\.min\.js"\):window\._dashPlotlyJSURL=\1\.plotlyjs_url',
+                flat,
+            )
+            assert match, bundle
+        else:
+            expected = (
+                "if (config.serve_locally) { window._dashPlotlyJSURL = "
+                + local.format(c="config")
+                + "; } else { window._dashPlotlyJSURL = config.plotlyjs_url; }"
+            )
+            assert expected in flat
+
+    def test_dcc_loads_plotlyjs_from_that_address_when_a_graph_mounts(self) -> None:
+        """#432: dcc's ``Graph`` loads plotly.js inside its async factory, which runs
+        when the first graph mounts: from ``window._dashPlotlyJSURL``, as an async
+        script with no ``integrity`` or ``crossOrigin`` (the residual D087 records),
+        and only when ``window.Plotly`` is not already loaded."""
+        text = DCC_JS.read_text(encoding="utf-8")
+        assert text.count("_dashPlotlyJSURL") == 1
+        start = text.index("Promise.resolve(window.Plotly||new Promise(")
+        loader = text[start : text.index("document.querySelector", start) + 60]
+        assert re.search(
+            r'(\w)=document\.createElement\("script"\);\1\.src='
+            r"window\._dashPlotlyJSURL,\1\.async=!0",
+            loader,
+        ), loader
+        assert "appendChild" in loader
+        assert "integrity" not in loader and "crossOrigin" not in loader
+        assert "integrity" not in text
+
     def test_external_only_keeps_only_the_cdn_address(self) -> None:
         """#430: the app's own script filter, with the config it runs on after a
         request (served locally, no eager loading), drops the package path of an
@@ -1736,7 +1822,7 @@ class TestPlotlyjsOverride:
 
 
 class TestPlotlyjsNotServed:
-    """#430: the app serves no copy of plotly.js, which no page uses yet."""
+    """#430: the app serves no copy of plotly.js; graphs fetch it from its CDN (#432)."""
 
     def test_the_plotlyjs_path_answers_404_and_is_never_registered(self) -> None:
         response = appmod.server.test_client().get(PLOTLYJS_SUITE_PATH)
@@ -1765,12 +1851,11 @@ class TestPlotlyjsNotServed:
         assert response.status_code == 200
         assert response.data
 
-    def test_the_index_has_no_plotlyjs_script_or_address(self) -> None:
-        """The index shell every page shares is unchanged: no script tag names
-        plotly.js or an off-site host, and the client config carries no plotly.js
-        address (#432 adds one on purpose, pointing graphs at the CDN). This reads the
-        index only: plotly.js would load lazily when a ``dcc.Graph`` renders, which no
-        test here checks (#432's ``TestEveryChart`` will)."""
+    def test_the_index_loads_no_plotlyjs_and_names_only_the_cdn_address(self) -> None:
+        """The index shell every page shares loads no plotly.js: no script tag names
+        it or an off-site host, so it stays off the first data cell's path. The client
+        config carries exactly the CDN address with ``serve_locally: false`` (#432),
+        which dcc reads only when a graph mounts."""
         _, _, body = get("/")
         srcs = re.findall(r"<script[^>]*\ssrc=\"([^\"]+)\"", body)
         assert srcs
@@ -1783,7 +1868,10 @@ class TestPlotlyjsNotServed:
             re.DOTALL,
         )
         assert config is not None
-        assert "plotlyjs_url" not in json.loads(html.unescape(config.group(1)))
+        sent = json.loads(html.unescape(config.group(1)))
+        assert sent["serve_locally"] is False
+        assert sent["plotlyjs_url"] == appmod.app._plotlyjs_url
+        assert body.count("cdn.plot.ly") == 1
 
 
 # --- every templated page validates what its layout receives (#312, item 6) ----------

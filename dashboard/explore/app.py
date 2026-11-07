@@ -535,10 +535,8 @@ class ExploreDash(dash.Dash):
         re-registered that way. Accepted residual: ``dcc._js_dist`` is module-global,
         so a second ``dash.Dash()`` built later in the same process would append an
         unmarked entry, which this app would then register and serve; none is built
-        (production imports only this app). Pointing graphs at the CDN is #432's;
-        until then no page may render a graph, since the renderer would request the
-        local path. No test enforces that yet; #432 plans the guard
-        (``TestEveryChart``).
+        (production imports only this app). :meth:`_config` points graphs at the
+        same CDN address (#432).
         """
         before = len(dcc._js_dist)
         super()._setup_plotlyjs()
@@ -550,6 +548,24 @@ class ExploreDash(dash.Dash):
         ):
             raise RuntimeError(f"unexpected plotly.js entries from Dash: {added!r}")
         added[0]["external_only"] = True
+
+    def _config(self) -> dict[str, Any]:
+        """The client config, with graphs pointed at plotly.js's CDN address (#432).
+
+        Dash's renderer reads ``serve_locally`` only to choose where ``dcc.Graph``
+        fetches plotly.js (the local package path, which this app no longer serves,
+        or ``plotlyjs_url``), and Dash sends ``plotlyjs_url`` only when
+        ``serve_locally`` is false. So the browser is told ``serve_locally: false``
+        and given ``self._plotlyjs_url``, the address Dash derives from the installed
+        plotly, while the app's own ``serve_locally`` stays true and every other
+        asset is still served from here. dcc injects the script, with no ``integrity``
+        attribute, when the first ``dcc.Graph`` mounts, so a page with no chart never
+        fetches it (D087). Dash privates, pinned in ``TestDashPrivates``.
+        """
+        config: dict[str, Any] = super()._config()
+        config["serve_locally"] = False
+        config["plotlyjs_url"] = self._plotlyjs_url
+        return config
 
     def index(self, *args: Any, **kwargs: Any) -> Any:
         # Resolved once, against one read of the snapshot: the status, the title and
