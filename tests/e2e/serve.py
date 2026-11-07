@@ -31,6 +31,15 @@ additive: it writes only its own div and two ``window`` records, and
 theme callback without it, as ``CALLBACK_OUTPUTS`` (``test_dashboard_export.py``) pins
 every production callback.
 
+A second addition, the **test chart page** (#432): before C1 (#433), no production page
+renders a chart, so the browser tests of the chart foundation need one. It registers a
+page at :data:`CHART_PAGE` whose layout is a success marker holding one chart built by
+``components.chart`` and its companion table, and rebinds ``charts.CHARTS`` in this
+process only with one row, :data:`CHART_ID`, outside the ``C<n>`` IDs, so it can never
+collide with an issued one. The D070(b) guard and ``TestEveryChart`` run the production
+registry in their own processes. The page has no site-navigation entry, and its figure
+is a plain dict here, never imported from the unit tests.
+
 ``conftest.py`` waits for :data:`READY_LINE` with this server's port, written only once
 the cache is filled and the socket is bound, so a session never starts against another
 process that took the port. A failed start-up check exits with its reason on stderr,
@@ -57,6 +66,37 @@ READY_LINE = "E2E-SERVER-READY"
 THEME_PROBE_ID = "theme-probe"
 THEME_PROBE_CALLS = "exploreThemeProbeCalls"
 THEME_PROBE_SEEN = "exploreThemeProbeSeen"
+
+#: The test chart page (#432): its path, its success marker, its chart's test-only ID
+#: and its companion table's id.
+CHART_PAGE = "/e2e-chart"
+CHART_SUCCESS = "e2e-chart-ok"
+CHART_ID = "X1"
+CHART_TABLE = "e2e-chart-table"
+
+#: The test chart's figure: two bar series told apart by a pattern, in the first two
+#: series tokens.
+CHART_FIGURE: dict[str, Any] = {
+    "data": [
+        {
+            "type": "bar",
+            "name": "First",
+            "x": ["A", "B"],
+            "y": [3, 5],
+            "marker": {"color": "var(--chart-1)"},
+            "hovertemplate": "%{x}: %{y} first<extra></extra>",
+        },
+        {
+            "type": "bar",
+            "name": "Second",
+            "x": ["A", "B"],
+            "y": [4, 2],
+            "marker": {"color": "var(--chart-2)", "pattern": {"shape": "/"}},
+            "hovertemplate": "%{x}: %{y} second<extra></extra>",
+        },
+    ],
+    "layout": {"title": {"text": "A test chart"}},
+}
 
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -152,6 +192,38 @@ def _add_theme_probe(appmod: Any) -> None:
     )
 
 
+def _add_chart_page() -> None:
+    """Register the test chart page and its test-only registry row (#432)."""
+    import dash
+    from dash import html
+
+    from explore import charts, components
+
+    charts.CHARTS = {**charts.CHARTS, CHART_ID: charts.Chart(CHART_PAGE, CHART_TABLE)}
+
+    def layout(**_query: Any) -> Any:
+        return html.Div(
+            [
+                html.H1("Test chart"),
+                components.chart(CHART_ID, CHART_FIGURE, CHART_TABLE, "A caption."),
+                html.Table(
+                    html.Tbody(html.Tr([html.Td("A"), html.Td("3")])), id=CHART_TABLE
+                ),
+            ],
+            id=CHART_SUCCESS,
+        )
+
+    dash.register_page(
+        "e2e_chart",
+        path=CHART_PAGE,
+        layout=layout,
+        prefetch=(),
+        on_miss=(),
+        success=CHART_SUCCESS,
+        nav=None,
+    )
+
+
 def main(port: int) -> None:
     sys.addaudithook(_audit)
 
@@ -162,6 +234,7 @@ def main(port: int) -> None:
 
     api.CLIENT = _fixture_client()
     _add_theme_probe(appmod)
+    _add_chart_page()
 
     # Explicit checks, never ``assert``: PYTHONOPTIMIZE, inherited from the parent's
     # environment, would strip them. Warmup always answers 200, even when its refresh

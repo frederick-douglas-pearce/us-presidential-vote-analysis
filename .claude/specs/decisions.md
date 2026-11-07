@@ -5958,7 +5958,14 @@ already serves.
   tables still worked, so nothing would fail loudly. After a deploy that changes the plotly
   version, check that the address answers 200 (`curl -sI` on the `plotlyjs_url` the live
   `_dash-config` names).
+- **A blocked CDN makes Dash loop** (found by #432's blocked-CDN browser test; owner decision,
+  2026-11-07). The page, the chart's title, caption and table pointer, and its companion table
+  still render, but dcc's lazy `Graph` rethrows its rejected plotly.js load on every render and the
+  renderer's error boundary remounts it, so the console logs the script's error event without end,
+  about 130 times a second. A bare `dcc.Graph` with no callback does the same: it is Dash 4.4.1's
+  behavior. #432 ships no chart a reader sees, so it is accepted here; #452 stops the loop before
+  C1 (#433), which depends on it.
 
-**Related:** D070, D071, D086, #430, #432, #433.
+**Related:** D070, D071, D086, #430, #432, #433, #452.
 
 ---
