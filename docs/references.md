@@ -222,8 +222,8 @@ The compact's total moves whenever a state acts. Check one of these the day a po
     vote with 99 to Adams's 84, so Adams took office from second place, as the interview says.
     The rest is history the record doesn't cover.
   - **Useful for:** the history behind *222 Votes Away* and any post on 1824 or the 1969–70
-    amendment; the small-states finding is a common assumption the series could test against
-    its own apportionment tables.
+    amendment; the small-states finding cuts against a common assumption, and the series'
+    apportionment tables can show how much weight small states actually carry.
 - Michael Geruso, Dean Spears and Ishaana Talesara, [*Inversions in US Presidential Elections:
   1836–2016*](https://www.nber.org/papers/w26247), NBER Working Paper 26247 (2019). An academic
   treatment of the comparison this project makes: how often the Electoral College and popular
