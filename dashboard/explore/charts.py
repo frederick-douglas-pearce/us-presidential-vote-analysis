@@ -106,8 +106,12 @@ _REFUSED_KEY_RE = re.compile(r".*colorscale")
 #: Its other values are the shared defaults: no drag or zoom, a legend that is only a
 #: key (a click hides nothing), hover text for the nearest point only, numbers written
 #: in full with thousands separators (never "80M" or "1.2B", as the tables write them),
-#: and a gap between adjacent bars, so neighboring bars need no contrast with each
-#: other.
+#: and bars in groups with a gap on every side (``bargap`` between locations,
+#: ``bargroupgap`` within one, never stacked or overlaid), so neighboring bars of
+#: different series, whose tokens do not contrast with each other, are always parted by
+#: the page's color (WCAG 1.4.11). Not enforced here, and C1's to rule on (#433): a
+#: number format inside a hover or text template or an axis ``hoverformat``, and a
+#: trace's own bar ``width`` or ``offset``.
 TEMPLATE: dict[str, Any] = {
     "layout": {
         "font": {"family": "var(--font-body)", "color": "var(--text)", "size": 14},
@@ -116,6 +120,8 @@ TEMPLATE: dict[str, Any] = {
         "colorway": ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"],
         "hovermode": "closest",
         "dragmode": False,
+        "barmode": "group",
+        "bargap": 0.2,
         "bargroupgap": 0.15,
         "margin": {"l": 56, "r": 16, "t": 16, "b": 48},
         "xaxis": {
@@ -169,18 +175,34 @@ CHART_CONFIG: dict[str, Any] = {
 #: figure's own ``layout`` win over ``layout.template``, so a chart setting one of these
 #: would bring back drag or zoom, a legend click that hides a series inside the
 #: ``role="img"`` wrapper, plotly's own unified hover header, shortened numbers
-#: ("80M"), or adjacent bars with no gap between them. Layout keys, legend keys, and
-#: keys of every ``xaxis``/``yaxis`` (``xaxis2`` too). A chart may still set its
+#: ("80M"), or bars that touch. Layout keys, legend keys, and keys of every
+#: ``xaxis``/``yaxis`` (``xaxis2`` too). A second legend (``legend2``) is refused
+#: outright, since the template's legend does not reach it. A chart may still set its
 #: margins, ``automargin`` and font size. ``TestTemplate`` checks each is set in
 #: :data:`TEMPLATE`.
-FIXED_LAYOUT_KEYS = ("hovermode", "dragmode", "bargroupgap")
+FIXED_LAYOUT_KEYS = ("hovermode", "dragmode", "barmode", "bargap", "bargroupgap")
 FIXED_LEGEND_KEYS = ("itemclick", "itemdoubleclick")
 FIXED_AXIS_KEYS = ("fixedrange", "exponentformat", "separatethousands")
 
-#: An axis ``tickformat`` whose d3 type shortens a number or writes it in exponent
-#: notation ("80M", "8e+7"): ``s``, ``e`` or ``g``, at the format's end before an
-#: optional ``~``. A percentage or a plain number format stays allowed.
-_SHORTENING_FORMAT_RE = re.compile(r".*[seg]~?")
+#: A d3 number format,
+#: ``[[fill]align][sign][symbol][0][width][,][.precision][~][type]``, its type
+#: captured. An axis ``tickformat`` may use only the types that write a number in
+#: full (:data:`_FULL_TYPES`): every other type, and none at all (which d3 reads as
+#: ``~g``), can shorten it or write an exponent ("80M", "8e+7"). A format starting
+#: ``%`` is a date format, not a number one, and is left alone.
+_D3_FORMAT_RE = re.compile(r"(?:.?[<>=^])?[-+( ]?[$#]?0?\d*,?(?:\.\d+)?~?([A-Za-z%]?)")
+_FULL_TYPES = frozenset({"d", "f", "r", "%", "p"})
+
+
+def _shortens(tickformat: str) -> bool:
+    if tickformat.startswith("%"):
+        return False
+    match = _D3_FORMAT_RE.fullmatch(tickformat)
+    return match is None or match.group(1) not in _FULL_TYPES
+
+
+#: A second or later legend, which the template's legend does not reach.
+_EXTRA_LEGEND_RE = re.compile(r"legend\d+")
 
 _AXIS_RE = re.compile(r"[xy]axis\d*")
 
@@ -271,14 +293,25 @@ def markup_problems(figure: Mapping[str, Any]) -> list[str]:
 def override_problems(figure: Mapping[str, Any]) -> list[str]:
     """Each template default ``figure``'s own layout overrides (#432's review): the
     :data:`FIXED_LAYOUT_KEYS`, :data:`FIXED_LEGEND_KEYS` and :data:`FIXED_AXIS_KEYS`,
-    and a shortening axis ``tickformat``."""
+    a shortening axis ``tickformat``, and a second legend, in the layout or named by a
+    trace."""
+    problems = [
+        f"data[{index}].legend: {trace['legend']!r}, not the template's legend"
+        for index, trace in enumerate(figure.get("data") or [])
+        if isinstance(trace, dict) and trace.get("legend", "legend") != "legend"
+    ]
     layout = figure.get("layout")
     if not isinstance(layout, dict):
-        return []
-    problems = [
+        return problems
+    problems += [
         f"layout.{key}: fixed by the template"
         for key in FIXED_LAYOUT_KEYS
         if key in layout
+    ]
+    problems += [
+        f"layout.{key}: a second legend, which the template does not reach"
+        for key in layout
+        if _EXTRA_LEGEND_RE.fullmatch(key)
     ]
     legend = layout.get("legend")
     if isinstance(legend, dict):
@@ -296,7 +329,7 @@ def override_problems(figure: Mapping[str, Any]) -> list[str]:
             if key in axis
         ]
         tickformat = axis.get("tickformat")
-        if isinstance(tickformat, str) and _SHORTENING_FORMAT_RE.fullmatch(tickformat):
+        if isinstance(tickformat, str) and _shortens(tickformat):
             problems.append(
                 f"layout.{name}.tickformat: {tickformat!r} shortens numbers"
             )
@@ -388,10 +421,21 @@ def color_only_pairs(figure: Mapping[str, Any]) -> list[tuple[int, int]]:
     return pairs
 
 
+def _is_number(value: Any) -> bool:
+    """A number, or a string plotly reads as one (``"0"``, an alias of ``"circle"``)."""
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float)) or (
+        isinstance(value, str) and value.isdigit()
+    )
+
+
 def number_problems(figure: Mapping[str, Any]) -> list[str]:
-    """Each numeric marker symbol or line dash (#432's review), alone or in a list:
-    plotly reads ``0`` as ``"circle"``, so a number would hide two traces' sameness
-    from :func:`color_only_pairs`."""
+    """Each numeric marker symbol or line dash (#432's review), alone or in a list, as
+    a number or a string of digits: plotly reads ``0`` and ``"0"`` as ``"circle"``, so
+    a number would hide two traces' sameness from :func:`color_only_pairs`. And each
+    scatter trace with no ``mode``: plotly then picks its mode by its point count, so
+    :func:`_channels` could not tell what it draws."""
     problems = []
     for index, trace in enumerate(figure.get("data") or []):
         if not isinstance(trace, dict):
@@ -400,10 +444,12 @@ def number_problems(figure: Mapping[str, Any]) -> list[str]:
             holder = trace.get(part)
             value = holder.get(key) if isinstance(holder, dict) else None
             values = value if isinstance(value, list) else [value]
-            if any(
-                isinstance(v, (int, float)) and not isinstance(v, bool) for v in values
-            ):
+            if any(_is_number(v) for v in values):
                 problems.append(f"data[{index}].{part}.{key}: a number, not a name")
+        if trace.get("type", "scatter") == "scatter" and not isinstance(
+            trace.get("mode"), str
+        ):
+            problems.append(f"data[{index}].mode: a scatter trace names its mode")
     return problems
 
 
@@ -429,8 +475,8 @@ def figure_problems(figure: Any) -> list[str]:
     with a list of traces, sets no template or config of its own and overrides none of
     the template's fixed defaults, names colors only as token references, carries no
     markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
-    numbering them, writes its own hover text, and never tells two traces apart by
-    color alone."""
+    numbering them and names every scatter trace's mode, writes its own hover text, and
+    never tells two traces apart by color alone."""
     if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
         return ["not a figure dict with a list of traces"]
     problems = [

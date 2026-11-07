@@ -133,8 +133,9 @@ def test_a_theme_switch_redraws_the_chart_with_no_reload_or_request(
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(page.locator(FIRST_BAR).first).not_to_have_css("fill", light)
     assert first_fill(page) == rgb(token(page, "--chart-1"))
-    # The template, not only the trace: in dark its paper and tick text
-    # differ from plotly's own white defaults, so a template plotly ignored fails.
+    # The template, not only the trace: in dark its paper and tick text differ from
+    # plotly's own defaults (a white paper, #444 tick text), so a template plotly
+    # ignored fails.
     assert painted(page) == {
         "paper": rgb(token(page, "--page")),
         "tick": rgb(token(page, "--text-secondary")),

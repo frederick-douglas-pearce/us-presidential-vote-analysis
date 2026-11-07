@@ -461,6 +461,9 @@ class TestMarkupNumbersAndOverrides:
             ("marker", "symbol", 0, True),
             ("marker", "symbol", [0, "x"], True),
             ("line", "dash", 2, True),
+            # A string of digits is a number to plotly ("0" is "circle").
+            ("marker", "symbol", "0", True),
+            ("marker", "symbol", ["x", "100"], True),
             ("marker", "symbol", "circle", False),
             ("marker", "symbol", ["circle", "x"], False),
             ("line", "dash", "dot", False),
@@ -469,8 +472,31 @@ class TestMarkupNumbersAndOverrides:
     def test_a_numeric_symbol_or_dash_is_refused(
         self, part: str, key: str, value: Any, refused: bool
     ) -> None:
-        figure = {"data": [{part: {key: value}}]}
+        figure = {"data": [{"type": "bar", part: {key: value}}]}
         assert bool(charts.number_problems(figure)) is refused
+
+    @pytest.mark.parametrize(
+        ("trace", "refused"),
+        [
+            ({"type": "scatter"}, True),
+            ({}, True),  # plotly's default type is scatter
+            ({"type": "scatter", "mode": None}, True),
+            ({"type": "scatter", "mode": "lines"}, False),
+            ({"type": "bar"}, False),
+        ],
+    )
+    def test_a_scatter_trace_names_its_mode(
+        self, trace: dict[str, Any], refused: bool
+    ) -> None:
+        """Plotly picks a mode-less scatter's mode by its point count, so the color-only
+        rule could not tell what it draws (#432's round 2)."""
+        assert bool(charts.number_problems({"data": [trace]})) is refused
+
+    def test_a_trace_cannot_name_another_legend(self) -> None:
+        assert charts.override_problems({"data": [{"legend": "legend2"}]}) == [
+            "data[0].legend: 'legend2', not the template's legend"
+        ]
+        assert charts.override_problems({"data": [{"legend": "legend"}, {}]}) == []
 
     @pytest.mark.parametrize(
         "layout",
@@ -486,6 +512,18 @@ class TestMarkupNumbersAndOverrides:
             {"yaxis": {"tickformat": ".2s"}},
             {"yaxis": {"tickformat": "~e"}},
             {"yaxis": {"tickformat": ".3g"}},
+            # No type is d3's ~g; n is ,g; an unknown type falls back to g.
+            {"yaxis": {"tickformat": ",.2"}},
+            {"yaxis": {"tickformat": ",.3~"}},
+            {"yaxis": {"tickformat": "n"}},
+            {"yaxis": {"tickformat": "E"}},
+            # Bars that touch: no gap between locations, or stacked or overlaid.
+            {"bargap": 0},
+            {"barmode": "stack"},
+            {"barmode": "overlay"},
+            # A second legend, which the template's legend does not reach.
+            {"legend2": {"itemclick": "toggle"}},
+            {"legend3": {}},
         ],
     )
     def test_a_figure_cannot_override_the_template_s_fixed_defaults(
@@ -501,6 +539,9 @@ class TestMarkupNumbersAndOverrides:
             {"font": {"size": 12}},
             {"yaxis": {"tickformat": ".0%"}},
             {"yaxis": {"tickformat": ",d"}},
+            {"yaxis": {"tickformat": ",.1f"}},
+            {"yaxis": {"tickformat": "+.1%"}},
+            {"xaxis": {"tickformat": "%Y"}},  # a date format, not a number one
             {"legend": {"orientation": "h"}},
         ],
     )
@@ -553,6 +594,8 @@ class TestTemplate:
         layout = charts.TEMPLATE["layout"]
         assert layout["hovermode"] == "closest"
         assert layout["dragmode"] is False
+        assert layout["barmode"] == "group"
+        assert layout["bargap"] > 0
         assert layout["bargroupgap"] > 0
         assert layout["legend"]["itemclick"] is False
         assert layout["legend"]["itemdoubleclick"] is False

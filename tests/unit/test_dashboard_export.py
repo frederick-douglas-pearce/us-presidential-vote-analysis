@@ -296,7 +296,7 @@ def chart_problems(
 
     It reads the one tree it is given: ``TestEveryChart`` hands it each page's default
     render, so a companion table that only a filter empties is not seen here (that
-    check is #435's, the first chart beside a filtered table)."""
+    check is #435's and #436's, whose charts sit beside filtered tables)."""
     from tests.unit.test_dashboard_theme import TOKENS
 
     problems = []
@@ -1792,6 +1792,7 @@ class TestNoRawValues:
             ("data", 1, "hovertemplate"),
             # A category value, drawn as a tick label, and hover-only values.
             ("data", 0, "x", 0),
+            ("data", 0, "y", 0),
             ("data", 1, "customdata", 0, "pv_share"),
             ("data", 0, "hovertext"),
             ("data", 0, "texttemplate"),

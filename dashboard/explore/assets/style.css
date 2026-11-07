@@ -37,9 +37,10 @@
    --text-secondary, --page). Each series and line token meets 3:1 on --page and the
    categorical three stay apart under simulated color-vision deficiencies
    (TestChartColors, tests/unit/test_dashboard_theme.py). The order is fixed and a chart
-   takes them in order; one with more series than tokens appends a token here, since
-   plotly would otherwise repeat a color (nothing enforces this: no filed chart needs
-   more than two):
+   takes them in order. A chart with more series than tokens appends one here, in all
+   three palette blocks, to charts.TEMPLATE's colorway, and to TOKENS and CHART_SERIES
+   in tests/unit/test_dashboard_theme.py, since plotly would otherwise repeat a color
+   (nothing enforces this: no filed chart needs more than two):
      --chart-1         the first series (blue)
      --chart-2         the second series (orange)
      --chart-3         the third series (green)

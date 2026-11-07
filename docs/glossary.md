@@ -20,8 +20,9 @@ wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value table
 and help-text constants, the names of the site's controls and links, and every chart's text),
 with a few page-level sentences in `dashboard/explore/components.py`,
 `dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`, and the site
-title in `dashboard/explore/config.py` (`SITE_TITLE`). The API's published text is its `/docs` page (also served at `/redoc` and `/openapi.json`) and the text of
-its responses other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
+title in `dashboard/explore/config.py` (`SITE_TITLE`). The API's published text is its
+`/docs` page (also served at `/redoc` and `/openapi.json`) and the text of its responses
+other than the data values they carry; `CLAUDE.md`, *Who writes wording*, lists
 what that includes. It ships from five files under `src/usvote/api/`:
 
 - `models.py`: field descriptions, response-model docstrings, and the prose inside response
@@ -127,8 +128,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   (*Editorial guardrails*). An argument for the hybrid belongs only in its labeled opinion tab
   (*Hybrid*). Every chart's text (chart title, axis titles, trace names, legend title, hover text,
   annotations, caption, and any text written in place of tick numbers) ships from `labels.py`
-  under a `ba` spec. *Source:* owner decision, 2026-11-05, #432; `.claude/specs/backlog-dashboard.md`,
-  E9-S6, "Conventions every chart follows". *Status:* settled.
+  under a `ba` spec. *Source:* owner decision, 2026-11-05, #432;
+  `.claude/specs/backlog-dashboard.md`, E9-S6, "Conventions every chart follows".
+  *Status:* settled.
 
 ---
 
@@ -311,9 +313,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   wraps even when the drawing cannot load. The caption ends with the table pointer,
   `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a
   chart with no title or no caption, and a series whose hover text would be plotly's own: each
-  series writes its own hover text or shows none. The chart title
-  is plain text and says what the chart shows; the caption may state a finding (*A chart title
-  describes; a caption may state a finding*). Assistive technology names the drawing by the chart
+  series writes its own hover text or shows none. The chart title is plain text and says what
+  the chart shows; the caption may state a finding (*A chart title describes; a caption may
+  state a finding*). Assistive technology names the drawing by the chart
   title and skips what is drawn inside it; the companion table carries the numbers. Pointing at a
   mark shows only the hover text written for that series, for the nearest point. Axis numbers are
   written in full with thousands separators, as the tables write them, never shortened ("80M",
