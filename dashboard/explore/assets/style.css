@@ -36,8 +36,10 @@
    Python. Chart text and the plot's background are the page tokens above (--text,
    --text-secondary, --page). Each series and line token meets 3:1 on --page and the
    categorical three stay apart under simulated color-vision deficiencies
-   (TestChartColors, tests/unit/test_dashboard_theme.py); the order is fixed, and a chart
-   takes them in order, never cycled:
+   (TestChartColors, tests/unit/test_dashboard_theme.py). The order is fixed and a chart
+   takes them in order; one with more series than tokens appends a token here, since
+   plotly would otherwise repeat a color (nothing enforces this: no filed chart needs
+   more than two):
      --chart-1         the first series (blue)
      --chart-2         the second series (orange)
      --chart-3         the third series (green)
@@ -429,4 +431,10 @@ fieldset.filter legend { padding: 0; }
   .states { columns: 3; column-gap: 2rem; }
   /* Padding, not margin: a margin at the top of a column is dropped, so the columns would not line up. */
   .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
+}
+
+/* A chart (#432): the figure element keeps no browser margin, so the drawing takes the
+   column's width on a phone, as the table under it does. */
+.chart {
+  margin: 0;
 }

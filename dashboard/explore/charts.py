@@ -38,9 +38,10 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
 #: here once retired. Empty until C1 (#433) lands; C1–C5 are assigned to #433–#436 by
-#: their issues. ``components.chart`` reads it by attribute at call time.
-#: ``TestChartRegistry`` (``test_dashboard_charts.py``) holds a hand-written literal of
-#: every issued ID with its page, which must equal this.
+#: their issues. ``components.chart`` reads it by attribute at call time. ``ISSUED``, a
+#: hand-written literal of every issued ID with its whole row, must equal this
+#: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
+#: ``test_every_row_is_well_formed_and_on_a_registered_page`` checks each row.
 CHARTS: Mapping[str, Chart] = {}
 
 
@@ -61,10 +62,6 @@ def registry_problems(registry: Mapping[str, Chart]) -> list[str]:
         ):
             problems.append(f"{chart_id!r}: not a chart row")
     return problems
-
-
-if registry_problems(CHARTS):
-    raise RuntimeError(f"malformed chart registry: {registry_problems(CHARTS)}")
 
 
 def dom_id(chart_id: str) -> str:
@@ -92,9 +89,12 @@ def source_id(dom: Any) -> dict[str, Any]:
 #: A token reference, the only form a color takes in a figure or the template.
 TOKEN_RE = re.compile(r"var\((--[a-z0-9-]+)\)")
 
-#: The figure and template keys a token may fill: every color attribute, and the font
-#: family (``--font-body``, which the page's text reads too).
+#: The color attributes, whose values must be color-token references.
 _COLOR_KEY_RE = re.compile(r".*(?:color|colors|colorway)")
+
+#: The one non-color token a figure may name: the font stack, under ``family`` only,
+#: which the page's text reads too.
+FONT_TOKEN = "--font-body"
 
 #: Color attributes no chart may set: a colorscale maps numbers to colors that are no
 #: token.
@@ -165,10 +165,27 @@ CHART_CONFIG: dict[str, Any] = {
     "responsive": True,
 }
 
+#: The template's defaults no figure may override (#432's review): plotly lets a
+#: figure's own ``layout`` win over ``layout.template``, so a chart setting one of these
+#: would bring back drag or zoom, a legend click that hides a series inside the
+#: ``role="img"`` wrapper, plotly's own unified hover header, shortened numbers
+#: ("80M"), or adjacent bars with no gap between them. Layout keys, legend keys, and
+#: keys of every ``xaxis``/``yaxis`` (``xaxis2`` too). A chart may still set its
+#: margins, ``automargin`` and font size. ``TestTemplate`` checks each is set in
+#: :data:`TEMPLATE`.
+FIXED_LAYOUT_KEYS = ("hovermode", "dragmode", "bargroupgap")
+FIXED_LEGEND_KEYS = ("itemclick", "itemdoubleclick")
+FIXED_AXIS_KEYS = ("fixedrange", "exponentformat", "separatethousands")
 
-def _walk(
-    value: Any, path: str = "", key: str = ""
-) -> Iterator[tuple[str, str, Any]]:
+#: An axis ``tickformat`` whose d3 type shortens a number or writes it in exponent
+#: notation ("80M", "8e+7"): ``s``, ``e`` or ``g``, at the format's end before an
+#: optional ``~``. A percentage or a plain number format stays allowed.
+_SHORTENING_FORMAT_RE = re.compile(r".*[seg]~?")
+
+_AXIS_RE = re.compile(r"[xy]axis\d*")
+
+
+def _walk(value: Any, path: str = "", key: str = "") -> Iterator[tuple[str, str, Any]]:
     """Every ``(path, key, value)`` under ``value``, a figure or a part of one; a list's
     items carry the list's key (``colorway[0]``'s is ``colorway``)."""
     if isinstance(value, dict):
@@ -191,11 +208,14 @@ def color_problems(figure: Mapping[str, Any]) -> list[str]:
     """Where ``figure`` names a color that is not a token reference (#432).
 
     The allowlist: a key ending ``color``, ``colors`` or ``colorway`` holds a token
-    reference, or (``colorway`` only) a list of them; ``family`` may hold one; no other
-    string contains ``var(``; no colorscale. A numeric or list ``color`` is refused, so
-    a trace never colors its points one by one: color would then carry categories inside
-    one trace, where :func:`color_only_pairs` cannot see it, and a number would pick a
-    colorscale's color, which is no token.
+    reference other than :data:`FONT_TOKEN`, or (``colorway`` only) a list of them;
+    ``family`` may hold only :data:`FONT_TOKEN`; no other string contains ``var(``; no
+    colorscale. A numeric or list ``color`` is refused, so a trace never colors its
+    points one by one: color would then carry categories inside one trace, where
+    :func:`color_only_pairs` cannot see it, and a number would pick a colorscale's
+    color, which is no token. Whether a named color token exists in ``style.css`` is
+    the tests' to check (this module reads no file): ``TestEveryChart`` for every
+    rendered chart, ``TestTemplate`` for the template.
     """
     problems = []
     for path, key, value in _walk(figure):
@@ -205,11 +225,17 @@ def color_problems(figure: Mapping[str, Any]) -> list[str]:
             if path.endswith("]"):
                 continue  # an item of a color list: the list itself is checked
             tokens = value if key == "colorway" and isinstance(value, list) else [value]
-            if not tokens or not all(_is_token(token) for token in tokens):
-                problems.append(f"{path}: {value!r} is not a token reference")
+            if not tokens or not all(
+                _is_token(token) and token != f"var({FONT_TOKEN})" for token in tokens
+            ):
+                problems.append(f"{path}: {value!r} is not a color token reference")
         elif key == "family":
-            if isinstance(value, str) and "var(" in value and not _is_token(value):
-                problems.append(f"{path}: {value!r} is not a token reference")
+            if (
+                isinstance(value, str)
+                and "var(" in value
+                and value != f"var({FONT_TOKEN})"
+            ):
+                problems.append(f"{path}: {value!r} is not the font token")
         elif isinstance(value, str) and "var(" in value:
             problems.append(f"{path}: a token reference outside a color")
     return problems
@@ -226,17 +252,76 @@ def tokens_named(figure: Mapping[str, Any]) -> set[str]:
     }
 
 
+#: The only markup plotly text may carry (#432's review): a line break, and the hover
+#: box's ``<extra>`` part. Anything else (``<span style=…>``, ``<b>``, ``<a href>``)
+#: is refused, so no color, emphasis or link enters through a string; a chart story
+#: that needs one widens this with a ``ba`` spec.
+_ALLOWED_MARKUP_RE = re.compile(r"<(?:br|extra|/extra)>")
+
+
+def markup_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each string in ``figure`` carrying markup other than ``<br>`` and ``<extra>``."""
+    return [
+        f"{path}: markup in {value!r}"
+        for path, _, value in _walk(figure)
+        if isinstance(value, str) and "<" in _ALLOWED_MARKUP_RE.sub("", value)
+    ]
+
+
+def override_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each template default ``figure``'s own layout overrides (#432's review): the
+    :data:`FIXED_LAYOUT_KEYS`, :data:`FIXED_LEGEND_KEYS` and :data:`FIXED_AXIS_KEYS`,
+    and a shortening axis ``tickformat``."""
+    layout = figure.get("layout")
+    if not isinstance(layout, dict):
+        return []
+    problems = [
+        f"layout.{key}: fixed by the template"
+        for key in FIXED_LAYOUT_KEYS
+        if key in layout
+    ]
+    legend = layout.get("legend")
+    if isinstance(legend, dict):
+        problems += [
+            f"layout.legend.{key}: fixed by the template"
+            for key in FIXED_LEGEND_KEYS
+            if key in legend
+        ]
+    for name, axis in layout.items():
+        if not (_AXIS_RE.fullmatch(name) and isinstance(axis, dict)):
+            continue
+        problems += [
+            f"layout.{name}.{key}: fixed by the template"
+            for key in FIXED_AXIS_KEYS
+            if key in axis
+        ]
+        tickformat = axis.get("tickformat")
+        if isinstance(tickformat, str) and _SHORTENING_FORMAT_RE.fullmatch(tickformat):
+            problems.append(
+                f"layout.{name}.tickformat: {tickformat!r} shortens numbers"
+            )
+    return problems
+
+
 def _mode(trace: Mapping[str, Any]) -> str:
     mode = trace.get("mode")
     return mode if isinstance(mode, str) else ""
 
 
+#: What a template writes that the reader never sees as written: a ``%{…}``
+#: placeholder.
+_PLACEHOLDER_RE = re.compile(r"%\{[^}]*\}")
+
+
 def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
     """The non-color encodings ``trace`` draws (#432), each only where its type draws
     it: a marker symbol where a scatter trace draws markers, a line dash where it draws
-    lines, a pattern on bars, and a direct label naming the series (an annotation whose
-    text is the trace's name, or shown text that names it). Any other trace type draws
-    none this counts, so a figure using one is refused until this learns it."""
+    lines, a pattern on bars, and a direct label naming the series: an annotation whose
+    text is the trace's name, or shown text that, with its placeholders removed, is the
+    name, or that writes it with ``%{fullData.name}``. A trace of any other type draws
+    none of these, so two traces of such a type are reported as differing by color
+    alone until this learns the type. A numeric symbol or dash is not read here:
+    :func:`figure_problems` refuses it, rather than copy plotly's number table."""
     kind = trace.get("type", "scatter")
     found_marker, found_line = trace.get("marker"), trace.get("line")
     marker: dict[str, Any] = found_marker if isinstance(found_marker, dict) else {}
@@ -258,7 +343,11 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
             shown = trace.get("textposition", "auto") != "none"
         written = [trace.get("text"), trace.get("texttemplate")]
         named = any(
-            isinstance(text, str) and (name in text or "%{fullData.name}" in text)
+            isinstance(text, str)
+            and (
+                "%{fullData.name}" in text
+                or _PLACEHOLDER_RE.sub("", text).strip() == name.strip()
+            )
             for text in written
         )
         if name in names or (shown and named):
@@ -267,8 +356,12 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
 
 
 def color_only_pairs(figure: Mapping[str, Any]) -> list[tuple[int, int]]:
-    """Each pair of traces that differs by color alone (WCAG 1.4.1, #432): no non-color
-    encoding both draw tells them apart."""
+    """Each pair of traces that differs by color alone (WCAG 1.4.1, #432): the two are
+    of the same type and draw the same shape channels (symbol, dash, pattern), and no
+    channel both draw tells them apart. Traces of different types, or drawing different
+    shape channels (dots against a line), differ in shape. A direct label is no shape:
+    it tells two traces apart only when both carry one, so a label on one of them does
+    not excuse the pair."""
     data = figure.get("data") or []
     layout = figure.get("layout")
     notes = layout.get("annotations") if isinstance(layout, dict) else None
@@ -277,14 +370,41 @@ def color_only_pairs(figure: Mapping[str, Any]) -> list[tuple[int, int]]:
         for note in (notes if isinstance(notes, list) else [])
         if isinstance(note, dict) and isinstance(note.get("text"), str)
     }
-    channels = [
-        _channels(trace, names) if isinstance(trace, dict) else {} for trace in data
+    traces = [
+        (
+            trace.get("type", "scatter") if isinstance(trace, dict) else None,
+            _channels(trace, names) if isinstance(trace, dict) else {},
+        )
+        for trace in data
     ]
-    return [
-        (i, j)
-        for (i, first), (j, second) in combinations(enumerate(channels), 2)
-        if not any(first[c] != second[c] for c in set(first) & set(second))
-    ]
+    pairs = []
+    for (i, (kind_i, first)), (j, (kind_j, second)) in combinations(
+        enumerate(traces), 2
+    ):
+        if kind_i != kind_j or set(first) - {"label"} != set(second) - {"label"}:
+            continue
+        if not any(first[c] != second[c] for c in set(first) & set(second)):
+            pairs.append((i, j))
+    return pairs
+
+
+def number_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each numeric marker symbol or line dash (#432's review), alone or in a list:
+    plotly reads ``0`` as ``"circle"``, so a number would hide two traces' sameness
+    from :func:`color_only_pairs`."""
+    problems = []
+    for index, trace in enumerate(figure.get("data") or []):
+        if not isinstance(trace, dict):
+            continue
+        for part, key in (("marker", "symbol"), ("line", "dash")):
+            holder = trace.get(part)
+            value = holder.get(key) if isinstance(holder, dict) else None
+            values = value if isinstance(value, list) else [value]
+            if any(
+                isinstance(v, (int, float)) and not isinstance(v, bool) for v in values
+            ):
+                problems.append(f"data[{index}].{part}.{key}: a number, not a name")
+    return problems
 
 
 def hover_problems(figure: Mapping[str, Any]) -> list[str]:
@@ -296,21 +416,30 @@ def hover_problems(figure: Mapping[str, Any]) -> list[str]:
             problems.append(f"data[{index}]: not a trace")
         elif trace.get("hoverinfo") in ("skip", "none"):
             continue
-        elif not isinstance(trace.get("hovertemplate"), str) or not trace[
-            "hovertemplate"
-        ].strip():
+        elif (
+            not isinstance(trace.get("hovertemplate"), str)
+            or not trace["hovertemplate"].strip()
+        ):
             problems.append(f"data[{index}]: no hovertemplate")
     return problems
 
 
 def figure_problems(figure: Any) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
-    with a list of traces, sets no template or config of its own, names colors only as
-    token references, writes its own hover text, and never tells two traces apart by
+    with a list of traces, sets no template or config of its own and overrides none of
+    the template's fixed defaults, names colors only as token references, carries no
+    markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
+    numbering them, writes its own hover text, and never tells two traces apart by
     color alone."""
     if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
         return ["not a figure dict with a list of traces"]
-    problems = [*color_problems(figure), *hover_problems(figure)]
+    problems = [
+        *color_problems(figure),
+        *markup_problems(figure),
+        *override_problems(figure),
+        *number_problems(figure),
+        *hover_problems(figure),
+    ]
     layout = figure.get("layout", {})
     if not isinstance(layout, dict):
         problems.append("layout: not a dict")
@@ -324,9 +453,6 @@ def figure_problems(figure: Any) -> list[str]:
     ]
     return problems
 
-
-if color_problems(TEMPLATE):
-    raise RuntimeError(f"the template names a color: {color_problems(TEMPLATE)}")
 
 #: The chart callback (#432), run in the browser for each chart on the page (a MATCH
 #: callback over :data:`GRAPH_TYPE` and :data:`SOURCE_TYPE`): its inputs are the chart's

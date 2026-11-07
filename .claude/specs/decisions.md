@@ -5917,7 +5917,7 @@ Drawing the marker from `aria-current` means what is seen is what assistive tech
 
 **Date:** 2026-11-06
 **Builds on:** D071, D086 · **Decided by:** the owner, on #432 (2026-11-05: CDN, lazy, no SRI), and
-the architect, at #432's design gate (2026-11-07); recorded by #432 (E14-S3)
+the architect, at #432's design gate (2026-11-06); recorded by #432 (E14-S3)
 
 **Context.** A `dcc.Graph` needs plotly.js, about 4.8 MB. #430 stopped the app serving dcc's
 bundled copy, which no page used, so until #432 no page could render a graph. Dash 4.4.1's renderer
@@ -5959,7 +5959,7 @@ already serves.
   version, check that the address answers 200 (`curl -sI` on the `plotlyjs_url` the live
   `_dash-config` names).
 - **A blocked CDN makes Dash loop** (found by #432's blocked-CDN browser test; owner decision,
-  2026-11-07). The page, the chart's title, caption and table pointer, and its companion table
+  2026-11-06). The page, the chart's title, caption and table pointer, and its companion table
   still render, but dcc's lazy `Graph` rethrows its rejected plotly.js load on every render and the
   renderer's error boundary remounts it, so the console logs the script's error event without end,
   about 130 times a second. A bare `dcc.Graph` with no callback does the same: it is Dash 4.4.1's

@@ -986,12 +986,56 @@ class TestChartColors:
         ratio = contrast(parse_color(palette[token]), parse_color(palette["--page"]))
         assert ratio >= NON_TEXT, (theme, token, round(ratio, 2))
 
+    def test_what_the_template_paints_is_what_these_tests_measure(self) -> None:
+        """Closure over ``charts.TEMPLATE`` (#432's review): each color it paints is a
+        token one of these tests holds to its ratio, so a template that moves text or a
+        line onto an unmeasured token, or a plot onto another background, fails."""
+        from explore import charts
+
+        layout = charts.TEMPLATE["layout"]
+        assert {layout["paper_bgcolor"], layout["plot_bgcolor"]} == {"var(--page)"}
+        backgrounds = {"var(--page)", layout["hoverlabel"]["bgcolor"]}
+        assert backgrounds == {"var(--page)", "var(--surface)"}
+        seen: set[str] = set()
+        for path, key, value in charts._walk(charts.TEMPLATE):
+            if not isinstance(value, str) or not value.startswith("var(--"):
+                continue
+            token = value.removeprefix("var(").removesuffix(")")
+            seen.add(path)
+            if path.endswith(".font.color") or path.endswith("tickfont.color"):
+                assert token in CHART_TEXT, path
+            elif key in ("linecolor", "tickcolor", "zerolinecolor"):
+                assert token in CHART_MARKS, path
+            elif key == "gridcolor":
+                assert token == "--chart-grid", path
+            elif key == "colorway" or path.startswith("layout.colorway"):
+                assert token in CHART_SERIES, path
+            elif key in ("paper_bgcolor", "plot_bgcolor", "bgcolor", "family"):
+                pass  # the backgrounds, checked above, and the font stack
+            elif key == "bordercolor":
+                assert token == "--border", path  # a control's stroke, as Dash's
+            else:
+                raise AssertionError(f"{path}: a painted color no test measures")
+        assert "layout.hoverlabel.font.color" in seen
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    def test_the_hover_label_s_text_meets_aa_on_its_background(self, theme: str) -> None:
+        from explore import charts
+
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        label = charts.TEMPLATE["layout"]["hoverlabel"]
+        text = resolve(label["font"]["color"], palette)
+        ground = resolve(label["bgcolor"], palette)
+        ratio = contrast(parse_color(text), parse_color(ground))
+        assert ratio >= AA, (theme, round(ratio, 2))
+
     def test_every_chart_token_but_the_grid_is_checked(self) -> None:
         charted = {t for t in TOKENS if t.startswith("--chart-")}
         assert charted == set(CHART_MARKS) | {"--chart-grid"}
 
     def test_the_series_tokens_are_hex(self) -> None:
-        # plotly.js and the contrast parser both read hex; a chart token is never rgba.
+        # The contrast and CIEDE2000 math here composites no alpha over the page, so a
+        # chart token is a plain hex color, never rgba (plotly.js itself reads both).
         for key in PALETTE_BLOCKS:
             palette = block(key)
             for token in TOKENS:

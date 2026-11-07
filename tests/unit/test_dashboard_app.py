@@ -1713,10 +1713,14 @@ class TestDashPrivates:
             assert expected in flat
 
     def test_dcc_loads_plotlyjs_from_that_address_when_a_graph_mounts(self) -> None:
-        """#432: dcc's ``Graph`` loads plotly.js inside its async factory, which runs
-        when the first graph mounts: from ``window._dashPlotlyJSURL``, as an async
-        script with no ``integrity`` or ``crossOrigin`` (the residual D087 records),
-        and only when ``window.Plotly`` is not already loaded."""
+        """#432: dcc's loader, as its text reads: it takes ``window._dashPlotlyJSURL``
+        and appends an async script with no ``integrity`` or ``crossOrigin`` (the
+        residual D087 records), and only when ``window.Plotly`` is not already loaded.
+        This pins the loader's text only, not when it runs: that a page with no chart
+        fetches no plotly.js is the browser's to show
+        (``test_a_page_with_no_chart_fetches_no_plotlyjs`` in
+        ``tests/e2e/test_dashboard_e2e_charts.py``, and the e2e guard's zero-fetch
+        default in ``tests/e2e/conftest.py``)."""
         text = DCC_JS.read_text(encoding="utf-8")
         assert text.count("_dashPlotlyJSURL") == 1
         start = text.index("Promise.resolve(window.Plotly||new Promise(")

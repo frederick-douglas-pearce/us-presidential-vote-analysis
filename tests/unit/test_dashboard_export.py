@@ -255,15 +255,17 @@ def unbuilt_tables(
 
 def chart_render(
     build: Callable[[], Any], monkeypatch: pytest.MonkeyPatch
-) -> tuple[Any, list[str]]:
-    """``build()``'s tree, and the chart IDs ``components.chart`` built during that call
-    (recorded through a wrapper; pages call it by attribute)."""
-    built: list[str] = []
+) -> tuple[Any, list[tuple[str, Any]]]:
+    """``build()``'s tree, and each chart ``components.chart`` built during that call
+    with the component it returned (recorded through a wrapper; pages call it by
+    attribute)."""
+    built: list[tuple[str, Any]] = []
     real = components.chart
 
     def recording(*args: Any, **kwargs: Any) -> Any:
-        built.append(args[0] if args else kwargs["chart_id"])
-        return real(*args, **kwargs)
+        figure = real(*args, **kwargs)
+        built.append((args[0] if args else kwargs["chart_id"], figure))
+        return figure
 
     monkeypatch.setattr(components, "chart", recording)
     tree = build()
@@ -282,23 +284,33 @@ def _contains(node: Any, wanted: str) -> bool:
     return False
 
 
-def chart_problems(tree: Any, key: str, built: list[str], success: str) -> list[str]:
-    """What is wrong with the charts in one page's ``tree`` (#432): a graph
-    ``components.chart`` did not build, one with an unregistered ID, one on a page other
-    than its registry row's, one rendered without its companion table, and a success
-    marker that is a chart or sits inside one."""
+def chart_problems(
+    tree: Any, key: str, built: list[tuple[str, Any]], success: str
+) -> list[str]:
+    """What is wrong with the charts in one page's ``tree`` (#432): a graph that is not
+    the one inside a figure ``components.chart`` returned (compared by identity, so a
+    hand-built graph reusing a built chart's id is caught), one with an unregistered ID,
+    one on a page other than its registry row's, one rendered without its companion
+    table, a chart naming a token that is not a declared color token, and a success
+    marker that is a chart or sits inside one.
+
+    It reads the one tree it is given: ``TestEveryChart`` hands it each page's default
+    render, so a companion table that only a filter empties is not seen here (that
+    check is #435's, the first chart beside a filtered table)."""
+    from tests.unit.test_dashboard_theme import TOKENS
+
     problems = []
     live = {
         charts.dom_id(chart_id): chart_id
         for chart_id, row in charts.CHARTS.items()
         if not row.retired
     }
-    built_doms = {charts.dom_id(chart_id) for chart_id in built}
+    from_builder = {id(g) for _, figure in built for g in of_type(figure, "Graph")}
     tables = {getattr(t, "id", None) for t in of_type(tree, "Table")}
     for graph in of_type(tree, "Graph"):
         graph_id = getattr(graph, "id", None)
         dom = graph_id.get("chart") if isinstance(graph_id, dict) else None
-        if dom not in built_doms:
+        if id(graph) not in from_builder:
             problems.append(f"{key}: a graph not built by components.chart: {graph_id}")
         if dom not in live:
             problems.append(f"{key}: a graph with an unregistered ID: {graph_id}")
@@ -308,9 +320,17 @@ def chart_problems(tree: Any, key: str, built: list[str], success: str) -> list[
             problems.append(f"{key}: {live[dom]} belongs on {row.page}")
         if row.table not in tables:
             problems.append(f"{key}: {live[dom]} has no companion table {row.table}")
+    for store in of_type(tree, "Store"):
+        store_id = getattr(store, "id", None)
+        if isinstance(store_id, dict) and store_id.get("type") == charts.SOURCE_TYPE:
+            named = charts.tokens_named(getattr(store, "data", None) or {})
+            unknown = sorted(named - set(TOKENS) - {charts.FONT_TOKEN})
+            if unknown:
+                problems.append(f"{key}: {store_id['chart']} names no token {unknown}")
     for figure in of_type(tree, "Figure"):
-        if figure.id in live and (figure.id == success or _contains(figure, success)):
-            problems.append(f"{key}: the success marker is inside chart {figure.id}")
+        figure_id = getattr(figure, "id", None)
+        if figure_id in live and (figure_id == success or _contains(figure, success)):
+            problems.append(f"{key}: the success marker is inside chart {figure_id}")
     return problems
 
 
@@ -365,10 +385,6 @@ class TestEveryChart:
             success = page.get("success", "")
             assert chart_problems(tree, key, built, success) == [], key
 
-    def test_no_success_marker_is_a_registered_chart(self) -> None:
-        doms = {charts.dom_id(chart_id) for chart_id in charts.CHARTS}
-        assert not doms & {page.get("success") for page in dash.page_registry.values()}
-
     def test_a_graph_built_by_hand_or_unregistered_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -376,14 +392,16 @@ class TestEveryChart:
             charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
         )
         by_hand = dash.dcc.Graph(id=charts.graph_id("c2"))
+        # A graph reusing the built chart's own id, outside the figure it returned.
+        twin = dash.dcc.Graph(id=charts.graph_id("c1"))
 
         def layout() -> Any:
             built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
             table = html.Table(id="elections-table")
-            return html.Div([built, table, by_hand, dash.dcc.Graph(id="plain")])
+            return html.Div([built, table, by_hand, dash.dcc.Graph(id="plain"), twin])
 
         tree, built = chart_render(layout, monkeypatch)
-        assert built == ["C1"]
+        assert [chart_id for chart_id, _ in built] == ["C1"]
         assert chart_problems(tree, "/elections", built, "elections") == [
             "/elections: a graph not built by components.chart: "
             "{'type': 'explore-chart-graph', 'chart': 'c2'}",
@@ -391,7 +409,30 @@ class TestEveryChart:
             "{'type': 'explore-chart-graph', 'chart': 'c2'}",
             "/elections: a graph not built by components.chart: plain",
             "/elections: a graph with an unregistered ID: plain",
+            "/elections: a graph not built by components.chart: "
+            "{'type': 'explore-chart-graph', 'chart': 'c1'}",
         ]
+
+    def test_a_chart_naming_an_undeclared_token_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+        figure = copy.deepcopy(TEST_FIGURE)
+        figure["data"][0]["marker"]["color"] = "var(--chart-9)"
+
+        def layout() -> Any:
+            built = components.chart("C1", figure, "elections-table", "Caption")
+            return html.Div([built, html.Table(id="elections-table")])
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert chart_problems(tree, "/elections", built, "elections") == [
+            "/elections: c1 names no token ['--chart-9']"
+        ]
+
+    def test_a_figure_with_no_id_is_no_chart(self) -> None:
+        assert chart_problems(html.Div([html.Figure([])]), "/elections", [], "x") == []
 
     def test_a_chart_on_the_wrong_page_or_without_its_table_fails(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1340,11 +1381,26 @@ def reader_texts(node: Any) -> list[str]:
 _TEMPLATE_CODE = re.compile(r"%\{[^}]*\}|</?extra>|<br>")
 
 
+def _leaves(value: Any) -> list[str]:
+    """Every string in ``value``, a list or a dict of any depth (``customdata``)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [t for inner in value.values() for t in _leaves(inner)]
+    if isinstance(value, list):
+        return [t for inner in value for t in _leaves(inner)]
+    return []
+
+
 def figure_texts(figure: Any) -> list[str]:
-    """Every string a chart's figure shows a reader (#432): axis, legend and chart
-    titles, tick text, trace names, hover and text templates (placeholders and markup
-    removed) and annotations. The chart title reaches the page as HTML, so a built
-    chart's title is scanned as ordinary children too."""
+    """Every string a chart's figure shows a reader (#432): axis, legend, legend-group
+    and chart titles, tick text (``ticktext``, and the category values plotly draws as
+    tick labels: every string in a trace's ``x`` and ``y``), trace names, hover and text
+    templates (placeholders and markup removed), ``text`` and ``hovertext``, every string
+    in ``customdata`` (which a ``%{customdata.…}`` placeholder shows), and annotations.
+    The chart title reaches the page as HTML, so a built chart's title is scanned as
+    ordinary children too. Shape labels are not read: no chart draws one before C4 and
+    C5 (#436)."""
     if not isinstance(figure, dict):
         return []
     found: list[str] = []
@@ -1371,11 +1427,16 @@ def figure_texts(figure: Any) -> list[str]:
     for trace in figure.get("data") or []:
         if not isinstance(trace, dict):
             continue
-        for field in ("name", "hovertemplate", "texttemplate", "text"):
+        for field in ("name", "hovertemplate", "texttemplate", "text", "hovertext"):
             value = trace.get(field)
             for text in value if isinstance(value, list) else [value]:
                 if isinstance(text, str):
                     found.append(_TEMPLATE_CODE.sub(" ", text))
+        for field in ("x", "y", "customdata"):
+            found += _leaves(trace.get(field))
+        group = trace.get("legendgrouptitle")
+        if isinstance(group, dict) and isinstance(group.get("text"), str):
+            found.append(group["text"])
     return [text for text in found if text.strip()]
 
 
@@ -1729,12 +1790,22 @@ class TestNoRawValues:
             ("layout", "xaxis", "ticktext", 1),
             ("data", 0, "name"),
             ("data", 1, "hovertemplate"),
+            # A category value, drawn as a tick label, and hover-only values.
+            ("data", 0, "x", 0),
+            ("data", 1, "customdata", 0, "pv_share"),
+            ("data", 0, "hovertext"),
+            ("data", 0, "texttemplate"),
+            ("data", 0, "legendgrouptitle"),
         ):
             doctored = copy.deepcopy(TEST_FIGURE)
             part: Any = doctored
             for step in path[:-1]:
                 part = part[step]
-            part[path[-1]] = "ec_share_full"
+            part[path[-1]] = (
+                {"text": "ec_share_full"}
+                if path[-1] == "legendgrouptitle"
+                else "ec_share_full"
+            )
             if path[:2] == ("data", 0):
                 doctored["data"][0]["marker"]["pattern"] = {"shape": "x"}
             chart = components.chart("C1", doctored, "elections-table", "Caption")

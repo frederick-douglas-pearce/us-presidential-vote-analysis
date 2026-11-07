@@ -277,7 +277,7 @@ NAV_API_DOCS_TITLE = (
 )
 
 #: The link that ends every chart's caption (#432; ba spec, approved at #432's plan
-#: gate, 2026-11-07), to the chart's companion table on the same page.
+#: gate, 2026-11-06), to the chart's companion table on the same page.
 #: ``components.chart`` writes the closing period as plain text after the link. It
 #: never says "the same" or "all" (a filter can narrow the table and not the chart),
 #: nor "above", "below" or "hover" (it must read right when the chart could not load).
