@@ -4,8 +4,8 @@
    which only the dark blocks map onto tokens); the dark blocks set Dash's two
    --Dash-Shading-* values as literals; and the forced-colors block names system
    colors (#447). The list is closed: TestThemeTokens
-   (tests/unit/test_dashboard_theme.py) pins it and this comment's list of it, and
-   E14-S3 (#432) reads chart colors from it, appending its own tokens to the same list.
+   (tests/unit/test_dashboard_theme.py) pins it and this comment's list of it; E14-S3
+   (#432) appended the chart tokens, and a later chart appends any it needs.
 
    Page tokens, by role:
      --page            the page background
@@ -31,6 +31,19 @@
      --disabled        a disabled control's fill
      --hover           a hovered option's fill
      --active          a pressed option's fill
+   Chart tokens (#432), which every chart reads through a var() reference in its figure,
+   resolved in the browser by the chart callback in charts.py; no chart color exists in
+   Python. Chart text and the plot's background are the page tokens above (--text,
+   --text-secondary, --page). Each series and line token meets 3:1 on --page and the
+   categorical three stay apart under simulated color-vision deficiencies
+   (TestChartColors, tests/unit/test_dashboard_theme.py); the order is fixed, and a chart
+   takes them in order, never cycled:
+     --chart-1         the first series (blue)
+     --chart-2         the second series (orange)
+     --chart-3         the third series (green)
+     --chart-axis      axis lines and ticks
+     --chart-grid      gridlines, decoration under the marks (exempt from 3:1)
+     --chart-reference  a reference line, such as a majority line
 
    Three palette blocks, each declaring every token. Light is the bare :root below.
    Dark is two identical blocks, so that an explicit choice wins in both directions:
@@ -44,8 +57,10 @@
    blocks set. */
 :root {
   color-scheme: light;
-  /* Not a color: the readable measure (#360). */
+  /* Not colors: the readable measure (#360), and the font stack the page and every
+     chart's text share (#432). */
   --measure: 42rem;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --page: #fff;
   --text: #1a1a1a;
   --text-secondary: #444;
@@ -61,6 +76,12 @@
   --disabled: rgba(0, 24, 102, 0.1); /* --Dash-Fill-Disabled */
   --hover: rgba(0, 18, 77, 0.04); /* --Dash-Fill-Primary-Hover */
   --active: rgba(0, 18, 77, 0.08); /* --Dash-Fill-Primary-Active */
+  --chart-1: #2a78d6;
+  --chart-2: #c94d16;
+  --chart-3: #168a60;
+  --chart-axis: #767676;
+  --chart-grid: #e6e6e6;
+  --chart-reference: #595959;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -80,6 +101,12 @@
     --disabled: #666;
     --hover: rgba(255, 255, 255, 0.06);
     --active: rgba(255, 255, 255, 0.12);
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-axis: #8a8a8a;
+    --chart-grid: #2e2e2e;
+    --chart-reference: #a6a6a6;
     --Dash-Text-Strong: var(--text);
     --Dash-Text-Primary: var(--text);
     --Dash-Text-Weak: var(--text-muted);
@@ -113,6 +140,12 @@
   --disabled: #666;
   --hover: rgba(255, 255, 255, 0.06);
   --active: rgba(255, 255, 255, 0.12);
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-axis: #8a8a8a;
+  --chart-grid: #2e2e2e;
+  --chart-reference: #a6a6a6;
   --Dash-Text-Strong: var(--text);
   --Dash-Text-Primary: var(--text);
   --Dash-Text-Weak: var(--text-muted);
@@ -137,7 +170,7 @@
    1280px. */
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: 1rem;
   line-height: 1.5;
   color: var(--text);

@@ -10,7 +10,9 @@ device, the store triggering a chart's callback) is ``tests/e2e/test_dashboard_e
 from __future__ import annotations
 
 import html.parser
+import itertools
 import json
+import math
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -46,10 +48,17 @@ TOKENS: tuple[str, ...] = (
     "--disabled",
     "--hover",
     "--active",
+    "--chart-1",
+    "--chart-2",
+    "--chart-3",
+    "--chart-axis",
+    "--chart-grid",
+    "--chart-reference",
 )
 
-#: The one non-color custom property, declared in the light block.
-NOT_COLORS = frozenset({"--measure"})
+#: The non-color custom properties, declared in the light block: the readable measure
+#: (#360) and the font stack the page and the charts share (#432).
+NOT_COLORS = frozenset({"--measure", "--font-body"})
 
 #: Each light control token, and the Dash variable whose light default it copies: in
 #: light, Dash's own values paint the controls, so the tokens must equal them.
@@ -545,7 +554,7 @@ class TestThemeTokens:
                 for name in block(key)
                 if name.startswith("--") and not name.startswith("--Dash-")
             }
-            # --measure, the one non-color, is the light block's alone.
+            # The non-colors are the light block's alone.
             expected = set(TOKENS) | (NOT_COLORS if key == LIGHT else set())
             assert declared == expected, key
 
@@ -818,6 +827,212 @@ class TestThemeContrast:
         assert contrast(parse_color("#ccc"), white) < AA
         # Black at 10% alpha on white is nearly white, not black.
         assert contrast(parse_color("rgba(0, 0, 0, 0.1)"), white) < 1.5
+
+
+# --- chart colors (#432) ---------------------------------------------------------------
+
+#: The categorical series tokens, in the order a chart takes them.
+CHART_SERIES = ("--chart-1", "--chart-2", "--chart-3")
+
+#: Chart text, on the plot's background (the page): WCAG 1.4.3.
+CHART_TEXT = ("--text", "--text-secondary")
+
+#: What a chart draws that a reader needs to see, on the page: WCAG 1.4.11's 3:1. The
+#: gridlines (``--chart-grid``) are decoration under the marks, so they are exempt.
+CHART_MARKS = (*CHART_SERIES, "--chart-axis", "--chart-reference")
+
+#: The color-vision floor: every pair of series tokens at a CIEDE2000 difference of at
+#: least this, unsimulated and under each simulation, in both palettes.
+CVD_FLOOR = 10.0
+
+#: Machado, Oliveira and Fernandes (2009), severity 1.0, applied to linear sRGB: the
+#: three common dichromacies. The same matrices as the ``dataviz`` skill's validator.
+MACHADO: dict[str, tuple[tuple[float, float, float], ...]] = {
+    "protanopia": (
+        (0.152286, 1.052583, -0.204868),
+        (0.114503, 0.786281, 0.099216),
+        (-0.003882, -0.048116, 1.051998),
+    ),
+    "deuteranopia": (
+        (0.367322, 0.860646, -0.227968),
+        (0.280085, 0.672501, 0.047413),
+        (-0.011820, 0.042940, 0.968881),
+    ),
+    "tritanopia": (
+        (1.255528, -0.076749, -0.178779),
+        (-0.078411, 0.930809, 0.147602),
+        (0.004733, 0.691367, 0.303900),
+    ),
+}
+
+Lab = tuple[float, float, float]
+
+
+def linear_rgb(color: Color) -> tuple[float, float, float]:
+    def channel(c: float) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(c) for c in color[:3])
+    return (r, g, b)
+
+
+def simulate(
+    rgb: tuple[float, float, float], kind: str | None
+) -> tuple[float, float, float]:
+    """``rgb`` (linear) as a reader with ``kind`` sees it, clamped; ``None`` is
+    unsimulated."""
+    if kind is None:
+        return rgb
+    r, g, b = (
+        min(1.0, max(0.0, row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2]))
+        for row in MACHADO[kind]
+    )
+    return (r, g, b)
+
+
+def cielab(rgb: tuple[float, float, float]) -> Lab:
+    """Linear sRGB to CIELAB (D65)."""
+    r, g, b = rgb
+    x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047
+    y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b
+    z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883
+
+    def f(t: float) -> float:
+        delta = 6 / 29
+        return t ** (1 / 3) if t > delta**3 else t / (3 * delta**2) + 4 / 29
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def ciede2000(first: Lab, second: Lab) -> float:
+    """The CIEDE2000 color difference (Sharma, Wu and Dalal 2005), kL = kC = kH = 1."""
+    (l1, a1, b1), (l2, a2, b2) = first, second
+    mean_c = (math.hypot(a1, b1) + math.hypot(a2, b2)) / 2
+    g = 0.5 * (1 - math.sqrt(mean_c**7 / (mean_c**7 + 25**7)))
+    a1p, a2p = (1 + g) * a1, (1 + g) * a2
+    c1p, c2p = math.hypot(a1p, b1), math.hypot(a2p, b2)
+
+    def hue(a: float, b: float) -> float:
+        return 0.0 if a == 0 and b == 0 else math.degrees(math.atan2(b, a)) % 360
+
+    h1p, h2p = hue(a1p, b1), hue(a2p, b2)
+    if c1p * c2p == 0:
+        dhp = 0.0
+    elif abs(h2p - h1p) <= 180:
+        dhp = h2p - h1p
+    elif h2p - h1p > 180:
+        dhp = h2p - h1p - 360
+    else:
+        dhp = h2p - h1p + 360
+    d_l, d_c = l2 - l1, c2p - c1p
+    d_h = 2 * math.sqrt(c1p * c2p) * math.sin(math.radians(dhp / 2))
+    mean_l, mean_cp = (l1 + l2) / 2, (c1p + c2p) / 2
+    if c1p * c2p == 0:
+        mean_h = h1p + h2p
+    elif abs(h1p - h2p) <= 180:
+        mean_h = (h1p + h2p) / 2
+    elif h1p + h2p < 360:
+        mean_h = (h1p + h2p + 360) / 2
+    else:
+        mean_h = (h1p + h2p - 360) / 2
+    t = (
+        1
+        - 0.17 * math.cos(math.radians(mean_h - 30))
+        + 0.24 * math.cos(math.radians(2 * mean_h))
+        + 0.32 * math.cos(math.radians(3 * mean_h + 6))
+        - 0.20 * math.cos(math.radians(4 * mean_h - 63))
+    )
+    rotation = 30 * math.exp(-(((mean_h - 275) / 25) ** 2))
+    r_c = 2 * math.sqrt(mean_cp**7 / (mean_cp**7 + 25**7))
+    s_l = 1 + 0.015 * (mean_l - 50) ** 2 / math.sqrt(20 + (mean_l - 50) ** 2)
+    s_c = 1 + 0.045 * mean_cp
+    s_h = 1 + 0.015 * mean_cp * t
+    r_t = -math.sin(math.radians(2 * rotation)) * r_c
+    return math.sqrt(
+        (d_l / s_l) ** 2
+        + (d_c / s_c) ** 2
+        + (d_h / s_h) ** 2
+        + r_t * (d_c / s_c) * (d_h / s_h)
+    )
+
+
+def separation(first: str, second: str, kind: str | None) -> float:
+    """How far apart two hex colors are, as a reader with ``kind`` sees them."""
+    return ciede2000(
+        cielab(simulate(linear_rgb(parse_color(first)), kind)),
+        cielab(simulate(linear_rgb(parse_color(second)), kind)),
+    )
+
+
+class TestChartColors:
+    """The chart tokens (#432): chart text at 4.5:1 and every mark at 3:1 on the page,
+    and the categorical series apart for common color-vision deficiencies, in both
+    palettes. The method: Machado, Oliveira and Fernandes (2009) at severity 1.0 in
+    linear sRGB, then CIEDE2000 between every pair, at least :data:`CVD_FLOOR`."""
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("token", CHART_TEXT)
+    def test_chart_text_meets_aa_on_the_page(self, theme: str, token: str) -> None:
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        ratio = contrast(parse_color(palette[token]), parse_color(palette["--page"]))
+        assert ratio >= AA, (theme, token, round(ratio, 2))
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("token", CHART_MARKS)
+    def test_each_mark_meets_3_to_1_on_the_page(self, theme: str, token: str) -> None:
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        ratio = contrast(parse_color(palette[token]), parse_color(palette["--page"]))
+        assert ratio >= NON_TEXT, (theme, token, round(ratio, 2))
+
+    def test_every_chart_token_but_the_grid_is_checked(self) -> None:
+        charted = {t for t in TOKENS if t.startswith("--chart-")}
+        assert charted == set(CHART_MARKS) | {"--chart-grid"}
+
+    def test_the_series_tokens_are_hex(self) -> None:
+        # plotly.js and the contrast parser both read hex; a chart token is never rgba.
+        for key in PALETTE_BLOCKS:
+            palette = block(key)
+            for token in TOKENS:
+                if token.startswith("--chart-"):
+                    assert re.fullmatch(r"#[0-9a-f]{6}", palette[token]), (key, token)
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("kind", [None, *MACHADO])
+    def test_the_series_stay_apart(self, theme: str, kind: str | None) -> None:
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        for first, second in itertools.combinations(CHART_SERIES, 2):
+            gap = separation(palette[first], palette[second], kind)
+            assert gap >= CVD_FLOOR, (theme, kind, first, second, round(gap, 2))
+
+    @pytest.mark.parametrize(
+        ("first", "second", "expected"),
+        [
+            # Sharma, Wu and Dalal (2005), Table 1, pairs 1, 7, 17 and 25.
+            ((50.0, 2.6772, -79.7751), (50.0, 0.0, -82.7485), 2.0425),
+            ((50.0, 0.0, 0.0), (50.0, -1.0, 2.0), 2.3669),
+            ((50.0, 2.5, 0.0), (73.0, 25.0, -18.0), 27.1492),
+            ((60.2574, -34.0099, 36.2677), (60.4626, -34.1751, 39.4387), 1.2644),
+        ],
+    )
+    def test_ciede2000_matches_sharmas_reference_pairs(
+        self, first: Lab, second: Lab, expected: float
+    ) -> None:
+        assert ciede2000(first, second) == pytest.approx(expected, abs=1e-4)
+        assert ciede2000(second, first) == pytest.approx(expected, abs=1e-4)
+
+    def test_the_simulation_separates_what_it_should_not(self) -> None:
+        """Non-vacuity: an orange and a green that a protanope and a deuteranope
+        confuse, and a teal and a blue that a tritanope confuses, pass unsimulated and
+        fail the floor under their simulations."""
+        orange, green = "#e8a33d", "#6fbf40"
+        assert separation(orange, green, None) >= CVD_FLOOR
+        assert separation(orange, green, "protanopia") < CVD_FLOOR
+        assert separation(orange, green, "deuteranopia") < CVD_FLOOR
+        teal, blue = "#1f9e89", "#4c8cd8"
+        assert separation(teal, blue, None) >= CVD_FLOOR
+        assert separation(teal, blue, "tritanopia") < CVD_FLOOR
 
 
 # --- the head script -------------------------------------------------------------------
