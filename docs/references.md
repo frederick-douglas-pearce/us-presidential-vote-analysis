@@ -200,7 +200,30 @@ The compact's total moves whenever a state acts. Check one of these the day a po
 
 - Alexander Keyssar, *Why Do We Still Have the Electoral College?* (Harvard University Press,
   2020). The history of reform attempts, including the 1969–70 amendment that passed the House
-  and died in the Senate. Keyssar is quoted in the Kenning article above.
+  and died in the Senate. Keyssar is quoted in the Kenning article above. Not yet read; the
+  interview below is the readable account of its argument.
+  - **Companion interview:** ["Alex Keyssar's *Why Do We Still Have the Electoral
+    College?*"](https://www.hks.harvard.edu/behind-the-book/alex-keyssar-why-do-we-still-have-the-electoral-college),
+    *Behind the Book*, Harvard Kennedy School, Sept. 8, 2020. A video interview hosted by
+    Alessandra Seiter, with a transcript on the page.
+  - **Reports:** Keyssar gives three reasons the system has outlasted every attempt to replace
+    it. *Complexity:* changing one part moves the rest, as when the Twelfth Amendment (1804) fixed
+    the tie problem but entrenched parties. *Partisanship:* dominant state parties adopted
+    winner-take-all to maximize their weight, and hostility to the system sharpened after 1824,
+    when the House chose John Quincy Adams. *Slavery and its legacy:* a national popular vote was
+    proposed in the Senate in 1816 (Abner Lacock of Pennsylvania) and dropped over Southern
+    objections that it would forfeit the electoral weight the Three-Fifths clause gave enslaved
+    people, and after Reconstruction the disenfranchising South kept its full electoral weight.
+    Support for a popular vote after World War II was broad and bipartisan, and in 1969 the House
+    passed an amendment by a supermajority before a filibuster by Southern senators killed it in
+    1970. He finds that small states only occasionally blocked reform, contrary to the usual
+    explanation. The compact then stood at 15 states (it's 18 plus DC now).
+  - **Checked here (2026-11-06):** in this project's record, Jackson led the 1824 electoral
+    vote with 99 to Adams's 84, so Adams took office from second place, as the interview says.
+    The rest is history the record doesn't cover.
+  - **Useful for:** the history behind *222 Votes Away* and any post on 1824 or the 1969–70
+    amendment; the small-states finding is a common assumption the series could test against
+    its own apportionment tables.
 - Michael Geruso, Dean Spears and Ishaana Talesara, [*Inversions in US Presidential Elections:
   1836–2016*](https://www.nber.org/papers/w26247), NBER Working Paper 26247 (2019). An academic
   treatment of the comparison this project makes: how often the Electoral College and popular
