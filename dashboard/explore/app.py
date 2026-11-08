@@ -14,12 +14,13 @@ in the browser, the theme choice and the site navigation's current-page marker:
   is. A matched path gets a canonical link built from the page's path template and its
   variables, with no query string, and an ``og:url`` that adds the query normalized by
   the page's own ``query=`` parser, so a shared filtered card reopens the filtered view.
-  A path no page matches, one a page's ``validate=`` rejects from the already-cached
-  source it names (a template source resolved from the cached index, #279), one whose
-  percent-escapes change it when decoded, or Dash's custom 404 page, answers 404 with
-  ``noindex`` and neither tag. A source not cached yet counts as matched: the index
-  never waits on the API (D071(g)). The page's card tags are built here, without
-  Dash's ``twitter:url``, which is the raw request URL.
+  A path is matched decoded once, as Dash's router matches it (:func:`router_key`,
+  D089), so a percent-encoded path resolves as the path it spells. A path no page
+  matches, one a page's ``validate=`` rejects from the already-cached source it names
+  (a template source resolved from the cached index, #279), or Dash's custom 404 page,
+  answers 404 with ``noindex`` and neither tag. A source not cached yet counts as
+  matched: the index never waits on the API (D071(g)). The page's card tags are built
+  here, without Dash's ``twitter:url``, which is the raw request URL.
   The index never decides what a render may fetch: a templated page validates what
   its layout receives, through ``api.accepted``.
 - **A title that names only what the index has checked** (#325, D083). :func:`resolve`
@@ -35,7 +36,11 @@ in the browser, the theme choice and the site navigation's current-page marker:
   page's path variables, so ``/election/1824?year=1872`` would render 1872 under a
   canonical link naming 1824. Before the router runs, :func:`strip_path_variables`
   drops from its routing request every query key named after a path variable of the
-  page the path matches, so the render always matches the canonical link.
+  page the path matches, so the render always matches the canonical link. Two ways
+  around it are closed (D089): :func:`refuse_encoded_dispatch` answers 415 to a
+  content-encoded callback request, whose body the strip cannot read, and the app
+  turns Dash's MCP server off (``enable_mcp=False``), which would run callbacks through
+  a route of its own.
 - **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
   thread, and only then starts the refresher, so the instance takes traffic with a
   filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
@@ -74,7 +79,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, unquote_plus, urlsplit
+from urllib.parse import quote, unquote, unquote_plus
 
 import dash
 import flask
@@ -251,44 +256,17 @@ def _not_found(page: Mapping[str, Any] | None) -> Resolution:
     )
 
 
-def raw_path(environ: dict[str, Any]) -> str | None:
-    """The request path as the client sent it, before percent-decoding, if known.
-
-    gunicorn (``app.yaml``'s entrypoint) keeps the request target in ``RAW_URI``;
-    other servers may set ``REQUEST_URI``. Either carries the query string, and may be
-    in absolute form. A fragment is dropped, as gunicorn drops it from ``PATH_INFO``,
-    and the result is normalized as Werkzeug normalizes ``request.path`` (one leading
-    slash), so only a percent-escape can make the two differ.
-    """
-    sent = environ.get("RAW_URI") or environ.get("REQUEST_URI")
-    if not isinstance(sent, str) or not sent:
-        return None
-    target = sent.partition("#")[0].partition("?")[0]
-    if not target.startswith("/"):
-        target = urlsplit(target).path
-    return "/" + target.lstrip("/")
-
-
-def resolve(
-    path: str, query: str, snapshot: api.Snapshot | None, raw: str | None = None
-) -> Resolution:
+def resolve(path: str, query: str, snapshot: api.Snapshot | None) -> Resolution:
     """Resolve a request path against the page registry, with Dash's router matcher.
 
-    ``path`` is the decoded request path and ``raw`` the path as sent, when known.
-    Dash's router matches the browser's still-encoded ``location.pathname``, so a path
-    that decoding changes would match differently there; no page path needs an escape,
-    so such a path is junk and is not found. Its title is the not-found state of the
-    page the raw path matches, else the custom-404 page's: Dash's matcher passes a
-    ``%``, and that page's ``validate`` judge refuses it, so the router renders that
-    page's not-found state once its source is read (with the source cold and the API
-    down it renders the degraded state instead, under this 404's title: accepted,
-    D083). The raw path only chooses which constant, and its variables reach no
-    title. ``snapshot`` is read once by the caller and never waited on: a page's
-    ``validate`` source missing from it counts as matched, never as rejected, and the
-    title then names no value.
+    ``path`` is the request path as Werkzeug decodes it (``request.path``), and is
+    never decoded again: Dash's router matches the browser's ``location.pathname``
+    decoded once (:func:`router_key`), which with leading and trailing slashes
+    stripped is the same string, so a percent-encoded path resolves as the path it
+    spells (D089). ``snapshot`` is read once by the caller and never waited on: a
+    page's ``validate`` source missing from it counts as matched, never as rejected,
+    and the title then names no value.
     """
-    if raw is not None and raw != path:
-        return _not_found(_path_to_page(raw.strip("/"))[0])
     page, path_vars = _path_to_page(path.strip("/"))
     # Dash's own custom-404 convention: its router renders this module for a path no
     # page matches, and it must not be served as a page of its own.
@@ -322,9 +300,12 @@ def resolve(
 
 
 def card_tags(resolution: Resolution, root: str) -> list[dict[str, str]]:
-    """The page's card tags, as Dash 4.4.1's ``_page_meta_tags`` builds them but from
-    the resolution's title and description, and without its ``twitter:url`` (the raw
-    request URL). ``root`` is the request's URL root, for an assets image."""
+    """The page's card tags, as Dash's ``_page_meta_tags`` builds them for a page but
+    from the resolution's title and description, and without its ``twitter:url`` (the
+    raw request URL). ``root`` is the request's URL root, for an assets image. Checked
+    against Dash 4.5.0, whose ``image`` may also be an http(s) URL and which falls back
+    to the app's own ``description`` and ``image``: no page and not the app sets
+    either, so the tags are the same (#456)."""
     page = resolution.page
     image = page.get("image", "")
     if image:
@@ -578,7 +559,6 @@ class ExploreDash(dash.Dash):
             flask.request.path,
             flask.request.query_string.decode("utf-8", "replace"),
             api.CLIENT.snapshot,
-            raw_path(flask.request.environ),
         )
         cards = card_tags(resolution, flask.request.url_root)
         if resolution.found:
@@ -637,6 +617,9 @@ app = ExploreDash(
     use_pages=True,
     compress=True,
     suppress_callback_exceptions=True,
+    # Dash's MCP server runs callbacks through a route of its own, which the routing
+    # hook never sees; the argument overrides DASH_MCP_ENABLED (D089).
+    enable_mcp=False,
     include_pages_meta=False,  # rebuilt in ExploreDash.index, without twitter:url
     title=SITE_TITLE,
     update_title=None,  # type: ignore[arg-type]  # Dash documents None: no "Updating…"
@@ -675,10 +658,12 @@ NAV_TABLE: tuple[NavEntry, ...] = tuple(
 #: Location, so it follows the pathname the router routes on, in the same dispatch: on
 #: the first load (before the Location reports a pathname it reads
 #: ``window.location.pathname``), after a client-side navigation and after back and
-#: forward. It matches the pathname as ``_path_to_page`` does with the app at the root
-#: (enforced above), against :data:`NAV_TABLE`: leading and trailing slashes stripped,
-#: which is all ``strip_relative_path`` strips there, never decoded (the router
-#: matches the still-encoded pathname), each page in order by its template's pattern,
+#: forward. It matches the pathname as the router does (:func:`router_key`) with the
+#: app at the root (enforced above), against :data:`NAV_TABLE`: decoded once, each run
+#: of percent-escapes as UTF-8 with replacement (``TextDecoder``, never
+#: ``decodeURIComponent``, which throws on a malformed escape), as Python's ``unquote``
+#: decodes it (D089), then leading and trailing slashes stripped, which is all
+#: ``strip_relative_path`` strips there; each page in order by its template's pattern,
 #: then its path, the first match winning; a pathname no page matches marks nothing.
 #: ``dcc.Link`` renders no ``aria-*`` attribute, so the callback writes
 #: ``aria-current`` onto the marked link itself and removes it from the others (React
@@ -690,6 +675,11 @@ NAV_CALLBACK = (
     f" var table = {json.dumps([entry.__dict__ for entry in NAV_TABLE])};"
     f" var ids = {json.dumps(components.NAV_LINK_IDS)};"
     ' var path = typeof pathname === "string" ? pathname : window.location.pathname;'
+    " path = path.replace(/(?:%[0-9A-Fa-f]{2})+/g, function (run) {"
+    " var bytes = new Uint8Array(run.length / 3);"
+    " for (var b = 0; b < bytes.length; b++) {"
+    " bytes[b] = parseInt(run.substr(b * 3 + 1, 2), 16); }"
+    " return new TextDecoder().decode(bytes); });"
     ' path = path.replace(/^\\/+|\\/+$/g, "");'
     " var hit = null;"
     " for (var i = 0; i < table.length && hit === null; i++) {"
@@ -769,10 +759,21 @@ ROUTER_OUTPUT = f"..{_ID_CONTENT}.children...{_ID_STORE}.data.."
 DISPATCH_ENDPOINT = app.config.routes_pathname_prefix + "_dash-update-component"
 
 
+def router_key(pathname: str) -> str:
+    """The string Dash's Pages router matches ``pathname`` by: decoded once with
+    ``unquote`` (UTF-8, errors replaced; ``+`` kept), then stripped as the router
+    strips (Dash 4.5.0, plotly/dash#4074; D089). Pinned in ``TestDashPrivates``.
+    Raises ``dash.exceptions.UnsupportedRelativePath`` for a decoded path that does
+    not start with ``/``, as the router's own strip does."""
+    return str(app.strip_relative_path(unquote(pathname)))
+
+
 def strip_path_variables(pathname: str, search: str) -> str:
     """``search`` without any key named after a path variable of ``pathname``'s page.
 
-    The page is the one Dash's router matches, by its own matcher and strip. Keys are
+    The page is the one Dash's router matches, by its own matcher on
+    :func:`router_key`; a pathname the router's strip refuses is left alone, for Dash
+    to refuse. Keys are
     read as the router's ``parse_qs(keep_blank_values=True)`` reads them: the text
     after ``?``, split on ``&`` only, each part's key everything before its first
     ``=`` (all of it, with no ``=``), ``+`` and percent-escapes decoded. So
@@ -781,7 +782,11 @@ def strip_path_variables(pathname: str, search: str) -> str:
     """
     if not search.startswith("?"):
         return search
-    _, path_vars = _path_to_page(app.strip_relative_path(pathname))
+    try:
+        key = router_key(pathname)
+    except dash.exceptions.UnsupportedRelativePath:
+        return search
+    _, path_vars = _path_to_page(key)
     if not path_vars:
         return search
     kept = [
@@ -819,6 +824,28 @@ def _strip_routing_request() -> None:
         query["value"] = strip_path_variables(pathname, search)
 
 
+def refuse_encoded_dispatch() -> werkzeug.Response | None:
+    """Refuse a callback request whose body is content-encoded (D089, #456).
+
+    Dash 4.5.0's dispatch decompresses a body sent with ``Content-Encoding: gzip``
+    (plotly/dash#3925) whatever the callback, while :func:`_strip_routing_request`
+    reads the body with ``get_json``, which cannot read it: a compressed routing
+    request would reach the router with its query unfiltered, and a small one can
+    expand to Dash's 64 MB cap on the one instance. No callback in this app sets
+    ``compress_payload``, so Dash's own client never sends one; the request answers
+    415 (Werkzeug's default body) before Dash reads it. Any encoding but identity is
+    refused, so a later Dash accepting another one is refused too.
+    """
+    request = flask.request
+    if request.method != "POST" or request.endpoint != DISPATCH_ENDPOINT:
+        return None
+    encoding = request.headers.get("Content-Encoding", "").strip().lower()
+    if encoding in ("", "identity"):
+        return None
+    # Werkzeug's default body, as the DependencyException handler uses NotFound's.
+    return werkzeug.exceptions.UnsupportedMediaType().get_response()
+
+
 def redirect_target(host: str, path: str, query: str) -> str | None:
     """Where a request should be sent instead, or ``None`` to serve it here."""
     name = host.split(":", 1)[0].lower().rstrip(".")
@@ -840,6 +867,9 @@ def _before_request() -> werkzeug.Response | None:
         return flask.redirect(target, code=301)
     if flask.request.path != WARMUP_PATH:  # warmup starts it after its own refresh
         api.CLIENT.ensure_refresher()
+    refused = refuse_encoded_dispatch()
+    if refused is not None:
+        return refused
     _strip_routing_request()
     return None
 

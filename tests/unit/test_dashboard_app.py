@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import copy
+import gzip
 import html
 import html.parser
 import http.client
@@ -532,14 +533,9 @@ class Head(html.parser.HTMLParser):
         return self.one("meta", "name", "robots", "content") == "noindex"
 
 
-def get(path: str, *, unencoded: bool = False, **kwargs: Any) -> tuple[int, Head, str]:
-    """GET ``path``. The test client reports the target as sent (``RAW_URI``), escapes
-    included; ``unencoded`` reports it decoded instead, as a client sending raw bytes
-    would, so the index's encoded-path check passes it."""
-    if unencoded:
-        sent, _, query = path.partition("?")
-        raw = urllib.parse.unquote(sent) + (f"?{query}" if query else "")
-        kwargs["environ_overrides"] = {"RAW_URI": raw, "REQUEST_URI": raw}
+def get(path: str, **kwargs: Any) -> tuple[int, Head, str]:
+    """GET ``path``. The test client decodes the path's escapes into ``PATH_INFO``,
+    as gunicorn does, so the index sees ``request.path`` decoded (D089)."""
     response = appmod.server.test_client().get(path, **kwargs)
     body = response.get_data(as_text=True)
     return response.status_code, Head(body), body
@@ -630,7 +626,7 @@ class TestCanonical:
         self, register: Callable[..., dict[str, Any]], year: str
     ) -> None:
         register(**YEAR_PAGE)  # cold: every well-formed variable counts as matched
-        _, head, _ = get(f"/fake-election/{year}", unencoded=True)
+        _, head, _ = get(f"/fake-election/{year}")
         assert head.canonical is not None
         path = urllib.parse.unquote(urllib.parse.urlsplit(head.canonical).path)
         page, path_vars = dash._pages._path_to_page(path.strip("/"))
@@ -809,7 +805,7 @@ def test_hostile_text_where_a_canonical_is_still_emitted(
     register(**YEAR_PAGE, query=lambda params: [("state", str(params.get("state")))])
     quoted = urllib.parse.quote(HOSTILE, safe="")
     for path in (f"/fake-election/{quoted}", f"/fake-election/1860?state={quoted}"):
-        status, head, body = get(path, unencoded=True)
+        status, head, body = get(path)
         assert status == 200, path
         assert head.canonical is not None and head.og_url is not None
         assert_no_markup(body)
@@ -853,7 +849,7 @@ def test_card_tags_and_title_escape_a_callable_title_that_echoes_the_path(
     )
     cached_client(monkeypatch)
     quoted = urllib.parse.quote(HOSTILE, safe="")
-    status, head, body = get(f"/fake-election/{quoted}", unencoded=True)
+    status, head, body = get(f"/fake-election/{quoted}")
     assert status == 200
     assert_no_markup(body)
     # Not vacuous: the hostile text is in every title, as text.
@@ -873,89 +869,138 @@ def test_tag_escapes_every_character_that_could_leave_an_attribute() -> None:
     assert tag == '<meta content="&quot;&#x27;&lt;&gt;&amp;">'
 
 
-#: Paths whose percent-escapes change them when decoded. Dash's router matches the
-#: browser's still-encoded ``location.pathname``, so on each one the decoded path the
-#: index sees would match differently from the page the router renders.
-ENCODED_PATHS = (
-    "/fake-election%2F1824",
-    "/%2F",
-    "/fake-election/%2F",
-    "/fake-election/182%34",
+#: Dash's router decodes a pathname once with ``unquote``, then strips and matches it
+#: (Dash 4.5.0, plotly/dash#4074; D089): one literal table, which the router, the hook
+#: (``appmod.router_key``) and the index each answer to. Each row is a pathname a
+#: browser can send, the key the router matches it by, and the ``year`` a page at
+#: ``/fake-election/<year>`` receives (``None``: that page is not matched). The comment
+#: names the change in Dash the row fails on.
+DECODED_PATHS: tuple[tuple[str, str, str | None], ...] = (
+    ("/fake-election/182%34", "fake-election/1824", "1824"),  # stops decoding
+    ("/fake-election/182%2534", "fake-election/182%34", "182%34"),  # decodes twice
+    ("/fake-election/%252F", "fake-election/%2F", "%2F"),  # ... or matches a page then
+    ("/%2Ffake-election%2F1824%2F", "fake-election/1824", "1824"),  # strips first
+    ("/fake-election%2F1824", "fake-election/1824", "1824"),  # decodes variables only
+    ("/%66ake-election/1824", "fake-election/1824", "1824"),  # ... after matching
+    ("/fake-election/18+24", "fake-election/18+24", "18+24"),  # unquote_plus
+    ("/fake-election/%FF", "fake-election/\ufffd", "\ufffd"),  # strict, or latin-1
+    ("/fake-election/18%0A24", "fake-election/18\n24", "18\n24"),  # drops DOTALL
+    ("/%2F", "", None),
+    ("/fake-election/%2F", "fake-election", None),
 )
 
 
-class TestEncodedPath:
-    """Status and render agree on a path decoding would change (D073)."""
+def echo_year_page(register: Callable[..., dict[str, Any]]) -> list[Any]:
+    """Register a page at ``/fake-election/<year>`` that records the ``year`` its
+    layout receives, and return the record."""
+    seen: list[Any] = []
 
-    @pytest.mark.parametrize("path", ENCODED_PATHS)
-    def test_a_path_decoding_changes_is_not_found_and_not_rendered(
+    def echo(year: Any = None, **_query: Any) -> Any:
+        seen.append(year)
+        return dash.html.P("x", id="fake-echo")
+
+    register("fake_echo", path_template="/fake-election/<year>", layout=echo)
+    return seen
+
+
+def path_to_page_calls(
+    monkeypatch: pytest.MonkeyPatch, owner: Any
+) -> list[tuple[str, dict[str, str] | None]]:
+    """Record every call of ``owner._path_to_page`` from now on: the key it was given
+    and the path variables it returned."""
+    calls: list[tuple[str, dict[str, str] | None]] = []
+    real = owner._path_to_page
+
+    def spy(key: str) -> Any:
+        page, path_vars = real(key)
+        calls.append((key, path_vars))
+        return page, path_vars
+
+    monkeypatch.setattr(owner, "_path_to_page", spy)
+    return calls
+
+
+def keys_of(calls: list[tuple[str, dict[str, str] | None]]) -> list[str]:
+    return [key for key, _ in calls]
+
+
+class TestEncodedPath:
+    """Status and render agree on a percent-encoded path: the index and the router both
+    read it decoded once, as the path it spells (D089, which amends D073)."""
+
+    @pytest.mark.parametrize(
+        ("pathname", "key", "_year"),
+        [row for row in DECODED_PATHS if "\n" not in row[1]],
+    )
+    def test_the_index_matches_the_key_the_router_matches(
+        self, monkeypatch: pytest.MonkeyPatch, pathname: str, key: str, _year: Any
+    ) -> None:
+        calls = path_to_page_calls(monkeypatch, appmod)
+        get(pathname)
+        assert keys_of(calls)[:1] == [key]
+
+    def test_a_decoded_newline_never_reaches_the_index(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Flask's catch-all path converter does not match a newline, so the document
+        # request answers Flask's own 404 and the app, its router included, never
+        # loads: there is no render to disagree with.
+        calls = path_to_page_calls(monkeypatch, appmod)
+        status, _, body = get("/fake-election/18%0A24")
+        assert status == 404 and calls == []
+        assert "<title>404 Not Found</title>" in body
+
+    @pytest.mark.parametrize(
+        ("pathname", "status", "canonical", "routed"),
+        [
+            ("/fake-election/182%34", 200, "/fake-election/1824", "fake-year"),
+            ("/fake-election%2F1824", 200, "/fake-election/1824", "fake-year"),
+            ("/%2Ffake-election%2F1824%2F", 200, "/fake-election/1824", "fake-year"),
+            # Decoded once, the year is "182%34": refused, never decoded again.
+            ("/fake-election/182%2534", 404, None, "fake-year-missing"),
+            ("/fake-election/18+24", 404, None, "fake-year-missing"),
+            ("/fake-election/%FF", 404, None, "fake-year-missing"),
+            ("/%2F", 200, "/", "coverage"),  # the home page's success marker
+            ("/fake-election/%2F", 404, None, "page-not-found"),
+        ],
+    )
+    def test_status_and_render_agree(
         self,
         register: Callable[..., dict[str, Any]],
         monkeypatch: pytest.MonkeyPatch,
-        path: str,
+        pathname: str,
+        status: int,
+        canonical: str | None,
+        routed: str,
     ) -> None:
         register(**YEAR_PAGE)
         _, calls, _ = cached_client(monkeypatch)
-        TestNotFound.assert_not_found(path)  # the test client sends it encoded
-        response = route(path)  # what the browser's router is handed
-        assert response.status_code == 200
-        assert "fake-year" not in routed_ids(response)
-        assert calls == []
+        got, head, _ = get(pathname)
+        assert (got, head.canonical) == (
+            status,
+            None if canonical is None else url(canonical),
+        )
+        assert head.noindex is (status == 404)
+        ids = routed_ids(route(pathname))
+        assert routed in ids, ids
+        if routed != "fake-year":
+            assert "fake-year" not in ids
+            assert calls == []  # a refused value fills nothing
 
-    def test_a_leading_double_slash_is_not_an_escape(
+    def test_a_leading_double_slash_matches_as_the_router_strips_it(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # gunicorn hands //fake-election/1824 over unnormalized, in RAW_URI and PATH_INFO
-        # alike; Werkzeug's request.path drops the extra slash, and Dash's router
-        # renders the page. (The test client would read //fake-election as a host.)
+        # gunicorn hands //fake-election/1824 over unnormalized in PATH_INFO; Werkzeug's
+        # request.path drops the extra slash, and Dash's router strips it. (The test
+        # client would read //fake-election as a host.)
         register(**YEAR_PAGE)
         cached_client(monkeypatch)
         status, head, _ = get(
             "/fake-election/1824",
-            environ_overrides={
-                "PATH_INFO": "//fake-election/1824",
-                "RAW_URI": "//fake-election/1824",
-                "REQUEST_URI": "",
-            },
+            environ_overrides={"PATH_INFO": "//fake-election/1824"},
         )
         assert (status, head.canonical) == (200, url("/fake-election/1824"))
         assert "fake-year" in routed_ids(route("//fake-election/1824"))
-
-    def test_without_a_raw_target_the_decoded_path_is_used(
-        self, register: Callable[..., dict[str, Any]]
-    ) -> None:
-        # The twin: the same request with no RAW_URI or REQUEST_URI is matched, so the
-        # 404 above comes from the raw-path comparison and nothing else.
-        register(**YEAR_PAGE)
-        status, head, _ = get(
-            "/fake-election%2F1824",
-            environ_overrides={"RAW_URI": "", "REQUEST_URI": ""},
-        )
-        assert (status, head.canonical) == (200, url("/fake-election/1824"))
-
-    @pytest.mark.parametrize(
-        ("environ", "expected"),
-        [
-            ({"RAW_URI": "/fake-election/1824?state=OH"}, "/fake-election/1824"),
-            ({"RAW_URI": "/a%2Fb"}, "/a%2Fb"),
-            ({"REQUEST_URI": "/x?y"}, "/x"),
-            ({"RAW_URI": "https://explore.example/x?y"}, "/x"),
-            (
-                {"RAW_URI": "//fake-election/1824"},
-                "/fake-election/1824",
-            ),  # as request.path is
-            ({"RAW_URI": "https://explore.example"}, "/"),
-            (
-                {"RAW_URI": "/fake-election/1824#x"},
-                "/fake-election/1824",
-            ),  # as gunicorn drops it
-            ({"RAW_URI": "/fake-election/1824?a=1#x"}, "/fake-election/1824"),
-            ({"RAW_URI": "", "REQUEST_URI": ""}, None),
-            ({}, None),
-        ],
-    )
-    def test_raw_path(self, environ: dict[str, Any], expected: str | None) -> None:
-        assert appmod.raw_path(environ) == expected
 
 
 class TestNotFoundPage:
@@ -1102,10 +1147,7 @@ class TestNotFoundTitle:
         [
             "/no-such-view",
             "/election",
-            "/%2F",
-            # Raw, it matches no page; decoded, it is /election/1825. The router
-            # matches the raw path, so the title must come from the raw match.
-            "/election%2F1825",
+            "/no-such-%76iew",  # decoded, still no page
         ],
     )
     def test_a_path_no_page_matches_reads_page_not_found(
@@ -1126,19 +1168,40 @@ class TestNotFoundTitle:
         assert store_title(routed) == not_found.title
         assert [f"{h} — {SITE_TITLE}" for h in h1_text(routed)] == [not_found.title]
 
-    def test_an_encoded_path_takes_the_heading_of_the_page_the_router_renders(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("encoded", "plain"),
+        [
+            ("/election%2F1825", "/election/1825"),
+            ("/election/18%32%35", "/election/1825"),
+            ("/election/18%32%34", "/election/1824"),
+            ("/%65lections", "/elections"),
+        ],
+    )
+    def test_an_encoded_path_reads_as_the_path_it_spells(
+        self, monkeypatch: pytest.MonkeyPatch, encoded: str, plain: str
     ) -> None:
-        """Dash's router matches the encoded path, so /election/18%32%34 renders the
-        election page's not-found state; its title says so, from a constant."""
-        election = dash.page_registry["pages.election"]
+        """Dash's router decodes the pathname before it matches (D089), so an encoded
+        path gets the status, title and render of the path it spells."""
         cached_client(monkeypatch)
-        status, head, body = get("/election/18%32%34")
-        assert status == 404
-        assert page_title(body) == election["not_found"].title
-        routed = route("/election/18%32%34")
-        assert "election-not-found" in routed_ids(routed)
-        assert store_title(routed) == election["not_found"].title
+        seen = []
+        for path in (encoded, plain):
+            status, head, body = get(path)
+            routed = route(path)
+            seen.append(
+                (
+                    status,
+                    head.canonical,
+                    page_title(body),
+                    store_title(routed),
+                    routed_ids(routed),
+                )
+            )
+        assert seen[0] == seen[1]
+        if plain == "/election/1825":  # not vacuous: the not-found state is reached
+            election = dash.page_registry["pages.election"]
+            assert seen[0][0] == 404
+            assert seen[0][2] == election["not_found"].title
+            assert "election-not-found" in seen[0][4]
 
     @pytest.mark.parametrize("value", [None, "", ["1824"], "<script>", HOSTILE, "1825"])
     def test_the_wrapped_title_is_total_and_never_names_a_refused_value(
@@ -1458,10 +1521,79 @@ class TestDashPrivates:
             "fake-election": (None, None),
             "fake-electionx/1860": (None, None),
             "no-such-view": (None, None),
+            # Dash 4.5.0 matches with DOTALL (plotly/dash#4075): a decoded newline.
+            "fake-election/18\n24": ("fake_year", {"year": "18\n24"}),
         }
         for path, (module, path_vars) in cases.items():
             page, found = _path_to_page(path)
             assert (page.get("module"), found) == (module, path_vars), path
+
+    @pytest.mark.parametrize(("pathname", "key", "year"), DECODED_PATHS)
+    def test_the_router_decodes_the_pathname_once_before_it_strips_and_matches(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        pathname: str,
+        key: str,
+        year: str | None,
+    ) -> None:
+        # Observed in a real routing request carrying a query that names the path
+        # variable: the key Dash's router hands its matcher, the key app.py's hook
+        # matched by, and the variable the layout receives (the path's, so the hook
+        # stripped by the router's key). The site navigation's model follows
+        # router_key, which must name the same key.
+        seen = echo_year_page(register)
+        router = path_to_page_calls(monkeypatch, dash.dash)
+        hook = path_to_page_calls(monkeypatch, appmod)
+        assert route(pathname, "?year=1860").status_code == 200
+        assert keys_of(router) == [key]
+        assert keys_of(hook) == [key]
+        assert seen == ([] if year is None else [year])
+        assert appmod.router_key(pathname) == key
+
+    def test_dash_decompresses_a_callback_body_only_by_its_content_encoding(
+        self,
+    ) -> None:
+        # app.py refuses any Content-Encoding on the dispatch endpoint because this is
+        # the one way Dash 4.5.0 reads a body other than get_json() (#3925, D089); a
+        # Dash that decompressed on another signal would get past the refusal.
+        from dash.backends import _flask
+
+        source = Path(_flask.__file__).read_text(encoding="utf-8")
+        assert source.count("decompress_payload(") == 1
+        assert (
+            "                decompress_payload(request.data)\n"
+            '                if "gzip" in request.headers.get("Content-Encoding", "")\n'
+            "                else request.get_json()\n"
+        ) in source
+
+    def test_no_callback_asks_the_client_to_compress_its_request(self) -> None:
+        appmod.server.test_client().get("/")  # Dash registers its router on a request
+        assert appmod.ROUTER_OUTPUT in appmod.app.callback_map
+        specs = [*appmod.app.callback_map.values(), *appmod.app._callback_list]
+        # The key is Dash's own name for it, in both collections: a renamed key would
+        # otherwise read as "not set" here while the client compressed.
+        assert all("compress_payload" in spec for spec in specs)
+        assert not any(spec["compress_payload"] for spec in specs)
+
+    def test_the_mcp_server_is_off_whatever_the_environment_says(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Dash's MCP server runs callbacks through a route of its own, which the
+        # routing hook never sees (D089). app.py passes enable_mcp=False, and a
+        # constructor argument beats DASH_MCP_ENABLED in Dash's config.
+        assert appmod.app._enable_mcp is False
+        mcp_path = appmod.app._mcp_path
+        assert mcp_path and all(
+            mcp_path.strip("/") not in rule.rule
+            for rule in appmod.server.url_map.iter_rules()
+        )
+        source = Path(appmod.__file__).read_text(encoding="utf-8")
+        assert "    enable_mcp=False,\n" in source
+        monkeypatch.setenv("DASH_MCP_ENABLED", "true")
+        assert dash._configs.get_combined_config("mcp_enabled", False, False) is False
+        # Not vacuous: with no argument, the variable would turn it on.
+        assert dash._configs.get_combined_config("mcp_enabled", None, False) is True
 
     def test_the_index_strips_the_path_as_the_router_does(self) -> None:
         for path in ("/", "/election/1860/", "//a//"):
@@ -2099,6 +2231,74 @@ def conflict_problems(
     return problems
 
 
+def encoded_route(
+    pathname: str, search: str, encoding: str = "gzip", body: bytes | None = None
+) -> Any:
+    """A routing POST whose JSON body is gzip-compressed and sent with
+    ``Content-Encoding: encoding``."""
+    payload = json.dumps(conflicting_route(pathname, search)).encode()
+    return appmod.server.test_client().post(
+        "/_dash-update-component",
+        data=gzip.compress(payload) if body is None else body,
+        headers={"Content-Encoding": encoding, "Content-Type": "application/json"},
+    )
+
+
+class TestEncodedDispatch:
+    """#456, D089: Dash 4.5.0 decompresses a gzip callback body (plotly/dash#3925)
+    that the routing hook cannot read, so the dispatch endpoint refuses any encoded
+    body before Dash reads it."""
+
+    @pytest.mark.parametrize(
+        "encoding", ["gzip", "GZIP", " gzip ", "x-gzip", "deflate", "br", "identity, gzip"]
+    )
+    def test_an_encoded_routing_request_is_refused(
+        self, register: Callable[..., dict[str, Any]], encoding: str
+    ) -> None:
+        seen = echo_year_page(register)
+        response = encoded_route("/fake-election/1824", "?year=1860", encoding)
+        assert response.status_code == 415
+        # Werkzeug's default body: no text of the app's own.
+        default = werkzeug.exceptions.UnsupportedMediaType().get_response()
+        assert response.get_data() == default.get_data()
+        assert seen == []
+
+    def test_without_the_refusal_dash_routes_it_with_the_querys_value(
+        self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The control: the bypass is real on this Dash. The hook cannot read the
+        # compressed body, so the query's year reaches the layout.
+        monkeypatch.setattr(appmod, "refuse_encoded_dispatch", lambda: None)
+        seen = echo_year_page(register)
+        response = encoded_route("/fake-election/1824", "?year=1860")
+        assert response.status_code == 200
+        assert seen == ["1860"]
+
+    @pytest.mark.parametrize("encoding", ["", "identity", " Identity "])
+    def test_an_identity_body_is_routed_and_stripped(
+        self, register: Callable[..., dict[str, Any]], encoding: str
+    ) -> None:
+        seen = echo_year_page(register)
+        payload = json.dumps(conflicting_route("/fake-election/1824", "?year=1860"))
+        response = encoded_route(
+            "/fake-election/1824", "?year=1860", encoding, payload.encode()
+        )
+        assert response.status_code == 200
+        assert seen == ["1824"]
+
+    def test_only_the_dispatch_endpoint_is_refused(self) -> None:
+        # An encoded POST to any other endpoint gets what it would get anyway (the
+        # index takes no POST: 405), so a refusal that dropped its endpoint check, and
+        # refused every encoded POST, would answer 415 here.
+        client = appmod.server.test_client()
+        response = client.post(
+            "/",
+            data=gzip.compress(b"{}"),
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+        )
+        assert response.status_code == 405
+
+
 class TestPathVariableWins:
     def test_every_registered_templated_page_renders_the_paths_value(
         self, register: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch
@@ -2149,20 +2349,66 @@ class TestPathVariableWins:
             ("/no-such-view", "?year=1860", "?year=1860"),
             ("/state/GA", "?usps=TX&year=1860", "?year=1860"),
             ("/candidate/andrew-jackson", "?slug=x&state=GA", "?state=GA"),
+            # Matched decoded, as the router matches (D089).
+            ("/election%2F1824", "?year=1860", "?"),
+            ("/%65lection/1824", "?year=1860&state=OH", "?state=OH"),
         ],
     )
     def test_the_strip_reads_keys_as_the_router_does(
-        self, pathname: str, search: str, expected: str
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        pathname: str,
+        search: str,
+        expected: str,
     ) -> None:
         stripped = appmod.strip_path_variables(pathname, search)
         assert stripped == expected
-        # Whatever the router would have read, minus the path variables, and no more.
-        _, path_vars = _path_to_page(appmod.app.strip_relative_path(pathname))
-        names = set(path_vars or ())
+        # Whatever the router would have read, minus the path variables, and no more:
+        # the router's own match, observed in a real routing request with no query,
+        # never re-implemented here (#456).
+        calls = path_to_page_calls(monkeypatch, dash.dash)
+        route(pathname)
+        assert len(calls) == 1
+        names = set(calls[0][1] or ())
         before = _parse_query_string(search)
         assert _parse_query_string(stripped) == {
             k: v for k, v in before.items() if k not in names
         }
+
+    @pytest.mark.parametrize(
+        ("pathname", "year"),
+        [
+            ("/fake-election%2F1824", "1824"),
+            ("/%2Ffake-election/1824", "1824"),
+            ("/%66ake-election/1824", "1824"),
+            ("/fake-election/182%34", "1824"),
+            ("/fake-election/182%2534", "182%34"),
+        ],
+    )
+    @pytest.mark.parametrize("hook", [True, False])
+    def test_an_encoded_pathname_still_hands_the_layout_the_paths_value(
+        self,
+        register: Callable[..., dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        pathname: str,
+        year: str,
+        hook: bool,
+    ) -> None:
+        # The hook matches the pathname as the router does, decoded once (D089); with
+        # the hook off, each case hands the layout the query's value, so each one
+        # exercises the hook.
+        if not hook:
+            without_the_hook(monkeypatch)
+        seen = echo_year_page(register)
+        route(pathname, "?year=1860")
+        assert seen == [year if hook else "1860"]
+
+    def test_a_pathname_the_routers_strip_refuses_is_left_for_dash(self) -> None:
+        # Decoded, it does not start with "/": the router's strip raises, and the hook
+        # leaves the request alone rather than raising first.
+        with pytest.raises(dash.exceptions.UnsupportedRelativePath):
+            appmod.router_key("election/1824")
+        assert appmod.strip_path_variables("election/1824", "?year=1") == "?year=1"
 
     @pytest.mark.parametrize(
         ("method", "path", "body"),

@@ -6053,3 +6053,95 @@ cause is its plotly/dash#3881 (callback-returned children no longer remounted on
 **Related:** D070, D082, D087, #432, #433, #436, #452, #455, #456.
 
 ---
+
+## D089: On Dash 4.5.0 a dashboard path is matched decoded, as Dash's router now matches it; a content-encoded callback request is refused
+
+**Date:** 2026-11-07
+**Builds on:** D073, D081, D083, D086, D088 · **Amends:** D073's "Matching is Dash's own" bullet
+(the refusal of a path whose escapes change it, and its post-deploy check); D081's matching of the
+routing request's pathname and its list of Dash internals; D083's title rule for a percent-encoded
+path; D086's "never decoded"; D088's lazy-chunk residual · **Decided by:** the owner, approving the
+architect's rulings at #456's plan gate (2026-11-07: decode at all three sites; refuse a compressed
+routing request in this change; `dash[compress]>=4.5`; no pointers added to the amended entries);
+recorded by #456
+
+**Context.** The dashboard moves from Dash 4.4.1 to 4.5.0 (#456). Three rules rested on "Dash's
+router matches the browser's still-encoded `location.pathname`": the index's refusal of a path
+whose escapes change it (D073, D083), the routing hook's match (D081) and the site navigation's
+marker (D086). 4.5.0's router (`router_sync` and `router_async`) now matches
+`strip_relative_path(unquote(pathname))` (plotly/dash#4074, read in the installed `dash/dash.py`),
+so on 4.5.0 the router rendered `/election/18%32%34` as 1824 while the index answered 404 (five
+unit tests failed), the hook would have left `/election%2F1824?year=2020` unstripped so the router
+rendered 2020 under a URL naming 1824 (`api.accepted` still validated it; no test sent an encoded
+pathname), and the marker missed `/%65lections`. Both of the
+marker's oracles re-implemented the old rule, so they kept passing. Separately, 4.5.0's Flask
+dispatch decompresses any callback body sent with `Content-Encoding: gzip`, whatever the callback
+(plotly/dash#3925), which the hook, reading the body with `get_json`, cannot read.
+
+**Decision.**
+- **One rule, Dash's: a pathname is decoded once, then stripped and matched.** `app.router_key`
+  states it (`unquote`: UTF-8 with replacement, `+` kept). The index matches `request.path`, which
+  gunicorn and Werkzeug have already decoded once and which, slash-stripped, is the same key; it is
+  never decoded again (`/election/18%2534` is the year `18%34`, refused). The hook matches
+  `router_key(pathname)` and leaves a pathname the router's strip refuses for Dash. `NAV_CALLBACK`
+  decodes each run of escapes with `TextDecoder` (never `decodeURIComponent`, which throws on a
+  malformed escape the router decodes) before it strips and matches. `raw_path` is gone.
+- **So a percent-encoded link gets what the link it spells gets** (amends D083's encoded-path
+  rule): `/election/18%32%34` is 200 with `/election/1824` as its canonical link,
+  `/election%2F1825` is the election page's not-found state with its title, and `/%2F` is the home
+  page. A path whose decoded form holds a newline never reaches the index: Flask's catch-all path
+  converter answers its own 404 for the document, so the app does not load.
+- **The rule is pinned to the router, not to a copy of it.** `DECODED_PATHS`
+  (`tests/unit/test_dashboard_app.py`) is one literal table of pathname → key → path variable that
+  the router (observed by spying `dash.dash._path_to_page` in a real routing request), the hook and
+  the index each answer to; each row fails one direction of change (stops decoding, decodes twice,
+  strips first, decodes only variables after matching, `unquote_plus`, a strict or latin-1
+  decode, no DOTALL). The marker's and the strip's oracles read the router's own choice the same
+  way.
+- **A content-encoded callback request is refused.** `refuse_encoded_dispatch` answers 415 to a POST
+  to the dispatch endpoint with any `Content-Encoding` but identity, before Dash reads it, with
+  Werkzeug's default body (no text of the app's own). No callback sets `compress_payload`, so Dash's
+  client never sends one. Without the refusal, a gzip routing request reaches the router with its
+  query unfiltered, and a small body can expand to Dash's 64 MB cap on the one instance. Pinned: the
+  refusal and its control (the bypass, with the refusal off), that no callback asks for compression,
+  and that Dash's Flask backend decompresses only on `Content-Encoding` and otherwise reads
+  `get_json()`.
+- **Dash's MCP server is off, whatever the environment says.** Dash (since 4.3, inferred from its
+  changelog) can serve an MCP route of its own that runs callbacks, which the routing hook never
+  sees; it needs no extra package and turns on with `DASH_MCP_ENABLED`. Nothing sets that today
+  (`app.yaml` sets no environment variable, and
+  `test_dashboard_guards.py::test_app_yaml_is_exactly_the_pinned_configuration` pins the file), but
+  one variable would expose every callback as a tool, so the app passes `enable_mcp=False`, which
+  Dash's config ranks above the variable. It predates 4.5.0; it is closed here as hardening (owner,
+  #456's review).
+- **More Dash internals relied on** (to D081's list): the router's decode-then-strip
+  (`TestDashPrivates.test_the_router_decodes_the_pathname_once_before_it_strips_and_matches`, which
+  also observes the key the hook matched by), its DOTALL match, the Flask backend's body read, and
+  the MCP server's off switch and its precedence over the environment
+  (`test_the_mcp_server_is_off_whatever_the_environment_says`).
+- **D073's post-deploy check changes.** The runbook (`docs/deploy-dashboard.md` §9) no longer
+  checks that the front end passes the raw target through; it checks that nothing in front of the
+  app decodes a path before it does, since a double decode would make `/election/%2531824` a 200.
+- **D088's lazy-chunk residual is bounded on 4.5.0.** The probe, 3 s in Chromium with plotly.js
+  fulfilled and one chunk aborted: on 4.4.1, `async-graph` on a chart page logged 76
+  `ChunkLoadError` lines and the year slider's `async-slider` on `/elections` 74, without end; on
+  4.5.0 each logs 2, plus the browser's one resource error, and stops. The cause is inferred from
+  4.5.0's in-place reconciliation fix (plotly/dash#3881), not bisected. Two browser tests pin the
+  mechanism, never a count Dash or webpack chooses: the chunk, matched by file name and never by
+  chunk id, is requested at least once and at most `CHUNK_ERROR_BOUND` (4) times, each aborted
+  request explains exactly one resource error, the `ChunkLoadError` lines number between one and
+  four, and they stop: after the first, nothing new for a 2 s window (restarted on each line,
+  under a deadline), then a console marker as a barrier and no new line before it. A loop slower
+  than one line per 2 s is out of reach; the harm pinned is D088's tight loop. Another test checks
+  a same-page re-render hands the renderer the chart's mount point empty and the chart is drawn
+  after it, which #3881 could have broken. They are advisory like the rest of the suite (D082),
+  so D088's note stands: on any Dash bump, run the browser tests by hand.
+
+**Rationale.** Matching as Dash matches is what D073 chose; the upgrade changed Dash's rule, so
+following it removes code (`raw_path`, a special title case) rather than adding hook behavior to
+keep refusing escaped paths, which would have rewritten a second input of the routing request on
+the dashboard's most sensitive surface. Tying every oracle to the router's observed decision is
+the fix for how the drift went unseen. The compressed-body refusal costs nothing the app uses and
+closes a bypass the upgrade itself opened.
+
+**Related:** D073, D081, D082, D083, D086, D088, #326, #448, #452, #456.

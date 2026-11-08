@@ -310,22 +310,25 @@ timeout, a refused connection, DNS) reports `unfetched` for its check, and a fai
 shell request's status shows as 000; an HTTP error response that arrives whole is
 judged like any other.
 
-**After a deploy, check by hand that the raw request path reaches the app** (D073). The index
-404s a path whose percent-escapes change it when decoded, comparing gunicorn's `RAW_URI` with
-the decoded path; if App Engine's front end ever dropped or decoded the raw target, that check
-would silently stop applying. The workflow's probes request no percent-escaped path, so they
-cannot tell:
+**After a deploy, check by hand that the path is decoded once, by the app** (D089, which
+replaces D073's raw-target check). Dash's router decodes the browser's pathname once, and the
+index matches `request.path`, which gunicorn has decoded once; they agree only if nothing in
+front of the app (App Engine's front end) decodes the path first. The workflow's probes request
+no percent-escaped path, so they cannot tell:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/%2F  # 404
-curl -s https://explore.us-presidential-election-center.org/%2F | grep -c 'content="noindex"'    # 1
-curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/     # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/election/%2531824  # 404
+curl -s https://explore.us-presidential-election-center.org/election/%2531824 | grep -c 'content="noindex"'    # 1
+curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/election/%31824    # 200
 ```
 
-`/%2F` decodes to `//`, which the app reads as `/`: a **200** there means the raw target did
-not arrive, and the check is not running. The `noindex` tag is what shows the 404 is the
-app's own (only its index emits it): a 404 without it came from somewhere in front of the
-app, and the request never reached the check.
+Decoded once, `/election/%2531824` is the year `%31824`, which the page refuses: a **200**
+there means the path was decoded twice (`%25` became `%` in front of the app, then the app read
+1824), and an escaped link could open a page its own URL does not name. The third request is the
+control: decoded once, `%31824` is 1824. The `noindex` tag is what shows the 404 is the app's
+own (only its index emits it): a 404 without it came from somewhere in front of the app. Run it
+after the instance has filled its cache (the probes above), since before that a year counts as
+matched.
 
 **After a deploy, check that the app serves no copy of plotly.js** (#430, §11). The script
 path answers 404 (Flask's default body):

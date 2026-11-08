@@ -85,7 +85,7 @@ serve = [
 # `default-groups` below so a bare `uv sync` / `uv run pytest` keeps the dashboard's
 # tests collectable.
 dashboard = [
-    "dash[compress]>=4.4",   # compress=True (D071 egress estimate) needs flask-compress
+    "dash[compress]>=4.5",   # compress=True (D071 egress estimate) needs flask-compress
     "gunicorn>=23",
 ]
 

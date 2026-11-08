@@ -12,7 +12,11 @@ from __future__ import annotations
 #: Each path, the ``components.NAV_LINKS`` key it marks and that link's
 #: ``aria-current``, or ``None`` where nothing is marked. The encoded, mixed-case,
 #: doubled-slash and trailing-slash paths are where a matcher that decodes, folds case
-#: or strips differently from the router would part from it.
+#: or strips differently from the router would part from it. Dash's router decodes the
+#: pathname once before it strips and matches (Dash 4.5.0, D089), so an escape in a
+#: static segment is matched as the character it spells, a double escape is not, and
+#: a malformed or overlong one decodes to a replacement character that matches nothing
+#: static.
 MARKS: dict[str, tuple[str, str] | None] = {
     "/": ("home", "page"),
     "//": ("home", "page"),
@@ -25,7 +29,17 @@ MARKS: dict[str, tuple[str, str] | None] = {
     "/election/1824/x": ("elections", "true"),
     "/election//1824": ("elections", "true"),
     "/election/%31824": ("elections", "true"),
-    "/%65lections": None,
+    "/%65lections": ("elections", "page"),
+    "/%2Felections%2F": ("elections", "page"),
+    "/election%2F1824": ("elections", "true"),
+    "/%2565lections": None,
+    "/%65lection/1824%FF": ("elections", "true"),
+    "/elections%FF": None,
+    "/%C0%AFelections": None,
+    "/elections%": None,
+    "/%G1": None,
+    "/election/18%0A24": ("elections", "true"),
+    "/%2F": ("home", "page"),
     "/Elections": None,
     "/states": ("states", "page"),
     "/state/GA": ("states", "true"),

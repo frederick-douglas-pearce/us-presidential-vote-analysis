@@ -21,7 +21,7 @@ from dash._pages import _path_to_page
 from explore import api, components, config, labels
 from explore import app as appmod
 from tests.nav_marks import MARKS
-from tests.unit.test_dashboard_app import offline_client
+from tests.unit.test_dashboard_app import offline_client, route
 
 
 @pytest.fixture(autouse=True)
@@ -178,19 +178,47 @@ class TestWording:
 # --- the current-page table ------------------------------------------------------------
 
 
+def js_decode(pathname: str) -> str:
+    """NAV_CALLBACK's decode, run in Python: each maximal run of ``%XX`` escapes as
+    UTF-8 with replacement, every other character as it is."""
+    return re.sub(
+        r"(?:%[0-9A-Fa-f]{2})+",
+        lambda run: bytes.fromhex(run.group(0).replace("%", "")).decode(
+            "utf-8", "replace"
+        ),
+        pathname,
+    )
+
+
 def js_match(pathname: str) -> appmod.NavEntry | None:
-    """The rule NAV_CALLBACK implements, run in Python on the embedded table: strip
-    leading and trailing slashes, never decode, first pattern or path match wins. The
-    JS itself runs on the same corpus in the browser
+    """The rule NAV_CALLBACK implements, run in Python on the embedded table: decode
+    each run of escapes, strip leading and trailing slashes, first pattern or path
+    match wins. The JS itself runs on the same corpus in the browser
     (``test_the_registered_callback_marks_every_path``, ``test_dashboard_e2e_nav.py``);
-    ``TestNavCallback`` pins its strip and match lines."""
-    path = re.sub(r"^/+|/+$", "", pathname)
+    ``TestNavCallback`` pins its decode, strip and match lines."""
+    path = re.sub(r"^/+|/+$", "", js_decode(pathname))
     for entry in appmod.NAV_TABLE:
         if (entry.pattern is not None and re.search(entry.pattern, path)) or (
             path == entry.path
         ):
             return entry
     return None
+
+
+def router_choice(pathname: str, monkeypatch: pytest.MonkeyPatch) -> str | None:
+    """The module of the page Dash's router picks for ``pathname``, or ``None``, read
+    off ``dash.dash._path_to_page`` while a real routing request runs."""
+    chosen: list[str | None] = []
+
+    def spy(key: str) -> Any:
+        page, path_vars = _path_to_page(key)
+        chosen.append(page.get("module") if page else None)
+        return page, path_vars
+
+    monkeypatch.setattr(dash.dash, "_path_to_page", spy)
+    route(pathname)
+    assert len(chosen) == 1, (pathname, chosen)
+    return chosen[0]
 
 
 class TestCurrentPage:
@@ -214,11 +242,14 @@ class TestCurrentPage:
         assert [appmod.nav_entry(p) for p in pages] == list(appmod.NAV_TABLE)
 
     @pytest.mark.parametrize("path", sorted(MARKS))
-    def test_the_matcher_agrees_with_dashs_router(self, path: str) -> None:
+    def test_the_matcher_agrees_with_dashs_router(
+        self, path: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         entry = js_match(path)
-        # The router's own strip, so the oracle does not share the model's assumption.
-        page, _ = _path_to_page(appmod.app.strip_relative_path(path))
-        module = page.get("module") if page else None
+        # The router's own decision, observed in a real routing request, so the oracle
+        # never re-implements the router's rule (#456: a re-implemented oracle kept
+        # agreeing with a rule Dash 4.5.0 had changed).
+        module = router_choice(path, monkeypatch)
         chosen = (
             next(
                 p["module"]
@@ -294,8 +325,20 @@ class TestNavCallback:
             "for (var i = 0; i < table.length && hit === null; i++) {" in script
         )
         assert "window.location.pathname" in script
-        # Never decoded: Dash's router matches the still-encoded pathname.
-        assert "decode" not in script.lower()
+        # Decoded once, before the strip, as the router decodes (D089): each run of
+        # escapes as UTF-8 with replacement, the rule js_decode models. Never
+        # decodeURIComponent, which throws on a malformed escape the router decodes.
+        decode = (
+            " path = path.replace(/(?:%[0-9A-Fa-f]{2})+/g, function (run) {"
+            " var bytes = new Uint8Array(run.length / 3);"
+            " for (var b = 0; b < bytes.length; b++) {"
+            " bytes[b] = parseInt(run.substr(b * 3 + 1, 2), 16); }"
+            " return new TextDecoder().decode(bytes); });"
+        )
+        assert decode in script
+        assert script.index(decode) < script.index(r"path = path.replace(/^\/+")
+        assert script.count("TextDecoder(") == 1
+        assert "decodeURI" not in script and "unescape(" not in script
 
     def test_the_app_is_served_at_the_root_as_the_matcher_assumes(self) -> None:
         # The JS strips only slashes, which is all the router strips at the root; app.py

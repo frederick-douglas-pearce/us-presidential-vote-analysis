@@ -759,17 +759,17 @@ articles and announcements). Every rule binds all three unless the rule states a
   tab, `og:title` and `twitter:title`) is the not-found heading followed by the site title; before
   then, the index answers 200 and the title is the page's generic one, which names no year or code
   (#325). Its link-preview description is the page's `NOT_FOUND_SENTENCE`. A percent-encoded link
-  that the page's path pattern matches (`/state/G%41`, `/election/18%32%34`) is the exception: its
-  index answers 404 with `noindex` and that page's not-found title and description at once,
-  whatever is in memory. The page shows this state once its source is read; with the source cold
-  and the API unreachable, it shows the *Degraded state* under that not-found title instead
-  (D083).
+  is read as the link it spells once decoded, as Dash's router reads it, so it gets whatever that
+  link gets: `/election%2F1825` gets this state, with the same status and title, just as
+  `/election/1825` does. `/election/18%32%34` is not a not-found link at all: it opens 1824, with
+  `/election/1824` as its canonical link (D089).
 - **Shown as:** `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/election.py`,
   `pages/state.py` and `pages/candidate.py`; the links "Browse every election in the dataset"
   (`not_found` in `pages/election.py`), "Browse every state in the dataset" (`not_found` in
   `pages/state.py`) and `NOT_FOUND_LINK` in `pages/candidate.py`; the title on a not-found link,
   built in `dashboard/explore/app.py` from the heading and `config.SITE_TITLE`.
-- **Source:** D073; D074; D083; `dashboard/CLAUDE.md`, `pages/`; the heading and title: #325;
+- **Source:** D073; D074; D083; D089 (a percent-encoded link is matched after decoding);
+  `dashboard/CLAUDE.md`, `pages/`; the heading and title: #325;
   their reader wording: owner decision, 2026-11-01, #325.
 - **Not:** *Degraded state*; *Page not found*, a link that matches no page at all; an empty filter
   result (`components.NO_ROWS`).
@@ -794,18 +794,22 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Page not found (a link that matches no page)
 - **Plain:** What the site says when a link leads to no page on it at all.
-- **Precise:** `pages/not_found_404.py`, Dash's custom-404 page, rendered for a path no page
-  matches, including a percent-encoded path that matches no page as sent. The index answers 404
+- **Precise:** `pages/not_found_404.py`, Dash's custom-404 page, rendered for a path that matches
+  no page once its percent-escapes are decoded, as Dash's router reads it. A percent-encoded link
+  gets the same page as the link it spells: `/election%2F1825` gets the election page's
+  *Not-found state*, as `/election/1825` does (D089). The index answers 404
   with `noindex`, and the title (the browser tab, `og:title` and `twitter:title`) is its heading
   followed by the site title. It reads no data, so it has no degraded state.
 - **Shown as:** `NOT_FOUND_HEADING`, `NOT_FOUND_SENTENCE` and `NOT_FOUND_LINK` in
   `pages/not_found_404.py`.
-- **Source:** #325; D083; `resolve` in `dashboard/explore/app.py` (Dash's `not_found_404`
+- **Source:** #325; D083; D089; `resolve` in `dashboard/explore/app.py` (Dash's `not_found_404`
   convention); reader wording: owner decision, 2026-11-01, #325.
 - **Not:** *Not-found state*, where the link names a kind of page (an election, a state, a
   candidate) but a value this dataset does not serve; *Degraded state*. A request for a file the
   site does not serve (for example a script under `/_dash-component-suites/`, #430), which answers
-  the web server's default 404 with no text of ours and no page.
+  the web server's default 404 with no text of ours and no page. A link whose decoded path holds
+  a line break (`%0A`), which the web server answers with its own default 404 before the site
+  loads, with no text of ours (D089).
 - **Status:** settled
 
 ### Party
