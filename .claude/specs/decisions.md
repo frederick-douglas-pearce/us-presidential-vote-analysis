@@ -5993,11 +5993,14 @@ cause is its plotly/dash#3881 (callback-returned children no longer remounted on
 - **No `dcc.Graph` is in any server-rendered layout or server callback's output.**
   `components.chart` renders the chart's `role="img"` wrapper as an empty **mount point**
   (`charts.mount_id`). `TestEveryChart` fails any `dcc.Graph` in a rendered layout (the shared one
-  included) and checks each mount point by identity, and a lint fails a runtime module that calls
-  `Graph`.
+  included) and checks each mount point by identity, and a lint
+  (`TestMountCallback.test_no_runtime_module_builds_a_graph`, `test_dashboard_charts.py`) fails a
+  runtime module that names `Graph` other than to read its `_type` or `_namespace`, reaches it by
+  `getattr`, or writes dcc's namespace literally.
 - **The app's mount callback loads plotly.js and then mounts the graph.**
   `charts.CHART_MOUNT_CALLBACK`, an inline clientside MATCH callback on the chart's source store
-  (so once per mount), returns a Promise. It checks `window.Plotly` first, on every call;
+  (so once per mount: no callback writes a source store,
+  `TestMountCallback.test_no_callback_writes_a_chart_source_store`), returns a Promise. It checks `window.Plotly` first, on every call;
   otherwise every chart shares one load, a Promise kept on `window` (`charts.PLOTLYJS_MEMO`), set
   before anything waits on it and never cleared. The load appends
   `<script src=window._dashPlotlyJSURL async>`, the address the renderer sets from `_config`
@@ -6006,7 +6009,7 @@ cause is its plotly/dash#3881 (callback-returned children no longer remounted on
   address (logged once). It never rejects and the callback never throws. Loaded, it returns the
   graph as Dash component JSON (type and namespace read from `dcc.Graph`, the config
   `CHART_CONFIG`, hidden), and `CHART_CALLBACK` draws it as before; dcc's loader finds
-  `window.Plotly` and never runs. Not loaded, it returns `no_update`.
+  `window.Plotly` and never appends a script or fetches. Not loaded, it returns `no_update`.
 - **No retry within a document.** A reader whose CDN is blocked is usually blocked for good (an
   extension or a proxy), so a retry on every chart page would fail every time, and a retry after
   the timeout could load plotly.js twice. A reload retries.
@@ -6020,17 +6023,30 @@ cause is its plotly/dash#3881 (callback-returned children no longer remounted on
 - **A blocked or timed-out load** (amends D087's loop residual): the page, the chart's title,
   caption and table pointer, and its companion table render; the mount point stays empty; the
   browser logs its own resource error once per document, and nothing repeats. The timeout ends the
-  wait without cancelling the fetch; a script that lands later serves the next mount.
+  wait without canceling the fetch; a script that lands later serves the next mount.
+- **A lazy dcc chunk that fails to load still loops on Dash 4.4.1** (found by #452's review). dcc's
+  `Graph` factory also loads its own chunks from the app (`async-graph`, 746, and the shared 384),
+  and the mount callback guards only the plotly.js part of it: a probe that aborted chunk 746 on a
+  chart page after plotly.js loaded saw `ChunkLoadError` logged 112 times in 3 s, without end.
+  It is not specific to charts: every lazily loaded dcc component has the same exposure, including
+  the year slider already in production (chunk 737; inferred, not probed). A content blocker does
+  not reach it (the chunks are same-origin); a flaky network, or a tab open across a deploy that
+  changes the Dash version, does. Guarding it here would need webpack internals, so it is
+  accepted (owner, #452); the upgrade to 4.5.0 (#456, raised to high) is the expected bound,
+  unverified for this trigger, and #456 re-runs the probe.
 - **Dash privates relied on:** a clientside callback returning a component as JSON, MATCH outputs
-  absent from every layout (allowed only by `suppress_callback_exceptions=True`, pinned in
-  `test_dashboard_charts.py`), dcc's `window.Plotly` short-circuit and the renderer's
+  absent from every layout (the chart callback's graph outputs, allowed only by
+  `suppress_callback_exceptions=True`, pinned by
+  `TestMountCallback.test_the_chart_callbacks_graph_outputs_need_callback_exceptions_off`), dcc's
+  `window.Plotly` short-circuit and the renderer's
   `window._dashPlotlyJSURL` (both pinned in `TestDashPrivates`).
 - **The browser tests are advisory** (D082): a Dash upgrade that broke mounting a graph from
   component JSON would make every chart vanish while the unit gate stays green. On any Dash bump,
   run the chart browser tests (`tests/e2e/test_dashboard_e2e_charts.py`) by hand.
-- **Why keep this on 4.5.0:** it does not depend on how Dash remounts a failed graph, it costs one
-  error rather than three, and dcc's loader never runs. No upstream report was filed, because the
-  latest release already bounds the loop (owner, #452).
+- **Why keep this on 4.5.0:** it does not rely on how Dash remounts a graph whose plotly.js load
+  failed, it costs one error rather than three, and dcc's loader never appends a script or
+  fetches. No upstream report was filed, because the latest release already bounds the loop
+  (owner, #452).
 
 **Related:** D070, D082, D087, #432, #433, #436, #452, #455, #456.
 

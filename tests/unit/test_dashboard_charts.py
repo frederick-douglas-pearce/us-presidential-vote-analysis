@@ -720,27 +720,65 @@ class TestChartCallback:
 # --- the mount callback (#452) ---------------------------------------------------------
 
 
-def graph_calls(source: str) -> list[str]:
-    """Every call that builds a ``dcc.Graph`` in ``source`` (#452): a call whose callee
-    is named ``Graph`` (``dcc.Graph(...)``, ``dash.dcc.Graph(...)``, ``Graph(...)``) or
-    is a name bound to ``Graph`` by an import (``from dash.dcc import Graph as G``).
-    Reading ``dcc.Graph._type`` is not a call, so it passes. A runtime module that built
-    one, in a layout or a server-side callback's return, would mount a graph before
-    plotly.js has loaded and bring Dash's blocked-CDN loop back."""
+def graph_uses(source: str) -> list[str]:
+    """Every way ``source`` reaches ``dcc.Graph`` to build one (#452): any load of
+    ``Graph`` (an attribute ``X.Graph``, or a name bound to it by ``from dash.dcc import
+    Graph [as G]``), except as the base of a ``._type`` or ``._namespace`` read; a
+    ``getattr(..., "Graph")``; and dcc's namespace written as a string (outside
+    docstrings), which is how a server callback would return a graph as component JSON.
+    One rule over loads, not calls, so an alias (``G = dcc.Graph``), a
+    ``functools.partial``, an indexed reference and a subclass are all caught. A runtime
+    module that built a graph, in a layout or a server callback's return, would mount it
+    before plotly.js has loaded and bring Dash's blocked-CDN loop back. It reads source;
+    a dynamic import or ``exec`` is the D070(b) lint's (``test_dashboard_guards.py``)."""
     tree = ast.parse(source)
-    aliases = {"Graph"}
+    aliases = {
+        a.asname or a.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module in ("dash", "dash.dcc")
+        for a in node.names
+        if a.name == "Graph"
+    }
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    found = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            aliases |= {a.asname or a.name for a in node.names if a.name == "Graph"}
-    calls = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name in aliases:
-            calls.append(f"line {node.lineno}: {ast.unparse(func)}(...)")
-    return calls
+        line = getattr(node, "lineno", 0)
+        is_graph = (isinstance(node, ast.Attribute) and node.attr == "Graph") or (
+            isinstance(node, ast.Name) and node.id in aliases
+        )
+        if is_graph:
+            parent = parents.get(node)
+            read = (
+                isinstance(parent, ast.Attribute)
+                and parent.value is node
+                and parent.attr in ("_type", "_namespace")
+            )
+            if not read:
+                found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and any(
+                isinstance(a, ast.Constant) and a.value == "Graph" for a in node.args
+            )
+        ):
+            found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and "dash_core_components" in node.value
+            and id(node) not in docstrings
+        ):
+            found.append(f"line {line}: dcc's namespace written as a string")
+    return found
 
 
 class TestMountCallback:
@@ -751,7 +789,7 @@ class TestMountCallback:
         found = {
             str(path): calls
             for path in RUNTIME_MODULES
-            if (calls := graph_calls(path.read_text(encoding="utf-8")))
+            if (calls := graph_uses(path.read_text(encoding="utf-8")))
         }
         assert found == {}
 
@@ -763,14 +801,24 @@ class TestMountCallback:
             ("from dash.dcc import Graph\nGraph()\n", True),
             ("from dash.dcc import Graph as G\nG(figure={})\n", True),
             ("from dash import dcc as d\nd.Graph()\n", True),
+            # #452's review: an alias, a partial, an indexed reference, a subclass,
+            # getattr, and a graph returned as component JSON.
+            ("from dash import dcc\nmake = dcc.Graph\nmake(id=1)\n", True),
+            ("import functools\nfrom dash import dcc\nfunctools.partial(dcc.Graph)()\n", True),
+            ("from dash import dcc\n[dcc.Graph][0]()\n", True),
+            ("from dash import dcc\nclass G(dcc.Graph):\n    pass\n", True),
+            ("from dash import dcc\ngetattr(dcc, 'Graph')()\n", True),
+            ("x = {'type': 'Graph', 'namespace': 'dash_core_components'}\n", True),
             ("from dash import dcc\nt = dcc.Graph._type\n", False),
+            ("from dash import dcc\nn = dcc.Graph._namespace\n", False),
             ("from dash import dcc\ndcc.Store(id='s')\n", False),
+            ('"""A docstring naming dash_core_components."""\n', False),
         ],
     )
-    def test_the_lint_catches_every_way_to_build_one(
+    def test_the_lint_catches_the_listed_ways_to_reach_graph(
         self, source: str, caught: bool
     ) -> None:
-        assert bool(graph_calls(source)) is caught
+        assert bool(graph_uses(source)) is caught
 
     def test_one_clientside_match_callback_on_the_source_with_the_mount_id(
         self,
@@ -787,14 +835,26 @@ class TestMountCallback:
         mounted = [k for k in appmod.app.callback_map if charts.MOUNT_TYPE in k]
         assert mounted == [self.KEY]
 
-    def test_the_graph_outputs_are_in_no_layout_so_callback_exceptions_are_off(
+    def test_the_chart_callbacks_graph_outputs_need_callback_exceptions_off(
         self,
     ) -> None:
-        # The mount and chart callbacks output to a graph no layout holds (#452), which
-        # Dash allows only with suppress_callback_exceptions.
+        # The chart callback outputs to a graph no layout holds (#452; the mount
+        # callback's output is the mount point, which the layout holds), which Dash
+        # allows only with suppress_callback_exceptions.
         assert appmod.app.config.suppress_callback_exceptions is True
 
-    def test_it_returns_dccs_own_graph_with_the_shared_config_hidden(self) -> None:
+    def test_no_callback_writes_a_chart_source_store(self) -> None:
+        # The mount callback runs once per mount because its one input, the source
+        # store, is never written (#452): a chart story that updated a figure by
+        # writing the store would remount its graph on every update.
+        assert appmod.server.test_client().get("/").status_code == 200
+        writers = [k for k in appmod.app.callback_map if charts.SOURCE_TYPE in k]
+        assert writers == []
+        assert charts.SOURCE_TYPE == "explore-chart-source"
+
+    def test_its_text_returns_dccs_own_graph_with_the_shared_config_hidden(
+        self,
+    ) -> None:
         script = charts.CHART_MOUNT_CALLBACK
         start = script.index("var graph = ") + len("var graph = ")
         graph, _ = json.JSONDecoder().raw_decode(script[start:])
@@ -811,7 +871,13 @@ class TestMountCallback:
             " return {type: graph.type, namespace: graph.namespace, props: props}; });"
         ) in script
 
-    def test_it_loads_plotlyjs_once_per_document_from_dashs_address(self) -> None:
+    def test_its_text_loads_plotlyjs_once_per_document_from_dashs_address(self) -> None:
+        """Pins the callback's text only: what it does in a browser is pinned by
+        ``test_two_charts_on_a_page_share_one_load``,
+        ``test_two_blocked_charts_cost_one_fetch_and_one_error``,
+        ``test_after_a_blocked_load_a_return_to_the_chart_makes_no_second_fetch`` and
+        ``test_the_registered_mount_function_does_nothing_after_a_failed_load``
+        (``tests/e2e/test_dashboard_e2e_charts.py``)."""
         script = charts.CHART_MOUNT_CALLBACK
         assert script.startswith("function (source, mount) {")
         assert f'var memo = "{charts.PLOTLYJS_MEMO}";' in script
@@ -825,13 +891,21 @@ class TestMountCallback:
         assert "delete " not in script
         assert " var address = window._dashPlotlyJSURL;" in script
         assert "if (typeof address !== 'string') {" in script
-        assert f"}}, {charts.PLOTLYJS_TIMEOUT_MS});" in script
+        # The timeout gives up (resolves false), never mounts.
+        assert (
+            " var timer = setTimeout(function () { resolve(false); },"
+            f" {charts.PLOTLYJS_TIMEOUT_MS});"
+        ) in script
+        assert script.count("resolve(true)") == 1  # only the window.Plotly shortcut
         assert charts.PLOTLYJS_TIMEOUT_MS == 30_000
         assert "resolve(Boolean(window.Plotly))" in script
         assert "if (!loaded) { return clientside.no_update; }" in script
         assert script.count("document.body.appendChild(script)") == 1
 
-    def test_it_never_rejects_throws_or_builds_html(self) -> None:
+    def test_its_text_never_rejects_throws_or_builds_html(self) -> None:
+        """Pins the callback's text only (its spelling); the browser tests named in
+        :meth:`test_its_text_loads_plotlyjs_once_per_document_from_dashs_address` pin
+        that a failed load logs nothing of its own."""
         script = charts.CHART_MOUNT_CALLBACK
         for banned in (
             "reject",

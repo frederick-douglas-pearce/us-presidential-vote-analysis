@@ -11,8 +11,8 @@ every color.
 
 No ``dcc.Graph`` is ever in a server-rendered layout (#452, D088): ``components.chart``
 renders an empty mount point, and :data:`CHART_MOUNT_CALLBACK` puts the graph in it only
-once plotly.js has loaded, so dcc's own loader never runs and a blocked CDN cannot make
-Dash loop.
+once plotly.js has loaded, so dcc's own loader never appends a script or fetches, and a
+blocked CDN cannot make Dash loop.
 
 A shared module: it imports nothing from ``explore`` and reads no API
 (``TestSharedPieces`` in ``test_dashboard_elections.py``).
@@ -564,7 +564,7 @@ CHART_CALLBACK = (
 )
 
 #: How long the mount callback waits for plotly.js before it gives up (#452): dcc's
-#: own wait. It only ends the wait; a script already fetching is not cancelled, and if
+#: own wait. It only ends the wait; a script already fetching is not canceled, and if
 #: it lands later, a later mount finds ``window.Plotly`` set.
 PLOTLYJS_TIMEOUT_MS = 30_000
 
@@ -584,7 +584,9 @@ _GRAPH_JSON = {
 
 #: The mount callback (#452, D088), run in the browser for each chart on the page (a
 #: MATCH callback): its input is the chart's source store, which exists from the
-#: chart's first render and never changes, so it runs once per mount; its state is the
+#: chart's first render and that no callback writes
+#: (``TestMountCallback.test_no_callback_writes_a_chart_source_store``), so it runs once
+#: per mount; its state is the
 #: mount point's own id; its output is the mount point's ``children``.
 #: It returns a Promise, which Dash awaits. plotly.js is loaded once per document and
 #: never retried within it (a reload retries): ``window.Plotly`` is checked first on
@@ -597,7 +599,8 @@ _GRAPH_JSON = {
 #: callback never throws, so a blocked CDN costs the browser's one resource error and
 #: nothing else. Loaded, the callback returns the graph (:data:`_GRAPH_JSON` with its
 #: id), which :data:`CHART_CALLBACK` then draws; dcc's own loader finds
-#: ``window.Plotly`` and never runs. Not loaded, it returns ``no_update``: the mount
+#: ``window.Plotly`` and never appends a script or fetches. Not loaded, it returns
+#: ``no_update``: the mount
 #: point stays empty and the title, caption, pointer and table are what the reader
 #: has. It builds no HTML and evaluates nothing.
 CHART_MOUNT_CALLBACK = (

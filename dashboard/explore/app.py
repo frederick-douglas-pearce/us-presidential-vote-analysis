@@ -561,7 +561,8 @@ class ExploreDash(dash.Dash):
         asset is still served from here. ``charts.CHART_MOUNT_CALLBACK`` loads the
         script from that address, with no ``integrity`` attribute, when the page's
         first chart mounts, so a page with no chart never fetches it (D087, D088), and
-        dcc's own loader never runs. Dash privates, pinned in ``TestDashPrivates``.
+        dcc's own loader never appends a script or fetches. Dash privates, pinned in
+        ``TestDashPrivates``.
         """
         config: dict[str, Any] = super()._config()
         config["serve_locally"] = False
@@ -709,9 +710,10 @@ clientside_callback(
     Output(components.SITE_NAV_ID, "data-current"),
     Input(_ID_LOCATION, "pathname"),
 )
-# The graph is in no server layout (#452): this mounts it once plotly.js has loaded,
-# and the next callback draws it. Both rely on suppress_callback_exceptions=True,
-# since their graph outputs are absent from every layout Dash validates.
+# The graph is in no server layout (#452): this mounts it into the mount point (which
+# every chart's layout holds) once plotly.js has loaded, and the next callback draws
+# it. The next callback's graph outputs are absent from every layout Dash validates,
+# which suppress_callback_exceptions=True allows.
 clientside_callback(
     charts.CHART_MOUNT_CALLBACK,
     Output(charts.mount_id(MATCH), "children"),

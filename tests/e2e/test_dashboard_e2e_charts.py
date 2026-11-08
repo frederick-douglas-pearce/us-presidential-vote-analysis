@@ -209,9 +209,25 @@ def assert_blocked_chart(page: Page) -> None:
     assert page.evaluate("typeof window.Plotly") == "undefined"
 
 
+#: Resolves to the document's settled plotly.js load (``true`` or ``false``), or
+#: ``null`` before the mount callback has made one.
+SETTLED_LOAD = f"async () => (window.{charts.PLOTLYJS_MEMO} === undefined ? null"
+SETTLED_LOAD += f" : await window.{charts.PLOTLYJS_MEMO})"
+
+
+def await_failed_load(page: Page) -> None:
+    """Wait for the mount callback's load to be made and to have settled as failed, so
+    a later step cannot join a still-pending load (#452's review)."""
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    assert page.evaluate(SETTLED_LOAD) is False
+
+
 def wait_out_the_loop(page: Page) -> None:
-    """A countable change that re-renders (a theme switch, which the chart callback
-    would answer), then the old loop's window: any repeat would land in it."""
+    """A theme switch, then the old loop's window. The barrier is the theme probe's
+    callback count: the switch is a re-render that a mounted graph's chart callback
+    would answer, but on a blocked page there is no graph for it to answer. What
+    observes a loop is the window together with the browser guard's exact count of
+    console errors and fetches, which a repeat inside it would break."""
     calls = page.evaluate(f"window.{THEME_PROBE_CALLS} || 0")
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     page.wait_for_function(f"(window.{THEME_PROBE_CALLS} || 0) > {calls}")
@@ -224,7 +240,7 @@ def test_a_blocked_cdn_leaves_the_page_and_its_table(page: Page) -> None:
     # The guard's exact count is the bound: one resource error, nothing repeated.
     page.goto(CHART_PAGE)
     assert_rendered(page, f"#{CHART_SUCCESS}")
-    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    await_failed_load(page)
     wait_out_the_loop(page)
     assert_blocked_chart(page)
 
@@ -237,7 +253,7 @@ def test_after_a_blocked_load_a_return_to_the_chart_makes_no_second_fetch(
     # No retry within a document (D088): a reload is how a reader retries.
     page.goto(CHART_PAGE)
     assert_rendered(page, f"#{CHART_SUCCESS}")
-    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    await_failed_load(page)
     page.evaluate("window.__e2e_mark = 1")
     page.locator(f"#{components.NAV_LINK_IDS['elections']}").click()
     assert_rendered(page, ELECTIONS_SUCCESS)
@@ -270,7 +286,7 @@ def test_two_charts_on_a_page_share_one_load(page: Page) -> None:
 def test_two_blocked_charts_cost_one_fetch_and_one_error(page: Page) -> None:
     page.goto(TWO_CHARTS_PAGE)
     assert_rendered(page, f"#{TWO_CHARTS_SUCCESS}")
-    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    await_failed_load(page)
     wait_out_the_loop(page)
     for chart in TWO:
         mount = page.locator(f"{chart} .chart-graph")
@@ -279,8 +295,13 @@ def test_two_blocked_charts_cost_one_fetch_and_one_error(page: Page) -> None:
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_the_app_loads_the_only_plotlyjs_script(page: Page) -> None:
-    # dcc's loader never ran: it finds window.Plotly and appends nothing (#452).
+def test_one_plotlyjs_script_one_fetch_and_the_apps_load(page: Page) -> None:
+    """What it observes: exactly one script element with the CDN address, exactly one
+    fetch (the browser guard), and the app's load kept as a Promise. It cannot tell
+    which loader appended the script; that the graph mounts only after plotly.js has
+    loaded is observed indirectly, by these exact counts (a graph mounted early makes
+    dcc append a second script) and, on the blocked path, by the guard's exact count
+    of console errors (#452)."""
     open_chart(page)
     page.wait_for_timeout(SETTLE_MS)
     cdn = plotlyjs_url()
@@ -347,9 +368,15 @@ def test_the_registered_mount_function_does_nothing_after_a_failed_load(
 ) -> None:
     page.goto(CHART_PAGE)
     assert_rendered(page, f"#{CHART_SUCCESS}")
-    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    await_failed_load(page)
     assert page.evaluate(CALL_MOUNT, [MOUNT_OUTPUT]) == "no_update"
     page.wait_for_timeout(SETTLE_MS)  # the guard then sees no second fetch
+    # A script that lands after the load gave up serves the next mount (#452's review):
+    # window.Plotly is checked before the memo, on every call.
+    page.evaluate("window.Plotly = {}")
+    result: Any = page.evaluate(CALL_MOUNT, [MOUNT_OUTPUT])
+    assert result["type"] == "Graph"
+    assert result["props"]["id"] == charts.graph_id("x1")
 
 
 #: The chart callback's key in ``/_dash-dependencies``: its two outputs.

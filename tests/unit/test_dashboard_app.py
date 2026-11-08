@@ -1717,9 +1717,12 @@ class TestDashPrivates:
         and appends an async script with no ``integrity`` or ``crossOrigin`` (the
         residual D087 records), and only when ``window.Plotly`` is not already loaded.
         That short-circuit is load-bearing since #452 (D088): the app's mount callback
-        puts a graph in only once ``window.Plotly`` is set, so this loader never runs
-        and a blocked CDN cannot make Dash loop; if dcc dropped the check, a mounted
-        graph would fetch plotly.js a second time (the e2e suite's one-script check).
+        puts a graph in only once ``window.Plotly`` is set, so this loader never
+        appends a script or fetches, and a blocked CDN cannot make Dash loop; if dcc
+        dropped the check, a mounted graph would fetch plotly.js a second time
+        (``test_one_plotlyjs_script_one_fetch_and_the_apps_load`` and
+        ``test_two_charts_on_a_page_share_one_load`` in
+        ``tests/e2e/test_dashboard_e2e_charts.py``, which count fetches and scripts).
         This pins the loader's text only, not when it runs: that a page with no chart
         fetches no plotly.js is the browser's to show
         (``test_a_page_with_no_chart_fetches_no_plotlyjs`` in

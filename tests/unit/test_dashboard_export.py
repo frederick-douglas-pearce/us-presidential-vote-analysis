@@ -285,14 +285,35 @@ def _contains(node: Any, wanted: str) -> bool:
     return False
 
 
+def components_in(node: Any) -> list[Any]:
+    """Every component in a rendered tree, depth-first, through ``children`` only (as
+    ``of_type`` walks)."""
+    if isinstance(node, (list, tuple)):
+        return [c for child in node for c in components_in(child)]
+    if isinstance(node, Component):
+        return [node, *components_in(getattr(node, "children", None))]
+    return []
+
+
 def mount_points(tree: Any) -> list[Any]:
-    """Every chart mount point in ``tree`` (#452): a ``Div`` whose pattern id is of
-    ``charts.MOUNT_TYPE``."""
+    """Every chart mount point in ``tree`` (#452): a component of any type whose pattern
+    id is of ``charts.MOUNT_TYPE``."""
     return [
-        div
-        for div in of_type(tree, "Div")
-        if isinstance(getattr(div, "id", None), dict)
-        and div.id.get("type") == charts.MOUNT_TYPE
+        c
+        for c in components_in(tree)
+        if isinstance(getattr(c, "id", None), dict)
+        and c.id.get("type") == charts.MOUNT_TYPE
+    ]
+
+
+def graphs(tree: Any) -> list[Any]:
+    """Every ``dcc.Graph`` in ``tree`` (#452), matched as the renderer matches one, by
+    dcc's namespace and type, so a subclass is one too."""
+    graph = (dash.dcc.Graph._namespace, dash.dcc.Graph._type)
+    return [
+        c
+        for c in components_in(tree)
+        if (getattr(c, "_namespace", None), getattr(c, "_type", None)) == graph
     ]
 
 
@@ -307,7 +328,9 @@ def chart_problems(
     reusing a built chart's id is caught), one with an unregistered ID, one on a page
     other than its registry row's, one rendered without its companion table; a chart
     naming a token that is not a declared color token; and a success marker that is a
-    chart or sits inside one.
+    chart or sits inside one. It walks ``children`` only, so a graph or mount point in
+    another component-valued prop is not seen here; a runtime module that builds a graph
+    anywhere is the lint's (``TestMountCallback.test_no_runtime_module_builds_a_graph``).
 
     It reads the one tree it is given: ``TestEveryChart`` hands it each page's default
     render, so a companion table that only a filter empties is not seen here (that
@@ -322,7 +345,7 @@ def chart_problems(
     }
     problems += [
         f"{key}: a dcc.Graph in a rendered layout: {getattr(g, 'id', None)}"
-        for g in of_type(tree, "Graph")
+        for g in graphs(tree)
     ]
     from_builder = {id(m) for _, figure in built for m in mount_points(figure)}
     tables = {getattr(t, "id", None) for t in of_type(tree, "Table")}
@@ -408,7 +431,7 @@ class TestEveryChart:
 
     def test_the_shared_layout_holds_no_graph_and_no_chart(self) -> None:
         # #452: the header, main and stores every page sits in.
-        assert of_type(appmod.app.layout, "Graph") == []
+        assert graphs(appmod.app.layout) == []
         assert mount_points(appmod.app.layout) == []
 
     def test_a_mount_point_built_by_hand_or_unregistered_or_any_graph_fails(
@@ -418,6 +441,13 @@ class TestEveryChart:
             charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
         )
         by_hand = html.Div(id=charts.mount_id("c2"), role="img")
+        # A mount point that is no Div, and a subclass of dcc.Graph (#452's review).
+        section = html.Section(id=charts.mount_id("c9"), role="img")
+
+        class MyGraph(dash.dcc.Graph):
+            pass
+
+        subclass = MyGraph(id="sub")
         # A mount point reusing the built chart's own id, outside the figure it returned.
         twin = html.Div(id=charts.mount_id("c1"), role="img")
         # A graph anywhere, even with a chart's own graph id (#452).
@@ -427,7 +457,7 @@ class TestEveryChart:
             built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
             table = html.Table(id="elections-table")
             plain = dash.dcc.Graph(id="plain")
-            return html.Div([built, table, by_hand, plain, twin, graph])
+            return html.Div([built, table, by_hand, plain, twin, graph, section, subclass])
 
         tree, built = chart_render(layout, monkeypatch)
         assert [chart_id for chart_id, _ in built] == ["C1"]
@@ -435,12 +465,17 @@ class TestEveryChart:
             "/elections: a dcc.Graph in a rendered layout: plain",
             "/elections: a dcc.Graph in a rendered layout: "
             "{'type': 'explore-chart-graph', 'chart': 'c1'}",
+            "/elections: a dcc.Graph in a rendered layout: sub",
             "/elections: a chart mount point not built by components.chart: "
             "{'type': 'explore-chart-mount', 'chart': 'c2'}",
             "/elections: a chart with an unregistered ID: "
             "{'type': 'explore-chart-mount', 'chart': 'c2'}",
             "/elections: a chart mount point not built by components.chart: "
             "{'type': 'explore-chart-mount', 'chart': 'c1'}",
+            "/elections: a chart mount point not built by components.chart: "
+            "{'type': 'explore-chart-mount', 'chart': 'c9'}",
+            "/elections: a chart with an unregistered ID: "
+            "{'type': 'explore-chart-mount', 'chart': 'c9'}",
         ]
 
     def test_a_built_chart_passes_and_holds_no_graph(
@@ -456,7 +491,7 @@ class TestEveryChart:
 
         tree, built = chart_render(layout, monkeypatch)
         assert len(mount_points(tree)) == 1
-        assert of_type(tree, "Graph") == []
+        assert graphs(tree) == []
         assert chart_problems(tree, "/elections", built, "elections") == []
 
     def test_a_chart_naming_an_undeclared_token_fails(

@@ -344,10 +344,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
-  SRI), recorded in D087, and a chart's drawing mounted only once plotly.js has loaded, so a
-  failed load leaves its space empty (D088, #452); owner decisions at #432's plan gate, 2026-11-06 (the table pointer's
-  wording, no toolbar, no chart IDs in reader text); `CHARTS` and `dom_id`, `TEMPLATE` and
-  `CHART_CONFIG` in `dashboard/explore/charts.py`.
+  SRI), recorded in D087; the drawing put in only once plotly.js has loaded, so a failed load
+  leaves its space empty: owner decision on #452, 2026-11-07, recorded in D088; owner decisions
+  at #432's plan gate, 2026-11-06 (the table pointer's wording, no toolbar, no chart IDs in
+  reader text); `CHARTS` and `dom_id`, `TEMPLATE` and `CHART_CONFIG` in
+  `dashboard/explore/charts.py`.
 - **Not:** A *figure*: in this file and on the page, a figure is a number ("no popular-vote
   figure"), and Plotly's and HTML's word for a chart stays in code. Not a page's title (the
   browser tab, `og:title`): a chart has a chart title. Not a stand-in for its companion table.
