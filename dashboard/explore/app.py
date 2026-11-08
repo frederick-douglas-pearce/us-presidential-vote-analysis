@@ -617,8 +617,8 @@ app = ExploreDash(
     use_pages=True,
     compress=True,
     suppress_callback_exceptions=True,
-    # Dash's MCP server (since 4.3) runs callbacks through a route of its own, which
-    # the routing hook never sees; the argument overrides DASH_MCP_ENABLED (D089).
+    # Dash's MCP server runs callbacks through a route of its own, which the routing
+    # hook never sees; the argument overrides DASH_MCP_ENABLED (D089).
     enable_mcp=False,
     include_pages_meta=False,  # rebuilt in ExploreDash.index, without twitter:url
     title=SITE_TITLE,

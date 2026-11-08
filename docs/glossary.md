@@ -807,9 +807,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** *Not-found state*, where the link names a kind of page (an election, a state, a
   candidate) but a value this dataset does not serve; *Degraded state*. A request for a file the
   site does not serve (for example a script under `/_dash-component-suites/`, #430), which answers
-  the web server's default 404 with no text of ours and no page. A link whose decoded path holds a line break (`%0A`), which
-  the web server answers with its own default 404 before the site loads, with no text of ours
-  (D089).
+  the web server's default 404 with no text of ours and no page. A link whose decoded path holds
+  a line break (`%0A`), which the web server answers with its own default 404 before the site
+  loads, with no text of ours (D089).
 - **Status:** settled
 
 ### Party
