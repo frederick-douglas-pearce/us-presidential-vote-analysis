@@ -878,6 +878,7 @@ def test_tag_escapes_every_character_that_could_leave_an_attribute() -> None:
 DECODED_PATHS: tuple[tuple[str, str, str | None], ...] = (
     ("/fake-election/182%34", "fake-election/1824", "1824"),  # stops decoding
     ("/fake-election/182%2534", "fake-election/182%34", "182%34"),  # decodes twice
+    ("/fake-election/%252F", "fake-election/%2F", "%2F"),  # ... or matches a page then
     ("/%2Ffake-election%2F1824%2F", "fake-election/1824", "1824"),  # strips first
     ("/fake-election%2F1824", "fake-election/1824", "1824"),  # decodes variables only
     ("/%66ake-election/1824", "fake-election/1824", "1824"),  # ... after matching
@@ -902,19 +903,25 @@ def echo_year_page(register: Callable[..., dict[str, Any]]) -> list[Any]:
     return seen
 
 
-def path_to_page_keys(
+def path_to_page_calls(
     monkeypatch: pytest.MonkeyPatch, owner: Any
-) -> list[str]:
-    """Record every key ``owner._path_to_page`` is called with, from now on."""
-    keys: list[str] = []
+) -> list[tuple[str, dict[str, str] | None]]:
+    """Record every call of ``owner._path_to_page`` from now on: the key it was given
+    and the path variables it returned."""
+    calls: list[tuple[str, dict[str, str] | None]] = []
     real = owner._path_to_page
 
     def spy(key: str) -> Any:
-        keys.append(key)
-        return real(key)
+        page, path_vars = real(key)
+        calls.append((key, path_vars))
+        return page, path_vars
 
     monkeypatch.setattr(owner, "_path_to_page", spy)
-    return keys
+    return calls
+
+
+def keys_of(calls: list[tuple[str, dict[str, str] | None]]) -> list[str]:
+    return [key for key, _ in calls]
 
 
 class TestEncodedPath:
@@ -928,9 +935,9 @@ class TestEncodedPath:
     def test_the_index_matches_the_key_the_router_matches(
         self, monkeypatch: pytest.MonkeyPatch, pathname: str, key: str, _year: Any
     ) -> None:
-        keys = path_to_page_keys(monkeypatch, appmod)
+        calls = path_to_page_calls(monkeypatch, appmod)
         get(pathname)
-        assert keys[:1] == [key]
+        assert keys_of(calls)[:1] == [key]
 
     def test_a_decoded_newline_never_reaches_the_index(
         self, monkeypatch: pytest.MonkeyPatch
@@ -938,9 +945,9 @@ class TestEncodedPath:
         # Flask's catch-all path converter does not match a newline, so the document
         # request answers Flask's own 404 and the app, its router included, never
         # loads: there is no render to disagree with.
-        keys = path_to_page_keys(monkeypatch, appmod)
+        calls = path_to_page_calls(monkeypatch, appmod)
         status, _, body = get("/fake-election/18%0A24")
-        assert status == 404 and keys == []
+        assert status == 404 and calls == []
         assert "<title>404 Not Found</title>" in body
 
     @pytest.mark.parametrize(
@@ -953,7 +960,7 @@ class TestEncodedPath:
             ("/fake-election/182%2534", 404, None, "fake-year-missing"),
             ("/fake-election/18+24", 404, None, "fake-year-missing"),
             ("/fake-election/%FF", 404, None, "fake-year-missing"),
-            ("/%2F", 200, "/", "home"),
+            ("/%2F", 200, "/", "coverage"),  # the home page's success marker
             ("/fake-election/%2F", 404, None, "page-not-found"),
         ],
     )
@@ -975,7 +982,7 @@ class TestEncodedPath:
         )
         assert head.noindex is (status == 404)
         ids = routed_ids(route(pathname))
-        assert routed in ids or (routed == "home" and "fake-year" not in ids), ids
+        assert routed in ids, ids
         if routed != "fake-year":
             assert "fake-year" not in ids
             assert calls == []  # a refused value fills nothing
@@ -1530,13 +1537,17 @@ class TestDashPrivates:
         key: str,
         year: str | None,
     ) -> None:
-        # Observed in a real routing request: the key Dash's router hands its matcher,
-        # and the variable the layout receives. app.py's router_key, which the hook
-        # and the site navigation's model follow, must name the same key.
+        # Observed in a real routing request carrying a query that names the path
+        # variable: the key Dash's router hands its matcher, the key app.py's hook
+        # matched by, and the variable the layout receives (the path's, so the hook
+        # stripped by the router's key). The site navigation's model follows
+        # router_key, which must name the same key.
         seen = echo_year_page(register)
-        keys = path_to_page_keys(monkeypatch, dash.dash)
-        assert route(pathname).status_code == 200
-        assert keys == [key]
+        router = path_to_page_calls(monkeypatch, dash.dash)
+        hook = path_to_page_calls(monkeypatch, appmod)
+        assert route(pathname, "?year=1860").status_code == 200
+        assert keys_of(router) == [key]
+        assert keys_of(hook) == [key]
         assert seen == ([] if year is None else [year])
         assert appmod.router_key(pathname) == key
 
@@ -1559,12 +1570,30 @@ class TestDashPrivates:
     def test_no_callback_asks_the_client_to_compress_its_request(self) -> None:
         appmod.server.test_client().get("/")  # Dash registers its router on a request
         assert appmod.ROUTER_OUTPUT in appmod.app.callback_map
-        assert not any(
-            spec.get("compress_payload") for spec in appmod.app.callback_map.values()
+        specs = [*appmod.app.callback_map.values(), *appmod.app._callback_list]
+        # The key is Dash's own name for it, in both collections: a renamed key would
+        # otherwise read as "not set" here while the client compressed.
+        assert all("compress_payload" in spec for spec in specs)
+        assert not any(spec["compress_payload"] for spec in specs)
+
+    def test_the_mcp_server_is_off_whatever_the_environment_says(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Dash's MCP server runs callbacks through a route of its own, which the
+        # routing hook never sees (D089). app.py passes enable_mcp=False, and a
+        # constructor argument beats DASH_MCP_ENABLED in Dash's config.
+        assert appmod.app._enable_mcp is False
+        mcp_path = appmod.app._mcp_path
+        assert mcp_path and all(
+            mcp_path.strip("/") not in rule.rule
+            for rule in appmod.server.url_map.iter_rules()
         )
-        assert not any(
-            spec.get("compress_payload") for spec in appmod.app._callback_list
-        )
+        source = Path(appmod.__file__).read_text(encoding="utf-8")
+        assert "    enable_mcp=False,\n" in source
+        monkeypatch.setenv("DASH_MCP_ENABLED", "true")
+        assert dash._configs.get_combined_config("mcp_enabled", False, False) is False
+        # Not vacuous: with no argument, the variable would turn it on.
+        assert dash._configs.get_combined_config("mcp_enabled", None, False) is True
 
     def test_the_index_strips_the_path_as_the_router_does(self) -> None:
         for path in ("/", "/election/1860/", "//a//"):
@@ -2229,6 +2258,9 @@ class TestEncodedDispatch:
         seen = echo_year_page(register)
         response = encoded_route("/fake-election/1824", "?year=1860", encoding)
         assert response.status_code == 415
+        # Werkzeug's default body: no text of the app's own.
+        default = werkzeug.exceptions.UnsupportedMediaType().get_response()
+        assert response.get_data() == default.get_data()
         assert seen == []
 
     def test_without_the_refusal_dash_routes_it_with_the_querys_value(
@@ -2255,9 +2287,16 @@ class TestEncodedDispatch:
         assert seen == ["1824"]
 
     def test_only_the_dispatch_endpoint_is_refused(self) -> None:
+        # An encoded POST to any other endpoint gets what it would get anyway (the
+        # index takes no POST: 405), so a refusal that dropped its endpoint check, and
+        # refused every encoded POST, would answer 415 here.
         client = appmod.server.test_client()
-        response = client.get("/", headers={"Content-Encoding": "gzip"})
-        assert response.status_code == 200
+        response = client.post(
+            "/",
+            data=gzip.compress(b"{}"),
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+        )
+        assert response.status_code == 405
 
 
 class TestPathVariableWins:
@@ -2327,18 +2366,10 @@ class TestPathVariableWins:
         # Whatever the router would have read, minus the path variables, and no more:
         # the router's own match, observed in a real routing request with no query,
         # never re-implemented here (#456).
-        found: list[Any] = []
-        real = dash.dash._path_to_page
-
-        def spy(key: str) -> Any:
-            page, path_vars = real(key)
-            found.append(path_vars)
-            return page, path_vars
-
-        monkeypatch.setattr(dash.dash, "_path_to_page", spy)
+        calls = path_to_page_calls(monkeypatch, dash.dash)
         route(pathname)
-        assert len(found) == 1
-        names = set(found[0] or ())
+        assert len(calls) == 1
+        names = set(calls[0][1] or ())
         before = _parse_query_string(search)
         assert _parse_query_string(stripped) == {
             k: v for k, v in before.items() if k not in names

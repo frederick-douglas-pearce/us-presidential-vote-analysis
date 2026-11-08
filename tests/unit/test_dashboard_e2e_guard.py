@@ -12,6 +12,7 @@ from tests.e2e.conftest import (
     guard_problems,
     is_chunk,
 )
+from tests.e2e.dashboard_pages import RESOURCE_ERROR
 
 
 def test_a_clean_test_passes() -> None:
@@ -56,24 +57,47 @@ CHUNK = "ChunkLoadError: Loading chunk 746 failed."
 
 
 def test_without_the_chunk_marker_every_error_is_left_to_the_named_check() -> None:
-    assert chunk_problems(None, 0, [CHUNK, "E"]) == ([], [CHUNK, "E"])
+    assert chunk_problems(None, 0, [CHUNK, RESOURCE_ERROR, "E"]) == (
+        [],
+        [CHUNK, RESOURCE_ERROR, "E"],
+    )
 
 
 def test_an_aborted_chunk_must_be_requested_and_fail_within_the_bound() -> None:
-    ok = [CHUNK] * 2 + ["E"]
+    ok = [CHUNK, CHUNK, RESOURCE_ERROR, "E"]
     assert chunk_problems("async-graph", 1, ok) == ([], ["E"])
-    assert chunk_problems("async-graph", 0, ok)[0] == [
+    assert chunk_problems("async-graph", 0, [CHUNK])[0] == [
         "the async-graph chunk was never requested"
     ]
-    assert chunk_problems("async-graph", 1, ["E"])[0] == [
+    assert chunk_problems("async-graph", 1, [RESOURCE_ERROR])[0] == [
         "the aborted async-graph chunk logged no ChunkLoadError"
     ]
-    at_bound = [CHUNK] * CHUNK_ERROR_BOUND
+    at_bound = [CHUNK] * CHUNK_ERROR_BOUND + [RESOURCE_ERROR]
     assert chunk_problems("async-graph", 1, at_bound) == ([], [])
-    over = [CHUNK] * (CHUNK_ERROR_BOUND + 1)
+    over = [CHUNK] * (CHUNK_ERROR_BOUND + 1) + [RESOURCE_ERROR]
     assert chunk_problems("async-graph", 1, over)[0] == [
         f"the aborted async-graph chunk logged {CHUNK_ERROR_BOUND + 1} "
         f"ChunkLoadError lines; at most {CHUNK_ERROR_BOUND} (D089)"
+    ]
+
+
+def test_each_aborted_request_explains_one_resource_error_and_no_more() -> None:
+    # A bounded retry: two requests, two resource errors, passes.
+    retry = [CHUNK, CHUNK, RESOURCE_ERROR, RESOURCE_ERROR]
+    assert chunk_problems("async-graph", 2, retry) == ([], [])
+    # A resource error no aborted request explains is left for the named check.
+    assert chunk_problems("async-graph", 1, [CHUNK, RESOURCE_ERROR, RESOURCE_ERROR]) == (
+        [],
+        [RESOURCE_ERROR],
+    )
+    # An aborted request whose resource error never came is a problem.
+    assert chunk_problems("async-graph", 2, [CHUNK, RESOURCE_ERROR])[0] == [
+        "2 aborted async-graph requests but 1 resource errors"
+    ]
+    many = [CHUNK] + [RESOURCE_ERROR] * (CHUNK_ERROR_BOUND + 1)
+    assert chunk_problems("async-graph", CHUNK_ERROR_BOUND + 1, many)[0] == [
+        f"the async-graph chunk was requested {CHUNK_ERROR_BOUND + 1} times; "
+        f"at most {CHUNK_ERROR_BOUND} (D089)"
     ]
 
 

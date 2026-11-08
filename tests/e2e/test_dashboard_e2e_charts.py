@@ -24,6 +24,7 @@ from tests.e2e.conftest import plotlyjs_file, plotlyjs_url
 from tests.e2e.dashboard_pages import (
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
+    RESOURCE_ERROR,
     assert_chunk_failure_stops,
     assert_rendered,
     watch_chunk_errors,
@@ -194,7 +195,7 @@ def test_the_drawing_is_named_by_the_chart_title(page: Page) -> None:
 #: Chrome's error for the refused script: the one console error a blocked CDN causes,
 #: once per document (#452). Before #452, a mounted ``dcc.Graph`` rethrew its rejected
 #: load on every render and Dash logged the script's error event without end.
-BLOCKED_RESOURCE = "Failed to load resource: net::ERR_FAILED"
+BLOCKED_RESOURCE = RESOURCE_ERROR
 #: Long enough for the old loop to have logged hundreds of errors (12 by 300 ms, 256
 #: by 2 s, #432's measure), so "bounded" is observed rather than assumed.
 LOOP_WINDOW_MS = 2000
@@ -469,7 +470,6 @@ def test_the_registered_callback_resolves_without_touching_its_source(
 
 @pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.aborted_chunk("async-graph")
-@pytest.mark.expected_console_error(BLOCKED_RESOURCE)
 def test_a_failed_graph_chunk_stops_logging(page: Page) -> None:
     """#456, D089: with plotly.js loaded and dcc's graph chunk refused, the page logs a
     bounded number of ``ChunkLoadError`` lines and stops; on Dash 4.4.1 it logged them
@@ -492,14 +492,31 @@ def test_a_same_page_re_render_keeps_the_chart_drawn(page: Page) -> None:
     with page.expect_response(
         lambda response: urlsplit(response.url).path == UPDATE_PATH
         and "_pages_content" in (response.request.post_data or "")
-    ):  # the router re-renders the page's content
+    ) as routed:
         page.evaluate(
             f"""() => {{
                 window.history.pushState({{}}, "", "{CHART_PAGE}?x=1");
                 window.dispatchEvent(new CustomEvent("_dashprivate_pushstate"));
             }}"""
         )
+    # The router handed the renderer the page again, the chart's mount point empty
+    # in it: so a graph drawn afterwards survived a fresh, empty mount point.
+    mount = charts.mount_id(charts.dom_id(CHART_ID))
+    assert empty_mount_in(routed.value.json()["response"]["_pages_content"], mount)
     page.wait_for_timeout(SETTLE_MS)
     expect(page.locator(GRAPH)).to_have_count(1)
     page.locator(FIRST_BAR).first.wait_for()
     assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
+
+
+def empty_mount_in(node: Any, mount: dict[str, Any]) -> bool:
+    """Whether a routing response's content holds the component with id ``mount``,
+    with no children."""
+    if isinstance(node, dict):
+        props = node.get("props")
+        if isinstance(props, dict) and props.get("id") == mount:
+            return not props.get("children")
+        return any(empty_mount_in(value, mount) for value in node.values())
+    if isinstance(node, list):
+        return any(empty_mount_in(value, mount) for value in node)
+    return False

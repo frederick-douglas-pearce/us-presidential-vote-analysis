@@ -161,7 +161,6 @@ def test_the_year_slider_labels_keep_apart(page: Page) -> None:
 
 
 @pytest.mark.aborted_chunk("async-slider")
-@pytest.mark.expected_console_error("Failed to load resource: net::ERR_FAILED")
 def test_a_failed_slider_chunk_stops_logging(page: Page) -> None:
     """#456, D089: with dcc's slider chunk refused, the elections index logs a bounded
     number of ``ChunkLoadError`` lines and stops (Dash 4.4.1 logged them without end),

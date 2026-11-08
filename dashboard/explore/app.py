@@ -14,12 +14,13 @@ in the browser, the theme choice and the site navigation's current-page marker:
   is. A matched path gets a canonical link built from the page's path template and its
   variables, with no query string, and an ``og:url`` that adds the query normalized by
   the page's own ``query=`` parser, so a shared filtered card reopens the filtered view.
-  A path no page matches, one a page's ``validate=`` rejects from the already-cached
-  source it names (a template source resolved from the cached index, #279), one whose
-  percent-escapes change it when decoded, or Dash's custom 404 page, answers 404 with
-  ``noindex`` and neither tag. A source not cached yet counts as matched: the index
-  never waits on the API (D071(g)). The page's card tags are built here, without
-  Dash's ``twitter:url``, which is the raw request URL.
+  A path is matched decoded once, as Dash's router matches it (:func:`router_key`,
+  D089), so a percent-encoded path resolves as the path it spells. A path no page
+  matches, one a page's ``validate=`` rejects from the already-cached source it names
+  (a template source resolved from the cached index, #279), or Dash's custom 404 page,
+  answers 404 with ``noindex`` and neither tag. A source not cached yet counts as
+  matched: the index never waits on the API (D071(g)). The page's card tags are built
+  here, without Dash's ``twitter:url``, which is the raw request URL.
   The index never decides what a render may fetch: a templated page validates what
   its layout receives, through ``api.accepted``.
 - **A title that names only what the index has checked** (#325, D083). :func:`resolve`
@@ -35,7 +36,11 @@ in the browser, the theme choice and the site navigation's current-page marker:
   page's path variables, so ``/election/1824?year=1872`` would render 1872 under a
   canonical link naming 1824. Before the router runs, :func:`strip_path_variables`
   drops from its routing request every query key named after a path variable of the
-  page the path matches, so the render always matches the canonical link.
+  page the path matches, so the render always matches the canonical link. Two ways
+  around it are closed (D089): :func:`refuse_encoded_dispatch` answers 415 to a
+  content-encoded callback request, whose body the strip cannot read, and the app
+  turns Dash's MCP server off (``enable_mcp=False``), which would run callbacks through
+  a route of its own.
 - **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
   thread, and only then starts the refresher, so the instance takes traffic with a
   filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
@@ -612,6 +617,9 @@ app = ExploreDash(
     use_pages=True,
     compress=True,
     suppress_callback_exceptions=True,
+    # Dash's MCP server (since 4.3) runs callbacks through a route of its own, which
+    # the routing hook never sees; the argument overrides DASH_MCP_ENABLED (D089).
+    enable_mcp=False,
     include_pages_meta=False,  # rebuilt in ExploreDash.index, without twitter:url
     title=SITE_TITLE,
     update_title=None,  # type: ignore[arg-type]  # Dash documents None: no "Updating…"
@@ -825,8 +833,8 @@ def refuse_encoded_dispatch() -> werkzeug.Response | None:
     request would reach the router with its query unfiltered, and a small one can
     expand to Dash's 64 MB cap on the one instance. No callback in this app sets
     ``compress_payload``, so Dash's own client never sends one; the request answers
-    415 before Dash reads it. Any encoding but identity is refused, so a later Dash
-    accepting another one is refused too.
+    415 (Werkzeug's default body) before Dash reads it. Any encoding but identity is
+    refused, so a later Dash accepting another one is refused too.
     """
     request = flask.request
     if request.method != "POST" or request.endpoint != DISPATCH_ENDPOINT:
@@ -834,7 +842,8 @@ def refuse_encoded_dispatch() -> werkzeug.Response | None:
     encoding = request.headers.get("Content-Encoding", "").strip().lower()
     if encoding in ("", "identity"):
         return None
-    return flask.Response("Unsupported Content-Encoding", status=415)
+    # Werkzeug's default body, as the DependencyException handler uses NotFound's.
+    return werkzeug.exceptions.UnsupportedMediaType().get_response()
 
 
 def redirect_target(host: str, path: str, query: str) -> str | None:

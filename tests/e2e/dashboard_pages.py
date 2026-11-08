@@ -129,12 +129,26 @@ def assert_rendered(page: Page, success: str) -> None:
     assert page.evaluate("innerWidth") == 390
 
 
-#: How long a failed chunk's errors must stay unchanged to count as stopped (#456).
-#: Dash 4.4.1's loop logged about 25 a second (D088), so it cannot hide in this window.
+#: How a failed lazy chunk's console error starts (webpack's ``ChunkLoadError``, #456).
+CHUNK_ERROR_PREFIX = "ChunkLoadError: Loading chunk"
+
+#: Chromium's console error for a request that failed, logged once per failed request
+#: (an aborted plotly.js load, #452, or an aborted chunk, #456).
+RESOURCE_ERROR = "Failed to load resource: net::ERR_FAILED"
+
+#: How long a failed chunk must log nothing new to count as stopped (#456). Dash
+#: 4.4.1's loop logged about 25 a second (D088), so it cannot hide in this window; a
+#: loop slower than one line per window is out of this test's reach (D089).
 CHUNK_QUIET_MS = 2000
 
-#: How long to wait for a failed chunk's first error.
+#: How long to wait for a failed chunk's first error, and, after it, for the quiet
+#: window to arrive.
 CHUNK_FIRST_ERROR_MS = 10_000
+CHUNK_DEADLINE_MS = 20_000
+
+#: The marker line the barrier logs; every line logged before it has been delivered
+#: once the test has seen it.
+CHUNK_BARRIER = "e2e-chunk-barrier"
 
 
 def watch_chunk_errors(page: Page) -> list[str]:
@@ -142,9 +156,7 @@ def watch_chunk_errors(page: Page) -> list[str]:
     seen: list[str] = []
 
     def on_console(message: Any) -> None:
-        if message.type == "error" and message.text.startswith(
-            "ChunkLoadError: Loading chunk"
-        ):
+        if message.type == "error" and message.text.startswith(CHUNK_ERROR_PREFIX):
             seen.append(message.text)
 
     page.on("console", on_console)
@@ -152,16 +164,34 @@ def watch_chunk_errors(page: Page) -> list[str]:
 
 
 def assert_chunk_failure_stops(page: Page, seen: list[str]) -> None:
-    """A failed chunk logged at least one ``ChunkLoadError`` and then stopped: the
-    count stays the same over :data:`CHUNK_QUIET_MS`. The guard holds the total to
-    ``CHUNK_ERROR_BOUND`` (``tests/e2e/conftest.py``)."""
+    """A failed chunk logged at least one ``ChunkLoadError`` and then stopped (#456,
+    D089): after the first line, the test waits until none has arrived for
+    :data:`CHUNK_QUIET_MS`, restarting the window on each new line, and fails if that
+    takes past :data:`CHUNK_DEADLINE_MS`; then a marker line is logged and awaited as a
+    barrier, so every line logged before it has arrived, and the count must not have
+    moved. The guard (``tests/e2e/conftest.py``, ``chunk_problems``) holds the totals
+    to its bound. A loop slower than one line per window is out of reach; the harm
+    this pins is D088's tight loop."""
     waited = 0
     while not seen and waited < CHUNK_FIRST_ERROR_MS:
         page.wait_for_timeout(100)
         waited += 100
     assert seen, "the aborted chunk logged no ChunkLoadError"
+    waited = 0
+    quiet = 0
     count = len(seen)
-    page.wait_for_timeout(CHUNK_QUIET_MS)
+    while quiet < CHUNK_QUIET_MS:
+        assert waited < CHUNK_DEADLINE_MS, (
+            f"ChunkLoadError kept coming for {waited} ms: {len(seen)} lines (D088's loop)"
+        )
+        page.wait_for_timeout(100)
+        waited += 100
+        if len(seen) != count:
+            count, quiet = len(seen), 0
+        else:
+            quiet += 100
+    with page.expect_console_message(lambda message: message.text == CHUNK_BARRIER):
+        page.evaluate(f"console.info({CHUNK_BARRIER!r})")
     assert len(seen) == count, (
         f"ChunkLoadError kept coming: {count}, then {len(seen)} (D088's loop)"
     )

@@ -6099,15 +6099,23 @@ dispatch decompresses any callback body sent with `Content-Encoding: gzip`, what
   decode, no DOTALL). The marker's and the strip's oracles read the router's own choice the same
   way.
 - **A content-encoded callback request is refused.** `refuse_encoded_dispatch` answers 415 to a
-  POST to the dispatch endpoint with any `Content-Encoding` but identity, before Dash reads it. No
-  callback sets `compress_payload`, so Dash's client never sends one. Without the refusal, a gzip
+  POST to the dispatch endpoint with any `Content-Encoding` but identity, before Dash reads it,
+  with Werkzeug's default body (no text of the app's own). No callback sets `compress_payload`, so Dash's client never sends one. Without the refusal, a gzip
   routing request reaches the router with its query unfiltered, and a small body can expand to
   Dash's 64 MB cap on the one instance. Pinned: the refusal and its control (the bypass, with the
   refusal off), that no callback asks for compression, and that Dash's Flask backend decompresses
   only on `Content-Encoding` and otherwise reads `get_json()`.
+- **Dash's MCP server is off, whatever the environment says.** Dash (since 4.3, inferred from its
+  changelog) can serve an MCP route of its own that runs callbacks, which the routing hook never
+  sees; it needs no extra package and turns on with `DASH_MCP_ENABLED`. Nothing sets that today
+  (`app.yaml` sets no environment variable, and a guard pins the file), but one variable would
+  expose every callback as a tool, so the app passes `enable_mcp=False`, which Dash's config ranks
+  above the variable. It predates 4.5.0; it is closed here as hardening (owner, #456's review).
 - **More Dash internals relied on** (to D081's list): the router's decode-then-strip
-  (`TestDashPrivates.test_the_router_decodes_the_pathname_once_before_it_strips_and_matches`), its
-  DOTALL match, and the Flask backend's body read.
+  (`TestDashPrivates.test_the_router_decodes_the_pathname_once_before_it_strips_and_matches`, which
+  also observes the key the hook matched by), its DOTALL match, the Flask backend's body read, and
+  the MCP server's off switch and its precedence over the environment
+  (`test_the_mcp_server_is_off_whatever_the_environment_says`).
 - **D073's post-deploy check changes.** The runbook (`docs/deploy-dashboard.md` §9) no longer
   checks that the front end passes the raw target through; it checks that nothing in front of the
   app decodes a path before it does, since a double decode would make `/election/%2531824` a 200.
@@ -6115,10 +6123,15 @@ dispatch decompresses any callback body sent with `Content-Encoding: gzip`, what
   fulfilled and one chunk aborted: on 4.4.1, `async-graph` on a chart page logged 76
   `ChunkLoadError` lines and the year slider's `async-slider` on `/elections` 74, without end; on
   4.5.0 each logs 2, plus the browser's one resource error, and stops. The cause is inferred from
-  4.5.0's in-place reconciliation fix (plotly/dash#3881), not bisected. Two browser tests hold a
-  failed chunk to at most `CHUNK_ERROR_BOUND` (4) lines that stop within a 2 s window, matched by
-  file name, never chunk id; another checks a same-page re-render keeps a chart drawn, which #3881
-  could have broken. They are advisory like the rest of the suite (D082), so D088's note stands:
+  4.5.0's in-place reconciliation fix (plotly/dash#3881), not bisected. Two browser tests pin the
+  mechanism, never a count Dash or webpack chooses: the chunk, matched by file name and never by
+  chunk id, is requested at least once and at most `CHUNK_ERROR_BOUND` (4) times, each aborted
+  request explains exactly one resource error, the `ChunkLoadError` lines number between one and
+  four, and they stop: after the first, nothing new for a 2 s window (restarted on each line,
+  under a deadline), then a console marker as a barrier and no new line before it. A loop slower
+  than one line per 2 s is out of reach; the harm pinned is D088's tight loop. Another test checks
+  a same-page re-render hands the renderer the chart's mount point empty and the chart is drawn
+  after it, which #3881 could have broken. They are advisory like the rest of the suite (D082), so D088's note stands:
   on any Dash bump, run the browser tests by hand.
 
 **Rationale.** Matching as Dash matches is what D073 chose; the upgrade changed Dash's rule, so

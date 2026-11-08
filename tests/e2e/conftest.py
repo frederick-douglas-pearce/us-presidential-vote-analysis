@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import BrowserContext, ConsoleMessage, Page, Route
 
-from tests.e2e.dashboard_pages import VIEWPORT
+from tests.e2e.dashboard_pages import CHUNK_ERROR_PREFIX, RESOURCE_ERROR, VIEWPORT
 from tests.e2e.serve import NETWORK_SENTINEL, READY_LINE
 
 REPO = Path(__file__).resolve().parents[2]
@@ -53,19 +53,18 @@ PLOTLYJS_FETCHES = "plotlyjs_fetches"
 
 #: The marker a test aborts one of dcc's lazily loaded chunks with (#456), by its file
 #: stem (``async-graph``, ``async-slider``), never by its webpack id: every request
-#: from the app for that file is aborted and counted. The test's ``ChunkLoadError``
-#: console errors are then held to :data:`CHUNK_ERROR_BOUND` rather than named one by
-#: one, since how many a bounded failure logs is Dash's own detail, and the chunk must
-#: have been requested at least once.
+#: from the app for that file is aborted and counted. The guard then holds the
+#: requests and the ``ChunkLoadError`` lines each to between one and
+#: :data:`CHUNK_ERROR_BOUND`, and takes one resource error per aborted request as
+#: explained, rather than the test naming them, since how many a bounded failure makes
+#: is Dash's and webpack's own detail.
 ABORTED_CHUNK = "aborted_chunk"
 
-#: The most ``ChunkLoadError`` lines a failed chunk may log (#456, D089). Dash 4.4.1
-#: logged about 25 a second without end (D088); 4.5.0 logs two. A different small
-#: number after a Dash upgrade means re-read the failure, not a regression.
+#: The most requests, and the most ``ChunkLoadError`` lines, a failed chunk may make
+#: (#456, D089). Dash 4.4.1 logged about 25 lines a second without end (D088); 4.5.0
+#: makes one request and logs two. A different small number after a Dash upgrade
+#: means re-read the failure, not a regression.
 CHUNK_ERROR_BOUND = 4
-
-#: How a failed chunk's console error starts (webpack's ``ChunkLoadError``).
-CHUNK_ERROR_PREFIX = "ChunkLoadError: Loading chunk"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -225,16 +224,35 @@ def chunk_problems(
     stem: str | None, aborted: int, errors: list[str]
 ) -> tuple[list[str], list[str]]:
     """What the guard fails a test that aborts a chunk on, and the console errors left
-    for :func:`guard_problems` to hold to the named ones (#456): without the marker,
-    nothing and every error; with it, a chunk never requested, a failure that logged no
-    ``ChunkLoadError``, or one that logged more than :data:`CHUNK_ERROR_BOUND`."""
+    for :func:`guard_problems` to hold to the named ones (#456). Without the marker:
+    nothing, and every error. With it: the chunk requested never, or more than
+    :data:`CHUNK_ERROR_BOUND` times; fewer resource errors than aborted requests (one
+    per aborted request is taken as explained, and removed); and no ``ChunkLoadError``
+    line, or more than :data:`CHUNK_ERROR_BOUND`. The ``ChunkLoadError`` lines are
+    removed too; anything else is left."""
     if stem is None:
         return [], errors
-    chunk = [e for e in errors if e.startswith(CHUNK_ERROR_PREFIX)]
-    rest = [e for e in errors if not e.startswith(CHUNK_ERROR_PREFIX)]
     problems = []
     if aborted == 0:
         problems.append(f"the {stem} chunk was never requested")
+    if aborted > CHUNK_ERROR_BOUND:
+        problems.append(
+            f"the {stem} chunk was requested {aborted} times; "
+            f"at most {CHUNK_ERROR_BOUND} (D089)"
+        )
+    chunk = [e for e in errors if e.startswith(CHUNK_ERROR_PREFIX)]
+    rest = [e for e in errors if not e.startswith(CHUNK_ERROR_PREFIX)]
+    explained = 0
+    kept = []
+    for error in rest:
+        if error == RESOURCE_ERROR and explained < aborted:
+            explained += 1
+        else:
+            kept.append(error)
+    if explained < aborted:
+        problems.append(
+            f"{aborted} aborted {stem} requests but {explained} resource errors"
+        )
     if not chunk:
         problems.append(f"the aborted {stem} chunk logged no ChunkLoadError")
     if len(chunk) > CHUNK_ERROR_BOUND:
@@ -242,7 +260,7 @@ def chunk_problems(
             f"the aborted {stem} chunk logged {len(chunk)} ChunkLoadError lines; "
             f"at most {CHUNK_ERROR_BOUND} (D089)"
         )
-    return problems, rest
+    return problems, kept
 
 
 @pytest.fixture(autouse=True)
