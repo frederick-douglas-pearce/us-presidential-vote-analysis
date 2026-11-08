@@ -36,9 +36,11 @@ renders a chart, so the browser tests of the chart foundation need one. It regis
 page at :data:`CHART_PAGE` whose layout is a success marker holding one chart built by
 ``components.chart`` and its companion table, and rebinds ``charts.CHARTS`` in this
 process only with one row, :data:`CHART_ID`, outside the ``C<n>`` IDs, so it can never
-collide with an issued one. The D070(b) guard and ``TestEveryChart`` run the production
-registry in their own processes. The page has no site-navigation entry, and its figure
-is a plain dict here, never imported from the unit tests.
+collide with an issued one. A second, the **two-chart test page** (#452), holds two
+charts (``X2``, ``X3``) beside one table, so the tests see two charts share one
+plotly.js load. The D070(b) guard and ``TestEveryChart`` run the production
+registry in their own processes. Neither page has a site-navigation entry, and the
+figure is a plain dict here, never imported from the unit tests.
 
 ``conftest.py`` waits for :data:`READY_LINE` with this server's port, written only once
 the cache is filled and the socket is bound, so a session never starts against another
@@ -73,6 +75,14 @@ CHART_PAGE = "/e2e-chart"
 CHART_SUCCESS = "e2e-chart-ok"
 CHART_ID = "X1"
 CHART_TABLE = "e2e-chart-table"
+
+#: The two-chart test page (#452): two charts on one page share one plotly.js load (C4
+#: and C5 will, #436). Its path, success marker, the charts' test-only IDs and their
+#: companion table's id.
+TWO_CHARTS_PAGE = "/e2e-two-charts"
+TWO_CHARTS_SUCCESS = "e2e-two-charts-ok"
+TWO_CHART_IDS = ("X2", "X3")
+TWO_CHARTS_TABLE = "e2e-two-charts-table"
 
 #: The test chart's figure: two bar series told apart by a pattern, in the first two
 #: series tokens.
@@ -220,6 +230,41 @@ def _add_chart_page() -> None:
         prefetch=(),
         on_miss=(),
         success=CHART_SUCCESS,
+        nav=None,
+    )
+
+    charts.CHARTS = {
+        **charts.CHARTS,
+        **{c: charts.Chart(TWO_CHARTS_PAGE, TWO_CHARTS_TABLE) for c in TWO_CHART_IDS},
+    }
+
+    def two_charts(**_query: Any) -> Any:
+        built = []
+        for n, chart_id in enumerate(TWO_CHART_IDS, start=1):
+            figure = json.loads(json.dumps(CHART_FIGURE))
+            figure["layout"]["title"]["text"] = f"Test chart {n} of 2"
+            built.append(
+                components.chart(chart_id, figure, TWO_CHARTS_TABLE, "A caption.")
+            )
+        return html.Div(
+            [
+                html.H1("Two test charts"),
+                *built,
+                html.Table(
+                    html.Tbody(html.Tr([html.Td("A"), html.Td("3")])),
+                    id=TWO_CHARTS_TABLE,
+                ),
+            ],
+            id=TWO_CHARTS_SUCCESS,
+        )
+
+    dash.register_page(
+        "e2e_two_charts",
+        path=TWO_CHARTS_PAGE,
+        layout=two_charts,
+        prefetch=(),
+        on_miss=(),
+        success=TWO_CHARTS_SUCCESS,
         nav=None,
     )
 

@@ -9,6 +9,11 @@ is a ``var(--token)`` reference to a token in ``style.css``, which
 :data:`CHART_CALLBACK` resolves in the browser, so ``style.css`` stays the one source of
 every color.
 
+No ``dcc.Graph`` is ever in a server-rendered layout (#452, D088): ``components.chart``
+renders an empty mount point, and :data:`CHART_MOUNT_CALLBACK` puts the graph in it only
+once plotly.js has loaded, so dcc's own loader never appends a script or fetches, and a
+blocked CDN cannot make Dash loop.
+
 A shared module: it imports nothing from ``explore`` and reads no API
 (``TestSharedPieces`` in ``test_dashboard_elections.py``).
 """
@@ -20,6 +25,8 @@ import re
 from collections.abc import Iterator, Mapping
 from itertools import combinations
 from typing import Any, NamedTuple
+
+from dash import dcc
 
 
 class Chart(NamedTuple):
@@ -84,6 +91,16 @@ def graph_id(dom: Any) -> dict[str, Any]:
 def source_id(dom: Any) -> dict[str, Any]:
     """The id of a chart's source store, holding its unresolved figure."""
     return {"type": SOURCE_TYPE, "chart": dom}
+
+
+#: The pattern-matching id type of a chart's mount point (#452): the ``role="img"``
+#: wrapper, rendered empty, that :data:`CHART_MOUNT_CALLBACK` puts the graph in.
+MOUNT_TYPE = "explore-chart-mount"
+
+
+def mount_id(dom: Any) -> dict[str, Any]:
+    """The id of a chart's mount point, keyed by its DOM id (or ``MATCH``)."""
+    return {"type": MOUNT_TYPE, "chart": dom}
 
 
 #: A token reference, the only form a color takes in a figure or the template.
@@ -505,7 +522,9 @@ def figure_problems(figure: Any) -> list[str]:
 #: unresolved figure, in its source store, and the theme in effect
 #: (``components.THEME_STORE_ID``); its outputs are the graph's ``figure`` and
 #: ``style``.
-#: Dash calls it when a chart mounts, after a client-side navigation too, and whenever
+#: Dash calls it when a chart's graph mounts (put in by :data:`CHART_MOUNT_CALLBACK`,
+#: so its outputs are in no server layout, which ``suppress_callback_exceptions``
+#: allows), after a client-side navigation too, and whenever
 #: the theme in effect changes, so a theme switch redraws every chart on the page with
 #: no reload, no server round trip and no API request. While the store is ``None`` (the
 #: theme callback has not run yet) it changes nothing, as the store's contract (b) asks;
@@ -541,5 +560,75 @@ CHART_CALLBACK = (
     " figure.layout = figure.layout || {};"
     " figure.layout.template = resolve(template);"
     ' return [figure, {visibility: "visible"}];'
+    " }"
+)
+
+#: How long the mount callback waits for plotly.js before it gives up (#452): dcc's
+#: own wait. It only ends the wait; a script already fetching is not canceled, and if
+#: it lands later, a later mount finds ``window.Plotly`` set.
+PLOTLYJS_TIMEOUT_MS = 30_000
+
+#: The one ``window`` property holding the document's plotly.js load (#452): a Promise
+#: of ``true`` (loaded) or ``false`` (failed or timed out), set once and never cleared.
+PLOTLYJS_MEMO = "__exploreChartPlotlyjs"
+
+#: The graph the mount callback returns, as Dash component JSON (#452): its type and
+#: namespace read from ``dcc.Graph`` itself (class attributes, no instance, no literal),
+#: the shared :data:`CHART_CONFIG`, hidden until :data:`CHART_CALLBACK` draws it. The
+#: callback adds its pattern id (:func:`graph_id` of the mount's chart).
+_GRAPH_JSON = {
+    "type": dcc.Graph._type,
+    "namespace": dcc.Graph._namespace,
+    "props": {"config": CHART_CONFIG, "style": {"visibility": "hidden"}},
+}
+
+#: The mount callback (#452, D088), run in the browser for each chart on the page (a
+#: MATCH callback): its input is the chart's source store, which exists from the
+#: chart's first render and is never written (no callback declares it as an output, and
+#: nothing but the theme listener calls ``set_props``:
+#: ``TestMountCallback.test_no_callback_writes_a_chart_source_store``), so it runs once
+#: per mount; its state is the mount point's own id; its output is the mount point's
+#: ``children``.
+#: It returns a Promise, which Dash awaits. plotly.js is loaded once per document and
+#: never retried within it (a reload retries): ``window.Plotly`` is checked first on
+#: every call, and otherwise every chart shares one load, kept as a Promise in
+#: :data:`PLOTLYJS_MEMO`, set synchronously before anything waits on it, from the
+#: address the renderer set from ``_config`` (``window._dashPlotlyJSURL``, D087's).
+#: The Promise resolves ``true`` once the script loaded and defined ``window.Plotly``,
+#: and ``false`` on its error, on the timeout, or if there is no address (which it
+#: logs, once, so the e2e guard sees a renderer change); it never rejects, and the
+#: callback never throws, so a blocked CDN costs the browser's one resource error and
+#: nothing else. Loaded, the callback returns the graph (:data:`_GRAPH_JSON` with its
+#: id), which :data:`CHART_CALLBACK` then draws; dcc's own loader finds
+#: ``window.Plotly`` and never appends a script or fetches. Not loaded, it returns
+#: ``no_update``: the mount point stays empty and the title, caption, pointer and table
+#: are what the reader has. It builds no HTML and evaluates nothing.
+CHART_MOUNT_CALLBACK = (
+    "function (source, mount) {"
+    " var clientside = window.dash_clientside;"
+    f" var memo = {json.dumps(PLOTLYJS_MEMO)};"
+    f" var graph = {json.dumps(_GRAPH_JSON)};"
+    " function load() {"
+    " if (window.Plotly) { return Promise.resolve(true); }"
+    " if (!window[memo]) {"
+    " window[memo] = new Promise(function (resolve) {"
+    " var address = window._dashPlotlyJSURL;"
+    " if (typeof address !== 'string') {"
+    " console.error('chart: no plotly.js address'); resolve(false); return; }"
+    " var script = document.createElement('script');"
+    " var timer = setTimeout(function () { resolve(false); },"
+    f" {PLOTLYJS_TIMEOUT_MS});"
+    " script.onload = function () {"
+    " clearTimeout(timer); resolve(Boolean(window.Plotly)); };"
+    " script.onerror = function () { clearTimeout(timer); resolve(false); };"
+    " script.src = address;"
+    " script.async = true;"
+    " document.body.appendChild(script); }); }"
+    " return window[memo]; }"
+    " return load().then(function (loaded) {"
+    " if (!loaded) { return clientside.no_update; }"
+    " var props = JSON.parse(JSON.stringify(graph.props));"
+    f" props.id = {{type: {json.dumps(GRAPH_TYPE)}, chart: mount.chart}};"
+    " return {type: graph.type, namespace: graph.namespace, props: props}; });"
     " }"
 )

@@ -552,15 +552,17 @@ class ExploreDash(dash.Dash):
     def _config(self) -> dict[str, Any]:
         """The client config, with graphs pointed at plotly.js's CDN address (#432).
 
-        Dash's renderer reads ``serve_locally`` only to choose where ``dcc.Graph``
-        fetches plotly.js (the local package path, which this app no longer serves,
-        or ``plotlyjs_url``), and Dash sends ``plotlyjs_url`` only when
-        ``serve_locally`` is false. So the browser is told ``serve_locally: false``
+        Dash's renderer reads ``serve_locally`` only to choose the plotly.js address
+        it sets as ``window._dashPlotlyJSURL`` (the local package path, which this app
+        no longer serves, or ``plotlyjs_url``), and Dash sends ``plotlyjs_url`` only
+        when ``serve_locally`` is false. So the browser is told ``serve_locally: false``
         and given ``self._plotlyjs_url``, the address Dash derives from the installed
         plotly, while the app's own ``serve_locally`` stays true and every other
-        asset is still served from here. dcc injects the script, with no ``integrity``
-        attribute, when the first ``dcc.Graph`` mounts, so a page with no chart never
-        fetches it (D087). Dash privates, pinned in ``TestDashPrivates``.
+        asset is still served from here. ``charts.CHART_MOUNT_CALLBACK`` loads the
+        script from that address, with no ``integrity`` attribute, when the page's
+        first chart mounts, so a page with no chart never fetches it (D087, D088), and
+        dcc's own loader never appends a script or fetches. Dash privates, pinned in
+        ``TestDashPrivates``.
         """
         config: dict[str, Any] = super()._config()
         config["serve_locally"] = False
@@ -707,6 +709,16 @@ clientside_callback(
     NAV_CALLBACK,
     Output(components.SITE_NAV_ID, "data-current"),
     Input(_ID_LOCATION, "pathname"),
+)
+# The graph is in no server layout (#452): this mounts it into the mount point (which
+# every chart's layout holds) once plotly.js has loaded, and the next callback draws
+# it. The next callback's graph outputs are absent from every layout Dash validates,
+# which suppress_callback_exceptions=True allows.
+clientside_callback(
+    charts.CHART_MOUNT_CALLBACK,
+    Output(charts.mount_id(MATCH), "children"),
+    Input(charts.source_id(MATCH), "data"),
+    State(charts.mount_id(MATCH), "id"),
 )
 clientside_callback(
     charts.CHART_CALLBACK,

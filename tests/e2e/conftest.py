@@ -55,9 +55,8 @@ PLOTLYJS_FETCHES = "plotlyjs_fetches"
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        f"{EXPECTED_CONSOLE_ERROR}(text, repeats=False): one occurrence of a console "
-        "error a browser test causes on purpose, matched in full; with repeats=True, "
-        "one or more",
+        f"{EXPECTED_CONSOLE_ERROR}(text): one occurrence of a console error a "
+        "browser test causes on purpose, matched in full",
     )
     config.addinivalue_line(
         "markers",
@@ -166,30 +165,24 @@ def guard_problems(
     fetches: int,
     expected_fetches: int,
     errors: list[str],
-    named: list[tuple[str, bool]],
+    named: list[str],
 ) -> list[str]:
     """What the browser guard fails a test on, as a pure function so it can be tested
     without a browser (#432's acceptance gate, ``test_dashboard_e2e_guard.py``): a
     request off the loopback host; a plotly.js fetch count other than the test
-    declared; and console errors other than those it named, each ``(text, repeats)``.
-    A named error must occur exactly as often as it is named, or, with ``repeats``
-    (one Dash logs without end, #432), at least once; so a second error with an
-    expected text (another 404) fails too."""
+    declared; and console errors other than those it named. A named error must occur
+    exactly as often as it is named, so a second error with an expected text (another
+    404, or a repeat a loop would log, #452) fails too."""
     problems = []
     if off_host:
         problems.append(f"requests off the loopback host: {off_host}")
     if fetches != expected_fetches:
         problems.append(f"plotly.js fetched {fetches} times; expected {expected_fetches}")
-    repeating = {text for text, repeats in named if repeats}
-    expected = Counter(text for text, _ in named if text not in repeating)
+    expected = Counter(named)
     seen = Counter(errors)
-    missing = sorted(text for text in repeating if not seen[text])
-    if missing:
-        problems.append(f"console errors that never occurred: {missing}")
-    counted = Counter({t: n for t, n in seen.items() if t not in repeating})
-    if counted != expected:
+    if seen != expected:
         problems.append(
-            f"console errors: {dict(counted)}; expected exactly: {dict(expected)}"
+            f"console errors: {dict(seen)}; expected exactly: {dict(expected)}"
         )
     return problems
 
@@ -234,9 +227,6 @@ def _browser_guard(
     page.on("console", on_console)
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
-    named = [
-        (m.args[0], bool(m.kwargs.get("repeats", False)))
-        for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)
-    ]
+    named = [m.args[0] for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)]
     problems = guard_problems(off_host, len(fetches), expected_fetches, errors, named)
     assert problems == [], problems

@@ -23,7 +23,9 @@ import pytest
 
 from explore import app as appmod
 from explore import charts, components, labels
+from tests.unit.test_dashboard_elections import of_type
 from tests.unit.test_dashboard_export import TEST_FIGURE
+from tests.unit.test_dashboard_guards import RUNTIME_MODULES
 from tests.unit.test_dashboard_theme import (
     EXPLICIT_DARK,
     LIGHT,
@@ -184,13 +186,18 @@ class TestChartBuilder:
         assert store.id == charts.source_id("c1")
         assert type(caption).__name__ == "Figcaption"
 
-    def test_the_graph_starts_hidden_with_no_figure_and_the_shared_config(self) -> None:
-        graph = build().children[1].children
-        assert type(graph).__name__ == "Graph"
-        assert graph.id == charts.graph_id("c1")
-        assert graph.style == {"visibility": "hidden"}
-        assert getattr(graph, "figure", None) is None
-        assert graph.config == charts.CHART_CONFIG
+    def test_the_mount_point_is_empty_and_no_graph_is_built(self) -> None:
+        # #452: the graph is put in by the mount callback once plotly.js has loaded.
+        built = build()
+        mount = built.children[1]
+        assert mount.id == charts.mount_id("c1")
+        assert mount.className == "chart-graph"
+        assert getattr(mount, "children", None) is None
+        assert of_type(built, "Graph") == []
+
+    def test_the_mount_id(self) -> None:
+        assert charts.mount_id("c1") == {"type": "explore-chart-mount", "chart": "c1"}
+        assert len({charts.MOUNT_TYPE, charts.GRAPH_TYPE, charts.SOURCE_TYPE}) == 3
 
     def test_the_store_holds_the_figure_without_its_title(self) -> None:
         store = build().children[2]
@@ -708,3 +715,286 @@ class TestChartCallback:
         template, _ = json.JSONDecoder().raw_decode(script[start:])
         assert template == charts.TEMPLATE
         assert "figure.layout.template = resolve(template);" in script
+
+
+# --- the mount callback (#452) ---------------------------------------------------------
+
+
+def graph_uses(source: str) -> list[str]:
+    """The listed ways ``source`` reaches ``dcc.Graph`` to build one (#452): any load of
+    ``Graph`` (an attribute ``X.Graph``, the bare name ``Graph``, or a name an import of
+    ``Graph`` from any module binds, ``from dash.dcc import Graph as G``), except as the
+    base of a ``._type`` or ``._namespace`` read; a
+    ``getattr(..., "Graph")``; and dcc's namespace written as a string (outside
+    docstrings), which is how a server callback would return a graph as component JSON.
+    One rule over loads, not calls, so an alias (``G = dcc.Graph``), a
+    ``functools.partial``, an indexed reference and a subclass are all caught. A runtime
+    module that built a graph, in a layout or a server callback's return, would mount it
+    before plotly.js has loaded and bring Dash's blocked-CDN loop back. It reads source:
+    a dynamic import is the D070(b) lint's (``test_dashboard_guards.py``), while
+    ``exec`` or ``eval`` of built text is outside both lints, as that lint's own
+    docstring says of evasion."""
+    tree = ast.parse(source)
+    aliases = {"Graph"} | {
+        a.asname or a.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for a in node.names
+        if a.name == "Graph"
+    }
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    found = []
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        is_graph = (isinstance(node, ast.Attribute) and node.attr == "Graph") or (
+            isinstance(node, ast.Name) and node.id in aliases
+        )
+        if is_graph:
+            parent = parents.get(node)
+            read = (
+                isinstance(parent, ast.Attribute)
+                and parent.value is node
+                and parent.attr in ("_type", "_namespace")
+            )
+            if not read:
+                found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and any(
+                isinstance(a, ast.Constant) and a.value == "Graph" for a in node.args
+            )
+        ):
+            found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and "dash_core_components" in node.value
+            and id(node) not in docstrings
+        ):
+            found.append(f"line {line}: dcc's namespace written as a string")
+    return found
+
+
+def set_props_refs(source: str) -> list[str]:
+    """Where ``source`` refers to Dash's ``set_props`` in code (#452): a load of the name
+    or attribute ``set_props``, or an import of it (reported by line), and a string
+    outside a docstring that names it (a clientside callback's JS), each reported as the
+    top-level definition or assignment it sits in. Comments are not code, so they do
+    not count."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    found = []
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            where = stmt.name
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
+            where = stmt.targets[0].id
+        else:
+            where = f"line {stmt.lineno}"
+        for node in ast.walk(stmt):
+            hit = (
+                (isinstance(node, ast.Name) and node.id == "set_props")
+                or (isinstance(node, ast.Attribute) and node.attr == "set_props")
+                or (
+                    isinstance(node, ast.ImportFrom)
+                    and any(a.name == "set_props" for a in node.names)
+                )
+                or (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and "set_props" in node.value
+                    and id(node) not in docstrings
+                )
+            )
+            if hit and where not in found:
+                found.append(where)
+    return found
+
+
+class TestMountCallback:
+    KEY = '{"chart":["MATCH"],"type":"explore-chart-mount"}.children'
+
+    def test_no_runtime_module_builds_a_graph(self) -> None:
+        assert RUNTIME_MODULES, "no runtime modules found"
+        found = {
+            str(path): calls
+            for path in RUNTIME_MODULES
+            if (calls := graph_uses(path.read_text(encoding="utf-8")))
+        }
+        assert found == {}
+
+    @pytest.mark.parametrize(
+        ("source", "caught"),
+        [
+            ("from dash import dcc\ndcc.Graph(id='x')\n", True),
+            ("import dash\ndash.dcc.Graph()\n", True),
+            ("from dash.dcc import Graph\nGraph()\n", True),
+            ("from dash.dcc import Graph as G\nG(figure={})\n", True),
+            ("from dash import dcc as d\nd.Graph()\n", True),
+            # #452's review: an alias, a partial, an indexed reference, a subclass,
+            # getattr, and a graph returned as component JSON.
+            ("from dash import dcc\nmake = dcc.Graph\nmake(id=1)\n", True),
+            ("import functools\nfrom dash import dcc\nfunctools.partial(dcc.Graph)()\n", True),
+            ("from dash import dcc\n[dcc.Graph][0]()\n", True),
+            ("from dash import dcc\nclass G(dcc.Graph):\n    pass\n", True),
+            ("from dash import dcc\ngetattr(dcc, 'Graph')()\n", True),
+            ("x = {'type': 'Graph', 'namespace': 'dash_core_components'}\n", True),
+            # #452's round 2: Graph's own module, and a star import.
+            ("from dash.dcc.Graph import Graph\nGraph()\n", True),
+            ("from dash.dcc import *\nGraph()\n", True),
+            ("from dash import dcc\nt = dcc.Graph._type\n", False),
+            ("from dash import dcc\nn = dcc.Graph._namespace\n", False),
+            ("from dash import dcc\ndcc.Store(id='s')\n", False),
+            ('"""A docstring naming dash_core_components."""\n', False),
+        ],
+    )
+    def test_the_lint_catches_the_listed_ways_to_reach_graph(
+        self, source: str, caught: bool
+    ) -> None:
+        assert bool(graph_uses(source)) is caught
+
+    def test_one_clientside_match_callback_on_the_source_with_the_mount_id(
+        self,
+    ) -> None:
+        assert appmod.server.test_client().get("/").status_code == 200
+        spec = appmod.app.callback_map[self.KEY]
+        assert spec["inputs"] == [
+            {"id": '{"chart":["MATCH"],"type":"explore-chart-source"}', "property": "data"}
+        ]
+        assert spec["state"] == [
+            {"id": '{"chart":["MATCH"],"type":"explore-chart-mount"}', "property": "id"}
+        ]
+        assert "callback" not in spec  # clientside: no Python function runs
+        mounted = [k for k in appmod.app.callback_map if charts.MOUNT_TYPE in k]
+        assert mounted == [self.KEY]
+
+    def test_the_chart_callbacks_graph_outputs_need_callback_exceptions_off(
+        self,
+    ) -> None:
+        # The chart callback outputs to a graph no layout holds (#452; the mount
+        # callback's output is the mount point, which the layout holds), which Dash
+        # allows only with suppress_callback_exceptions.
+        assert appmod.app.config.suppress_callback_exceptions is True
+
+    def test_no_callback_writes_a_chart_source_store(self) -> None:
+        """The mount callback runs once per mount because its one input, the source
+        store, is never written (#452): a chart story that updated a figure by writing
+        the store would remount its graph on every update. The two write paths guarded:
+        no callback declares a source store as an output, and nothing but the theme
+        listener (in ``app.THEME_CALLBACK``) calls ``set_props``. Not guarded: a
+        callback's ``running=`` argument, which sets props too."""
+        assert appmod.server.test_client().get("/").status_code == 200
+        writers = [k for k in appmod.app.callback_map if charts.SOURCE_TYPE in k]
+        assert writers == []
+        assert charts.SOURCE_TYPE == "explore-chart-source"
+        found = {
+            path.name: refs
+            for path in RUNTIME_MODULES
+            if (refs := set_props_refs(path.read_text(encoding="utf-8")))
+        }
+        assert found == {"app.py": ["THEME_CALLBACK"]}
+
+    @pytest.mark.parametrize(
+        ("source", "found"),
+        [
+            ("import dash\ndef cb():\n    dash.set_props('s', {})\n", ["cb"]),
+            ("from dash import set_props as s\ndef cb():\n    s('s', {})\n", ["line 1"]),
+            ("JS = 'window.dash_clientside.set_props(id, {});'\n", ["JS"]),
+            ("from dash import set_props\n", ["line 1"]),
+            ("# set_props in a comment\nx = 1\n", []),
+            ('"""A docstring naming set_props."""\n', []),
+            ("def cb():\n    return 1\n", []),
+        ],
+    )
+    def test_the_set_props_rule_finds_what_it_should(
+        self, source: str, found: list[str]
+    ) -> None:
+        """Non-vacuity of the set_props guard, rule by rule (#452's round 2)."""
+        assert set_props_refs(source) == found
+
+    def test_its_text_returns_dccs_own_graph_with_the_shared_config_hidden(
+        self,
+    ) -> None:
+        script = charts.CHART_MOUNT_CALLBACK
+        start = script.index("var graph = ") + len("var graph = ")
+        graph, _ = json.JSONDecoder().raw_decode(script[start:])
+        assert graph == {
+            "type": dash.dcc.Graph._type,
+            "namespace": dash.dcc.Graph._namespace,
+            "props": {"config": charts.CHART_CONFIG, "style": {"visibility": "hidden"}},
+        }
+        assert (graph["type"], graph["namespace"]) == ("Graph", "dash_core_components")
+        assert (
+            ' props.id = {type: "explore-chart-graph", chart: mount.chart};' in script
+        )
+        assert (
+            " return {type: graph.type, namespace: graph.namespace, props: props}; });"
+        ) in script
+
+    def test_its_text_loads_plotlyjs_once_per_document_from_dashs_address(self) -> None:
+        """Pins the callback's text only: what it does in a browser is pinned by
+        ``test_two_charts_on_a_page_share_one_load``,
+        ``test_two_blocked_charts_cost_one_fetch_and_one_error``,
+        ``test_after_a_blocked_load_a_return_to_the_chart_makes_no_second_fetch`` and
+        ``test_the_registered_mount_function_waits_for_plotlyjs_after_a_failed_load``
+        (``tests/e2e/test_dashboard_e2e_charts.py``)."""
+        script = charts.CHART_MOUNT_CALLBACK
+        assert script.startswith("function (source, mount) {")
+        assert f'var memo = "{charts.PLOTLYJS_MEMO}";' in script
+        # window.Plotly first, on every call; then one memo, set before any wait and
+        # never cleared.
+        assert script.index("if (window.Plotly) { return Promise.resolve(true); }") < (
+            script.index("if (!window[memo]) {")
+        )
+        assert "window[memo] = new Promise(function (resolve) {" in script
+        assert script.count("window[memo] =") == 1
+        assert "delete " not in script
+        assert " var address = window._dashPlotlyJSURL;" in script
+        assert (
+            "if (typeof address !== 'string') {"
+            " console.error('chart: no plotly.js address'); resolve(false); return; }"
+        ) in script
+        # The timeout gives up (resolves false), never mounts.
+        assert (
+            " var timer = setTimeout(function () { resolve(false); },"
+            f" {charts.PLOTLYJS_TIMEOUT_MS});"
+        ) in script
+        assert script.count("resolve(true)") == 1  # only the window.Plotly shortcut
+        assert charts.PLOTLYJS_TIMEOUT_MS == 30_000
+        assert "resolve(Boolean(window.Plotly))" in script
+        assert "if (!loaded) { return clientside.no_update; }" in script
+        assert script.count("document.body.appendChild(script)") == 1
+
+    def test_its_text_never_rejects_throws_or_builds_html(self) -> None:
+        """Pins the callback's text only (its spelling); the browser tests named in
+        :meth:`test_its_text_loads_plotlyjs_once_per_document_from_dashs_address` pin
+        that a failed load logs nothing of its own."""
+        script = charts.CHART_MOUNT_CALLBACK
+        for banned in (
+            "reject",
+            "throw",
+            "eval",
+            "innerHTML",
+            "Function(",
+            "setAttribute",
+            "fetch(",
+            "integrity",
+            "location",
+            "history",
+            "XMLHttpRequest",
+            "sendBeacon",
+        ):
+            assert banned not in script, banned

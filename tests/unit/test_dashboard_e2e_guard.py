@@ -27,11 +27,11 @@ def test_the_plotlyjs_fetch_count_must_match_exactly() -> None:
 
 
 def test_a_named_error_occurs_exactly_as_often_as_named() -> None:
-    assert guard_problems([], 0, 0, ["E"], [("E", False)]) == []
-    assert guard_problems([], 0, 0, ["E", "E"], [("E", False)]) == [
+    assert guard_problems([], 0, 0, ["E"], ["E"]) == []
+    assert guard_problems([], 0, 0, ["E", "E"], ["E"]) == [
         "console errors: {'E': 2}; expected exactly: {'E': 1}"
     ]
-    assert guard_problems([], 0, 0, [], [("E", False)]) == [
+    assert guard_problems([], 0, 0, [], ["E"]) == [
         "console errors: {}; expected exactly: {'E': 1}"
     ]
     assert guard_problems([], 0, 0, ["other"], []) == [
@@ -39,13 +39,9 @@ def test_a_named_error_occurs_exactly_as_often_as_named() -> None:
     ]
 
 
-def test_a_repeating_error_must_occur_at_least_once() -> None:
-    assert guard_problems([], 0, 0, ["Event"] * 3, [("Event", True)]) == []
-    assert guard_problems([], 0, 0, ["Event"], [("Event", True)]) == []
-    assert guard_problems([], 0, 0, [], [("Event", True)]) == [
-        "console errors that never occurred: ['Event']"
+def test_a_named_error_repeated_fails_as_a_loop_would() -> None:
+    # #452: no form of the marker excuses a repeat; a loop's errors all count.
+    assert guard_problems([], 0, 0, ["E"] * 3, ["E"]) == [
+        "console errors: {'E': 3}; expected exactly: {'E': 1}"
     ]
-    # A repeating name excuses only its own text.
-    assert guard_problems([], 0, 0, ["Event", "other"], [("Event", True)]) == [
-        "console errors: {'other': 1}; expected exactly: {}"
-    ]
+    assert guard_problems([], 0, 0, ["E", "E"], ["E", "E"]) == []
