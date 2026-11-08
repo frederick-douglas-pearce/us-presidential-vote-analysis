@@ -5999,9 +5999,11 @@ cause is its plotly/dash#3881 (callback-returned children no longer remounted on
   `getattr`, or writes dcc's namespace literally.
 - **The app's mount callback loads plotly.js and then mounts the graph.**
   `charts.CHART_MOUNT_CALLBACK`, an inline clientside MATCH callback on the chart's source store
-  (so once per mount: no callback writes a source store,
-  `TestMountCallback.test_no_callback_writes_a_chart_source_store`), returns a Promise. It checks `window.Plotly` first, on every call;
-  otherwise every chart shares one load, a Promise kept on `window` (`charts.PLOTLYJS_MEMO`), set
+  (so once per mount: no callback declares a source store as an output, and nothing but the
+  theme listener calls `set_props`:
+  `TestMountCallback.test_no_callback_writes_a_chart_source_store`),
+  returns a Promise. It checks `window.Plotly` first, on every call; otherwise every chart shares
+  one load, a Promise kept on `window` (`charts.PLOTLYJS_MEMO`), set
   before anything waits on it and never cleared. The load appends
   `<script src=window._dashPlotlyJSURL async>`, the address the renderer sets from `_config`
   (D087's, no second literal), and resolves `true` once the script has defined `window.Plotly`

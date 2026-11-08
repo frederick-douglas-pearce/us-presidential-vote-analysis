@@ -584,10 +584,11 @@ _GRAPH_JSON = {
 
 #: The mount callback (#452, D088), run in the browser for each chart on the page (a
 #: MATCH callback): its input is the chart's source store, which exists from the
-#: chart's first render and that no callback writes
-#: (``TestMountCallback.test_no_callback_writes_a_chart_source_store``), so it runs once
-#: per mount; its state is the
-#: mount point's own id; its output is the mount point's ``children``.
+#: chart's first render and is never written (no callback declares it as an output, and
+#: nothing but the theme listener calls ``set_props``:
+#: ``TestMountCallback.test_no_callback_writes_a_chart_source_store``), so it runs once
+#: per mount; its state is the mount point's own id; its output is the mount point's
+#: ``children``.
 #: It returns a Promise, which Dash awaits. plotly.js is loaded once per document and
 #: never retried within it (a reload retries): ``window.Plotly`` is checked first on
 #: every call, and otherwise every chart shares one load, kept as a Promise in
@@ -600,9 +601,8 @@ _GRAPH_JSON = {
 #: nothing else. Loaded, the callback returns the graph (:data:`_GRAPH_JSON` with its
 #: id), which :data:`CHART_CALLBACK` then draws; dcc's own loader finds
 #: ``window.Plotly`` and never appends a script or fetches. Not loaded, it returns
-#: ``no_update``: the mount
-#: point stays empty and the title, caption, pointer and table are what the reader
-#: has. It builds no HTML and evaluates nothing.
+#: ``no_update``: the mount point stays empty and the title, caption, pointer and table
+#: are what the reader has. It builds no HTML and evaluates nothing.
 CHART_MOUNT_CALLBACK = (
     "function (source, mount) {"
     " var clientside = window.dash_clientside;"

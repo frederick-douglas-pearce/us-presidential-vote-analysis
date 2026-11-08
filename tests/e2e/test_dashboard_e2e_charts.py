@@ -363,7 +363,7 @@ def test_the_registered_mount_function_returns_the_graph_once_loaded(
 
 @pytest.mark.plotlyjs_fetches(1, abort=True)
 @pytest.mark.expected_console_error(BLOCKED_RESOURCE)
-def test_the_registered_mount_function_does_nothing_after_a_failed_load(
+def test_the_registered_mount_function_waits_for_plotlyjs_after_a_failed_load(
     page: Page,
 ) -> None:
     page.goto(CHART_PAGE)
