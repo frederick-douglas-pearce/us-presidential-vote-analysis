@@ -963,7 +963,10 @@ class TestMountCallback:
         assert script.count("window[memo] =") == 1
         assert "delete " not in script
         assert " var address = window._dashPlotlyJSURL;" in script
-        assert "if (typeof address !== 'string') {" in script
+        assert (
+            "if (typeof address !== 'string') {"
+            " console.error('chart: no plotly.js address'); resolve(false); return; }"
+        ) in script
         # The timeout gives up (resolves false), never mounts.
         assert (
             " var timer = setTimeout(function () { resolve(false); },"

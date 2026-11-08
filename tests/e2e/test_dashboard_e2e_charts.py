@@ -265,12 +265,17 @@ def test_after_a_blocked_load_a_return_to_the_chart_makes_no_second_fetch(
 
 
 TWO = [f"#{charts.dom_id(c)}" for c in TWO_CHART_IDS]
+# Written out, so shrinking the fixture's IDs cannot make the two-chart tests pass on
+# one chart (#452's acceptance gate); the page's own mount count is checked too.
+assert len(TWO) == 2, TWO
+TWO_MOUNTS = 2
 
 
 @pytest.mark.plotlyjs_fetches(1)
 def test_two_charts_on_a_page_share_one_load(page: Page) -> None:
     page.goto(TWO_CHARTS_PAGE)
     assert_rendered(page, f"#{TWO_CHARTS_SUCCESS}")
+    expect(page.locator(".chart-graph")).to_have_count(TWO_MOUNTS)
     for chart in TWO:
         page.locator(f"{chart} .barlayer .point path").first.wait_for()
         expect(page.locator(f"{chart} .js-plotly-plot")).to_have_count(1)
@@ -286,6 +291,7 @@ def test_two_charts_on_a_page_share_one_load(page: Page) -> None:
 def test_two_blocked_charts_cost_one_fetch_and_one_error(page: Page) -> None:
     page.goto(TWO_CHARTS_PAGE)
     assert_rendered(page, f"#{TWO_CHARTS_SUCCESS}")
+    expect(page.locator(".chart-graph")).to_have_count(TWO_MOUNTS)
     await_failed_load(page)
     wait_out_the_loop(page)
     for chart in TWO:
@@ -377,6 +383,34 @@ def test_the_registered_mount_function_waits_for_plotlyjs_after_a_failed_load(
     result: Any = page.evaluate(CALL_MOUNT, [MOUNT_OUTPUT])
     assert result["type"] == "Graph"
     assert result["props"]["id"] == charts.graph_id("x1")
+
+
+#: The mount callback's one log line (#452), for a renderer that set no plotly.js
+#: address: what tells the browser guard a Dash change removed the address.
+NO_ADDRESS = "chart: no plotly.js address"
+
+#: Hides the renderer's plotly.js address before any page script runs: Dash's write is
+#: dropped and every read is ``undefined``.
+HIDE_ADDRESS = (
+    "Object.defineProperty(window, '_dashPlotlyJSURL',"
+    " {get: () => undefined, set: () => {}, configurable: false});"
+)
+
+
+@pytest.mark.expected_console_error(NO_ADDRESS)
+def test_with_no_plotlyjs_address_the_mount_logs_once_and_gives_up(page: Page) -> None:
+    # #452's acceptance gate: with no address the load resolves false at once, logs its
+    # one line (the guard counts it exactly) and fetches nothing (zero fetches is the
+    # guard's default), so no script with an undefined src is appended.
+    page.add_init_script(HIDE_ADDRESS)
+    page.goto(CHART_PAGE)
+    assert_rendered(page, f"#{CHART_SUCCESS}")
+    page.wait_for_function(f"window.{charts.PLOTLYJS_MEMO} !== undefined")
+    assert page.evaluate(SETTLED_LOAD) is False
+    page.wait_for_timeout(SETTLE_MS)
+    assert page.locator(MOUNT).evaluate("el => el.childElementCount") == 0
+    assert page.evaluate("document.querySelectorAll('script[src=\"undefined\"]').length") == 0
+    assert page.evaluate("typeof window.Plotly") == "undefined"
 
 
 #: The chart callback's key in ``/_dash-dependencies``: its two outputs.
