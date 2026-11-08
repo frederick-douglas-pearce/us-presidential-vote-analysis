@@ -51,6 +51,22 @@ EXPECTED_CONSOLE_ERROR = "expected_console_error"
 #: them, as a blocked CDN would, rather than fulfill them from the installed file.
 PLOTLYJS_FETCHES = "plotlyjs_fetches"
 
+#: The marker a test aborts one of dcc's lazily loaded chunks with (#456), by its file
+#: stem (``async-graph``, ``async-slider``), never by its webpack id: every request
+#: from the app for that file is aborted and counted. The test's ``ChunkLoadError``
+#: console errors are then held to :data:`CHUNK_ERROR_BOUND` rather than named one by
+#: one, since how many a bounded failure logs is Dash's own detail, and the chunk must
+#: have been requested at least once.
+ABORTED_CHUNK = "aborted_chunk"
+
+#: The most ``ChunkLoadError`` lines a failed chunk may log (#456, D089). Dash 4.4.1
+#: logged about 25 a second without end (D088); 4.5.0 logs two. A different small
+#: number after a Dash upgrade means re-read the failure, not a regression.
+CHUNK_ERROR_BOUND = 4
+
+#: How a failed chunk's console error starts (webpack's ``ChunkLoadError``).
+CHUNK_ERROR_PREFIX = "ChunkLoadError: Loading chunk"
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
@@ -62,6 +78,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         f"{PLOTLYJS_FETCHES}(count, abort=False): how many times the test fetches "
         "plotly.js from its CDN address, fulfilled from the installed file or aborted",
+    )
+    config.addinivalue_line(
+        "markers",
+        f"{ABORTED_CHUNK}(stem): abort the app's requests for one of dcc's lazily "
+        "loaded chunks, and hold its ChunkLoadError lines to CHUNK_ERROR_BOUND",
     )
 
 
@@ -187,6 +208,43 @@ def guard_problems(
     return problems
 
 
+def is_chunk(url: str, stem: str) -> bool:
+    """Whether ``url`` is the app's request for dcc's chunk ``stem`` (its file is
+    ``<stem>.js``, or ``<stem>.<fingerprint>.js`` where Dash fingerprints it)."""
+    parts = urlsplit(url)
+    name = parts.path.rsplit("/", 1)[-1]
+    return (
+        not _off_host(url)
+        and "/dcc/" in parts.path
+        and name.endswith(".js")
+        and name.split(".", 1)[0] == stem
+    )
+
+
+def chunk_problems(
+    stem: str | None, aborted: int, errors: list[str]
+) -> tuple[list[str], list[str]]:
+    """What the guard fails a test that aborts a chunk on, and the console errors left
+    for :func:`guard_problems` to hold to the named ones (#456): without the marker,
+    nothing and every error; with it, a chunk never requested, a failure that logged no
+    ``ChunkLoadError``, or one that logged more than :data:`CHUNK_ERROR_BOUND`."""
+    if stem is None:
+        return [], errors
+    chunk = [e for e in errors if e.startswith(CHUNK_ERROR_PREFIX)]
+    rest = [e for e in errors if not e.startswith(CHUNK_ERROR_PREFIX)]
+    problems = []
+    if aborted == 0:
+        problems.append(f"the {stem} chunk was never requested")
+    if not chunk:
+        problems.append(f"the aborted {stem} chunk logged no ChunkLoadError")
+    if len(chunk) > CHUNK_ERROR_BOUND:
+        problems.append(
+            f"the aborted {stem} chunk logged {len(chunk)} ChunkLoadError lines; "
+            f"at most {CHUNK_ERROR_BOUND} (D089)"
+        )
+    return problems, rest
+
+
 @pytest.fixture(autouse=True)
 def _browser_guard(
     context: BrowserContext, page: Page, request: pytest.FixtureRequest
@@ -224,9 +282,20 @@ def _browser_guard(
             errors.append(message.text)
 
     context.route(_off_host, refuse)
+    chunk_marker = request.node.get_closest_marker(ABORTED_CHUNK)
+    stem: str | None = chunk_marker.args[0] if chunk_marker else None
+    aborted: list[str] = []
+    if stem is not None:
+
+        def abort_chunk(route: Route) -> None:
+            aborted.append(route.request.url)
+            route.abort()
+
+        context.route(lambda url: is_chunk(url, stem), abort_chunk)
     page.on("console", on_console)
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
     named = [m.args[0] for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)]
-    problems = guard_problems(off_host, len(fetches), expected_fetches, errors, named)
+    problems, rest = chunk_problems(stem, len(aborted), errors)
+    problems += guard_problems(off_host, len(fetches), expected_fetches, rest, named)
     assert problems == [], problems

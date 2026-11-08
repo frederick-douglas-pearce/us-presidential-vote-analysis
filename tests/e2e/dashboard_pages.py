@@ -127,3 +127,41 @@ def assert_rendered(page: Page, success: str) -> None:
     # Written out, not read from VIEWPORT, so editing that constant cannot move the
     # width this suite claims to check: #306's phone, 390 px.
     assert page.evaluate("innerWidth") == 390
+
+
+#: How long a failed chunk's errors must stay unchanged to count as stopped (#456).
+#: Dash 4.4.1's loop logged about 25 a second (D088), so it cannot hide in this window.
+CHUNK_QUIET_MS = 2000
+
+#: How long to wait for a failed chunk's first error.
+CHUNK_FIRST_ERROR_MS = 10_000
+
+
+def watch_chunk_errors(page: Page) -> list[str]:
+    """Record the page's ``ChunkLoadError`` console lines from now on (#456)."""
+    seen: list[str] = []
+
+    def on_console(message: Any) -> None:
+        if message.type == "error" and message.text.startswith(
+            "ChunkLoadError: Loading chunk"
+        ):
+            seen.append(message.text)
+
+    page.on("console", on_console)
+    return seen
+
+
+def assert_chunk_failure_stops(page: Page, seen: list[str]) -> None:
+    """A failed chunk logged at least one ``ChunkLoadError`` and then stopped: the
+    count stays the same over :data:`CHUNK_QUIET_MS`. The guard holds the total to
+    ``CHUNK_ERROR_BOUND`` (``tests/e2e/conftest.py``)."""
+    waited = 0
+    while not seen and waited < CHUNK_FIRST_ERROR_MS:
+        page.wait_for_timeout(100)
+        waited += 100
+    assert seen, "the aborted chunk logged no ChunkLoadError"
+    count = len(seen)
+    page.wait_for_timeout(CHUNK_QUIET_MS)
+    assert len(seen) == count, (
+        f"ChunkLoadError kept coming: {count}, then {len(seen)} (D088's loop)"
+    )

@@ -34,10 +34,12 @@ from tests.e2e.dashboard_pages import (
     PV_FIRST,
     ROUTER_OUTPUT,
     UPDATE_PATH,
+    assert_chunk_failure_stops,
     assert_rendered,
     lower_thumb,
     row_years,
     search,
+    watch_chunk_errors,
     years_shown,
 )
 
@@ -156,3 +158,15 @@ def test_the_year_slider_labels_keep_apart(page: Page) -> None:
             or b["y"] + b["height"] <= a["y"]
         )
         assert apart, f"slider labels closer than {MIN_LABEL_GAP_PX}px: {a} and {b}"
+
+
+@pytest.mark.aborted_chunk("async-slider")
+@pytest.mark.expected_console_error("Failed to load resource: net::ERR_FAILED")
+def test_a_failed_slider_chunk_stops_logging(page: Page) -> None:
+    """#456, D089: with dcc's slider chunk refused, the elections index logs a bounded
+    number of ``ChunkLoadError`` lines and stops (Dash 4.4.1 logged them without end),
+    and its table still renders."""
+    seen = watch_chunk_errors(page)
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    assert_chunk_failure_stops(page, seen)
