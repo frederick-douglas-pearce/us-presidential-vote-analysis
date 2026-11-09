@@ -411,8 +411,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     # The bare address published posts link (#461) lands on the docs. The Location is
     # the relative docs_url, never a URL built from the request: through the Worker the
-    # request's host is the raw run.app origin (D035, D090). Out of the schema and
-    # explained here rather than in a docstring, so no API text is published (#374).
+    # request's host is the raw run.app origin (D035, D090). include_in_schema=False
+    # keeps the route off /docs and openapi.json, so it publishes no API text (#374).
+    # Registered only while the app serves docs (docs_url is set, as it always is
+    # today); an app built without them would answer / with 404 again.
     if app.docs_url is not None:
         docs_url = app.docs_url
 

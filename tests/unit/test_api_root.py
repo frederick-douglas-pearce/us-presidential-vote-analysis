@@ -18,35 +18,64 @@ fallback rather than the Worker's rewrite.
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit
+from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import usvote.api.app as app_module
 from usvote.api import create_app
 from usvote.api.config import ApiSettings
 
 RUN_APP_HOST = "usvote-api-x-uw.a.run.app"
 
 
-def _assert_relative(location: str) -> None:
-    parts = urlsplit(location)
-    assert parts.scheme == "" and parts.netloc == "", location
+def _app_with_docs_url(
+    monkeypatch: pytest.MonkeyPatch, settings: ApiSettings, docs_url: str | None
+) -> FastAPI:
+    """Build the real app with its docs served at ``docs_url`` instead of ``/docs``.
+
+    ``create_app`` takes no docs setting, so the constructor it calls is swapped for
+    one that overrides that one keyword and passes every other through unchanged.
+    """
+
+    class _DocsAt(FastAPI):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**{**kwargs, "docs_url": docs_url})
+
+    monkeypatch.setattr(app_module, "FastAPI", _DocsAt)
+    return create_app(settings)
 
 
 def test_root_redirects_to_the_docs(client: TestClient) -> None:
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 307
-    assert r.headers["location"] == client.app.docs_url  # type: ignore[attr-defined]
     assert r.headers["location"] == "/docs"
-    _assert_relative(r.headers["location"])
 
 
 def test_root_redirect_stays_relative_under_the_workers_host(client: TestClient) -> None:
     r = client.get("/", headers={"host": RUN_APP_HOST}, follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"] == "/docs"
-    _assert_relative(r.headers["location"])
+
+
+def test_root_follows_the_docs_url_rather_than_naming_it(
+    monkeypatch: pytest.MonkeyPatch, settings: ApiSettings
+) -> None:
+    with TestClient(_app_with_docs_url(monkeypatch, settings, "/api-docs")) as c:
+        r = c.get("/", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/api-docs"
+
+
+def test_no_root_route_when_the_app_serves_no_docs(
+    monkeypatch: pytest.MonkeyPatch, settings: ApiSettings
+) -> None:
+    app = _app_with_docs_url(monkeypatch, settings, None)
+    assert "/" not in {getattr(route, "path", None) for route in app.routes}
+    with TestClient(app) as c:
+        assert c.get("/", follow_redirects=False).status_code == 404
 
 
 def test_root_answers_head_with_the_same_redirect(client: TestClient) -> None:

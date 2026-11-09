@@ -35,10 +35,11 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    # Worst cases: each API check is 3 tries × 20 s + 2 × 10 s of sleeps (80 s), times
-    # however many expect_status checks the step makes; the dashboard is its shell check
-    # (80 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s redirect. Re-add these up
-    # when a check is added, and keep the sum under the limit.
+    # Worst cases: each expect_status is 3 tries × 20 s + 2 × 10 s of sleeps (80 s). The
+    # API checks through Cloudflare and direct are 5 of them (400 s). The dashboard path
+    # is its own expect_status (80 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s
+    # redirect (1000 s). Total ≈ 1400 s ≈ 23.3 min, under 30. Add a check's 80 s when
+    # adding one, and keep the total under the limit.
     timeout-minutes: 30
     # Never checks out, never calls the API — no token needed at all.
     permissions: {}
@@ -76,14 +77,18 @@ jobs:
               [ "$i" -lt 3 ] && sleep 10
             done
             fail "${label}: got ${code}, want ${want} — ${url}"
-            echo "--- response headers ---"; cat "$HDR"
-            echo "--- body (first 600 bytes) ---"; head -c 600 "$BODY"; echo
+            # Indented, because the runner parses a workflow command only at the start
+            # of a line, and these are untrusted response bytes.
+            echo "--- response headers ---"; sed 's/^/    | /' "$HDR"
+            echo "--- body (first 600 bytes) ---"; head -c 600 "$BODY" | sed 's/^/    | /'; echo
             return 1
           }
 
-          # A response header is untrusted network input: strip CR/LF and break up "::"
-          # before it reaches an ::error:: line, so it cannot inject a workflow command.
-          safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/::/: :/g' | head -c 200; }
+          # A response header is untrusted network input. The runner parses a workflow
+          # command only at the start of a line, and this value is always printed
+          # mid-line, so stripping CR/LF is the protection: it cannot start a new line.
+          # Twin: safe() and the Location parse in deploy.yml's post-deploy smoke step.
+          safe() { printf '%s' "$1" | tr -d '\r\n' | head -c 200; }
 
           # The Worker rewrites Host to the raw run.app origin (D035), so any header the
           # app builds from the request's host names that origin. Nothing the public host
@@ -100,6 +105,7 @@ jobs:
           # /docs. The raw header, not curl's %{redirect_url}, which resolves a relative
           # Location to an absolute one and would hide a host leak. Never -L.
           if expect_status "/ → /docs" "https://${CF_HOST}/" 307; then
+            # Twin of the Location parse in deploy.yml's expect_location.
             loc=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="location:"{print $2}')
             [ "$loc" = "/docs" ] \
               || fail "/ redirects to '$(safe "$loc")', want the relative '/docs'"

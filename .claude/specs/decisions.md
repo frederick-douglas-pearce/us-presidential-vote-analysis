@@ -6166,9 +6166,11 @@ lock's 403. The same probe showed the Worker passes a 307 through to the client 
 - **Every `Location` the API sends is relative.** Nothing builds a redirect from the request's
   host (`request.url_for`, `request.url`), because through the Worker that host is the origin.
 - **`/` redirects to the docs**: `GET` and `HEAD`, `307` (temporary, so the docs can move or `/`
-  can become a page), `Location` the relative `app.docs_url`, out of the OpenAPI schema. It lives
-  in the app, not the Worker, whose source is not in the repo and which nothing tests; D032 keeps
-  behavior in the image.
+  can become a page), `Location` the relative `app.docs_url`, out of the OpenAPI schema. The route
+  exists only while the app serves docs, as it always does today. It lives in the app, not the
+  Worker: the Worker's source is not in the repo and nothing tests it, D035 keeps its job to the
+  Host rewrite, the origin secret and `/v1` caching, and D032's provider-agnostic image means
+  the behavior travels with the container.
 - **`redirect_slashes` is off.** It was the one source of an absolute `Location`. A
   trailing-slash path now 404s. No published link uses one, the `/v1` ones already ended in a 403,
   and the rest worked only by sending the visitor to the origin.
