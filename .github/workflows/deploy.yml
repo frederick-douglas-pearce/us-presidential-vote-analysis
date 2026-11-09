@@ -167,7 +167,7 @@ jobs:
           # after a cache purge + revision cutover, so the first hits can wake a cold
           # container or miss the just-purged edge and briefly return the wrong code.
           # Retry each assertion before failing, so a warm-up race isn't a false deploy
-          # failure. Every check gets the same budget: 15 tries (~60s).
+          # failure. wait_for retries 15 times, 4 s apart; expect_location below uses 5.
           wait_for() {  # wait_for <url> <expected-code> <label>
             local url="$1" want="$2" label="$3" tries=15 code=""
             for i in $(seq 1 "$tries"); do
@@ -261,14 +261,17 @@ jobs:
             # trailing-slash path 404s with no Location (redirect_slashes off), where it
             # used to redirect to http://<run.app host>/<path>. Raw headers, never curl's
             # %{redirect_url} (it resolves a relative Location to absolute) and never -L.
-            # A header value is untrusted. It is only ever printed mid-line, and the runner
-            # parses a workflow command only at the start of a line, so stripping CR/LF is
-            # the protection. Twin: safe() and the Location parse in api-canary.yml.
-            safe() { printf '%s' "$1" | tr -d '\r\n' | head -c 200; }
+            # A header value is untrusted, and the runner parses two workflow-command forms:
+            # `::cmd::` at the start of a line (after leading whitespace) and the legacy
+            # `##[cmd]` anywhere in a line. Stripping CR/LF keeps the value on its caller's
+            # line, which never starts with it; rewriting every run of `#` before `[` to
+            # `# [` defuses the legacy form and cannot leave a `##[` behind.
+            # Twin: safe() and the Location parse in api-canary.yml.
+            safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/##*\[/# [/g' | head -c 200; }
             # expect_location <path> <want-code> <want-location; empty = none>
             # 5 tries, unlike wait_for's 15: the edge already answered for /v1/meta above,
-            # so the origin is warm, and each try can take up to 20 s + 4 s (≈2 min per
-            # check), which keeps the step inside the job's 20-minute limit.
+            # so the origin is warm. Each try is capped at 20 s + 4 s, so a check takes at
+            # most ~2 min.
             expect_location() {
               local path="$1" want="$2" want_loc="$3" hdr code="" loc=""
               hdr=$(mktemp)

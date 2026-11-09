@@ -77,18 +77,23 @@ jobs:
               [ "$i" -lt 3 ] && sleep 10
             done
             fail "${label}: got ${code}, want ${want} — ${url}"
-            # Indented, because the runner parses a workflow command only at the start
-            # of a line, and these are untrusted response bytes.
-            echo "--- response headers ---"; sed 's/^/    | /' "$HDR"
-            echo "--- body (first 600 bytes) ---"; head -c 600 "$BODY" | sed 's/^/    | /'; echo
+            # Untrusted response bytes, dumped through defuse_dump below.
+            echo "--- response headers ---"; defuse_dump < "$HDR"
+            echo "--- body (first 600 bytes) ---"; head -c 600 "$BODY" | defuse_dump; echo
             return 1
           }
 
-          # A response header is untrusted network input. The runner parses a workflow
-          # command only at the start of a line, and this value is always printed
-          # mid-line, so stripping CR/LF is the protection: it cannot start a new line.
+          # Response bytes are untrusted, and the runner parses two workflow-command forms:
+          # `::cmd::` at the start of a line (after leading whitespace, which it trims) and
+          # the legacy `##[cmd]` anywhere in a line. Both helpers rewrite every run of
+          # `#` before `[` to `# [`, which cannot leave a `##[` behind.
+          # safe() is for a value printed inside a line its caller starts: stripping CR/LF
+          # keeps the value on that line, so it never starts one.
           # Twin: safe() and the Location parse in deploy.yml's post-deploy smoke step.
-          safe() { printf '%s' "$1" | tr -d '\r\n' | head -c 200; }
+          safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/##*\[/# [/g' | head -c 200; }
+          # defuse_dump is for printing whole response lines: the "|" in its prefix (not
+          # the indent, which the runner trims) stops a line from starting with `::`.
+          defuse_dump() { sed 's/##*\[/# [/g; s/^/    | /'; }
 
           # The Worker rewrites Host to the raw run.app origin (D035), so any header the
           # app builds from the request's host names that origin. Nothing the public host
@@ -211,7 +216,7 @@ jobs:
               echo "  ✓ dashboard content carries the live snapshot"
             else
               fail "dashboard content: ${note:-no response}"
-              head -c 600 "$BODY"; echo
+              head -c 600 "$BODY" | defuse_dump; echo
             fi
 
             # The vendor host must hand visitors to the public hostname.
