@@ -1,0 +1,49 @@
+# OG share-card brief: LinkedIn follow-up to Post 1, "The Compact's Arithmetic After the Midterms".
+#
+# Render with:
+#     uv run python tooling/render-og-card.py social/images/2026-11-08-linkedin-compact-arithmetic-after-midterms/og-card.toml
+#
+# Rationale: the post leads with the post-midterm arithmetic, so the card shows the sums
+# and nothing else. Left panel: the compact's tally plus each non-member state with a new
+# Democratic trifecta. Right panel: the running total against 270. States are added largest
+# first, which is only the order of size; it claims nothing about the order of any
+# enactment. Every cell is filled, and nothing on the card comes from UCSB.
+#
+# Data provenance (checked 2026-11-08):
+#   - 222: https://www.nationalpopularvote.com/state-status (19 jurisdictions). NOT an
+#     election-record number; re-check on the day of posting.
+#   - The state allotments come from the LIVE public API, GET /v1/elections/2024?state=<XX>,
+#     field `state_electoral_votes` (2024 apportionment, in force through 2028).
+#   - Which states changed hands: NCSL, Nov. 6, 2026 (results unofficial until certified).
+#   - The running totals are arithmetic on the above.
+
+[card]
+title = ["222 Plus Five States:", "The Arithmetic"]
+subhead = "New Democratic trifectas are not enactments. Results are unofficial until certified."
+series_mark = "Counted, Not Assumed"
+
+[[panel]]
+label = "Electoral votes"
+sublabel = "2024 allotments"
+mono = true
+rows = [
+  ["Compact today", "222"],
+  ["+ Pennsylvania", "19"],
+  ["+ Michigan", "15"],
+  ["+ Arizona", "11"],
+  ["+ Wisconsin", "10"],
+  ["+ Nevada", "6"],
+]
+
+[[panel]]
+label = "Running total"
+sublabel = "270 needed"
+mono = true
+rows = [
+  ["Today", "222"],
+  ["with PA", "241"],
+  ["with MI", "256"],
+  ["with AZ", "267"],
+  ["with WI", "277"],
+  ["with NV", "283"],
+]
