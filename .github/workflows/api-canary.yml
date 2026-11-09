@@ -91,9 +91,12 @@ jobs:
           # keeps the value on that line, so it never starts one.
           # Twin: safe() and the Location parse in deploy.yml's post-deploy smoke step.
           safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/##*\[/# [/g' | head -c 200; }
-          # defuse_dump is for printing whole response lines: the "|" in its prefix (not
-          # the indent, which the runner trims) stops a line from starting with `::`.
-          defuse_dump() { sed 's/##*\[/# [/g; s/^/    | /'; }
+          # defuse_dump is for printing whole response lines. The runner ends a line at a
+          # bare CR as well as at LF, and sed prefixes only after LF, so CRs are stripped
+          # first (also before the rewrite, so a CR between `##` and `[` cannot rejoin
+          # them). Then the "|" in the prefix (not the indent, which the runner trims)
+          # stops a line from starting with `::`.
+          defuse_dump() { tr -d '\r' | sed 's/##*\[/# [/g; s/^/    | /'; }
 
           # The Worker rewrites Host to the raw run.app origin (D035), so any header the
           # app builds from the request's host names that origin. Nothing the public host

@@ -167,7 +167,7 @@ jobs:
           # after a cache purge + revision cutover, so the first hits can wake a cold
           # container or miss the just-purged edge and briefly return the wrong code.
           # Retry each assertion before failing, so a warm-up race isn't a false deploy
-          # failure. wait_for retries 15 times, 4 s apart; expect_location below uses 5.
+          # failure. wait_for tries 15 times, 4 s apart; expect_location below uses 5.
           wait_for() {  # wait_for <url> <expected-code> <label>
             local url="$1" want="$2" label="$3" tries=15 code=""
             for i in $(seq 1 "$tries"); do
