@@ -11,13 +11,13 @@ humanizer_pass: v3.0.0
 featured: false
 ---
 
-After the 2026 US midterms, it's looking like six states will have new Democratic trifectas, with Democrats holding the governorship and both legislative chambers, according to the [National Conference of State Legislatures](https://www.ncsl.org/state-legislatures-news/details/2026-state-legislative-elections-the-results-and-what-they-mean)' unofficial count. Within days of the vote, outlets including [USA TODAY](https://www.usatoday.com/story/news/politics/elections/2026/11/06/democrats-elect-president-popular-vote-electoral-college/92631637007/) and [The New Republic](https://newrepublic.com/post/217594/democrats-seats-nationwide-end-electoral-college) were asking what those trifectas mean for how the US elects its president. Results are unofficial until certified, so this is a snapshot: the compact's tally is as of November 8 and NCSL's count as of November 6.
+After the 2026 US midterms, it's looking like six states will have new Democratic trifectas, with Democrats holding the governorship and both legislative chambers, according to the [National Conference of State Legislatures](https://www.ncsl.org/state-legislatures-news/details/2026-state-legislative-elections-the-results-and-what-they-mean)' unofficial count. Within days of the vote, outlets including [USA TODAY](https://www.usatoday.com/story/news/politics/elections/2026/11/06/democrats-elect-president-popular-vote-electoral-college/92631637007/) and [The New Republic](https://newrepublic.com/post/217594/democrats-seats-nationwide-end-electoral-college) were asking what those trifectas mean for how the US elects its president. Results are unofficial until certified, so this is a snapshot: the compact's tally is as of November 9 and NCSL's count as of November 6.
 
 The reason is the National Popular Vote Interstate Compact (NPVIC). States that join agree to appoint their electors for whoever wins the national popular vote, but only once enough states have joined to hold 270 electoral votes, a majority of the Electoral College. Minnesota is one of the six trifecta states, but it's already a member. The other five are not.
 
 ## The arithmetic
 
-As of November 8, 2026, the compact's [status page](https://www.nationalpopularvote.com/state-status) shows member jurisdictions holding 222 electoral votes, 48 short of 270. Using the 2024 allotments, the five non-member states hold:
+As of November 9, 2026, the compact's [status page](https://www.nationalpopularvote.com/state-status) shows member jurisdictions holding 222 electoral votes, 48 short of 270. Using the 2024 allotments, the five non-member states hold:
 
 - Pennsylvania: 19
 - Michigan: 15
