@@ -21,7 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from usvote.api import provenance, routes
 from usvote.api.cache import NotModified, cache_dependency, not_modified_handler
@@ -366,6 +366,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         license_info=API_LICENSE_INFO,
         openapi_tags=_OPENAPI_TAGS,
         lifespan=_lifespan,
+        # Off on purpose (D090). Starlette's trailing-slash redirect builds an absolute
+        # Location from the request's Host, and the Cloudflare Worker rewrites Host to
+        # the raw run.app origin (D035), so it sent public visitors to
+        # http://<run.app host>/<path>. A trailing-slash path now 404s instead.
+        redirect_slashes=False,
     )
     app.state.settings = settings
     app.add_exception_handler(NotModified, not_modified_handler)
@@ -403,6 +408,19 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             },
             headers={"Cache-Control": _HEALTH_CACHE_CONTROL},
         )
+
+    # The bare address published posts link (#461) lands on the docs. The Location is
+    # the relative docs_url, never a URL built from the request: through the Worker the
+    # request's host is the raw run.app origin (D035, D090). include_in_schema=False
+    # keeps the route off /docs and openapi.json, so it publishes no API text (#374).
+    # Registered only while the app serves docs (docs_url is set, as it always is
+    # today); an app built without them would answer / with 404 again.
+    if app.docs_url is not None:
+        docs_url = app.docs_url
+
+        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        def root() -> RedirectResponse:
+            return RedirectResponse(url=docs_url, status_code=307)
 
     v1 = APIRouter(
         prefix=settings.version_prefix,

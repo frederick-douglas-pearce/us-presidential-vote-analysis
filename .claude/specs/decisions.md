@@ -6145,3 +6145,46 @@ the fix for how the drift went unseen. The compressed-body refusal costs nothing
 closes a bypass the upgrade itself opened.
 
 **Related:** D073, D081, D082, D083, D086, D088, #326, #448, #452, #456.
+
+---
+
+## D090: Every Location the API sends is relative; the root redirects to the docs and trailing-slash redirects are off
+
+**Date:** 2026-11-08
+**Builds on:** D032, D035 · **Decided by:** the owner, approving #461's plan (architect-ruled fork)
+
+**Context.** Published posts (Posts 1 and 2), the README and LinkedIn copies link the API's bare
+address, `https://api.us-presidential-election-center.org/`, which answered 404. While planning
+the fix (#461), a probe through the public host showed a live leak on another path: `/v1/meta/`,
+`/docs/` and `/health/` each answered `307` with `location: http://usvote-api-…-uw.a.run.app/<path>`.
+The Cloudflare Worker rewrites `Host` to the raw `run.app` origin (D035), and Starlette's
+trailing-slash redirect builds an absolute URL from that host. The redirect exposed the origin
+the lock exists to keep out of view, downgraded to http, and for a `/v1` path ended in the origin
+lock's 403. The same probe showed the Worker passes a 307 through to the client unfollowed.
+
+**Decision.**
+- **Every `Location` the API sends is relative.** Nothing builds a redirect from the request's
+  host (`request.url_for`, `request.url`), because through the Worker that host is the origin.
+- **`/` redirects to the docs**: `GET` and `HEAD`, `307` (temporary, so the docs can move or `/`
+  can become a page), `Location` the relative `app.docs_url`, out of the OpenAPI schema. The route
+  exists only while the app serves docs, as it always does today. It lives in the app, not the
+  Worker: the Worker's source is not in the repo and nothing tests it, D035 keeps its job to the
+  Host rewrite, the origin secret and `/v1` caching, and D032's provider-agnostic image means
+  the behavior travels with the container.
+- **`redirect_slashes` is off.** It was the one source of an absolute `Location`. A
+  trailing-slash path now 404s. No published link uses one, the `/v1` ones already ended in a 403,
+  and the rest worked only by sending the visitor to the origin.
+- **Checked end to end.** The canary asserts `/` answers exactly `307` with the raw header
+  `/docs`, and fails if any header from the public host names `run.app`. The deploy smoke step
+  checks `/` and that `/v1/meta/` 404s with no `Location`. The Worker must not follow redirects
+  (`docs/deploy-cloud-run.md` §7).
+
+**Rationale.** Turning off one framework default removes the whole class of leak at its source,
+where a middleware rewriting `Location` would keep a behavior nobody relies on at the cost of
+security-sensitive code that could itself produce an open redirect (a protocol-relative `//host`).
+`tests/unit/test_api_root.py` pins the redirect and the 404s, with a twin test that shows the
+default still leaks under the same foreign `Host`, so a Starlette change that makes slash
+redirects relative turns a test red and this decision can be revisited.
+
+**Related:** D032, D034, D035, #374, #461.
+
