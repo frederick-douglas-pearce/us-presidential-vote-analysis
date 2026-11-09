@@ -7,7 +7,7 @@ categories: ["us-presidential-vote"]
 tags: ["electoral-college", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/compact-arithmetic-after-midterms-og.png
 og_card_source: social/images/2026-11-08-linkedin-compact-arithmetic-after-midterms/og-card.png
-humanizer_pass: none
+humanizer_pass: v3.0.0
 featured: false
 ---
 
@@ -27,21 +27,21 @@ As of November 8, 2026, the compact's [status page](https://www.nationalpopularv
 
 That's 61. All five together would bring the compact to 283.
 
-Two things follow from the sums. Pennsylvania and Michigan are each necessary: without Pennsylvania the total tops out at 264, without Michigan at 268. With both, any two of Arizona, Wisconsin and Nevada are enough, and any one alone is not.
+Pennsylvania and Michigan are each necessary: without Pennsylvania the total tops out at 264, without Michigan at 268. With both, any two of Arizona, Wisconsin and Nevada are enough, and any one alone is not.
 
 Not every list includes Arizona. USA TODAY names Michigan, Minnesota, Nevada, Pennsylvania and Wisconsin. NCSL also counts Arizona, and so does The New Republic's tally. Without Arizona, the four non-members reach 272. With it, 283.
 
 ## A trifecta is not an enactment
 
-In two of these states, a trifecta has not been enough on its own. Nevada had one in 2019, when its legislature passed a compact bill, AB 186, and Governor Steve Sisolak [vetoed it](https://archive.leg.state.nv.us/Session/80th2019/Reports/VetoMessages/AB186_80th_VetoMessage.pdf) on May 30. Michigan had a Democratic trifecta in 2023 and 2024, and its compact bill, HB 4156, [passed a House committee and went no further](https://www.nationalpopularvote.com/state-status).
+Nevada and Michigan have both had Democratic trifectas before without joining. In 2019 Nevada's legislature passed a compact bill, AB 186, and Governor Steve Sisolak [vetoed it](https://archive.leg.state.nv.us/Session/80th2019/Reports/VetoMessages/AB186_80th_VetoMessage.pdf) on May 30. Michigan had one in 2023 and 2024, and its compact bill, HB 4156, [passed a House committee and went no further](https://www.nationalpopularvote.com/state-status).
 
 ## Open questions
 
-A legal question sits behind all of it: whether the Compact Clause requires Congress to consent to an interstate agreement like this one. The [Congressional Research Service](https://crsreports.congress.gov/product/pdf/R/R43823) has examined it and left it unresolved. The New Republic notes that the filibuster would matter if consent is required. And USA TODAY reports the compact could take effect as early as 2028. That is its reporting, not a forecast of mine.
+The compact also faces an open legal question: whether the Compact Clause requires Congress to consent to an interstate agreement like this one. The [Congressional Research Service](https://crsreports.congress.gov/product/pdf/R/R43823) has examined it and left it unresolved. The New Republic notes that the filibuster would matter if consent is required. USA TODAY reports that the compact could take effect as early as 2028.
 
 ## The allotments are a snapshot too
 
-The 2024 allotments are in force through the 2028 election. After the 2030 census, House seats, and with them electoral votes, are reapportioned, and the 270 math is redone on the new numbers. I make no projection of what they will be.
+The 2024 allotments are in force through the 2028 election. After the 2030 census, House seats, and with them electoral votes, are reapportioned, and the 270 math is redone on the new numbers.
 
 The current allotments are public, free and need no key. [`GET /v1/elections/2024?state=PA`](https://api.us-presidential-election-center.org/v1/elections/2024?state=PA) returns Pennsylvania's `state_electoral_votes`, 19. Swap in MI, AZ, WI or NV to check the rest.
 
