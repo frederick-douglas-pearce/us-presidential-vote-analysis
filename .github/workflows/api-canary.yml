@@ -35,10 +35,11 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    # Worst cases: the API checks ≈5.5 min (4 × 3 tries × 20 s + sleeps), the dashboard
-    # ≈17 min (its shell check ≈1.3 min, 12 content tries × 20 s + 11 × 60 s, the redirect
-    # 20 s). Both fit inside 25.
-    timeout-minutes: 25
+    # Worst cases: each API check is 3 tries × 20 s + 2 × 10 s of sleeps (80 s), times
+    # however many expect_status checks the step makes; the dashboard is its shell check
+    # (80 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s redirect. Re-add these up
+    # when a check is added, and keep the sum under the limit.
+    timeout-minutes: 30
     # Never checks out, never calls the API — no token needed at all.
     permissions: {}
     # No hostname, no public surface to check (a fresh clone, a fork).
@@ -80,7 +81,30 @@ jobs:
             return 1
           }
 
+          # A response header is untrusted network input: strip CR/LF and break up "::"
+          # before it reaches an ::error:: line, so it cannot inject a workflow command.
+          safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/::/: :/g' | head -c 200; }
+
+          # The Worker rewrites Host to the raw run.app origin (D035), so any header the
+          # app builds from the request's host names that origin. Nothing the public host
+          # serves may carry it (D090). Run after every check through Cloudflare.
+          no_origin_leak() {
+            if grep -qi 'run\.app' "$HDR"; then
+              fail "$1: a response header names the raw run.app origin — $(safe "$(grep -i 'run\.app' "$HDR" | head -1)")"
+            fi
+          }
+
           echo "=== through Cloudflare (datacenter IP, curl UA — the #148 client) ==="
+
+          # The bare address published posts link (#461): an exact 307 to the relative
+          # /docs. The raw header, not curl's %{redirect_url}, which resolves a relative
+          # Location to an absolute one and would hide a host leak. Never -L.
+          if expect_status "/ → /docs" "https://${CF_HOST}/" 307; then
+            loc=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="location:"{print $2}')
+            [ "$loc" = "/docs" ] \
+              || fail "/ redirects to '$(safe "$loc")', want the relative '/docs'"
+          fi
+          no_origin_leak "/"
 
           if expect_status "/health" "https://${CF_HOST}/health" 200; then
             guard=$(jq -r '.origin_guard // "missing"' "$BODY")
@@ -92,6 +116,7 @@ jobs:
             # /health is `no-store`, so this is always the ORIGIN's answer, never the edge's.
             origin_version=$(jq -r '.snapshot_version // ""' "$BODY")
           fi
+          no_origin_leak "/health"
 
           # The exact assertion that was 403 for 34 days.
           if expect_status "/v1/meta" "https://${CF_HOST}/v1/meta" 200; then
@@ -116,6 +141,7 @@ jobs:
               fail "the edge is serving snapshot '${edge_version:-none}' but the origin has '${origin_version}' — stale edge cache"
             fi
           fi
+          no_origin_leak "/v1/meta"
 
           # A real data route, so a reachable API serving a broken snapshot is caught too.
           # 2000 is deliberate and must not be bumped to "the latest election": a historical
@@ -124,6 +150,7 @@ jobs:
             n=$(jq -r '.data | length' "$BODY" 2>/dev/null || echo 0)
             [ "$n" -gt 0 ] 2>/dev/null || fail "the 2000 summary returned no rows — reachable, but serving a broken snapshot"
           fi
+          no_origin_leak "/v1/elections/2000/summary"
 
           if [ -n "${RAW_ORIGIN_URL}" ]; then
             echo "=== direct to the origin (no Cloudflare) ==="

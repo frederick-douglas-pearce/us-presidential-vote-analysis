@@ -267,7 +267,10 @@ Transform-Rule steps a paid plan would use; see [D035](../.claude/specs/decision
    `ORIGIN_SECRET` = the value from §4 (no trailing space/newline) → Deploy.
 3. **Route it.** Worker → Settings → Domains & Routes → Add → **Custom Domain** →
    `api.<domain>` (auto-creates the proxied DNS + cert). SSL/TLS mode → **Full (strict)**.
-   Test: `curl https://api.<domain>/health` → 200.
+   Test: `curl https://api.<domain>/health` → 200, and `curl -sI https://api.<domain>/` → `307`
+   with `location: /docs` (the bare address lands on the docs, #461). The Worker must pass that
+   307 through to the client: don't add `redirect: 'follow'` to its `fetch`. Every `Location`
+   the API sends is relative for the same reason the Host rewrite exists (D090).
 4. **Rate limiting** (the Worker does NOT rate-limit): Security → WAF → Rate limiting rules →
    `Hostname eq api.<domain> and URI Path starts_with "/v1"` → 60 req/min per IP → Block.
    **Do NOT enable Bot Fight Mode** (Security → Bots) — see the box below.

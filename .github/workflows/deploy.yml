@@ -253,4 +253,32 @@ jobs:
               echo "::error::the canonical /v1/meta is not serving this deploy's snapshot (last: HTTP ${code}, ETag '${etag:-none}') — the purge did not take, or the endpoint is failing"
               exit 1
             fi
+
+            # The Location rule (D090): the Worker rewrites Host to the raw run.app origin
+            # (D035), so every Location the API emits must be relative. Two checks prove
+            # this image carries it, through the Worker (which must pass a 307 through
+            # unfollowed). / answers an exact 307 to the relative /docs (#461), and a
+            # trailing-slash path 404s with no Location (redirect_slashes off), where it
+            # used to redirect to http://<run.app host>/<path>. Raw headers, never curl's
+            # %{redirect_url} (it resolves a relative Location to absolute) and never -L.
+            # A header value is untrusted: strip CR/LF and break up "::" before echoing it.
+            safe() { printf '%s' "$1" | tr -d '\r\n' | sed 's/::/: :/g' | head -c 200; }
+            # expect_location <path> <want-code> <want-location; empty = none>
+            expect_location() {
+              local path="$1" want="$2" want_loc="$3" hdr code="" loc=""
+              hdr=$(mktemp)
+              for i in $(seq 1 15); do
+                code=$(curl -s -o /dev/null -D "$hdr" -w '%{http_code}' --max-time 20 "https://${CF_HOST}${path}") || code=000
+                loc=$(tr -d '\r' < "$hdr" | awk 'tolower($1)=="location:"{print $2}')
+                if [ "$code" = "$want" ] && [ "$loc" = "$want_loc" ]; then
+                  echo "  ✓ ${path}: ${code}, location '${loc:-none}' (try ${i})"; return 0
+                fi
+                echo "  … ${path}: HTTP ${code}, location '$(safe "${loc:-none}")', want ${want} + '${want_loc:-none}' (try ${i}); retrying"
+                sleep 4
+              done
+              echo "::error::${path} answered HTTP ${code} with location '$(safe "${loc:-none}")', want ${want} with '${want_loc:-none}'"
+              return 1
+            }
+            expect_location "/" 307 "/docs" || exit 1
+            expect_location "/v1/meta/" 404 "" || exit 1
           fi
