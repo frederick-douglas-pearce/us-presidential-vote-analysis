@@ -2,7 +2,7 @@
 layout: post
 title: "222 Plus Five States: The Compact's Arithmetic, as of November 2026"
 date: 2026-11-09 00:00:00-0800
-description: "After the 2026 midterms, five states without the National Popular Vote Interstate Compact have new Democratic trifectas. A snapshot of the arithmetic as of November 2026: what they would add, what is necessary, and what a trifecta has not been enough to do."
+description: "Five states outside the National Popular Vote Interstate Compact have new Democratic trifectas after the 2026 midterms. The arithmetic, as of November 2026."
 categories: ["us-presidential-vote"]
 tags: ["electoral-college", "us-presidential-vote-analysis"]
 og_image: https://frederick-douglas-pearce.github.io/assets/img/compact-arithmetic-after-midterms-og.png
@@ -41,7 +41,7 @@ The compact also faces an open legal question: whether the Compact Clause requir
 
 ## The allotments are a snapshot too
 
-The 2024 allotments are in force through the 2028 election. After the 2030 census, House seats, and with them electoral votes, are reapportioned, and the 270 math is redone on the new numbers.
+The 2024 allotments are in force through the 2028 election. After the 2030 census, House seats, and with them electoral votes, are reapportioned, and the 270 math is redone on the new numbers. How much room above 270 the compact would need to stay there is something the record can partly answer. The 19 current members and these five states together held 298 electoral votes under the 1970s allotments, and fewer under every reapportionment since: 294, 293, 290, 286, and 283 today. The 19 members alone have held between 222 and 230 under every apportionment since 1964.
 
 The current allotments are public, free and need no key. [`GET /v1/elections/2024?state=PA`](https://api.us-presidential-election-center.org/v1/elections/2024?state=PA) returns Pennsylvania's `state_electoral_votes`, 19. Swap in MI, AZ, WI or NV to check the rest.
 
