@@ -1082,7 +1082,8 @@ def not_found() -> html.Div:
 def layout(year: Any = None, **params: Any) -> html.Div:
     """The one-election view. On success, :func:`render`'s body is the whole page: it
     holds the links, then the heading and the lede with its filter sentence (#464).
-    The not-found and degraded states get their heading and lede here, heading first."""
+    The not-found and degraded states get their heading here, heading first, and the
+    degraded state its lede."""
     heading = "Election"
     lede: str | None = LEDE
     try:

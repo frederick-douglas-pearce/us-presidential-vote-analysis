@@ -847,9 +847,9 @@ class TestThemeContrast:
         assert toggle_rule(".neighbor-later::after")["transform"] == "rotate(-135deg)"
 
     def test_the_bar_is_drawn_by_its_class_not_the_election_views_id(self) -> None:
-        # #465's subpages take the treatment by class (#464). No rule names the bar's
-        # or its links' ids, so the paint premise and the chevron check, which scan
-        # the classes, see every rule that styles the bar.
+        # #465's subpages take the treatment by class (#464). The paint premise and
+        # the chevron check see every rule keyed on the bar's classes; a rule keyed on
+        # the bar's ids would escape them, so none may exist.
         selectors = " ".join(prelude for _, prelude, _ in shipped_rules())
         for name in ("NAV_ID", "EARLIER_ID", "LATER_ID"):
             element = page_global("pages.election", name)

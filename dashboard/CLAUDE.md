@@ -42,12 +42,13 @@ at a 390 × 844 viewport: the home page, and the elections index's filter-to-URL
 callback per change, no loop), back and forward, a pasted filtered URL, the column-name list
 and the year slider's labels keeping a gap; and the one-election view's later link, from a
 filtered view to the next year unfiltered as a client-side navigation, and back (#324),
-and its bar (#464): at 390 px and 1280 px in Light and Dark, the two links apart, inside
+and its bar (#464), reporting whether the pair sat on one row or two at 390 px: at
+390 px and 1280 px in Light and Dark, the two links apart, inside
 the box, one line each, each on its side, above the H1, outside and below the site
 header, no sideways scroll (also at 320 px), each link's accessible name exactly its
 text, a year at either end keeping its one link on its side, forced colors keeping the
 edge, the links and the focus ring at 3:1 in both palettes, and Tab reaching the earlier
-then the later link after the theme toggle (it reports one row or two at 390 px),
+then the later link after the theme toggle,
 and an unserved year's heading and browser tab reading as not found (#325), and chart C1
 (#433): 2016's seven rows, both series and every text the chart draws (bar and marker
 labels, tick labels, the axis title, the legend's entries and the majority line's label)

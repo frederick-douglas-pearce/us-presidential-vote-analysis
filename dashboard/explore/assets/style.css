@@ -241,7 +241,8 @@ body {
    the pair wraps to two rows, which it does at a phone's width rather than shrinking the
    text. Each link is at least 24 px tall (WCAG 2.5.8) and keeps its underline; at the
    default text size its text is one line, and when the reader's text is larger it
-   wraps rather than scrolling the page sideways (WCAG 1.4.4, 1.4.10). A class, not #election-nav, so #465's subpages take it as is. */
+   wraps rather than scrolling the page sideways (WCAG 1.4.4, 1.4.10). A class, not
+   #election-nav, so #465's subpages take it as is. */
 .neighbor-nav {
   display: flex;
   flex-wrap: wrap;
