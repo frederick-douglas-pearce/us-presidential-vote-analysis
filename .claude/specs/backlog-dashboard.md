@@ -631,13 +631,16 @@ _Story of epic #N (E9 — public dashboard)._
 - #430 — stop serving Dash's bundled plotly.js (live gap, `priority:high`; first)
 - #433 — C1: electoral vs popular-vote share per candidate, dashed majority line (`/election/<year>`)
 - #434 — C2: the leader's electoral share against the majority line, every election (`/elections`)
-- #435 — C3: every state's persons per electoral vote (`/election/<year>`)
+- #464 — the earlier and later links set apart in a bar above the heading (done)
+- #465 — the election overview and its two subpages, `/election/<year>/states` and
+  `/election/<year>/per-capita`, one fill each (D092; filed from #433's plan gate)
+- #435 — C3: every state's persons per electoral vote (`/election/<year>/per-capita`, since #465)
 - #436 — C4, C5: electors appointed and popular votes per election, one-state filter (`/elections`)
 - #437 — headline metrics on `/elections`, under a bounded dashboard-side summary rule (new D-entry)
 - #429 — research (`priority:low`): the spread of persons per electoral vote over time, accounting
   for the three-elector floor
 
-**Order:** #430 → #359 → #432 → #433 → #435; #431 → #434 (after #432) → #437; #428 + #431 → #436.
+**Order:** #430 → #359 → #432 → #433 → #464 → #465 → #435; #431 → #434 (after #432) → #437; #428 + #431 → #436.
 
 **Later tier** (tracker rows): margins with the years the winners differed; one state's allotment
 and persons per electoral vote over time; popular-vote coverage over time; electoral votes outside

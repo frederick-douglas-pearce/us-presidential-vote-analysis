@@ -82,7 +82,14 @@ class TestStructure:
     def test_the_landmark_is_named_apart_from_the_election_views_nav(self) -> None:
         name = getattr(site_nav(), "aria-label")
         assert name == labels.SITE_NAV_LABEL
-        assert name != page_global("pages.election", "ELECTION_NAV_LABEL")
+        assert name not in {
+            labels.ELECTION_NAV_LABEL,
+            labels.ELECTION_SECTIONS_LABEL,
+            *(
+                labels.ELECTION_NAV_SECTION_LABEL.format(section=text)
+                for text in (labels.SECTION_STATES, labels.SECTION_PER_CAPITA)
+            ),
+        }
 
     def test_site_name_three_links_then_the_toggle_four_on_the_right(self) -> None:
         head = header()
@@ -231,6 +238,8 @@ class TestCurrentPage:
             "pages.home": "home",
             "pages.elections": "elections",
             "pages.election": "elections",
+            "pages.election_states": "elections",
+            "pages.election_per_capita": "elections",
             "pages.states": "states",
             "pages.state": "states",
             "pages.candidate": None,

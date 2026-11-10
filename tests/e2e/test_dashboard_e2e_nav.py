@@ -61,6 +61,10 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     "/elections": (ELECTIONS_SUCCESS, ("elections", "page")),
     "/election/1824": (ELECTION_SUCCESS, ("elections", "true")),
     "/election/1825": ("#election-not-found", ("elections", "true")),
+    # The overview's subpages (#465), and an unserved year on one.
+    "/election/1824/states": ("#election-states-page", ("elections", "true")),
+    "/election/1824/per-capita": ("#election-per-capita-page", ("elections", "true")),
+    "/election/1825/states": ("#election-states-not-found", ("elections", "true")),
     "/states": ("#states", ("states", "page")),
     "/state/GA": ("#state", ("states", "true")),
     "/state/TX": (UNAVAILABLE, ("states", "true")),
@@ -69,7 +73,7 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
 }
 
 #: The templates whose document answers 404, which logs one console error.
-NOT_FOUND_PATHS = {"/election/1825", "/no-such-page"}
+NOT_FOUND_PATHS = {"/election/1825", "/election/1825/states", "/no-such-page"}
 
 
 def template_params() -> list[Any]:
@@ -319,6 +323,9 @@ def test_the_registered_callback_marks_every_path(page: Page) -> None:
     # the function Dash registered for the nav's output, called with each path, its
     # return and the links' aria-current read after each call. Found through
     # _dash-dependencies, a Dash-private shape, acceptable in this advisory suite.
+    # It checks the mark, not which table entry matched: on the election pages
+    # (#465) every entry marks Elections alike, so #465's NAV_CALLBACK criterion holds
+    # here by the mark alone, and the matched entry is TestCurrentPage's (unit suite).
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))

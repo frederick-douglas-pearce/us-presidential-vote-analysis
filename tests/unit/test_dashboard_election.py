@@ -1,14 +1,17 @@
-"""The one-election view, T2 and T3 (#307), T6, every state's persons per electoral
-vote (#280), and the election panel with T3's hybrid column (#308).
+"""The election pages (#307, split by #465): the overview (the election panel with
+T3's hybrid column, #308, chart C1, #433, and T3), the states page (T2 and its
+filters) and the per-capita page (T6, every state's persons per electoral vote, #280,
+and its state filter), their shared pieces in ``explore.election_view``.
 
 Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872,
 2016 and 2024, and ``/v1/elections/{year}/per-capita`` for those years and 1848 and 1864
 (one snapshot, ``v1_meta.json``'s), through the helpers and the autouse offline
-process client of ``test_dashboard_app.py``. Its registry-wide checks pick this page up
-from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
+process client of ``test_dashboard_app.py``. Their registry-wide checks pick these pages
+up from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
 ``TestRegistryContracts`` and ``test_every_registered_page_is_found_at_the_index_and_
-reads_nothing``), and the D070(b) guard renders it at 1824 as its first fills on a
-miss. These tests cover what is particular to this page.
+reads_nothing``), and the D070(b) guard renders them at 1824, after the candidate
+history's fills (``ELECTION_PAGE_MISSES``). These tests cover what is particular to
+these pages.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, components, export, labels
+from explore import api, components, election_view, export, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     META,
@@ -48,8 +51,17 @@ from usvote.snapshot_schema import (
 )
 
 PAGE: dict[str, Any] = dash.page_registry["pages.election"]
-#: The page module's namespace, reached through its layout (Dash loads it by path).
-MOD: dict[str, Any] = PAGE["layout"].__globals__
+STATES_PAGE: dict[str, Any] = dash.page_registry["pages.election_states"]
+PER_CAPITA_PAGE: dict[str, Any] = dash.page_registry["pages.election_per_capita"]
+#: Each page module's namespace, reached through its layout (Dash loads it by path):
+#: the overview, results by state and people per electoral vote (#465).
+OV: dict[str, Any] = PAGE["layout"].__globals__
+ST: dict[str, Any] = STATES_PAGE["layout"].__globals__
+PC: dict[str, Any] = PER_CAPITA_PAGE["layout"].__globals__
+#: The shared module and the three namespaces as one, for the names only one defines (a table's fields
+#: and ids, a figure helper). A name two pages define (``PAGE_ID``, ``LEDE``,
+#: ``render``) is read from the page it is about, never from here.
+MOD: dict[str, Any] = {**vars(election_view), **PC, **ST, **OV}
 
 INDEX: dict[str, Any] = RECORDED[api.ELECTIONS_PATH]
 YEARS = [row["year"] for row in INDEX["data"]]
@@ -67,7 +79,7 @@ def year_body(year: int) -> dict[str, Any]:
 
 
 def index_row(year: int, index: dict[str, Any] | None = None) -> dict[str, Any]:
-    result: dict[str, Any] = MOD["index_row"](index or INDEX, str(year))
+    result: dict[str, Any] = election_view.index_row(index or INDEX, str(year))
     return result
 
 
@@ -76,16 +88,35 @@ def per_capita_body(year: int) -> dict[str, Any]:
 
 
 def render(year: int, query: str = "", body: Any = None, per_capita: Any = None) -> Any:
-    """The page body for ``year`` and ``query``, as the layout builds it."""
+    """The three election pages' bodies for ``year`` and ``query`` (#465), as their
+    layouts build them, side by side: the overview (the panel, C1, T3), the states page
+    (T2 and its filters) and the per-capita page (T6 and its filter), each given the
+    query as its own parser reads it. A table or the panel is on one page only, so
+    ``find`` on the result finds it on its page; what a single page shows, or does not,
+    is tested on :func:`render_page`."""
+    return dash.html.Div(
+        [render_page(page, year, query, body, per_capita) for page in (OV, ST, PC)]
+    )
+
+
+def render_page(
+    page: dict[str, Any],
+    year: int,
+    query: str = "",
+    body: Any = None,
+    per_capita: Any = None,
+) -> Any:
+    """One election page's body (``OV``, ``ST`` or ``PC``), as its layout builds it."""
     body = year_body(year) if body is None else body
     per_capita = per_capita_body(year) if per_capita is None else per_capita
-    return MOD["render"](
-        body,
-        index_row(year),
-        MOD["parse_filters"](parse(query)),
-        per_capita,
-        MOD["neighbours"](INDEX, year),
-    )
+    around = election_view.neighbours(INDEX, year)
+    if page is OV:
+        return OV["render"](body, index_row(year), around)
+    if page is ST:
+        pairs = election_view.parse_filters(parse(query))
+        return ST["render"](body, index_row(year), pairs, around)
+    pairs = election_view.parse_state(parse(query))
+    return PC["render"](per_capita, index_row(year), pairs, around)
 
 
 def table_rows(tree: Any, table_id: str) -> list[list[Any]]:
@@ -146,19 +177,55 @@ def _cell_text(child: Any) -> Any:
 # --- registration and the recorded responses -----------------------------------------
 
 
-def test_the_page_is_registered_as_planned() -> None:
-    assert PAGE["path_template"] == "/election/<year>"
-    assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PAGE["on_miss"] == (
-        "/v1/elections/{year}",
-        "/v1/elections/{year}/per-capita",
-    )
-    assert PAGE["success"] == PAGE_ID
+#: The three election pages (#465): path template, fills on a miss, ``query=`` parser.
+PAGES = {
+    "pages.election": ("/election/<year>", ("/v1/elections/{year}",), None),
+    "pages.election_states": (
+        "/election/<year>/states",
+        ("/v1/elections/{year}",),
+        election_view.parse_filters,
+    ),
+    "pages.election_per_capita": (
+        "/election/<year>/per-capita",
+        ("/v1/elections/{year}/per-capita",),
+        election_view.parse_state,
+    ),
+}
+
+
+@pytest.mark.parametrize("module", list(PAGES))
+def test_each_page_is_registered_as_planned(module: str) -> None:
+    template, on_miss, parser = PAGES[module]
+    page = dash.page_registry[module]
+    mod = page["layout"].__globals__
+    assert page["path_template"] == template
+    assert page["prefetch"] == (api.ELECTIONS_PATH,)
+    assert page["on_miss"] == on_miss  # one fill each (#465)
+    assert page["success"] == mod["PAGE_ID"]
     # The registered judge is the one the layout calls, so the index's 404 and the
-    # page's not-found state decide alike.
-    assert PAGE["validate"] is MOD["VALIDATE"]
-    assert PAGE["validate"] == (api.ELECTIONS_PATH, MOD["served_year"])
-    assert PAGE["query"] is MOD["parse_filters"]
+    # page's not-found state decide alike; all three judge by the overview's rule.
+    assert page["validate"] is mod["VALIDATE"]
+    assert page["validate"] == (api.ELECTIONS_PATH, election_view.served_year)
+    assert page.get("query") is parser
+    assert page["nav"] == "elections"
+    assert page["not_found"] == OV["NOT_FOUND"]
+
+
+def test_the_pages_success_markers_are_their_own_and_no_table_s() -> None:
+    markers = [dash.page_registry[m]["success"] for m in PAGES]
+    tables = {OV["NATION_TABLE_ID"], ST["STATES_TABLE_ID"], PC["PER_CAPITA_TABLE_ID"]}
+    assert len(set(markers)) == 3
+    assert not set(markers) & tables
+
+
+def test_the_overview_moves_t2_s_keys_to_the_states_page() -> None:
+    assert PAGE["moved"] == (election_view.STATES_KEYS, "/election/<year>/states")
+    assert set(election_view.STATES_KEYS) == {
+        "state",
+        "candidate",
+        "pv_status",
+        "electoral_count_status",
+    }
 
 
 @pytest.mark.parametrize("path", sorted(RECORDED))
@@ -256,10 +323,19 @@ class TestNotFound:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
-        status, head, _ = get("/election/1860?state=SC&junk=1")
+        # The overview reads no filter, so its og:url names no query (#465).
+        status, head, _ = get("/election/1860?junk=1")
         assert status == 200
         assert head.canonical == url("/election/1860")
-        assert head.og_url == url("/election/1860?state=SC")
+        assert head.og_url == url("/election/1860")
+        for section, query, kept in (
+            ("states", "state=SC&junk=1&year=1900", "?state=SC"),
+            ("per-capita", "state=SC&candidate=abraham-lincoln&junk=1", "?state=SC"),
+        ):
+            status, head, _ = get(f"/election/1860/{section}?{query}")
+            assert status == 200, section
+            assert head.canonical == url(f"/election/1860/{section}"), section
+            assert head.og_url == url(f"/election/1860/{section}{kept}"), section
 
     def test_the_page_says_the_dataset_has_no_election_that_year(
         self, monkeypatch: pytest.MonkeyPatch
@@ -270,13 +346,13 @@ class TestNotFound:
         assert MOD["NOT_FOUND_ID"] in ids
         assert PAGE_ID not in ids
         body = response.get_data(as_text=True)
-        assert MOD["NOT_FOUND_SENTENCE"] in body
+        assert labels.ELECTION_NOT_FOUND_SENTENCE in body
         assert (
             "1825" not in json_node(response.get_json(), MOD["NOT_FOUND_ID"]).__str__()
         )
         assert calls == []
         # The way back leads to the elections index.
-        links = of_type(MOD["not_found"](), "Link")
+        links = of_type(election_view.not_found(MOD["NOT_FOUND_ID"]), "Link")
         assert [link.href for link in links] == ["/elections"]
 
     def test_the_index_s_404_follows_the_index_served(
@@ -318,6 +394,7 @@ class TestNotFound:
         assert (status, head.canonical) == (200, url("/election/1825"))
         assert PAGE_ID in routed_ids(route("/election/1825"))
         assert "/v1/elections/1825" in calls
+        assert PC["PAGE_ID"] in routed_ids(route("/election/1825/per-capita"))
         assert "/v1/elections/1825/per-capita" in calls
 
     def test_the_not_found_state_follows_the_index_served(
@@ -344,10 +421,13 @@ class TestRender:
         self, monkeypatch: pytest.MonkeyPatch, year: int
     ) -> None:
         cached_client(monkeypatch)
-        response = route(f"/election/{year}")
-        ids = routed_ids(response)
-        assert {PAGE_ID, STATES, NATION} <= ids
-        assert "isn't responding" not in response.get_data(as_text=True)
+        for path, expected in (
+            (f"/election/{year}", {PAGE_ID, NATION}),
+            (f"/election/{year}/states", {ST["PAGE_ID"], STATES}),
+        ):
+            response = route(path)
+            assert expected <= routed_ids(response), path
+            assert "isn't responding" not in response.get_data(as_text=True)
         tree = render(year)
         body = year_body(year)
         assert len(table_rows(tree, STATES)) == len(body["data"])
@@ -360,7 +440,9 @@ class TestRender:
         found = of_type(PAGE["layout"](year="1872"), "H1")
         missing = of_type(PAGE["layout"](year="1825"), "H1")
         assert [h.children for h in found] == ["The 1872 election"]
-        assert [h.children for h in missing] == [MOD["NOT_FOUND_HEADING"]]  # #325
+        assert [h.children for h in missing] == [
+            labels.ELECTION_NOT_FOUND_HEADING
+        ]  # #325
 
     def test_the_window_is_read_from_coverage_not_literals(self) -> None:
         def new_york(pv_year_min: int) -> set[str]:
@@ -392,8 +474,8 @@ class TestRender:
         monkeypatch.setattr(api, "CLIENT", offline_client(fetch))
         tree = PAGE["layout"](year="1872")
         assert PAGE_ID in component_ids(tree)
-        assert len(table_rows(tree, STATES)) == 222
         assert len(table_rows(tree, NATION)) == len(body["summary"])
+        assert len(table_rows(STATES_PAGE["layout"](year="1872"), STATES)) == 222
         assert MOD["PANEL_ID"] not in component_ids(tree)
         unavailable = find(tree, MOD["PANEL_UNAVAILABLE_ID"])
         assert unavailable.children == (
@@ -721,22 +803,18 @@ class TestNullCells:
     def test_t3_reads_the_index_s_flag_and_the_coverage_years(self) -> None:
         """Doctored inputs, so a literal window in the page fails: the year-level
         decision comes from the index row, the sentence's years from coverage."""
-        held = MOD["render"](
+        held = OV["render"](
             year_body(1872),
             {**index_row(1872), "has_popular_vote": True},
-            [],
-            per_capita_body(1872),
-            MOD["neighbours"](INDEX, 1872),
+            election_view.neighbours(INDEX, 1872),
         )
         assert find(held, MOD["NO_PV_ID"]) is None
         grant = nation_rows(held)["Ulysses S. Grant"]
         assert grant["national_pv_votes"] == labels.NO_NATIONAL_FIGURE
-        missing = MOD["render"](
+        missing = OV["render"](
             year_body(2016),
             {**index_row(2016), "has_popular_vote": False},
-            [],
-            per_capita_body(2016),
-            MOD["neighbours"](INDEX, 2016),
+            election_view.neighbours(INDEX, 2016),
         )
         assert find(missing, MOD["NO_PV_ID"]) is not None
         trump = nation_rows(missing)["Donald J. Trump"]
@@ -754,12 +832,10 @@ class TestNullCells:
     @pytest.mark.parametrize("flag", ["false", 1, None])
     def test_only_a_true_flag_claims_a_popular_vote(self, flag: Any) -> None:
         """A malformed index flag never makes T3 claim the year has a popular vote."""
-        tree = MOD["render"](
+        tree = OV["render"](
             year_body(1872),
             {**index_row(1872), "has_popular_vote": flag},
-            [],
-            per_capita_body(1872),
-            MOD["neighbours"](INDEX, 1872),
+            election_view.neighbours(INDEX, 1872),
         )
         assert find(tree, MOD["NO_PV_ID"]) is not None
 
@@ -1221,21 +1297,21 @@ class TestShareableUrl:
         self, monkeypatch: pytest.MonkeyPatch, query: str
     ) -> None:
         cached_client(monkeypatch)
-        status, head, _ = get(f"/election/1872?{query}")
+        status, head, _ = get(f"/election/1872/states?{query}")
         assert status == 200
         assert head.og_url is not None
         reopened = urllib.parse.urlsplit(head.og_url)
-        assert reopened.path == "/election/1872"
-        original = route("/election/1872", f"?{query}" if query else "")
+        assert reopened.path == "/election/1872/states"
+        original = route("/election/1872/states", f"?{query}" if query else "")
         again = route(reopened.path, f"?{reopened.query}" if reopened.query else "")
-        assert PAGE_ID in routed_ids(original)
+        assert ST["PAGE_ID"] in routed_ids(original)
         assert original.get_json() == again.get_json()
 
     def test_the_round_trip_check_sees_a_filter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
-        filtered = routed_states(route("/election/1872", f"?{SHARED[0]}"))
+        filtered = routed_states(route("/election/1872/states", f"?{SHARED[0]}"))
         assert filtered == [["Georgia", "Horace Greeley"]]
 
     @pytest.mark.parametrize(
@@ -1259,7 +1335,7 @@ class TestShareableUrl:
             for c in ("STATE_ID", "CANDIDATE_ID", "PV_STATUS_ID", "COUNT_STATUS_ID")
         ]
         written = MOD["search_for"](*values)
-        og_url = appmod.resolve("/election/1872", query, None).og_url
+        og_url = appmod.resolve("/election/1872/states", query, None).og_url
         assert og_url is not None
         expected = urllib.parse.urlsplit(og_url).query
         if query == "state=ZZ":
@@ -1300,26 +1376,46 @@ class TestShareableUrl:
 
 
 class TestRequestBudget:
-    def test_opening_a_year_makes_at_most_two_requests(
+    def test_each_election_page_makes_one_fill(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The year's rows, then its per-capita table (#280)."""
+        """One fill per page (#465): the overview the year's rows, the states page none
+        after it (one cold), the per-capita page its own table."""
         _, calls, bucket = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/election/1872"))
-        assert calls == ["/v1/elections/1872", "/v1/elections/1872/per-capita"]
-        assert len(bucket.waits) == 2
+        assert calls == ["/v1/elections/1872"]
+        assert len(bucket.waits) == 1
         calls.clear()
         assert PAGE_ID in routed_ids(route("/election/1872"))  # cached: none
+        assert ST["PAGE_ID"] in routed_ids(route("/election/1872/states"))
         assert calls == []
+        assert PC["PAGE_ID"] in routed_ids(route("/election/1872/per-capita"))
+        assert calls == ["/v1/elections/1872/per-capita"]
+
+    @pytest.mark.parametrize(
+        ("section", "fill"),
+        [
+            ("", "/v1/elections/1868"),
+            ("/states", "/v1/elections/1868"),
+            ("/per-capita", "/v1/elections/1868/per-capita"),
+        ],
+    )
+    def test_each_page_opened_cold_makes_one_fill(
+        self, monkeypatch: pytest.MonkeyPatch, section: str, fill: str
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        route(f"/election/1868{section}")
+        assert calls == [fill]
+        assert len(bucket.waits) == 1
 
     def test_filter_changes_make_no_api_request(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _, calls, _ = cached_client(monkeypatch)
-        route("/election/1872")
+        route("/election/1872/states")
         calls.clear()
         for search in ("?state=GA", "?electoral_count_status=not_counted", ""):
-            assert PAGE_ID in routed_ids(route("/election/1872", search))
+            assert ST["PAGE_ID"] in routed_ids(route("/election/1872/states", search))
         MOD["on_filter_change"]("GA", None, None, None, "")
         assert calls == []
 
@@ -1338,11 +1434,7 @@ class TestRequestBudget:
         with the prefetched index cached; cold, the index is filled first."""
         _, calls, _ = cached_client(monkeypatch, elections=False)
         assert PAGE_ID in routed_ids(route("/election/1872"))
-        assert calls == [
-            api.ELECTIONS_PATH,
-            "/v1/elections/1872",
-            "/v1/elections/1872/per-capita",
-        ]
+        assert calls == [api.ELECTIONS_PATH, "/v1/elections/1872"]
 
 
 # --- the earlier and later links (#324) ----------------------------------------------
@@ -1417,19 +1509,32 @@ class TestNeighbourLinks:
     def test_a_malformed_index_has_no_neighbours(self, body: Any) -> None:
         assert MOD["neighbours"](body, 1868) == (None, None)
 
-    def test_a_middle_year_links_both_ways_unfiltered(self) -> None:
-        tree = render(1868, "state=GA&candidate=ulysses-s-grant")
+    @pytest.mark.parametrize("section", election_view.SECTIONS)
+    def test_a_middle_year_links_both_ways_unfiltered(self, section: str) -> None:
+        """On every election page, to the same page of the neighboring years (#465)."""
+        page = {"": OV, "/states": ST, "/per-capita": PC}[section]
+        tree = render_page(page, 1868, "state=GA&candidate=ulysses-s-grant")
         assert nav_links(tree) == [
-            (MOD["EARLIER_ID"], "/election/1864", "Earlier: the 1864 election"),
-            (MOD["LATER_ID"], "/election/1872", "Later: the 1872 election"),
+            (
+                MOD["EARLIER_ID"],
+                f"/election/1864{section}",
+                "Earlier: the 1864 election",
+            ),
+            (MOD["LATER_ID"], f"/election/1872{section}", "Later: the 1872 election"),
         ]
         nav = find(tree, MOD["NAV_ID"])
-        assert getattr(nav, "aria-label") == MOD["ELECTION_NAV_LABEL"]
+        assert getattr(nav, "aria-label") == (
+            labels.ELECTION_NAV_LABEL
+            if not section
+            else labels.ELECTION_NAV_SECTION_LABEL.format(
+                section=election_view.SECTION_TEXT[section]
+            )
+        )
         # A client-side navigation, never a full page load.
         assert not any(getattr(link, "refresh", False) for link in of_type(nav, "Link"))
 
     def test_the_nav_comes_before_the_panel(self) -> None:
-        ids = [getattr(child, "id", None) for child in render(1868).children]
+        ids = [getattr(child, "id", None) for child in render_page(OV, 1868).children]
         assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
 
     def test_the_first_and_last_years_link_one_way(self) -> None:
@@ -1437,15 +1542,17 @@ class TestNeighbourLinks:
         assert [i for i, _, _ in nav_links(render(YEARS[-1]))] == [MOD["EARLIER_ID"]]
 
     def test_with_no_neighbour_there_is_no_landmark(self) -> None:
-        tree = MOD["render"](
-            year_body(1872),
-            index_row(1872),
-            [],
-            per_capita_body(1872),
-            MOD["Neighbours"](None, None),
-        )
-        assert find(tree, MOD["NAV_ID"]) is None
-        assert tree.id == PAGE_ID
+        none = election_view.Neighbours(None, None)
+        for tree, marker in (
+            (OV["render"](year_body(1872), index_row(1872), none), PAGE_ID),
+            (ST["render"](year_body(1872), index_row(1872), [], none), ST["PAGE_ID"]),
+            (
+                PC["render"](per_capita_body(1872), index_row(1872), [], none),
+                PC["PAGE_ID"],
+            ),
+        ):
+            assert find(tree, MOD["NAV_ID"]) is None
+            assert tree.id == marker
 
     def test_the_layout_reads_the_neighbours_from_the_served_index(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1463,25 +1570,34 @@ class TestNeighbourLinks:
     def test_following_a_link_makes_only_the_target_year_s_fills(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AC3 as amended at the plan gate: the target year's own fills on a miss (two
-        since #280), and none of the link's own."""
+        """AC3 as amended at the plan gate: the target year's own fills on a miss (one
+        per page since #465), and none of the link's own."""
         _, calls, _ = cached_client(monkeypatch)
         response = route("/election/1868")
-        assert calls == ["/v1/elections/1868", "/v1/elections/1868/per-capita"]
+        assert calls == ["/v1/elections/1868"]
         calls.clear()
         later = routed_hrefs(response)[MOD["LATER_ID"]]
         assert PAGE_ID in routed_ids(route(later))
-        assert calls == ["/v1/elections/1872", "/v1/elections/1872/per-capita"]
+        assert calls == ["/v1/elections/1872"]
+        calls.clear()
+        response = route("/election/1868/per-capita")
+        later = routed_hrefs(response)[MOD["LATER_ID"]]
+        assert later == "/election/1872/per-capita"
+        calls.clear()
+        assert PC["PAGE_ID"] in routed_ids(route(later))
+        assert calls == ["/v1/elections/1872/per-capita"]
 
     def test_no_nav_and_no_filter_sentence_where_the_page_has_no_data(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
-        found = MOD["layout"](year="1872")
+        # The overview has no filters, so its lede has no filter sentence (#465).
+        assert lede(OV["layout"](year="1872")) == OV["LEDE"]
+        found = ST["layout"](year="1872")
         assert find(found, MOD["NAV_ID"]) is not None
-        assert lede(found) == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
-        not_found = MOD["layout"](year="1825")
-        assert find(not_found, MOD["NOT_FOUND_ID"]) is not None
+        assert lede(found) == f"{ST['LEDE']} {ST['FILTER_SENTENCE']}"
+        not_found = ST["layout"](year="1825")
+        assert find(not_found, ST["NOT_FOUND_ID"]) is not None
         assert find(not_found, MOD["NAV_ID"]) is None
         # No lede at all: it describes a page that is not there (#325).
         assert not [
@@ -1493,10 +1609,10 @@ class TestNeighbourLinks:
                 raise api.ApiUnavailable("down")
 
         monkeypatch.setattr(api, "CLIENT", Down())
-        degraded = MOD["layout"](year="1872")
+        degraded = ST["layout"](year="1872")
         assert components.UNAVAILABLE_MESSAGE in texts(degraded)
         assert find(degraded, MOD["NAV_ID"]) is None
-        assert lede(degraded) == MOD["LEDE"]
+        assert lede(degraded) == ST["LEDE"]
 
     @pytest.mark.parametrize("failure", ["unavailable", "malformed"])
     def test_with_the_index_read_a_failed_render_shows_neither(
@@ -1521,10 +1637,10 @@ class TestNeighbourLinks:
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
         client.refresh()
         monkeypatch.setattr(api, "CLIENT", client)
-        degraded = MOD["layout"](year="1872")
+        degraded = PC["layout"](year="1872")
         assert components.UNAVAILABLE_MESSAGE in texts(degraded)
         assert find(degraded, MOD["NAV_ID"]) is None
-        assert lede(degraded) == MOD["LEDE"]
+        assert lede(degraded) == PC["LEDE"]
 
 
 class TestNeighborBar:
@@ -1536,19 +1652,33 @@ class TestNeighborBar:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
-        page = body = MOD["layout"](year="1868")
+        body = OV["layout"](year="1868")
         assert body.id == PAGE_ID
         kinds = [type(child).__name__ for child in body.children]
-        # The page-local Location renders nothing; the nav is the first thing shown.
-        assert kinds[:4] == ["Location", "Nav", "H1", "P"]
-        nav, heading, lede_ = body.children[1:4]
+        # The links, the heading, the lede, then the section links (#465).
+        assert kinds[:4] == ["Nav", "H1", "P", "Nav"]
+        nav, heading, lede_, sections = body.children[:4]
         assert nav.id == MOD["NAV_ID"]
         assert heading.children == "The 1868 election"
         assert lede_.className == "lede"
-        assert lede_.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert lede_.children == OV["LEDE"]
+        assert sections.id == election_view.SECTIONS_ID
         ids = [getattr(child, "id", None) for child in body.children]
         assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
-        assert [h.children for h in of_type(page, "H1")] == ["The 1868 election"]
+        assert [h.children for h in of_type(body, "H1")] == ["The 1868 election"]
+        for page, heading_text in (
+            (ST, "The 1868 election: results by state"),
+            (PC, "The 1868 election: people per electoral vote"),
+        ):
+            body = page["layout"](year="1868")
+            kinds = [type(child).__name__ for child in body.children]
+            # The page-local Location renders nothing; the bar is the first shown.
+            assert kinds[:5] == ["Location", "Nav", "H1", "P", "Nav"], heading_text
+            assert body.children[2].children == heading_text
+            assert body.children[3].children == (
+                f"{page['LEDE']} {page['FILTER_SENTENCE']}"
+            )
+            assert [h.children for h in of_type(body, "H1")] == [heading_text]
 
     def test_the_states_with_no_links_keep_the_heading_first(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1556,7 +1686,7 @@ class TestNeighborBar:
         cached_client(monkeypatch)
         not_found = MOD["layout"](year="1825")
         assert type(not_found.children[0]).__name__ == "H1"
-        assert not_found.children[0].children == MOD["NOT_FOUND_HEADING"]
+        assert not_found.children[0].children == labels.ELECTION_NOT_FOUND_HEADING
 
         class Down:
             def view(self) -> Any:
@@ -1568,17 +1698,24 @@ class TestNeighborBar:
         assert len(of_type(degraded, "H1")) == 1
         assert find(degraded, MOD["NAV_ID"]) is None
 
-    def test_the_heading_and_the_tab_share_one_wording(self) -> None:
-        assert MOD["HEADING"].format(year=1868) == "The 1868 election"
-        assert MOD["title"]("1868").startswith(MOD["HEADING"].format(year=1868) + " — ")
-        (heading,) = of_type(render(1868), "H1")
-        assert heading.children == MOD["HEADING"].format(year=1868)
+    @pytest.mark.parametrize(
+        ("page", "heading"),
+        [(OV, "HEADING"), (ST, "STATES_HEADING"), (PC, "PER_CAPITA_HEADING")],
+    )
+    def test_the_heading_and_the_tab_share_one_wording(
+        self, page: dict[str, Any], heading: str
+    ) -> None:
+        text = page[heading].format(year=1868)
+        assert text.startswith("The 1868 election")
+        assert page["title"]("1868").startswith(text + " — ")
+        (h1,) = of_type(render_page(page, 1868), "H1")
+        assert h1.children == text
 
     @pytest.mark.parametrize("which", ["both", "first", "last"])
     def test_each_link_carries_its_side_and_its_text_alone(self, which: str) -> None:
         # 1868 is a recorded year with a served year on each side.
         year = {"both": 1868, "first": YEARS[0], "last": YEARS[-1]}[which]
-        tree = render(year)
+        tree = render_page(OV, year)
         nav = find(tree, MOD["NAV_ID"])
         assert nav.className == MOD["NEIGHBOR_NAV_CLASS"]
         sides = {
@@ -1594,13 +1731,76 @@ class TestNeighborBar:
         assert [link.id for link in links] == expected
         earlier, later = MOD["neighbours"](INDEX, year)
         texts_by_id = {
-            MOD["EARLIER_ID"]: MOD["EARLIER_LINK"].format(year=earlier),
-            MOD["LATER_ID"]: MOD["LATER_LINK"].format(year=later),
+            MOD["EARLIER_ID"]: labels.EARLIER_LINK.format(year=earlier),
+            MOD["LATER_ID"]: labels.LATER_LINK.format(year=later),
         }
         for link in links:
             assert link.className == sides[link.id]
             # The chevrons are drawn by the stylesheet: no arrow in the link's text.
             assert link.children == texts_by_id[link.id]
+
+
+class TestSectionLinks:
+    """#465: each election page links the year's other two, in page order, the page
+    being read marked as current by text, not a link, and only on success."""
+
+    @pytest.mark.parametrize("section", election_view.SECTIONS)
+    def test_the_three_pages_in_order_the_current_one_marked(
+        self, section: str
+    ) -> None:
+        page = {"": OV, "/states": ST, "/per-capita": PC}[section]
+        tree = render_page(page, 1868, "state=GA&candidate=ulysses-s-grant")
+        nav = find(tree, election_view.SECTIONS_ID)
+        assert type(nav).__name__ == "Nav"
+        assert getattr(nav, "aria-label") == labels.ELECTION_SECTIONS_LABEL
+        assert [texts(entry) for entry in nav.children] == [
+            [labels.SECTION_OVERVIEW],
+            [labels.SECTION_STATES],
+            [labels.SECTION_PER_CAPITA],
+        ]
+        for entry, target in zip(nav.children, election_view.SECTIONS, strict=True):
+            if target == section:
+                # Announced as current, and no link to itself.
+                assert type(entry).__name__ == "Span"
+                assert getattr(entry, "aria-current") == "page"
+            else:
+                # A client-side link to the other page, unfiltered.
+                assert type(entry).__name__ == "Link"
+                assert entry.href == f"/election/1868{target}"
+                assert not getattr(entry, "refresh", False)
+                assert "aria-current" not in entry.to_plotly_json()["props"]
+
+    def test_the_landmark_s_name_is_its_own(self) -> None:
+        names = {
+            labels.SITE_NAV_LABEL,
+            labels.ELECTION_NAV_LABEL,
+            *(
+                labels.ELECTION_NAV_SECTION_LABEL.format(section=text)
+                for text in (labels.SECTION_STATES, labels.SECTION_PER_CAPITA)
+            ),
+        }
+        assert labels.ELECTION_SECTIONS_LABEL not in names
+        assert len(names) == 4
+
+    @pytest.mark.parametrize("page", [OV, ST, PC], ids=["overview", "states", "pc"])
+    def test_success_only(
+        self, monkeypatch: pytest.MonkeyPatch, page: dict[str, Any]
+    ) -> None:
+        cached_client(monkeypatch)
+        assert find(page["layout"](year="1868"), election_view.SECTIONS_ID) is not None
+        assert find(page["layout"](year="1825"), election_view.SECTIONS_ID) is None
+
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        assert find(page["layout"](year="1868"), election_view.SECTIONS_ID) is None
+
+    def test_after_the_lede_before_the_page_s_content(self) -> None:
+        for page, first_after in ((OV, OV["PANEL_ID"]), (PC, PC["STATE_ID"])):
+            order = ids_in_order(render_page(page, 1868))
+            assert order.index(election_view.SECTIONS_ID) < order.index(first_after)
 
 
 # --- the title ------------------------------------------------------------------------
@@ -1622,10 +1822,11 @@ def test_the_title_is_total_and_names_only_a_four_digit_year(
     year: Any, named: bool
 ) -> None:
     # The page's own title; the registry's is app.py's wrapper (#325, D083).
-    title = MOD["title"](year=year)
-    assert isinstance(title, str)
-    assert (f"The {year} election" in title) is named
-    assert "<" not in title
+    for page in (OV, ST, PC):
+        title = page["title"](year=year)
+        assert isinstance(title, str)
+        assert (f"The {year} election" in title) is named
+        assert "<" not in title
 
 
 def test_the_footer_carries_the_response_s_provenance() -> None:
@@ -1652,18 +1853,22 @@ def per_capita_rows(tree: Any) -> dict[str, dict[str, str]]:
     return {row["state"]: row for row in rows}
 
 
-def section(year: int, body: Any = None, **chosen: Any) -> Any:
-    """T6 alone, built from the per-capita response only (so it also serves 1848 and
-    1864, whose ``/v1/elections/{year}`` is not recorded), with the filters
-    ``chosen``."""
+def section(year: int, body: Any = None, state: str | None = None) -> Any:
+    """T6's page (#465), built from the per-capita response and the index only (so it
+    also serves 1848 and 1864, whose ``/v1/elections/{year}`` is not recorded), with
+    the state filter ``state``."""
     body = per_capita_body(year) if body is None else body
-    filters = MOD["Filters"](
-        **{"state": None, "candidate": None, "pv_status": None, "count_status": None}
-        | chosen
-    )
-    download = MOD["_download"](year, "per-capita", "x", body, filters)
-    rows = MOD["_per_capita_rows"](body["data"], year)
-    return MOD["_per_capita_section"](rows, filters, download)
+    pairs = election_view.parse_state({"state": state} if state else {})
+    around = election_view.neighbours(INDEX, year)
+    return PC["render"](body, index_row(year), pairs, around)
+
+
+def lede_text(tree: Any) -> str:
+    (found,) = [
+        p for p in of_type(tree, "P") if getattr(p, "className", None) == "lede"
+    ]
+    text: str = found.children
+    return text
 
 
 def all_cells(tree: Any) -> list[str]:
@@ -1778,20 +1983,21 @@ class TestT6Filters:
     def test_the_state_filter_narrows_t6(self) -> None:
         assert list(per_capita_rows(render(1872, "state=GA"))) == ["Georgia"]
 
-    def test_t6_follows_the_state_t2_resolved(self) -> None:
-        """T2 falls back to "all" for a state absent from its rows, and T6 applies T2's
-        resolved filter rather than re-resolving: one URL never shows T2 unfiltered
-        and T6 filtered."""
-        body = year_body(1872)
-        body["data"] = [r for r in body["data"] if r["state_usps"] != "GA"]
-        tree = render(1872, "state=GA", body=body)
-        assert len(per_capita_rows(tree)) == len(per_capita_body(1872)["data"])
-        # And a state T2 resolves that T6 lacks is an honest empty result.
+    def test_t6_s_state_is_checked_against_t6_s_own_rows(self) -> None:
+        """#465, amending #280: a state T6's own rows lack falls back to every state T6
+        has, never an empty table. The other direction, that the page reads no T2 rows
+        to resolve it, is a read, pinned by ``READS_BEFORE`` (``test_dashboard_export.py``)
+        and ``test_the_routed_page_shows_t6_and_reads_its_own_path``."""
         per_capita = per_capita_body(1872)
         per_capita["data"] = [r for r in per_capita["data"] if r["state_usps"] != "GA"]
-        tree = render(1872, "state=GA", per_capita=per_capita)
-        assert per_capita_rows(tree) == {}
-        assert "No rows match these filters." in texts(tree)
+        tree = render_page(PC, 1872, "state=GA", per_capita=per_capita)
+        assert len(per_capita_rows(tree)) == len(per_capita["data"])
+        assert "No rows match these filters." not in texts(tree)
+        control = find(tree, PC["STATE_ID"])
+        assert control.value is None
+        assert "GA" not in {o["value"] for o in control.options}
+        # A state T6 names narrows it to that state.
+        assert list(per_capita_rows(render_page(PC, 1872, "state=GA"))) == ["Georgia"]
 
     @pytest.mark.parametrize(
         "search",
@@ -1803,10 +2009,64 @@ class TestT6Filters:
         assert len(per_capita_rows(tree)) == len(per_capita_body(1872)["data"])
 
     def test_t6_says_which_filter_applies_and_counts_its_rows(self) -> None:
-        tree = render(1872, "state=GA")
+        tree = render_page(PC, 1872, "state=GA")
         total = len(per_capita_body(1872)["data"])
-        assert MOD["PER_CAPITA_FILTER_NOTE"] in texts(tree)
+        # One filter, its own (#465): no note says which filters apply.
+        assert "PER_CAPITA_FILTER_NOTE" not in PC
         assert f"Showing 1 of {total} rows" in texts(tree)
+        assert lede_text(tree) == f"{PC['LEDE']} {PC['FILTER_SENTENCE']}"
+
+
+class TestPerCapitaCallback:
+    """#465: the per-capita page's own filter callback, on its own ids (Dash keys
+    callbacks by output app-wide), as the states page's is tested in
+    ``TestShareableUrl``."""
+
+    def test_the_callback_is_wired_to_the_page_s_own_location(self) -> None:
+        graph = appmod.server.test_client().get("/_dash-dependencies").get_json()
+        entries = [c for c in graph if c["output"] == f"{PC['URL_ID']}.search"]
+        assert len(entries) == 1
+        assert entries[0]["inputs"] == [{"id": PC["STATE_ID"], "property": "value"}]
+        assert entries[0]["state"] == [{"id": PC["URL_ID"], "property": "search"}]
+        assert entries[0]["prevent_initial_call"] is True
+        assert {PC["URL_ID"], PC["STATE_ID"]}.isdisjoint({ST["URL_ID"], ST["STATE_ID"]})
+        location = find(render_page(PC, 1872), PC["URL_ID"])
+        assert location.refresh == "callback-nav"
+
+    def test_the_callback_leaves_an_unchanged_url_alone(self) -> None:
+        callback = PC["on_filter_change"]
+        assert callback("GA", "") == "?state=GA"
+        assert callback("GA", "?state=GA") is no_update
+        assert callback(None, None) is no_update
+        assert callback(None, "?state=GA") == ""
+        # Syntactically bad values are dropped.
+        assert callback("ga", "?state=GA") == ""
+        assert callback(["GA"], "?state=GA") == ""
+
+    @pytest.mark.parametrize(
+        "query", ["state=GA", "state=GA&candidate=horace-greeley", "state=ZZ", ""]
+    )
+    def test_the_callback_writes_the_og_url_s_query_byte_for_byte(
+        self, query: str
+    ) -> None:
+        value = find(render_page(PC, 1872, query), PC["STATE_ID"]).value
+        written = PC["search_for"](value)
+        og_url = appmod.resolve("/election/1872/per-capita", query, None).og_url
+        assert og_url is not None
+        expected = urllib.parse.urlsplit(og_url).query
+        if query == "state=ZZ":
+            # og:url keeps a state T6 lacks; the control cannot. Both open every state.
+            assert (written, expected) == ("", "state=ZZ")
+        else:
+            assert written == (f"?{expected}" if expected else "")
+
+    def test_the_callback_reads_no_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class NoView:
+            def view(self) -> Any:
+                raise AssertionError("the filter callback read the API")
+
+        monkeypatch.setattr(api, "CLIENT", NoView())
+        assert PC["on_filter_change"]("GA", "") == "?state=GA"
 
 
 class TestT6Bodies:
@@ -1841,9 +2101,11 @@ class TestT6Bodies:
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
         client.refresh()
         monkeypatch.setattr(api, "CLIENT", client)
-        ids = routed_ids(route("/election/1872"))
+        ids = routed_ids(route("/election/1872/per-capita"))
         assert "unavailable" in ids
-        assert PAGE_ID not in ids
+        assert PC["PAGE_ID"] not in ids
+        # The overview reads no per-capita table, so it still renders (#465).
+        assert PAGE_ID in routed_ids(route("/election/1872"))
 
     @pytest.mark.parametrize(
         "answer",
@@ -1881,9 +2143,9 @@ class TestT6Bodies:
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
         client.refresh()
         monkeypatch.setattr(api, "CLIENT", client)
-        ids = routed_ids(route("/election/1872"))
+        ids = routed_ids(route("/election/1872/per-capita"))
         assert "unavailable" in ids
-        assert PAGE_ID not in ids and STATES not in ids
+        assert PC["PAGE_ID"] not in ids and PER_CAPITA not in ids
         assert target in calls
 
     def test_a_non_finite_ratio_reads_unrecognized(self) -> None:
@@ -1915,14 +2177,14 @@ def test_the_routed_page_shows_t6_and_reads_its_own_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, calls, _ = cached_client(monkeypatch)
-    ids = routed_ids(route("/election/1868"))
-    assert {PAGE_ID, PER_CAPITA} <= ids
-    assert "/v1/elections/1868/per-capita" in calls
+    ids = routed_ids(route("/election/1868/per-capita"))
+    assert {PC["PAGE_ID"], PER_CAPITA} <= ids
+    assert calls == ["/v1/elections/1868/per-capita"]  # never the year's own rows
 
 
 def test_the_footer_names_the_census_bureau_and_its_license() -> None:
     provenance = per_capita_body(1872)["meta"]["provenance"]
-    footer = of_type(render(1872), "Footer")
+    footer = of_type(render_page(PC, 1872), "Footer")
     (footer_node,) = footer
     assert provenance["census_source_name"] == "U.S. Census Bureau"
     assert f"{provenance['census_source_name']} (" in texts(footer_node)
@@ -2227,25 +2489,22 @@ class TestPanel:
         assert cells[field] == labels.NOT_IN_DATASET
 
     def test_the_panel_follows_the_links_inside_the_success_marker(self) -> None:
-        order = ids_in_order(render(2016))
-        # The success marker, the page's own URL store, the earlier and later links
-        # (#324), then the panel, ahead of every table.
+        order = ids_in_order(render_page(OV, 2016))
+        # The success marker, the earlier and later links (#324), the section links
+        # (#465), then the panel, ahead of every table.
         assert order[:5] == [
             PAGE_ID,
-            MOD["URL_ID"],
             MOD["NAV_ID"],
             MOD["EARLIER_ID"],
             MOD["LATER_ID"],
+            election_view.SECTIONS_ID,
         ]
         assert order[5] == PANEL
-        # National results (C1, then T3) come before Results by state (owner, #433).
-        assert (
-            order.index(PANEL)
-            < order.index("c1")
-            < order.index(NATION)
-            < order.index(STATES)
-            < order.index(MOD["PER_CAPITA_TABLE_ID"])
-        )
+        # National results: C1, then T3 (owner, #433). T2 and T6 are pages of their
+        # own since #465.
+        assert order.index(PANEL) < order.index("c1") < order.index(NATION)
+        assert STATES not in order
+        assert MOD["PER_CAPITA_TABLE_ID"] not in order
 
     @pytest.mark.parametrize("year", [1824, 2024])
     @pytest.mark.parametrize(
@@ -2352,15 +2611,16 @@ class TestPanel:
             "The hybrid score is the average of a candidate's electoral share and "
             "popular-vote share; the candidate with the highest score wins it."
         )
-        tree = render(2016)
+        tree = render_page(OV, 2016)
         assert labels.HYBRID_NOTE in texts(find(tree, PANEL))
         assert texts(tree).count(labels.HYBRID_NOTE) == 2
-        # The second is T3's: after its table, before the next section's heading.
+        # The second is T3's: after its table, before the footer.
         order = texts(tree)
         under_t3 = len(order) - 1 - order[::-1].index(labels.HYBRID_NOTE)
         last_t3_cell = texts(find(tree, NATION))[-1]
         assert under_t3 > order.index(last_t3_cell)
-        assert under_t3 < order.index("People per electoral vote")
+        footer = texts(of_type(tree, "Footer")[0])
+        assert under_t3 < order.index(footer[0])
 
     @pytest.mark.parametrize("year", PANEL_YEARS)
     def test_no_panel_text_calls_the_hybrid_better(self, year: int) -> None:
@@ -2741,20 +3001,16 @@ class TestT3Hybrid:
 
     def test_t3_reads_the_index_s_flag_for_the_hybrid_score(self) -> None:
         """Doctored index rows, so the score's year rule is T3's, not a literal."""
-        missing = MOD["render"](
+        missing = OV["render"](
             year_body(2016),
             {**index_row(2016), "has_popular_vote": False},
-            [],
-            per_capita_body(2016),
-            MOD["neighbours"](INDEX, 2016),
+            election_view.neighbours(INDEX, 2016),
         )
         assert nation_rows(missing)["Donald J. Trump"]["hybrid_score"] == NOT_APPLICABLE
-        held = MOD["render"](
+        held = OV["render"](
             year_body(1872),
             {**index_row(1872), "has_popular_vote": True},
-            [],
-            per_capita_body(1872),
-            MOD["neighbours"](INDEX, 1872),
+            election_view.neighbours(INDEX, 1872),
         )
         grant = nation_rows(held)["Ulysses S. Grant"]
         assert grant["hybrid_score"] == labels.NO_NATIONAL_FIGURE
@@ -2989,13 +3245,13 @@ class TestC1:
     def test_inside_the_success_marker_in_national_results_before_t3(
         self, year: int
     ) -> None:
-        tree = render(year)
+        tree = render_page(OV, year)
         assert tree.id == PAGE_ID
         order = ids_in_order(tree)
         assert order.index(PANEL) < order.index(C1) < order.index(NATION)
-        assert order.index(NATION) < order.index(STATES)
+        # The overview's last section: T2 and T6 are pages of their own (#465).
         headings = [h.children for h in of_type(tree, "H2")]
-        assert headings.index("National results") < headings.index("Results by state")
+        assert headings[-2:] == ["National results", "Where the data comes from"]
         # The chart comes after its section's heading and before T3's own pieces.
         section = tree.children
         h2 = next(
@@ -3099,7 +3355,7 @@ class TestC1:
     ) -> None:
         """Non-vacuity (round 1): with ``_plotted`` drawing nothing, every share
         becomes a marker, and the reconciliation fails."""
-        monkeypatch.setitem(MOD, "_plotted", lambda value, cell: None)
+        monkeypatch.setitem(OV, "_plotted", lambda value, cell: None)
         with pytest.raises(AssertionError):
             self.test_every_plotted_value_is_t3_s_cell_for_the_same_slug(2024)
 
@@ -3128,12 +3384,10 @@ class TestC1:
             assert ("pv" in traces(figure)) is expected, year
             assert index_row(year)["has_popular_vote"] is expected
         body = year_body(2016)
-        tree = MOD["render"](
+        tree = OV["render"](
             body,
             {**index_row(2016), "has_popular_vote": False},
-            [],
-            per_capita_body(2016),
-            MOD["neighbours"](INDEX, 2016),
+            election_view.neighbours(INDEX, 2016),
         )
         assert "pv" not in traces(c1_figure(tree))
 
@@ -3448,7 +3702,7 @@ class TestC1:
                 "national_electoral_denominator": "SENTINEL-APPOINTED",
             }
 
-        monkeypatch.setitem(MOD, "_nation_cells", counted)
+        monkeypatch.setitem(OV, "_nation_cells", counted)
         tree = render(2024)
         summary = year_body(2024)["summary"]
         assert calls == [r["candidate_slug"] for r in summary]

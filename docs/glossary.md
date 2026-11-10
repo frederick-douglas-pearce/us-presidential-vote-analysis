@@ -181,8 +181,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   only received popular votes are not in it. `/v1/candidates` lists each candidate once, with
   `candidate_slug`, `candidate` and the election years they appear in (*Election years a
   candidate appears in*).
-- **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>` (named by the
-  lede's `FILTER_SENTENCE` in `pages/election.py`) and `/state/<usps>`; the name, as served, as
+- **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>/states` (named by
+  that page's `FILTER_SENTENCE` in `pages/election_states.py`) and `/state/<usps>`; the name, as served, as
   the link to the candidate history page `/candidate/<slug>` in T2, T3 and T4, and as that page's
   heading (`pages/candidate.py`), or `HEADING` there until a name is read, which is also the
   page's title (`title`) on any link that is not refused; on a refused link, `NOT_FOUND_HEADING`
@@ -341,8 +341,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   it; `labels.CHART_TABLE_POINTER`; each chart's own wording (title, axis titles, trace names,
   legend title, hover text, annotations, caption) in `labels.py`; the axis number format, the
   hover behavior and the inert legend in `charts.TEMPLATE`, and the absent toolbar in
-  `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the one-election view, is
-  the first chart a page renders. The home page's lede (`pages/home.py`) already
+  `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the election overview
+  (`/election/<year>`), is the first chart a page renders. The home page's lede (`pages/home.py`) already
   says "Tables and charts".
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
@@ -388,8 +388,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["electoral_count_status"]`, `LABELS["electoral_count_status_reason"]`;
   values `labels.COUNT_STATUS`; the cell `labels.count_status`, which shows the reason verbatim
   only when it is text with something in it, and leaves it out otherwise (the download keeps it
-  as served; #355); the count-status filter on `/election/<year>` (named, with the popular-vote
-  status filter, as "status" by the lede's `FILTER_SENTENCE` in `pages/election.py`).
+  as served; #355); the count-status filter on `/election/<year>/states` (named "count status" by
+  that page's `FILTER_SENTENCE` in `pages/election_states.py`).
 - **Source:** `src/usvote/count_status.py`, `COUNT_STATUS_VALUES` and the comment on each value;
   `EcPvRow.electoral_count_status` and `electoral_count_status_reason`; D043; D044; D047; D048 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "When the record itself won't say" (the
@@ -415,14 +415,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   carries redistributable data only (D030). "In this dataset" is a statement about what the
   snapshot holds, never about what happened historically and never about a source.
 - **Shown as:** throughout, for example `labels.NOT_IN_DATASET`, `labels.BEFORE_WINDOW`,
-  `labels.HAS_POPULAR_VOTE_NOTE` and the page ledes, among them the one-election view's `LEDE` in
-  `pages/election.py`, which names that page's sections in the order they appear (National
-  results before Results by state).
+  `labels.HAS_POPULAR_VOTE_NOTE` and the page ledes, among them the election overview's `LEDE` in
+  `pages/election.py`, which names that page's sections in the order they appear (the election
+  panel before National results).
 - **Source:** `CLAUDE.md`, "Publishing" (editorial guardrail); `.claude/specs/backlog-dashboard.md`,
   "Carry-forward constraints"; D030; D070; `posts/2026-08-06-222-votes-away.md`, "The record the
   argument runs on top of" (the 1976 popular-vote edge described as a licensing boundary, not a
   records one); the order of `LEDE` in `pages/election.py`, which follows the order of the
-  page's sections (owner approval at #433's plan gate, 2026-11-09; recorded here with #466).
+  page's sections (owner approval at #433's plan gate, 2026-11-09; recorded here with #466);
+  since #465, Results by state and People per electoral vote are pages of their own (*Election
+  pages*).
 - **Not:** "The historical record".
 - **Status:** settled
 
@@ -435,34 +437,76 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `components.UNAVAILABLE_MESSAGE`.
 - **Source:** `dashboard/explore/components.py`; `dashboard/CLAUDE.md`, `components.py`.
 - **Not:** A not-found state (*Not-found state*): a link whose year, state code or candidate slug
-  the dataset does not serve (`NOT_FOUND_SENTENCE` in `pages/election.py`, `pages/state.py` and
-  `pages/candidate.py`). An empty filter result
+  the dataset does not serve, or whose election section the site does not have
+  (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, and
+  `NOT_FOUND_SENTENCE` in `pages/state.py` and `pages/candidate.py`). An empty filter result
   (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`).
+- **Status:** settled
+
+### Election pages (overview, results by state, people per electoral vote)
+- **Plain:** Each election in this dataset has three pages. The overview shows who led under each
+  method and the national results, with a chart. Results by state shows every state's electoral
+  votes for each candidate, which a reader can narrow by state, candidate, popular-vote status or
+  count status. People per electoral vote shows how many people each state's electoral votes stood
+  for, which a reader can narrow to one state. Links near the top of each page go between the
+  three, and the page being read is marked. On each page, the earlier and later links go to the
+  same page for the neighboring election.
+- **Precise:** Three registered pages: `/election/<year>`, the overview (the election panel,
+  National results with C1 and T3, and the provenance footer; no filters); `/election/<year>/states`
+  (T2 and its four filters, `state`, `candidate`, `pv_status` and `electoral_count_status`); and
+  `/election/<year>/per-capita` (T6 and a `state` filter, checked against T6's own rows, which falls
+  back to every state when the code is not among them). Each page checks the year against
+  `/v1/elections`; a year it refuses gets the same not-found state on all three (*Not-found state*),
+  and a link naming a section the site does not have (`/election/1824/x`) reaches the overview,
+  whose check refuses it, so it gets the overview's not-found state too, with the same status and
+  title (*Not-found state*), never *Page not found*. On a successful
+  render each page carries the section links, a landmark named `labels.ELECTION_SECTIONS_LABEL`:
+  the page being read is text marked `aria-current="page"`, and the other two are links that open
+  without reloading the page. The earlier and later links on a subpage go to the same subpage of the
+  neighboring served year, with no filters. A link to `/election/<year>` that carries any of T2's
+  filters is redirected (302) to `/election/<year>/states` with those filters. "Overview" is never
+  "summary", which is the API's name for T3's data (`summary` on `/v1/elections/{year}`).
+- **Shown as:** the section links `labels.SECTION_OVERVIEW`, `labels.SECTION_STATES` and
+  `labels.SECTION_PER_CAPITA` and their landmark name `labels.ELECTION_SECTIONS_LABEL` (read by
+  assistive technology, not shown); the overview's `HEADING`, `LEDE` and `description` in
+  `pages/election.py`; `STATES_HEADING`, `STATES_GENERIC_HEADING`, `LEDE`, `FILTER_SENTENCE` and
+  `description` in `pages/election_states.py`; `PER_CAPITA_HEADING`, `PER_CAPITA_GENERIC_HEADING`,
+  `LEDE`, `FILTER_SENTENCE` and `description` in `pages/election_per_capita.py`.
+- **Source:** #465 (owner decisions, 2026-11-09: the split, the per-capita state filter, the earlier
+  and later links keeping the page, the 302); D092; reader wording: `ba` spec for #465, approved by
+  the owner at its plan gate (2026-11-10).
+- **Not:** *Site navigation*. The earlier and later links (*Election year*). The API's `summary`.
+  A filter: the section links change the page, not the rows.
 - **Status:** settled
 
 ### Election year
 - **Plain:** The year the presidential election was held.
 - **Precise:** `year`. The years served run from `meta.provenance.coverage.year_min` to
-  `year_max`, read from the response, never written as a literal. On the one-election view, the
-  earlier and later links go to the nearest year before and after it that `/v1/elections` serves,
-  read from that index and never computed as four years before or after; a year with no served
-  year on one side has no link on that side. "Earlier" and "later" are about the years this
+  `year_max`, read from the response, never written as a literal. On each election page (*Election
+  pages*), the earlier and later links go to the nearest year before and after it that
+  `/v1/elections` serves, on the same page (the overview, results by state, or people per
+  electoral vote), read from that index and never computed as four years before or after; a year
+  with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`); the label
   of the year control on `/candidate/<slug>`, and the lede sentence that offers it
-  (`FILTER_SENTENCE` in `pages/candidate.py`); the one-election view's heading, `HEADING` in
-  `pages/election.py` (the `H1` that `render` builds, and the start of the page's title, `title`),
-  or "Election" on the degraded state (a literal in `layout` there) and in the title before a year
-  is checked; the earlier and later links on `/election/<year>`
-  (`EARLIER_LINK` and `LATER_LINK` in `pages/election.py`) and their accessible name
-  (`ELECTION_NAV_LABEL` in `pages/election.py`, read by assistive technology, not shown). The
+  (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages' headings: `HEADING` on the overview
+  (`pages/election.py`), `STATES_HEADING` (`pages/election_states.py`) and `PER_CAPITA_HEADING`
+  (`pages/election_per_capita.py`), each the `H1` that page's `render` builds and the start of its
+  title (`title`); on the degraded state, and in the title before a year is checked, "Election" on
+  the overview (a literal in `layout` there), `STATES_GENERIC_HEADING` and
+  `PER_CAPITA_GENERIC_HEADING`; the earlier and later links on every election page
+  (`labels.EARLIER_LINK` and `labels.LATER_LINK`) and their accessible names
+  (`labels.ELECTION_NAV_LABEL` on the overview and `labels.ELECTION_NAV_SECTION_LABEL` on the
+  subpages, read by assistive technology, not shown). The
   links sit in a bordered bar above the page heading, the earlier link at the left and the later
   at the right, each with a chevron pointing its way (before the earlier link's text, after the
   later's). The chevrons are drawn shapes with no text: they are not part of either link's name
   and are never read aloud, so the words "Earlier" and "Later" carry the direction.
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`; the
   earlier and later links: #324; their reader wording: owner decision, 2026-10-30, #324; the bar
-  above the heading and its decorative chevrons: #464.
+  above the heading and its decorative chevrons: #464; the links keeping the page on the
+  subpages: #465.
 - **Not:** *Census used*, which is also a year.
 - **Status:** settled
 
@@ -559,7 +603,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Electoral share and popular-vote share chart (C1)
-- **Plain:** A chart on the page for one election, with a row for each candidate. Each row has a
+- **Plain:** A chart on an election's overview page, with a row for each candidate. Each row has a
   bar for the candidate's electoral share and, in a year this dataset has popular-vote figures
   for, a bar for their popular-vote share. A dashed line marks half of the electors appointed: a
   candidate whose electoral share is more than half has a majority of them. Every bar is labeled
@@ -568,8 +612,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   the bar, never a bar of zero length; a real zero is a drawn bar, labeled with its zero.
 - **Precise:** Chart ID C1 in `CHARTS` (`dashboard/explore/charts.py`), on `/election/<year>`,
   with T3 as its *Companion table* (`election-nation`, `NATION_TABLE_ID` in `pages/election.py`);
-  its element id is `c1`. It sits in the National results section, between that section's heading
-  and T3, and that section comes before Results by state. Horizontal grouped bars, one row per
+  its element id is `c1`. It sits in the National results section of the election overview, between
+  that section's heading and T3; Results by state is a page of its own (*Election pages*). Horizontal grouped bars, one row per
   candidate in T3, with the candidate's name as the row label (that axis has no title) and
   `labels.C1_X_AXIS` on the share axis. The electoral-share series is `ec_share_full`
   (*Electoral share*: votes counted ÷ electors appointed), named `LABELS["ec_share_full"]`; the
@@ -841,7 +885,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Not-found state (a link the dataset does not serve)
 - **Plain:** What a page says when its link names a year, a state code or a candidate link this
-  dataset does not serve. Its heading and the browser tab say that the election, state or
+  dataset does not serve, or, on an election's pages, a section the site does not have. Its heading
+  and the browser tab say that the election, state or
   candidate was not found, and so does a shared link's preview once the site has checked the
   link; before that, the preview names no year, state or candidate.
 - **Precise:** Rendered when a page's `validate` judge refuses its path value (D073, D074). It
@@ -852,14 +897,20 @@ articles and announcements). Every rule binds all three unless the rule states a
   is in the dashboard's memory, the index answers 404 with `noindex`, and the title (the browser
   tab, `og:title` and `twitter:title`) is the not-found heading followed by the site title; before
   then, the index answers 200 and the title is the page's generic one, which names no year or code
-  (#325). Its link-preview description is the page's `NOT_FOUND_SENTENCE`. A percent-encoded link
+  (#325). Its link-preview description is the page's not-found sentence:
+  `labels.ELECTION_NOT_FOUND_SENTENCE` on the three election pages, and `NOT_FOUND_SENTENCE` in
+  `pages/state.py` and `pages/candidate.py`. A percent-encoded link
   is read as the link it spells once decoded, as Dash's router reads it, so it gets whatever that
   link gets: `/election%2F1825` gets this state, with the same status and title, just as
   `/election/1825` does. `/election/18%32%34` is not a not-found link at all: it opens 1824, with
-  `/election/1824` as its canonical link (D089).
-- **Shown as:** `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/election.py`,
-  `pages/state.py` and `pages/candidate.py`; the links "Browse every election in the dataset"
-  (`not_found` in `pages/election.py`), "Browse every state in the dataset" (`not_found` in
+  `/election/1824` as its canonical link (D089). On the election pages, the overview and both
+  subpages (`/election/1825/states`) share one heading and sentence, and so does a link naming a
+  section the site does not have (`/election/1824/x`), which reaches the overview: the sentence is
+  about the link, so it holds whether the year or the section is what the site does not have.
+- **Shown as:** `labels.ELECTION_NOT_FOUND_HEADING` and `labels.ELECTION_NOT_FOUND_SENTENCE` for
+  the three election pages, and `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/state.py`
+  and `pages/candidate.py`; the links "Browse every election in the dataset"
+  (`labels.ELECTION_NOT_FOUND_LINK`, built by `election_view.not_found`), "Browse every state in the dataset" (`not_found` in
   `pages/state.py`) and `NOT_FOUND_LINK` in `pages/candidate.py`; the title on a not-found link,
   built in `dashboard/explore/app.py` from the heading and `config.SITE_TITLE`.
 - **Source:** D073; D074; D083; D089 (a percent-encoded link is matched after decoding);
@@ -946,7 +997,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   is 0 (votes withheld: eleven states in 1864, three in 1868). Never 0 and never infinite. Where a
   row carries both causes, the missing census figure is the one shown.
 - **Shown as:** `LABELS["persons_per_electoral_vote"]`; `labels.persons_per_electoral_vote`;
-  `labels.NO_ELECTORAL_VOTES`; the T6 and T7 headings.
+  `labels.NO_ELECTORAL_VOTES`; the heading of T7 (`pages/state.py`); the per-capita page's
+  `PER_CAPITA_HEADING` and `PER_CAPITA_GENERIC_HEADING` (`pages/election_per_capita.py`); the
+  section link `labels.SECTION_PER_CAPITA`.
 - **Source:** `PerCapitaRow`; D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
   names the same measure "persons per electoral vote"; readers see "people" (owner decision, 2026-10-11, #348).
   The field name `persons_per_electoral_vote` stays where field names are allowed.
@@ -962,7 +1015,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   about the election, not about the dataset: a `popular_vote` row can still lack a figure. The
   public values come from the in-repo absence catalog (D048 §3).
 - **Shown as:** `LABELS["pv_status"]`; values `labels.PV_STATUS` (cell and filter);
-  `labels.LEGISLATURE_CHOSE` and `labels.TOOK_NO_PART` in the popular-vote cell.
+  `labels.LEGISLATURE_CHOSE` and `labels.TOOK_NO_PART` in the popular-vote cell. The filter is
+  named "popular-vote status" by the states page's `FILTER_SENTENCE`
+  (`pages/election_states.py`).
 - **Source:** `src/usvote/pv/status.py`, `PV_STATUS_VALUES` and its comment; `EcPvRow.pv_status`;
   D024 §4; D048 §2–3; `posts/2026-08-18-presidential-elections-are-messy.md`, "How the record
   keeps them apart" (the three values as readers see them: held, the legislature chose the
@@ -1091,7 +1146,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   custom 404 page; the theme toggle follows it in the header, outside the landmark (D086). It
   reads no data. The site-name link carries `aria-current="page"` on `/`, as Elections does on
   `/elections` and States on `/states`. Elections carries `aria-current="true"` on
-  `/election/<year>` and States on `/state/<usps>`, matched by route, so a link the dataset does
+  `/election/<year>`, `/election/<year>/states` and `/election/<year>/per-capita`, and States on
+  `/state/<usps>`, matched by route, so a link the dataset does
   not serve marks its section too: the mark names the section, not the page being read. Nothing
   is marked on `/candidate/<slug>` or the custom 404 page. Elections, States and the site name
   navigate client-side. API docs is an ordinary same-tab link to the API's `/docs` page, which
@@ -1103,8 +1159,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `components.site_nav`, placed in `app.layout` (`dashboard/explore/app.py`).
 - **Source:** #448 (owner decisions fixed in the issue and the owner's comment, 2026-11-06);
   D086; reader wording: owner decision at #448's plan gate, 2026-11-06.
-- **Not:** The earlier and later links on `/election/<year>` and their landmark
-  (`ELECTION_NAV_LABEL`, *Election year*). The in-body "Browse…" links on the home page and the
+- **Not:** The earlier and later links on the election pages and their landmarks
+  (`labels.ELECTION_NAV_LABEL`, `labels.ELECTION_NAV_SECTION_LABEL`; *Election year*), and the
+  links between an election's three pages (`labels.ELECTION_SECTIONS_LABEL`; *Election pages*). The in-body "Browse…" links on the home page and the
   not-found states, which stay. A menu: the bar has at most four entries at the right, the
   toggle counted, and never collapses.
 - **Status:** settled
@@ -1143,8 +1200,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   code used in URLs and filters. The state history page, `/state/<usps>`, lists one state's rows
   in every election this dataset holds for it (T4) and its people per electoral vote in each
   (T7); an election outside the years this dataset covers (*Years covered*) is not on it.
-- **Shown as:** `LABELS["state"]`; the state filter on `/election/<year>`, named by the lede's
-  `FILTER_SENTENCE` in `pages/election.py`, and on `/candidate/<slug>`, with `STATE_PLACEHOLDER`
+- **Shown as:** `LABELS["state"]`; the state filter on `/election/<year>/states`, named by that
+  page's `FILTER_SENTENCE` (`pages/election_states.py`), and on `/election/<year>/per-capita`,
+  named by its `FILTER_SENTENCE` (`pages/election_per_capita.py`), both with the placeholder "All
+  states", and on `/candidate/<slug>`, with `STATE_PLACEHOLDER`
   and named by the lede's `FILTER_SENTENCE` or `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`;
   `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
   and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or,
@@ -1367,7 +1426,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
 | "figure" for a chart | chart | a rule | In this file and on the page a figure is a number ("no popular-vote figure"). Plotly and HTML call the chart a figure. |
 | "C1", "C2" … in page text | the chart's title | a rule | A chart ID is a registry key and a link fragment; readers know a chart by its title (owner decision, 2026-11-06, #432). |
-| "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `EARLIER_LINK`, `LATER_LINK` in `pages/election.py` | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
+| "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `labels.EARLIER_LINK`, `labels.LATER_LINK`, on every election page | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
+| "Summary" for an election's first page | Overview | `labels.SECTION_OVERVIEW` | The API serves T3's data as `summary`; one term, one meaning. |
 | an arrow character ("←", "→", "«", "»") typed into a link's text | a drawn chevron beside the text, with the words unchanged | a rule (`.neighbor-nav` in `dashboard/explore/assets/style.css`) | A typed arrow is read aloud ("left arrow") and becomes part of the link's name; the words already say which way the link goes. |
 
 ## Open decisions

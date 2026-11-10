@@ -6258,3 +6258,70 @@ sub-pixel bars readable at 390 px. The three rules close the gaps #432's review 
 second chart can rely on them.
 
 **Related:** D070, D075, D087, D088, #432, #433, #364.
+
+## D092: An election has an overview and one subpage per table section, each filling one path; old filtered overview links redirect (302)
+
+**Date:** 2026-11-10
+**Builds on:** D070(c), D073, D081, D083, D089, D091; amends #280's T6 filter rule · **Decided by:** the owner, approving #465's plan (architect-reviewed)
+
+**Context.** `/election/<year>` held the earlier and later links, the panel, National results
+(C1 and T3), Results by state (T2 and its four filters) and People per electoral vote (T6), with
+C3 (#435) to come. The owner (2026-11-09) found this too much for one view, above all on a phone,
+and chose to split it into an overview and two subpages, one story in one PR. Four things needed
+ruling: where the shared code lives (a page module cannot import another), how the subpages route
+when the overview's `<year>` is greedy (Dash's matcher turns `election/1824/states` into
+`{'year': '1824/states'}`), what an old link carrying T2's filters does, and what T6's state
+filter is checked against once T6 no longer sits beside T2.
+
+**Decision.**
+- **An overview and `/election/<year>/<section>` subpages.** `/election/<year>` is the overview
+  (the panel, National results with C1 and T3, the provenance footer; no filters).
+  `/election/<year>/states` holds T2 and its four filters; `/election/<year>/per-capita` holds T6
+  and a `state` filter, and C3 when it lands (#435's body amended with the owner's OK). A summary
+  that spans tables is a chart on the overview, filed as its own story; this split adds no chart
+  and leaves no empty slot (#364's rule).
+- **One fill per page.** The overview fills `/v1/elections/{year}`, the states page the same path
+  (none after the overview, one cold), the per-capita page `/v1/elections/{year}/per-capita`, its
+  heading and neighbours coming from the prefetched index. No new data shape, endpoint or request
+  (D070(c)). A later overview chart over per-capita data would bring the second fill back to the
+  overview; that story decides.
+- **Routing precedence by `order=`.** The two subpages register `order=`, so they sort before every
+  unordered page in the registry Dash's router walks, the overview included, whatever their module
+  names; Dash re-sorts on every registration, so an `app.py` reordering would be undone, and Dash
+  templates take no constraint syntax. `test_every_page_s_path_routes_to_that_page` fails any
+  shadowing a later page brings. An unknown section (`/election/1824/x`) reaches the overview,
+  whose `validate` refuses it: 404.
+- **The shared pieces are a shared module, `explore/election_view.py`.** It holds the section
+  suffixes (the one source for every template, link, view URL and the redirect target), the
+  year-body checks, both filter parsers, the earlier and later links, the section links and the
+  not-found state, importing only `labels` and `query` (`TestSharedPieces`). Each page builds its
+  own `VALIDATE` from its `served_year`. Their wording is in `labels.py`. One module registering
+  several pages was declined: it breaks registry key = page module, which the guards walk.
+- **Old filtered links: 302, scoped to an accepted year.** The overview declares
+  `moved=(keys, target template)`; `app.py` checks at import that the target is a registered page
+  over the same path variables with a `query=` parser and the same `validate`, and uses that
+  parser. A document request for the overview whose query, parsed as the router parses it, names
+  any of T2's four keys gets 302 with a relative `Location`: the target filled with the accepted,
+  router-decoded year, plus the target parser's normalized query (unknown keys and `year`
+  dropped, D081). Only when the snapshot in memory accepted the year: a refused year answers the
+  overview's 404, and before the first snapshot the overview answers 200, unfiltered, as a
+  client-side route does. 302, not 301: the canonical link never carries a query (D073), and a
+  301 is cached by browsers with no undo, while the overview might read a key later. A link that
+  narrowed T2 and T6 together (`?state=GA`) lands on the states page only (accepted).
+- **T6's `state` filter is checked against T6's own rows** on the per-capita page, falling back
+  to every state when the code is not among them, per parameter as `og:url` is. This replaces
+  #280's rule that T6 followed T2's resolved state, never re-resolved against T6's rows.
+- **Section links.** Each page, on success only, carries a landmark linking the three pages; the
+  page being read is text with `aria-current="page"`, drawn with more than color, and the links are
+  unfiltered. The earlier and later links on a subpage go to the same subpage of the neighboring
+  served year, unfiltered (owner, 2026-11-09: it supports comparing one table across years).
+
+**Rationale.** One fill per page halves an overview's misses, and the overview opens on the
+result instead of two long state tables. A redirect keeps every link shared before the split
+working without making the overview read filters it no longer shows. Checking T6's filter against
+its own rows is the only rule a page that reads no T2 rows can apply.
+
+**Action required.** None beyond #465. The e2e plotly.js bound now decides a chart page by Dash's
+router rather than a pattern of the template, which the overview's greedy `<year>` would let
+match its subpages (`tests/e2e/conftest.py`, `is_chart_path`); C3's row will name the per-capita
+template.

@@ -16,7 +16,7 @@ import math
 import re
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 
 import dash
 import pandas as pd
@@ -38,9 +38,9 @@ from tests.unit.test_dashboard_guards import DOWNLOAD_IDS
 #: Every table's id (its link's is ``export.link_id(id)``), by the page that renders it.
 TABLES = {
     "elections-table": "/elections",
-    "election-states": "/election/<year>",
+    "election-states": "/election/<year>/states",
     "election-nation": "/election/<year>",
-    "election-per-capita": "/election/<year>",
+    "election-per-capita": "/election/<year>/per-capita",
     "state-history": "/state/<usps>",
     "state-per-capita": "/state/<usps>",
     "candidate-history": "/candidate/<slug>",
@@ -55,9 +55,12 @@ READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
     "/elections": ["/v1/elections"],
-    "/election/<year>": [
+    # #465 split the one-election view's reads across its three pages: each fills one
+    # path (the per-capita page reads no /v1/elections/{year}), and none adds a read.
+    "/election/<year>": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
+    "/election/<year>/states": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
+    "/election/<year>/per-capita": [
         "/v1/elections",
-        "/v1/elections/1824",
         "/v1/elections/1824/per-capita",
         "/v1/elections",
     ],
@@ -94,7 +97,8 @@ ROUTES = {
 FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
 #: Every callback output once Dash has registered them all, before and after #309: the
-#: Pages router's two, each filtered page's URL, the theme callback's store and its
+#: Pages router's two, each filtered page's URL (the election per-capita page's since
+#: #465), the theme callback's store and its
 #: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
 #: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
@@ -108,6 +112,7 @@ CALLBACK_OUTPUTS = {
     "_pages_dummy.children",
     "elections-url.search",
     "election-url.search",
+    "election-per-capita-url.search",
     "state-url.search",
     "candidate-url.search",
 }
@@ -674,28 +679,37 @@ class TestExactlyTheView:
     def test_1860_filtered_to_south_carolina(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, "state=SC", year="1860")
-        for table in ("election-states", "election-per-capita"):
+        # T2 on the states page and T6 on the per-capita page (#465), each narrowed by
+        # its own page's state filter; T3, on the overview, is never filtered.
+        trees = {
+            table: render(TABLES[table], monkeypatch, "state=SC", year="1860")[0]
+            for table in ("election-states", "election-per-capita")
+        }
+        for table, tree in trees.items():
             file = download(tree, table)
             assert file.rows, table
             assert {r["state_usps"] for r in file.rows} == {"SC"}, table
             assert len(file.rows) == len(body_rows(tree, table)), table
         recorded = RECORDED["/v1/elections/1860"]
-        states = download(tree, "election-states")
+        states = download(trees["election-states"], "election-states")
         expected = [r for r in recorded["data"] if r["state_usps"] == "SC"]
         assert [r["candidate_slug"] for r in states.rows] == [
             r["candidate_slug"] for r in expected
         ]
+        tree, _ = render("/election/<year>", monkeypatch, year="1860")
         nation = download(tree, "election-nation")
         assert [r["candidate_slug"] for r in nation.rows] == [
             r["candidate_slug"] for r in recorded["summary"]
         ]
-        assert states.lines[
-            [i for i, x in enumerate(states.lines) if "View" in x][0]
-        ] == (
-            "View: https://explore.us-presidential-election-center.org"
-            "/election/1860?state=SC"
-        )
+        for table, section in (
+            ("election-states", "states"),
+            ("election-per-capita", "per-capita"),
+        ):
+            lines = download(trees[table], table).lines
+            assert lines[[i for i, x in enumerate(lines) if "View" in x][0]] == (
+                "View: https://explore.us-presidential-election-center.org"
+                f"/election/1860/{section}?state=SC"
+            )
 
     def test_the_file_follows_the_rows_the_table_shows(
         self, monkeypatch: pytest.MonkeyPatch
@@ -776,12 +790,25 @@ class TestExactlyTheView:
             # Each status filter under its own key (closed values: kept even when no
             # row has them).
             (
+                "/election/<year>/states",
+                "electoral_count_status=counted&pv_status=popular_vote",
+                "election-states",
+                "/election/1824/states"
+                "?electoral_count_status=counted&pv_status=popular_vote",
+            ),
+            # The per-capita page reads the state only (#465).
+            (
+                "/election/<year>/per-capita",
+                "state=SC&candidate=andrew-jackson",
+                "election-per-capita",
+                "/election/1824/per-capita?state=SC",
+            ),
+            # The overview reads no filter, so T3's file names the bare overview.
+            (
                 "/election/<year>",
-                "electoral_count_status=disputed&pv_status=popular_vote",
-                # T3 is never filtered, so its file names the view however few rows
-                # T2 keeps.
+                "zz=1",
                 "election-nation",
-                "/election/1824?electoral_count_status=disputed&pv_status=popular_vote",
+                "/election/1824",
             ),
         ],
     )
@@ -800,11 +827,13 @@ class TestExactlyTheView:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # A state 1860 does not name falls back to "all", so the view is unfiltered.
-        tree, _ = render("/election/<year>", monkeypatch, "state=ZZ", year="1860")
+        tree, _ = render(
+            "/election/<year>/states", monkeypatch, "state=ZZ", year="1860"
+        )
         lines = download(tree, "election-states").lines
         assert (
-            "View: https://explore.us-presidential-election-center.org/election/1860"
-            in lines
+            "View: https://explore.us-presidential-election-center.org"
+            "/election/1860/states" in lines
         )
 
     @pytest.mark.parametrize(
@@ -816,7 +845,7 @@ class TestExactlyTheView:
                 ("year", "candidate_count", "has_popular_vote"),
             ),
             (
-                "/election/<year>",
+                "/election/<year>/states",
                 "election-states",
                 (
                     "state",
@@ -858,7 +887,7 @@ class TestExactlyTheView:
                 ),
             ),
             (
-                "/election/<year>",
+                "/election/<year>/per-capita",
                 "election-per-capita",
                 ("state", *labels.PER_CAPITA_FIELDS, "state_usps", "year"),
             ),
@@ -963,7 +992,7 @@ class TestExactlyTheView:
 
 class TestNulls:
     def test_a_null_is_an_empty_cell(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, year="1860")
+        tree, _ = render("/election/<year>/states", monkeypatch, year="1860")
         states = download(tree, "election-states")
         recorded = RECORDED["/v1/elections/1860"]["data"]
         assert all(r["popular_votes"] is None for r in recorded)  # the premise
@@ -973,13 +1002,14 @@ class TestNulls:
             r["candidate"] for r in states.rows if r["nominating_party"] == ""
         }
         assert {"John C. Breckinridge", "John Bell"} <= nulls
+        tree, _ = render("/election/<year>", monkeypatch, year="1860")
         nation = download(tree, "election-nation")
         assert {r["hybrid_score"] for r in nation.rows} == {""}
 
     def test_the_columns_that_explain_a_null_travel_with_it(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, year="1872")
+        tree, _ = render("/election/<year>/states", monkeypatch, year="1872")
         states = download(tree, "election-states")
         reasons = {r["electoral_count_status_reason"] for r in states.rows}
         assert reasons - {""}, "1872 carries Archives reasons"
@@ -1037,10 +1067,14 @@ class TestNulls:
         assert labels.BOUNDARY_NOTE in lines
         state = page_of("/state/<usps>")["layout"].__globals__
         assert state["PER_CAPITA_FILTER_NOTE"] in lines
-        tree, _ = render("/election/<year>", monkeypatch)
-        election = page_of("/election/<year>")["layout"].__globals__
-        assert election["PER_CAPITA_FILTER_NOTE"] in (
-            download(tree, "election-per-capita").lines
+        # T6's page has one filter, its own (#465), so no note says which apply.
+        tree, _ = render("/election/<year>/per-capita", monkeypatch)
+        lines = download(tree, "election-per-capita").lines
+        assert labels.GOVERNING_CENSUS_NOTE in lines
+        assert labels.BOUNDARY_NOTE in lines
+        assert (
+            "PER_CAPITA_FILTER_NOTE"
+            not in page_of("/election/<year>/per-capita")["layout"].__globals__
         )
 
     def test_the_national_file_carries_t3_s_notes(
@@ -1081,7 +1115,7 @@ class TestNulls:
         body = copy.deepcopy(RECORDED["/v1/elections/1824"])
         body["data"][0]["candidate"] = "A\ud800B"
         monkeypatch.setitem(RECORDED, "/v1/elections/1824", body)
-        tree, _ = render("/election/<year>", monkeypatch)
+        tree, _ = render("/election/<year>/states", monkeypatch)
         assert of_type(tree, "Table"), "the page degraded"
         file = download(tree, "election-states")
         assert "A?B" in [r["candidate"] for r in file.rows]
@@ -1264,12 +1298,6 @@ class TestAttribution:
                 "state-per-capita",
                 "state-history",
             ),
-            (
-                "/election/<year>",
-                "/v1/elections/1824/per-capita",
-                "election-per-capita",
-                "election-states",
-            ),
         ],
     )
     def test_a_per_capita_table_reads_its_own_response(
@@ -1287,7 +1315,30 @@ class TestAttribution:
         monkeypatch.setitem(RECORDED, path, per_capita)
         tree, _ = render(key, monkeypatch)
         assert "Data version: OWN-RESPONSE" in download(tree, table).lines
-        assert "Data version: OWN-RESPONSE" not in download(tree, other).lines
+        other_tree, _ = render(TABLES[other], monkeypatch)
+        assert "Data version: OWN-RESPONSE" not in download(other_tree, other).lines
+
+    def test_the_per_capita_page_s_file_reads_its_own_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T6 has a page of its own since #465, whose other read is the index (for the
+        heading and the neighbours): its file and footer carry the per-capita
+        response's provenance, never the index's."""
+        for path, version in (
+            ("/v1/elections/1824/per-capita", "OWN-RESPONSE"),
+            ("/v1/elections", "INDEX-RESPONSE"),
+        ):
+            body = copy.deepcopy(RECORDED[path])
+            body["meta"]["provenance"]["snapshot_version"] = version
+            monkeypatch.setitem(RECORDED, path, body)
+        tree, reads = render("/election/<year>/per-capita", monkeypatch)
+        assert "/v1/elections" in reads  # the premise: the index was read
+        lines = download(tree, "election-per-capita").lines
+        assert "Data version: OWN-RESPONSE" in lines
+        assert not [line for line in lines if "INDEX-RESPONSE" in line]
+        (footer,) = of_type(tree, "Footer")
+        assert "OWN-RESPONSE" in str(footer)
+        assert "INDEX-RESPONSE" not in str(footer)
 
     def test_it_states_provenance_never_a_license_condition(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1333,8 +1384,12 @@ class TestFile:
         text = export.BOM + "#,a b%–\r\n\r\nx\r\n"
         encoded = export.href(text).removeprefix(export.DATA_URL_PREFIX)
         assert unquote_to_bytes(encoded) == text.encode("utf-8")
-        tree, _ = render("/election/<year>", monkeypatch, year="1872")
-        for link in links(tree).values():
+        links_1872 = {
+            link_id: link
+            for key in ("/election/<year>", "/election/<year>/states")
+            for link_id, link in links(render(key, monkeypatch, year="1872")[0]).items()
+        }
+        for link in links_1872.values():
             encoded = link.href.removeprefix(export.DATA_URL_PREFIX)
             assert not set(encoded) & {"#", " ", "\n", "\r", ","}
             file = Csv(link.href)
@@ -1349,7 +1404,7 @@ class TestFile:
     def test_a_script_skipping_comments_reads_the_table(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, year="1872")
+        tree, _ = render("/election/<year>/states", monkeypatch, year="1872")
         file = download(tree, "election-states")
         frame = pd.read_csv(
             io.BytesIO(file.raw), comment="#", encoding="utf-8-sig", dtype=str
@@ -1368,7 +1423,7 @@ class TestFile:
         body = copy.deepcopy(RECORDED["/v1/elections/1824"])
         body["data"][0]["candidate"] = "Lincoln #1"
         monkeypatch.setitem(RECORDED, "/v1/elections/1824", body)
-        tree, _ = render("/election/<year>", monkeypatch)
+        tree, _ = render("/election/<year>/states", monkeypatch)
         file = download(tree, "election-states")
         frame = pd.read_csv(
             io.BytesIO(file.raw), comment="#", encoding="utf-8-sig", dtype=str
@@ -1409,7 +1464,7 @@ class TestRequestBudget:
 
 # --- no raw values on a page (#355) ---------------------------------------------------
 
-#: The recorded years of the one-election view, each rendered whole: read from the
+#: The recorded years of the election pages, each page rendered whole: read from the
 #: recordings, so a newly recorded year is scanned too.
 ELECTION_YEARS = tuple(
     sorted(
@@ -1646,12 +1701,11 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {},
         {"/v1/elections": _row("has_popular_vote", "candidate_count")},
     ),
-    "/election/<year>": (
+    "/election/<year>": ({"year": "2016"}, {"/v1/elections/2016": _election}),
+    "/election/<year>/states": ({"year": "2016"}, {"/v1/elections/2016": _election}),
+    "/election/<year>/per-capita": (
         {"year": "2016"},
-        {
-            "/v1/elections/2016": _election,
-            "/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
-        },
+        {"/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
     "/state/<usps>": (
         {"usps": "GA"},
@@ -1678,10 +1732,14 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 UNRECOGNIZED_CELLS = {
     "/elections": {"elections-table": 2},
     "/election/<year>": {
-        "election-states": len(STATE_ROW_FIELDS) + 1,  # popular votes
         "election-nation": len(SUMMARY_ROW_FIELDS),
-        "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
         "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
+    },
+    "/election/<year>/states": {
+        "election-states": len(STATE_ROW_FIELDS) + 1,  # popular votes
+    },
+    "/election/<year>/per-capita": {
+        "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
     "/state/<usps>": {
         "state-history": len(STATE_ROW_FIELDS) + 1,
@@ -1759,8 +1817,8 @@ class TestOnePartyPerRow:
                     )
 
         doctor(monkeypatch, "/v1/elections/2016", change)
-        tree, _ = render("/election/<year>", monkeypatch, year="2016")
         for table in ("election-states", "election-nation"):
+            tree, _ = render(TABLES[table], monkeypatch, year="2016")
             file = download(tree, table)
             powell = [r for r in file.rows if r["candidate"] == "Colin Powell"]
             assert powell, table
@@ -1777,6 +1835,46 @@ class TestOnePartyPerRow:
                 line.startswith("Parties the National Archives does not print: ")
                 for line in file.lines
             ), table
+
+
+def test_no_in_app_link_builds_a_filtered_overview_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#465: the overview reads no filter, and a filtered overview link is only ever
+    an old one the index redirects, so no page links to the overview with a query.
+    Decided by Dash's router, as ``is_chart_path`` decides a chart page, never a
+    pattern of the template: ``/election/2016/?q`` reaches the overview too."""
+    from dash._pages import _path_to_page
+
+    from explore import app as appmod
+
+    trees = list(all_pages(monkeypatch).values())
+    trees += [
+        render(key, monkeypatch, "state=GA&candidate=donald-j-trump", year="2016")[0]
+        for key in ("/election/<year>/states", "/election/<year>/per-capita")
+    ]
+    hrefs = [
+        href
+        for tree in trees
+        for node in of_type(tree, "Link") + of_type(tree, "A")
+        if isinstance(href := getattr(node, "href", None), str)
+    ]
+    on_overview = []
+    for href in hrefs:
+        parts = urlsplit(href)
+        if (
+            parts.scheme not in ("", "https")
+            or (parts.netloc and parts.netloc != HOST.removeprefix("https://"))
+            or not parts.path.startswith("/")
+        ):
+            # A download's data: URL, another site's link (the API docs), or a fragment
+            # on the same page (a chart's pointer to its table).
+            continue
+        page, _ = _path_to_page(appmod.router_key(parts.path))
+        if page.get("module") == "pages.election":
+            on_overview.append(href)
+    assert on_overview  # the premise: the section links and the bar reach it
+    assert [href for href in on_overview if urlsplit(href).query] == []
 
 
 class TestNoRawValues:
@@ -1800,10 +1898,11 @@ class TestNoRawValues:
     def test_every_recorded_election(
         self, year: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/election/<year>", monkeypatch, year=year)
-        on_page = {t for t, key in TABLES.items() if key == "/election/<year>"}
-        assert on_page <= set(tables_in(tree))  # the premise: no degraded page
-        assert raw_values(tree) == []
+        for page in sorted({TABLES[t] for t in TABLES if t.startswith("election-")}):
+            tree, _ = render(page, monkeypatch, year=year)
+            on_page = {t for t, key in TABLES.items() if key == page}
+            assert on_page <= set(tables_in(tree)), page  # the premise: not degraded
+            assert raw_values(tree) == [], page
 
     @pytest.mark.parametrize("key", list(DOCTORED))
     def test_a_doctored_page_shows_no_raw_value_and_notes_every_unrecognized_cell(

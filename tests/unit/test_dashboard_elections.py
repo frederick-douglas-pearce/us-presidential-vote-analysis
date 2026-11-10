@@ -653,7 +653,14 @@ class TestLabels:
 
 # --- the shared pieces: footer, degraded state, purity -------------------------------
 
-SHARED_MODULES = ("charts.py", "components.py", "export.py", "labels.py", "query.py")
+SHARED_MODULES = (
+    "charts.py",
+    "components.py",
+    "election_view.py",  # the election pages' shared pieces (#465)
+    "export.py",
+    "labels.py",
+    "query.py",
+)
 
 #: The shared modules by import name: the only ``explore`` modules a shared module may
 #: import (#309: the shared table component builds on ``labels`` and ``export``; #432:
@@ -788,6 +795,8 @@ class TestSharedPieces:
         }
         assert graph["components"] == {"charts", "export", "labels", "query"}
         assert graph["charts"] == set()  # the chart rules import nothing from explore
+        # The election pages' shared pieces build on labels and query only (#465).
+        assert graph["election_view"] == {"labels", "query"}
         assert in_cycles(graph) == []
 
     def test_the_cycle_check_sees_a_cycle(self) -> None:

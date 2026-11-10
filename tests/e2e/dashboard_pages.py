@@ -41,6 +41,12 @@ FIELDS = ("year", "candidate_count", "has_popular_vote")
 ELECTION_SUCCESS = "#election"
 ELECTION_EARLIER = "#election-earlier"
 ELECTION_LATER = "#election-later"
+#: The election overview's two subpages (#465), their success markers and not-found
+#: states, and the section links on all three.
+STATES_SUCCESS = "#election-states-page"
+PER_CAPITA_SUCCESS = "#election-per-capita-page"
+STATES_NOT_FOUND = "#election-states-not-found"
+SECTIONS = "#election-sections"
 
 # Shared pieces (components.py).
 PROVENANCE = f"#{components.PROVENANCE_ID}"
@@ -69,7 +75,8 @@ PV_FIRST: int = COVERAGE["pv_year_min"]
 
 
 def _recorded_year(year: int) -> bool:
-    """Whether both paths the one-election view fills for ``year`` are recorded."""
+    """Whether both paths ``year``'s election pages fill are recorded (#465: the
+    overview's, which the states page shares, and the per-capita page's)."""
     return all(
         path in RECORDED_FILES
         for path in (f"/v1/elections/{year}", f"/v1/elections/{year}/per-capita")
@@ -77,7 +84,7 @@ def _recorded_year(year: int) -> bool:
 
 
 def step_years() -> tuple[int, int]:
-    """Two consecutive served years whose one-election views are both recorded, from
+    """Two consecutive served years whose election pages are both recorded, from
     the recorded index, oldest first: where the browser test steps from one election
     to the next (#324). Called by that test, so a corpus with no such pair fails it,
     by name, rather than every module importing this one."""

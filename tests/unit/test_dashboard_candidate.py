@@ -20,7 +20,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, components, labels
+from explore import api, components, election_view, labels
 from tests.unit.test_dashboard_app import (
     RECORDED,
     RecordingBucket,
@@ -460,19 +460,19 @@ class TestCallback:
 # --- the candidate links in T2, T3 and T4 ---------------------------------------------
 
 
-def _election_tree(year: str = "1824", change: Any = None) -> tuple[Any, Any]:
-    election = dash.page_registry["pages.election"]["layout"].__globals__
+def _election_tables(year: str = "1824", change: Any = None) -> tuple[Any, Any]:
+    """T3 from the election overview and T2 from its states page (#465), rendered
+    from one doctored body."""
+    overview = dash.page_registry["pages.election"]["layout"].__globals__
+    states = dash.page_registry["pages.election_states"]["layout"].__globals__
     body = copy.deepcopy(RECORDED[f"/v1/elections/{year}"])
     if change is not None:
         change(body)
-    tree = election["render"](
-        body,
-        election["index_row"](INDEX, year),
-        [],
-        copy.deepcopy(RECORDED[f"/v1/elections/{year}/per-capita"]),
-        election["neighbours"](INDEX, int(year)),
-    )
-    return tree, election
+    index_row = election_view.index_row(INDEX, year)
+    around = election_view.neighbours(INDEX, int(year))
+    t2 = find(states["render"](body, index_row, [], around), states["STATES_TABLE_ID"])
+    t3 = find(overview["render"](body, index_row, around), overview["NATION_TABLE_ID"])
+    return t2, t3
 
 
 def _candidate_links(table: Any) -> set[str]:
@@ -484,12 +484,12 @@ def _candidate_links(table: Any) -> set[str]:
 
 
 def test_t2_and_t3_link_each_candidate_to_their_history() -> None:
-    tree, election = _election_tree()
+    t2, t3 = _election_tables()
     body = RECORDED["/v1/elections/1824"]
     expected = {f"/candidate/{r['candidate_slug']}" for r in body["summary"]}
     assert f"/candidate/{SLUG}" in expected
-    assert _candidate_links(find(tree, election["STATES_TABLE_ID"])) == expected
-    assert _candidate_links(find(tree, election["NATION_TABLE_ID"])) == expected
+    assert _candidate_links(t2) == expected
+    assert _candidate_links(t3) == expected
 
 
 def test_t4_links_each_candidate_to_their_history() -> None:
@@ -544,7 +544,7 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
     if "candidate" in row and row["candidate"] is None:
-        # election._options (the candidate filter's options) sorts by name, which a
+        # election_states._options (the candidate filter's options) sorts by name, which a
         # null name breaks. No served page reaches that: the API types the name as
         # required text (#367).
         return
@@ -553,9 +553,8 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
         for r in [*body["data"], *body["summary"]]:
             r.update(row)
 
-    tree, election = _election_tree(change=doctor)  # renders, does not raise
-    for table in (election["STATES_TABLE_ID"], election["NATION_TABLE_ID"]):
-        assert _candidate_links(find(tree, table)) == set()
+    for table in _election_tables(change=doctor):  # renders, does not raise
+        assert _candidate_links(table) == set()
 
 
 def test_a_slug_and_a_name_make_a_link() -> None:

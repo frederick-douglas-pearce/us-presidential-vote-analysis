@@ -1,5 +1,6 @@
-"""The one-election view in a browser: its earlier and later links (#324), an
-unserved year's not-found state (#325), and chart C1 (#433) at the phone's width.
+"""The election pages in a browser: the overview and its two subpages (#465), their
+earlier and later links (#324), an unserved year's not-found state (#325), and chart
+C1 (#433) at the phone's width.
 
 From a filtered view, the later link opens the next served year's own view
 unfiltered, as a client-side navigation (a marker set on ``window`` before the click
@@ -21,7 +22,7 @@ import pytest
 from playwright.sync_api import Page, Request, expect
 
 import explore.app  # (registers the pages, whose not-found states it reads)
-from explore import charts, components, labels
+from explore import charts, components, election_view, labels
 from tests.dashboard_fixtures import RECORDED_FILES
 from tests.e2e.dashboard_pages import (
     ELECTION_EARLIER,
@@ -30,7 +31,11 @@ from tests.e2e.dashboard_pages import (
     ELECTIONS,
     FIRST,
     LAST,
+    PER_CAPITA_SUCCESS,
     RESOURCE_ERROR,
+    SECTIONS,
+    STATES_NOT_FOUND,
+    STATES_SUCCESS,
     assert_rendered,
     composited,
     contrast_ratio,
@@ -40,39 +45,161 @@ from tests.e2e.dashboard_pages import (
 
 pytestmark = pytest.mark.e2e
 
-#: The earlier and later links' landmark name (#324), apart from the site
-#: navigation's (#448), read from the page module through its layout.
-ELECTION_NAV_LABEL = dash.page_registry["pages.election"]["layout"].__globals__[
-    "ELECTION_NAV_LABEL"
-]
+#: The states page's earlier and later links' landmark name (#324, #465), apart from
+#: the site navigation's (#448).
+STATES_NAV_LABEL = labels.ELECTION_NAV_SECTION_LABEL.format(
+    section=labels.SECTION_STATES
+)
 
 #: A filter the starting view applies, so the step shows that none carries over.
 FILTERED = "?state=GA"
 
+#: Each election page's path suffix and success marker (#465).
+PAGES = {
+    election_view.OVERVIEW: ELECTION_SUCCESS,
+    election_view.STATES: STATES_SUCCESS,
+    election_view.PER_CAPITA: PER_CAPITA_SUCCESS,
+}
 
-def assert_year(page: Page, year: int, search: str = "") -> None:
-    """The view of ``year`` with exactly ``search``: the URL ends there."""
-    expect(page).to_have_url(re.compile(re.escape(f"/election/{year}{search}") + "$"))
-    assert_rendered(page, ELECTION_SUCCESS)
+
+def assert_year(
+    page: Page, year: int, search: str = "", section: str = election_view.OVERVIEW
+) -> None:
+    """The page ``section`` of ``year`` with exactly ``search``: the URL ends there."""
+    expect(page).to_have_url(
+        re.compile(re.escape(f"/election/{year}{section}{search}") + "$")
+    )
+    assert_rendered(page, PAGES[section])
     expect(page.get_by_role("heading", level=1)).to_contain_text(str(year))
 
 
+def assert_section(page: Page, section: str) -> None:
+    """The section links mark ``section`` as the page being read, by text with
+    ``aria-current="page"``, and link the other two; the site navigation marks
+    Elections (#448)."""
+    nav = page.get_by_role("navigation", name=labels.ELECTION_SECTIONS_LABEL)
+    expect(nav).to_have_count(1)
+    current = nav.locator('[aria-current="page"]')
+    expect(current).to_have_text(election_view.SECTION_TEXT[section])
+    expect(nav.get_by_role("link")).to_have_count(2)
+    expect(page.locator(f"#{components.SITE_NAV_ID} [aria-current=true]")).to_have_text(
+        labels.NAV_ELECTIONS
+    )
+
+
 def test_the_later_link_opens_the_next_election_and_back_returns(page: Page) -> None:
+    """#324's test, on the states page since #465: from a filtered view, the later
+    link opens the same page of the next year, unfiltered, and back returns."""
     earlier, later = step_years()
-    page.goto(f"/election/{earlier}{FILTERED}")
-    assert_year(page, earlier, FILTERED)
-    expect(page.get_by_role("navigation", name=ELECTION_NAV_LABEL)).to_have_count(1)
+    states = election_view.STATES
+    page.goto(f"/election/{earlier}{states}{FILTERED}")
+    assert_year(page, earlier, FILTERED, states)
+    expect(page.get_by_role("navigation", name=STATES_NAV_LABEL)).to_have_count(1)
     link = page.locator(ELECTION_LATER)
-    expect(link).to_have_attribute("href", f"/election/{later}")
+    expect(link).to_have_attribute("href", f"/election/{later}{states}")
     page.evaluate("window.__e2e_mark = 1")
     link.click()
-    assert_year(page, later)
+    assert_year(page, later, section=states)
     assert page.evaluate("window.__e2e_mark") == 1
     expect(page.locator(ELECTION_EARLIER)).to_have_attribute(
-        "href", f"/election/{earlier}"
+        "href", f"/election/{earlier}{states}"
     )
     page.go_back()
-    assert_year(page, earlier, FILTERED)
+    assert_year(page, earlier, FILTERED, states)
+
+
+@pytest.mark.plotlyjs_fetches(1)  # the overview's C1, once for the one document
+def test_the_overview_and_its_subpages_are_one_client_side_chain(page: Page) -> None:
+    """#465: the overview shows the panel, C1 and T3 and neither T2 nor T6; the section
+    links move to each subpage and back and forward with no document load, the URL,
+    the tab, the section mark and the site mark following."""
+    year, _ = step_years()
+    page.goto(f"/election/{year}")
+    assert_year(page, year)
+    for shown in ("#election-panel", "#c1", "#election-nation"):
+        expect(page.locator(shown)).to_have_count(1)
+    for absent in ("#election-states", "#election-per-capita"):
+        expect(page.locator(absent)).to_have_count(0)
+    assert_section(page, election_view.OVERVIEW)
+    page.evaluate("window.__e2e_mark = 1")
+    nav = page.get_by_role("navigation", name=labels.ELECTION_SECTIONS_LABEL)
+    titles = {
+        election_view.OVERVIEW: f"The {year} election",
+        election_view.STATES: f"The {year} election: results by state",
+        election_view.PER_CAPITA: f"The {year} election: people per electoral vote",
+    }
+
+    def landed(section: str) -> None:
+        """The page ``section``: its URL, success marker, tab, and both marks."""
+        assert_year(page, year, section=section)
+        expect(page).to_have_title(re.compile("^" + re.escape(titles[section]) + " — "))
+        assert_section(page, section)
+
+    landed(election_view.OVERVIEW)
+    for section in (election_view.STATES, election_view.PER_CAPITA):
+        nav.get_by_role("link", name=election_view.SECTION_TEXT[section]).click()
+        landed(section)
+        expect(page.locator("#c1")).to_have_count(0)
+    page.go_back()
+    landed(election_view.STATES)
+    page.go_back()
+    landed(election_view.OVERVIEW)
+    page.go_forward()
+    landed(election_view.STATES)
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
+    assert (
+        page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        <= 0
+    )
+
+
+def test_a_state_filter_change_on_the_states_page_and_back(page: Page) -> None:
+    """#465: T2's filters on its own page still write the URL, and back undoes it."""
+    year, _ = step_years()
+    page.goto(f"/election/{year}/states")
+    assert_year(page, year, section=election_view.STATES)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator("#election-state").click()
+    page.keyboard.type("Georgia")
+    page.keyboard.press("Enter")
+    assert_year(page, year, "?state=GA", election_view.STATES)
+    expect(page.locator("#election-states tbody tr td:first-child")).to_contain_text(
+        ["Georgia"]
+    )
+    page.go_back()
+    assert_year(page, year, section=election_view.STATES)
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+def test_an_old_filtered_overview_link_lands_on_the_states_page(page: Page) -> None:
+    """#465: a link shared before the split, loaded as a document, is redirected (302)
+    to the states page with its filter applied."""
+    response = page.goto("/election/2016?state=GA")
+    assert response is not None and response.status == 200
+    assert_year(page, 2016, "?state=GA", election_view.STATES)
+    expect(page.locator("#election-states tbody tr td:first-child")).to_contain_text(
+        ["Georgia"]
+    )
+    rows = page.locator("#election-states tbody tr")
+    expect(rows).to_have_count(
+        sum(r["state_usps"] == "GA" for r in recorded("/v1/elections/2016")["data"])
+    )
+
+
+@pytest.mark.plotlyjs_fetches(0)  # a not-found render mounts no chart (#433)
+@pytest.mark.expected_console_error(
+    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
+)
+def test_an_unserved_year_reads_as_not_found_on_the_states_page(page: Page) -> None:
+    not_found = dash.page_registry["pages.election_states"]["not_found"]
+    response = page.goto("/election/1825/states")
+    assert response is not None and response.status == 404
+    expect(page.get_by_role("heading", level=1)).to_have_text(not_found.heading)
+    expect(page).to_have_title(not_found.title)
+    expect(page.locator(STATES_NOT_FOUND)).to_contain_text(not_found.sentence)
+    expect(page.locator(SECTIONS)).to_have_count(0)
 
 
 @pytest.mark.plotlyjs_fetches(0)  # a not-found render mounts no chart (#433)
@@ -405,11 +532,10 @@ def test_passing_through_a_chart_page_needs_no_marker(page: Page) -> None:
 
 # --- the earlier-and-later bar (#464) ----------------------------------------------
 
-#: The bar, its links and the page module's names for them, read through its layout.
-_ELECTION = dash.page_registry["pages.election"]["layout"].__globals__
-BAR = f"#{_ELECTION['NAV_ID']}"
-EARLIER_LINK: str = _ELECTION["EARLIER_LINK"]
-LATER_LINK: str = _ELECTION["LATER_LINK"]
+#: The bar and its links, by ``election_view``'s ids and ``labels``' wording.
+BAR = f"#{election_view.NAV_ID}"
+EARLIER_LINK: str = labels.EARLIER_LINK
+LATER_LINK: str = labels.LATER_LINK
 THEME_KEY = explore.app.THEME_STORAGE_KEY
 
 #: What the browser measures of the bar: each box in CSS px, the content box inside
@@ -457,9 +583,9 @@ BAR_MEASURE = """() => {
 }"""
 
 
-def bar_measure(page: Page) -> dict[str, Any]:
+def bar_measure(page: Page, section: str = election_view.OVERVIEW) -> dict[str, Any]:
     script = BAR_MEASURE.replace("__BAR__", json.dumps(BAR)).replace(
-        "__PAGE__", str(_ELECTION["PAGE_ID"])
+        "__PAGE__", PAGES[section].removeprefix("#")
     )
     found: dict[str, Any] = page.evaluate(script)
     return found
@@ -477,15 +603,22 @@ def middle_year() -> int:
     raise AssertionError("no recorded served year with a neighbor on each side")
 
 
-def open_year(page: Page, year: int, theme: str, width: int) -> None:
-    """The view of ``year`` under an explicit ``theme`` choice at ``width``."""
+def open_year(
+    page: Page,
+    year: int,
+    theme: str,
+    width: int,
+    section: str = election_view.OVERVIEW,
+) -> None:
+    """The page ``section`` of ``year`` under an explicit ``theme`` choice at
+    ``width``."""
     page.add_init_script(
         f"localStorage.setItem({json.dumps(THEME_KEY)}, {json.dumps(theme)});"
     )
     page.set_viewport_size({"width": width, "height": 900})
-    page.goto(f"/election/{year}")
+    page.goto(f"/election/{year}{section}")
     # assert_rendered checks 390 px, so a wide view waits on the marker itself.
-    page.locator(ELECTION_SUCCESS).wait_for()
+    page.locator(PAGES[section]).wait_for()
     assert page.evaluate("document.documentElement.dataset.theme") == theme
 
 
@@ -512,12 +645,13 @@ def inside(inner: dict[str, Any], outer: dict[str, Any]) -> bool:
 
 @pytest.mark.parametrize("width", [390, 1280])
 @pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("section", election_view.SECTIONS)  # every page (#465)
 def test_the_bar_sets_its_two_links_apart_above_the_heading(
-    page: Page, theme: str, width: int
+    page: Page, theme: str, width: int, section: str
 ) -> None:
     year = middle_year()
-    open_year(page, year, theme, width)
-    found = bar_measure(page)
+    open_year(page, year, theme, width, section)
+    found = bar_measure(page, section)
     earlier, later = found["links"]
     assert [earlier["id"], later["id"]] == [ELECTION_EARLIER[1:], ELECTION_LATER[1:]]
     # Two links: a positive gap between them, both inside the box, one line each.
@@ -536,7 +670,7 @@ def test_the_bar_sets_its_two_links_apart_above_the_heading(
     width_ = page.locator(BAR).evaluate("e => getComputedStyle(e).borderTopWidth")
     assert float(width_.removesuffix("px")) >= 1
     # The chevrons are no part of either link's name.
-    neighbors = _ELECTION["neighbours"](ELECTIONS, year)
+    neighbors = election_view.neighbours(ELECTIONS, year)
     for text in (
         EARLIER_LINK.format(year=neighbors.earlier),
         LATER_LINK.format(year=neighbors.later),

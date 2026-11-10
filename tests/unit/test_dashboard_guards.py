@@ -47,14 +47,14 @@ rendered at a concrete value from :data:`GUARD_PATH_VALUES` in both runs, in ord
 their concrete paths. The candidate history, ``/candidate/andrew-jackson`` (#331), sorts
 first, so its render makes the success run's first fills on a miss,
 :data:`CANDIDATE_MISSES` (the candidate index, then the candidate's rows). The
-one-election view, ``/election/<year>`` (#307), reads ``/v1/elections/{year}`` on a miss:
-rendered at 1824, its render makes the next ones, :data:`ELECTION_MISSES` (the year,
-:data:`MISS_PATH`, then its per-capita table, #280), through the render-scoped view
-pages use; the run checks every named miss, in some registered page's ``on_miss`` and in
+election pages (#307, #465) make the next ones, :data:`ELECTION_MISSES`, rendered at
+1824: the overview, ``/election/<year>``, reads :data:`MISS_PATH` on a miss, the
+per-capita page its table (#280) and the states page nothing more, each render's own
+slice checked (:data:`ELECTION_PAGE_MISSES`), through the render-scoped view pages use; the run checks every named miss, in some registered page's ``on_miss`` and in
 the snapshot. It validates the year from the
 ``/v1/elections`` it prefetches before formatting it into a path (#312), and the
-success run renders it at 1825 too: the page's not-found state, neither its success marker nor the degraded
-state, with no request reaching the transport at all (``REQUESTED``, which records
+success run renders each of the three at 1825 too: each page's own not-found state,
+neither its success marker nor the degraded state, with no request reaching the transport at all (``REQUESTED``, which records
 every request, fixture or not). Until #307 a fake page the guard registered stood in.
 
 **What the guard does not claim.** A file read that bypasses Python's ``open`` (C code
@@ -128,20 +128,22 @@ FIXTURE_FILES = {
     "/v1/candidates/andrew-jackson": "v1_candidates_andrew-jackson.json",
 }
 
-#: Each table's download link (#309), all rendered by the success run at
-#: :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render, under the guard.
-DOWNLOAD_IDS = (
-    "elections-table-csv",
-    "election-states-csv",
-    "election-nation-csv",
-    "election-per-capita-csv",
-    "state-history-csv",
-    "state-per-capita-csv",
-    "candidate-history-csv",
-)
+#: Each table's download link (#309), by the page that renders it, all rendered by the
+#: success run at :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render,
+#: under the guard. Checked per page, so a link that moved to another page fails.
+DOWNLOAD_IDS_BY_PAGE = {
+    "/elections": ("elections-table-csv",),
+    "/election/<year>": ("election-nation-csv",),
+    "/election/<year>/states": ("election-states-csv",),
+    "/election/<year>/per-capita": ("election-per-capita-csv",),
+    "/state/<usps>": ("state-history-csv", "state-per-capita-csv"),
+    "/candidate/<slug>": ("candidate-history-csv",),
+}
+DOWNLOAD_IDS = tuple(i for ids in DOWNLOAD_IDS_BY_PAGE.values() for i in ids)
 
-#: Prefetched by no page: the success run's first fill on a miss, read by the
-#: one-election view (#307) rendered at :data:`GUARD_PATH_VALUES`.
+#: Prefetched by no page: the election overview's fill on a miss (#307; the states
+#: page's too, when cold), after :data:`CANDIDATE_MISSES`, rendered at
+#: :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
 
 #: The concrete value each path variable is rendered at, in both runs. Every templated
@@ -155,9 +157,21 @@ GUARD_PATH_VALUES = {"year": "1824", "usps": "GA", "slug": "andrew-jackson"}
 #: validates the slug against, then the candidate's rows.
 CANDIDATE_MISSES = ["/v1/candidates", "/v1/candidates/andrew-jackson"]
 
-#: The one-election view's fills on a miss, after :data:`CANDIDATE_MISSES`, in the order
-#: its render makes them: the year's rows (:data:`MISS_PATH`), then its per-capita
-#: table (#280).
+#: The election pages' fills on a miss (#465), by page, each the page's one fill or
+#: none: the overview the year's rows (:data:`MISS_PATH`), the per-capita page its own
+#: table (#280), and the states page none, since the overview, which sorts first, has
+#: filled the year. The success run checks each render's own slice of ``SERVED``, which
+#: sees only fills that reach the transport, never a cache hit: it pins each page's own
+#: fills under this guard. That a page reads no other page's path is
+#: ``test_a_render_reads_what_it_read_before``'s job (``READS_BEFORE`` in
+#: ``test_dashboard_export.py``), which records every ``view.get``.
+ELECTION_PAGE_MISSES = {
+    "/election/<year>": [MISS_PATH],
+    "/election/<year>/per-capita": ["/v1/elections/1824/per-capita"],
+    "/election/<year>/states": [],
+}
+#: The same fills after :data:`CANDIDATE_MISSES`, in the order the success run renders
+#: the pages (by concrete path: the overview, then ``/per-capita``, then ``/states``).
 ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
 #: The fills on a miss after :data:`ELECTION_MISSES`, in the order the success run
@@ -514,22 +528,30 @@ assert client.get("/").status_code == 200
 assert "/" in [concrete(page) for page in PAGES]
 rendered = set()
 by_page = {{}}
+served_by_page = {{}}
 for page in PAGES:
     path = concrete(page)
+    key = page.get("path_template") or page["path"]
     # The candidate history's render makes the first fills on a miss
-    # (CANDIDATE_MISSES), then the one-election view's, at 1824 (ELECTION_MISSES).
+    # (CANDIDATE_MISSES), then the election pages', at 1824 (ELECTION_MISSES).
+    before = len(SERVED)
     text = route(client, path)
+    served_by_page[key] = SERVED[before:]
     assert "isn't responding" not in text, path  # rendered from the filled cache
     assert page["success"] in rendered_ids(text), (path, page["success"])
     rendered |= rendered_ids(text)
-    by_page[page.get("path_template") or page["path"]] = rendered_ids(text)
+    by_page[key] = rendered_ids(text)
     if path == "/":
         assert _VERSION in text
-# Every table's CSV (#309) is built in these renders, under this guard. That a download
-# is its link's data: URL with no route or callback behind it is checked elsewhere:
-# link_problems and TestRequestBudget in test_dashboard_export.py.
-missing = set({DOWNLOAD_IDS!r}) - rendered
-assert not missing, ("a table rendered no download link", missing)
+# Each election page made its own fill and no other's (#465).
+for key, misses in {ELECTION_PAGE_MISSES!r}.items():
+    assert served_by_page[key] == misses, (key, served_by_page[key], misses)
+# Every table's CSV (#309) is built in these renders, under this guard, on its own
+# page. That a download is its link's data: URL with no route or callback behind it
+# is checked elsewhere: link_problems and TestRequestBudget in test_dashboard_export.py.
+for key, ids in {DOWNLOAD_IDS_BY_PAGE!r}.items():
+    missing = set(ids) - by_page[key]
+    assert not missing, ("a table rendered no download link", key, missing)
 
 # Every live registered chart (#432) renders on its own page, under this guard.
 from explore import charts as _charts
@@ -557,14 +579,24 @@ for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}:
 # reach SERVED, so REQUESTED is what sees it). Its not-found state, written here as a
 # literal: neither the page's success marker nor the degraded state.
 requested_before = list(REQUESTED)
-text = route(client, "/election/1825")
-# The literal below is the page's marker; pinned, so a rename cannot leave it vacuous.
-(election_page,) = [p for p in PAGES if p.get("path_template") == "/election/<year>"]
-assert election_page["success"] == "election", election_page["success"]
-assert "election" not in rendered_ids(text)
-assert "election-not-found" in rendered_ids(text)
-assert "isn't responding" not in text
-assert REQUESTED == requested_before, (REQUESTED, requested_before)
+# The literals below are each page's markers; pinned, so a rename cannot leave them
+# vacuous. Each election page renders its own not-found state (#465), so a page that
+# captured another's path (the overview's greedy <year>) fails here.
+for section, marker, not_found in (
+    ("", "election", "election-not-found"),
+    ("/states", "election-states-page", "election-states-not-found"),
+    ("/per-capita", "election-per-capita-page", "election-per-capita-not-found"),
+):
+    text = route(client, "/election/1825" + section)
+    (election_page,) = [
+        p for p in PAGES if p.get("path_template") == "/election/<year>" + section
+    ]
+    assert election_page["success"] == marker, election_page["success"]
+    ids = rendered_ids(text)
+    assert marker not in ids, section
+    assert not_found in ids, (section, ids)
+    assert "isn't responding" not in text
+    assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
 # A code the roster does not name (#279): refused from the roster the /state/GA render
 # above filled, so nothing is requested, and never /v1/states/ZZ.

@@ -43,7 +43,7 @@ from dash._pages import (
 from dash.dash import _ID_CONTENT, _ID_LOCATION
 from dash.development.base_component import Component
 
-from explore import api, components
+from explore import api, components, labels
 from explore import app as appmod
 from explore.config import SITE_TITLE
 from tests.dashboard_fixtures import RECORDED_FILES
@@ -329,9 +329,10 @@ class TestRender:
             register("fake_shadow", **{**YEAR_PAGE, "path_template": "/election/<yr>"})
         assert "fake_shadow" not in dash.page_registry
         # A variable where the real page has a fixed segment: "x/x" routes nowhere,
-        # yet the template matches /election/1824, and /candidate/andrew-jackson, which
-        # the registry, sorted by module name, reaches first (#331).
-        with pytest.raises(AssertionError, match=r"pages\.candidate"):
+        # yet the template matches /election/1824, /candidate/andrew-jackson and
+        # /election/1824/states, which the registry reaches first: the election
+        # subpages are ordered (#465), and an ordered page precedes every other.
+        with pytest.raises(AssertionError, match=r"pages\.election_states"):
             register("fake_wide", **{**YEAR_PAGE, "path_template": "/<kind>/<year>"})
         assert "fake_wide" not in dash.page_registry
 
@@ -887,6 +888,9 @@ DECODED_PATHS: tuple[tuple[str, str, str | None], ...] = (
     ("/fake-election/18%0A24", "fake-election/18\n24", "18\n24"),  # drops DOTALL
     ("/%2F", "", None),
     ("/fake-election/%2F", "fake-election", None),
+    # An election subpage spelled with an encoded slash (#465): decoded once, it is
+    # /election/2016/states, a real page the echo page never sees (TestElectionPages).
+    ("/election/2016%2Fstates", "election/2016/states", None),
 )
 
 
@@ -1483,8 +1487,11 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
         if appmod.is_not_found_page(page):
             TestNotFound.assert_not_found(concrete)
             continue
+        # A query key the page reads (or ignores); never one it moved to another page,
+        # which the index redirects (#465, TestMovedFilters).
+        query = "?zz=1" if page.get("moved") else "?state=OH"
         for path in {concrete, concrete.rstrip("/") + "/"}:
-            status, head, _ = get(f"{path}?state=OH")
+            status, head, _ = get(f"{path}{query}")
             assert status == 200, (page["module"], path)
             assert head.canonical == url(concrete), (page["module"], path)
             found, path_vars = _path_to_page(concrete.strip("/"))
@@ -4563,3 +4570,285 @@ class TestRedirect:
     def test_the_canonical_host_is_served(self) -> None:
         response = appmod.server.test_client().get("/", headers={"Host": CANONICAL_HOST})
         assert response.status_code == 200
+
+
+# --- the election pages: routing and the moved filters (#465) -------------------------
+
+
+def _module(path: str) -> tuple[str | None, dict[str, str] | None]:
+    page, path_vars = _path_to_page(path)
+    return page.get("module"), path_vars
+
+
+class TestElectionPages:
+    """The overview's greedy ``<year>`` would capture a subpage path; the subpages'
+    ``order=`` puts them first in the registry Dash's router walks, whatever their
+    module names, and ``test_every_page_s_path_routes_to_that_page`` fails any
+    shadowing a later page brings."""
+
+    @pytest.mark.parametrize(
+        ("path", "module", "year"),
+        [
+            ("election/1824/states", "pages.election_states", "1824"),
+            ("election/1824/per-capita", "pages.election_per_capita", "1824"),
+            ("election/1824", "pages.election", "1824"),
+            # An unknown section reaches the overview, whose validate refuses it.
+            ("election/1824/x", "pages.election", "1824/x"),
+        ],
+    )
+    def test_each_path_reaches_its_page(
+        self, path: str, module: str, year: str
+    ) -> None:
+        assert _module(path) == (module, {"year": year})
+
+    def test_the_precedence_comes_from_order_not_module_names(self) -> None:
+        order = {
+            module: dash.page_registry[module]["supplied_order"]
+            for module in (
+                "pages.election",
+                "pages.election_states",
+                "pages.election_per_capita",
+            )
+        }
+        assert order["pages.election"] is None
+        assert isinstance(order["pages.election_states"], int)
+        assert isinstance(order["pages.election_per_capita"], int)
+        modules = list(dash.page_registry)
+        overview = modules.index("pages.election")
+        assert modules.index("pages.election_states") < overview
+        assert modules.index("pages.election_per_capita") < overview
+
+    def test_an_unknown_section_is_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch)
+        status, head, _ = get("/election/1824/x")
+        assert (status, head.canonical) == (404, None)
+        assert "election-not-found" in routed_ids(route("/election/1824/x"))
+        assert calls == []
+
+    @pytest.mark.parametrize("section", ["states", "per-capita"])
+    def test_an_unserved_year_is_not_found_on_each_subpage(
+        self, monkeypatch: pytest.MonkeyPatch, section: str
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch)
+        status, head, body = get(f"/election/1825/{section}")
+        assert (status, head.canonical, head.noindex) == (404, None, True)
+        assert f"<title>{labels.ELECTION_NOT_FOUND_HEADING} — " in body
+        assert f"election-{section}-not-found" in routed_ids(
+            route(f"/election/1825/{section}")
+        )
+        assert calls == []
+
+    def test_an_encoded_subpage_path_is_that_subpage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        response = appmod.server.test_client().get("/election/2016%2Fstates?state=GA")
+        assert response.status_code == 200  # the states page: never redirected
+        head = Head(response.get_data(as_text=True))
+        assert head.canonical == url("/election/2016/states")
+        assert head.og_url == url("/election/2016/states?state=GA")
+
+    def test_no_two_callbacks_write_one_output(self) -> None:
+        # The per-capita page's control and Location have ids of their own, since
+        # Dash keys callbacks by output app-wide (#465).
+        graph = appmod.server.test_client().get("/_dash-dependencies").get_json()
+        outputs = [c["output"] for c in graph]
+        assert len(outputs) == len(set(outputs))
+        assert "election-per-capita-url.search" in outputs
+        assert "election-url.search" in outputs
+
+
+def _location(path: str) -> tuple[int, str | None]:
+    response = appmod.server.test_client().get(path)
+    return response.status_code, response.headers.get("Location")
+
+
+class TestMovedFilters:
+    """A link to the overview carrying one of T2's keys, shared before #465, is
+    redirected (302) to the states page with them, normalized by its parser."""
+
+    @pytest.mark.parametrize(
+        ("query", "location"),
+        [
+            ("state=GA", "/election/2016/states?state=GA"),
+            (
+                "candidate=donald-j-trump",
+                "/election/2016/states?candidate=donald-j-trump",
+            ),
+            ("pv_status=popular_vote", "/election/2016/states?pv_status=popular_vote"),
+            (
+                "electoral_count_status=counted",
+                "/election/2016/states?electoral_count_status=counted",
+            ),
+            (
+                "state=GA&candidate=donald-j-trump&pv_status=popular_vote"
+                "&electoral_count_status=counted",
+                "/election/2016/states?candidate=donald-j-trump"
+                "&electoral_count_status=counted&pv_status=popular_vote&state=GA",
+            ),
+            # A repeated key: kept when it agrees, dropped when it does not.
+            ("state=GA&state=GA", "/election/2016/states?state=GA"),
+            ("state=GA&state=OH", "/election/2016/states"),
+            # The path's year wins (D081); unknown keys are dropped.
+            ("year=1900&state=GA&junk=1", "/election/2016/states?state=GA"),
+            # Read as the router reads the query: an escaped key, a blank value.
+            ("st%61te=GA", "/election/2016/states?state=GA"),
+            ("state=", "/election/2016/states"),
+            ("state=ga", "/election/2016/states"),  # not a USPS code: dropped
+        ],
+    )
+    def test_a_moved_key_redirects_to_the_states_page(
+        self, monkeypatch: pytest.MonkeyPatch, query: str, location: str
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        # The raw header: relative, never naming a host (D090).
+        assert _location(f"/election/2016?{query}") == (302, location)
+        # Judged from the snapshot in memory: the redirect reads and fills nothing.
+        assert (calls, bucket.waits) == ([], [])
+
+    def test_a_percent_encoded_year_redirects_by_the_year_it_spells(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        assert _location("/election/20%31%36?state=GA") == (
+            302,
+            "/election/2016/states?state=GA",
+        )
+        assert (calls, bucket.waits) == ([], [])
+
+    def test_the_location_is_built_from_the_accepted_year_not_the_request_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A trailing slash reaches the overview (D089), but the request path is not
+        the year: a Location built from it would read ``/election/2016//states``."""
+        _, calls, _ = cached_client(monkeypatch)
+        assert _location("/election/2016/?state=GA") == (
+            302,
+            "/election/2016/states?state=GA",
+        )
+        assert calls == []
+
+    @pytest.mark.parametrize("query", ["", "junk=1", "year=1900", "statex=GA"])
+    def test_no_moved_key_serves_the_overview(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        cached_client(monkeypatch)
+        assert _location(f"/election/2016?{query}") == (200, None)
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/election/1825", "/election/..", "/election/%3Cb%3E", "/election/1824/x"],
+    )
+    def test_a_refused_year_answers_the_overview_s_404(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        cached_client(monkeypatch)
+        assert _location(f"{path}?state=GA") == (404, None)
+
+    def test_before_the_first_snapshot_the_overview_is_served_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only a year the snapshot in memory accepted builds a Location; an unchecked
+        one is served as the overview, which reads no filter."""
+
+        def no_fetch(path: str, timeout: float = 0) -> api.Response:
+            raise AssertionError(f"the index fetched {path}")
+
+        client = offline_client(no_fetch)
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setattr(api, "CLIENT", client)
+        assert _location("/election/2016?state=GA") == (200, None)
+        assert _location("/election/abc?state=GA") == (200, None)
+
+    def test_a_client_side_route_renders_the_overview_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        ids = routed_ids(route("/election/2016", "?state=GA"))
+        assert "election" in ids
+        assert "election-states" not in ids
+
+
+class TestMoveContract:
+    """``moved=`` is checked as the registry is read (:func:`explore.app.page_move`), so
+    a redirect never leads to a page that would refuse the value just accepted."""
+
+    VALIDATE = ("/v1/elections", lambda path_vars, body: True)
+
+    def registry(self, **target: Any) -> dict[str, Any]:
+        return {
+            "t": {
+                "module": "t",
+                "path_template": "/x/<year>/y",
+                "query": lambda params: [],
+                "validate": self.VALIDATE,
+                **target,
+            }
+        }
+
+    def page(self, **page: Any) -> dict[str, Any]:
+        return {
+            "module": "p",
+            "path_template": "/x/<year>",
+            "validate": self.VALIDATE,
+            "moved": (("a",), "/x/<year>/y"),
+            **page,
+        }
+
+    def test_a_page_without_moved_has_none(self) -> None:
+        assert appmod.page_move({"module": "p"}, {}) is None
+
+    def test_a_valid_move_takes_the_target_s_parser(self) -> None:
+        registry = self.registry()
+        move = appmod.page_move(self.page(), registry)
+        assert move == appmod.Move(("a",), "/x/<year>/y", registry["t"]["query"])
+
+    @pytest.mark.parametrize(
+        ("page", "target", "message"),
+        [
+            ({"moved": (("a",), "/nowhere/<year>")}, {}, "unregistered"),
+            ({"path_template": "/x/<yr>"}, {}, "path variables"),
+            ({}, {"query": None}, "no query="),
+            ({}, {"validate": ("/v1/other", lambda v, b: True)}, "validates"),
+            ({"moved": ((), "/x/<year>/y")}, {}, "no keys"),
+            # A bare string would read as its letters, never as one key.
+            ({"moved": ("a", "/x/<year>/y")}, {}, "not a tuple of names"),
+            ({"moved": (("a",), "/x/<year>/y", "extra")}, {}, "is not"),
+            ({"moved": [("a",), "/x/<year>/y"]}, {}, "is not"),
+            ({"moved": (("",), "/x/<year>/y")}, {}, "no keys"),
+            # A key that is not a name, however truthy, is no query key.
+            ({"moved": ((1,), "/x/<year>/y")}, {}, "no keys"),
+            ({"moved": ((b"state",), "/x/<year>/y")}, {}, "no keys"),
+        ],
+    )
+    def test_a_bad_move_fails_the_import(
+        self, page: dict[str, Any], target: dict[str, Any], message: str
+    ) -> None:
+        with pytest.raises(RuntimeError, match=message):
+            appmod.page_move(self.page(**page), self.registry(**target))
+
+    def test_each_path_variable_is_quoted_into_the_location(self) -> None:
+        """Every redirect today carries a four-digit year, which quoting leaves alone,
+        so the quoting is pinned directly: a value a looser ``validate`` let through
+        could never add a path segment, a query or a fragment to the Location."""
+        resolution = appmod.Resolution(
+            canonical="https://x/",
+            og_url="https://x/",
+            title="t",
+            description="d",
+            page={},
+            path_vars={"year": "a/b?c#d"},
+        )
+        move = appmod.Move(("k",), "/x/<year>/y", lambda params: [("k", "v")])
+        assert appmod.moved_location(resolution, move, "k=1") == (
+            "/x/a%2Fb%3Fc%23d/y?k=v"
+        )
+
+    def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
+        assert set(appmod.MOVES) == {"pages.election"}
+        move = appmod.MOVES["pages.election"]
+        assert move.keys == ("state", "candidate", "pv_status", "electoral_count_status")
+        assert move.template == "/election/<year>/states"
+        assert move.parser is dash.page_registry["pages.election_states"]["query"]

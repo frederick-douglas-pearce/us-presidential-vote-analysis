@@ -17,7 +17,6 @@ starts a process or touches the network at import.
 from __future__ import annotations
 
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -213,24 +212,30 @@ def guard_problems(
     return problems
 
 
-def page_pattern(template: str) -> re.Pattern[str]:
-    """A Dash path template (``/election/<year>``) as a pattern over URL paths: each
-    ``<variable>`` takes one or more characters, as Dash's greedy variable does."""
-    parts = re.split(r"<[^>]+>", template)
-    return re.compile(".+".join(re.escape(part) for part in parts))
-
-
-def chart_page_patterns() -> list[re.Pattern[str]]:
-    """The pages a live registered chart renders on (#433): from ``charts.CHARTS``."""
+def chart_templates() -> set[str]:
+    """The page templates a live registered chart renders on (#433): from
+    ``charts.CHARTS``."""
     from explore import charts
 
-    return [
-        page_pattern(row.page) for row in charts.CHARTS.values() if not row.retired
-    ]
+    return {row.page for row in charts.CHARTS.values() if not row.retired}
+
+
+def is_chart_path(path: str, templates: Iterable[str]) -> bool:
+    """Whether Dash's router sends the URL path ``path`` to a page whose template is in
+    ``templates``. Decided by the router itself (``_path_to_page`` on the key it
+    matches, ``app.router_key``), never by a pattern of the template: the overview's
+    greedy ``<year>`` would match ``/election/2016/states``, a page of its own that
+    renders no chart, which the router reaches first (#465)."""
+    from dash._pages import _path_to_page
+
+    from explore import app as appmod
+
+    page, _ = _path_to_page(appmod.router_key(path))
+    return bool(page) and (page.get("path_template") or page["path"]) in set(templates)
 
 
 def derived_fetch_problems(
-    fetches: Iterable[tuple[int, str]], chart_pages: Iterable[re.Pattern[str]]
+    fetches: Iterable[tuple[int, str]], chart_pages: Iterable[str]
 ) -> list[str]:
     """The plotly.js bound for a test that declares no count (#433, D091): each fetch,
     given as the document it was made in (a count of the main frame's document loads)
@@ -239,12 +244,14 @@ def derived_fetch_problems(
     twice (the mount callback loads plotly.js once per document, D088). So a test that
     only passes through a chart page needs no marker, and a path no chart's template
     matches may fetch nothing. A not-found or degraded render at a chart path is not
-    told apart here: a test of one declares ``plotlyjs_fetches(0)`` (owner, #433)."""
-    patterns = list(chart_pages)
+    told apart here: a test of one declares ``plotlyjs_fetches(0)`` (owner, #433).
+    ``chart_pages`` are page templates (:func:`chart_templates`), matched through the
+    router (:func:`is_chart_path`)."""
+    templates = set(chart_pages)
     problems = []
     seen: set[int] = set()
     for document, path in fetches:
-        if not any(pattern.fullmatch(path) for pattern in patterns):
+        if not is_chart_path(path, templates):
             problems.append(f"plotly.js fetched by {path!r}, which renders no chart")
         if document in seen:
             problems.append(f"plotly.js fetched twice by one document ({path!r})")
@@ -368,5 +375,5 @@ def _browser_guard(
     problems, rest = chunk_problems(stem, len(aborted), errors)
     problems += guard_problems(off_host, len(fetches), expected_fetches, rest, named)
     if expected_fetches is None:
-        problems += derived_fetch_problems(fetches, chart_page_patterns())
+        problems += derived_fetch_problems(fetches, chart_templates())
     assert problems == [], problems

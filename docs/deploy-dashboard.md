@@ -616,9 +616,11 @@ uses automatic.
 ### Cold year links (#310)
 
 What the first reader of a shared `/election/<year>` link waits for, at D072's prefetch
-extent (`/v1/meta` and `/v1/elections` only). The page makes two fills on a miss
-(`/v1/elections/{year}`, then `/v1/elections/{year}/per-capita`), under one render deadline
-(`MAX_REQUEST_WAIT_S`, 2.0 s), each capped at `VISITOR_FETCH_TIMEOUT_S` (1.5 s). Three
+extent (`/v1/meta` and `/v1/elections` only). Since #465 (D092) each election page makes one
+fill on a miss: the overview `/v1/elections/{year}`, the states page nothing more after it (the
+same path, cold), and the per-capita page `/v1/elections/{year}/per-capita`; the measurements
+below predate #465, when one page made both fills. Each render runs under one render deadline
+(`MAX_REQUEST_WAIT_S`, 2.0 s), and each fill is capped at `VISITOR_FETCH_TIMEOUT_S` (1.5 s). Three
 states, all with the dashboard serving a snapshot and that year missing from its cache
 (check 3 above):
 
@@ -1046,7 +1048,8 @@ other years one or two.
   finished at 5.02 s, and the chart was drawn at 5.41 s. **So the first data cell does not
   wait for plotly.js**, and from the cache the chart draws 2.9–3.2 s after first data.
 - **Request budget held.** The dashboard logged 18 `api fetch` lines for nine years, the
-  two fills each (`ELECTION_MISSES`), and no others; no warnings and no 5xx.
+  two fills each (`ELECTION_MISSES` then; one page made both before #465), and no others; no
+  warnings and no 5xx.
 - **Memory:** the instance used 115.6 MB (110.2 MiB) after the deploy probes (10 requests),
   144.7 MB (138.0 MiB) after the first five years were filled (280 requests) and 147.0 MB
   (140.2 MiB) after nine (496 requests): 38 % of the 384 MB D071 names for F1 (37 % if
