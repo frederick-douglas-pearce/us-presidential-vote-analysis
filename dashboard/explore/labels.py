@@ -305,7 +305,8 @@ C1_NO_FIGURE = "No figure in this dataset"
 #: The label of the marker drawn in place of an electoral-share bar the dataset has no
 #: value for (a null or blank; T3's cell reads ``NOT_IN_DATASET``). Never a zero-length
 #: bar. It names the series, since the chart has no column header to say which share
-#: is missing.
+#: is missing. Not from the plan-gate spec above: ba's addendum at #466's round-1 fix,
+#: owner approval with #466.
 C1_NO_SHARE = "No electoral share in this dataset"
 #: Hover text, filled with T3's cell strings (never a number format in a template).
 C1_EC_HOVER = (
@@ -315,8 +316,9 @@ C1_EC_HOVER = (
 C1_PV_HOVER = "{candidate}<br>Popular-vote share: {share}<br>Popular votes: {votes}"
 #: A marker's hover: T3's cell for the value (``NO_NATIONAL_FIGURE``; for a null or
 #: blank electoral share, ``LABELS["ec_share_full"]`` and ``NOT_IN_DATASET`` joined by
-#: ``": "``, as T3 shows that cell under its header; or ``UNRECOGNIZED`` followed by
-#: ``<br>`` and ``UNRECOGNIZED_NOTE``).
+#: ``": "``, as T3 shows that cell under its header (ba's addendum at #466's round-1
+#: fix, owner approval with #466); or ``UNRECOGNIZED`` followed by ``<br>`` and
+#: ``UNRECOGNIZED_NOTE``).
 C1_NO_FIGURE_HOVER = "{candidate}<br>{cell}"
 #: The caption's sentences, joined in the order ``pages/election.py`` gives.
 C1_BASES = (

@@ -145,10 +145,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   12th Amendment's "whole number of Electors appointed", and the base for every majority test and
   electoral share. It can be 0 for a state whose votes were withheld (1864, 1868). It is the top
   rung of the ladder **appointed ≥ cast ≥ counted**.
-- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7); `LABELS["national_electoral_denominator"]` (T3);
-  in C1, the hover line "Electors appointed" (`labels.C1_EC_HOVER`), the majority line's label
-  `labels.C1_MAJORITY_LINE`, and the caption sentences `labels.C1_BASES`, `labels.C1_EC_BASIS`
-  and `labels.C1_MAJORITY_NOTE`.
+- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7);
+  `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line "Electors appointed"
+  (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`, and the caption
+  sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`; D041; D046 §5;
   D068; `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast" (the reader
@@ -585,8 +585,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C1_NO_FIGURE_NOTE` only when a marker labeled `labels.C1_NO_FIGURE` is drawn; in a year
   without them, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE` and `labels.C1_NO_PV_CAPTION`.
   No caption sentence explains the other two markers: the label and hover of each say what it
-  stands for. `components.chart` then appends `labels.CHART_TABLE_POINTER`. In a year without popular-vote
-  figures, `NO_PV_SENTENCE` in `pages/election.py` still shows above T3.
+  stands for. `components.chart` then appends `labels.CHART_TABLE_POINTER`. In a year without
+  popular-vote figures, `NO_PV_SENTENCE` in `pages/election.py` still shows above T3.
 - **Shown as:** the chart, placed by `pages/election.py` through `components.chart`; its wording
   in `labels.py`: the title `labels.C1_TITLE`, or `labels.C1_TITLE_NO_PV` in a year without
   popular-vote figures; the share axis `labels.C1_X_AXIS`; the series names
@@ -1246,8 +1246,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
   (set by `labels.cell`, and by `labels.nominating_party_cell`). In C1, `labels.UNRECOGNIZED`
   labels the marker drawn in place of a bar for such a value, and `labels.C1_NO_FIGURE_HOVER`
-  writes it with `labels.UNRECOGNIZED_NOTE` as that marker's hover text. Reached through `labels.pv_status`,
-  `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
+  writes it with `labels.UNRECOGNIZED_NOTE` as that marker's hover text. Reached through
+  `labels.pv_status`, `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
   `labels.per_capita_coverage`, `labels._null_per_capita`), `labels.popular_votes`,
   `labels.has_popular_vote`, `labels.yes_no`, `labels.flip`, `labels.ec_majority`, `labels.winner`,
   `labels.nominating_party`, `labels.party_notes` (the Party notes list's candidate name),
