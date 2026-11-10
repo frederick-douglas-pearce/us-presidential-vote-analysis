@@ -128,6 +128,7 @@ def test_the_overview_and_its_subpages_are_one_client_side_chain(page: Page) -> 
         election_view.STATES: f"The {year} election: results by state",
         election_view.PER_CAPITA: f"The {year} election: people per electoral vote",
     }
+
     def landed(section: str) -> None:
         """The page ``section``: its URL, success marker, tab, and both marks."""
         assert_year(page, year, section=section)

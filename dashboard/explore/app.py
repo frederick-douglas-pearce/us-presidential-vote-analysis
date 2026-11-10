@@ -318,11 +318,17 @@ def page_move(page: Mapping[str, Any], registry: Mapping[str, Any]) -> Move | No
     """A page's ``moved=(keys, target_template)`` (#465) as a :class:`Move`, or ``None``
     for a page without one; ``RuntimeError`` unless the target is a registered page
     over the same path variables, with a ``query=`` parser and the same ``validate``,
-    so a redirect never leads to a page that would refuse the value just accepted."""
+    so a redirect never leads to a page that would refuse the value just accepted, and
+    unless ``moved`` is a pair whose keys are a tuple of names (a bare string would
+    read as its letters)."""
     moved = page.get("moved")
     if moved is None:
         return None
+    if not (isinstance(moved, tuple) and len(moved) == 2):
+        raise RuntimeError(f"{page['module']} moved= is not (keys, target_template)")
     keys, template = moved
+    if not isinstance(keys, tuple):
+        raise RuntimeError(f"{page['module']} moves keys that are not a tuple of names")
     target = next(
         (p for p in registry.values() if p.get("path_template") == template), None
     )

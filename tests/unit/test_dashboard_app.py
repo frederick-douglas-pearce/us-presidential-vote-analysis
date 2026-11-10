@@ -4813,6 +4813,10 @@ class TestMoveContract:
             ({}, {"query": None}, "no query="),
             ({}, {"validate": ("/v1/other", lambda v, b: True)}, "validates"),
             ({"moved": ((), "/x/<year>/y")}, {}, "no keys"),
+            # A bare string would read as its letters, never as one key.
+            ({"moved": ("a", "/x/<year>/y")}, {}, "not a tuple of names"),
+            ({"moved": (("a",), "/x/<year>/y", "extra")}, {}, "is not"),
+            ({"moved": [("a",), "/x/<year>/y"]}, {}, "is not"),
             ({"moved": (("",), "/x/<year>/y")}, {}, "no keys"),
         ],
     )
@@ -4825,5 +4829,6 @@ class TestMoveContract:
     def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
         assert set(appmod.MOVES) == {"pages.election"}
         move = appmod.MOVES["pages.election"]
+        assert move.keys == ("state", "candidate", "pv_status", "electoral_count_status")
         assert move.template == "/election/<year>/states"
         assert move.parser is dash.page_registry["pages.election_states"]["query"]

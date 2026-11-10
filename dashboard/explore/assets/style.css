@@ -232,7 +232,7 @@ body {
   text-decoration-color: var(--accent);
   text-underline-offset: 0.3em;
 }
-/* The earlier-and-later bar (#464): the one-election view's links to the nearest served
+/* The earlier-and-later bar (#464): every election page's links to the nearest served
    years, the first thing in the page content, above the heading. A box across the
    measure, drawn by its border, which forced colors keep (a fill alone they remove); no
    fill, so its links sit on --page. The site header has no edge, so the box never reads

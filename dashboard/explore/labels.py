@@ -282,7 +282,7 @@ NAV_API_DOCS_TITLE = (
 #:
 #: The not-found state's heading and sentence (#325), shared by the three pages since
 #: #465 (ba spec, approved at #465's plan gate, 2026-11-10; the sentence reworded at
-#: its code review, 2026-11-11): what is not found is the link, a year the dataset does
+#: its code review, 2026-11-10): what is not found is the link, a year the dataset does
 #: not serve or a section the site does not have, which reaches the overview
 #: (``/election/1824/x``), so all three pages say the same. The heading also leads the
 #: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about

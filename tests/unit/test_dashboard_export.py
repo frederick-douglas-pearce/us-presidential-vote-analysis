@@ -1464,7 +1464,7 @@ class TestRequestBudget:
 
 # --- no raw values on a page (#355) ---------------------------------------------------
 
-#: The recorded years of the one-election view, each rendered whole: read from the
+#: The recorded years of the election pages, each page rendered whole: read from the
 #: recordings, so a newly recorded year is scanned too.
 ELECTION_YEARS = tuple(
     sorted(

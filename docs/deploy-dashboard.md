@@ -620,7 +620,7 @@ extent (`/v1/meta` and `/v1/elections` only). Since #465 (D092) each election pa
 fill on a miss: the overview `/v1/elections/{year}`, the states page nothing more after it (the
 same path, cold), and the per-capita page `/v1/elections/{year}/per-capita`; the measurements
 below predate #465, when one page made both fills. Each render runs under one render deadline
-(`MAX_REQUEST_WAIT_S`, 2.0 s), each capped at `VISITOR_FETCH_TIMEOUT_S` (1.5 s). Three
+(`MAX_REQUEST_WAIT_S`, 2.0 s), and each fill is capped at `VISITOR_FETCH_TIMEOUT_S` (1.5 s). Three
 states, all with the dashboard serving a snapshot and that year missing from its cache
 (check 3 above):
 
