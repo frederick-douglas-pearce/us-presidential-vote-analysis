@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -90,7 +91,13 @@ def measure(
                     page.wait_for_selector(chart, state="visible", timeout=30_000)
                     chart_s = time.perf_counter() - start
                 except PlaywrightTimeoutError:
-                    pass
+                    # A null reads like a slow chart; say which, so a mistyped
+                    # selector is not recorded as a regression.
+                    print(
+                        f"chart selector {chart!r} not visible within 30 s"
+                        f" ({page.locator(chart).count()} matched)",
+                        file=sys.stderr,
+                    )
             response_start_ms = page.evaluate(
                 "performance.getEntriesByType('navigation')[0].responseStart"
             )

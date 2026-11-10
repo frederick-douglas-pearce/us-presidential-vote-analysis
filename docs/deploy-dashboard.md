@@ -999,48 +999,57 @@ then requests `/health` again before the operator's own `GET /`.
 C1 is the first chart on a page (`/election/<year>`), so its story re-measured D071(g) and
 the instance's memory after it shipped. Dashboard version `v-f1a4ef516288-r22-a1` (deploy
 run 42781499052 of f1a4ef5), snapshot `37af4064…`, API origin warm by the keep-warm ping
-throughout. Measured 08:24–08:28Z, before the daily canary, by #277's method:
-`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser
-context each run), with `--chart "#c1 .main-svg"` for the time until the chart is drawn;
-that column is not a D071(g) measure.
+throughout. Measured 08:24–08:28Z, clear of the daily canary (its last run 2026-11-09
+22:59Z, the next due 13:17Z), by #277's method: `scripts/measure_dashboard_cold_start.py`
+(390 px, 10 Mbps / 100 ms, a fresh browser context each run), with
+`--chart "#c1 .main-svg"` for the time until the chart is drawn, which is not a D071(g)
+measure.
 
 The first run of each year was that year's first visit on the new instance, so a fill on a
 miss: both of its paths missed the API edge and reached the origin, which answered in
 6–20 ms. The other runs read the year from the instance's cache.
 
-| Year | First visit: TTFB / first data (s) | From cache: TTFB (s) | From cache: first data (s) | Chart drawn (s) |
+| Year | First visit: TTFB / first data / chart (s) | From cache: TTFB (s) | From cache: first data (s) | From cache: chart (s) |
 |---|---|---|---|---|
-| 1824 | 0.18 / 2.13 | 0.16–0.21 | 1.23–1.36 | 4.27–5.76 |
-| 1860 | 0.21 / 2.26 | 0.17–0.21 | 1.38–1.43 | 4.51–5.39 |
-| 1872 | 0.14 / 2.65 | 0.11–0.15 | 1.77–1.81 | 4.70–5.78 |
-| 2016 | 0.22 / **3.15** | 0.10–0.18 | 2.07–2.28 | 5.12–6.27 |
-| 2024 | 0.14 / 2.07 | 0.14–0.21 | 1.29–1.44 | 4.33–5.25 |
-| 2020 | 0.11 / 2.18 | 0.31 | 1.49 | 4.59–5.24 |
-| 2012 | 0.23 / 2.16 | 0.15 | 1.36 | 4.49–5.19 |
-| 2008 | 0.21 / 1.98 | 0.17 | 1.31 | 4.37–5.09 |
-| 2000 | 0.15 / 2.08 | 0.20 | 1.61 | 4.47–5.42 |
+| 1824 | 0.18 / 2.13 / 5.76 | 0.16–0.21 | 1.23–1.36 | 4.27–4.53 |
+| 1860 | 0.21 / 2.26 / 5.39 | 0.17–0.21 | 1.38–1.43 | 4.51–4.57 |
+| 1872 | 0.14 / 2.65 / 5.78 | 0.11–0.15 | 1.77–1.81 | 4.70–4.80 |
+| 2016 | 0.22 / **3.15** / 6.27 | 0.10–0.18 | 2.07–2.28 | 5.12–5.43 |
+| 2024 | 0.14 / 2.07 / 5.25 | 0.14–0.21 | 1.29–1.44 | 4.33–4.55 |
+| 2020 | 0.11 / 2.18 / 5.24 | 0.31 | 1.49 | 4.59 |
+| 2012 | 0.23 / 2.16 / 5.19 | 0.15 | 1.36 | 4.49 |
+| 2008 | 0.21 / 1.98 / 5.09 | 0.17 | 1.31 | 4.37 |
+| 2000 | 0.15 / 2.08 / 5.42 | 0.20 | 1.61 | 4.47 |
 
 Every run reached data, with no degraded page. 2016 had five runs from the cache, the
 other years one or two.
 
 - **TTFB met D071(g) on all 26 runs** (0.10–0.31 s, against ≤ 1 s).
-- **First data met it on 25 of 26.** The miss was 2016's first visit, at 3.15 s. 2016
-  is the slowest year from the cache too (2.07–2.28 s, five runs), and its two fills went
-  out one after the other, logged 0.34 s apart, so a first visit to 2016
-  lands at about 3 s. Every other first visit took 1.98–2.65 s. This is the first record of a
-  modern year: the earlier tables cover 1828–1888, so how much of 2016's time C1 adds is not
-  measured.
+- **First data met it on 25 of 26.** The miss was 2016's one first visit, at 3.15 s. A first
+  visit took 0.47–0.95 s longer than the same year from the cache, for every year (its two
+  fills go out one after the other, logged 0.27–0.45 s apart), so 2016 is not slower to
+  fill. It is slower to render: from the cache it is the slowest year (2.07–2.28 s, five
+  runs), and its first visit adds the usual fill cost on top. With one sample, how often a
+  first visit to 2016 passes 3 s is not established.
+- **Slower than a month ago, for reasons not separated.** #346's runs on 2026-10-11 measured
+  1860 and 1872 in the same state (edge cold, origin warm by the ping) at 1.65 s and
+  1.72 s; their first visits now took 2.26 s and 2.65 s, 0.6–0.9 s more. Between the two
+  versions the dashboard gained, among others, the theme choice and toggle, the site
+  navigation, the Dash 4.5.0 upgrade and C1, so how much of that C1 adds is not measured.
+  No modern year had been measured on `/election/<year>` before.
 - **Where a 2016 load from the cache spends its time** (one traced run, first data at
-  2.16 s): the routing callback's response (21 KB, the figure included) had arrived by
-  1.35 s; dcc's dropdown and date-picker chunks by 2.11 s; then first data. plotly.js
-  (`cdn.plot.ly/plotly-4.1.1.min.js`, 1,473,344 bytes compressed, 1.39 s to transfer) was
-  requested only after first data and finished at 3.57 s; dcc's `async-graph.js` came at
-  5.02 s, and the chart was drawn at 5.41 s. **So the first data cell does not wait for
-  plotly.js**, and the chart draws about 3 s after it.
+  2.16 s): the routing callback's response (21,314 bytes as transferred, carrying the
+  figure in its source store) had arrived by 1.35 s; dcc's dropdown and date-picker
+  chunks by 2.11 s; then first data. plotly.js (`cdn.plot.ly/plotly-4.1.1.min.js`,
+  1,473,344 bytes as transferred, 1.39 s) finished at 3.57 s, so its request started at
+  about 2.18 s, around first data, when the chart mounted (D088). dcc's `async-graph.js`
+  finished at 5.02 s, and the chart was drawn at 5.41 s. **So the first data cell does not
+  wait for plotly.js**, and from the cache the chart draws 2.9–3.2 s after first data.
 - **Request budget held.** The dashboard logged 18 `api fetch` lines for nine years, the
   two fills each (`ELECTION_MISSES`), and no others; no warnings and no 5xx.
-- **Memory:** the instance used 110.2 MiB after the deploy probes (10 requests), 138.0 MiB
-  after the first five years were filled (280 requests) and 140.2 MiB after nine (496
-  requests): 37 % of F1's 384 MiB, so D071's F1 flip condition is not near
-  (`gcloud app instances list`, `instance.memoryUsage`). #310 measured 106–126 MiB before
-  any chart.
+- **Memory:** the instance used 115.6 MB (110.2 MiB) after the deploy probes (10 requests),
+  144.7 MB (138.0 MiB) after the first five years were filled (280 requests) and 147.0 MB
+  (140.2 MiB) after nine (496 requests): 38 % of the 384 MB D071 names for F1 (37 % if
+  that limit is 384 MiB), so D071's F1 flip condition is not near
+  (`gcloud app instances list`, `instance.memoryUsage`, in bytes). #310 measured
+  106–126 MiB before any chart.
