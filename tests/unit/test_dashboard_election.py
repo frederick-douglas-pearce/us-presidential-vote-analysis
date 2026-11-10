@@ -1,14 +1,17 @@
-"""The one-election view, T2 and T3 (#307), T6, every state's persons per electoral
-vote (#280), and the election panel with T3's hybrid column (#308).
+"""The election pages (#307, split by #465): the overview (the election panel with
+T3's hybrid column, #308, chart C1, #433, and T3), the states page (T2 and its
+filters) and the per-capita page (T6, every state's persons per electoral vote, #280,
+and its state filter), their shared pieces in ``explore.election_view``.
 
 Offline, against recorded ``/v1/elections/{year}`` responses for 1824, 1860, 1868, 1872,
 2016 and 2024, and ``/v1/elections/{year}/per-capita`` for those years and 1848 and 1864
 (one snapshot, ``v1_meta.json``'s), through the helpers and the autouse offline
-process client of ``test_dashboard_app.py``. Its registry-wide checks pick this page up
-from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
+process client of ``test_dashboard_app.py``. Their registry-wide checks pick these pages
+up from the registry (``TestRegistryCoverage``, ``TestValidateBeforeFill``,
 ``TestRegistryContracts`` and ``test_every_registered_page_is_found_at_the_index_and_
-reads_nothing``), and the D070(b) guard renders it at 1824 as its first fills on a
-miss. These tests cover what is particular to this page.
+reads_nothing``), and the D070(b) guard renders them at 1824, after the candidate
+history's fills (``ELECTION_PAGE_MISSES``). These tests cover what is particular to
+these pages.
 """
 
 from __future__ import annotations
@@ -1373,7 +1376,7 @@ class TestShareableUrl:
 
 
 class TestRequestBudget:
-    def test_opening_a_year_makes_at_most_two_requests(
+    def test_each_election_page_makes_one_fill(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """One fill per page (#465): the overview the year's rows, the states page none
@@ -1981,24 +1984,20 @@ class TestT6Filters:
         assert list(per_capita_rows(render(1872, "state=GA"))) == ["Georgia"]
 
     def test_t6_s_state_is_checked_against_t6_s_own_rows(self) -> None:
-        """#465, amending #280: the per-capita page reads no T2 rows, so its state
-        filter is checked against T6's own, in both directions."""
-        # A state T2 lacks but T6 names narrows T6.
-        body = year_body(1872)
-        body["data"] = [r for r in body["data"] if r["state_usps"] != "GA"]
-        tree = render(1872, "state=GA", body=body)
-        assert list(per_capita_rows(tree)) == ["Georgia"]
-        # A state T6 lacks falls back to every state T6 has, never an empty table.
+        """#465, amending #280: a state T6's own rows lack falls back to every state T6
+        has, never an empty table. The other direction, that the page reads no T2 rows
+        to resolve it, is a read, pinned by ``READS_BEFORE`` (``test_dashboard_export.py``)
+        and ``test_the_routed_page_shows_t6_and_reads_its_own_path``."""
         per_capita = per_capita_body(1872)
         per_capita["data"] = [r for r in per_capita["data"] if r["state_usps"] != "GA"]
-        tree = render(1872, "state=GA", per_capita=per_capita)
+        tree = render_page(PC, 1872, "state=GA", per_capita=per_capita)
         assert len(per_capita_rows(tree)) == len(per_capita["data"])
-        assert "No rows match these filters." not in texts(render_page(PC, 1872))
-        control = find(
-            render_page(PC, 1872, "state=GA", per_capita=per_capita), PC["STATE_ID"]
-        )
+        assert "No rows match these filters." not in texts(tree)
+        control = find(tree, PC["STATE_ID"])
         assert control.value is None
         assert "GA" not in {o["value"] for o in control.options}
+        # A state T6 names narrows it to that state.
+        assert list(per_capita_rows(render_page(PC, 1872, "state=GA"))) == ["Georgia"]
 
     @pytest.mark.parametrize(
         "search",
@@ -2016,6 +2015,58 @@ class TestT6Filters:
         assert "PER_CAPITA_FILTER_NOTE" not in PC
         assert f"Showing 1 of {total} rows" in texts(tree)
         assert lede_text(tree) == f"{PC['LEDE']} {PC['FILTER_SENTENCE']}"
+
+
+class TestPerCapitaCallback:
+    """#465: the per-capita page's own filter callback, on its own ids (Dash keys
+    callbacks by output app-wide), as the states page's is tested in
+    ``TestShareableUrl``."""
+
+    def test_the_callback_is_wired_to_the_page_s_own_location(self) -> None:
+        graph = appmod.server.test_client().get("/_dash-dependencies").get_json()
+        entries = [c for c in graph if c["output"] == f"{PC['URL_ID']}.search"]
+        assert len(entries) == 1
+        assert entries[0]["inputs"] == [{"id": PC["STATE_ID"], "property": "value"}]
+        assert entries[0]["state"] == [{"id": PC["URL_ID"], "property": "search"}]
+        assert entries[0]["prevent_initial_call"] is True
+        assert {PC["URL_ID"], PC["STATE_ID"]}.isdisjoint({ST["URL_ID"], ST["STATE_ID"]})
+        location = find(render_page(PC, 1872), PC["URL_ID"])
+        assert location.refresh == "callback-nav"
+
+    def test_the_callback_leaves_an_unchanged_url_alone(self) -> None:
+        callback = PC["on_filter_change"]
+        assert callback("GA", "") == "?state=GA"
+        assert callback("GA", "?state=GA") is no_update
+        assert callback(None, None) is no_update
+        assert callback(None, "?state=GA") == ""
+        # Syntactically bad values are dropped.
+        assert callback("ga", "?state=GA") == ""
+        assert callback(["GA"], "?state=GA") == ""
+
+    @pytest.mark.parametrize(
+        "query", ["state=GA", "state=GA&candidate=horace-greeley", "state=ZZ", ""]
+    )
+    def test_the_callback_writes_the_og_url_s_query_byte_for_byte(
+        self, query: str
+    ) -> None:
+        value = find(render_page(PC, 1872, query), PC["STATE_ID"]).value
+        written = PC["search_for"](value)
+        og_url = appmod.resolve("/election/1872/per-capita", query, None).og_url
+        assert og_url is not None
+        expected = urllib.parse.urlsplit(og_url).query
+        if query == "state=ZZ":
+            # og:url keeps a state T6 lacks; the control cannot. Both open every state.
+            assert (written, expected) == ("", "state=ZZ")
+        else:
+            assert written == (f"?{expected}" if expected else "")
+
+    def test_the_callback_reads_no_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class NoView:
+            def view(self) -> Any:
+                raise AssertionError("the filter callback read the API")
+
+        monkeypatch.setattr(api, "CLIENT", NoView())
+        assert PC["on_filter_change"]("GA", "") == "?state=GA"
 
 
 class TestT6Bodies:

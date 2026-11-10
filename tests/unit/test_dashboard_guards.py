@@ -141,8 +141,9 @@ DOWNLOAD_IDS_BY_PAGE = {
 }
 DOWNLOAD_IDS = tuple(i for ids in DOWNLOAD_IDS_BY_PAGE.values() for i in ids)
 
-#: Prefetched by no page: the success run's first fill on a miss, read by the
-#: one-election view (#307) rendered at :data:`GUARD_PATH_VALUES`.
+#: Prefetched by no page: the election overview's fill on a miss (#307; the states
+#: page's too, when cold), after :data:`CANDIDATE_MISSES`, rendered at
+#: :data:`GUARD_PATH_VALUES`.
 MISS_PATH = "/v1/elections/1824"
 
 #: The concrete value each path variable is rendered at, in both runs. Every templated
@@ -159,8 +160,11 @@ CANDIDATE_MISSES = ["/v1/candidates", "/v1/candidates/andrew-jackson"]
 #: The election pages' fills on a miss (#465), by page, each the page's one fill or
 #: none: the overview the year's rows (:data:`MISS_PATH`), the per-capita page its own
 #: table (#280), and the states page none, since the overview, which sorts first, has
-#: filled the year. The success run checks each render's own slice of ``SERVED``, so a
-#: page that made another page's fill fails even where the run's sequence would not.
+#: filled the year. The success run checks each render's own slice of ``SERVED``, which
+#: sees only fills that reach the transport, never a cache hit: it pins each page's own
+#: fills under this guard. That a page reads no other page's path is
+#: ``test_a_render_reads_what_it_read_before``'s job (``READS_BEFORE`` in
+#: ``test_dashboard_export.py``), which records every ``view.get``.
 ELECTION_PAGE_MISSES = {
     "/election/<year>": [MISS_PATH],
     "/election/<year>/per-capita": ["/v1/elections/1824/per-capita"],

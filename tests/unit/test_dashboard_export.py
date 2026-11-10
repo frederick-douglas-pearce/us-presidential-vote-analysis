@@ -16,7 +16,7 @@ import math
 import re
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 
 import dash
 import pandas as pd
@@ -1298,14 +1298,6 @@ class TestAttribution:
                 "state-per-capita",
                 "state-history",
             ),
-            # T6 has its own page since #465, so its file is the page's only one, and
-            # T2's (the states page, the year's response) is the other.
-            (
-                "/election/<year>/per-capita",
-                "/v1/elections/1824/per-capita",
-                "election-per-capita",
-                "election-states",
-            ),
         ],
     )
     def test_a_per_capita_table_reads_its_own_response(
@@ -1325,6 +1317,28 @@ class TestAttribution:
         assert "Data version: OWN-RESPONSE" in download(tree, table).lines
         other_tree, _ = render(TABLES[other], monkeypatch)
         assert "Data version: OWN-RESPONSE" not in download(other_tree, other).lines
+
+    def test_the_per_capita_page_s_file_reads_its_own_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T6 has a page of its own since #465, whose other read is the index (for the
+        heading and the neighbours): its file and footer carry the per-capita
+        response's provenance, never the index's."""
+        for path, version in (
+            ("/v1/elections/1824/per-capita", "OWN-RESPONSE"),
+            ("/v1/elections", "INDEX-RESPONSE"),
+        ):
+            body = copy.deepcopy(RECORDED[path])
+            body["meta"]["provenance"]["snapshot_version"] = version
+            monkeypatch.setitem(RECORDED, path, body)
+        tree, reads = render("/election/<year>/per-capita", monkeypatch)
+        assert "/v1/elections" in reads  # the premise: the index was read
+        lines = download(tree, "election-per-capita").lines
+        assert "Data version: OWN-RESPONSE" in lines
+        assert not [line for line in lines if "INDEX-RESPONSE" in line]
+        (footer,) = of_type(tree, "Footer")
+        assert "OWN-RESPONSE" in str(footer)
+        assert "INDEX-RESPONSE" not in str(footer)
 
     def test_it_states_provenance_never_a_license_condition(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1827,21 +1841,40 @@ def test_no_in_app_link_builds_a_filtered_overview_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#465: the overview reads no filter, and a filtered overview link is only ever
-    an old one the index redirects, so no page links to one, filtered or not."""
+    an old one the index redirects, so no page links to the overview with a query.
+    Decided by Dash's router, as ``is_chart_path`` decides a chart page, never a
+    pattern of the template: ``/election/2016/?q`` reaches the overview too."""
+    from dash._pages import _path_to_page
+
+    from explore import app as appmod
+
     trees = list(all_pages(monkeypatch).values())
     trees += [
         render(key, monkeypatch, "state=GA&candidate=donald-j-trump", year="2016")[0]
         for key in ("/election/<year>/states", "/election/<year>/per-capita")
     ]
-    filtered = re.compile(r"/election/\d{4}\?")
     hrefs = [
         href
         for tree in trees
         for node in of_type(tree, "Link") + of_type(tree, "A")
         if isinstance(href := getattr(node, "href", None), str)
     ]
-    assert any(href.startswith("/election/") for href in hrefs)  # the premise
-    assert [href for href in hrefs if filtered.match(href)] == []
+    on_overview = []
+    for href in hrefs:
+        parts = urlsplit(href)
+        if (
+            parts.scheme not in ("", "https")
+            or (parts.netloc and parts.netloc != HOST.removeprefix("https://"))
+            or not parts.path.startswith("/")
+        ):
+            # A download's data: URL, another site's link (the API docs), or a fragment
+            # on the same page (a chart's pointer to its table).
+            continue
+        page, _ = _path_to_page(appmod.router_key(parts.path))
+        if page.get("module") == "pages.election":
+            on_overview.append(href)
+    assert on_overview  # the premise: the section links and the bar reach it
+    assert [href for href in on_overview if urlsplit(href).query] == []
 
 
 class TestNoRawValues:

@@ -437,7 +437,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `components.UNAVAILABLE_MESSAGE`.
 - **Source:** `dashboard/explore/components.py`; `dashboard/CLAUDE.md`, `components.py`.
 - **Not:** A not-found state (*Not-found state*): a link whose year, state code or candidate slug
-  the dataset does not serve (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, and
+  the dataset does not serve, or whose election section the site does not have
+  (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, and
   `NOT_FOUND_SENTENCE` in `pages/state.py` and `pages/candidate.py`). An empty filter result
   (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`).
 - **Status:** settled
@@ -456,7 +457,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/election/<year>/per-capita` (T6 and a `state` filter, checked against T6's own rows, which falls
   back to every state when the code is not among them). Each page checks the year against
   `/v1/elections`; a year it refuses gets the same not-found state on all three (*Not-found state*),
-  and a section the site does not have (`/election/1824/x`) gets *Page not found*. On a successful
+  and a link naming a section the site does not have (`/election/1824/x`) reaches the overview, whose check refuses it, so it gets the overview's not-found state too, with the same status and title (*Not-found state*), never *Page not found*. On a successful
   render each page carries the section links, a landmark named `labels.ELECTION_SECTIONS_LABEL`:
   the page being read is text marked `aria-current="page"`, and the other two are links that open
   without reloading the page. The earlier and later links on a subpage go to the same subpage of the
@@ -882,7 +883,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Not-found state (a link the dataset does not serve)
 - **Plain:** What a page says when its link names a year, a state code or a candidate link this
-  dataset does not serve. Its heading and the browser tab say that the election, state or
+  dataset does not serve, or, on an election's pages, a section the site does not have. Its heading and the browser tab say that the election, state or
   candidate was not found, and so does a shared link's preview once the site has checked the
   link; before that, the preview names no year, state or candidate.
 - **Precise:** Rendered when a page's `validate` judge refuses its path value (D073, D074). It
@@ -893,13 +894,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   is in the dashboard's memory, the index answers 404 with `noindex`, and the title (the browser
   tab, `og:title` and `twitter:title`) is the not-found heading followed by the site title; before
   then, the index answers 200 and the title is the page's generic one, which names no year or code
-  (#325). Its link-preview description is the page's `NOT_FOUND_SENTENCE`. A percent-encoded link
+  (#325). Its link-preview description is the page's not-found sentence: `labels.ELECTION_NOT_FOUND_SENTENCE` on the three election pages, and `NOT_FOUND_SENTENCE` in `pages/state.py` and `pages/candidate.py`. A percent-encoded link
   is read as the link it spells once decoded, as Dash's router reads it, so it gets whatever that
   link gets: `/election%2F1825` gets this state, with the same status and title, just as
   `/election/1825` does. `/election/18%32%34` is not a not-found link at all: it opens 1824, with
   `/election/1824` as its canonical link (D089). On the election pages, the overview and both
-  subpages (`/election/1825/states`) share one heading and sentence, since what is not found is
-  the year.
+  subpages (`/election/1825/states`) share one heading and sentence, and so does a link naming a
+  section the site does not have (`/election/1824/x`), which reaches the overview: the sentence is
+  about the link, so it holds whether the year or the section is what the site does not have.
 - **Shown as:** `labels.ELECTION_NOT_FOUND_HEADING` and `labels.ELECTION_NOT_FOUND_SENTENCE` for
   the three election pages, and `NOT_FOUND_HEADING` and `NOT_FOUND_SENTENCE` in `pages/state.py`
   and `pages/candidate.py`; the links "Browse every election in the dataset"

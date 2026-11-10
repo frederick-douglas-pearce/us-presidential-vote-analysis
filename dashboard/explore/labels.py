@@ -281,13 +281,17 @@ NAV_API_DOCS_TITLE = (
 #: so they live here rather than in one page module. None is a ``LABELS`` key.
 #:
 #: The not-found state's heading and sentence (#325), shared by the three pages since
-#: #465 (ba spec, approved at #465's plan gate, 2026-11-10): what is not found is the
-#: year, so a subpage says the same. The heading also leads the page's title on a
-#: not-found link (``api.NotFound.title``, D083). "Not found" is about the link: a real
-#: election outside the dataset (1820) is not found too. The raw path value is never
-#: echoed. The link under them leads back to the elections index.
+#: #465 (ba spec, approved at #465's plan gate, 2026-11-10; the sentence reworded at
+#: its code review, 2026-11-11): what is not found is the link, a year the dataset does
+#: not serve or a section the site does not have, which reaches the overview
+#: (``/election/1824/x``), so all three pages say the same. The heading also leads the
+#: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about
+#: the link: a real election outside the dataset (1820) is not found too. The raw path
+#: value is never echoed. The link under them leads back to the elections index.
 ELECTION_NOT_FOUND_HEADING = "Election not found"
-ELECTION_NOT_FOUND_SENTENCE = "This dataset has no presidential election for that year."
+ELECTION_NOT_FOUND_SENTENCE = (
+    "This link does not match any page for an election in this dataset."
+)
 ELECTION_NOT_FOUND_LINK = "Browse every election in the dataset"
 
 #: The links to the nearest earlier and later year the index serves (#324), on every

@@ -45,9 +45,8 @@ from tests.e2e.dashboard_pages import (
 
 pytestmark = pytest.mark.e2e
 
-#: The earlier and later links' landmark names (#324, #465), apart from the site
-#: navigation's (#448): the overview's, and the states page's.
-ELECTION_NAV_LABEL = labels.ELECTION_NAV_LABEL
+#: The states page's earlier and later links' landmark name (#324, #465), apart from
+#: the site navigation's (#448).
 STATES_NAV_LABEL = labels.ELECTION_NAV_SECTION_LABEL.format(
     section=labels.SECTION_STATES
 )
@@ -129,20 +128,23 @@ def test_the_overview_and_its_subpages_are_one_client_side_chain(page: Page) -> 
         election_view.STATES: f"The {year} election: results by state",
         election_view.PER_CAPITA: f"The {year} election: people per electoral vote",
     }
-    for section in (election_view.STATES, election_view.PER_CAPITA):
-        nav.get_by_role("link", name=election_view.SECTION_TEXT[section]).click()
+    def landed(section: str) -> None:
+        """The page ``section``: its URL, success marker, tab, and both marks."""
         assert_year(page, year, section=section)
         expect(page).to_have_title(re.compile("^" + re.escape(titles[section]) + " — "))
         assert_section(page, section)
+
+    landed(election_view.OVERVIEW)
+    for section in (election_view.STATES, election_view.PER_CAPITA):
+        nav.get_by_role("link", name=election_view.SECTION_TEXT[section]).click()
+        landed(section)
         expect(page.locator("#c1")).to_have_count(0)
     page.go_back()
-    assert_year(page, year, section=election_view.STATES)
-    assert_section(page, election_view.STATES)
+    landed(election_view.STATES)
     page.go_back()
-    assert_year(page, year)
-    assert_section(page, election_view.OVERVIEW)
+    landed(election_view.OVERVIEW)
     page.go_forward()
-    assert_year(page, year, section=election_view.STATES)
+    landed(election_view.STATES)
     assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
     assert (
         page.evaluate(
@@ -529,8 +531,7 @@ def test_passing_through_a_chart_page_needs_no_marker(page: Page) -> None:
 
 # --- the earlier-and-later bar (#464) ----------------------------------------------
 
-#: The bar, its links and the page module's names for them, read through its layout.
-_ELECTION = dash.page_registry["pages.election"]["layout"].__globals__
+#: The bar and its links, by ``election_view``'s ids and ``labels``' wording.
 BAR = f"#{election_view.NAV_ID}"
 EARLIER_LINK: str = labels.EARLIER_LINK
 LATER_LINK: str = labels.LATER_LINK

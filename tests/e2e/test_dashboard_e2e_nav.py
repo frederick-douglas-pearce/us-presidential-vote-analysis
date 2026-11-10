@@ -323,6 +323,9 @@ def test_the_registered_callback_marks_every_path(page: Page) -> None:
     # the function Dash registered for the nav's output, called with each path, its
     # return and the links' aria-current read after each call. Found through
     # _dash-dependencies, a Dash-private shape, acceptable in this advisory suite.
+    # It checks the mark, not which table entry matched: on the election pages
+    # (#465) every entry marks Elections alike, so #465's NAV_CALLBACK criterion holds
+    # here by the mark alone, and the matched entry is TestCurrentPage's (unit suite).
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))

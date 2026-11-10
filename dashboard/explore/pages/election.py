@@ -33,7 +33,9 @@ from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries.
 PAGE_ID = "election"
-#: The wrapper of the not-found state: a year the dataset does not serve.
+#: The wrapper of the not-found state: a year the dataset does not serve, or a section
+#: the site does not have, which the greedy ``<year>`` brings here
+#: (``/election/1824/x``).
 NOT_FOUND_ID = "election-not-found"
 NATION_TABLE_ID = "election-nation"
 NO_PV_ID = "election-no-pv"

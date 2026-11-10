@@ -4702,18 +4702,33 @@ class TestMovedFilters:
     def test_a_moved_key_redirects_to_the_states_page(
         self, monkeypatch: pytest.MonkeyPatch, query: str, location: str
     ) -> None:
-        cached_client(monkeypatch)
+        _, calls, bucket = cached_client(monkeypatch)
         # The raw header: relative, never naming a host (D090).
         assert _location(f"/election/2016?{query}") == (302, location)
+        # Judged from the snapshot in memory: the redirect reads and fills nothing.
+        assert (calls, bucket.waits) == ([], [])
 
     def test_a_percent_encoded_year_redirects_by_the_year_it_spells(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        cached_client(monkeypatch)
+        _, calls, bucket = cached_client(monkeypatch)
         assert _location("/election/20%31%36?state=GA") == (
             302,
             "/election/2016/states?state=GA",
         )
+        assert (calls, bucket.waits) == ([], [])
+
+    def test_the_location_is_built_from_the_accepted_year_not_the_request_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A trailing slash reaches the overview (D089), but the request path is not
+        the year: a Location built from it would read ``/election/2016//states``."""
+        _, calls, _ = cached_client(monkeypatch)
+        assert _location("/election/2016/?state=GA") == (
+            302,
+            "/election/2016/states?state=GA",
+        )
+        assert calls == []
 
     @pytest.mark.parametrize("query", ["", "junk=1", "year=1900", "statex=GA"])
     def test_no_moved_key_serves_the_overview(

@@ -27,8 +27,11 @@ MARKS: dict[str, tuple[str, str] | None] = {
     "/election/1824": ("elections", "true"),
     "/election/1825": ("elections", "true"),
     "/election/1824/x": ("elections", "true"),
-    # The election subpages (#465), which route before the overview's greedy <year>,
-    # and an unserved year on one; an unknown section is the line above.
+    # The election subpages (#465) and an unserved year on one; an unknown section is
+    # the line above. Every election page marks Elections the same way, so these pin
+    # the mark only: which table entry matched (the subpages' before the overview's
+    # greedy <year>) is TestCurrentPage.test_the_matcher_agrees_with_dashs_router's,
+    # which compares the matched entry's module with the router's choice.
     "/election/1824/states": ("elections", "true"),
     "/election/1824/per-capita": ("elections", "true"),
     "/election/1825/states": ("elections", "true"),
