@@ -38,8 +38,10 @@ from tests.unit.test_dashboard_theme import (
 #: Every chart ID ever issued, live and retired, with its whole row (page, companion
 #: table, retired): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
-#: registers it; none is yet (C1–C5 are assigned to #433–#436 by their issues).
-ISSUED: dict[str, tuple[str, str, bool]] = {}
+#: registers it: C1 by #433; C2–C5 are assigned to #434–#436 by their issues.
+ISSUED: dict[str, tuple[str, str, bool]] = {
+    "C1": ("/election/<year>", "election-nation", False),
+}
 
 #: A registry with one live and one retired row, for the builder's tests.
 REGISTRY = {
@@ -576,6 +578,140 @@ class TestMarkupNumbersAndOverrides:
     )
     def test_what_a_chart_may_still_set(self, layout: dict[str, Any]) -> None:
         assert charts.override_problems({"data": [], "layout": layout}) == []
+
+
+class TestC1Rules:
+    """The three rules C1 made (#433, D091), each beside a control that passes."""
+
+    @pytest.mark.parametrize(
+        ("template", "refused"),
+        [
+            ("%{hovertext}<extra></extra>", False),
+            ("%{text}", False),
+            ("%{customdata[0]}<br>%{customdata[1]}", False),
+            ("%{customdata.pv_share} of votes<extra>%{fullData.name}</extra>", False),
+            ("No placeholder at all", False),
+            ("%{x}", True),
+            ("%{y:.1%}", True),
+            ("%{customdata[0]:,}", True),  # a format on a string the page wrote
+            ("%{hovertext} %{x}", True),
+            ("%{meta}", True),
+        ],
+    )
+    def test_a_template_names_only_strings_the_page_wrote(
+        self, template: str, refused: bool
+    ) -> None:
+        for key in ("hovertemplate", "texttemplate"):
+            figure = {"data": [{"type": "bar", key: template}]}
+            assert bool(charts.template_problems(figure)) is refused, (key, template)
+        # Per point, too.
+        per_point: dict[str, Any] = {
+            "data": [{"type": "bar", "hovertemplate": ["%{text}", template]}]
+        }
+        assert bool(charts.template_problems(per_point)) is refused
+
+    @pytest.mark.parametrize(
+        "figure",
+        [
+            {"data": [], "layout": {"xaxis": {"hoverformat": ".1%"}}},
+            {"data": [], "layout": {"yaxis2": {"hoverformat": ",d"}}},
+            {"data": [{"type": "bar", "xhoverformat": ".1%"}]},
+            {"data": [{"type": "scatter", "yhoverformat": ".2f"}]},
+        ],
+    )
+    def test_no_hover_format(self, figure: dict[str, Any]) -> None:
+        assert any("no hover format" in p for p in charts.template_problems(figure))
+
+    @pytest.mark.parametrize(
+        ("figure", "refused"),
+        [
+            ({"data": [{"type": "bar"}]}, False),
+            ({"data": [{"type": "bar", "width": 0.5}]}, True),
+            ({"data": [{"type": "bar", "offset": -0.2}]}, True),
+            ({"data": [{"type": "bar", "width": [0.5, 0.4]}]}, True),
+            # A scatter's marker width is no bar width.
+            ({"data": [{"type": "scatter", "marker": {"line": {"width": 2}}}]}, False),
+            ({"data": [], "layout": {"scattergap": 0.1}}, True),
+        ],
+    )
+    def test_no_bar_sets_its_own_width_or_offset(
+        self, figure: dict[str, Any], refused: bool
+    ) -> None:
+        assert bool(charts.bar_problems(figure)) is refused
+
+    @pytest.mark.parametrize(
+        ("trace", "refused"),
+        [
+            ({"type": "bar", "text": ["50.0%", ""]}, False),
+            ({"type": "bar", "text": "A label"}, False),
+            ({"type": "bar", "hovertext": ["A<br>B"]}, False),
+            ({"type": "bar", "customdata": [{"pv_share": "48.0%"}, ["a", "b"]]}, False),
+            # plotly would format each of these itself.
+            ({"type": "bar", "text": [0.5]}, True),
+            ({"type": "bar", "text": 0.5}, True),
+            ({"type": "bar", "hovertext": ["A", 3]}, True),
+            ({"type": "bar", "customdata": [{"pv_share": 0.48}]}, True),
+            ({"type": "bar", "customdata": [[0.1, "a"]]}, True),
+            ({"type": "bar", "text": [None]}, True),
+            ({"type": "bar", "text": [True]}, True),
+        ],
+    )
+    def test_text_hovertext_and_customdata_hold_only_strings(
+        self, trace: dict[str, Any], refused: bool
+    ) -> None:
+        """The owner's ruling on round 1: a hover or text label shows only strings the
+        page wrote, so a number in ``text``, ``hovertext`` or ``customdata``, which a
+        ``%{text}`` would let plotly format, is refused."""
+        problems = charts.template_problems({"data": [trace]})
+        assert bool(problems) is refused, problems
+        assert all("not a string the page wrote" in p for p in problems)
+
+    def test_figure_problems_gathers_the_c1_rules(self) -> None:
+        assert charts.figure_problems(TEST_FIGURE) == []
+        for change, message in (
+            (lambda f: f["data"][0].update(hovertemplate="%{y}"), "not a string"),
+            (lambda f: f["data"][0].update(width=0.3), "width and place"),
+            (lambda f: f["layout"]["xaxis"].update(hoverformat=".1%"), "hover format"),
+            (lambda f: f["data"][0].update(text=[0.5, 0.4]), "not a string the page"),
+        ):
+            figure = copy.deepcopy(TEST_FIGURE)
+            change(figure)
+            assert any(message in p for p in charts.figure_problems(figure)), message
+
+    @pytest.mark.parametrize(
+        ("first", "second", "apart"),
+        [
+            # plotly draws the texttemplate when set: a ``text`` it replaces names
+            # nothing (#432's note 1).
+            (
+                trace("bar", name="A", text="A", texttemplate="%{y}"),
+                trace("bar", name="B", text="B", texttemplate="%{y}"),
+                False,
+            ),
+            # A conservative refusal, on purpose: placeholders are not resolved, so a
+            # label written only through %{text} is not credited, though plotly would
+            # draw "A" (#468 defers resolving it).
+            (
+                trace("bar", name="A", text="A", texttemplate="%{text}"),
+                trace("bar", name="B", text="B", texttemplate="%{text}"),
+                False,
+            ),
+            (
+                trace("bar", name="A", text="A", texttemplate=""),
+                trace("bar", name="B", text="B", texttemplate=""),
+                True,
+            ),
+            (
+                trace("bar", name="A", text="A"),
+                trace("bar", name="B", text="B"),
+                True,
+            ),
+        ],
+    )
+    def test_a_direct_label_is_the_drawn_string(
+        self, first: dict[str, Any], second: dict[str, Any], apart: bool
+    ) -> None:
+        assert (charts.color_only_pairs({"data": [first, second]}) == []) is apart
 
 
 class TestHoverText:

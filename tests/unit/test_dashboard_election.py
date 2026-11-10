@@ -534,11 +534,12 @@ class TestHeaders:
         assert len(glossaries) == 4
         named = [[texts(dd.children)[0] for dd in of_type(g, "Dd")] for g in glossaries]
         assert named[0] == list(MOD["PANEL_FIELDS"])
-        assert named[1] == list(MOD["STATE_FIELDS"]) + [
+        # National results come before Results by state (owner, #433's plan gate).
+        assert named[1] == list(MOD["NATION_FIELDS"]) + ["nominating_party_note"]
+        assert named[2] == list(MOD["STATE_FIELDS"]) + [
             "electoral_count_status_reason",
             "nominating_party_note",
         ]
-        assert named[2] == list(MOD["NATION_FIELDS"]) + ["nominating_party_note"]
         assert named[3] == list(MOD["PER_CAPITA_FIELDS"])
         summaries = [g.children[0].children for g in glossaries]
         assert summaries == ["Field names"] + ["Column names"] * 3
@@ -2161,10 +2162,12 @@ class TestPanel:
             MOD["LATER_ID"],
         ]
         assert order[5] == PANEL
+        # National results (C1, then T3) come before Results by state (owner, #433).
         assert (
             order.index(PANEL)
-            < order.index(STATES)
+            < order.index("c1")
             < order.index(NATION)
+            < order.index(STATES)
             < order.index(MOD["PER_CAPITA_TABLE_ID"])
         )
 
@@ -2846,3 +2849,548 @@ def test_a_blank_t3_figure_is_a_missing_one() -> None:
     assert national_pv("", True, False) == labels.NO_NATIONAL_FIGURE
     assert national_pv(" ", True, True) == labels.NO_NATIONAL_FIGURE
     assert national_pv("", False, True) == labels.NOT_APPLICABLE
+
+
+# --- chart C1 (#433) -------------------------------------------------------------------
+
+C1 = "c1"
+RECONCILED_YEARS = (1824, 1860, 1872, 2016, 2024)
+#: The hover templates as shipped, copied at import, so a test that patches the page's
+#: template sees the reconciliation compare against the approved one.
+EC_HOVER, PV_HOVER = labels.C1_EC_HOVER, labels.C1_PV_HOVER
+
+
+def c1(tree: Any) -> Any:
+    """The rendered C1: its ``figure`` element, or ``None``."""
+    return find(tree, C1)
+
+
+def c1_figure(tree: Any) -> dict[str, Any]:
+    """The figure C1's source store holds (the title is the page text above it)."""
+    (store,) = of_type(c1(tree), "Store")
+    figure: dict[str, Any] = store.data
+    return figure
+
+
+def c1_caption(tree: Any) -> str:
+    (caption,) = of_type(c1(tree), "Figcaption")
+    return "".join(texts(caption.children))
+
+
+def traces(figure: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """C1's traces by role: ``ec`` and ``pv`` bars, and ``marks``."""
+    found: dict[str, dict[str, Any]] = {}
+    for trace in figure["data"]:
+        if trace["type"] == "scatter":
+            found["marks"] = trace
+        else:
+            found[{"ec_share_full": "ec", "pv_share": "pv"}[trace["offsetgroup"]]] = (
+                trace
+            )
+    return found
+
+
+def t3_cells(year: int, body: Any = None) -> list[dict[str, str]]:
+    """T3's cell text per row, in T3's order, with each row's slug."""
+    tree = render(year, body=body)
+    fields = MOD["NATION_FIELDS"]
+    rows = []
+    summary = (year_body(year) if body is None else body)["summary"]
+    for row, cells in zip(summary, table_rows(tree, NATION), strict=True):
+        texts_ = dict(zip(fields, (cell_text(c) for c in cells), strict=True))
+        rows.append({**texts_, "slug": row["candidate_slug"]})
+    return rows
+
+
+class TestC1:
+    def test_registered_with_t3_as_its_companion(self) -> None:
+        from explore import charts
+
+        assert charts.CHARTS["C1"] == charts.Chart("/election/<year>", NATION)
+        assert MOD["C1_ID"] == "C1"
+
+    @pytest.mark.parametrize("year", RECONCILED_YEARS)
+    def test_inside_the_success_marker_in_national_results_before_t3(
+        self, year: int
+    ) -> None:
+        tree = render(year)
+        assert tree.id == PAGE_ID
+        order = ids_in_order(tree)
+        assert order.index(PANEL) < order.index(C1) < order.index(NATION)
+        assert order.index(NATION) < order.index(STATES)
+        headings = [h.children for h in of_type(tree, "H2")]
+        assert headings.index("National results") < headings.index("Results by state")
+        # The chart comes after its section's heading and before T3's own pieces.
+        section = tree.children
+        h2 = next(
+            i
+            for i, child in enumerate(section)
+            if getattr(child, "children", None) == "National results"
+        )
+        chart = next(i for i, child in enumerate(section) if child is c1(tree))
+        assert h2 < chart
+        assert type(c1(tree)).__name__ == "Figure"
+        # Never the success marker (#432): the chart holds no page id.
+        assert PAGE_ID not in ids_in_order(c1(tree))
+
+    def test_never_on_the_not_found_or_degraded_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        response = route("/election/1825")
+        assert MOD["NOT_FOUND_ID"] in routed_ids(response)
+        assert json_node(response.get_json(), C1) is None
+        assert C1 in routed_ids(route("/election/2016"))  # the control
+
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        degraded = MOD["layout"](year="2016")
+        assert components.UNAVAILABLE_MESSAGE in texts(degraded)
+        assert c1(degraded) is None
+
+    @pytest.mark.parametrize("year", RECONCILED_YEARS)
+    def test_every_plotted_value_is_t3_s_cell_for_the_same_slug(self, year: int) -> None:
+        """AC Reconciliation, keyed by slug through each trace's ``ids``: every series
+        slot of every T3 row is exactly one bar or exactly one marker. A bar is the
+        served value (the chart computes no share) and is drawn exactly where T3's cell
+        is a share; its text is that cell and its hover the template filled with T3's
+        cells. A marker stands exactly where the cell is not a share, labeled and
+        hovered from that cell."""
+        tree = render(year)
+        found = traces(c1_figure(tree))
+        t3 = {row["slug"]: row for row in t3_cells(year)}
+        summary = {r["candidate_slug"]: r for r in year_body(year)["summary"]}
+        figure = c1_figure(tree)
+        assert figure["layout"]["yaxis"]["ticktext"] == [
+            r["candidate"] for r in t3.values()
+        ]
+        marks = found.get("marks", {"ids": [], "text": [], "hovertext": []})
+        assert len(set(marks["ids"])) == len(marks["ids"])
+        series = [("ec", "ec_share_full")]
+        if "pv" in found:
+            series.append(("pv", "pv_share"))
+        slots = 0
+        for role, field in series:
+            trace = found[role]
+            assert trace["ids"] == list(t3)  # T3's rows, in T3's order
+            assert trace["y"] == list(range(len(t3)))
+            for i, slug in enumerate(trace["ids"]):
+                served, cell, row = summary[slug][field], t3[slug][field], t3[slug]
+                is_share = cell != labels.UNRECOGNIZED and cell == labels.share(served)
+                x, mark = trace["x"][i], f"{slug}/{field}"
+                assert (x is not None) is is_share, (slug, field, cell)
+                assert (mark in marks["ids"]) is not is_share, (slug, field)
+                slots += 1
+                if is_share:
+                    assert x == served and type(x) is type(served)
+                    assert trace["text"][i] == cell
+                    expected = (
+                        EC_HOVER.format(
+                            candidate=row["candidate"],
+                            share=cell,
+                            counted=row["national_electoral_votes_counted"],
+                            appointed=row["national_electoral_denominator"],
+                        )
+                        if field == "ec_share_full"
+                        else PV_HOVER.format(
+                            candidate=row["candidate"],
+                            share=cell,
+                            votes=row["national_pv_votes"],
+                        )
+                    )
+                    assert trace["hovertext"][i] == expected
+                    continue
+                assert trace["text"][i] == ""
+                k = marks["ids"].index(mark)
+                if cell == labels.NO_NATIONAL_FIGURE:
+                    label, shown = labels.C1_NO_FIGURE, cell
+                elif cell == labels.NOT_IN_DATASET:
+                    label, shown = labels.C1_NO_SHARE, f"{labels.LABELS[field]}: {cell}"
+                else:
+                    label, shown = cell, f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
+                assert marks["text"][k] == label
+                assert marks["hovertext"][k] == labels.C1_NO_FIGURE_HOVER.format(
+                    candidate=row["candidate"], cell=shown
+                )
+        drawn = sum(x is not None for role, _ in series for x in found[role]["x"])
+        assert drawn + len(marks["ids"]) == slots == len(t3) * len(series)
+
+    def test_the_reconciliation_fails_a_chart_that_draws_no_bar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity (round 1): with ``_plotted`` drawing nothing, every share
+        becomes a marker, and the reconciliation fails."""
+        monkeypatch.setitem(MOD, "_plotted", lambda value, cell: None)
+        with pytest.raises(AssertionError):
+            self.test_every_plotted_value_is_t3_s_cell_for_the_same_slug(2024)
+
+    def test_the_reconciliation_fails_a_hover_with_the_wrong_votes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GE8's mutant: the "Popular votes" line filled with another cell."""
+        monkeypatch.setattr(
+            labels, "C1_PV_HOVER", PV_HOVER.replace("{votes}", "{counted}")
+        )
+        hover = traces(c1_figure(render(2024)))["pv"]["hovertext"][0]
+        assert "Popular votes: 312" in hover  # the premise: the mutant took
+        with pytest.raises(AssertionError):
+            self.test_every_plotted_value_is_t3_s_cell_for_the_same_slug(2024)
+
+    def test_the_popular_vote_window_comes_from_t3_s_year_rule(self) -> None:
+        """AC Window: the popular-vote series only where T3 treats the year as having
+        popular votes (the index row's flag), with the window from coverage."""
+        for year, expected in (
+            (1860, False),
+            (1824, False),
+            (2016, True),
+            (2024, True),
+        ):
+            figure = c1_figure(render(year))
+            assert ("pv" in traces(figure)) is expected, year
+            assert index_row(year)["has_popular_vote"] is expected
+        body = year_body(2016)
+        tree = MOD["render"](
+            body,
+            {**index_row(2016), "has_popular_vote": False},
+            [],
+            per_capita_body(2016),
+            MOD["neighbours"](INDEX, 2016),
+        )
+        assert "pv" not in traces(c1_figure(tree))
+
+    def test_1860_says_why_no_popular_vote_share_is_drawn(self) -> None:
+        tree = render(1860)
+        caption = c1_caption(tree)
+        assert (
+            labels.C1_NO_PV_CAPTION.format(first=PV_MIN, last=PV_MAX, year=1860)
+            in caption
+        )
+        assert labels.C1_EC_BASIS in caption
+        assert labels.C1_MAJORITY_NOTE in caption
+        assert labels.C1_ROW_ORDER not in caption
+        assert caption.endswith(f"{labels.CHART_TABLE_POINTER}.")
+        title = of_type(c1(tree), "P")[0].children
+        assert title == labels.C1_TITLE_NO_PV.format(year=1860)
+        figure = c1_figure(tree)
+        assert "legend" not in figure["layout"]
+        assert traces(figure)["ec"]["showlegend"] is False
+        # The year sentence above T3 stays (owner, option (a)).
+        assert find(tree, MOD["NO_PV_ID"]) is not None
+
+    def test_the_window_in_the_caption_is_never_a_literal(self) -> None:
+        body = year_body(1860)
+        body["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1980, pv_year_max=2020
+        )
+        caption = c1_caption(render(1860, body=body))
+        assert "1980–2020" in caption and f"{PV_MIN}–{PV_MAX}" not in caption
+
+    def test_2016_draws_a_labeled_marker_for_each_missing_popular_vote_figure(
+        self,
+    ) -> None:
+        """AC Missing figure: the five candidates with electoral votes and no
+        popular-vote figure get a marker in the popular-vote slot, never a zero-length
+        bar; Trump and Clinton get bars."""
+        tree = render(2016)
+        found = traces(c1_figure(tree))
+        pv, marks = found["pv"], found["marks"]
+        missing = [
+            r["candidate_slug"]
+            for r in year_body(2016)["summary"]
+            if r["pv_share"] is None
+        ]
+        assert len(missing) == 5
+        assert [i.split("/")[0] for i in marks["ids"]] == missing
+        assert {i.split("/")[1] for i in marks["ids"]} == {"pv_share"}
+        assert marks["text"] == [labels.C1_NO_FIGURE] * 5
+        assert all(labels.NO_NATIONAL_FIGURE in h for h in marks["hovertext"])
+        for slug in missing:
+            assert pv["x"][pv["ids"].index(slug)] is None  # no bar at all, not a zero
+        assert [x is not None for x in pv["x"]] == [True, True] + [False] * 5
+        # Each marker sits in its row's popular-vote slot.
+        slot = (1 - MOD["charts"].TEMPLATE["layout"]["bargap"]) / 4
+        rows = [pv["ids"].index(s) for s in missing]
+        assert marks["y"] == [row + slot for row in rows]
+        assert marks["x"] == [0] * 5
+        assert marks["showlegend"] is False
+        assert marks["name"] == labels.C1_NO_FIGURE_SERIES
+        assert labels.C1_NO_FIGURE_NOTE.format(label=labels.C1_NO_FIGURE) in (
+            c1_caption(tree)
+        )
+
+    def test_2024_draws_no_marker_and_no_marker_note(self) -> None:
+        tree = render(2024)
+        assert "marks" not in traces(c1_figure(tree))
+        caption = c1_caption(tree)
+        assert labels.C1_NO_FIGURE not in caption
+        for sentence in (
+            labels.C1_BASES,
+            labels.C1_MAJORITY_NOTE,
+            labels.C1_LINE_EC_ONLY,
+            labels.C1_ROW_ORDER,
+        ):
+            assert sentence in caption
+
+    def test_1872_greeley_s_zero_is_a_drawn_labeled_bar(self) -> None:
+        tree = render(1872)
+        found = traces(c1_figure(tree))
+        ec = found["ec"]
+        i = ec["ids"].index("horace-greeley")
+        assert ec["x"][i] == 0.0
+        assert (
+            ec["text"][i]
+            == "0.0%"
+            == nation_rows(tree)["Horace Greeley"]["ec_share_full"]
+        )
+        assert "marks" not in found  # a zero is a value, never a missing figure
+
+    def test_1872_hover_says_the_share_is_counted_over_appointed(self) -> None:
+        ec = traces(c1_figure(render(1872)))["ec"]
+        grant = ec["hovertext"][ec["ids"].index("ulysses-s-grant")]
+        assert "Electoral votes counted: 286" in grant
+        assert "Electors appointed: 366" in grant
+        assert "300" not in grant  # never the votes cast
+        greeley = ec["hovertext"][ec["ids"].index("horace-greeley")]
+        assert "Electoral votes counted: 0<br>" in greeley
+
+    def test_the_dashed_majority_line_at_half_of_electors_appointed(self) -> None:
+        tree = render(2016)
+        layout = c1_figure(tree)["layout"]
+        (line,) = layout["shapes"]
+        assert (line["type"], line["xref"], line["x0"], line["x1"]) == (
+            "line",
+            "x",
+            0.5,
+            0.5,
+        )
+        assert line["line"]["dash"] == "dash"
+        assert line["line"]["color"] == "var(--chart-reference)"
+        assert layout["xaxis"]["range"] == [0, 1]
+        (note,) = layout["annotations"]
+        assert (note["text"], note["x"], note["xref"]) == (
+            labels.C1_MAJORITY_LINE,
+            0.5,
+            "x",
+        )
+        assert labels.C1_MAJORITY_NOTE in c1_caption(tree)
+
+    @pytest.mark.parametrize("year", [2016, 2024])
+    def test_the_legend_names_both_series_in_a_popular_vote_year(
+        self, year: int
+    ) -> None:
+        """Acceptance gate, Class B survivor: with every series hidden from the legend
+        the figure still had a legend layout and passed. The legend must list exactly
+        the two series, and never the marker series."""
+        figure = c1_figure(render(year))
+        shown = [t["name"] for t in figure["data"] if t.get("showlegend") is True]
+        assert shown == [labels.LABELS["ec_share_full"], labels.LABELS["pv_share"]]
+        assert "legend" in figure["layout"]
+
+    def test_t2_s_filters_never_reach_the_chart(self) -> None:
+        """AC Same rows as T3: like T3, C1 ignores T2's filters."""
+        plain = c1_figure(render(2016))
+        filtered = render(
+            2016,
+            "state=GA&candidate=donald-j-trump&pv_status=popular_vote"
+            "&electoral_count_status=counted",
+        )
+        # The premise: the filters applied to T2.
+        assert {r["state"] for r in state_rows(filtered)} == {"Georgia"}
+        assert {r["candidate"] for r in state_rows(filtered)} == {"Donald J. Trump"}
+        assert c1_figure(filtered) == plain
+        assert c1_caption(filtered) == c1_caption(render(2016))
+
+    def test_the_two_series_differ_without_color(self) -> None:
+        from explore import charts
+
+        figure = c1_figure(render(2016))
+        found = traces(figure)
+        assert found["ec"]["marker"].get("pattern") is None
+        assert found["pv"]["marker"]["pattern"]["shape"] == "/"
+        assert charts.color_only_pairs(figure) == []
+        # Upper bar electoral: the first trace takes the row's upper slot on a
+        # reversed axis, which the caption's row-order sentence states.
+        assert figure["data"][0] is not None and figure["data"][0]["offsetgroup"] == (
+            "ec_share_full"
+        )
+        assert figure["layout"]["yaxis"]["autorange"] == "reversed"
+        assert figure["layout"]["legend"]["orientation"] == "h"
+
+    def test_no_trace_sets_its_own_bar_width_or_offset(self) -> None:
+        for year in RECONCILED_YEARS:
+            for trace in c1_figure(render(year))["data"]:
+                assert "width" not in trace and "offset" not in trace
+
+    def test_an_unrecognized_share_gets_a_marker_never_a_bar(self) -> None:
+        body = year_body(2016)
+        body["summary"][0].update(pv_share="zz", ec_share_full=float("nan"))
+        tree = render(2016, body=body)
+        found = traces(c1_figure(tree))
+        assert found["ec"]["x"][0] is None and found["pv"]["x"][0] is None
+        marks = found["marks"]
+        ours = [i for i, ident in enumerate(marks["ids"]) if ident.startswith("donald")]
+        assert sorted(marks["ids"][i] for i in ours) == [
+            "donald-j-trump/ec_share_full",
+            "donald-j-trump/pv_share",
+        ]
+        slot = (1 - MOD["charts"].TEMPLATE["layout"]["bargap"]) / 4
+        for i in ours:
+            assert marks["text"][i] == labels.UNRECOGNIZED
+            assert labels.UNRECOGNIZED_NOTE in marks["hovertext"][i]
+            expected = -slot if marks["ids"][i].endswith("ec_share_full") else slot
+            assert marks["y"][i] == expected
+        assert nation_rows(tree)["Donald J. Trump"]["pv_share"] == labels.UNRECOGNIZED
+
+    @pytest.mark.parametrize("blank", [None, " "])
+    def test_a_null_electoral_share_is_a_marker_naming_its_series(
+        self, blank: Any
+    ) -> None:
+        body = year_body(1860)
+        body["summary"][0]["ec_share_full"] = blank
+        tree = render(1860, body=body)
+        marks = traces(c1_figure(tree))["marks"]
+        assert marks["ids"] == ["abraham-lincoln/ec_share_full"]
+        assert marks["text"] == [labels.C1_NO_SHARE]
+        assert marks["hovertext"] == [
+            "Abraham Lincoln<br>Electoral share (counted ÷ appointed): "
+            + labels.NOT_IN_DATASET
+        ]
+        assert marks["y"] == [0.0]  # one series: the bar's slot is the row's center
+        assert nation_rows(tree)["Abraham Lincoln"]["ec_share_full"] == (
+            labels.NOT_IN_DATASET
+        )
+        # (1860 draws no popular vote, so no caption note can show here; the next test
+        # checks a year that could show one.)
+
+    def test_a_null_electoral_share_adds_no_caption_note_in_a_popular_vote_year(
+        self,
+    ) -> None:
+        """Round 2: the addendum's "no caption sentence" for the C1_NO_SHARE marker,
+        in a year whose caption could carry C1_NO_FIGURE_NOTE (2024 draws no popular-vote
+        marker, so the note's presence could only come from this marker)."""
+        body = year_body(2024)
+        body["summary"][0]["ec_share_full"] = None
+        tree = render(2024, body=body)
+        marks = traces(c1_figure(tree))["marks"]
+        assert marks["ids"] == ["donald-j-trump/ec_share_full"]
+        assert marks["text"] == [labels.C1_NO_SHARE]
+        assert marks["y"] == [-MOD["_SLOT"]]  # the electoral bar's slot, the upper one
+        caption = c1_caption(tree)
+        assert labels.C1_NO_FIGURE not in caption
+        assert labels.C1_NO_FIGURE_NOTE.format(label=labels.C1_NO_FIGURE) not in caption
+        assert caption.startswith(labels.C1_BASES)  # the premise: a popular-vote year
+
+    def test_a_share_too_large_to_show_is_no_bar(self) -> None:
+        body = year_body(2024)
+        body["summary"][0]["ec_share_full"] = 1e308
+        ec = traces(c1_figure(render(2024, body=body)))["ec"]
+        assert ec["x"][0] is None
+
+    def test_a_hostile_name_is_drawn_as_written(self) -> None:
+        body = year_body(2016)
+        body["summary"][0]["candidate"] = "<b>A & B</b>"
+        for row in body["data"]:
+            if row["candidate_slug"] == "donald-j-trump":
+                row["candidate"] = "<b>A & B</b>"
+        tree = render(2016, body=body)
+        figure = c1_figure(tree)
+        assert (
+            figure["layout"]["yaxis"]["ticktext"][0] == "&lt;b&gt;A &amp; B&lt;/b&gt;"
+        )
+        ec = traces(figure)["ec"]
+        assert ec["hovertext"][0].startswith("&lt;b&gt;A &amp; B&lt;/b&gt;<br>")
+
+    @pytest.mark.parametrize(
+        "name", ["var(--chart-1)", "var(--unset)", "x var(--page) y", "(a)"]
+    )
+    def test_a_name_spelling_a_token_reference_is_drawn_as_written(
+        self, name: str
+    ) -> None:
+        """Round 1: a served name holding ``var(`` once made ``components.chart``
+        refuse the figure and took the whole page down. ``(`` is written as an entity,
+        which plotly draws as ``(``."""
+        body = year_body(2016)
+        body["summary"][0]["candidate"] = name
+        tree = render(2016, body=body)
+        assert c1(tree) is not None and find(tree, NATION) is not None
+        figure = c1_figure(tree)
+        shown = figure["layout"]["yaxis"]["ticktext"][0]
+        assert "(" not in shown and shown == name.replace("(", "&#40;")
+        hover = traces(figure)["ec"]["hovertext"][0]
+        assert hover.startswith(f"{shown}<br>") and "var(" not in hover
+
+    def test_a_slug_spelling_a_token_reference_still_renders(self) -> None:
+        body = year_body(2016)
+        body["summary"][0]["candidate_slug"] = "var(--chart-1)"
+        assert c1(render(2016, body=body)) is not None
+
+    @pytest.mark.parametrize("name", [7, None, " "])
+    def test_a_name_that_is_not_text_still_renders(self, name: Any) -> None:
+        body = year_body(2024)
+        body["summary"][0]["candidate"] = name
+        tree = render(2024, body=body)
+        assert c1(tree) is not None
+        assert c1_figure(tree)["layout"]["yaxis"]["ticktext"][0] == str(name)
+
+    def test_the_title_is_the_page_text(self) -> None:
+        tree = render(2016)
+        title = of_type(c1(tree), "P")[0]
+        assert title.children == labels.C1_TITLE.format(year=2016)
+        assert "title" not in c1_figure(tree)["layout"]  # the builder took it
+
+    def test_the_height_follows_the_rows(self) -> None:
+        heights = {
+            year: c1_figure(render(year))["layout"]["height"] for year in (2016, 2024)
+        }
+        assert heights[2016] - heights[2024] == 5 * MOD["_ROW_PX"]
+
+    def test_the_hover_templates_name_only_the_page_s_strings(self) -> None:
+        from explore import charts
+
+        for year in RECONCILED_YEARS:
+            figure = c1_figure(render(year))
+            assert charts.template_problems(figure) == []
+            for trace in figure["data"]:
+                assert trace["hovertemplate"] == "%{hovertext}<extra></extra>"
+
+    def test_t3_and_c1_read_one_computation_of_the_cells(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Round 1: ``_nation_cells`` runs once per T3 row per render, and both T3 and
+        C1 read its result."""
+        calls: list[str] = []
+        real = MOD["_nation_cells"]
+
+        def counted(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]:
+            calls.append(row["candidate_slug"])
+            return {
+                **real(row, has_popular_vote),
+                "electoral_rank": "SENTINEL-RANK",
+                "national_electoral_denominator": "SENTINEL-APPOINTED",
+            }
+
+        monkeypatch.setitem(MOD, "_nation_cells", counted)
+        tree = render(2024)
+        summary = year_body(2024)["summary"]
+        assert calls == [r["candidate_slug"] for r in summary]
+        assert column(tree, NATION, MOD["NATION_FIELDS"], "electoral_rank") == [
+            "SENTINEL-RANK"
+        ] * len(summary)
+        # C1 reads the same result: its hover carries the sentinel T3's cell shows.
+        assert column(
+            tree, NATION, MOD["NATION_FIELDS"], "national_electoral_denominator"
+        ) == ["SENTINEL-APPOINTED"] * len(summary)
+        for hover in traces(c1_figure(tree))["ec"]["hovertext"]:
+            assert hover.endswith("Electors appointed: SENTINEL-APPOINTED")
+
+    def test_t3_s_cells_are_unchanged_by_the_shared_helper(self) -> None:
+        """T3 reads :func:`_nation_cells` too: its rows match the pre-C1 rules."""
+        row = year_body(2016)["summary"][2]  # Colin Powell: no popular-vote figure
+        cells = MOD["_nation_cells"](row, True)
+        assert cells["pv_share"] == labels.NO_NATIONAL_FIGURE
+        assert cells["ec_share_full"] == labels.share_cell(row["ec_share_full"])
+        assert MOD["_nation_cells"](row, False)["pv_share"] == labels.NOT_APPLICABLE
+        assert tuple(MOD["_nation_cells"](row, True)) == MOD["NATION_WORDED"]

@@ -284,6 +284,70 @@ NAV_API_DOCS_TITLE = (
 #: Not a ``LABELS`` key.
 CHART_TABLE_POINTER = "See this chart's numbers in a table on this page"
 
+#: Chart C1 (#433; ba spec, approved by the owner at #433's plan gate, 2026-11-09):
+#: each candidate's electoral share beside their popular-vote share on the one-election
+#: view, with the majority line. Not ``LABELS`` keys. The series names are
+#: ``LABELS["ec_share_full"]`` and ``LABELS["pv_share"]``, and each bar's text is T3's
+#: cell for the same value, so the chart writes every number as T3 does.
+C1_TITLE = "Each candidate's electoral share and popular-vote share in {year}"
+#: The title in a year this dataset has no popular-vote figures for.
+C1_TITLE_NO_PV = "Each candidate's electoral share in {year}"
+#: The share axis's title. The candidate axis has none: the names are its ticks.
+C1_X_AXIS = "Share"
+#: The name of the marker series, kept off the legend and never shown: the figure
+#: rules need every trace named.
+C1_NO_FIGURE_SERIES = "No bar for this value"
+#: The dashed line's label (``<br>`` is the one line break a chart string may carry).
+C1_MAJORITY_LINE = "Majority line: half of<br>electors appointed"
+#: The label of the marker drawn in place of a popular-vote bar the dataset has no
+#: figure for, inside the popular-vote window. Never a zero-length bar.
+C1_NO_FIGURE = "No figure in this dataset"
+#: The label of the marker drawn in place of an electoral-share bar the dataset has no
+#: value for (a null or blank; T3's cell reads ``NOT_IN_DATASET``). Never a zero-length
+#: bar. It names the series, since the chart has no column header to say which share
+#: is missing. Not from the plan-gate spec above: ba's addendum at #466's round-1 fix,
+#: owner approval with #466.
+C1_NO_SHARE = "No electoral share in this dataset"
+#: Hover text, filled with T3's cell strings (never a number format in a template).
+C1_EC_HOVER = (
+    "{candidate}<br>Electoral share (counted ÷ appointed): {share}<br>"
+    "Electoral votes counted: {counted}<br>Electors appointed: {appointed}"
+)
+C1_PV_HOVER = "{candidate}<br>Popular-vote share: {share}<br>Popular votes: {votes}"
+#: A marker's hover: T3's cell for the value (``NO_NATIONAL_FIGURE``; for a null or
+#: blank electoral share, ``LABELS["ec_share_full"]`` and ``NOT_IN_DATASET`` joined by
+#: ``": "``, as T3 shows that cell under its header (ba's addendum at #466's round-1
+#: fix, owner approval with #466); or ``UNRECOGNIZED`` followed by ``<br>`` and
+#: ``UNRECOGNIZED_NOTE``).
+C1_NO_FIGURE_HOVER = "{candidate}<br>{cell}"
+#: The caption's sentences, joined in the order ``pages/election.py`` gives.
+C1_BASES = (
+    "Electoral share is electoral votes counted out of all electors appointed; "
+    "popular-vote share is popular votes out of all votes cast for president "
+    "nationally."
+)
+C1_EC_BASIS = (
+    "Electoral share is electoral votes counted out of all electors appointed."
+)
+C1_MAJORITY_NOTE = (
+    "The dashed line marks half of the electors appointed: a candidate whose electoral "
+    "share is more than half has a majority of them."
+)
+C1_LINE_EC_ONLY = "The line applies to the electoral share only."
+C1_ROW_ORDER = (
+    "In each row, the upper bar is the electoral share and the lower bar the "
+    "popular-vote share."
+)
+#: Shown only when a :data:`C1_NO_FIGURE` marker is drawn.
+C1_NO_FIGURE_NOTE = (
+    'A marker labeled "{label}" means this dataset has no popular-vote figure for '
+    "that candidate. It is not a zero."
+)
+C1_NO_PV_CAPTION = (
+    "No popular-vote share is drawn: this dataset's popular-vote figures cover "
+    "{first}–{last}, not {year}."
+)
+
 
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
@@ -390,10 +454,13 @@ def has_text(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and not is_blank(value)
 
 
-def _finite(value: object) -> float | None:
+def finite(value: object) -> float | None:
     """A number as a finite float, or ``None`` for anything else: a bool, a value of no
     numeric type, an integer no float can hold, or a non-finite number. Each of those
-    that is a value reads :data:`UNRECOGNIZED` (:func:`_unknown`), never a figure."""
+    that is a value reads :data:`UNRECOGNIZED` (:func:`_unknown`), never a figure.
+
+    Public since C1 (#433): a chart draws a value only where this accepts it and its
+    cell is a figure, so the chart and its companion table agree on what is a number."""
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
     try:
@@ -473,11 +540,11 @@ def share(value: object) -> str:
     """A share as a percentage to one decimal place.
 
     Total: a null or a blank names no cause; any other value no percentage can show
-    reads :data:`UNRECOGNIZED` (see :func:`_finite`), including a finite one whose
+    reads :data:`UNRECOGNIZED` (see :func:`finite`), including a finite one whose
     percentage overflows, rather than raising ``OverflowError`` past the page's degraded
     state (``json`` parses integers of any size).
     """
-    number_ = _finite(value)
+    number_ = finite(value)
     if number_ is None or not math.isfinite(number_ * 100):
         return _unknown(value)
     return f"{number_ * 100:.1f}%"
@@ -673,7 +740,7 @@ def persons_per_electoral_vote(
         if allotment == 0 and not isinstance(allotment, bool):
             return NO_ELECTORAL_VOTES
         return _null_per_capita(coverage)
-    number_ = _finite(value)
+    number_ = finite(value)
     return _unknown(value) if number_ is None else f"{round(number_):,}"
 
 
@@ -770,7 +837,7 @@ def margin(value: object, applicable: bool) -> str:
     other value no figure can show (a non-finite number, an integer no float can hold,
     a value of no numeric type) reads :data:`UNRECOGNIZED`.
     """
-    points = _finite(value)
+    points = finite(value)
     if points is None:
         return _unknown(value, _null(applicable))
     return f"{points:.1f} percentage points"

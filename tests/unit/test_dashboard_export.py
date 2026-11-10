@@ -388,7 +388,8 @@ TEST_FIGURE: dict[str, Any] = {
             "x": ["A", "B"],
             "y": [0.5, 0.4],
             "marker": {"color": "var(--chart-1)"},
-            "hovertemplate": "%{x}: %{y:.1%} of electors<extra></extra>",
+            "hovertext": ["A: 50.0% of electors", "B: 40.0% of electors"],
+            "hovertemplate": "%{hovertext}<extra></extra>",
         },
         {
             "type": "bar",
@@ -396,8 +397,8 @@ TEST_FIGURE: dict[str, Any] = {
             "x": ["A", "B"],
             "y": [0.48, 0.45],
             "marker": {"color": "var(--chart-2)", "pattern": {"shape": "/"}},
-            "hovertemplate": "%{x}: %{y:.1%} of %{customdata.pv_share}<extra>%{fullData.name}</extra>",
-            "customdata": [{"pv_share": 1}, {"pv_share": 2}],
+            "hovertemplate": "%{customdata.pv_share} of votes<extra>%{fullData.name}</extra>",
+            "customdata": [{"pv_share": "48.0%"}, {"pv_share": "45.0%"}],
         },
     ],
     "layout": {

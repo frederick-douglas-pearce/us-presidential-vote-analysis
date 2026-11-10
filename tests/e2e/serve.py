@@ -85,7 +85,7 @@ TWO_CHART_IDS = ("X2", "X3")
 TWO_CHARTS_TABLE = "e2e-two-charts-table"
 
 #: The test chart's figure: two bar series told apart by a pattern, in the first two
-#: series tokens.
+#: series tokens, with hover text the page wrote (D091: a template names no value).
 CHART_FIGURE: dict[str, Any] = {
     "data": [
         {
@@ -94,7 +94,8 @@ CHART_FIGURE: dict[str, Any] = {
             "x": ["A", "B"],
             "y": [3, 5],
             "marker": {"color": "var(--chart-1)"},
-            "hovertemplate": "%{x}: %{y} first<extra></extra>",
+            "hovertext": ["A: 3 first", "B: 5 first"],
+            "hovertemplate": "%{hovertext}<extra></extra>",
         },
         {
             "type": "bar",
@@ -102,7 +103,8 @@ CHART_FIGURE: dict[str, Any] = {
             "x": ["A", "B"],
             "y": [4, 2],
             "marker": {"color": "var(--chart-2)", "pattern": {"shape": "/"}},
-            "hovertemplate": "%{x}: %{y} second<extra></extra>",
+            "hovertext": ["A: 4 second", "B: 2 second"],
+            "hovertemplate": "%{hovertext}<extra></extra>",
         },
     ],
     "layout": {"title": {"text": "A test chart"}},
