@@ -7,7 +7,7 @@ browser context with an empty cache. Which *server* state a run measures (dashbo
 restarted, API edge purged) is set up by the operator before running this; the runbook
 (docs/deploy-dashboard.md §12) gives the sequences.
 
-Each run is ONE browser navigation, and both numbers come from it:
+Each run is ONE browser navigation, and every number comes from it:
 
 - ``ttfb_s``: the navigation's own time to first byte (Navigation Timing
   ``responseStart``), under the throttled network;
