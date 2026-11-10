@@ -1094,14 +1094,13 @@ def layout(year: Any = None, **params: Any) -> html.Div:
                 body = view.get(f"/v1/elections/{year}")
                 per_capita = view.get(f"/v1/elections/{year}/per-capita")
                 index = view.get(api.ELECTIONS_PATH)
-                found = render(
+                return render(
                     body,
                     index_row(index, year),
                     parse_filters(params),
                     per_capita,
                     neighbours(index, int(year)),
                 )
-                return html.Div([found])
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     lead = [] if lede is None else [html.P(lede, className="lede")]

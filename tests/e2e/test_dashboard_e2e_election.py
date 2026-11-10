@@ -27,10 +27,13 @@ from tests.e2e.dashboard_pages import (
     ELECTION_EARLIER,
     ELECTION_LATER,
     ELECTION_SUCCESS,
+    ELECTIONS,
     FIRST,
     LAST,
     RESOURCE_ERROR,
     assert_rendered,
+    composited,
+    contrast_ratio,
     recorded,
     step_years,
 )
@@ -464,7 +467,7 @@ def bar_measure(page: Page) -> dict[str, Any]:
 
 def middle_year() -> int:
     """A served year with a served year on each side whose view is recorded."""
-    served = sorted(e["year"] for e in recorded("/v1/elections")["data"])
+    served = sorted(e["year"] for e in ELECTIONS["data"])
     for year in served[1:-1]:
         if all(
             f"/v1/elections/{year}{tail}" in RECORDED_FILES
@@ -533,7 +536,7 @@ def test_the_bar_sets_its_two_links_apart_above_the_heading(
     width_ = page.locator(BAR).evaluate("e => getComputedStyle(e).borderTopWidth")
     assert float(width_.removesuffix("px")) >= 1
     # The chevrons are no part of either link's name.
-    neighbors = _ELECTION["neighbours"](recorded("/v1/elections"), year)
+    neighbors = _ELECTION["neighbours"](ELECTIONS, year)
     for text in (
         EARLIER_LINK.format(year=neighbors.earlier),
         LATER_LINK.format(year=neighbors.later),
@@ -544,19 +547,22 @@ def test_the_bar_sets_its_two_links_apart_above_the_heading(
         print(f"#464 bar at 390 px ({theme}): {rows}")
 
 
-def test_the_bar_keeps_its_links_inside_at_320_px(page: Page) -> None:
-    open_year(page, middle_year(), "light", 320)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_bar_keeps_its_links_inside_at_320_px(page: Page, theme: str) -> None:
+    open_year(page, middle_year(), theme, 320)
     found = bar_measure(page)
     assert found["overflow"] <= 0, found
     for link in found["links"]:
         assert inside(link["box"], found["bar"]) and link["lines"] == 1, found
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize(("year", "side"), [(FIRST, "later"), (LAST, "earlier")])
 def test_a_year_at_either_end_keeps_its_one_link_on_its_side(
-    page: Page, year: int, side: str
+    page: Page, year: int, side: str, theme: str, width: int
 ) -> None:
-    open_year(page, year, "light", 390)
+    open_year(page, year, theme, width)
     found = bar_measure(page)
     (link,) = found["links"]
     if side == "later":
@@ -565,22 +571,6 @@ def test_a_year_at_either_end_keeps_its_one_link_on_its_side(
     else:
         assert link["id"] == ELECTION_EARLIER[1:]
         assert abs(link["box"]["left"] - found["content"]["left"]) <= 0.5, found
-
-
-def luminance_of(value: str) -> float:
-    parts = [float(p) for p in re.findall(r"[\d.]+", value)[:3]]
-
-    def channel(c: float) -> float:
-        c /= 255
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    r, g, b = (channel(c) for c in parts)
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-
-def ratio(first: str, second: str) -> float:
-    a, b = sorted((luminance_of(first), luminance_of(second)), reverse=True)
-    return (a + 0.05) / (b + 0.05)
 
 
 def focus_earlier(page: Page) -> None:
@@ -618,8 +608,13 @@ def test_forced_colors_keep_the_edge_the_links_and_the_focus_ring(
     )
     assert painted["width"] >= 1 and painted["style"] == "solid", painted
     assert painted["ringStyle"] == "solid", painted
-    for color in (painted["edge"], *painted["links"], painted["ring"]):
-        assert ratio(color, painted["backdrop"]) >= 3.0, (color, painted)
+    # contrast_ratio refuses a translucent or non-rgb() color, so a transparent edge
+    # or link fails rather than reading as black. Chromium draws the forced ring in a
+    # translucent system color, so the ring is measured as it lands on the backdrop,
+    # where a transparent one becomes the backdrop and fails at 1:1.
+    ring = composited(painted["ring"], painted["backdrop"])
+    for color in (painted["edge"], *painted["links"], ring):
+        assert contrast_ratio(color, painted["backdrop"]) >= 3.0, (color, painted)
 
 
 def test_tab_reaches_the_bar_first_in_the_page_content(page: Page) -> None:

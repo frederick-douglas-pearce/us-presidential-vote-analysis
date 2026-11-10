@@ -450,7 +450,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`); the label
   of the year control on `/candidate/<slug>`, and the lede sentence that offers it
-  (`FILTER_SENTENCE` in `pages/candidate.py`); the earlier and later links on `/election/<year>`
+  (`FILTER_SENTENCE` in `pages/candidate.py`); the one-election view's heading, `HEADING` in
+  `pages/election.py` (the `H1` that `render` builds, and the start of the page's title, `title`),
+  or "Election" on the degraded state (a literal in `layout` there) and in the title before a year
+  is checked; the earlier and later links on `/election/<year>`
   (`EARLIER_LINK` and `LATER_LINK` in `pages/election.py`) and their accessible name
   (`ELECTION_NAV_LABEL` in `pages/election.py`, read by assistive technology, not shown). The
   links sit in a bordered bar above the page heading, the earlier link at the left and the later

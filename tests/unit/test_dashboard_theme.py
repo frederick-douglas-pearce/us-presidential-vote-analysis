@@ -829,26 +829,31 @@ class TestThemeContrast:
 
     def test_the_chevrons_carry_no_text(self) -> None:
         # Generated text would join the link's accessible name (#464); an empty
-        # content draws the shape alone. Every pseudo-element on the bar is checked.
-        pseudo = [
-            (prelude, dict(declarations(body)))
+        # content draws the shape alone. Every bar rule that sets content is checked,
+        # whatever its colon syntax (a legacy `:before` too); a rule keyed on the
+        # bar's ids is refused by the class-not-id test below.
+        generating = [
+            (prelude, rule["content"])
             for _, prelude, body in shipped_rules()
-            if re.search(NEIGHBOR, prelude) and "::" in prelude
+            if re.search(NEIGHBOR, prelude)
+            and "content" in (rule := dict(declarations(body)))
         ]
-        assert pseudo
-        for prelude, rule in pseudo:
-            if "content" in rule:
-                assert rule["content"] == '""', prelude
+        assert generating
+        for prelude, content in generating:
+            assert content == '""', prelude
         drawn = toggle_rule(".neighbor-earlier::before, .neighbor-later::after")
         assert drawn["content"] == '""'
         assert toggle_rule(".neighbor-earlier::before")["transform"] == "rotate(45deg)"
         assert toggle_rule(".neighbor-later::after")["transform"] == "rotate(-135deg)"
 
     def test_the_bar_is_drawn_by_its_class_not_the_election_views_id(self) -> None:
-        # #465's subpages take the treatment by class (#464).
-        nav_id = page_global("pages.election", "NAV_ID")
+        # #465's subpages take the treatment by class (#464). No rule names the bar's
+        # or its links' ids, so the paint premise and the chevron check, which scan
+        # the classes, see every rule that styles the bar.
         selectors = " ".join(prelude for _, prelude, _ in shipped_rules())
-        assert f"#{nav_id}" not in selectors
+        for name in ("NAV_ID", "EARLIER_ID", "LATER_ID"):
+            element = page_global("pages.election", name)
+            assert not re.search(rf"#{re.escape(element)}\b", selectors), element
         classes = {
             page_global("pages.election", name)
             for name in (
@@ -862,22 +867,39 @@ class TestThemeContrast:
             assert f".{name}" in selectors, name
 
     def test_the_earlier_and_later_bar_declarations_are_pinned(self) -> None:
-        # What the e2e fit checks cannot see in every font (#464): the wrap, the later
-        # link's side, the 24 px targets on one line each, the edge, and padding wider
-        # than a focus ring's reach, so a ring never leaves the box.
+        # What the e2e fit checks cannot see in every font (#464): the flex box, whose
+        # loss runs the two links together again (the defect #464 fixed); the wrap;
+        # the later link's side; the 24 px targets, which need the links' inline-flex;
+        # text that wraps rather than overflowing at a larger text size; and the edge.
         bar = toggle_rule(".neighbor-nav")
+        assert bar["display"] == "flex"
         assert bar["flex-wrap"] == "wrap"
         assert bar["border"] == "1px solid var(--border)"
-        assert bar["padding"] == "0.375rem 0.75rem"
         link = toggle_rule(".neighbor-nav a")
+        assert link["display"] == "inline-flex"
         assert link["min-height"] == "1.5rem"
-        assert link["white-space"] == "nowrap"
+        assert "white-space" not in link  # wraps at a larger text size (#464's review)
         assert "text-decoration" not in link  # the links keep their underline
         assert toggle_rule(".neighbor-nav .neighbor-later") == {"margin-left": "auto"}
         measure = [
             p for _, p, b in shipped_rules() if "max-width: var(--measure)" in b
         ]
         assert len(measure) == 1 and ".neighbor-nav" in measure[0].split(", ")
+
+    def test_the_earlier_and_later_bar_padding_clears_the_focus_ring(self) -> None:
+        # A focused link's ring stays inside the box: every side's padding is wider
+        # than the ring's reach, offset plus width, read from the ring's own rule.
+        focus = toggle_rule(".neighbor-nav a:focus-visible")
+        width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
+        offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
+        assert width and offset, focus
+        reach = int(width.group(1)) + int(offset.group(1))
+        parts = toggle_rule(".neighbor-nav")["padding"].split()
+        rems = [re.fullmatch(r"([\d.]+)rem", part) for part in parts]
+        assert rems and all(rems), parts
+        for rem in rems:
+            assert rem is not None
+            assert float(rem.group(1)) * 16 > reach, (parts, reach)
 
     def test_the_bar_layout_declarations_are_pinned(self) -> None:
         # The declarations the e2e fit checks cannot see in every font or at every

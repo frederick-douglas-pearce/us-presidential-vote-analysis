@@ -1536,8 +1536,7 @@ class TestNeighborBar:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
-        page = MOD["layout"](year="1868")
-        (body,) = page.children
+        page = body = MOD["layout"](year="1868")
         assert body.id == PAGE_ID
         kinds = [type(child).__name__ for child in body.children]
         # The page-local Location renders nothing; the nav is the first thing shown.
