@@ -5,8 +5,10 @@ stops it at session end; ``base_url`` points Playwright's ``page.goto`` at it. E
 test also gets :func:`_browser_guard`, which fails it on a request off the loopback host
 or on a console error, at the 390 × 844 phone viewport #306 was checked at. The one
 off-host address it answers is plotly.js's on its CDN (#432), fulfilled from the
-installed file and counted: a test names how many fetches it expects with
-:data:`PLOTLYJS_FETCHES`, and every other test expects none.
+installed file and counted: a test of a chart names exactly how many fetches it expects
+with :data:`PLOTLYJS_FETCHES`, and every other test is held to a bound derived from the
+chart registry (#433, D091): at most one fetch per document, and only from a page a
+registered chart renders on.
 
 pytest imports this module on every run, the default one included, so nothing here
 starts a process or touches the network at import.
@@ -15,12 +17,13 @@ starts a process or touches the network at import.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -46,9 +49,11 @@ STOP_TIMEOUT_S = 5.0
 EXPECTED_CONSOLE_ERROR = "expected_console_error"
 
 
-#: The marker a test names its plotly.js fetches with (#432): how many requests for
-#: the CDN address it expects (0 without the marker), and ``abort=True`` to refuse
-#: them, as a blocked CDN would, rather than fulfill them from the installed file.
+#: The marker a test names its plotly.js fetches with (#432): exactly how many requests
+#: for the CDN address it expects, and ``abort=True`` to refuse them, as a blocked CDN
+#: would, rather than fulfill them from the installed file. Without it, the guard
+#: derives the bound (:func:`derived_fetch_problems`, #433), so a test that only passes
+#: through a chart page needs no marker.
 PLOTLYJS_FETCHES = "plotlyjs_fetches"
 
 #: The marker a test aborts one of dcc's lazily loaded chunks with (#456), by its file
@@ -183,20 +188,21 @@ def _off_host(url: str) -> bool:
 def guard_problems(
     off_host: list[str],
     fetches: int,
-    expected_fetches: int,
+    expected_fetches: int | None,
     errors: list[str],
     named: list[str],
 ) -> list[str]:
     """What the browser guard fails a test on, as a pure function so it can be tested
     without a browser (#432's acceptance gate, ``test_dashboard_e2e_guard.py``): a
     request off the loopback host; a plotly.js fetch count other than the test
-    declared; and console errors other than those it named. A named error must occur
-    exactly as often as it is named, so a second error with an expected text (another
-    404, or a repeat a loop would log, #452) fails too."""
+    declared (``None``: the test declared none, and :func:`derived_fetch_problems`
+    holds its fetches instead); and console errors other than those it named. A named
+    error must occur exactly as often as it is named, so a second error with an
+    expected text (another 404, or a repeat a loop would log, #452) fails too."""
     problems = []
     if off_host:
         problems.append(f"requests off the loopback host: {off_host}")
-    if fetches != expected_fetches:
+    if expected_fetches is not None and fetches != expected_fetches:
         problems.append(f"plotly.js fetched {fetches} times; expected {expected_fetches}")
     expected = Counter(named)
     seen = Counter(errors)
@@ -204,6 +210,43 @@ def guard_problems(
         problems.append(
             f"console errors: {dict(seen)}; expected exactly: {dict(expected)}"
         )
+    return problems
+
+
+def page_pattern(template: str) -> re.Pattern[str]:
+    """A Dash path template (``/election/<year>``) as a pattern over URL paths: each
+    ``<variable>`` takes one or more characters, as Dash's greedy variable does."""
+    parts = re.split(r"<[^>]+>", template)
+    return re.compile(".+".join(re.escape(part) for part in parts))
+
+
+def chart_page_patterns() -> list[re.Pattern[str]]:
+    """The pages a live registered chart renders on (#433): from ``charts.CHARTS``."""
+    from explore import charts
+
+    return [
+        page_pattern(row.page) for row in charts.CHARTS.values() if not row.retired
+    ]
+
+
+def derived_fetch_problems(
+    fetches: Iterable[tuple[int, str]], chart_pages: Iterable[re.Pattern[str]]
+) -> list[str]:
+    """The plotly.js bound for a test that declares no count (#433, D091): each fetch,
+    given as the document it was made in (a count of the main frame's document loads)
+    and the path that document showed, must come from a page a registered chart renders
+    on, and no document may fetch twice (the mount callback loads plotly.js once per
+    document, D088). So a test that only passes through a chart page needs no marker,
+    while a page with no chart still fetches nothing."""
+    patterns = list(chart_pages)
+    problems = []
+    seen: set[int] = set()
+    for document, path in fetches:
+        if not any(pattern.fullmatch(path) for pattern in patterns):
+            problems.append(f"plotly.js fetched by {path!r}, which renders no chart")
+        if document in seen:
+            problems.append(f"plotly.js fetched twice by one document ({path!r})")
+        seen.add(document)
     return problems
 
 
@@ -278,13 +321,18 @@ def _browser_guard(
     errors: list[str] = []
     cdn = plotlyjs_url()
     marker = request.node.get_closest_marker(PLOTLYJS_FETCHES)
-    expected_fetches = marker.args[0] if marker else 0
+    expected_fetches = marker.args[0] if marker else None
     abort = bool(marker and marker.kwargs.get("abort", False))
-    fetches: list[str] = []
+    fetches: list[tuple[int, str]] = []
+    documents = [0]
+
+    def on_document(_: Page) -> None:
+        documents[0] += 1
 
     def refuse(route: Route) -> None:
         if route.request.url == cdn:
-            fetches.append(route.request.url)
+            frame = route.request.frame
+            fetches.append((documents[0], urlsplit(frame.url).path))
             if abort:
                 route.abort()
             else:
@@ -310,10 +358,13 @@ def _browser_guard(
             route.abort()
 
         context.route(lambda url: is_chunk(url, stem), abort_chunk)
+    page.on("domcontentloaded", on_document)
     page.on("console", on_console)
     page.on("pageerror", lambda error: errors.append(str(error)))
     yield
     named = [m.args[0] for m in request.node.iter_markers(EXPECTED_CONSOLE_ERROR)]
     problems, rest = chunk_problems(stem, len(aborted), errors)
     problems += guard_problems(off_host, len(fetches), expected_fetches, rest, named)
+    if expected_fetches is None:
+        problems += derived_fetch_problems(fetches, chart_page_patterns())
     assert problems == [], problems

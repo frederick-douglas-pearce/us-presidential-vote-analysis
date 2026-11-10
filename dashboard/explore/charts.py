@@ -44,12 +44,16 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
-#: here once retired. Empty until C1 (#433) lands; C1–C5 are assigned to #433–#436 by
-#: their issues. ``components.chart`` reads it by attribute at call time. ``ISSUED``, a
+#: here once retired. C1 (#433) is the first; C2–C5 are assigned to #434–#436 by their
+#: issues. ``components.chart`` reads it by attribute at call time. ``ISSUED``, a
 #: hand-written literal of every issued ID with its whole row, must equal this
 #: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
 #: ``test_every_row_is_well_formed_and_on_a_registered_page`` checks each row.
-CHARTS: Mapping[str, Chart] = {}
+CHARTS: Mapping[str, Chart] = {
+    # Each candidate's electoral share beside their popular-vote share, with the
+    # majority line, on the one-election view, beside T3 (#433).
+    "C1": Chart("/election/<year>", "election-nation"),
+}
 
 
 def registry_problems(registry: Mapping[str, Chart]) -> list[str]:
@@ -126,9 +130,9 @@ _REFUSED_KEY_RE = re.compile(r".*colorscale")
 #: and bars in groups with a gap on every side (``bargap`` between locations,
 #: ``bargroupgap`` within one, never stacked or overlaid), so neighboring bars of
 #: different series, whose tokens do not contrast with each other, are always parted by
-#: the page's color (WCAG 1.4.11). Not enforced here, and C1's to rule on (#433): a
-#: number format inside a hover or text template or an axis ``hoverformat``, and a
-#: trace's own bar ``width`` or ``offset``.
+#: the page's color (WCAG 1.4.11). C1 (#433, D091) made two of these rules: a hover or
+#: text template names no number format (:func:`template_problems`), and no bar sets
+#: its own ``width`` or ``offset``, which would defeat both gaps (:func:`bar_problems`).
 TEMPLATE: dict[str, Any] = {
     "layout": {
         "font": {"family": "var(--font-body)", "color": "var(--text)", "size": 14},
@@ -363,12 +367,21 @@ def _mode(trace: Mapping[str, Any]) -> str:
 _PLACEHOLDER_RE = re.compile(r"%\{[^}]*\}")
 
 
+def _drawn_text(trace: Mapping[str, Any]) -> Any:
+    """The text plotly draws on ``trace``'s points: its ``texttemplate`` when set,
+    which then replaces ``text`` (#433, D091), else its ``text``."""
+    template = trace.get("texttemplate")
+    return template if template not in (None, "") else trace.get("text")
+
+
 def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
     """The non-color encodings ``trace`` draws (#432), each only where its type draws
     it: a marker symbol where a scatter trace draws markers, a line dash where it draws
     lines, a pattern on bars, and a direct label naming the series: an annotation whose
     text is the trace's name, or shown text that, with its placeholders removed, is the
-    name, or that writes it with ``%{fullData.name}``. A trace of any other type draws
+    name, or that writes it with ``%{fullData.name}``. Shown text is the string plotly
+    draws (:func:`_drawn_text`), so a ``text`` a ``texttemplate`` replaces names
+    nothing (#433). A trace of any other type draws
     none of these, so two traces of such a type are reported as differing by color
     alone until this learns the type. A numeric symbol or dash is not read here:
     :func:`figure_problems` refuses it, rather than copy plotly's number table."""
@@ -391,14 +404,10 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
             shown = "text" in _mode(trace)
         else:
             shown = trace.get("textposition", "auto") != "none"
-        written = [trace.get("text"), trace.get("texttemplate")]
-        named = any(
-            isinstance(text, str)
-            and (
-                "%{fullData.name}" in text
-                or _PLACEHOLDER_RE.sub("", text).strip() == name.strip()
-            )
-            for text in written
+        text = _drawn_text(trace)
+        named = isinstance(text, str) and (
+            "%{fullData.name}" in text
+            or _PLACEHOLDER_RE.sub("", text).strip() == name.strip()
         )
         if name in names or (shown and named):
             found["label"] = json.dumps(name)
@@ -487,13 +496,63 @@ def hover_problems(figure: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+#: What a ``%{…}`` placeholder in a hover or text template may name (#433, D091): a
+#: string the page wrote (``customdata`` or a part of it, ``hovertext``, ``text``) or
+#: the trace's name, and never a format. So every number a chart shows is a string its
+#: page wrote, as its companion table writes it, and never plotly's own formatting of a
+#: value (``%{x:.1%}``, ``%{y}``).
+_ALLOWED_PLACEHOLDER_RE = re.compile(
+    r"%\{(?:customdata(?:\[\d+\]|\.[A-Za-z0-9_]+)*|hovertext|text|fullData\.name)\}"
+)
+
+#: The keys whose strings are templates plotly fills.
+_TEMPLATE_KEYS = frozenset({"hovertemplate", "texttemplate"})
+
+
+def template_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each template placeholder that names a value or a format rather than a string the
+    page wrote (:data:`_ALLOWED_PLACEHOLDER_RE`), and each ``hoverformat`` (an axis's,
+    or a trace's ``xhoverformat`` and the like), which formats a value plotly then shows
+    (#433, D091)."""
+    problems = []
+    for path, key, value in _walk(figure):
+        if key in _TEMPLATE_KEYS and isinstance(value, str):
+            problems += [
+                f"{path}: {placeholder!r} is not a string the page wrote"
+                for placeholder in _PLACEHOLDER_RE.findall(value)
+                if not _ALLOWED_PLACEHOLDER_RE.fullmatch(placeholder)
+            ]
+        elif key.endswith("hoverformat") and not path.endswith("]"):
+            problems.append(f"{path}: no hover format")
+    return problems
+
+
+def bar_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each bar trace setting its own ``width`` or ``offset``, which plotly lets win
+    over the template's ``bargap`` and ``bargroupgap``, so bars of different series
+    could touch (#432's review, #433, D091); and a layout ``scattergap``, which places
+    scatter points against bar slots by a gap of its own."""
+    problems = [
+        f"data[{index}].{key}: a bar's width and place are the template's"
+        for index, trace in enumerate(figure.get("data") or [])
+        if isinstance(trace, dict) and trace.get("type", "scatter") == "bar"
+        for key in ("width", "offset")
+        if key in trace
+    ]
+    layout = figure.get("layout")
+    if isinstance(layout, dict) and "scattergap" in layout:
+        problems.append("layout.scattergap: fixed by the template's bar gaps")
+    return problems
+
+
 def figure_problems(figure: Any) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
     with a list of traces, sets no template or config of its own and overrides none of
     the template's fixed defaults, names colors only as token references, carries no
     markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
-    numbering them and names every scatter trace's mode, writes its own hover text, and
-    never tells two traces apart by color alone."""
+    numbering them and names every scatter trace's mode, writes its own hover text with
+    no number format, sets no bar's width or offset, and never tells two traces apart
+    by color alone."""
     if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
         return ["not a figure dict with a list of traces"]
     problems = [
@@ -502,6 +561,8 @@ def figure_problems(figure: Any) -> list[str]:
         *override_problems(figure),
         *number_problems(figure),
         *hover_problems(figure),
+        *template_problems(figure),
+        *bar_problems(figure),
     ]
     layout = figure.get("layout", {})
     if not isinstance(layout, dict):

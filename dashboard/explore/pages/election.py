@@ -1,6 +1,6 @@
 """One election in full (#307): the election panel (#308), the winner under each
-method, T2, results by state, T3, national results, and T6, every state's persons per
-electoral vote (#280).
+method, T3, national results, with chart C1 (#433), T2, results by state, and T6, every
+state's persons per electoral vote (#280).
 
 The panel, T2 and T3 come from one response, ``/v1/elections/{year}`` (its
 ``election`` block, ``data`` and ``summary``), and T6 from a second,
@@ -32,7 +32,7 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query
+from explore import api, charts, components, export, labels, query
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in T2.
@@ -146,7 +146,11 @@ CANDIDATE = "candidate"
 PV_STATUS = "pv_status"
 COUNT_STATUS = "electoral_count_status"
 
-#: The year's popular-vote sentence above T3, when the dataset holds none for it.
+#: Chart C1 (#433): each candidate's electoral share beside their popular-vote share,
+#: with the majority line, beside T3.
+C1_ID = "C1"
+
+#: The year's popular-vote sentence above C1 and T3, when the dataset holds none for it.
 NO_PV_SENTENCE = (
     "This dataset has no popular-vote figures for {year}; its popular-vote figures "
     "cover {first}–{last}."
@@ -164,10 +168,10 @@ NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
 #: offers (#324, as the candidate history does since #331): the not-found and degraded
 #: states have no filters.
 LEDE = (
-    "Who led under the Electoral College, the popular vote and the hybrid; every "
-    "state's electoral votes for each candidate, with the popular vote where this "
-    "dataset has it; the national result; and how many people each state's electoral "
-    "votes stood for."
+    "Who led under the Electoral College, the popular vote and the hybrid; the "
+    "national result; every state's electoral votes for each candidate, with the "
+    "popular vote where this dataset has it; and how many people each state's "
+    "electoral votes stood for."
 )
 FILTER_SENTENCE = "Narrow the state results by state, candidate or status."
 
@@ -467,26 +471,274 @@ def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
     return labels.share(value) if as_share else labels.number(value)
 
 
+#: The T3 fields :func:`_nation_cells` words, in T3's order: every column but the
+#: candidate and the party, which are cells of their own (a link, a note).
+NATION_WORDED = NATION_FIELDS[2:]
+
+
+def _nation_cells(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]:
+    """T3's cell text for each of :data:`NATION_WORDED`: the one source of the strings
+    T3 shows and C1 draws (#433), so the chart writes each number as the table does."""
+    return {
+        "national_electoral_votes": labels.number(row["national_electoral_votes"]),
+        "national_electoral_votes_counted": labels.number(
+            row["national_electoral_votes_counted"]
+        ),
+        "national_electoral_denominator": labels.number(
+            row["national_electoral_denominator"]
+        ),
+        "electoral_rank": labels.number(row["electoral_rank"]),
+        "took_office": labels.yes_no(row["took_office"]),
+        "national_pv_votes": _national_pv(
+            row["national_pv_votes"], has_popular_vote, False
+        ),
+        # Nullable in the API's schema, though real for every served year.
+        "ec_share_full": labels.share_cell(row["ec_share_full"]),
+        "pv_share": _national_pv(row["pv_share"], has_popular_vote, True),
+        # On T3's year rule, so the row agrees with itself.
+        "hybrid_score": _national_pv(row["hybrid_score"], has_popular_vote, True),
+    }
+
+
 def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
+    cells = _nation_cells(row, has_popular_vote)
     return html.Tr(
         [
             components.candidate_cell(row),
             labels.nominating_party_cell(row),
-            labels.cell(labels.number(row["national_electoral_votes"])),
-            labels.cell(labels.number(row["national_electoral_votes_counted"])),
-            labels.cell(labels.number(row["national_electoral_denominator"])),
-            labels.cell(labels.number(row["electoral_rank"])),
-            labels.cell(labels.yes_no(row["took_office"])),
-            labels.cell(
-                _national_pv(row["national_pv_votes"], has_popular_vote, False)
-            ),
-            # Nullable in the API's schema, though real for every served year.
-            labels.cell(labels.share_cell(row["ec_share_full"])),
-            labels.cell(_national_pv(row["pv_share"], has_popular_vote, True)),
-            # On T3's year rule, so the row agrees with itself.
-            labels.cell(_national_pv(row["hybrid_score"], has_popular_vote, True)),
+            *(labels.cell(cells[field]) for field in NATION_WORDED),
         ]
     )
+
+
+def _escaped(text: str) -> str:
+    """Served text as plotly's pseudo-HTML shows it as written: a name holding ``<`` or
+    ``&`` is drawn, never read as markup (#433)."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _plotted(value: Any, cell: str) -> float | None:
+    """The value C1 draws for a share, or ``None`` for a marker: only a number
+    :func:`explore.labels.finite` accepts whose T3 cell is a share (#433). The chart
+    computes no share; it draws the served value and labels it with T3's cell."""
+    number = labels.finite(value)
+    is_share = cell != labels.UNRECOGNIZED and cell == labels.share(value)
+    return number if number is not None and is_share else None
+
+
+#: Where a marker sits in a row (#433): the centre of the slot of the bar it stands
+#: for, from the template's ``bargap`` (one source), as plotly places two grouped bars
+#: at a quarter of the row's bar band either side of its centre. With one series the
+#: bar is centred.
+_SLOT = (1 - charts.TEMPLATE["layout"]["bargap"]) / 4
+
+#: Pixels per row and the margins around the plot (#433): two bars and their labels
+#: per row at 390 px; the top margin holds the legend and the majority line's label.
+_ROW_PX = 56
+_TOP_PX = {True: 96, False: 56}
+_BOTTOM_PX = 48
+
+
+def _marker_hover(name: str, cell: str) -> str:
+    text = cell
+    if cell == labels.UNRECOGNIZED:
+        text = f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
+    return labels.C1_NO_FIGURE_HOVER.format(candidate=name, cell=text)
+
+
+def _c1_figure(
+    summary: list[dict[str, Any]], has_popular_vote: bool, year: int
+) -> tuple[dict[str, Any], bool]:
+    """C1's figure (#433), from T3's rows in T3's order, and whether it draws a
+    :data:`labels.C1_NO_FIGURE` marker.
+
+    One row per T3 row, at its position (0…n−1, reversed so T3's first is on top),
+    labeled with the candidate's name as T3 shows it. Each bar is the served share,
+    labeled with T3's cell for it; a share T3 does not show as one gets a labeled marker
+    in its bar's slot, never a zero-length bar, and a real zero is a drawn, labeled bar.
+    The popular-vote series is drawn only in a year T3 treats as having popular votes.
+    Total over every body T3 renders: it reads only ``labels`` predicates and the cells.
+    """
+    n = len(summary)
+    positions = list(range(n))
+    names = [_escaped(str(row["candidate"])) for row in summary]
+    slugs = [str(row["candidate_slug"]) for row in summary]
+    cells = [_nation_cells(row, has_popular_vote) for row in summary]
+    offsets = (
+        {"ec_share_full": -_SLOT, "pv_share": _SLOT}
+        if has_popular_vote
+        else {"ec_share_full": 0.0}
+    )
+    marks: list[tuple[float, str, str, str]] = []  # (y, label, hover, id)
+    no_figure = False
+    bars = []
+    for field, color, hover in (
+        ("ec_share_full", "var(--chart-1)", labels.C1_EC_HOVER),
+        ("pv_share", "var(--chart-2)", labels.C1_PV_HOVER),
+    ):
+        if field not in offsets:
+            continue
+        xs: list[float | None] = []
+        texts: list[str] = []
+        hovers: list[str] = []
+        for i, (row, cell) in enumerate(zip(summary, cells, strict=True)):
+            shown = cell[field]
+            x = _plotted(row[field], shown)
+            xs.append(x)
+            texts.append(shown if x is not None else "")
+            hovers.append(
+                hover.format(
+                    candidate=names[i],
+                    share=shown,
+                    counted=cell["national_electoral_votes_counted"],
+                    appointed=cell["national_electoral_denominator"],
+                    votes=cell["national_pv_votes"],
+                )
+            )
+            if x is None:
+                blank = shown == labels.NO_NATIONAL_FIGURE
+                no_figure = no_figure or blank
+                marks.append(
+                    (
+                        i + offsets[field],
+                        labels.C1_NO_FIGURE if blank else shown,
+                        _marker_hover(names[i], shown),
+                        f"{slugs[i]}/{field}",
+                    )
+                )
+        marker: dict[str, Any] = {"color": color}
+        if field == "pv_share":
+            marker["pattern"] = {
+                "shape": "/",
+                "fillmode": "overlay",
+                "fgcolor": "var(--page)",
+            }
+        bars.append(
+            {
+                "type": "bar",
+                "orientation": "h",
+                "name": labels.LABELS[field],
+                "offsetgroup": field,
+                "ids": slugs,
+                "x": xs,
+                "y": positions,
+                "text": texts,
+                "textposition": "outside",
+                "textfont": {"color": "var(--text)"},
+                "cliponaxis": False,
+                "marker": marker,
+                "hovertext": hovers,
+                "hovertemplate": "%{hovertext}<extra></extra>",
+                "showlegend": has_popular_vote,
+            }
+        )
+    data: list[dict[str, Any]] = list(bars)
+    if marks:
+        data.append(
+            {
+                "type": "scatter",
+                "mode": "markers+text",
+                "name": labels.C1_NO_FIGURE_SERIES,
+                "showlegend": False,
+                "ids": [mark[3] for mark in marks],
+                "x": [0] * len(marks),
+                "y": [mark[0] for mark in marks],
+                "text": [mark[1] for mark in marks],
+                "textposition": "middle right",
+                "textfont": {"color": "var(--text)"},
+                "cliponaxis": False,
+                "marker": {"symbol": "x", "size": 10, "color": "var(--text)"},
+                "hovertext": [mark[2] for mark in marks],
+                "hovertemplate": "%{hovertext}<extra></extra>",
+            }
+        )
+    title = labels.C1_TITLE if has_popular_vote else labels.C1_TITLE_NO_PV
+    top = _TOP_PX[has_popular_vote]
+    layout: dict[str, Any] = {
+        "title": {"text": title.format(year=year)},
+        "height": _ROW_PX * max(n, 1) + top + _BOTTOM_PX,
+        "margin": {"t": top, "b": _BOTTOM_PX, "r": 56},
+        "xaxis": {
+            "range": [0, 1],
+            "tickformat": ".0%",
+            "dtick": 0.25,
+            "title": {"text": labels.C1_X_AXIS},
+        },
+        "yaxis": {
+            "tickvals": positions,
+            "ticktext": names,
+            "autorange": "reversed",
+            "showgrid": False,
+            "zeroline": False,
+        },
+        "shapes": [
+            {
+                "type": "line",
+                "xref": "x",
+                "x0": 0.5,
+                "x1": 0.5,
+                "yref": "paper",
+                "y0": 0,
+                "y1": 1,
+                "layer": "below",
+                "line": {"dash": "dash", "width": 2, "color": "var(--chart-reference)"},
+            }
+        ],
+        "annotations": [
+            {
+                "text": labels.C1_MAJORITY_LINE,
+                "xref": "x",
+                "x": 0.5,
+                "yref": "paper",
+                "y": 1,
+                "yanchor": "bottom",
+                "showarrow": False,
+                "font": {"color": "var(--text)", "size": 12},
+            }
+        ],
+    }
+    if has_popular_vote:
+        layout["legend"] = {
+            "orientation": "h",
+            "yref": "container",
+            "y": 1,
+            "yanchor": "top",
+            "x": 0,
+            "xanchor": "left",
+        }
+    return {"data": data, "layout": layout}, no_figure
+
+
+def _pv_window(coverage: dict[str, Any]) -> dict[str, Any]:
+    """The popular-vote window as :data:`NO_PV_SENTENCE` and
+    :data:`labels.C1_NO_PV_CAPTION` both write it: from ``coverage``, never a
+    literal."""
+    return {"first": coverage["pv_year_min"], "last": coverage["pv_year_max"]}
+
+
+def _c1_caption(
+    has_popular_vote: bool, no_figure: bool, year: int, coverage: dict[str, Any]
+) -> str:
+    """C1's caption (#433): what each share counts and what the line marks; in a year
+    with popular votes, which bar is which and, where a marker is drawn, what it means;
+    otherwise why no popular-vote share is drawn. ``components.chart`` adds the table
+    pointer."""
+    if has_popular_vote:
+        parts = [
+            labels.C1_BASES,
+            labels.C1_MAJORITY_NOTE,
+            labels.C1_LINE_EC_ONLY,
+            labels.C1_ROW_ORDER,
+        ]
+        if no_figure:
+            parts.append(labels.C1_NO_FIGURE_NOTE.format(label=labels.C1_NO_FIGURE))
+    else:
+        parts = [
+            labels.C1_EC_BASIS,
+            labels.C1_MAJORITY_NOTE,
+            labels.C1_NO_PV_CAPTION.format(year=year, **_pv_window(coverage)),
+        ]
+    return " ".join(parts)
 
 
 def _download(
@@ -692,16 +944,19 @@ def render(
     if not has_popular_vote:
         nation.append(
             html.P(
-                NO_PV_SENTENCE.format(
-                    year=year,
-                    first=coverage["pv_year_min"],
-                    last=coverage["pv_year_max"],
-                ),
+                NO_PV_SENTENCE.format(year=year, **_pv_window(coverage)),
                 id=NO_PV_ID,
                 className="note",
             )
         )
+    figure, no_figure = _c1_figure(summary, has_popular_vote, year)
     nation += [
+        components.chart(
+            C1_ID,
+            figure,
+            NATION_TABLE_ID,
+            _c1_caption(has_popular_vote, no_figure, year, coverage),
+        ),
         *components.table(
             summary,
             lambda r: _nation_row(r, has_popular_vote),
@@ -723,6 +978,9 @@ def render(
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             *_nav(around),
             *_panel(block, year, coverage),
+            # National results (H2, C1, T3) come before Results by state, so the chart
+            # sits near the top on a phone (owner, #433's plan gate).
+            *nation,
             html.H2("Results by state"),
             _controls(rows, chosen),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
@@ -737,7 +995,6 @@ def render(
             ),
             *labels.party_notes(shown),
             labels.glossary(STATE_GLOSSARY),
-            *nation,
             *_per_capita_section(
                 per_capita_rows,
                 chosen,

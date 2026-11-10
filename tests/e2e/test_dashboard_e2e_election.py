@@ -1,5 +1,5 @@
-"""The one-election view in a browser: its earlier and later links (#324), and an
-unserved year's not-found state (#325).
+"""The one-election view in a browser: its earlier and later links (#324), an
+unserved year's not-found state (#325), and chart C1 (#433) at the phone's width.
 
 From a filtered view, the later link opens the next served year's own view
 unfiltered, as a client-side navigation (a marker set on ``window`` before the click
@@ -12,17 +12,22 @@ times as named.
 from __future__ import annotations
 
 import re
+from typing import Any
+from urllib.parse import urlsplit
 
 import dash
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Request, expect
 
 import explore.app  # noqa: F401  (registers the pages, whose not-found states it reads)
+from explore import charts, components, labels
 from tests.e2e.dashboard_pages import (
     ELECTION_EARLIER,
     ELECTION_LATER,
     ELECTION_SUCCESS,
+    RESOURCE_ERROR,
     assert_rendered,
+    recorded,
     step_years,
 )
 
@@ -100,3 +105,218 @@ def test_the_tab_follows_the_router_to_an_unserved_year(page: Page) -> None:
     expect(page.get_by_role("heading", level=1)).to_have_text(not_found.heading)
     expect(page).to_have_title(not_found.title)
     assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
+
+
+# --- chart C1 (#433) -------------------------------------------------------------------
+
+C1 = "#c1"
+#: Each bar plotly drew, by trace: the electoral share first, then the popular vote.
+EC_BARS = f"{C1} .barlayer .trace:nth-child(1) .point path"
+PV_BARS = f"{C1} .barlayer .trace:nth-child(2) .point path"
+#: Every text C1 draws on the plot: the bars' labels and the markers' labels.
+PLOT_TEXTS = f"{C1} .barlayer .bartext, {C1} .scatterlayer .textpoint text"
+#: Long enough for a request the browser would make after a change to have gone out.
+SETTLE_MS = 500
+
+
+def names(year: int) -> list[str]:
+    return [row["candidate"] for row in recorded(f"/v1/elections/{year}")["summary"]]
+
+
+def open_c1(page: Page, year: int) -> None:
+    page.goto(f"/election/{year}")
+    assert_rendered(page, ELECTION_SUCCESS)
+    page.locator(EC_BARS).first.wait_for()
+
+
+def boxes(page: Page, selector: str) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = page.eval_on_selector_all(
+        selector,
+        """els => els.map(el => {
+            const r = el.getBoundingClientRect();
+            return {x: r.x, y: r.y, w: r.width, h: r.height,
+                    text: el.textContent};
+        })""",
+    )
+    return found
+
+
+def overlaps(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return bool(
+        a["x"] < b["x"] + b["w"]
+        and b["x"] < a["x"] + a["w"]
+        and a["y"] < b["y"] + b["h"]
+        and b["y"] < a["y"] + a["h"]
+    )
+
+
+def rgb(hex_color: str) -> str:
+    digits = hex_color.strip().lstrip("#")
+    if len(digits) == 3:
+        digits = "".join(d * 2 for d in digits)
+    r, g, b = (int(digits[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgb({r}, {g}, {b})"
+
+
+def token(page: Page, name: str) -> str:
+    value: str = page.evaluate(
+        "name => getComputedStyle(document.documentElement)"
+        ".getPropertyValue(name).trim()",
+        name,
+    )
+    return value
+
+
+def first_ec_fill(page: Page) -> str:
+    fill: str = page.locator(EC_BARS).first.evaluate("el => getComputedStyle(el).fill")
+    return fill
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c1_on_2016_is_readable_at_390_px(page: Page) -> None:
+    """AC Phone-width floor: 2016's seven candidates and both values, labeled, with no
+    sideways scroll and no label over another; the electoral bar is each row's upper
+    one, as the caption says."""
+    open_c1(page, 2016)
+    expect(page.locator(f"{C1} .chart-title")).to_have_text(
+        labels.C1_TITLE.format(year=2016)
+    )
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    ticks = [b["text"] for b in boxes(page, f"{C1} .ytick text")]
+    assert ticks == names(2016)
+    texts = boxes(page, PLOT_TEXTS)
+    shown = [b["text"] for b in texts]
+    # Seven electoral labels, two popular-vote labels, five markers.
+    assert sorted(shown) == sorted(
+        ["56.5%", "42.2%", "0.6%", "0.2%", "0.2%", "0.2%", "0.2%", "46.0%", "48.1%"]
+        + [labels.C1_NO_FIGURE] * 5
+    )
+    labeled = texts + boxes(page, f"{C1} .ytick text")
+    for i, a in enumerate(labeled):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= 390, a
+        for b in labeled[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+    expect(page.locator(f"{C1} .legend .traces")).to_have_count(2)
+    ec = boxes(page, EC_BARS)[0]
+    pv = boxes(page, PV_BARS)[0]
+    assert ec["y"] + ec["h"] <= pv["y"] + 0.5  # Trump: electoral above popular
+    # The drawing fills its box, now and after a resize (#433's responsive check).
+    for width in (390, 340):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.wait_for_function(
+            f"""() => {{
+                const svg = document.querySelector("{C1} .main-svg");
+                const box = document.querySelector("{C1} .chart-graph");
+                return svg && Math.abs(svg.getBoundingClientRect().width
+                    - box.getBoundingClientRect().width) < 1;
+            }}"""
+        )
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c1_on_1860_draws_the_electoral_share_alone(page: Page) -> None:
+    open_c1(page, 1860)
+    expect(page.locator(f"{C1} .barlayer .trace")).to_have_count(1)
+    expect(page.locator(f"{C1} .legend")).to_have_count(0)
+    first, last = _window()
+    expect(page.locator(f"{C1} figcaption")).to_contain_text(
+        labels.C1_NO_PV_CAPTION.format(first=first, last=last, year=1860)
+    )
+    assert [b["text"] for b in boxes(page, f"{C1} .ytick text")] == names(1860)
+
+
+def _window() -> tuple[int, int]:
+    coverage = recorded("/v1/elections")["meta"]["provenance"]["coverage"]
+    return coverage["pv_year_min"], coverage["pv_year_max"]
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c1_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
+    """AC Themes: drawn in the theme in effect, and redrawn in the other on a switch,
+    with no reload (a marker on ``window`` survives) and no request."""
+    open_c1(page, 2016)
+    light = first_ec_fill(page)
+    assert light == rgb(token(page, "--chart-1"))
+    line = f"{C1} .shapelayer path"
+    stroke = page.locator(line).first.evaluate("el => getComputedStyle(el).stroke")
+    assert stroke == rgb(token(page, "--chart-reference"))
+    seen: list[str] = []
+
+    def on_request(request: Request) -> None:
+        seen.append(f"{request.method} {urlsplit(request.url).path}")
+
+    page.on("request", on_request)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    expect(page.locator(EC_BARS).first).not_to_have_css("fill", light)
+    assert first_ec_fill(page) == rgb(token(page, "--chart-1"))
+    stroke = page.locator(line).first.evaluate("el => getComputedStyle(el).stroke")
+    assert stroke == rgb(token(page, "--chart-reference"))
+    page.wait_for_timeout(SETTLE_MS)
+    assert seen == [], seen
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.browser_context_args(has_touch=True)
+def test_a_touch_swipe_on_c1_scrolls_the_page(page: Page) -> None:
+    """AC Phone-width floor: touch never traps page scrolling. A swipe that starts on
+    the drawing's plot area scrolls the page. Raw touch events, which Chromium turns
+    into a scroll as a finger's would be (``Input.synthesizeScrollGesture`` scrolls
+    nothing in headless Chromium, on the chart or off it)."""
+    open_c1(page, 2016)
+    graph = page.locator(f"{C1} .chart-graph")
+    graph.scroll_into_view_if_needed()
+    box = graph.bounding_box()
+    assert box is not None
+    x, y = box["x"] + box["width"] / 2, box["y"] + min(box["height"] / 2, 300)
+    # The premise: the swipe starts on plotly's drawing, not beside it.
+    assert page.evaluate(
+        f"""() => document.elementFromPoint({x}, {y})
+            .closest("{C1} .js-plotly-plot") !== null"""
+    )
+    before = page.evaluate("scrollY")
+    session = page.context.new_cdp_session(page)
+    session.send(
+        "Input.dispatchTouchEvent",
+        {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]},
+    )
+    for step in range(1, 16):
+        session.send(
+            "Input.dispatchTouchEvent",
+            {"type": "touchMove", "touchPoints": [{"x": x, "y": y - step * 20}]},
+        )
+        page.wait_for_timeout(16)
+    session.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    page.wait_for_function(f"scrollY > {before} + 50")
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(RESOURCE_ERROR)
+def test_with_plotlyjs_blocked_t3_the_title_and_caption_render(page: Page) -> None:
+    """AC States: if plotly.js fails to load, T3 and the caption still render."""
+    page.goto("/election/2016")
+    assert_rendered(page, ELECTION_SUCCESS)
+    memo = f"window.{charts.PLOTLYJS_MEMO}"
+    page.wait_for_function(f"{memo} !== undefined")
+    assert page.evaluate(f"async () => await {memo}") is False
+    expect(page.locator(f"{C1} .chart-title")).to_have_text(
+        labels.C1_TITLE.format(year=2016)
+    )
+    expect(page.locator(f"{C1} figcaption")).to_contain_text(labels.C1_BASES)
+    expect(page.locator("#election-nation")).to_be_visible()
+    expect(page.locator(f"{C1} .js-plotly-plot")).to_have_count(0)
+
+
+def test_passing_through_a_chart_page_needs_no_marker(page: Page) -> None:
+    """D091: the guard derives this test's plotly.js bound (one fetch per document,
+    from a chart page), so stepping through two years' charts declares nothing."""
+    earlier, later = step_years()
+    page.goto(f"/election/{earlier}")
+    assert_year(page, earlier)
+    page.locator(EC_BARS).first.wait_for()
+    page.locator(ELECTION_LATER).click()
+    assert_year(page, later)
+    page.locator(EC_BARS).first.wait_for()
+    assert page.evaluate("typeof window.Plotly") == "object"

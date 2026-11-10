@@ -17,9 +17,12 @@ from playwright.sync_api import Page
 
 from tests.e2e.conftest import (
     CHUNK_ERROR_BOUND,
+    chart_page_patterns,
     chunk_problems,
+    derived_fetch_problems,
     guard_problems,
     is_chunk,
+    page_pattern,
 )
 from tests.e2e.dashboard_pages import (
     CHUNK_BARRIER,
@@ -45,6 +48,57 @@ def test_the_plotlyjs_fetch_count_must_match_exactly() -> None:
     assert guard_problems([], 1, 0, [], []) == ["plotly.js fetched 1 times; expected 0"]
     assert guard_problems([], 0, 1, [], []) == ["plotly.js fetched 0 times; expected 1"]
     assert guard_problems([], 2, 1, [], []) == ["plotly.js fetched 2 times; expected 1"]
+
+
+def test_without_a_declared_count_the_exact_check_is_skipped() -> None:
+    # #433: the derived bound below holds such a test's fetches instead.
+    assert guard_problems([], 0, None, [], []) == []
+    assert guard_problems([], 3, None, [], []) == []
+
+
+ELECTION = page_pattern("/election/<year>")
+
+
+def test_a_page_template_matches_its_paths() -> None:
+    assert ELECTION.fullmatch("/election/2016")
+    assert ELECTION.fullmatch("/election/1824/x")  # Dash's variable is greedy
+    assert not ELECTION.fullmatch("/elections")
+    assert not ELECTION.fullmatch("/election/")
+    assert not ELECTION.fullmatch("/xelection/2016")
+    assert page_pattern("/a.b/<v>").fullmatch("/a.b/1")
+    assert not page_pattern("/a.b/<v>").fullmatch("/aXb/1")
+
+
+def test_the_registry_derives_the_chart_pages() -> None:
+    from explore import charts
+
+    live = [row.page for row in charts.CHARTS.values() if not row.retired]
+    assert live  # the premise: C1 (#433)
+    assert [p.pattern for p in chart_page_patterns()] == [
+        page_pattern(page).pattern for page in live
+    ]
+    assert any(p.fullmatch("/election/2016") for p in chart_page_patterns())
+
+
+def test_the_derived_bound() -> None:
+    """#433, D091: at most one fetch per document, and only from a chart page."""
+    assert derived_fetch_problems([], [ELECTION]) == []
+    assert derived_fetch_problems([(1, "/election/2016")], [ELECTION]) == []
+    # One per document: a reload or a new document may fetch again.
+    assert (
+        derived_fetch_problems([(1, "/election/2016"), (2, "/election/1824")], [ELECTION])
+        == []
+    )
+    assert derived_fetch_problems(
+        [(1, "/election/2016"), (1, "/election/2024")], [ELECTION]
+    ) == ["plotly.js fetched twice by one document ('/election/2024')"]
+    # A page with no chart fetches nothing.
+    assert derived_fetch_problems([(1, "/elections")], [ELECTION]) == [
+        "plotly.js fetched by '/elections', which renders no chart"
+    ]
+    assert derived_fetch_problems([(1, "/election/2016")], []) == [
+        "plotly.js fetched by '/election/2016', which renders no chart"
+    ]
 
 
 def test_a_named_error_occurs_exactly_as_often_as_named() -> None:
