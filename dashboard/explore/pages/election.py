@@ -1,87 +1,45 @@
-"""One election in full (#307): the election panel (#308), the winner under each
-method, T3, national results, with chart C1 (#433), T2, results by state, and T6, every
-state's persons per electoral vote (#280).
+"""One election's overview (#307, #465): the election panel (#308), the winner under
+each method, and National results, chart C1 (#433) and T3.
 
-The panel, T2 and T3 come from one response, ``/v1/elections/{year}`` (its
-``election`` block, ``data`` and ``summary``), and T6 from a second,
-``/v1/elections/{year}/per-capita``; both are filled on a miss, in the same render, so
-the page's success marker renders only when the panel (or, where the API serves
-``election: null``, the panel's unavailable sentence) and all three tables did. The year
-is the path (``/election/<year>``, an item singular as the index is plural); it is
-validated from the ``/v1/elections`` the page prefetches before it is formatted into an
-API path (#312), so a year the dataset does not serve is not found, at the index (404)
-and in the page.
+Since #465 the year's results by state (T2) and people per electoral vote (T6) are
+pages of their own, ``/election/<year>/states`` and ``/election/<year>/per-capita``
+(``pages/election_states.py``, ``pages/election_per_capita.py``); what the three pages
+share is in :mod:`explore.election_view`. The overview reads one response,
+``/v1/elections/{year}`` (its ``election`` block, ``data`` and ``summary``), filled on
+a miss, so opening it makes one request. The year is the path (``/election/<year>``,
+an item singular as the index is plural); it is validated from the ``/v1/elections``
+the page prefetches before it is formatted into an API path (#312), so a year the
+dataset does not serve is not found, at the index (404) and in the page.
 
-It follows the elections index's conventions (``pages/elections.py``): labels from
-:mod:`explore.labels`, filters only in the query string through the page's one parser,
-a filter change written to a page-local ``dcc.Location`` and re-rendered from the
-cache, the provenance footer from the response's own ``meta.provenance``, and every
-table through :func:`explore.components.table`, which offers its rows as a CSV (#309)
-built from the same list as its body. T2's
-filters are the API's own query names, ``state`` (a USPS code) and ``candidate`` (a
-slug), and the field names ``pv_status`` and ``electoral_count_status``. T3 is never
-filtered: it is the year's national result, as the API's ``summary`` is. T6 is narrowed
-by the same ``state`` filter, as T2 resolves it, and by nothing else. The panel is
-never filtered either.
+It reads no filter, so its ``og:url`` names no query. A link that carries one of T2's
+filters (shared before #465) is redirected by the index to the states page with them
+(``moved=``, app.py). It follows the elections index's conventions
+(``pages/elections.py``): labels from :mod:`explore.labels`, the provenance footer
+from the response's own ``meta.provenance``, and every table through
+:func:`explore.components.table`, which offers its rows as a CSV (#309) built from the
+same list as its body. T3 is never filtered: it is the year's national result, as the
+API's ``summary`` is. The panel is never filtered either.
 """
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import Any
 
 import dash
-from dash import Input, Output, State, callback, dcc, html, no_update
+from dash import html
 
-from explore import api, charts, components, export, labels, query
+from explore import api, charts, components, election_view, export, labels, query
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
-#: The wrapper every successful render carries, whatever the filters leave in T2.
+#: The wrapper every successful render carries.
 PAGE_ID = "election"
 #: The wrapper of the not-found state: a year the dataset does not serve.
 NOT_FOUND_ID = "election-not-found"
-STATES_TABLE_ID = "election-states"
 NATION_TABLE_ID = "election-nation"
 NO_PV_ID = "election-no-pv"
-PER_CAPITA_TABLE_ID = "election-per-capita"
 PANEL_ID = "election-panel"
 #: The panel's place when the API serves ``election: null`` (a build gap).
 PANEL_UNAVAILABLE_ID = "election-panel-unavailable"
-URL_ID = "election-url"
-STATE_ID = "election-state"
-CANDIDATE_ID = "election-candidate"
-PV_STATUS_ID = "election-pv-status"
-COUNT_STATUS_ID = "election-count-status"
-
-#: T2's columns, in display order, by public field name.
-STATE_FIELDS = (
-    "state",
-    "candidate",
-    "nominating_party",
-    "state_electoral_votes",
-    "electoral_votes",
-    "electoral_votes_counted",
-    "electoral_count_status",
-    "pv_status",
-    "popular_votes",
-)
-#: The fields T2's glossary names: its columns, the reason its count cell shows, and the
-#: party note its Party notes list shows (#389).
-STATE_GLOSSARY = (
-    *STATE_FIELDS,
-    "electoral_count_status_reason",
-    "nominating_party_note",
-)
-#: What T2's CSV adds after its columns (#309): the reason its count cell shows, the
-#: party note and the party's per-row source (#389), and the keys its filters and its
-#: year are named by.
-STATE_EXTRA = (
-    "electoral_count_status_reason",
-    "nominating_party_note",
-    "nominating_party_source",
-    "state_usps",
-    "candidate_slug",
-    "year",
-)
 
 #: T3's columns, in display order, by public field name.
 NATION_FIELDS = (
@@ -128,24 +86,6 @@ PANEL_FIELDS = (
 #: The panel's sentence when the API serves no ``election`` block for the year.
 PANEL_UNAVAILABLE = "The comparison across methods is not available for this year."
 
-#: T6's columns, in display order, by public field name (#280).
-PER_CAPITA_FIELDS = ("state", *labels.PER_CAPITA_FIELDS)
-#: What T6's CSV adds after its columns (#309): the state's key and the year.
-PER_CAPITA_EXTRA = ("state_usps", "year")
-
-#: Which of the page's filters T6 follows: the state, and not the others.
-PER_CAPITA_FILTER_NOTE = (
-    "Only the state filter applies to this table; the candidate and status filters do "
-    "not."
-)
-
-#: The query keys this page reads: the API's own filter names for a state and a
-#: candidate, and the field names of the two closed vocabularies.
-STATE = "state"
-CANDIDATE = "candidate"
-PV_STATUS = "pv_status"
-COUNT_STATUS = "electoral_count_status"
-
 #: Chart C1 (#433): each candidate's electoral share beside their popular-vote share,
 #: with the majority line, beside T3.
 C1_ID = "C1"
@@ -156,119 +96,24 @@ NO_PV_SENTENCE = (
     "cover {first}–{last}."
 )
 
-#: The not-found state's heading and sentence (#325). The heading also leads the
-#: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about
-#: the link: a real election outside the dataset (1820) is not found too. The raw path
-#: value is never echoed.
-NOT_FOUND_HEADING = "Election not found"
-NOT_FOUND_SENTENCE = "This dataset has no presidential election for that year."
-NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
-
-#: The lede, then, on a successful render only, the sentence naming the filters it
-#: offers (#324, as the candidate history does since #331): the not-found and degraded
-#: states have no filters.
-LEDE = (
-    "Who led under the Electoral College, the popular vote and the hybrid; the "
-    "national result; every state's electoral votes for each candidate, with the "
-    "popular vote where this dataset has it; and how many people each state's "
-    "electoral votes stood for."
+#: The not-found state (#325), shared by the three election pages (#465).
+NOT_FOUND = api.NotFound(
+    labels.ELECTION_NOT_FOUND_HEADING, labels.ELECTION_NOT_FOUND_SENTENCE
 )
-FILTER_SENTENCE = "Narrow the state results by state, candidate or status."
+
+#: The lede (ba spec, approved at #465's plan gate, 2026-11-10): what the overview
+#: shows, in page order. It has no filter sentence: the overview has no filters.
+LEDE = (
+    "Who led under the Electoral College, the popular vote and the hybrid, and the "
+    "national result for each candidate."
+)
 
 #: A served year's heading, the browser tab's title before the site title, and the
 #: ``H1`` that ``render`` builds on a successful render (#464).
 HEADING = "The {year} election"
 
-#: The links to the nearest earlier and later year the index serves (#324), and the
-#: accessible name of the landmark holding them. "Earlier" and "later" are about the
-#: years this dataset serves, never a claim that no election fell between.
-NAV_ID = "election-nav"
-EARLIER_ID = "election-earlier"
-LATER_ID = "election-later"
-EARLIER_LINK = "Earlier: the {year} election"
-LATER_LINK = "Later: the {year} election"
-ELECTION_NAV_LABEL = "Earlier and later elections in this dataset"
-#: The bar's classes (#464), which ``style.css`` draws: the box, and which side each
-#: link holds. Classes rather than ids, so #465's subpages take the treatment as is.
-NEIGHBOR_NAV_CLASS = "neighbor-nav"
-NEIGHBOR_EARLIER_CLASS = "neighbor-earlier"
-NEIGHBOR_LATER_CLASS = "neighbor-later"
 
-
-def parse_filters(params: Any) -> list[tuple[str, str]]:
-    """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
-
-    Syntactic and total, and it reads no API: Dash's index runs it to build ``og:url``.
-    Keeps ``state`` only as a USPS code, ``candidate`` only as a slug, and the two
-    statuses only as one of their closed values; a key repeated with differing values
-    is dropped, and so is a key it does not know. Never emits ``year``, the path
-    variable. Whether a state or candidate is in this year's results is the layout's
-    question (:func:`filters`).
-    """
-    if not isinstance(params, dict):
-        return []
-    kept: dict[str, str] = {}
-    state = query.single(params.get(STATE))
-    if state is not None and query.USPS_RE.fullmatch(state):
-        kept[STATE] = state
-    candidate = query.single(params.get(CANDIDATE))
-    if candidate is not None and query.is_slug(candidate):
-        kept[CANDIDATE] = candidate
-    pv_status = query.single(params.get(PV_STATUS))
-    if pv_status in labels.PV_STATUS:
-        kept[PV_STATUS] = pv_status
-    count_status = query.single(params.get(COUNT_STATUS))
-    if count_status in labels.COUNT_STATUS:
-        kept[COUNT_STATUS] = count_status
-    return sorted(kept.items())
-
-
-def _year_rows(body: Any) -> list[Any]:
-    data = body.get("data") if isinstance(body, dict) else None
-    return data if isinstance(data, list) else []
-
-
-def _row_year(row: Any) -> int | None:
-    return query.checked_year(row.get("year")) if isinstance(row, dict) else None
-
-
-def served_year(path_vars: dict[str, Any], body: Any) -> bool:
-    """Whether ``path_vars["year"]`` is a year ``/v1/elections`` serves.
-
-    Pure and total: four ASCII digits, equal to a row year of the index (each checked
-    by :func:`explore.query.checked_year`), never a literal. A malformed body serves
-    nothing.
-    """
-    year = path_vars.get("year")
-    if not isinstance(year, str) or not query.YEAR_RE.fullmatch(year):
-        return False
-    return any(_row_year(row) == int(year) for row in _year_rows(body))
-
-
-VALIDATE: api.Validate = (api.ELECTIONS_PATH, served_year)
-
-
-class Neighbours(NamedTuple):
-    """The nearest year before and after one that the index serves; ``None`` where
-    there is none."""
-
-    earlier: int | None
-    later: int | None
-
-
-def neighbours(body: Any, year: int) -> Neighbours:
-    """The served years either side of ``year`` in a ``/v1/elections`` body (#324).
-
-    Pure and total: read from the index's rows (each checked by
-    :func:`explore.query.checked_year`, a malformed row skipped as :func:`served_year`
-    skips it), never computed from ``year``, so the ends and any gap in the served
-    years are right.
-    """
-    years = {y for y in map(_row_year, _year_rows(body)) if y is not None}
-    return Neighbours(
-        earlier=max((y for y in years if y < year), default=None),
-        later=min((y for y in years if y > year), default=None),
-    )
+VALIDATE: api.Validate = (api.ELECTIONS_PATH, election_view.served_year)
 
 
 def title(year: Any = None, **_vars: Any) -> str:
@@ -282,190 +127,29 @@ def title(year: Any = None, **_vars: Any) -> str:
 
 dash.register_page(
     __name__,
-    path_template="/election/<year>",
+    path_template=election_view.template(election_view.OVERVIEW),
     title=title,
     # No years: the index HTML never waits on the API, so this cannot read the span.
-    description="One US presidential election: results by state and nationally.",
+    description=(
+        "One US presidential election: who led under the Electoral College, the "
+        "popular vote and the hybrid, and the national result for each candidate."
+    ),
     prefetch=(api.ELECTIONS_PATH,),
-    on_miss=("/v1/elections/{year}", "/v1/elections/{year}/per-capita"),
+    on_miss=("/v1/elections/{year}",),
     success=PAGE_ID,
     validate=VALIDATE,
     not_found=NOT_FOUND,
-    query=parse_filters,
+    # The query keys that moved to the states page (#465): a document request
+    # carrying one is redirected there by the index (302), with the states page's
+    # parser normalizing the query.
+    moved=(
+        election_view.STATES_KEYS,
+        election_view.template(election_view.STATES),
+    ),
     # The site navigation link this page marks (#448):
     # a one-election view marks its index, Elections.
     nav="elections",
 )
-
-
-class Filters(NamedTuple):
-    """The filters a render applies; ``None`` is "all".
-
-    A ``NamedTuple``, not a dataclass: Dash executes a page module before it is in
-    ``sys.modules``, which ``dataclass`` needs.
-    """
-
-    state: str | None
-    candidate: str | None
-    pv_status: str | None
-    count_status: str | None
-
-
-def filters(pairs: list[tuple[str, str]], rows: list[dict[str, Any]]) -> Filters:
-    """The filters to apply to this year's rows.
-
-    Per parameter, as ``og:url`` is: a state or candidate this year's results do not
-    name falls back to "all" (``og:url`` keeps it, as the index keeps an out-of-span
-    year). A status is a closed value, so it is kept even when no row has it: an empty
-    result is the honest answer.
-    """
-    given = dict(pairs)
-    state = given.get(STATE)
-    candidate = given.get(CANDIDATE)
-    return Filters(
-        state=state if any(r["state_usps"] == state for r in rows) else None,
-        candidate=(
-            candidate if any(r["candidate_slug"] == candidate for r in rows) else None
-        ),
-        pv_status=given.get(PV_STATUS),
-        count_status=given.get(COUNT_STATUS),
-    )
-
-
-def select(rows: list[dict[str, Any]], chosen: Filters) -> list[dict[str, Any]]:
-    """The rows T2 shows: pure, and separate from building the table."""
-    return [
-        r
-        for r in rows
-        if chosen.state in (None, r["state_usps"])
-        and chosen.candidate in (None, r["candidate_slug"])
-        and chosen.pv_status in (None, r["pv_status"])
-        and chosen.count_status in (None, r["electoral_count_status"])
-    ]
-
-
-def search_for(state: Any, candidate: Any, pv_status: Any, count_status: Any) -> str:
-    """The query string for the controls' values, in the normal form ``og:url`` uses
-    (``""`` or ``?…``). A cleared control is "all" and is omitted."""
-    params = {
-        key: value
-        for key, value in (
-            (STATE, state),
-            (CANDIDATE, candidate),
-            (PV_STATUS, pv_status),
-            (COUNT_STATUS, count_status),
-        )
-        if isinstance(value, str) and value
-    }
-    return query.encode_search(parse_filters(params))
-
-
-def applied_search(chosen: Filters) -> str:
-    """The filters a render applied, in the normal form :func:`search_for` writes:
-    already checked, so they are encoded without the parser."""
-    keys = (STATE, CANDIDATE, PV_STATUS, COUNT_STATUS)
-    return query.encode_search(
-        (key, value) for key, value in zip(keys, chosen, strict=True) if value
-    )
-
-
-@callback(
-    Output(URL_ID, "search"),
-    Input(STATE_ID, "value"),
-    Input(CANDIDATE_ID, "value"),
-    Input(PV_STATUS_ID, "value"),
-    Input(COUNT_STATUS_ID, "value"),
-    State(URL_ID, "search"),
-    prevent_initial_call=True,
-)
-def on_filter_change(
-    state: Any, candidate: Any, pv_status: Any, count_status: Any, current: Any
-) -> Any:
-    """A filter change becomes a URL change; the router re-renders from the cache.
-
-    Reads no API. An unchanged search is left alone.
-    """
-    search = search_for(state, candidate, pv_status, count_status)
-    return no_update if search == (current or "") else search
-
-
-def _options(pairs: dict[str, str]) -> list[dict[str, str]]:
-    return [
-        {"label": label, "value": value}
-        for value, label in sorted(pairs.items(), key=lambda kv: kv[1])
-    ]
-
-
-def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
-    states = {r["state_usps"]: r["state"] for r in rows}
-    candidates = {r["candidate_slug"]: r["candidate"] for r in rows}
-    dropdowns = (
-        (STATE_ID, labels.LABELS[STATE], _options(states), chosen.state, "All states"),
-        (
-            CANDIDATE_ID,
-            labels.LABELS[CANDIDATE],
-            _options(candidates),
-            chosen.candidate,
-            "All candidates",
-        ),
-        (
-            PV_STATUS_ID,
-            labels.LABELS["pv_status"],
-            [{"label": v, "value": k} for k, v in labels.PV_STATUS.items()],
-            chosen.pv_status,
-            "Any",
-        ),
-        (
-            COUNT_STATUS_ID,
-            labels.LABELS["electoral_count_status"],
-            [{"label": v[0], "value": k} for k, v in labels.COUNT_STATUS.items()],
-            chosen.count_status,
-            "Any",
-        ),
-    )
-    return html.Div(
-        [
-            html.Div(
-                [
-                    html.Label(label, htmlFor=control_id, className="label"),
-                    dcc.Dropdown(
-                        id=control_id,
-                        options=options,
-                        value=value,
-                        placeholder=placeholder,
-                        clearable=True,
-                    ),
-                ],
-                className="filter",
-            )
-            for control_id, label, options, value, placeholder in dropdowns
-        ],
-        className="filters",
-    )
-
-
-def _state_row(row: dict[str, Any], year: int, coverage: dict[str, Any]) -> html.Tr:
-    return html.Tr(
-        [
-            components.state_cell(row),
-            components.candidate_cell(row),
-            labels.nominating_party_cell(row),
-            labels.cell(labels.number(row["state_electoral_votes"])),
-            labels.cell(labels.number(row["electoral_votes"])),
-            labels.cell(labels.number(row["electoral_votes_counted"])),
-            labels.cell(
-                labels.count_status(
-                    row["electoral_count_status"], row["electoral_count_status_reason"]
-                )
-            ),
-            labels.cell(labels.pv_status(row["pv_status"])),
-            labels.cell(
-                labels.popular_votes(
-                    row["popular_votes"], row["pv_status"], year, coverage
-                )
-            ),
-        ]
-    )
 
 
 def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
@@ -773,37 +457,17 @@ def _c1_caption(
     return " ".join(parts)
 
 
-def _download(
-    year: int, table: str, name: str, body: dict[str, Any], chosen: Filters
-) -> export.Download:
-    """A table's download: the file named for the view and the table, the provenance of
-    the response its rows come from, and the view's URL with the filters applied."""
+def _download(year: int, body: dict[str, Any]) -> export.Download:
+    """T3's download: the file named for the view and the table, the provenance of the
+    response its rows come from, and the overview's URL, which carries no filter."""
     return export.Download(
-        filename=f"election-{year}-{table}.csv",
-        name=name,
+        filename=f"election-{year}-national.csv",
+        name="the national results",
         provenance=body["meta"]["provenance"],
         view_url=export.view_url(
-            CANONICAL_HOST, f"/election/{year}", applied_search(chosen)
+            CANONICAL_HOST, election_view.path(year, election_view.OVERVIEW), ""
         ),
     )
-
-
-def _rows(value: Any, year: int, name: str, path: str | None = None) -> list[Any]:
-    """A non-empty list of the year's rows from ``path`` (``/v1/elections/{year}`` by
-    default), each naming that year, or ``TypeError``.
-
-    A served year always has state rows, and the API treats a year with no national
-    summary as a build regression, so an empty list is a malformed body: rendering it
-    would show the success marker over an empty table. Each row's year is checked
-    against the validated one, so no row of another year (or of no year) is shown,
-    and the cells read the validated year rather than the row's.
-    """
-    path = path or f"/v1/elections/{year}"
-    if not isinstance(value, list) or not value:
-        raise TypeError(f"{path} carries no list of {name}")
-    if any(_row_year(row) != year for row in value):
-        raise TypeError(f"{path} carries {name} of another year")
-    return value
 
 
 def _election(value: Any, year: int) -> dict[str, Any] | None:
@@ -812,12 +476,12 @@ def _election(value: Any, year: int) -> dict[str, Any] | None:
 
     The API serves ``election: null`` on a build gap while the rows beside it stay
     correct, so a null is the panel's own unavailable state, never the page's. Any
-    other shape, or a block naming another year (checked as :func:`_rows` checks a
-    row's), is a malformed body.
+    other shape, or a block naming another year (checked as
+    :func:`explore.election_view.rows` checks a row's), is a malformed body.
     """
     if value is None:
         return None
-    if not isinstance(value, dict) or _row_year(value) != year:
+    if not isinstance(value, dict) or election_view.row_year(value) != year:
         raise TypeError(f"/v1/elections/{year} carries no election block of that year")
     return value
 
@@ -886,84 +550,16 @@ def _panel(block: dict[str, Any] | None, year: int, coverage: Any) -> list[Any]:
     ]
 
 
-def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
-    """T6's rows sorted by state name, or ``TypeError``.
-
-    As :func:`_rows` reads the year's rows: a non-empty list, each naming the validated
-    year, so an empty list or a row of another year is a malformed body. Each must name
-    a USPS code too, which the state filter and the state link read. A null cell is not
-    malformed: :func:`explore.labels.per_capita_cells` says why it is null.
-    """
-    path = f"/v1/elections/{year}/per-capita"
-    rows = _rows(value, year, "rows", path)
-    for row in rows:
-        usps = row.get("state_usps")
-        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
-            raise TypeError(f"{path} carries a bad state code")
-    return sorted(rows, key=lambda r: str(r["state"]))
-
-
-def _per_capita_section(
-    rows: list[dict[str, Any]], chosen: Filters, download: export.Download
-) -> list[Any]:
-    """T6: every state's persons per electoral vote, narrowed by T2's resolved state."""
-    shown = [r for r in rows if chosen.state in (None, r["state_usps"])]
-    return [
-        html.H2("People per electoral vote"),
-        html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-        *components.table(
-            shown,
-            lambda r: html.Tr([components.state_cell(r), *labels.per_capita_cells(r)]),
-            PER_CAPITA_FIELDS,
-            PER_CAPITA_TABLE_ID,
-            download,
-            extra=PER_CAPITA_EXTRA,
-            notes=(
-                PER_CAPITA_FILTER_NOTE,
-                labels.GOVERNING_CENSUS_NOTE,
-                labels.BOUNDARY_NOTE,
-            ),
-        ),
-        labels.glossary(PER_CAPITA_FIELDS),
-    ]
-
-
-def _nav(around: Neighbours) -> list[Any]:
-    """The links to the earlier and later served years, unfiltered (owner, #324's plan
-    gate); a side with no year has no link, and with neither there is no landmark. The
-    bar's classes put the earlier link at the left and the later at the right, alone or
-    together (#464)."""
-    links = [
-        dcc.Link(
-            text.format(year=year),
-            href=f"/election/{year}",
-            id=link_id,
-            className=side,
-        )
-        for year, text, link_id, side in (
-            (around.earlier, EARLIER_LINK, EARLIER_ID, NEIGHBOR_EARLIER_CLASS),
-            (around.later, LATER_LINK, LATER_ID, NEIGHBOR_LATER_CLASS),
-        )
-        if year is not None
-    ]
-    if not links:
-        return []
-    # Dash takes ``aria-*`` as keyword arguments its stubs do not name.
-    aria: dict[str, Any] = {"aria-label": ELECTION_NAV_LABEL}
-    return [html.Nav(links, id=NAV_ID, className=NEIGHBOR_NAV_CLASS, **aria)]
-
-
 def render(
     body: dict[str, Any],
     index_row: dict[str, Any],
-    pairs: list[tuple[str, str]],
-    per_capita: dict[str, Any],
-    around: Neighbours,
+    around: election_view.Neighbours,
 ) -> html.Div:
-    """The page body for one ``/v1/elections/{year}`` response, the year's row of
-    ``/v1/elections`` and its ``/per-capita`` response (all read through the same
-    view), this page's filter pairs and the year's served neighbours. The response's
-    ``election`` key is required, though its value may be null (:func:`_election`).
+    """The overview for one ``/v1/elections/{year}`` response, the year's row of
+    ``/v1/elections`` (read through the same view) and the year's served neighbours.
+    The response's ``election`` key is required, though its value may be null
+    (:func:`_election`). Its state rows are checked though not shown, so a malformed
+    body degrades here as on the states page.
 
     It builds the page's heading and lede too, after the earlier and later links, so
     the links come before the ``H1`` (#464); :func:`layout` builds them only for the
@@ -973,16 +569,14 @@ def render(
     # The popular-vote window, checked once before any cell reads it, whatever the
     # ``election`` block holds: two years, the first no later than the last (#308).
     query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
-    year = _row_year(index_row)
+    year = election_view.row_year(index_row)
     if year is None:
         raise TypeError("the index row names no year")
-    rows = _rows(body["data"], year, "state rows")
-    summary = _rows(body["summary"], year, "candidates")
-    per_capita_rows = _per_capita_rows(per_capita["data"], year)
+    source = f"/v1/elections/{year}"
+    election_view.rows(body["data"], year, "state rows", source)
+    summary = election_view.rows(body["summary"], year, "candidates", source)
     block = _election(body["election"], year)
     has_popular_vote = index_row["has_popular_vote"] is True
-    chosen = filters(pairs, rows)
-    shown = select(rows, chosen)
     nation: list[Any] = [html.H2("National results")]
     if not has_popular_vote:
         nation.append(
@@ -1007,7 +601,7 @@ def render(
             lambda r: _nation_row(r, by_row[id(r)]),
             NATION_FIELDS,
             NATION_TABLE_ID,
-            _download(year, "national", "the national results", body, chosen),
+            _download(year, body),
             extra=NATION_EXTRA,
             notes=(
                 labels.PARTY_NOTE,
@@ -1020,87 +614,38 @@ def render(
     ]
     return html.Div(
         [
-            dcc.Location(id=URL_ID, refresh="callback-nav"),
-            *_nav(around),
+            *election_view.neighbor_nav(around, election_view.OVERVIEW),
             html.H1(HEADING.format(year=year)),
-            html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
+            html.P(LEDE, className="lede"),
+            election_view.section_nav(year, election_view.OVERVIEW),
             *_panel(block, year, coverage),
-            # National results (H2, C1, T3) come before Results by state, so the chart
-            # sits near the top on a phone (owner, #433's plan gate).
             *nation,
-            html.H2("Results by state"),
-            _controls(rows, chosen),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                lambda r: _state_row(r, year, coverage),
-                STATE_FIELDS,
-                STATES_TABLE_ID,
-                _download(year, "by-state", "the results by state", body, chosen),
-                extra=STATE_EXTRA,
-                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
-            ),
-            *labels.party_notes(shown),
-            labels.glossary(STATE_GLOSSARY),
-            *_per_capita_section(
-                per_capita_rows,
-                chosen,
-                _download(
-                    year,
-                    "per-capita",
-                    "people per electoral vote",
-                    per_capita,
-                    chosen,
-                ),
-            ),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
     )
 
 
-def index_row(index: dict[str, Any], year: str) -> dict[str, Any]:
-    """The year's row of ``/v1/elections``; ``KeyError`` if it has none."""
-    for row in _year_rows(index):
-        if _row_year(row) == int(year):
-            return dict(row)
-    raise KeyError(year)
-
-
-def not_found() -> html.Div:
-    """A year the dataset does not serve: said plainly, with the way back, under
-    :data:`NOT_FOUND_HEADING` and no lede (#325)."""
-    return html.Div(
-        [
-            html.P(NOT_FOUND_SENTENCE),
-            dcc.Link("Browse every election in the dataset", href="/elections"),
-        ],
-        id=NOT_FOUND_ID,
-    )
-
-
-def layout(year: Any = None, **params: Any) -> html.Div:
-    """The one-election view. On success, :func:`render`'s body is the whole page: it
-    holds the links, then the heading and the lede with its filter sentence (#464).
-    The not-found and degraded states get their heading here, heading first, and the
-    degraded state its lede."""
+def layout(year: Any = None, **_params: Any) -> html.Div:
+    """The overview. On success, :func:`render`'s body is the whole page: it holds the
+    links, then the heading, the lede and the section links (#464, #465). The
+    not-found and degraded states get their heading here, heading first, and the
+    degraded state its lede. Query keys are ignored: the overview reads no filter."""
     heading = "Election"
     lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
             # Validated from the prefetched index before it is formatted (#312).
             if not api.accepted(view.get, VALIDATE, {"year": year}):
-                heading, lede, content = NOT_FOUND_HEADING, None, not_found()
+                heading, lede = labels.ELECTION_NOT_FOUND_HEADING, None
+                content = election_view.not_found(NOT_FOUND_ID)
             else:
                 body = view.get(f"/v1/elections/{year}")
-                per_capita = view.get(f"/v1/elections/{year}/per-capita")
                 index = view.get(api.ELECTIONS_PATH)
                 return render(
                     body,
-                    index_row(index, year),
-                    parse_filters(params),
-                    per_capita,
-                    neighbours(index, int(year)),
+                    election_view.index_row(index, year),
+                    election_view.neighbours(index, int(year)),
                 )
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()

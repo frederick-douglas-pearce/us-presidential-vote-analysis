@@ -276,6 +276,42 @@ NAV_API_DOCS_TITLE = (
     "How to read this dataset from your own software. Opens the API's documentation."
 )
 
+#: The election pages' shared wording (#465): each election has an overview and two
+#: subpages (``explore.election_view``), and these strings are the same on all three,
+#: so they live here rather than in one page module. None is a ``LABELS`` key.
+#:
+#: The not-found state's heading and sentence (#325), shared by the three pages since
+#: #465 (ba spec, approved at #465's plan gate, 2026-11-10): what is not found is the
+#: year, so a subpage says the same. The heading also leads the page's title on a
+#: not-found link (``api.NotFound.title``, D083). "Not found" is about the link: a real
+#: election outside the dataset (1820) is not found too. The raw path value is never
+#: echoed. The link under them leads back to the elections index.
+ELECTION_NOT_FOUND_HEADING = "Election not found"
+ELECTION_NOT_FOUND_SENTENCE = "This dataset has no presidential election for that year."
+ELECTION_NOT_FOUND_LINK = "Browse every election in the dataset"
+
+#: The links to the nearest earlier and later year the index serves (#324), on every
+#: election page since #465, and the accessible names of the landmark holding them:
+#: :data:`ELECTION_NAV_LABEL` on the overview, and on a subpage
+#: :data:`ELECTION_NAV_SECTION_LABEL` (filled with the subpage's section link text),
+#: which says the links stay on the same table (ba spec, approved at #465's plan
+#: gate, 2026-11-10). "Earlier" and "later" are about the years this dataset serves,
+#: never a claim that no election fell between.
+EARLIER_LINK = "Earlier: the {year} election"
+LATER_LINK = "Later: the {year} election"
+ELECTION_NAV_LABEL = "Earlier and later elections in this dataset"
+ELECTION_NAV_SECTION_LABEL = "{section} for earlier and later elections in this dataset"
+
+#: The links between an election's three pages (#465; ba spec, approved at #465's plan
+#: gate, 2026-11-10), in page order, and their landmark's accessible name, read by
+#: assistive technology and not shown. A screen reader adds "navigation", so the name
+#: does not say it; it differs from :data:`SITE_NAV_LABEL` and the earlier and later
+#: links' names. "Overview", never "Summary": the API serves T3's data as ``summary``.
+ELECTION_SECTIONS_LABEL = "Pages for this election"
+SECTION_OVERVIEW = "Overview"
+SECTION_STATES = "Results by state"
+SECTION_PER_CAPITA = "People per electoral vote"
+
 #: The link that ends every chart's caption (#432; ba spec, approved at #432's plan
 #: gate, 2026-11-06), to the chart's companion table on the same page.
 #: ``components.chart`` writes the closing period as plain text after the link. It

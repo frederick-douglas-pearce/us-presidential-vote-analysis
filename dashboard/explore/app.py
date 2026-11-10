@@ -76,7 +76,7 @@ import html as html_escaping
 import json
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote, unquote_plus
@@ -124,13 +124,16 @@ def canonical_url(path: str) -> str:
 @dataclass(frozen=True)
 class Resolution:
     """What a request path is: its canonical URL and ``og:url``, or neither (a 404);
-    its title and description; and the page whose card it shows (#325)."""
+    its title and description; the page whose card it shows (#325); and the path
+    variables the page's ``validate`` accepted, ``None`` unless it did (#465: only an
+    accepted value may build a redirect)."""
 
     canonical: str | None
     og_url: str | None
     title: str
     description: str
     page: Mapping[str, Any]
+    path_vars: Mapping[str, str] | None = None
 
     @property
     def found(self) -> bool:
@@ -296,7 +299,69 @@ def resolve(path: str, query: str, snapshot: api.Snapshot | None) -> Resolution:
         title=page_text(page, "title", shown_vars),
         description=page_text(page, "description", shown_vars),
         page=page,
+        path_vars=shown_vars,
     )
+
+
+@dataclass(frozen=True)
+class Move:
+    """Query keys a page no longer reads and the page that reads them now (#465): the
+    target's path template, over the same path variables, and its ``query=`` parser,
+    which normalizes the query the redirect carries."""
+
+    keys: tuple[str, ...]
+    template: str
+    parser: Callable[[Any], list[tuple[str, str]]]
+
+
+def page_move(page: Mapping[str, Any], registry: Mapping[str, Any]) -> Move | None:
+    """A page's ``moved=(keys, target_template)`` (#465) as a :class:`Move`, or ``None``
+    for a page without one; ``RuntimeError`` unless the target is a registered page
+    over the same path variables, with a ``query=`` parser and the same ``validate``,
+    so a redirect never leads to a page that would refuse the value just accepted."""
+    moved = page.get("moved")
+    if moved is None:
+        return None
+    keys, template = moved
+    target = next(
+        (p for p in registry.values() if p.get("path_template") == template), None
+    )
+    own = page.get("path_template") or ""
+    if target is None:
+        raise RuntimeError(f"{page['module']} moves keys to unregistered {template!r}")
+    if sorted(_VARIABLE_RE.findall(template)) != sorted(_VARIABLE_RE.findall(own)):
+        raise RuntimeError(f"{page['module']} moves keys across path variables")
+    if target.get("query") is None:
+        raise RuntimeError(f"{target['module']} has no query= for the keys it takes")
+    if target.get("validate") != page.get("validate"):
+        raise RuntimeError(f"{target['module']} validates otherwise than {own!r}")
+    if not keys or not all(isinstance(key, str) and key for key in keys):
+        raise RuntimeError(f"{page['module']} moves no keys")
+    return Move(tuple(keys), template, target["query"])
+
+
+def moved_location(resolution: Resolution, move: Move | None, query: str) -> str | None:
+    """Where a document request for a page whose filters moved is redirected (#465),
+    or ``None`` to serve the page.
+
+    Only when the page's ``validate`` accepted the path variables against the snapshot
+    in memory (never an unchecked or refused value), and the query, parsed as the
+    router parses it, names any of the moved keys (a blank value counts; a value the
+    target's parser drops still redirects, to no query). The ``Location`` is relative
+    and built only from the accepted variables, each percent-quoted, and the target
+    parser's output, never from the raw path or query, so it cannot name another
+    host or carry a key the target does not read (D081: never the path variable).
+    """
+    if move is None or resolution.path_vars is None or not query:
+        return None
+    params = _parse_query_string(f"?{query}")
+    if not any(key in params for key in move.keys):
+        return None
+    path_vars = resolution.path_vars
+    path = _VARIABLE_RE.sub(
+        lambda m: quote(path_vars[m.group(1)], safe=""), move.template
+    )
+    return path + query_syntax.encode_search(move.parser(params))
 
 
 def card_tags(resolution: Resolution, root: str) -> list[dict[str, str]]:
@@ -555,11 +620,16 @@ class ExploreDash(dash.Dash):
         # the tags below come from the same answer even if the refresher swaps
         # meanwhile. The cards are built here, never by Dash's _page_meta_tags, which
         # would call the registry's title and so read the snapshot again (#325).
-        resolution = resolve(
-            flask.request.path,
-            flask.request.query_string.decode("utf-8", "replace"),
-            api.CLIENT.snapshot,
+        query = flask.request.query_string.decode("utf-8", "replace")
+        resolution = resolve(flask.request.path, query, api.CLIENT.snapshot)
+        # A filter that moved to another page (#465): a 302, never a 301, which
+        # browsers cache with no undo; the routing callback never reaches the index,
+        # so a client-side route to the page renders it unfiltered.
+        target = moved_location(
+            resolution, MOVES.get(resolution.page.get("module", "")), query
         )
+        if target is not None:
+            return flask.redirect(target, code=302)
         cards = card_tags(resolution, flask.request.url_root)
         if resolution.found:
             own = [
@@ -647,6 +717,14 @@ app.layout = html.Div(
         dcc.Store(id=components.THEME_STORE_ID, storage_type="memory"),
     ]
 )
+
+#: Each page's moved filters (#465), by module: built once every page is registered, and
+#: checked as it is built (:func:`page_move`), so a bad ``moved=`` fails the import.
+MOVES: dict[str, Move] = {
+    module: move
+    for module, page in dash.page_registry.items()
+    if (move := page_move(page, dash.page_registry)) is not None
+}
 
 #: The site navigation's current-page table (#448): one entry per registered page, in
 #: the registry's order, which is the order Dash's router tries them in.

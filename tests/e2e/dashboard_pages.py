@@ -41,6 +41,12 @@ FIELDS = ("year", "candidate_count", "has_popular_vote")
 ELECTION_SUCCESS = "#election"
 ELECTION_EARLIER = "#election-earlier"
 ELECTION_LATER = "#election-later"
+#: The election overview's two subpages (#465), their success markers and not-found
+#: states, and the section links on all three.
+STATES_SUCCESS = "#election-states-page"
+PER_CAPITA_SUCCESS = "#election-per-capita-page"
+STATES_NOT_FOUND = "#election-states-not-found"
+SECTIONS = "#election-sections"
 
 # Shared pieces (components.py).
 PROVENANCE = f"#{components.PROVENANCE_ID}"

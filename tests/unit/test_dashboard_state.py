@@ -21,7 +21,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, labels, query
+from explore import api, election_view, labels, query
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -481,38 +481,49 @@ def test_each_year_links_to_its_election() -> None:
 def test_the_one_election_view_links_each_state_to_its_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    election = dash.page_registry["pages.election"]["layout"].__globals__
+    """T2 on the election's states page and T6 on its per-capita page (#465)."""
+    states = dash.page_registry["pages.election_states"]["layout"].__globals__
+    per_capita_page = dash.page_registry["pages.election_per_capita"]["layout"]
+    per_capita_mod = per_capita_page.__globals__
     body = copy.deepcopy(RECORDED["/v1/elections/1868"])
-    index_row = election["index_row"](INDEX, "1868")
     per_capita = copy.deepcopy(RECORDED["/v1/elections/1868/per-capita"])
-    tree = election["render"](
-        body, index_row, [], per_capita, election["neighbours"](INDEX, 1868)
-    )
-    hrefs = {
-        link.href
-        for link in of_type(find(tree, election["STATES_TABLE_ID"]), "Link")
-        if link.href.startswith("/state/")
-    }
-    assert "/state/GA" in hrefs
-    assert hrefs == {f"/state/{r['state_usps']}" for r in body["data"]}
+    index_row = election_view.index_row(INDEX, "1868")
+    around = election_view.neighbours(INDEX, 1868)
+    for tree, table, rows in (
+        (
+            states["render"](body, index_row, [], around),
+            states["STATES_TABLE_ID"],
+            body["data"],
+        ),
+        (
+            per_capita_mod["render"](per_capita, index_row, [], around),
+            per_capita_mod["PER_CAPITA_TABLE_ID"],
+            per_capita["data"],
+        ),
+    ):
+        hrefs = {
+            link.href
+            for link in of_type(find(tree, table), "Link")
+            if link.href.startswith("/state/")
+        }
+        assert "/state/GA" in hrefs
+        assert hrefs == {f"/state/{r['state_usps']}" for r in rows}
 
 
 @pytest.mark.parametrize("usps", ["ga", "G A", None, "../x", "<b>"])
 def test_a_state_code_that_is_not_one_is_text_not_a_link(usps: Any) -> None:
-    election = dash.page_registry["pages.election"]["layout"].__globals__
+    states = dash.page_registry["pages.election_states"]["layout"].__globals__
     body = copy.deepcopy(RECORDED["/v1/elections/1868"])
     body["data"] = [r for r in body["data"] if r["state_usps"] == "GA"]
     for row in body["data"]:
         row["state_usps"] = usps
-    per_capita = copy.deepcopy(RECORDED["/v1/elections/1868/per-capita"])
-    tree = election["render"](
+    tree = states["render"](
         body,
-        election["index_row"](INDEX, "1868"),
+        election_view.index_row(INDEX, "1868"),
         [],
-        per_capita,
-        election["neighbours"](INDEX, 1868),
+        election_view.neighbours(INDEX, 1868),
     )
-    links = of_type(find(tree, election["STATES_TABLE_ID"]), "Link")
+    links = of_type(find(tree, states["STATES_TABLE_ID"]), "Link")
     assert [link.href for link in links if link.href.startswith("/state/")] == []
 
 

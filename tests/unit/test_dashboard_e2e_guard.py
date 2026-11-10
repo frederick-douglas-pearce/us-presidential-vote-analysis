@@ -17,12 +17,12 @@ from playwright.sync_api import Page
 
 from tests.e2e.conftest import (
     CHUNK_ERROR_BOUND,
-    chart_page_patterns,
+    chart_templates,
     chunk_problems,
     derived_fetch_problems,
     guard_problems,
+    is_chart_path,
     is_chunk,
-    page_pattern,
 )
 from tests.e2e.dashboard_pages import (
     CHUNK_BARRIER,
@@ -56,28 +56,31 @@ def test_without_a_declared_count_the_exact_check_is_skipped() -> None:
     assert guard_problems([], 3, None, [], []) == []
 
 
-ELECTION = page_pattern("/election/<year>")
+ELECTION = {"/election/<year>"}
 
 
-def test_a_page_template_matches_its_paths() -> None:
-    assert ELECTION.fullmatch("/election/2016")
-    assert ELECTION.fullmatch("/election/1824/x")  # Dash's variable is greedy
-    assert not ELECTION.fullmatch("/elections")
-    assert not ELECTION.fullmatch("/election/")
-    assert not ELECTION.fullmatch("/xelection/2016")
-    assert page_pattern("/a.b/<v>").fullmatch("/a.b/1")
-    assert not page_pattern("/a.b/<v>").fullmatch("/aXb/1")
+def test_a_chart_path_is_the_one_the_router_sends_to_the_page() -> None:
+    assert is_chart_path("/election/2016", ELECTION)
+    # Dash's variable is greedy, and an unknown section reaches the overview.
+    assert is_chart_path("/election/1824/x", ELECTION)
+    # The subpages are pages of their own, which the router reaches first (#465).
+    assert not is_chart_path("/election/2016/states", ELECTION)
+    assert not is_chart_path("/election/2016/per-capita", ELECTION)
+    assert not is_chart_path("/elections", ELECTION)
+    assert not is_chart_path("/election/", ELECTION)
+    assert not is_chart_path("/xelection/2016", ELECTION)
+    # Decoded once, as the router decodes it (D089).
+    assert is_chart_path("/election/20%31%36", ELECTION)
+    assert not is_chart_path("/election/2016%2Fstates", ELECTION)
 
 
 def test_the_registry_derives_the_chart_pages() -> None:
     from explore import charts
 
-    live = [row.page for row in charts.CHARTS.values() if not row.retired]
+    live = {row.page for row in charts.CHARTS.values() if not row.retired}
     assert live  # the premise: C1 (#433)
-    assert [p.pattern for p in chart_page_patterns()] == [
-        page_pattern(page).pattern for page in live
-    ]
-    assert any(p.fullmatch("/election/2016") for p in chart_page_patterns())
+    assert chart_templates() == live
+    assert is_chart_path("/election/2016", chart_templates())
 
 
 def test_a_retired_chart_s_page_is_not_a_chart_page(
@@ -90,34 +93,34 @@ def test_a_retired_chart_s_page_is_not_a_chart_page(
         charts,
         "CHARTS",
         {
-            "C1": charts.Chart("/live/<v>", "t"),
-            "C2": charts.Chart("/retired/<v>", "t", retired=True),
+            "C1": charts.Chart("/elections", "t"),
+            "C2": charts.Chart("/election/<year>", "t", retired=True),
         },
     )
-    patterns = chart_page_patterns()
-    assert [p.pattern for p in patterns] == [page_pattern("/live/<v>").pattern]
-    assert derived_fetch_problems([(1, "/retired/1")], patterns) == [
-        "plotly.js fetched by '/retired/1', which renders no chart"
-    ]
+    assert chart_templates() == {"/elections"}
+    assert derived_fetch_problems(
+        [(1, "/election/1"), (2, "/elections")], chart_templates()
+    ) == ["plotly.js fetched by '/election/1', which renders no chart"]
 
 
 def test_the_derived_bound() -> None:
     """#433, D091: at most one fetch per document, and only from a chart page."""
-    assert derived_fetch_problems([], [ELECTION]) == []
-    assert derived_fetch_problems([(1, "/election/2016")], [ELECTION]) == []
+    assert derived_fetch_problems([], ELECTION) == []
+    assert derived_fetch_problems([(1, "/election/2016")], ELECTION) == []
     # One per document: a reload or a new document may fetch again.
     assert (
-        derived_fetch_problems([(1, "/election/2016"), (2, "/election/1824")], [ELECTION])
+        derived_fetch_problems([(1, "/election/2016"), (2, "/election/1824")], ELECTION)
         == []
     )
     assert derived_fetch_problems(
-        [(1, "/election/2016"), (1, "/election/2024")], [ELECTION]
+        [(1, "/election/2016"), (1, "/election/2024")], ELECTION
     ) == ["plotly.js fetched twice by one document ('/election/2024')"]
-    # A page with no chart fetches nothing.
-    assert derived_fetch_problems([(1, "/elections")], [ELECTION]) == [
-        "plotly.js fetched by '/elections', which renders no chart"
-    ]
-    assert derived_fetch_problems([(1, "/election/2016")], []) == [
+    # A page with no chart fetches nothing, a subpage of a chart page included (#465).
+    for path in ("/elections", "/election/2016/states", "/election/2016/per-capita"):
+        assert derived_fetch_problems([(1, path)], ELECTION) == [
+            f"plotly.js fetched by {path!r}, which renders no chart"
+        ]
+    assert derived_fetch_problems([(1, "/election/2016")], set()) == [
         "plotly.js fetched by '/election/2016', which renders no chart"
     ]
 

@@ -26,10 +26,10 @@ from playwright.sync_api import Locator, Page, expect
 from explore import app as appmod
 from explore import components, labels
 from tests.e2e.dashboard_pages import (
-    ELECTION_SUCCESS,
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     PV,
+    STATES_SUCCESS,
     YEARS,
     assert_rendered,
     color_channels,
@@ -270,9 +270,9 @@ PAINTED: tuple[tuple[str, str, str, str], ...] = (
     ("/elections", f"{YEARS} .dash-slider-track", "backgroundColor", "--disabled"),
     ("/elections", f"{YEARS} .dash-slider-mark", "color", "--text"),
     ("/elections", f"{PV} label", "color", "--text"),
-    ("/election/2016", "#election-state", "backgroundColor", "--surface"),
-    ("/election/2016", "#election-state", "color", "--text"),
-    ("/election/2016", "#election-state", "borderTopColor", "--border"),
+    ("/election/2016/states", "#election-state", "backgroundColor", "--surface"),
+    ("/election/2016/states", "#election-state", "color", "--text"),
+    ("/election/2016/states", "#election-state", "borderTopColor", "--border"),
     (
         "/candidate/andrew-jackson",
         f"{CANDIDATE_SUCCESS} .year-buttons label",
@@ -295,7 +295,7 @@ PAINTED: tuple[tuple[str, str, str, str], ...] = (
 
 SUCCESS = {
     "/elections": ELECTIONS_SUCCESS,
-    "/election/2016": ELECTION_SUCCESS,
+    "/election/2016/states": STATES_SUCCESS,
     "/candidate/andrew-jackson": CANDIDATE_SUCCESS,
 }
 

@@ -22,10 +22,9 @@ from typing import Any
 import dash
 import pytest
 
-from explore import api, components, labels
+from explore import api, components, election_view, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import offline_client
-from tests.unit.test_dashboard_nav import page_global
 
 STYLESHEET = Path(appmod.__file__).parent / "assets" / "style.css"
 DCC_BUNDLE = Path(dash.__file__).parent / "dcc" / "dash_core_components.js"
@@ -536,7 +535,20 @@ NEIGHBOR_PAINT = (
     (".neighbor-nav", "border", 3.0),
 )
 
-#: The bar's selectors, by the classes ``pages/election.py`` names (#464).
+#: The section links' marker rule (#465): the election page being read, as text.
+SECTIONS_MARKED = '.election-sections [aria-current="page"]'
+
+#: What the section links paint (#465), as NEIGHBOR_PAINT: no fill, so every pair sits
+#: on the page. The other two pages' links are text (AA, the global `a` rule's color);
+#: the current page's underline and the focus ring are graphics (3:1). The current
+#: page's text inherits the page's text color, held by the page's own pair.
+SECTIONS_PAINT = (
+    ("a", "color", 4.5),
+    (SECTIONS_MARKED, "text-decoration-color", 3.0),
+    (".election-sections a:focus-visible", "outline", 3.0),
+)
+
+#: The bar's selectors, by the classes ``explore.election_view`` names (#464, #465).
 NEIGHBOR = r"\.neighbor-(?:nav|earlier|later)\b"
 
 
@@ -851,16 +863,16 @@ class TestThemeContrast:
         # the chevron check see every rule keyed on the bar's classes; a rule keyed on
         # the bar's ids would escape them, so none may exist.
         selectors = " ".join(prelude for _, prelude, _ in shipped_rules())
-        for name in ("NAV_ID", "EARLIER_ID", "LATER_ID"):
-            element = page_global("pages.election", name)
+        for element in (
+            election_view.NAV_ID,
+            election_view.EARLIER_ID,
+            election_view.LATER_ID,
+        ):
             assert not re.search(rf"#{re.escape(element)}\b", selectors), element
         classes = {
-            page_global("pages.election", name)
-            for name in (
-                "NEIGHBOR_NAV_CLASS",
-                "NEIGHBOR_EARLIER_CLASS",
-                "NEIGHBOR_LATER_CLASS",
-            )
+            election_view.NEIGHBOR_NAV_CLASS,
+            election_view.NEIGHBOR_EARLIER_CLASS,
+            election_view.NEIGHBOR_LATER_CLASS,
         }
         assert classes == {"neighbor-nav", "neighbor-earlier", "neighbor-later"}
         for name in classes:
@@ -924,6 +936,41 @@ class TestThemeContrast:
         assert toggle_rule(".site-name-rest")["white-space"] == "pre"
         assert labels.SITE_NAME_REST.startswith(" ")
 
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize(("selector", "foreground", "minimum"), SECTIONS_PAINT)
+    def test_the_section_links_meet_their_contrast(
+        self, theme: str, selector: str, foreground: str, minimum: float
+    ) -> None:
+        rule = toggle_rule(selector)
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        color = over(parse_color(palette[token_in(rule[foreground])]), page)
+        ratio = contrast(color, page)
+        assert ratio >= minimum, (theme, selector, foreground, round(ratio, 2))
+
+    def test_the_section_links_paint_what_sections_paint_measures(self) -> None:
+        # SECTIONS_PAINT's premises (#465): no section rule sets a fill or a color, and
+        # the forced-colors block names none, so every pair sits on --page.
+        rules = [
+            (at, " ".join(prelude.split()), dict(declarations(body)))
+            for at, prelude, body in shipped_rules()
+            if re.search(r"\.election-sections\b", prelude)
+        ]
+        assert len(rules) >= 4
+        for at, prelude, rule in rules:
+            assert at != FORCED_COLORS, prelude
+            assert not {"background", "background-color"} & set(rule), prelude
+            assert "color" not in rule, prelude
+            assert not any(name.startswith("border") for name in rule), prelude
+
+    def test_the_current_section_is_marked_by_more_than_color(self) -> None:
+        # WCAG 1.4.1: the page being read differs by weight and an underline, which
+        # forced colors keep; it is text, so the links' own rule never reaches it.
+        marked = toggle_rule(SECTIONS_MARKED)
+        assert marked["font-weight"] == "600"
+        assert marked["text-decoration-line"] == "underline"
+        assert marked["text-decoration-thickness"] == "2px"
+
     def test_the_marker_is_an_underline_not_color_alone(self) -> None:
         # WCAG 1.4.1: the current link differs by a decoration, which forced colors
         # keep, and the other links carry none.
@@ -940,6 +987,7 @@ class TestThemeContrast:
             (".site-header", ".site-nav a:focus-visible"),
             (".site-header", ".theme-control button:focus-visible"),
             (".neighbor-nav", ".neighbor-nav a:focus-visible"),
+            (".election-sections", ".election-sections a:focus-visible"),
         ],
     )
     def test_each_gap_clears_the_focus_ring(

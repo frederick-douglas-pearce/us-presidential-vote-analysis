@@ -27,6 +27,12 @@ MARKS: dict[str, tuple[str, str] | None] = {
     "/election/1824": ("elections", "true"),
     "/election/1825": ("elections", "true"),
     "/election/1824/x": ("elections", "true"),
+    # The election subpages (#465), which route before the overview's greedy <year>,
+    # and an unserved year on one; an unknown section is the line above.
+    "/election/1824/states": ("elections", "true"),
+    "/election/1824/per-capita": ("elections", "true"),
+    "/election/1825/states": ("elections", "true"),
+    "/election/1824%2Fper-capita": ("elections", "true"),
     "/election//1824": ("elections", "true"),
     "/election/%31824": ("elections", "true"),
     "/%65lections": ("elections", "page"),

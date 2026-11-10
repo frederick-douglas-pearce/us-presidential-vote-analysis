@@ -279,6 +279,34 @@ body {
 }
 .neighbor-earlier::before { transform: rotate(45deg); }
 .neighbor-later::after { transform: rotate(-135deg); }
+/* The links between an election's three pages (#465), after the lede: the overview,
+   results by state and people per electoral vote, in one row that wraps rather than
+   scrolling. No box, so it never reads as a second earlier-and-later bar. The page being
+   read is text, not a link, marked by weight and an underline drawn from its
+   aria-current, never color alone: what is seen is what assistive technology hears, and
+   forced colors keep both. Each entry is at least 24 px tall (WCAG 2.5.8). */
+.election-sections {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 1rem;
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+}
+.election-sections a,
+.election-sections [aria-current="page"] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+.election-sections a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.election-sections [aria-current="page"] {
+  font-weight: 600;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.3em;
+}
 /* The rest of the site name: visually hidden on a narrow screen, so the link's name stays
    the full name, and shown from 45rem up, where the whole name fits on the row even in a
    wide fallback font (DejaVu Sans, the CI runner's). white-space: pre keeps the space
@@ -478,7 +506,9 @@ fieldset.filter legend { padding: 0; }
 /* The readable measure. T1 and the States list are here too: at full width their few
    short columns would spread thin. */
 .explore p, .glossary, .panel, .filters, .unavailable, .states, .provenance-footer ul,
-.table-scroll #elections-table, .neighbor-nav { max-width: var(--measure); }
+.table-scroll #elections-table, .neighbor-nav, .election-sections {
+  max-width: var(--measure);
+}
 @media (min-width: 64rem) {
   .explore, .site-header { padding-left: 2rem; padding-right: 2rem; }
   /* The gap leaves room for each column's bullets, which sit outside its text. */
