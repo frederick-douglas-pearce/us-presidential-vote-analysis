@@ -25,6 +25,7 @@ import pytest
 from explore import api, components, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import offline_client
+from tests.unit.test_dashboard_nav import page_global
 
 STYLESHEET = Path(appmod.__file__).parent / "assets" / "style.css"
 DCC_BUNDLE = Path(dash.__file__).parent / "dcc" / "dash_core_components.js"
@@ -524,6 +525,21 @@ NAV_PAINT = (
 )
 
 
+#: What the earlier-and-later bar paints (#464), read from its own rules, as NAV_PAINT
+#: is: (selector, the property naming the foreground token, the minimum ratio). The bar
+#: has no fill, so every one sits on the page. Link text is text (AA); the focus ring
+#: and the box's edge, which is what sets the pair apart as navigation, are graphics
+#: (3:1). The chevrons paint in the link's color, the first pair.
+NEIGHBOR_PAINT = (
+    ("a", "color", 4.5),
+    (".neighbor-nav a:focus-visible", "outline", 3.0),
+    (".neighbor-nav", "border", 3.0),
+)
+
+#: The bar's selectors, by the classes ``pages/election.py`` names (#464).
+NEIGHBOR = r"\.neighbor-(?:nav|earlier|later)\b"
+
+
 def toggle_rule(selector: str, context: str | None = None) -> dict[str, str]:
     """The declarations of the one shipped rule whose selector reads ``selector``,
     inside the at-rule ``context`` (``None``: at the top level)."""
@@ -571,6 +587,24 @@ class TestThemeTokens:
         listed = re.findall(r"^ {5}(--[\w-]+) {2,}\S", header, flags=re.M)
         assert len(listed) == len(set(listed))
         assert set(listed) == set(TOKENS)
+
+    @pytest.mark.parametrize(
+        ("token", "role"),
+        [
+            ("--border", "the earlier-and-later bar's edge"),
+            ("--accent", "the earlier-and-later bar's"),
+        ],
+    )
+    def test_the_header_names_the_earlier_and_later_bar_in_each_role_it_takes(
+        self, token: str, role: str
+    ) -> None:
+        # #464 gave two tokens a new role; the header's list says so, under the token
+        # whose role it is (the regex above pins only the names).
+        css = STYLESHEET.read_text(encoding="utf-8")
+        header = css[: css.index("*/")]
+        entries = re.split(r"^ {5}(?=--[\w-]+ {2,}\S)", header, flags=re.M)
+        (entry,) = [e for e in entries if e.startswith(f"{token} ")]
+        assert role in " ".join(entry.split()), (token, entry)
 
     def test_the_checked_pill_outranks_dashs_hover_and_focus_color(self) -> None:
         # Dash's rule (0,3,1), a private of the installed dcc, injected after our
@@ -758,6 +792,115 @@ class TestThemeContrast:
                 assert "color" not in rule, (at, prelude)
         assert toggle_rule(".site-nav .site-name")["color"] == "var(--text)"
 
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize(("selector", "foreground", "minimum"), NEIGHBOR_PAINT)
+    def test_the_earlier_and_later_bar_meets_its_contrast(
+        self, theme: str, selector: str, foreground: str, minimum: float
+    ) -> None:
+        rule = toggle_rule(selector)
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        color = over(parse_color(palette[token_in(rule[foreground])]), page)
+        ratio = contrast(color, page)
+        assert ratio >= minimum, (theme, selector, foreground, round(ratio, 2))
+
+    def test_the_earlier_and_later_bar_paints_what_neighbor_paint_measures(
+        self,
+    ) -> None:
+        # NEIGHBOR_PAINT's premises (#464): the global `a` rule colors the links, the
+        # chevrons are borders in the link's own color, and nothing in the bar is
+        # filled, so every pair sits on --page. A bar rule that set a fill or a color
+        # would paint a pair no test reads; the forced-colors block names none.
+        bar_rules = [
+            (at, " ".join(prelude.split()), dict(declarations(body)))
+            for at, prelude, body in shipped_rules()
+            if re.search(NEIGHBOR, prelude)
+        ]
+        assert len(bar_rules) >= 6
+        for at, prelude, rule in bar_rules:
+            assert at != FORCED_COLORS, prelude
+            assert not {"background", "background-color"} & set(rule), prelude
+            assert "color" not in rule, prelude
+            for name, value in rule.items():
+                if name.startswith("border") and name != "border-radius":
+                    assert "var(--border)" in value or value.endswith(
+                        " currentColor"
+                    ), (prelude, name, value)
+
+    def test_the_chevrons_carry_no_text(self) -> None:
+        # Generated text would join the link's accessible name (#464); an empty
+        # content draws the shape alone. Every bar rule that sets content is checked,
+        # whatever its colon syntax (a legacy `:before` too); a rule keyed on the
+        # bar's ids is refused by the class-not-id test below.
+        generating = [
+            (prelude, rule["content"])
+            for _, prelude, body in shipped_rules()
+            if re.search(NEIGHBOR, prelude)
+            and "content" in (rule := dict(declarations(body)))
+        ]
+        assert generating
+        for prelude, content in generating:
+            assert content == '""', prelude
+        drawn = toggle_rule(".neighbor-earlier::before, .neighbor-later::after")
+        assert drawn["content"] == '""'
+        assert toggle_rule(".neighbor-earlier::before")["transform"] == "rotate(45deg)"
+        assert toggle_rule(".neighbor-later::after")["transform"] == "rotate(-135deg)"
+
+    def test_the_bar_is_drawn_by_its_class_not_the_election_views_id(self) -> None:
+        # #465's subpages take the treatment by class (#464). The paint premise and
+        # the chevron check see every rule keyed on the bar's classes; a rule keyed on
+        # the bar's ids would escape them, so none may exist.
+        selectors = " ".join(prelude for _, prelude, _ in shipped_rules())
+        for name in ("NAV_ID", "EARLIER_ID", "LATER_ID"):
+            element = page_global("pages.election", name)
+            assert not re.search(rf"#{re.escape(element)}\b", selectors), element
+        classes = {
+            page_global("pages.election", name)
+            for name in (
+                "NEIGHBOR_NAV_CLASS",
+                "NEIGHBOR_EARLIER_CLASS",
+                "NEIGHBOR_LATER_CLASS",
+            )
+        }
+        assert classes == {"neighbor-nav", "neighbor-earlier", "neighbor-later"}
+        for name in classes:
+            assert f".{name}" in selectors, name
+
+    def test_the_earlier_and_later_bar_declarations_are_pinned(self) -> None:
+        # What the e2e fit checks cannot see in every font (#464): the flex box, whose
+        # loss runs the two links together again (the defect #464 fixed); the wrap;
+        # the later link's side; the 24 px targets, which need the links' inline-flex;
+        # text that wraps rather than overflowing at a larger text size; and the edge.
+        bar = toggle_rule(".neighbor-nav")
+        assert bar["display"] == "flex"
+        assert bar["flex-wrap"] == "wrap"
+        assert bar["border"] == "1px solid var(--border)"
+        link = toggle_rule(".neighbor-nav a")
+        assert link["display"] == "inline-flex"
+        assert link["min-height"] == "1.5rem"
+        assert "white-space" not in link  # wraps at a larger text size (#464's review)
+        assert "text-decoration" not in link  # the links keep their underline
+        assert toggle_rule(".neighbor-nav .neighbor-later") == {"margin-left": "auto"}
+        measure = [
+            p for _, p, b in shipped_rules() if "max-width: var(--measure)" in b
+        ]
+        assert len(measure) == 1 and ".neighbor-nav" in measure[0].split(", ")
+
+    def test_the_earlier_and_later_bar_padding_clears_the_focus_ring(self) -> None:
+        # A focused link's ring stays inside the box: every side's padding is wider
+        # than the ring's reach, offset plus width, read from the ring's own rule.
+        focus = toggle_rule(".neighbor-nav a:focus-visible")
+        width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
+        offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
+        assert width and offset, focus
+        reach = int(width.group(1)) + int(offset.group(1))
+        parts = toggle_rule(".neighbor-nav")["padding"].split()
+        rems = [re.fullmatch(r"([\d.]+)rem", part) for part in parts]
+        assert rems and all(rems), parts
+        for rem in rems:
+            assert rem is not None
+            assert float(rem.group(1)) * 16 > reach, (parts, reach)
+
     def test_the_bar_layout_declarations_are_pinned(self) -> None:
         # The declarations the e2e fit checks cannot see in every font or at every
         # width (#448's acceptance gate): the full name's breakpoint, the wrap that
@@ -796,6 +939,7 @@ class TestThemeContrast:
             (".site-nav", ".site-nav a:focus-visible"),
             (".site-header", ".site-nav a:focus-visible"),
             (".site-header", ".theme-control button:focus-visible"),
+            (".neighbor-nav", ".neighbor-nav a:focus-visible"),
         ],
     )
     def test_each_gap_clears_the_focus_ring(
@@ -809,10 +953,13 @@ class TestThemeContrast:
         focus = toggle_rule(focus_selector)
         width = re.fullmatch(r"(\d+)px solid var\(--[\w-]+\)", focus["outline"])
         offset = re.fullmatch(r"(\d+)px", focus["outline-offset"])
-        rem = re.fullmatch(r"([\d.]+)rem", gap)
-        assert width and offset and rem, (gap, focus)
+        # A gap may give its row and column values apart (#464's bar); each clears.
+        rems = [re.fullmatch(r"([\d.]+)rem", part) for part in gap.split()]
+        assert width and offset and rems and all(rems), (gap, focus)
         reach = int(width.group(1)) + int(offset.group(1))
-        assert float(rem.group(1)) * 16 > reach, (gap_selector, gap, reach)
+        for rem in rems:
+            assert rem is not None
+            assert float(rem.group(1)) * 16 > reach, (gap_selector, gap, reach)
 
     def test_the_unselected_button_paints_on_the_page(self) -> None:
         # What makes the "on the page" pairs above true: no fill and no UA button look.

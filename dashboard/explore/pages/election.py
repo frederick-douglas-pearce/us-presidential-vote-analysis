@@ -175,6 +175,10 @@ LEDE = (
 )
 FILTER_SENTENCE = "Narrow the state results by state, candidate or status."
 
+#: A served year's heading, the browser tab's title before the site title, and the
+#: ``H1`` that ``render`` builds on a successful render (#464).
+HEADING = "The {year} election"
+
 #: The links to the nearest earlier and later year the index serves (#324), and the
 #: accessible name of the landmark holding them. "Earlier" and "later" are about the
 #: years this dataset serves, never a claim that no election fell between.
@@ -184,6 +188,11 @@ LATER_ID = "election-later"
 EARLIER_LINK = "Earlier: the {year} election"
 LATER_LINK = "Later: the {year} election"
 ELECTION_NAV_LABEL = "Earlier and later elections in this dataset"
+#: The bar's classes (#464), which ``style.css`` draws: the box, and which side each
+#: link holds. Classes rather than ids, so #465's subpages take the treatment as is.
+NEIGHBOR_NAV_CLASS = "neighbor-nav"
+NEIGHBOR_EARLIER_CLASS = "neighbor-earlier"
+NEIGHBOR_LATER_CLASS = "neighbor-later"
 
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
@@ -267,7 +276,7 @@ def title(year: Any = None, **_vars: Any) -> str:
     accepted, or with none while that is unchecked (#325, D083); it is total anyway,
     reads no API, and names the year only when the year is four ASCII digits."""
     if isinstance(year, str) and query.YEAR_RE.fullmatch(year):
-        return f"The {year} election — {SITE_TITLE}"
+        return f"{HEADING.format(year=year)} — {SITE_TITLE}"
     return f"Election — {SITE_TITLE}"
 
 
@@ -921,12 +930,19 @@ def _per_capita_section(
 
 def _nav(around: Neighbours) -> list[Any]:
     """The links to the earlier and later served years, unfiltered (owner, #324's plan
-    gate); a side with no year has no link, and with neither there is no landmark."""
+    gate); a side with no year has no link, and with neither there is no landmark. The
+    bar's classes put the earlier link at the left and the later at the right, alone or
+    together (#464)."""
     links = [
-        dcc.Link(text.format(year=year), href=f"/election/{year}", id=link_id)
-        for year, text, link_id in (
-            (around.earlier, EARLIER_LINK, EARLIER_ID),
-            (around.later, LATER_LINK, LATER_ID),
+        dcc.Link(
+            text.format(year=year),
+            href=f"/election/{year}",
+            id=link_id,
+            className=side,
+        )
+        for year, text, link_id, side in (
+            (around.earlier, EARLIER_LINK, EARLIER_ID, NEIGHBOR_EARLIER_CLASS),
+            (around.later, LATER_LINK, LATER_ID, NEIGHBOR_LATER_CLASS),
         )
         if year is not None
     ]
@@ -934,7 +950,7 @@ def _nav(around: Neighbours) -> list[Any]:
         return []
     # Dash takes ``aria-*`` as keyword arguments its stubs do not name.
     aria: dict[str, Any] = {"aria-label": ELECTION_NAV_LABEL}
-    return [html.Nav(links, id=NAV_ID, **aria)]
+    return [html.Nav(links, id=NAV_ID, className=NEIGHBOR_NAV_CLASS, **aria)]
 
 
 def render(
@@ -947,7 +963,11 @@ def render(
     """The page body for one ``/v1/elections/{year}`` response, the year's row of
     ``/v1/elections`` and its ``/per-capita`` response (all read through the same
     view), this page's filter pairs and the year's served neighbours. The response's
-    ``election`` key is required, though its value may be null (:func:`_election`)."""
+    ``election`` key is required, though its value may be null (:func:`_election`).
+
+    It builds the page's heading and lede too, after the earlier and later links, so
+    the links come before the ``H1`` (#464); :func:`layout` builds them only for the
+    not-found and degraded states, which have no links."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     # The popular-vote window, checked once before any cell reads it, whatever the
@@ -1002,6 +1022,8 @@ def render(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             *_nav(around),
+            html.H1(HEADING.format(year=year)),
+            html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             *_panel(block, year, coverage),
             # National results (H2, C1, T3) come before Results by state, so the chart
             # sits near the top on a phone (owner, #433's plan gate).
@@ -1058,6 +1080,10 @@ def not_found() -> html.Div:
 
 
 def layout(year: Any = None, **params: Any) -> html.Div:
+    """The one-election view. On success, :func:`render`'s body is the whole page: it
+    holds the links, then the heading and the lede with its filter sentence (#464).
+    The not-found and degraded states get their heading here, heading first, and the
+    degraded state its lede."""
     heading = "Election"
     lede: str | None = LEDE
     try:
@@ -1069,15 +1095,13 @@ def layout(year: Any = None, **params: Any) -> html.Div:
                 body = view.get(f"/v1/elections/{year}")
                 per_capita = view.get(f"/v1/elections/{year}/per-capita")
                 index = view.get(api.ELECTIONS_PATH)
-                content = render(
+                return render(
                     body,
                     index_row(index, year),
                     parse_filters(params),
                     per_capita,
                     neighbours(index, int(year)),
                 )
-                heading = f"The {year} election"
-                lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     lead = [] if lede is None else [html.P(lede, className="lede")]

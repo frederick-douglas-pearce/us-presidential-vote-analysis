@@ -10,6 +10,7 @@ responses at import, as ``test_dashboard_app.py`` does.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from playwright.sync_api import Locator, Page
@@ -195,3 +196,40 @@ def assert_chunk_failure_stops(page: Page, seen: list[str]) -> None:
     assert len(seen) == count, (
         f"ChunkLoadError kept coming: {count}, then {len(seen)} (D088's loop)"
     )
+
+
+def color_channels(color: str) -> tuple[float, float, float, float]:
+    """A computed ``rgb()``/``rgba()`` color's channels and alpha; any other form fails."""
+    match = re.fullmatch(
+        r"rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)", color.strip()
+    )
+    assert match, color
+    r, g, b = (float(match.group(i)) for i in (1, 2, 3))
+    return (r, g, b, float(match.group(4) or 1))
+
+
+def contrast_ratio(foreground: str, background: str) -> float:
+    """WCAG 2's ratio of two opaque computed colors: a translucent one fails, since
+    its ratio depends on what it is drawn over."""
+
+    def luminance(color: str) -> float:
+        def channel(c: float) -> float:
+            c /= 255
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+        r, g, b, alpha = color_channels(color)
+        assert alpha == 1, color
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+    lighter, darker = sorted((luminance(foreground), luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def composited(color: str, backdrop: str) -> str:
+    """``color`` drawn over the opaque ``backdrop``, as an opaque ``rgb()``: a fully
+    transparent color comes back as the backdrop itself, so its ratio is 1."""
+    r, g, b, alpha = color_channels(color)
+    under = color_channels(backdrop)
+    assert under[3] == 1, backdrop
+    mixed = (round(alpha * c + (1 - alpha) * u) for c, u in zip((r, g, b), under[:3], strict=True))
+    return "rgb({}, {}, {})".format(*mixed)

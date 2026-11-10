@@ -11,6 +11,7 @@ times as named.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 from urllib.parse import urlsplit
@@ -19,14 +20,20 @@ import dash
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-import explore.app  # noqa: F401  (registers the pages, whose not-found states it reads)
+import explore.app  # (registers the pages, whose not-found states it reads)
 from explore import charts, components, labels
+from tests.dashboard_fixtures import RECORDED_FILES
 from tests.e2e.dashboard_pages import (
     ELECTION_EARLIER,
     ELECTION_LATER,
     ELECTION_SUCCESS,
+    ELECTIONS,
+    FIRST,
+    LAST,
     RESOURCE_ERROR,
     assert_rendered,
+    composited,
+    contrast_ratio,
     recorded,
     step_years,
 )
@@ -394,3 +401,239 @@ def test_passing_through_a_chart_page_needs_no_marker(page: Page) -> None:
     assert_year(page, later)
     page.locator(EC_BARS).first.wait_for()
     assert page.evaluate("typeof window.Plotly") == "object"
+
+
+# --- the earlier-and-later bar (#464) ----------------------------------------------
+
+#: The bar, its links and the page module's names for them, read through its layout.
+_ELECTION = dash.page_registry["pages.election"]["layout"].__globals__
+BAR = f"#{_ELECTION['NAV_ID']}"
+EARLIER_LINK: str = _ELECTION["EARLIER_LINK"]
+LATER_LINK: str = _ELECTION["LATER_LINK"]
+THEME_KEY = explore.app.THEME_STORAGE_KEY
+
+#: What the browser measures of the bar: each box in CSS px, the content box inside
+#: the bar's border and padding, each link's text line count (the client rects of a
+#: Range over its text, so a wrapped text counts two however its box is drawn), the
+#: page's sideways overflow, the site header's bottom and the H1's top.
+BAR_MEASURE = """() => {
+    const bar = document.querySelector(__BAR__);
+    const box = e => { const r = e.getBoundingClientRect();
+        return {left: r.left, right: r.right, top: r.top, bottom: r.bottom}; };
+    const s = getComputedStyle(bar);
+    const outer = box(bar);
+    const lines = e => {
+        const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+        let count = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const tops = new Set([...range.getClientRects()].map(r => Math.round(r.top)));
+            count += tops.size;
+        }
+        return count;
+    };
+    const links = [...bar.querySelectorAll("a")].map(a => ({
+        id: a.id, box: box(a), lines: lines(a),
+    }));
+    const main = document.querySelector("main");
+    return {
+        bar: outer,
+        content: {
+            left: outer.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft),
+            right: outer.right - parseFloat(s.borderRightWidth)
+                - parseFloat(s.paddingRight),
+        },
+        links,
+        overflow: document.documentElement.scrollWidth
+            - document.documentElement.clientWidth,
+        header: box(document.querySelector("header")).bottom,
+        h1: box(document.querySelector("h1")).top,
+        inHeader: bar.closest("header") !== null,
+        firstHeading: main.querySelector("h1, h2, h3, h4, h5, h6").tagName,
+        firstInMain: main.querySelector("#__PAGE__ > :not(script):not([id$='-url'])")
+            === bar,
+    };
+}"""
+
+
+def bar_measure(page: Page) -> dict[str, Any]:
+    script = BAR_MEASURE.replace("__BAR__", json.dumps(BAR)).replace(
+        "__PAGE__", str(_ELECTION["PAGE_ID"])
+    )
+    found: dict[str, Any] = page.evaluate(script)
+    return found
+
+
+def middle_year() -> int:
+    """A served year with a served year on each side whose view is recorded."""
+    served = sorted(e["year"] for e in ELECTIONS["data"])
+    for year in served[1:-1]:
+        if all(
+            f"/v1/elections/{year}{tail}" in RECORDED_FILES
+            for tail in ("", "/per-capita")
+        ):
+            return int(year)
+    raise AssertionError("no recorded served year with a neighbor on each side")
+
+
+def open_year(page: Page, year: int, theme: str, width: int) -> None:
+    """The view of ``year`` under an explicit ``theme`` choice at ``width``."""
+    page.add_init_script(
+        f"localStorage.setItem({json.dumps(THEME_KEY)}, {json.dumps(theme)});"
+    )
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(f"/election/{year}")
+    # assert_rendered checks 390 px, so a wide view waits on the marker itself.
+    page.locator(ELECTION_SUCCESS).wait_for()
+    assert page.evaluate("document.documentElement.dataset.theme") == theme
+
+
+def disjoint(a: dict[str, Any], b: dict[str, Any]) -> float:
+    """The gap between two boxes, positive when they neither touch nor overlap."""
+    return float(
+        max(
+            b["left"] - a["right"],
+            a["left"] - b["right"],
+            b["top"] - a["bottom"],
+            a["top"] - b["bottom"],
+        )
+    )
+
+
+def inside(inner: dict[str, Any], outer: dict[str, Any]) -> bool:
+    return bool(
+        inner["left"] >= outer["left"] - 0.5
+        and inner["right"] <= outer["right"] + 0.5
+        and inner["top"] >= outer["top"] - 0.5
+        and inner["bottom"] <= outer["bottom"] + 0.5
+    )
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_bar_sets_its_two_links_apart_above_the_heading(
+    page: Page, theme: str, width: int
+) -> None:
+    year = middle_year()
+    open_year(page, year, theme, width)
+    found = bar_measure(page)
+    earlier, later = found["links"]
+    assert [earlier["id"], later["id"]] == [ELECTION_EARLIER[1:], ELECTION_LATER[1:]]
+    # Two links: a positive gap between them, both inside the box, one line each.
+    assert disjoint(earlier["box"], later["box"]) > 0, found
+    assert inside(earlier["box"], found["bar"]) and inside(later["box"], found["bar"])
+    assert earlier["lines"] == 1 and later["lines"] == 1, found
+    # Each on its side, on one row or two.
+    assert abs(earlier["box"]["left"] - found["content"]["left"]) <= 0.5, found
+    assert abs(later["box"]["right"] - found["content"]["right"]) <= 0.5, found
+    # Above the heading, outside the site header and apart from it, and the page's
+    # first heading is still the H1.
+    assert found["bar"]["bottom"] <= found["h1"], found
+    assert not found["inHeader"] and found["bar"]["top"] - found["header"] >= 16, found
+    assert found["firstInMain"] and found["firstHeading"] == "H1", found
+    assert found["overflow"] <= 0, found
+    width_ = page.locator(BAR).evaluate("e => getComputedStyle(e).borderTopWidth")
+    assert float(width_.removesuffix("px")) >= 1
+    # The chevrons are no part of either link's name.
+    neighbors = _ELECTION["neighbours"](ELECTIONS, year)
+    for text in (
+        EARLIER_LINK.format(year=neighbors.earlier),
+        LATER_LINK.format(year=neighbors.later),
+    ):
+        expect(page.get_by_role("link", name=text, exact=True)).to_have_count(1)
+    if width == 390:
+        rows = "one row" if earlier["box"]["top"] == later["box"]["top"] else "two rows"
+        print(f"#464 bar at 390 px ({theme}): {rows}")
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_bar_keeps_its_links_inside_at_320_px(page: Page, theme: str) -> None:
+    open_year(page, middle_year(), theme, 320)
+    found = bar_measure(page)
+    assert found["overflow"] <= 0, found
+    for link in found["links"]:
+        assert inside(link["box"], found["bar"]) and link["lines"] == 1, found
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize(("year", "side"), [(FIRST, "later"), (LAST, "earlier")])
+def test_a_year_at_either_end_keeps_its_one_link_on_its_side(
+    page: Page, year: int, side: str, theme: str, width: int
+) -> None:
+    open_year(page, year, theme, width)
+    found = bar_measure(page)
+    (link,) = found["links"]
+    if side == "later":
+        assert link["id"] == ELECTION_LATER[1:]
+        assert abs(link["box"]["right"] - found["content"]["right"]) <= 0.5, found
+    else:
+        assert link["id"] == ELECTION_EARLIER[1:]
+        assert abs(link["box"]["left"] - found["content"]["left"]) <= 0.5, found
+
+
+def focus_earlier(page: Page) -> None:
+    """Focus the earlier link from the keyboard, so ``:focus-visible`` applies."""
+    page.locator(f"#{components.THEME_BUTTON_IDS['light']}").focus()
+    page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.id") == ELECTION_EARLIER[1:]
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_forced_colors_keep_the_edge_the_links_and_the_focus_ring(
+    page: Page, scheme: str
+) -> None:
+    """In both forced palettes (Chromium's emulation): the box's edge is a solid
+    border at least 1 px wide, and it, both links and a focused link's ring each
+    reach 3:1 against the page's backdrop, the nearest opaque background (body)."""
+    page.emulate_media(color_scheme=scheme, forced_colors="active")  # type: ignore[arg-type]
+    page.goto(f"/election/{middle_year()}")
+    assert_rendered(page, ELECTION_SUCCESS)
+    focus_earlier(page)
+    painted = page.evaluate(
+        """bar => {
+            const nav = document.querySelector(bar);
+            const s = getComputedStyle(nav);
+            const links = [...nav.querySelectorAll("a")].map(a => getComputedStyle(a).color);
+            const ring = getComputedStyle(document.activeElement);
+            return {
+                width: parseFloat(s.borderTopWidth), style: s.borderTopStyle,
+                edge: s.borderTopColor, links,
+                ring: ring.outlineColor, ringStyle: ring.outlineStyle,
+                backdrop: getComputedStyle(document.body).backgroundColor,
+            };
+        }""",
+        BAR,
+    )
+    assert painted["width"] >= 1 and painted["style"] == "solid", painted
+    assert painted["ringStyle"] == "solid", painted
+    # contrast_ratio refuses a translucent or non-rgb() color, so a transparent edge
+    # or link fails rather than reading as black. Chromium draws the forced ring in a
+    # translucent system color, so the ring is measured as it lands on the backdrop,
+    # where a transparent one becomes the backdrop and fails at 1:1.
+    ring = composited(painted["ring"], painted["backdrop"])
+    for color in (painted["edge"], *painted["links"], ring):
+        assert contrast_ratio(color, painted["backdrop"]) >= 3.0, (color, painted)
+
+
+def test_tab_reaches_the_bar_first_in_the_page_content(page: Page) -> None:
+    """From the top of the document: the site navigation, the theme toggle, then the
+    earlier link and the later, each target at least 24 px tall."""
+    page.goto(f"/election/{middle_year()}")
+    assert_rendered(page, ELECTION_SUCCESS)
+    expected = [
+        *components.NAV_LINK_IDS.values(),
+        components.NAV_API_DOCS_ID,
+        *components.THEME_BUTTON_IDS.values(),
+        ELECTION_EARLIER[1:],
+        ELECTION_LATER[1:],
+    ]
+    order = []
+    for _ in expected:
+        page.keyboard.press("Tab")
+        order.append(page.evaluate("document.activeElement.id"))
+    assert order == expected
+    for link in (ELECTION_EARLIER, ELECTION_LATER):
+        height = page.locator(link).evaluate("e => e.getBoundingClientRect().height")
+        assert height >= 24, (link, height)

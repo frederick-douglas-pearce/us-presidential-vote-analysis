@@ -32,6 +32,8 @@ from tests.e2e.dashboard_pages import (
     PV,
     YEARS,
     assert_rendered,
+    color_channels,
+    contrast_ratio,
 )
 from tests.e2e.serve import THEME_PROBE_CALLS, THEME_PROBE_ID, THEME_PROBE_SEEN
 
@@ -562,29 +564,6 @@ def test_an_unknown_trigger_changes_nothing(page: Page) -> None:
     assert_selected(page, "dark")
 
 
-def _channels(color: str) -> tuple[float, float, float, float]:
-    match = re.fullmatch(
-        r"rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)", color.strip()
-    )
-    assert match, color
-    r, g, b = (float(match.group(i)) for i in (1, 2, 3))
-    return (r, g, b, float(match.group(4) or 1))
-
-
-def _contrast(foreground: str, background: str) -> float:
-    """WCAG 2's ratio of two opaque computed colors."""
-
-    def luminance(color: str) -> float:
-        def channel(c: float) -> float:
-            c /= 255
-            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-        r, g, b, alpha = _channels(color)
-        assert alpha == 1, color
-        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-
-    lighter, darker = sorted((luminance(foreground), luminance(background)), reverse=True)
-    return (lighter + 0.05) / (darker + 0.05)
 
 
 #: Each theme button's painted background (the page's where it is transparent), its
@@ -628,13 +607,13 @@ def test_forced_colors_paint_every_icon_and_the_selection_border(
         seen: list[dict[str, str]] = page.evaluate(FORCED_PAINT)
         for value, paint in zip(labels.THEME_CHOICES, seen, strict=True):
             assert paint["adjust"] == "none", (choice, value, paint)
-            ratio = _contrast(paint["icon"], paint["ground"])
+            ratio = contrast_ratio(paint["icon"], paint["ground"])
             assert ratio >= 3, (scheme, choice, value, paint, round(ratio, 2))
             if value == choice:
                 assert paint["borderWidth"] == "2px", (choice, paint)
                 # Visible: opaque (a transparent border is no cue) and at 3:1.
-                assert _channels(paint["borderColor"])[3] == 1, (choice, paint)
-                border = _contrast(paint["borderColor"], paint["ground"])
+                assert color_channels(paint["borderColor"])[3] == 1, (choice, paint)
+                border = contrast_ratio(paint["borderColor"], paint["ground"])
                 assert border >= 3, (scheme, choice, paint, round(border, 2))
             else:
                 assert paint["borderWidth"] == "0px", (choice, value, paint)
