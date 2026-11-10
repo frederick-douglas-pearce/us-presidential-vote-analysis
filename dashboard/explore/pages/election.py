@@ -538,7 +538,8 @@ def _plotted(value: Any, cell: str) -> float | None:
 #: Where a marker sits in a row (#433): the center of the slot of the bar it stands
 #: for, from the template's ``bargap`` (one source), as plotly places two grouped bars
 #: at a quarter of the row's bar band either side of its center. With one series the
-#: bar is centered. The e2e test on 2016 observes it against a drawn bar.
+#: bar is centered. The e2e test ``test_c1_on_2016_is_readable_at_390_px`` observes it
+#: against a drawn bar.
 _SLOT = (1 - charts.TEMPLATE["layout"]["bargap"]) / 4
 
 #: Pixels per row and the margins around the plot (#433): two bars and their labels

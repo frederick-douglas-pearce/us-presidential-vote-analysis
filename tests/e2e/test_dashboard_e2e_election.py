@@ -207,8 +207,11 @@ def test_c1_on_2016_is_readable_at_390_px(page: Page) -> None:
         + [labels.C1_NO_FIGURE] * 5
     )
     others = boxes(page, CHART_TEXTS)
-    # The premise: every kind of text was found (two legend entries, a two-line label).
+    # The premise: every kind of text was found: the row names, the x tick labels, the
+    # axis title, the two legend entries and the two-line majority label.
     assert len([b for b in others if b["text"] in names(2016)]) == 7
+    assert {"0%", "50%", "100%"} <= {b["text"] for b in others}
+    assert any(b["text"] == labels.C1_X_AXIS for b in others)
     assert any(b["text"].startswith("Majority line") for b in others)
     assert len([b for b in others if "share" in b["text"]]) >= 2
     labeled = [b for b in texts + others if b["w"] > 0]
@@ -299,7 +302,7 @@ def test_a_touch_swipe_on_c1_scrolls_the_page(page: Page) -> None:
     Raw touch events, which Chromium turns into a scroll as a finger's would be
     (``Input.synthesizeScrollGesture`` scrolls nothing in headless Chromium, on the chart
     or off it). The control first shows the swipe can see a trap: with a listener on the
-    drag layer cancelling ``touchmove``, as plotly's own drag handling would where it
+    drag layer canceling ``touchmove``, as plotly's own drag handling would where it
     traps touch, the same swipe does not scroll. (``touch-action: none`` on the drag
     layer is no control: Chromium ignores it on an SVG ``rect``, and the swipe still
     scrolls.)"""

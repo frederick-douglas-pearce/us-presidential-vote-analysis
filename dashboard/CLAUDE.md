@@ -47,7 +47,7 @@ inside 390 px with no sideways scroll and none over another, the electoral bar a
 popular-vote bar, each marker in its row's popular-vote slot, the drawing filling its box
 after a resize, 1860's electoral share alone, a theme switch redrawing it with no reload or
 request, a touch swipe starting on plotly's drag layer scrolling the page (beside a control
-where a cancelled `touchmove` stops it), and a blocked CDN leaving T3, the title and the
+where a canceled `touchmove` stops it), and a blocked CDN leaving T3, the title and the
 caption; and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
 across a client-side navigation and a reload, no flash of the other palette (checked at

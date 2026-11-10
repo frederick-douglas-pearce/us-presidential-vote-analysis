@@ -6224,7 +6224,8 @@ chart sits on a page whose first table runs to dozens of rows.
   zero reads "0.0%", a missing popular-vote figure reads `labels.C1_NO_FIGURE`, a null electoral
   share (never served) `labels.C1_NO_SHARE`, and any other value the page has no label for
   `labels.UNRECOGNIZED`. C1's marker sits at the center of its slot, `(1 − bargap) / 4` either
-  side of the row's center (the 2016 browser test observes it against a drawn bar),
+  side of the row's center (`test_c1_on_2016_is_readable_at_390_px` in
+  `tests/e2e/test_dashboard_e2e_election.py` observes it against a drawn bar),
   `bargap` read from `charts.TEMPLATE`, on a numeric row axis (T3's order, reversed), so two
   candidates of one name never merge. `scattermode` and its `offsetgroup` alignment were rejected:
   a scatter's default orientation is vertical, and bars and scatter points are positioned in

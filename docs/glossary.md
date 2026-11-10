@@ -422,7 +422,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   "Carry-forward constraints"; D030; D070; `posts/2026-08-06-222-votes-away.md`, "The record the
   argument runs on top of" (the 1976 popular-vote edge described as a licensing boundary, not a
   records one); the order of `LEDE` in `pages/election.py`, which follows the order of the
-  page's sections (owner approval at #433's plan gate, 2026-11-09): owner approval with #466.
+  page's sections (owner approval at #433's plan gate, 2026-11-09; recorded here with #466).
 - **Not:** "The historical record".
 - **Status:** settled
 
@@ -542,8 +542,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C1_TITLE_NO_PV`, the hover text `labels.C1_EC_HOVER`, the label `labels.C1_NO_SHARE` of
   the marker drawn in place of a null or blank electoral-share bar, and the caption sentences
   `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY`
-  and `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's cell for the same value. `ec_share_hybrid` is on no dashboard page and in no download since
-  #358; the API serves it.
+  and `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's cell for the same value.
+  `ec_share_hybrid` is on no dashboard page and in no download since #358; the API serves it.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
   2026-11-02, #358.

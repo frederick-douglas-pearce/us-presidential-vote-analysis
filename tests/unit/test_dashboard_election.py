@@ -3233,11 +3233,29 @@ class TestC1:
             + labels.NOT_IN_DATASET
         ]
         assert marks["y"] == [0.0]  # one series: the bar's slot is the row's center
-        # No caption note: the label and hover say what the marker stands for.
-        assert labels.C1_NO_FIGURE not in c1_caption(tree)
         assert nation_rows(tree)["Abraham Lincoln"]["ec_share_full"] == (
             labels.NOT_IN_DATASET
         )
+        # (1860 draws no popular vote, so no caption note can show here; the next test
+        # checks a year that could show one.)
+
+    def test_a_null_electoral_share_adds_no_caption_note_in_a_popular_vote_year(
+        self,
+    ) -> None:
+        """Round 2: the addendum's "no caption sentence" for the C1_NO_SHARE marker,
+        in a year whose caption could carry C1_NO_FIGURE_NOTE (2024 draws no popular-vote
+        marker, so the note's presence could only come from this marker)."""
+        body = year_body(2024)
+        body["summary"][0]["ec_share_full"] = None
+        tree = render(2024, body=body)
+        marks = traces(c1_figure(tree))["marks"]
+        assert marks["ids"] == ["donald-j-trump/ec_share_full"]
+        assert marks["text"] == [labels.C1_NO_SHARE]
+        assert marks["y"] == [-MOD["_SLOT"]]  # the electoral bar's slot, the upper one
+        caption = c1_caption(tree)
+        assert labels.C1_NO_FIGURE not in caption
+        assert labels.C1_NO_FIGURE_NOTE.format(label=labels.C1_NO_FIGURE) not in caption
+        assert caption.startswith(labels.C1_BASES)  # the premise: a popular-vote year
 
     def test_a_share_too_large_to_show_is_no_bar(self) -> None:
         body = year_body(2024)
@@ -3322,7 +3340,11 @@ class TestC1:
 
         def counted(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]:
             calls.append(row["candidate_slug"])
-            return {**real(row, has_popular_vote), "electoral_rank": "SENTINEL-RANK"}
+            return {
+                **real(row, has_popular_vote),
+                "electoral_rank": "SENTINEL-RANK",
+                "national_electoral_denominator": "SENTINEL-APPOINTED",
+            }
 
         monkeypatch.setitem(MOD, "_nation_cells", counted)
         tree = render(2024)
@@ -3331,6 +3353,12 @@ class TestC1:
         assert column(tree, NATION, MOD["NATION_FIELDS"], "electoral_rank") == [
             "SENTINEL-RANK"
         ] * len(summary)
+        # C1 reads the same result: its hover carries the sentinel T3's cell shows.
+        assert column(
+            tree, NATION, MOD["NATION_FIELDS"], "national_electoral_denominator"
+        ) == ["SENTINEL-APPOINTED"] * len(summary)
+        for hover in traces(c1_figure(tree))["ec"]["hovertext"]:
+            assert hover.endswith("Electors appointed: SENTINEL-APPOINTED")
 
     def test_t3_s_cells_are_unchanged_by_the_shared_helper(self) -> None:
         """T3 reads :func:`_nation_cells` too: its rows match the pre-C1 rules."""
