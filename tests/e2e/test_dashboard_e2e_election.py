@@ -295,6 +295,20 @@ def test_c1_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
 
 
 @pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.browser_context_args(color_scheme="dark")
+def test_c1_follows_a_dark_device_under_auto(page: Page) -> None:
+    """AC Themes, the System (Auto) choice: with no saved choice, a device in dark mode
+    draws C1 in the dark palette."""
+    open_c1(page, 2016)
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')") is None
+    assert page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
+    expect(page.locator(EC_BARS).first).to_have_css(
+        "fill", rgb(token(page, "--chart-1"))
+    )
+    assert first_ec_fill(page) != rgb("#2a78d6")  # not the light palette's --chart-1
+
+
+@pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.browser_context_args(has_touch=True)
 def test_a_touch_swipe_on_c1_scrolls_the_page(page: Page) -> None:
     """AC Phone-width floor: touch never traps page scrolling. A swipe that starts on

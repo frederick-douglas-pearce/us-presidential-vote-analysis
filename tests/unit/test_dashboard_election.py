@@ -3177,6 +3177,32 @@ class TestC1:
         )
         assert labels.C1_MAJORITY_NOTE in c1_caption(tree)
 
+    @pytest.mark.parametrize("year", [2016, 2024])
+    def test_the_legend_names_both_series_in_a_popular_vote_year(
+        self, year: int
+    ) -> None:
+        """Acceptance gate, Class B survivor: with every series hidden from the legend
+        the figure still had a legend layout and passed. The legend must list exactly
+        the two series, and never the marker series."""
+        figure = c1_figure(render(year))
+        shown = [t["name"] for t in figure["data"] if t.get("showlegend") is True]
+        assert shown == [labels.LABELS["ec_share_full"], labels.LABELS["pv_share"]]
+        assert "legend" in figure["layout"]
+
+    def test_t2_s_filters_never_reach_the_chart(self) -> None:
+        """AC Same rows as T3: like T3, C1 ignores T2's filters."""
+        plain = c1_figure(render(2016))
+        filtered = render(
+            2016,
+            "state=GA&candidate=donald-j-trump&pv_status=popular_vote"
+            "&electoral_count_status=counted",
+        )
+        # The premise: the filters applied to T2.
+        assert {r["state"] for r in state_rows(filtered)} == {"Georgia"}
+        assert {r["candidate"] for r in state_rows(filtered)} == {"Donald J. Trump"}
+        assert c1_figure(filtered) == plain
+        assert c1_caption(filtered) == c1_caption(render(2016))
+
     def test_the_two_series_differ_without_color(self) -> None:
         from explore import charts
 
