@@ -993,3 +993,54 @@ came up at 04:00:49 (warmup 1.74 s, `serving snapshot` 04:00:51.25). Sequence 1'
 started 0.5 s after an un-pause that followed a 13-minute pause. What governs the delay is
 not established (one sample each), so the un-pause procedure now waits for an instance,
 then requests `/health` again before the operator's own `GET /`.
+
+### Chart C1, measured after deploy (2026-11-10, #433)
+
+C1 is the first chart on a page (`/election/<year>`), so its story re-measured D071(g) and
+the instance's memory after it shipped. Dashboard version `v-f1a4ef516288-r22-a1` (deploy
+run 42781499052 of f1a4ef5), snapshot `37af4064…`, API origin warm by the keep-warm ping
+throughout. Measured 08:24–08:28Z, before the daily canary, by #277's method:
+`scripts/measure_dashboard_cold_start.py`'s navigation (390 px, 10 Mbps / 100 ms, a fresh
+browser context each run). Each run also waited for `#c1 .main-svg`, the chart drawn; that
+column is not a D071(g) measure.
+
+The first run of each year was that year's first visit on the new instance, so a fill on a
+miss: both of its paths missed the API edge and reached the origin, which answered in
+6–20 ms. The other runs read the year from the instance's cache.
+
+| Year | First visit: TTFB / first data (s) | From cache: TTFB (s) | From cache: first data (s) | Chart drawn (s) |
+|---|---|---|---|---|
+| 1824 | 0.18 / 2.13 | 0.16–0.21 | 1.23–1.36 | 4.27–5.76 |
+| 1860 | 0.21 / 2.26 | 0.17–0.21 | 1.38–1.43 | 4.51–5.39 |
+| 1872 | 0.14 / 2.65 | 0.11–0.15 | 1.77–1.81 | 4.70–5.78 |
+| 2016 | 0.22 / **3.15** | 0.10–0.18 | 2.07–2.28 | 5.12–6.27 |
+| 2024 | 0.14 / 2.07 | 0.14–0.21 | 1.29–1.44 | 4.33–5.25 |
+| 2020 | 0.11 / 2.18 | 0.31 | 1.49 | 4.59–5.24 |
+| 2012 | 0.23 / 2.16 | 0.15 | 1.36 | 4.49–5.19 |
+| 2008 | 0.21 / 1.98 | 0.17 | 1.31 | 4.37–5.09 |
+| 2000 | 0.15 / 2.08 | 0.20 | 1.61 | 4.47–5.42 |
+
+Every run reached data, with no degraded page. 2016 had five runs from the cache, the
+other years one or two.
+
+- **TTFB met D071(g) on all 26 runs** (0.10–0.31 s, against ≤ 1 s).
+- **First data met it on 25 of 26.** The miss was 2016's first visit, at 3.15 s. 2016
+  is the slowest year from the cache too (2.07–2.28 s, five runs), and its two fills went
+  out one after the other, logged 0.34 s apart, so a first visit to 2016
+  lands at about 3 s. Every other first visit took 1.98–2.65 s. This is the first record of a
+  modern year: the earlier tables cover 1828–1888, so how much of 2016's time C1 adds is not
+  measured.
+- **Where a 2016 load from the cache spends its time** (one traced run, first data at
+  2.16 s): the routing callback's response (21 KB, the figure included) had arrived by
+  1.35 s; dcc's dropdown and date-picker chunks by 2.11 s; then first data. plotly.js
+  (`cdn.plot.ly/plotly-4.1.1.min.js`, 1,473,344 bytes compressed, 1.39 s to transfer) was
+  requested only after first data and finished at 3.57 s; dcc's `async-graph.js` came at
+  5.02 s, and the chart was drawn at 5.41 s. **So the first data cell does not wait for
+  plotly.js**, and the chart draws about 3 s after it.
+- **Request budget held.** The dashboard logged 18 `api fetch` lines for nine years, the
+  two fills each (`ELECTION_MISSES`), and no others; no warnings and no 5xx.
+- **Memory:** the instance used 110.2 MiB after the deploy probes (10 requests), 138.0 MiB
+  after the first five years were filled (280 requests) and 140.2 MiB after nine (496
+  requests): 37 % of F1's 384 MiB, so D071's F1 flip condition is not near
+  (`gcloud app instances list`, `instance.memoryUsage`). #310 measured 106–126 MiB before
+  any chart.
