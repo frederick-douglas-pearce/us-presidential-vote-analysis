@@ -80,6 +80,27 @@ def test_the_registry_derives_the_chart_pages() -> None:
     assert any(p.fullmatch("/election/2016") for p in chart_page_patterns())
 
 
+def test_a_retired_chart_s_page_is_not_a_chart_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round 1 (GE5): only a live row's page counts."""
+    from explore import charts
+
+    monkeypatch.setattr(
+        charts,
+        "CHARTS",
+        {
+            "C1": charts.Chart("/live/<v>", "t"),
+            "C2": charts.Chart("/retired/<v>", "t", retired=True),
+        },
+    )
+    patterns = chart_page_patterns()
+    assert [p.pattern for p in patterns] == [page_pattern("/live/<v>").pattern]
+    assert derived_fetch_problems([(1, "/retired/1")], patterns) == [
+        "plotly.js fetched by '/retired/1', which renders no chart"
+    ]
+
+
 def test_the_derived_bound() -> None:
     """#433, D091: at most one fetch per document, and only from a chart page."""
     assert derived_fetch_problems([], [ELECTION]) == []

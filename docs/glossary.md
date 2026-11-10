@@ -415,11 +415,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   carries redistributable data only (D030). "In this dataset" is a statement about what the
   snapshot holds, never about what happened historically and never about a source.
 - **Shown as:** throughout, for example `labels.NOT_IN_DATASET`, `labels.BEFORE_WINDOW`,
-  `labels.HAS_POPULAR_VOTE_NOTE` and the page ledes.
+  `labels.HAS_POPULAR_VOTE_NOTE` and the page ledes, among them the one-election view's `LEDE` in
+  `pages/election.py`, which names that page's sections in the order they appear (National
+  results before Results by state).
 - **Source:** `CLAUDE.md`, "Publishing" (editorial guardrail); `.claude/specs/backlog-dashboard.md`,
   "Carry-forward constraints"; D030; D070; `posts/2026-08-06-222-votes-away.md`, "The record the
   argument runs on top of" (the 1976 popular-vote edge described as a licensing boundary, not a
-  records one).
+  records one); the order of `LEDE` in `pages/election.py`, which follows the order of the
+  page's sections (owner approval at #433's plan gate, 2026-11-09): owner approval with #466.
 - **Not:** "The historical record".
 - **Status:** settled
 
@@ -533,12 +536,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   to less than 100% (D041). `ec_share_hybrid` is the electoral share fed into the hybrid; under
   the only configured policy, (b), it equals `ec_share_full`, and the API serves it separately so
   that can be checked.
-- **Shown as:** `LABELS["ec_share_full"]` (T3, and the name of C1's electoral-share series);
-  `labels.share_cell`; in C1 (*Electoral share and popular-vote share chart (C1)*), the titles
-  `labels.C1_TITLE` and `labels.C1_TITLE_NO_PV`, the hover text `labels.C1_EC_HOVER`, and the
-  caption sentences `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`,
-  `labels.C1_LINE_EC_ONLY` and `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's
-  cell for the same value. `ec_share_hybrid` is on no dashboard page and in no download since
+- **Shown as:** `LABELS["ec_share_full"]` (T3, the name of C1's electoral-share series, and the
+  start of the hover of C1's marker for a null or blank electoral share); `labels.share_cell`; in
+  C1 (*Electoral share and popular-vote share chart (C1)*), the titles `labels.C1_TITLE` and
+  `labels.C1_TITLE_NO_PV`, the hover text `labels.C1_EC_HOVER`, the label `labels.C1_NO_SHARE` of
+  the marker drawn in place of a null or blank electoral-share bar, and the caption sentences
+  `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY`
+  and `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's cell for the same value. `ec_share_hybrid` is on no dashboard page and in no download since
   #358; the API serves it.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
@@ -566,10 +570,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   drawn bar's text is T3's cell for the same value, so the chart and the table write each number
   alike; a zero is drawn and labeled (1872, Greeley's counted electoral share, 0.0%). Inside the
   window, a null or blank popular-vote share draws, in the bar's place, a marker labeled
-  `labels.C1_NO_FIGURE` (*No popular-vote figure in this dataset*), and a value in either series
-  that the page has no label for draws a marker labeled `labels.UNRECOGNIZED` (*Unrecognized
-  value*). Both markers belong to one series, named `labels.C1_NO_FIGURE_SERIES` for the figure
-  rules and kept off the legend, so no reader sees that name. The dashed line stands at 0.5 on the
+  `labels.C1_NO_FIGURE` (*No popular-vote figure in this dataset*). In any year, a null or blank
+  electoral share, which T3 shows as `labels.NOT_IN_DATASET` (*Not in this dataset*), draws a
+  marker labeled `labels.C1_NO_SHARE`, whose hover names the series as T3's header does. A value
+  in either series that the page has no label for draws a marker labeled `labels.UNRECOGNIZED`
+  (*Unrecognized value*). All three markers belong to one series, named
+  `labels.C1_NO_FIGURE_SERIES` for the figure rules and kept off the legend, so no reader sees
+  that name. The dashed line stands at 0.5 on the
   share axis, half of the electors appointed (*Electoral College majority*); the test is strict,
   so a bar that ends on the line is not a majority. The line applies to the electoral share only.
   The electoral-share hover gives the votes counted and the electors appointed, never the votes
@@ -577,25 +584,29 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY` and `labels.C1_ROW_ORDER`, then
   `labels.C1_NO_FIGURE_NOTE` only when a marker labeled `labels.C1_NO_FIGURE` is drawn; in a year
   without them, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE` and `labels.C1_NO_PV_CAPTION`.
-  `components.chart` then appends `labels.CHART_TABLE_POINTER`. In a year without popular-vote
+  No caption sentence explains the other two markers: the label and hover of each say what it
+  stands for. `components.chart` then appends `labels.CHART_TABLE_POINTER`. In a year without popular-vote
   figures, `NO_PV_SENTENCE` in `pages/election.py` still shows above T3.
 - **Shown as:** the chart, placed by `pages/election.py` through `components.chart`; its wording
   in `labels.py`: the title `labels.C1_TITLE`, or `labels.C1_TITLE_NO_PV` in a year without
   popular-vote figures; the share axis `labels.C1_X_AXIS`; the series names
   `LABELS["ec_share_full"]` and `LABELS["pv_share"]`; the majority line's label
-  `labels.C1_MAJORITY_LINE`; the marker labels `labels.C1_NO_FIGURE` and `labels.UNRECOGNIZED`; the
-  hover text `labels.C1_EC_HOVER`, `labels.C1_PV_HOVER` and `labels.C1_NO_FIGURE_HOVER` (which
-  writes `labels.NO_NATIONAL_FIGURE`, or `labels.UNRECOGNIZED` with `labels.UNRECOGNIZED_NOTE`);
-  the caption sentences `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`,
-  `labels.C1_LINE_EC_ONLY`, `labels.C1_ROW_ORDER`, `labels.C1_NO_FIGURE_NOTE` and
-  `labels.C1_NO_PV_CAPTION`; then `labels.CHART_TABLE_POINTER`. The marker series' name,
-  `labels.C1_NO_FIGURE_SERIES`, is never shown.
+  `labels.C1_MAJORITY_LINE`; the marker labels `labels.C1_NO_FIGURE`, `labels.C1_NO_SHARE` and
+  `labels.UNRECOGNIZED`; the hover text `labels.C1_EC_HOVER`, `labels.C1_PV_HOVER` and
+  `labels.C1_NO_FIGURE_HOVER` (which writes `labels.NO_NATIONAL_FIGURE`; for a null or blank
+  electoral share, `LABELS["ec_share_full"]`, a colon and `labels.NOT_IN_DATASET`; or
+  `labels.UNRECOGNIZED` with `labels.UNRECOGNIZED_NOTE`); the caption sentences
+  `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY`,
+  `labels.C1_ROW_ORDER`, `labels.C1_NO_FIGURE_NOTE` and `labels.C1_NO_PV_CAPTION`; then
+  `labels.CHART_TABLE_POINTER`. The marker series' name, `labels.C1_NO_FIGURE_SERIES`, is never
+  shown.
 - **Source:** #433; `CHARTS` in `dashboard/explore/charts.py`; the two series:
   `NationalSummaryRow.ec_share_full` and `pv_share` in `src/usvote/api/models.py`, D041, D046 §4;
   the majority line: `ElectionSummary.ec_determinative`, D041; reader wording, the order of the
   page's sections (National results before Results by state), the row-order sentence, counted
   votes only in the hover, and the majority line's label: owner approval at #433's plan gate,
-  2026-11-09.
+  2026-11-09; the marker for a null or blank electoral share, its label and its hover: owner
+  approval with #466.
 - **Not:** A stand-in for T3, which holds the numbers and the download. Not a chart of votes
   cast: the electoral share is votes counted out of electors appointed. Not the hybrid: no hybrid
   score is drawn. A marker is not a zero, and a bar of zero length never stands for a missing
@@ -808,7 +819,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.PARTY_NULL_NOTE` through `labels.nominating_party_cell`), `labels.party_notes` (the Party
   notes list's candidate name), `labels._closed_value`, `labels._null` (so `labels.winner`,
   `labels.flip`, `labels.margin`), `labels.ec_majority`, `labels._null_per_capita` (so
-  `labels.population`), `labels.persons_per_electoral_vote`.
+  `labels.population`), `labels.persons_per_electoral_vote`. In C1, a null or blank electoral
+  share draws a marker labeled `labels.C1_NO_SHARE`, and its hover (`labels.C1_NO_FIGURE_HOVER`)
+  writes `labels.NOT_IN_DATASET` after `LABELS["ec_share_full"]` and a colon, as T3 shows that
+  cell under its header.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1335,7 +1349,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE`, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
 | "No nomination", "no party" for `no_nomination` | Without a party's nomination for President when the electors voted | `labels.NO_NOMINATION` | "No party" is a different claim. "No nomination" denies that a withdrawn nominee was ever nominated (D077). |

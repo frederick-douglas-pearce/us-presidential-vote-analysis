@@ -7,8 +7,8 @@ or on a console error, at the 390 × 844 phone viewport #306 was checked at. The
 off-host address it answers is plotly.js's on its CDN (#432), fulfilled from the
 installed file and counted: a test of a chart names exactly how many fetches it expects
 with :data:`PLOTLYJS_FETCHES`, and every other test is held to a bound derived from the
-chart registry (#433, D091): at most one fetch per document, and only from a page a
-registered chart renders on.
+chart registry (#433, D091): at most one fetch per document, and only from a path a
+live registered chart's page template matches, whatever state the page rendered there.
 
 pytest imports this module on every run, the default one included, so nothing here
 starts a process or touches the network at import.
@@ -234,10 +234,12 @@ def derived_fetch_problems(
 ) -> list[str]:
     """The plotly.js bound for a test that declares no count (#433, D091): each fetch,
     given as the document it was made in (a count of the main frame's document loads)
-    and the path that document showed, must come from a page a registered chart renders
-    on, and no document may fetch twice (the mount callback loads plotly.js once per
-    document, D088). So a test that only passes through a chart page needs no marker,
-    while a page with no chart still fetches nothing."""
+    and the path that document showed, must come from a path a live ``CHARTS`` row's
+    template matches, whatever state the page rendered there, and no document may fetch
+    twice (the mount callback loads plotly.js once per document, D088). So a test that
+    only passes through a chart page needs no marker, and a path no chart's template
+    matches may fetch nothing. A not-found or degraded render at a chart path is not
+    told apart here: a test of one declares ``plotlyjs_fetches(0)`` (owner, #433)."""
     patterns = list(chart_pages)
     problems = []
     seen: set[int] = set()

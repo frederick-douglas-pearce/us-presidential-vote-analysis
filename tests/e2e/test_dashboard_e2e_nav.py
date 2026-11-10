@@ -76,7 +76,12 @@ def template_params() -> list[Any]:
     return [
         pytest.param(
             path,
-            marks=[pytest.mark.expected_console_error(NOT_FOUND_ERROR)]
+            # A not-found render never mounts a chart: exactly no plotly.js, never
+            # the derived bound (#433's round 1).
+            marks=[
+                pytest.mark.expected_console_error(NOT_FOUND_ERROR),
+                pytest.mark.plotlyjs_fetches(0),
+            ]
             if path in NOT_FOUND_PATHS
             else [],
             id=path,

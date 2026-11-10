@@ -500,8 +500,9 @@ def _nation_cells(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]
     }
 
 
-def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
-    cells = _nation_cells(row, has_popular_vote)
+def _nation_row(row: dict[str, Any], cells: dict[str, str]) -> html.Tr:
+    """A T3 row from its :func:`_nation_cells`, computed once per render and shared
+    with C1."""
     return html.Tr(
         [
             components.candidate_cell(row),
@@ -512,9 +513,17 @@ def _nation_row(row: dict[str, Any], has_popular_vote: bool) -> html.Tr:
 
 
 def _escaped(text: str) -> str:
-    """Served text as plotly's pseudo-HTML shows it as written: a name holding ``<`` or
-    ``&`` is drawn, never read as markup (#433)."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Served text as plotly's pseudo-HTML shows it as written (#433): a name holding
+    ``<`` or ``&`` is drawn, never read as markup, and ``(`` is written as an entity, so
+    no served string can spell a ``var(--token)`` reference, which the figure rules
+    refuse outside a color (``charts.color_problems``) and the chart callback would
+    resolve. plotly draws each entity as its character."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("(", "&#40;")
+    )
 
 
 def _plotted(value: Any, cell: str) -> float | None:
@@ -526,10 +535,10 @@ def _plotted(value: Any, cell: str) -> float | None:
     return number if number is not None and is_share else None
 
 
-#: Where a marker sits in a row (#433): the centre of the slot of the bar it stands
+#: Where a marker sits in a row (#433): the center of the slot of the bar it stands
 #: for, from the template's ``bargap`` (one source), as plotly places two grouped bars
-#: at a quarter of the row's bar band either side of its centre. With one series the
-#: bar is centred.
+#: at a quarter of the row's bar band either side of its center. With one series the
+#: bar is centered. The e2e test on 2016 observes it against a drawn bar.
 _SLOT = (1 - charts.TEMPLATE["layout"]["bargap"]) / 4
 
 #: Pixels per row and the margins around the plot (#433): two bars and their labels
@@ -539,15 +548,24 @@ _TOP_PX = {True: 96, False: 56}
 _BOTTOM_PX = 48
 
 
-def _marker_hover(name: str, cell: str) -> str:
-    text = cell
+def _marker(field: str, cell: str) -> tuple[str, str]:
+    """A marker's label and its hover cell, for a value T3 does not show as a share
+    (#433): a missing popular-vote figure, a null or blank electoral share (named by its
+    series, as T3's header names that cell), or an unrecognized value with its note."""
+    if cell == labels.NO_NATIONAL_FIGURE:
+        return labels.C1_NO_FIGURE, cell
+    if field == "ec_share_full" and cell == labels.NOT_IN_DATASET:
+        return labels.C1_NO_SHARE, f"{labels.LABELS[field]}: {cell}"
     if cell == labels.UNRECOGNIZED:
-        text = f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
-    return labels.C1_NO_FIGURE_HOVER.format(candidate=name, cell=text)
+        return cell, f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
+    return cell, cell
 
 
 def _c1_figure(
-    summary: list[dict[str, Any]], has_popular_vote: bool, year: int
+    summary: list[dict[str, Any]],
+    cells: list[dict[str, str]],
+    has_popular_vote: bool,
+    year: int,
 ) -> tuple[dict[str, Any], bool]:
     """C1's figure (#433), from T3's rows in T3's order, and whether it draws a
     :data:`labels.C1_NO_FIGURE` marker.
@@ -557,13 +575,15 @@ def _c1_figure(
     labeled with T3's cell for it; a share T3 does not show as one gets a labeled marker
     in its bar's slot, never a zero-length bar, and a real zero is a drawn, labeled bar.
     The popular-vote series is drawn only in a year T3 treats as having popular votes.
-    Total over every body T3 renders: it reads only ``labels`` predicates and the cells.
+    ``cells`` are each row's :func:`_nation_cells`, the strings T3 shows. Total over
+    every body T3 renders: it reads the served shares only through
+    :func:`explore.labels.finite` and :func:`explore.labels.share` (:func:`_plotted`),
+    and each name and slug as ``str``, escaped (:func:`_escaped`).
     """
     n = len(summary)
     positions = list(range(n))
     names = [_escaped(str(row["candidate"])) for row in summary]
-    slugs = [str(row["candidate_slug"]) for row in summary]
-    cells = [_nation_cells(row, has_popular_vote) for row in summary]
+    slugs = [_escaped(str(row["candidate_slug"])) for row in summary]
     offsets = (
         {"ec_share_full": -_SLOT, "pv_share": _SLOT}
         if has_popular_vote
@@ -596,13 +616,15 @@ def _c1_figure(
                 )
             )
             if x is None:
-                blank = shown == labels.NO_NATIONAL_FIGURE
-                no_figure = no_figure or blank
+                label, hover_cell = _marker(field, shown)
+                no_figure = no_figure or label == labels.C1_NO_FIGURE
                 marks.append(
                     (
                         i + offsets[field],
-                        labels.C1_NO_FIGURE if blank else shown,
-                        _marker_hover(names[i], shown),
+                        label,
+                        labels.C1_NO_FIGURE_HOVER.format(
+                            candidate=names[i], cell=hover_cell
+                        ),
                         f"{slugs[i]}/{field}",
                     )
                 )
@@ -949,7 +971,9 @@ def render(
                 className="note",
             )
         )
-    figure, no_figure = _c1_figure(summary, has_popular_vote, year)
+    cells = [_nation_cells(row, has_popular_vote) for row in summary]
+    by_row = {id(row): row_cells for row, row_cells in zip(summary, cells, strict=True)}
+    figure, no_figure = _c1_figure(summary, cells, has_popular_vote, year)
     nation += [
         components.chart(
             C1_ID,
@@ -959,7 +983,7 @@ def render(
         ),
         *components.table(
             summary,
-            lambda r: _nation_row(r, has_popular_vote),
+            lambda r: _nation_row(r, by_row[id(r)]),
             NATION_FIELDS,
             NATION_TABLE_ID,
             _download(year, "national", "the national results", body, chosen),

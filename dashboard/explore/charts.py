@@ -368,8 +368,11 @@ _PLACEHOLDER_RE = re.compile(r"%\{[^}]*\}")
 
 
 def _drawn_text(trace: Mapping[str, Any]) -> Any:
-    """The text plotly draws on ``trace``'s points: its ``texttemplate`` when set,
-    which then replaces ``text`` (#433, D091), else its ``text``."""
+    """The string that gives ``trace``'s drawn text (#433, D091): its ``texttemplate``
+    when set, which plotly draws in place of ``text``, else its ``text``. Placeholders
+    are not resolved, so a series named only through ``%{text}`` (or any placeholder but
+    ``%{fullData.name}``) is not credited with a direct label: a conservative refusal,
+    which can refuse a figure but never passes a color-only pair (#468)."""
     template = trace.get("texttemplate")
     return template if template not in (None, "") else trace.get("text")
 
@@ -379,9 +382,9 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
     it: a marker symbol where a scatter trace draws markers, a line dash where it draws
     lines, a pattern on bars, and a direct label naming the series: an annotation whose
     text is the trace's name, or shown text that, with its placeholders removed, is the
-    name, or that writes it with ``%{fullData.name}``. Shown text is the string plotly
-    draws (:func:`_drawn_text`), so a ``text`` a ``texttemplate`` replaces names
-    nothing (#433). A trace of any other type draws
+    name, or that writes it with ``%{fullData.name}``. Shown text is read from
+    :func:`_drawn_text`, so a ``text`` a ``texttemplate`` replaces names nothing, and
+    placeholders are not resolved (#433). A trace of any other type draws
     none of these, so two traces of such a type are reported as differing by color
     alone until this learns the type. A numeric symbol or dash is not read here:
     :func:`figure_problems` refuses it, rather than copy plotly's number table."""
@@ -498,9 +501,14 @@ def hover_problems(figure: Mapping[str, Any]) -> list[str]:
 
 #: What a ``%{…}`` placeholder in a hover or text template may name (#433, D091): a
 #: string the page wrote (``customdata`` or a part of it, ``hovertext``, ``text``) or
-#: the trace's name, and never a format. So every number a chart shows is a string its
-#: page wrote, as its companion table writes it, and never plotly's own formatting of a
-#: value (``%{x:.1%}``, ``%{y}``).
+#: the trace's name, and never a value or a format (``%{x:.1%}``, ``%{y}``); and every
+#: item of a trace's ``text``, ``hovertext`` and ``customdata`` is a string
+#: (:func:`template_problems`). So every hover and text label shows a string its page
+#: wrote, never plotly's own formatting of a value. That those strings are the companion
+#: table's cells is each chart's reconciliation test's to show (C1's: ``TestC1`` in
+#: ``test_dashboard_election.py``). Axis tick labels are the exception: plotly writes
+#: them, under the template's full-number formats and a chart's ``tickformat``, which
+#: :func:`override_problems` holds to the types that write a number in full.
 _ALLOWED_PLACEHOLDER_RE = re.compile(
     r"%\{(?:customdata(?:\[\d+\]|\.[A-Za-z0-9_]+)*|hovertext|text|fullData\.name)\}"
 )
@@ -508,13 +516,38 @@ _ALLOWED_PLACEHOLDER_RE = re.compile(
 #: The keys whose strings are templates plotly fills.
 _TEMPLATE_KEYS = frozenset({"hovertemplate", "texttemplate"})
 
+#: A trace's keys whose items plotly draws as written or fills into a template: each
+#: item must be a string the page wrote, never a value plotly would format itself.
+_STRING_KEYS = ("text", "hovertext", "customdata")
+
+
+def _non_strings(value: Any, path: str) -> Iterator[str]:
+    """Each item under ``value`` (a string, or a list or dict of them at any depth)
+    that is not a string."""
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            yield from _non_strings(inner, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            yield from _non_strings(inner, f"{path}[{index}]")
+    elif not isinstance(value, str):
+        yield path
+
 
 def template_problems(figure: Mapping[str, Any]) -> list[str]:
     """Each template placeholder that names a value or a format rather than a string the
-    page wrote (:data:`_ALLOWED_PLACEHOLDER_RE`), and each ``hoverformat`` (an axis's,
-    or a trace's ``xhoverformat`` and the like), which formats a value plotly then shows
-    (#433, D091)."""
-    problems = []
+    page wrote (:data:`_ALLOWED_PLACEHOLDER_RE`); each ``hoverformat`` (an axis's, or a
+    trace's ``xhoverformat`` and the like), which formats a value plotly then shows; and
+    each item of a trace's ``text``, ``hovertext`` or ``customdata`` that is not a
+    string, which plotly would format itself (#433, D091)."""
+    problems = [
+        f"{path}: not a string the page wrote"
+        for index, trace in enumerate(figure.get("data") or [])
+        if isinstance(trace, dict)
+        for key in _STRING_KEYS
+        if key in trace
+        for path in _non_strings(trace[key], f"data[{index}].{key}")
+    ]
     for path, key, value in _walk(figure):
         if key in _TEMPLATE_KEYS and isinstance(value, str):
             problems += [

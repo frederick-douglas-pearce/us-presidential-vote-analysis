@@ -639,12 +639,40 @@ class TestC1Rules:
     ) -> None:
         assert bool(charts.bar_problems(figure)) is refused
 
-    def test_figure_problems_gathers_both(self) -> None:
+    @pytest.mark.parametrize(
+        ("trace", "refused"),
+        [
+            ({"type": "bar", "text": ["50.0%", ""]}, False),
+            ({"type": "bar", "text": "A label"}, False),
+            ({"type": "bar", "hovertext": ["A<br>B"]}, False),
+            ({"type": "bar", "customdata": [{"pv_share": "48.0%"}, ["a", "b"]]}, False),
+            # plotly would format each of these itself.
+            ({"type": "bar", "text": [0.5]}, True),
+            ({"type": "bar", "text": 0.5}, True),
+            ({"type": "bar", "hovertext": ["A", 3]}, True),
+            ({"type": "bar", "customdata": [{"pv_share": 0.48}]}, True),
+            ({"type": "bar", "customdata": [[0.1, "a"]]}, True),
+            ({"type": "bar", "text": [None]}, True),
+            ({"type": "bar", "text": [True]}, True),
+        ],
+    )
+    def test_text_hovertext_and_customdata_hold_only_strings(
+        self, trace: dict[str, Any], refused: bool
+    ) -> None:
+        """The owner's ruling on round 1: a hover or text label shows only strings the
+        page wrote, so a number in ``text``, ``hovertext`` or ``customdata``, which a
+        ``%{text}`` would let plotly format, is refused."""
+        problems = charts.template_problems({"data": [trace]})
+        assert bool(problems) is refused, problems
+        assert all("not a string the page wrote" in p for p in problems)
+
+    def test_figure_problems_gathers_the_c1_rules(self) -> None:
         assert charts.figure_problems(TEST_FIGURE) == []
         for change, message in (
             (lambda f: f["data"][0].update(hovertemplate="%{y}"), "not a string"),
             (lambda f: f["data"][0].update(width=0.3), "width and place"),
             (lambda f: f["layout"]["xaxis"].update(hoverformat=".1%"), "hover format"),
+            (lambda f: f["data"][0].update(text=[0.5, 0.4]), "not a string the page"),
         ):
             figure = copy.deepcopy(TEST_FIGURE)
             change(figure)
@@ -655,6 +683,14 @@ class TestC1Rules:
         [
             # plotly draws the texttemplate when set: a ``text`` it replaces names
             # nothing (#432's note 1).
+            (
+                trace("bar", name="A", text="A", texttemplate="%{y}"),
+                trace("bar", name="B", text="B", texttemplate="%{y}"),
+                False,
+            ),
+            # A conservative refusal, on purpose: placeholders are not resolved, so a
+            # label written only through %{text} is not credited, though plotly would
+            # draw "A" (#468 defers resolving it).
             (
                 trace("bar", name="A", text="A", texttemplate="%{text}"),
                 trace("bar", name="B", text="B", texttemplate="%{text}"),

@@ -6207,23 +6207,34 @@ how a real zero (1872, Greeley's counted electoral share) is told apart from it,
 chart sits on a page whose first table runs to dozens of rows.
 
 **Decision.**
-- **Every number a chart shows is its companion table's cell string.** A hover or text template's
-  `%{…}` placeholders may name only strings the page wrote (`customdata` or a part of it,
-  `hovertext`, `text`) or the trace's name, never a value or a format; `hoverformat` (an axis's,
-  or a trace's `xhoverformat` and the like) is refused (`charts.template_problems`). A chart draws
-  the served value and computes none, and draws it only where `labels.finite` (public since #433)
-  accepts it and the table's cell for it is a figure.
+- **Every hover and text label a chart shows is a string its page wrote, and a chart's are its
+  companion table's cells.** The figure rules enforce the first half (`charts.template_problems`):
+  a hover or text template's `%{…}` placeholders may name only strings the page wrote
+  (`customdata` or a part of it, `hovertext`, `text`) or the trace's name, never a value or a
+  format; every item of a trace's `text`, `hovertext` and `customdata` is a string (owner, #433's
+  round 1); and `hoverformat` (an axis's, or a trace's `xhoverformat` and the like) is refused.
+  That those strings are the table's cells is each chart's reconciliation test's to show (C1's:
+  `TestC1` in `test_dashboard_election.py`). Axis tick labels are the exception: plotly writes
+  them, under the template's full-number formats and a chart's `tickformat`, which
+  `charts.override_problems` holds to types that write a number in full. A chart draws the served
+  value and computes none, and draws it only where `labels.finite` (public since #433) accepts it
+  and the table's cell for it is a figure.
 - **A missing or unrecognized value gets a labeled marker in its bar's slot, never a bar of zero
   length; a zero is drawn and labeled.** Every drawn bar carries its cell as a text label, so a
-  zero reads "0.0%" and a missing figure reads `labels.C1_NO_FIGURE` (or `labels.UNRECOGNIZED`).
-  C1's marker sits at the centre of its slot, `(1 − bargap) / 4` either side of the row's centre,
+  zero reads "0.0%", a missing popular-vote figure reads `labels.C1_NO_FIGURE`, a null electoral
+  share (never served) `labels.C1_NO_SHARE`, and any other value the page has no label for
+  `labels.UNRECOGNIZED`. C1's marker sits at the center of its slot, `(1 − bargap) / 4` either
+  side of the row's center (the 2016 browser test observes it against a drawn bar),
   `bargap` read from `charts.TEMPLATE`, on a numeric row axis (T3's order, reversed), so two
   candidates of one name never merge. `scattermode` and its `offsetgroup` alignment were rejected:
   a scatter's default orientation is vertical, and bars and scatter points are positioned in
   separate passes.
 - **No bar sets its own `width` or `offset`, and no figure sets `scattergap`**
   (`charts.bar_problems`), so the template's gaps always part neighboring bars.
-- **A direct label is the string plotly draws:** `texttemplate` when set, else `text`.
+- **A direct label is read from the string plotly draws:** `texttemplate` when set, else
+  `text`. Placeholders are not resolved, so a series named only through `%{text}` is not
+  credited: a conservative refusal that can refuse a figure but never passes a color-only pair
+  (resolving it is deferred to #468).
 - **C1's form and place.** Horizontal grouped bars (electoral share solid, the upper bar;
   popular-vote share with a `marker.pattern` overlaid in the page color, so the two differ without
   color), a dashed line at 0.5 labeled as half of the electors appointed, a horizontal legend. The
@@ -6231,9 +6242,11 @@ chart sits on a page whose first table runs to dozens of rows.
   near the top of a phone page. In a year with no popular-vote figures, the year sentence above
   T3 stays and the caption says why no popular-vote share is drawn.
 - **Browser tests derive their plotly.js bound.** Without a `plotlyjs_fetches` marker, the e2e
-  guard allows at most one plotly.js fetch per document, and only from a page a registered chart
-  renders on (a `CHARTS` row's path template); a test of a chart itself still declares an exact
-  count. So a test that only passes through a chart page needs no marker, and C2–C5 need no ripple.
+  guard allows at most one plotly.js fetch per document, and only from a path a live `CHARTS`
+  row's template matches, whatever state the page rendered there (owner, #433's round 1: the
+  rule keys on the path); a test of a chart itself still declares an exact count, and so does a
+  test of a state that renders no chart on such a path (`/election/1825`, not found: exactly 0).
+  So a test that only passes through a chart page needs no marker, and C2–C5 need no ripple.
 
 **Rationale.** A chart that formats its own numbers can disagree with the table it points to, and
 a reader has no way to tell which is right; reusing the table's cell strings makes them agree by

@@ -1,9 +1,11 @@
-"""The chart foundation in a browser (#432), on ``serve.py``'s test chart page: before
-C1 (#433), no production page renders a chart.
+"""The chart foundation in a browser (#432), on ``serve.py``'s test chart page, which
+tests the foundation apart from any production chart (C1, #433, has its own tests in
+``test_dashboard_e2e_election.py``).
 
 plotly.js is fetched from its CDN address only where a chart mounts, fulfilled from the
-installed file by the browser guard, which counts every fetch (``plotlyjs_fetches``;
-zero for every other test). A chart is drawn in the theme in effect, redrawn on a theme
+installed file by the browser guard, which counts every fetch: each test here declares
+its count with ``plotlyjs_fetches``, since serve.py's test rows are not in this
+process's registry, which the guard derives an undeclared test's bound from (D091). A chart is drawn in the theme in effect, redrawn on a theme
 switch with no reload and no server round trip, and its table pointer moves within the
 page. If the CDN is blocked, the page, the chart's title, caption and pointer and its
 table still render, with one console error and no loop: no graph mounts until plotly.js
@@ -107,14 +109,14 @@ def test_the_installed_plotlyjs_is_the_version_the_address_names() -> None:
     assert urlsplit(plotlyjs_url()).netloc == "cdn.plot.ly"
 
 
+@pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.parametrize(
     ("path", "success"), [("/", HOME_SUCCESS), ("/elections", ELECTIONS_SUCCESS)]
 )
 def test_a_page_with_no_chart_fetches_no_plotlyjs(
     page: Page, path: str, success: str
 ) -> None:
-    # The browser guard expects no fetch without the marker; this waits long enough
-    # for one to have gone out.
+    # Exactly no fetch, declared; this waits long enough for one to have gone out.
     page.goto(path)
     assert_rendered(page, success)
     page.wait_for_timeout(SETTLE_MS)
@@ -404,11 +406,12 @@ HIDE_ADDRESS = (
 )
 
 
+@pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.expected_console_error(NO_ADDRESS)
 def test_with_no_plotlyjs_address_the_mount_logs_once_and_gives_up(page: Page) -> None:
     # #452's acceptance gate: with no address the load resolves false at once, logs its
-    # one line (the guard counts it exactly) and fetches nothing (zero fetches is the
-    # guard's default), so no script with an undefined src is appended.
+    # one line (the guard counts it exactly) and fetches nothing (declared exactly), so
+    # no script with an undefined src is appended.
     page.add_init_script(HIDE_ADDRESS)
     page.goto(CHART_PAGE)
     assert_rendered(page, f"#{CHART_SUCCESS}")

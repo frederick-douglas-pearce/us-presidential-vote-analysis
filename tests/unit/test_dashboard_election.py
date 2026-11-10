@@ -2855,6 +2855,9 @@ def test_a_blank_t3_figure_is_a_missing_one() -> None:
 
 C1 = "c1"
 RECONCILED_YEARS = (1824, 1860, 1872, 2016, 2024)
+#: The hover templates as shipped, copied at import, so a test that patches the page's
+#: template sees the reconciliation compare against the approved one.
+EC_HOVER, PV_HOVER = labels.C1_EC_HOVER, labels.C1_PV_HOVER
 
 
 def c1(tree: Any) -> Any:
@@ -2949,42 +2952,92 @@ class TestC1:
         assert c1(degraded) is None
 
     @pytest.mark.parametrize("year", RECONCILED_YEARS)
-    def test_every_plotted_value_is_t3_s_cell_for_the_same_slug(
-        self, year: int
-    ) -> None:
-        """AC Reconciliation: rows in T3's order, keyed by slug through each trace's
-        ``ids``; each bar is the served value (the chart computes no share) and its text
-        and hover carry T3's cell; each marker carries T3's cell."""
+    def test_every_plotted_value_is_t3_s_cell_for_the_same_slug(self, year: int) -> None:
+        """AC Reconciliation, keyed by slug through each trace's ``ids``: every series
+        slot of every T3 row is exactly one bar or exactly one marker. A bar is the
+        served value (the chart computes no share) and is drawn exactly where T3's cell
+        is a share; its text is that cell and its hover the template filled with T3's
+        cells. A marker stands exactly where the cell is not a share, labeled and
+        hovered from that cell."""
         tree = render(year)
+        found = traces(c1_figure(tree))
+        t3 = {row["slug"]: row for row in t3_cells(year)}
+        summary = {r["candidate_slug"]: r for r in year_body(year)["summary"]}
         figure = c1_figure(tree)
-        found = traces(figure)
-        t3 = t3_cells(year)
-        summary = year_body(year)["summary"]
-        assert figure["layout"]["yaxis"]["ticktext"] == [r["candidate"] for r in t3]
-        assert figure["layout"]["yaxis"]["tickvals"] == list(range(len(t3)))
-        for role, field in (("ec", "ec_share_full"), ("pv", "pv_share")):
-            if role not in found:
-                continue
+        assert figure["layout"]["yaxis"]["ticktext"] == [
+            r["candidate"] for r in t3.values()
+        ]
+        marks = found.get("marks", {"ids": [], "text": [], "hovertext": []})
+        assert len(set(marks["ids"])) == len(marks["ids"])
+        series = [("ec", "ec_share_full")]
+        if "pv" in found:
+            series.append(("pv", "pv_share"))
+        slots = 0
+        for role, field in series:
             trace = found[role]
-            assert trace["ids"] == [r["slug"] for r in t3]
+            assert trace["ids"] == list(t3)  # T3's rows, in T3's order
             assert trace["y"] == list(range(len(t3)))
             for i, slug in enumerate(trace["ids"]):
-                served = next(r for r in summary if r["candidate_slug"] == slug)[field]
-                cell = next(r for r in t3 if r["slug"] == slug)[field]
-                x = trace["x"][i]
-                if x is None:
-                    assert trace["text"][i] == ""
+                served, cell, row = summary[slug][field], t3[slug][field], t3[slug]
+                is_share = cell != labels.UNRECOGNIZED and cell == labels.share(served)
+                x, mark = trace["x"][i], f"{slug}/{field}"
+                assert (x is not None) is is_share, (slug, field, cell)
+                assert (mark in marks["ids"]) is not is_share, (slug, field)
+                slots += 1
+                if is_share:
+                    assert x == served and type(x) is type(served)
+                    assert trace["text"][i] == cell
+                    expected = (
+                        EC_HOVER.format(
+                            candidate=row["candidate"],
+                            share=cell,
+                            counted=row["national_electoral_votes_counted"],
+                            appointed=row["national_electoral_denominator"],
+                        )
+                        if field == "ec_share_full"
+                        else PV_HOVER.format(
+                            candidate=row["candidate"],
+                            share=cell,
+                            votes=row["national_pv_votes"],
+                        )
+                    )
+                    assert trace["hovertext"][i] == expected
                     continue
-                assert x == served and type(x) is type(served)
-                assert labels.share(x) == cell
-                assert trace["text"][i] == cell
-                assert f": {cell}<br>" in trace["hovertext"][i]
-        for i, ident in enumerate(found.get("marks", {}).get("ids", [])):
-            slug, field = ident.split("/")
-            cell = next(r for r in t3 if r["slug"] == slug)[field]
-            mark = found["marks"]
-            assert mark["text"][i] in (cell, labels.C1_NO_FIGURE)
-            assert f"<br>{cell}" in mark["hovertext"][i]
+                assert trace["text"][i] == ""
+                k = marks["ids"].index(mark)
+                if cell == labels.NO_NATIONAL_FIGURE:
+                    label, shown = labels.C1_NO_FIGURE, cell
+                elif cell == labels.NOT_IN_DATASET:
+                    label, shown = labels.C1_NO_SHARE, f"{labels.LABELS[field]}: {cell}"
+                else:
+                    label, shown = cell, f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
+                assert marks["text"][k] == label
+                assert marks["hovertext"][k] == labels.C1_NO_FIGURE_HOVER.format(
+                    candidate=row["candidate"], cell=shown
+                )
+        drawn = sum(x is not None for role, _ in series for x in found[role]["x"])
+        assert drawn + len(marks["ids"]) == slots == len(t3) * len(series)
+
+    def test_the_reconciliation_fails_a_chart_that_draws_no_bar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity (round 1): with ``_plotted`` drawing nothing, every share
+        becomes a marker, and the reconciliation fails."""
+        monkeypatch.setitem(MOD, "_plotted", lambda value, cell: None)
+        with pytest.raises(AssertionError):
+            self.test_every_plotted_value_is_t3_s_cell_for_the_same_slug(2024)
+
+    def test_the_reconciliation_fails_a_hover_with_the_wrong_votes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GE8's mutant: the "Popular votes" line filled with another cell."""
+        monkeypatch.setattr(
+            labels, "C1_PV_HOVER", PV_HOVER.replace("{votes}", "{counted}")
+        )
+        hover = traces(c1_figure(render(2024)))["pv"]["hovertext"][0]
+        assert "Popular votes: 312" in hover  # the premise: the mutant took
+        with pytest.raises(AssertionError):
+            self.test_every_plotted_value_is_t3_s_cell_for_the_same_slug(2024)
 
     def test_the_popular_vote_window_comes_from_t3_s_year_rule(self) -> None:
         """AC Window: the popular-vote series only where T3 treats the year as having
@@ -3165,14 +3218,23 @@ class TestC1:
             assert marks["y"][i] == expected
         assert nation_rows(tree)["Donald J. Trump"]["pv_share"] == labels.UNRECOGNIZED
 
-    def test_a_null_electoral_share_reads_as_t3_does(self) -> None:
+    @pytest.mark.parametrize("blank", [None, " "])
+    def test_a_null_electoral_share_is_a_marker_naming_its_series(
+        self, blank: Any
+    ) -> None:
         body = year_body(1860)
-        body["summary"][0]["ec_share_full"] = None
+        body["summary"][0]["ec_share_full"] = blank
         tree = render(1860, body=body)
         marks = traces(c1_figure(tree))["marks"]
         assert marks["ids"] == ["abraham-lincoln/ec_share_full"]
-        assert marks["text"] == [labels.NOT_IN_DATASET]
-        assert marks["y"] == [0.0]  # one series: the bar's slot is the row's centre
+        assert marks["text"] == [labels.C1_NO_SHARE]
+        assert marks["hovertext"] == [
+            "Abraham Lincoln<br>Electoral share (counted ÷ appointed): "
+            + labels.NOT_IN_DATASET
+        ]
+        assert marks["y"] == [0.0]  # one series: the bar's slot is the row's center
+        # No caption note: the label and hover say what the marker stands for.
+        assert labels.C1_NO_FIGURE not in c1_caption(tree)
         assert nation_rows(tree)["Abraham Lincoln"]["ec_share_full"] == (
             labels.NOT_IN_DATASET
         )
@@ -3196,6 +3258,30 @@ class TestC1:
         )
         ec = traces(figure)["ec"]
         assert ec["hovertext"][0].startswith("&lt;b&gt;A &amp; B&lt;/b&gt;<br>")
+
+    @pytest.mark.parametrize(
+        "name", ["var(--chart-1)", "var(--unset)", "x var(--page) y", "(a)"]
+    )
+    def test_a_name_spelling_a_token_reference_is_drawn_as_written(
+        self, name: str
+    ) -> None:
+        """Round 1: a served name holding ``var(`` once made ``components.chart``
+        refuse the figure and took the whole page down. ``(`` is written as an entity,
+        which plotly draws as ``(``."""
+        body = year_body(2016)
+        body["summary"][0]["candidate"] = name
+        tree = render(2016, body=body)
+        assert c1(tree) is not None and find(tree, NATION) is not None
+        figure = c1_figure(tree)
+        shown = figure["layout"]["yaxis"]["ticktext"][0]
+        assert "(" not in shown and shown == name.replace("(", "&#40;")
+        hover = traces(figure)["ec"]["hovertext"][0]
+        assert hover.startswith(f"{shown}<br>") and "var(" not in hover
+
+    def test_a_slug_spelling_a_token_reference_still_renders(self) -> None:
+        body = year_body(2016)
+        body["summary"][0]["candidate_slug"] = "var(--chart-1)"
+        assert c1(render(2016, body=body)) is not None
 
     @pytest.mark.parametrize("name", [7, None, " "])
     def test_a_name_that_is_not_text_still_renders(self, name: Any) -> None:
@@ -3225,6 +3311,26 @@ class TestC1:
             assert charts.template_problems(figure) == []
             for trace in figure["data"]:
                 assert trace["hovertemplate"] == "%{hovertext}<extra></extra>"
+
+    def test_t3_and_c1_read_one_computation_of_the_cells(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Round 1: ``_nation_cells`` runs once per T3 row per render, and both T3 and
+        C1 read its result."""
+        calls: list[str] = []
+        real = MOD["_nation_cells"]
+
+        def counted(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]:
+            calls.append(row["candidate_slug"])
+            return {**real(row, has_popular_vote), "electoral_rank": "SENTINEL-RANK"}
+
+        monkeypatch.setitem(MOD, "_nation_cells", counted)
+        tree = render(2024)
+        summary = year_body(2024)["summary"]
+        assert calls == [r["candidate_slug"] for r in summary]
+        assert column(tree, NATION, MOD["NATION_FIELDS"], "electoral_rank") == [
+            "SENTINEL-RANK"
+        ] * len(summary)
 
     def test_t3_s_cells_are_unchanged_by_the_shared_helper(self) -> None:
         """T3 reads :func:`_nation_cells` too: its rows match the pre-C1 rules."""
