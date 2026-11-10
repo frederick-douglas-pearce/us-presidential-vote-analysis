@@ -44,15 +44,19 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
-#: here once retired. C1 (#433) is the first; C2–C5 are assigned to #434–#436 by their
-#: issues. ``components.chart`` reads it by attribute at call time. ``ISSUED``, a
-#: hand-written literal of every issued ID with its whole row, must equal this
-#: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
+#: here once retired. C1 (#433) was the first and C3 (#435) the second; C2, C4 and C5
+#: are assigned to #434 and #436 by their issues. ``components.chart`` reads it by
+#: attribute at call time. ``ISSUED``, a hand-written literal of every issued ID with
+#: its whole row, must equal this (``TestChartRegistry`` in
+#: ``test_dashboard_charts.py`` reads it), and
 #: ``test_every_row_is_well_formed_and_on_a_registered_page`` checks each row.
 CHARTS: Mapping[str, Chart] = {
     # Each candidate's electoral share beside their popular-vote share, with the
     # majority line, on the one-election view, beside T3 (#433).
     "C1": Chart("/election/<year>", "election-nation"),
+    # Every state's people per electoral vote, never narrowed by the page's state
+    # filter, on an election's People per electoral vote page, beside T6 (#435, D093).
+    "C3": Chart("/election/<year>/per-capita", "election-per-capita"),
 }
 
 
@@ -73,6 +77,20 @@ def registry_problems(registry: Mapping[str, Chart]) -> list[str]:
         ):
             problems.append(f"{chart_id!r}: not a chart row")
     return problems
+
+
+def escaped(text: str) -> str:
+    """Served text as plotly's pseudo-HTML shows it as written (#433, #435): a name
+    holding ``<`` or ``&`` is drawn, never read as markup, and ``(`` is written as an
+    entity, so no served string can spell a ``var(--token)`` reference, which
+    :func:`color_problems` refuses outside a color and :data:`CHART_CALLBACK` would
+    resolve. plotly draws each entity as its character."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("(", "&#40;")
+    )
 
 
 def dom_id(chart_id: str) -> str:

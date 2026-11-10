@@ -388,6 +388,88 @@ C1_NO_PV_CAPTION = (
     "{first}–{last}, not {year}."
 )
 
+#: Chart C3 (#435; ba spec, revised after the architect's review and approved by the
+#: owner at #435's plan gate, 2026-11-10): every state's people per electoral vote on
+#: an election's People per electoral vote page, beside T6. Not ``LABELS`` keys. Each
+#: bar's text and every hover value is T6's cell, so the chart writes every number as
+#: T6 does. The bar series are named by :data:`BOUNDARY_BASIS`, or
+#: :data:`C3_PLAIN_SERIES` (below).
+C3_TITLE = (
+    "People per electoral vote in each state in {year} (census used: {census_year})"
+)
+#: The title when the rows' census-year cells are not all one year (or one is
+#: unrecognized).
+C3_TITLE_NO_CENSUS = "People per electoral vote in each state in {year}"
+#: The value axis's title (its tick labels are hidden: every bar carries its number).
+C3_X_AXIS = LABELS["persons_per_electoral_vote"]
+#: The plain bar series' name when any plain row's border cell is not "Borders at the
+#: election" (a defensive case: a served body never carries one).
+C3_PLAIN_SERIES = "Bars without stripes"
+#: The selected state's series (the page's filter): one open point at the start of its
+#: row. "Selected", not "you chose": a shared link carries the filter.
+C3_SELECTED = "Selected state"
+#: The marker series' name, kept off the legend and never shown: the figure rules need
+#: every trace named.
+C3_NO_FIGURE_SERIES = "No bar for this state"
+#: The short labels drawn beside a marker, short enough for 390 px. T6's full cell is in
+#: the marker's hover (:data:`C3_NO_FIGURE_HOVER`).
+C3_NO_CENSUS_FIGURE = "No census figure"
+C3_NO_ELECTORAL_VOTES = "No electoral votes"
+#: A marker's drawn label, looked up by T6's cell; any cell not here draws
+#: :data:`UNRECOGNIZED`.
+C3_MARKER_LABELS: dict[str, str] = {
+    PER_CAPITA_COVERAGE[NO_GOVERNING_FIGURE]: C3_NO_CENSUS_FIGURE,
+    NO_ELECTORAL_VOTES: C3_NO_ELECTORAL_VOTES,
+    NOT_IN_DATASET: NOT_IN_DATASET,
+    UNRECOGNIZED: UNRECOGNIZED,
+}
+#: A bar's hover, filled with T6's cell strings.
+C3_BAR_HOVER = (
+    "{state}<br>People per electoral vote: {ratio}<br>Population: {population}<br>"
+    "Electors appointed: {electoral_votes}<br>Census used: {census_year}<br>"
+    "Borders used: {boundary}"
+)
+#: A marker's hover: T6's ratio cell in full (for ``UNRECOGNIZED``, followed by
+#: ``<br>`` and :data:`UNRECOGNIZED_NOTE`).
+C3_NO_FIGURE_HOVER = "{state}<br>People per electoral vote: {cell}"
+#: The caption's sentences, in the order ``pages/election_per_capita.py`` gives.
+C3_RATIO = (
+    "Each bar is a state's population divided by its electors appointed: how many "
+    "people each of its electoral votes stood for. States run from the most people per "
+    "electoral vote at the top to the fewest."
+)
+#: With :data:`C3_TITLE`. It follows the glossary's *Census used* and does not say the
+#: census set the state's electoral votes (#423).
+C3_CENSUS = (
+    "Population is from the census used for the latest redistribution of House seats "
+    "made before this election, which is not always the nearest census."
+)
+#: With :data:`C3_TITLE_NO_CENSUS`.
+C3_CENSUS_MIXED = (
+    "Population is from each state's census used, which is not always the nearest "
+    "census."
+)
+#: Shown whenever a striped bar is drawn, followed by :data:`BOUNDARY_NOTE`.
+C3_STRIPES = "Striped bars use present-day borders."
+#: Shown when no striped bar is drawn and every plain bar is at the election.
+C3_ALL_AT_ELECTION = "Every bar uses the state's borders at the election."
+#: Shown when the plain series is named :data:`C3_PLAIN_SERIES`.
+C3_PLAIN_MIXED = (
+    "For some bars without stripes, this page cannot say which borders the population "
+    "describes."
+)
+#: Shown only when a marker is drawn.
+C3_NO_FIGURE_NOTE = (
+    "A labeled marker in place of a bar means there is no figure to draw for that "
+    "state, and its label says why. It is not a zero. These states come last, in "
+    "alphabetical order."
+)
+#: Shown only when the page's filter selects a state.
+C3_SELECTED_NOTE = (
+    "{state}, the selected state, is marked at the start of its row. The chart shows "
+    "every state; only the table is narrowed to {state}."
+)
+
 
 #: What ``has_popular_vote``'s ``false`` means (#309): shown under T1, whose cells read
 #: :data:`NOT_IN_DATASET`, and written into its downloaded file, where the cell is the
@@ -804,25 +886,37 @@ PER_CAPITA_FIELDS = (
 )
 
 
-def per_capita_cells(row: dict[str, Any]) -> list[html.Td]:
-    """A per-capita row's cells for :data:`PER_CAPITA_FIELDS` (#280).
+def per_capita_strings(row: dict[str, Any]) -> dict[str, str]:
+    """A per-capita row's worded cells for :data:`PER_CAPITA_FIELDS`, by field (#280,
+    #435): the one source of the strings T6 and T7 show and chart C3 draws, so the
+    chart writes each figure as the table does."""
+    coverage = row["coverage"]
+    allotment = row["state_electoral_votes"]
+    return {
+        "governing_census_year": census_year(row["governing_census_year"]),
+        "state_electoral_votes": number(allotment),
+        "population": population(row["population"], coverage),
+        "boundary_basis": boundary_basis(row["boundary_basis"]),
+        "coverage": per_capita_coverage(coverage),
+        "persons_per_electoral_vote": persons_per_electoral_vote(
+            row["persons_per_electoral_vote"], coverage, allotment
+        ),
+    }
+
+
+def per_capita_cells(
+    row: dict[str, Any], strings: dict[str, str] | None = None
+) -> list[html.Td]:
+    """A per-capita row's cells for :data:`PER_CAPITA_FIELDS` (#280), from
+    :func:`per_capita_strings` (passed in when the page already computed them).
 
     The boundary-basis cell carries :data:`BOUNDARY_NOTE` as its help text, as a null
     party cell carries its note; an unrecognized cell carries :data:`UNRECOGNIZED_NOTE`.
     """
-    coverage = row["coverage"]
-    allotment = row["state_electoral_votes"]
+    worded = per_capita_strings(row) if strings is None else strings
     return [
-        cell(census_year(row["governing_census_year"])),
-        cell(number(allotment)),
-        cell(population(row["population"], coverage)),
-        cell(boundary_basis(row["boundary_basis"]), title=BOUNDARY_NOTE),
-        cell(per_capita_coverage(coverage)),
-        cell(
-            persons_per_electoral_vote(
-                row["persons_per_electoral_vote"], coverage, allotment
-            )
-        ),
+        cell(worded[field], title=BOUNDARY_NOTE if field == "boundary_basis" else None)
+        for field in PER_CAPITA_FIELDS
     ]
 
 

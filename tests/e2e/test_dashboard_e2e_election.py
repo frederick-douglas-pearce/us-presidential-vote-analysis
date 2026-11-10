@@ -1,6 +1,6 @@
 """The election pages in a browser: the overview and its two subpages (#465), their
-earlier and later links (#324), an unserved year's not-found state (#325), and chart
-C1 (#433) at the phone's width.
+earlier and later links (#324), an unserved year's not-found state (#325), and charts
+C1 (#433) and C3 (#435) at the phone's width.
 
 From a filtered view, the later link opens the next served year's own view
 unfiltered, as a client-side navigation (a marker set on ``window`` before the click
@@ -140,6 +140,10 @@ def test_the_overview_and_its_subpages_are_one_client_side_chain(page: Page) -> 
         nav.get_by_role("link", name=election_view.SECTION_TEXT[section]).click()
         landed(section)
         expect(page.locator("#c1")).to_have_count(0)
+        # C3 is the per-capita page's alone (#435).
+        expect(page.locator("#c3")).to_have_count(
+            1 if section == election_view.PER_CAPITA else 0
+        )
     page.go_back()
     landed(election_view.STATES)
     page.go_back()
@@ -771,3 +775,178 @@ def test_tab_reaches_the_bar_first_in_the_page_content(page: Page) -> None:
     for link in (ELECTION_EARLIER, ELECTION_LATER):
         height = page.locator(link).evaluate("e => e.getBoundingClientRect().height")
         assert height >= 24, (link, height)
+
+
+# --- chart C3 (#435) ------------------------------------------------------------------
+
+C3 = "#c3"
+C3_BARS = f"{C3} .barlayer .trace .point path"
+C3_PLOT_TEXTS = f"{C3} .barlayer .bartext, {C3} .scatterlayer .textpoint text"
+C3_CHART_TEXTS = ", ".join(
+    f"{C3} {part}" for part in (".ytick text", ".g-xtitle text", ".legend .legendtext")
+)
+C3_SELECTED = f"{C3} .scatterlayer .trace:last-child .points path"
+
+
+def c3_order(year: int) -> list[str]:
+    """C3's rows for ``year``, by the page's rule (drawn by ratio, most first, ties by
+    name; then the rest by name), from the recorded response."""
+    rows = recorded(f"/v1/elections/{year}/per-capita")["data"]
+    drawn = sorted(
+        (r for r in rows if isinstance(r["persons_per_electoral_vote"], float)),
+        key=lambda r: (-r["persons_per_electoral_vote"], r["state"]),
+    )
+    rest = sorted((r for r in rows if r not in drawn), key=lambda r: r["state"])
+    return [r["state"] for r in drawn + rest]
+
+
+def open_c3(page: Page, year: int, query: str = "") -> None:
+    page.goto(f"/election/{year}/per-capita{query}")
+    assert_rendered(page, PER_CAPITA_SUCCESS)
+    page.locator(f"{C3} .main-svg").first.wait_for()
+    page.locator(f"{C3} .ytick text").first.wait_for()
+
+
+def assert_c3_readable(page: Page, year: int) -> list[dict[str, Any]]:
+    """Every state's row name and every drawn label inside 390 px, none over another,
+    no sideways scroll; returns the tick boxes."""
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    ticks = boxes(page, f"{C3} .ytick text")
+    assert [b["text"] for b in ticks] == c3_order(year)
+    texts = boxes(page, C3_PLOT_TEXTS)
+    others = boxes(page, C3_CHART_TEXTS)
+    assert any(b["text"] == labels.C3_X_AXIS for b in others)
+    labeled = [b for b in texts + others if b["w"] > 0]
+    for i, a in enumerate(labeled):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= 390, a
+        for b in labeled[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+    return ticks
+
+
+def center(box: dict[str, Any]) -> float:
+    return float(box["y"] + box["h"] / 2)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c3_on_2024_is_readable_at_390_px(page: Page) -> None:
+    """AC Shared: all 51 entries legible at 390 px; each row one bar centered on its
+    row name; the one legend entry (every bar is on present-day borders)."""
+    open_c3(page, 2024)
+    expect(page.locator(f"{C3} .chart-title")).to_have_text(
+        labels.C3_TITLE.format(year=2024, census_year="2020")
+    )
+    ticks = assert_c3_readable(page, 2024)
+    assert len(ticks) == 51
+    bars = boxes(page, C3_BARS)
+    assert len(bars) == 51
+    texts = [b["text"] for b in boxes(page, f"{C3} .barlayer .bartext")]
+    assert len(texts) == 51 and "732,189" in texts and "192,284" in texts
+    by_row = sorted(bars, key=center)
+    for tick, bar in zip(ticks, by_row, strict=True):
+        assert abs(center(bar) - center(tick)) <= 1.5, (tick, bar)
+    expect(page.locator(f"{C3} .legend .traces")).to_have_count(1)
+    expect(page.locator(f"{C3} .xtick text")).to_have_count(0)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c3_on_1864_marks_each_state_with_no_electoral_votes(page: Page) -> None:
+    """AC Nulls: each zero allotment is a labeled marker, never a zero bar, and every
+    label stays inside 390 px with none over another."""
+    open_c3(page, 1864)
+    assert_c3_readable(page, 1864)
+    marks = [b["text"] for b in boxes(page, f"{C3} .scatterlayer .textpoint text")]
+    assert marks == [labels.C3_NO_ELECTORAL_VOTES] * 11
+    expect(page.locator(C3_BARS)).to_have_count(36 - 11)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c3_on_1848_labels_texas_and_stripes_present_day_bars(page: Page) -> None:
+    open_c3(page, 1848)
+    assert_c3_readable(page, 1848)
+    marks = [b["text"] for b in boxes(page, f"{C3} .scatterlayer .textpoint text")]
+    assert marks == [labels.C3_NO_CENSUS_FIGURE]
+    expect(page.locator(f"{C3} .legend .traces")).to_have_count(2)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize(("year", "usps"), [(2024, "CA"), (2024, "WY"), (1848, "TX")])
+def test_c3_marks_the_selected_state_over_no_text(
+    page: Page, year: int, usps: str
+) -> None:
+    """AC: a filtered state is marked by a non-color channel, in its own row, over no
+    drawn text, and the chart keeps every state while T6 shows one."""
+    open_c3(page, year, f"?state={usps}")
+    ticks = assert_c3_readable(page, year)
+    name = next(
+        r["state"]
+        for r in recorded(f"/v1/elections/{year}/per-capita")["data"]
+        if r["state_usps"] == usps
+    )
+    (mark,) = boxes(page, C3_SELECTED)
+    row = c3_order(year).index(name)
+    assert abs(center(mark) - center(ticks[row])) <= 1.5
+    for text in boxes(page, C3_PLOT_TEXTS + ", " + C3_CHART_TEXTS):
+        if text["w"] > 0:
+            assert not overlaps(mark, text), (mark, text)
+    expect(page.locator("#election-per-capita tbody tr")).to_have_count(1)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c3_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
+    # 1848: its first bar trace is the plain one (a striped bar fills with a pattern).
+    open_c3(page, 1848)
+    bar = page.locator(f"{C3} .barlayer .trace:first-child .point path").first
+    light = bar.evaluate("el => getComputedStyle(el).fill")
+    assert light == rgb(token(page, "--chart-1"))
+    seen: list[str] = []
+
+    def on_request(request: Request) -> None:
+        seen.append(f"{request.method} {urlsplit(request.url).path}")
+
+    page.on("request", on_request)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    expect(bar).not_to_have_css("fill", light)
+    assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
+        token(page, "--chart-1")
+    )
+    page.wait_for_timeout(SETTLE_MS)
+    assert seen == [], seen
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(RESOURCE_ERROR)
+def test_with_plotlyjs_blocked_t6_and_c3_s_title_and_caption_render(
+    page: Page,
+) -> None:
+    page.goto("/election/2024/per-capita")
+    assert_rendered(page, PER_CAPITA_SUCCESS)
+    memo = f"window.{charts.PLOTLYJS_MEMO}"
+    page.wait_for_function(f"{memo} !== undefined")
+    assert page.evaluate(f"async () => await {memo}") is False
+    expect(page.locator(f"{C3} .chart-title")).to_have_text(
+        labels.C3_TITLE.format(year=2024, census_year="2020")
+    )
+    expect(page.locator(f"{C3} figcaption")).to_contain_text(labels.C3_RATIO)
+    expect(page.locator(f"{C3} figcaption a")).to_have_attribute(
+        "href", "#election-per-capita"
+    )
+    expect(page.locator("#election-per-capita")).to_be_visible()
+    expect(page.locator(f"{C3} .js-plotly-plot")).to_have_count(0)
+
+
+@pytest.mark.plotlyjs_fetches(0)  # a degraded render mounts no chart (#435)
+def test_a_degraded_per_capita_page_shows_no_chart(page: Page) -> None:
+    """A served year whose per-capita response is not recorded reads as unavailable
+    (the e2e server answers an unrecorded path ``ApiUnavailable``), with no C3."""
+    served = [r["year"] for r in recorded("/v1/elections")["data"]]
+    year = next(
+        y
+        for y in served
+        if f"/v1/elections/{y}/per-capita" not in RECORDED_FILES
+    )
+    page.goto(f"/election/{year}/per-capita")
+    expect(page.get_by_text(components.UNAVAILABLE_MESSAGE)).to_be_visible()
+    expect(page.locator(C3)).to_have_count(0)

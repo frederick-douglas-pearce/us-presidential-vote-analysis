@@ -41,6 +41,7 @@ from tests.unit.test_dashboard_theme import (
 #: registers it: C1 by #433; C2–C5 are assigned to #434–#436 by their issues.
 ISSUED: dict[str, tuple[str, str, bool]] = {
     "C1": ("/election/<year>", "election-nation", False),
+    "C3": ("/election/<year>/per-capita", "election-per-capita", False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.

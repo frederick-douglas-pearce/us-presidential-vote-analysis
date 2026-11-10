@@ -338,8 +338,8 @@ def chart_problems(
     anywhere is the lint's (``TestMountCallback.test_no_runtime_module_builds_a_graph``).
 
     It reads the one tree it is given: ``TestEveryChart`` hands it each page's default
-    render, so a companion table that only a filter empties is not seen here (that
-    check is #435's and #436's, whose charts sit beside filtered tables)."""
+    render, and each chart page's renders under :data:`CHART_QUERIES` (#435, D093(c)),
+    so a companion table that a filter empties fails it."""
     from tests.unit.test_dashboard_theme import TOKENS
 
     problems = []
@@ -416,6 +416,36 @@ TEST_FIGURE: dict[str, Any] = {
 }
 
 
+#: Each chart page's filtered renders (#435, D093(c)): its path values, a query, and
+#: whether the query names a value the page's rows hold (``filtered``) or one they do
+#: not (``absent``). Hand-written, so a page's own filters are listed by the story that
+#: adds its chart: ``test_every_chart_page_with_a_filter_lists_its_queries`` fails a
+#: live chart page with a ``query=`` parser that lists no query of each kind. The
+#: overview reads no filter, so its entry checks a client-side route carrying one.
+CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
+    "/election/<year>": [({}, "state=GA", "filtered")],
+    "/election/<year>/per-capita": [
+        ({}, "state=GA", "filtered"),
+        # No California in 1824: the filter falls back to every state.
+        ({}, "state=CA", "absent"),
+        # 1864: zero allotments, so markers beside the selected state's row.
+        ({"year": "1864"}, "state=GA", "filtered"),
+        ({"year": "1864"}, "state=ZZ", "absent"),
+    ],
+}
+
+
+def chart_rows(tree: Any) -> list[Any]:
+    """Each chart's rows in ``tree``, as its figure names them: the category axis's
+    tick text (C1 and C3 put one row per tick)."""
+    found = []
+    for store in of_type(tree, "Store"):
+        store_id = getattr(store, "id", None)
+        if isinstance(store_id, dict) and store_id.get("type") == charts.SOURCE_TYPE:
+            found.append(store.data["layout"]["yaxis"]["ticktext"])
+    return found
+
+
 # --- coverage is structural -----------------------------------------------------------
 
 
@@ -434,6 +464,53 @@ class TestEveryChart:
             # The custom-404 page reads no data and declares no success marker.
             success = page.get("success", "")
             assert chart_problems(tree, key, built, success) == [], key
+
+    @pytest.mark.parametrize(
+        ("key", "values", "query"),
+        [
+            (key, values, query)
+            for key, entries in CHART_QUERIES.items()
+            for values, query, _ in entries
+        ],
+    )
+    def test_every_chart_page_under_its_listed_queries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        key: str,
+        values: dict[str, str],
+        query: str,
+    ) -> None:
+        """#435, D093(c): each chart page rendered under a filter and under a filter
+        naming a value the page's rows do not hold passes the same checks as its default
+        render, so a filter that emptied a companion table (and left a caption pointing
+        at a table that is not rendered) fails here. And the filter never narrows a
+        chart (D093(a)): its rows are the unfiltered render's."""
+        page = page_of(key)
+        success = page.get("success", "")
+        parser = page.get("query")
+        if parser is not None:
+            # Not vacuous: the page's own parser keeps the query's filter.
+            assert parser(parse(query)), (key, query)
+        tree, built = chart_render(
+            lambda: render(key, monkeypatch, query, **values)[0], monkeypatch
+        )
+        assert built, f"{key}{query}: no chart rendered"
+        assert chart_problems(tree, key, built, success) == [], (key, query)
+        plain = render(key, monkeypatch, **values)[0]
+        assert chart_rows(tree) == chart_rows(plain), (key, query)
+
+    def test_every_chart_page_with_a_filter_lists_its_queries(self) -> None:
+        """#435, D093(c): every live chart page whose page reads filters (a ``query=``
+        parser) lists at least one filtered query and one naming an absent value in
+        :data:`CHART_QUERIES`, so a chart story adding a filtered page lists its own."""
+        for chart_id, row in charts.CHARTS.items():
+            if row.retired:
+                continue
+            kinds = {kind for _, _, kind in CHART_QUERIES.get(row.page, [])}
+            if page_of(row.page).get("query") is not None:
+                assert {"filtered", "absent"} <= kinds, (chart_id, row.page)
+            else:
+                assert kinds, (chart_id, row.page)
 
     def test_the_shared_layout_holds_no_graph_and_no_chart(self) -> None:
         # #452: the header, main and stores every page sits in.
