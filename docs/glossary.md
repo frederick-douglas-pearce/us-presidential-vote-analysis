@@ -148,7 +148,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7);
   `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line "Electors appointed"
   (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`, and the caption
-  sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`.
+  sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`. In C3, the hover
+  line "Electors appointed" (`labels.C3_BAR_HOVER`) and the caption sentence `labels.C3_RATIO`.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`; D041; D046 §5;
   D068; `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast" (the reader
@@ -166,7 +167,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   election. This is the footprint axis only, separate from which census supplies the figure
   (*Census used*) and where the allotment came from (D066(b)).
 - **Shown as:** `LABELS["boundary_basis"]`; values `labels.BOUNDARY_BASIS`; help text
-  `labels.BOUNDARY_NOTE` (on each cell and under T6 and T7).
+  `labels.BOUNDARY_NOTE` (on each cell and under T6 and T7). In C3, the series names
+  (`labels.BOUNDARY_BASIS` values), the plain series' name `labels.C3_PLAIN_SERIES` where a plain
+  row is not at the election, the striped bars for `present_day`, the hover line "Borders used", and
+  the caption sentences `labels.C3_STRIPES` (followed by `labels.BOUNDARY_NOTE`),
+  `labels.C3_ALL_AT_ELECTION` and `labels.C3_PLAIN_MIXED`.
 - **Source:** `PerCapitaRow.boundary_basis`; D060(f); D066(a), (b), (e); D067; vocabulary copied
   into `snapshot_schema.py` per D069(b). Header and value wording: owner decision, 2026-10-10,
   #348 (no "counted", no "footprint").
@@ -238,7 +243,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   census figure exists for the state and year (one cell, 1848 Texas, which the United States had
   not enumerated in 1840). `no_governing_figure` holds exactly where `population` is null.
 - **Shown as:** `LABELS["coverage"]`; values `labels.PER_CAPITA_COVERAGE`, read by
-  `labels.per_capita_coverage`, `labels.population` and `labels.persons_per_electoral_vote`.
+  `labels.per_capita_coverage`, `labels.population` and `labels.persons_per_electoral_vote`. In C3,
+  the marker label `labels.C3_NO_CENSUS_FIGURE`, with the full cell in its hover
+  (`labels.C3_NO_FIGURE_HOVER`).
 - **Source:** `PerCapitaRow.coverage`; D060(h); D069(e); value wording: owner decision,
   2026-10-10, #348 (no "governs").
 - **Not:** *Years covered* (`meta.provenance.coverage`) or the *share of electors from
@@ -279,9 +286,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   1852–1860 (two seats under its admission act, which the House Historian's table lists under
   1850), and for DC from 1964 (the Twenty-third Amendment). The row still shows this census's
   population, where it has one. `docs/governing-census.md` lists the rows.
-- **Shown as:** `LABELS["governing_census_year"]`; help text `labels.GOVERNING_CENSUS_NOTE`
-  under T6 and T7; on the API's `/docs` page, the `PerCapitaRow.governing_census_year` field
-  description in `src/usvote/api/models.py`.
+- **Shown as:** `LABELS["governing_census_year"]`; help text `labels.GOVERNING_CENSUS_NOTE` under T6
+  and T7; on the API's `/docs` page, the `PerCapitaRow.governing_census_year` field description in
+  `src/usvote/api/models.py`. In C3, the title `labels.C3_TITLE` (the census year), the hover line
+  "Census used" (`labels.C3_BAR_HOVER`), and the caption sentences `labels.C3_CENSUS` and
+  `labels.C3_CENSUS_MIXED`, which follow this entry's Plain and do not say the census set the
+  state's electoral votes; #423 keeps them in step with the reworded note.
 - **Source:** `PerCapitaRow.governing_census_year`; `governing_census_year` in
   `src/usvote/apportionment.py`, which computes it, and `GOVERNING_CENSUS_BY_ELECTION` there, that
   function over every election; `tests/unit/test_apportionment.py`, which pins the mapping to a
@@ -342,7 +352,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   legend title, hover text, annotations, caption) in `labels.py`; the axis number format, the
   hover behavior and the inert legend in `charts.TEMPLATE`, and the absent toolbar in
   `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the election overview
-  (`/election/<year>`), is the first chart a page renders. The home page's lede (`pages/home.py`) already
+  (`/election/<year>`), is the first chart a page renders. C3 is on an election's People per electoral vote page (`/election/<year>/per-capita`). The home page's lede (`pages/home.py`) already
   says "Tables and charts".
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
@@ -447,14 +457,13 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** Each election in this dataset has three pages. The overview shows who led under each
   method and the national results, with a chart. Results by state shows every state's electoral
   votes for each candidate, which a reader can narrow by state, candidate, popular-vote status or
-  count status. People per electoral vote shows how many people each state's electoral votes stood
-  for, which a reader can narrow to one state. Links near the top of each page go between the
+  count status. People per electoral vote shows, in a chart and a table, how many people each state's electoral votes stood for; a reader can narrow the table to one state, which the chart then marks. Links near the top of each page go between the
   three, and the page being read is marked. On each page, the earlier and later links go to the
   same page for the neighboring election.
 - **Precise:** Three registered pages: `/election/<year>`, the overview (the election panel,
   National results with C1 and T3, and the provenance footer; no filters); `/election/<year>/states`
   (T2 and its four filters, `state`, `candidate`, `pv_status` and `electoral_count_status`); and
-  `/election/<year>/per-capita` (T6 and a `state` filter, checked against T6's own rows, which falls
+  `/election/<year>/per-capita` (C3, T6 and a `state` filter, checked against T6's own rows, which falls
   back to every state when the code is not among them). Each page checks the year against
   `/v1/elections`; a year it refuses gets the same not-found state on all three (*Not-found state*),
   and a link naming a section the site does not have (`/election/1824/x`) reaches the overview,
@@ -871,10 +880,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.PARTY_NULL_NOTE` through `labels.nominating_party_cell`), `labels.party_notes` (the Party
   notes list's candidate name), `labels._closed_value`, `labels._null` (so `labels.winner`,
   `labels.flip`, `labels.margin`), `labels.ec_majority`, `labels._null_per_capita` (so
-  `labels.population`), `labels.persons_per_electoral_vote`. In C1, a null or blank electoral
-  share draws a marker labeled `labels.C1_NO_SHARE`, and its hover (`labels.C1_NO_FIGURE_HOVER`)
-  writes `labels.NOT_IN_DATASET` after `LABELS["ec_share_full"]` and a colon, as T3 shows that
-  cell under its header.
+  `labels.population`), `labels.persons_per_electoral_vote`. In C1, a null or blank electoral share
+  draws a marker labeled `labels.C1_NO_SHARE`, and its hover (`labels.C1_NO_FIGURE_HOVER`) writes
+  `labels.NOT_IN_DATASET` after `LABELS["ec_share_full"]` and a colon, as T3 shows that cell under
+  its header. In C3, the short label of a marker drawn in place of a bar (through
+  `labels.C3_MARKER_LABELS`), and, in `labels.C3_NO_FIGURE_HOVER`, the full cell (for
+  `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`).
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -999,11 +1010,68 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["persons_per_electoral_vote"]`; `labels.persons_per_electoral_vote`;
   `labels.NO_ELECTORAL_VOTES`; the heading of T7 (`pages/state.py`); the per-capita page's
   `PER_CAPITA_HEADING` and `PER_CAPITA_GENERIC_HEADING` (`pages/election_per_capita.py`); the
-  section link `labels.SECTION_PER_CAPITA`.
+  section link `labels.SECTION_PER_CAPITA`. In C3 (*People per electoral vote chart (C3)*), the
+  titles `labels.C3_TITLE` and `labels.C3_TITLE_NO_CENSUS`, the axis title
+  (`LABELS["persons_per_electoral_vote"]`), each bar's text (T6's cell), the hover text
+  `labels.C3_BAR_HOVER` and `labels.C3_NO_FIGURE_HOVER`, the marker label
+  `labels.C3_NO_ELECTORAL_VOTES` with `labels.NO_ELECTORAL_VOTES` in its hover, and the caption
+  sentences `labels.C3_RATIO` and `labels.C3_NO_FIGURE_NOTE`.
 - **Source:** `PerCapitaRow`; D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
   names the same measure "persons per electoral vote"; readers see "people" (owner decision, 2026-10-11, #348).
   The field name `persons_per_electoral_vote` stays where field names are allowed.
 - **Not:** People per elector who voted.
+- **Status:** settled
+
+### People per electoral vote chart (C3)
+- **Plain:** A chart on an election's People per electoral vote page, with a bar for each state
+  and DC: how many people each of the state's electoral votes stood for in that election. The bars
+  run from the most people per electoral vote to the fewest, and each is labeled with its number,
+  written as the table on the same page writes it. The title names the census used. Striped bars
+  use present-day borders. Where there is no figure to draw for a state, its row shows a marker
+  with a short label saying why, never a bar of zero length, and those rows come last. When the
+  page is narrowed to one state, the chart marks that state at the start of its row and still
+  shows every state.
+- **Precise:** Chart ID C3 in `CHARTS` (`dashboard/explore/charts.py`), on
+  `/election/<year>/per-capita`, with T6 as its *Companion table* (`election-per-capita`,
+  `PER_CAPITA_TABLE_ID` in `pages/election_per_capita.py`); its element id is `c3`. It sits after
+  the section links and before the state control. It is built from every T6 row, never narrowed
+  by the page's `state` filter (D093), and every number and label it shows is T6's cell string
+  (`labels.per_capita_strings`). A bar is drawn only where `labels.finite` accepts
+  `persons_per_electoral_vote` and T6's cell is that figure. Drawn bars are ordered by the ratio,
+  most first, ties by state name. Every other row follows in T6's order (by state name), with a
+  marker at zero on the axis whose label is looked up by T6's cell in `labels.C3_MARKER_LABELS`
+  (`labels.C3_NO_CENSUS_FIGURE` for 1848 Texas, `labels.C3_NO_ELECTORAL_VOTES` for a zero
+  allotment: eleven states in 1864, three in 1868; `labels.NOT_IN_DATASET`; or
+  `labels.UNRECOGNIZED` for any other cell), with T6's cell in full in its hover; never a
+  zero-length bar and never an infinity. The bars are two series split on T6's border cell,
+  sharing one row slot: striped exactly where the cell is `BOUNDARY_BASIS["present_day"]`, plain
+  for every other row. The stripes mean present-day borders in every year. The legend has an entry
+  for each series drawn. The plain series is named `BOUNDARY_BASIS["at_election"]` when every
+  plain row is at the election, and `labels.C3_PLAIN_SERIES` otherwise, and in that case the
+  caption adds `labels.C3_PLAIN_MIXED`. The selected state (the page's filter, once T6's rows name
+  it) is marked by one open point at the start of its row, in a series of its own named
+  `labels.C3_SELECTED`, with no hover of its own; its row label is unchanged. The title names
+  `governing_census_year` only when every row's census-year cell is the same year (2024 reads
+  2020; 1924 and 1928 read 1910). The axis's tick labels are hidden, because every bar and marker
+  carries its own label. No average line: the API serves none.
+- **Shown as:** the chart, placed by `pages/election_per_capita.py` through `components.chart`;
+  its wording in `labels.py`: the title `labels.C3_TITLE`, or `labels.C3_TITLE_NO_CENSUS`; the
+  axis `labels.C3_X_AXIS` (`LABELS["persons_per_electoral_vote"]`); the series names
+  `labels.BOUNDARY_BASIS` values and `labels.C3_SELECTED`; the hidden name
+  `labels.C3_NO_FIGURE_SERIES`; the plain series' legend name `labels.C3_PLAIN_SERIES` where it
+  applies; marker labels `labels.C3_MARKER_LABELS`; the hover text `labels.C3_BAR_HOVER` and
+  `labels.C3_NO_FIGURE_HOVER`; the caption sentences `labels.C3_RATIO`, `labels.C3_CENSUS` or
+  `labels.C3_CENSUS_MIXED`, then `labels.C3_STRIPES` followed by `labels.BOUNDARY_NOTE`,
+  `labels.C3_ALL_AT_ELECTION`, `labels.C3_PLAIN_MIXED`, then `labels.C3_NO_FIGURE_NOTE` only when
+  a marker is drawn, then `labels.C3_SELECTED_NOTE` only when a state is selected; then
+  `labels.CHART_TABLE_POINTER`.
+- **Source:** #435 (acceptance criteria, amended 2026-11-10 at #465's plan gate); `CHARTS` in
+  `dashboard/explore/charts.py`; `PerCapitaRow` in `src/usvote/api/models.py`; D064(c), (d);
+  D066; D069; D091 (the C1 pattern it follows); D093; reader wording: `ba` spec for #435,
+  approved by the owner at its plan gate (2026-11-10).
+- **Not:** A stand-in for T6, which holds the numbers and the download. Not a chart of electoral
+  votes cast: the base is the electors appointed. A marker is not a zero. Not narrowed by the
+  page's filter. Not an average; no national figure is drawn.
 - **Status:** settled
 
 ### Popular vote held in this state (`pv_status`)
@@ -1092,7 +1160,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** The state's resident population from the census used for that election.
 - **Precise:** The governing census's resident population (`population_series` is `resident`),
   described on the row's boundary basis. Null only where no census figure exists.
-- **Shown as:** `LABELS["population"]`; `labels.population`.
+- **Shown as:** `LABELS["population"]`; `labels.population`. In C3, the hover line "Population"
+  (`labels.C3_BAR_HOVER`) and the caption sentences `labels.C3_RATIO` and `labels.C3_CENSUS`.
 - **Source:** `PerCapitaRow.population` and `population_series`; D059; D064(b); D066; header
   wording: owner decision, 2026-10-10, #348.
 - **Not:** Voting-age population; votes cast.
@@ -1201,20 +1270,20 @@ articles and announcements). Every rule binds all three unless the rule states a
   in every election this dataset holds for it (T4) and its people per electoral vote in each
   (T7); an election outside the years this dataset covers (*Years covered*) is not on it.
 - **Shown as:** `LABELS["state"]`; the state filter on `/election/<year>/states`, named by that
-  page's `FILTER_SENTENCE` (`pages/election_states.py`), and on `/election/<year>/per-capita`,
-  named by its `FILTER_SENTENCE` (`pages/election_per_capita.py`), both with the placeholder "All
-  states", and on `/candidate/<slug>`, with `STATE_PLACEHOLDER`
-  and named by the lede's `FILTER_SENTENCE` or `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`;
-  `/states`; the name, as served, as the link to the state history page `/state/<usps>` in T2, T5
-  and T6 (`components.state_cell`), and as that page's heading (`render` in `pages/state.py`), or,
-  on the degraded state, "State history" (a literal in `layout` there); in `pages/state.py`, the
-  page's lede (`LEDE`), its title (`title`, which names at most the code, never the name, and
-  only once the index has checked it), its link-preview `description` and T4's download name
-  (`"this state's history"`);
-  its not-found state (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link
-  to `/states`, in `pages/state.py`); and the home page's lede and its "Browse by state" link
-  (`pages/home.py`). The site navigation's States link, `labels.NAV_STATES`, goes to `/states`
-  and is marked on `/states` and on `/state/<usps>`.
+  page's `FILTER_SENTENCE` (`pages/election_states.py`), and on `/election/<year>/per-capita`, named
+  by its `FILTER_SENTENCE` (`pages/election_per_capita.py`), both with the placeholder "All states",
+  and on `/candidate/<slug>`, with `STATE_PLACEHOLDER` and named by the lede's `FILTER_SENTENCE` or
+  `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`; `/states`; the name, as served, as the link to
+  the state history page `/state/<usps>` in T2, T5 and T6 (`components.state_cell`), and as that
+  page's heading (`render` in `pages/state.py`), or, on the degraded state, "State history" (a
+  literal in `layout` there); in `pages/state.py`, the page's lede (`LEDE`), its title (`title`,
+  which names at most the code, never the name, and only once the index has checked it), its
+  link-preview `description` and T4's download name (`"this state's history"`); its not-found state
+  (`NOT_FOUND_HEADING`, also its title, and `NOT_FOUND_SENTENCE` with its link to `/states`, in
+  `pages/state.py`); and the home page's lede and its "Browse by state" link (`pages/home.py`). The
+  site navigation's States link, `labels.NAV_STATES`, goes to `/states` and is marked on `/states`
+  and on `/state/<usps>`. In C3, the row labels, the selected-state series `labels.C3_SELECTED` and
+  the caption sentence `labels.C3_SELECTED_NOTE`.
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —
@@ -1311,15 +1380,17 @@ articles and announcements). Every rule binds all three unless the rule states a
   served it; for a null figure with an unrecognized cause, the figure's column is empty and the
   cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
-  (set by `labels.cell`, and by `labels.nominating_party_cell`). In C1, `labels.UNRECOGNIZED`
-  labels the marker drawn in place of a bar for such a value, and `labels.C1_NO_FIGURE_HOVER`
-  writes it with `labels.UNRECOGNIZED_NOTE` as that marker's hover text. Reached through
-  `labels.pv_status`, `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
+  (set by `labels.cell`, and by `labels.nominating_party_cell`). In C1, `labels.UNRECOGNIZED` labels
+  the marker drawn in place of a bar for such a value, and `labels.C1_NO_FIGURE_HOVER` writes it
+  with `labels.UNRECOGNIZED_NOTE` as that marker's hover text. Reached through `labels.pv_status`,
+  `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
   `labels.per_capita_coverage`, `labels._null_per_capita`), `labels.popular_votes`,
   `labels.has_popular_vote`, `labels.yes_no`, `labels.flip`, `labels.ec_majority`, `labels.winner`,
   `labels.nominating_party`, `labels.party_notes` (the Party notes list's candidate name),
   `labels.margin`, `labels.number`, `labels.share` (so `labels.share_cell`), `labels.population`,
-  `labels.persons_per_electoral_vote`, `labels.census_year`.
+  `labels.persons_per_electoral_vote`, `labels.census_year`. In C3, the short label of a marker
+  drawn in place of a bar (through `labels.C3_MARKER_LABELS`), and, in `labels.C3_NO_FIGURE_HOVER`,
+  the full cell (for `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`).
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
@@ -1416,7 +1487,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| "the state you chose" for a filter's state | Selected state | `labels.C3_SELECTED`, `labels.C3_SELECTED_NOTE` | A shared link carries the filter; the reader who opens it chose nothing. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
 | "No nomination", "no party" for `no_nomination` | Without a party's nomination for President when the electors voted | `labels.NO_NOMINATION` | "No party" is a different claim. "No nomination" denies that a withdrawn nominee was ever nominated (D077). |

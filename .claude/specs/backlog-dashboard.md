@@ -634,7 +634,8 @@ _Story of epic #N (E9 — public dashboard)._
 - #464 — the earlier and later links set apart in a bar above the heading (done)
 - #465 — the election overview and its two subpages, `/election/<year>/states` and
   `/election/<year>/per-capita`, one fill each (D092; filed from #433's plan gate)
-- #435 — C3: every state's persons per electoral vote (`/election/<year>/per-capita`, since #465)
+- #435 — C3: every state's persons per electoral vote (`/election/<year>/per-capita`, since #465;
+  D093, which #436 follows; the issue stays open until #470 records C3's D071(g) re-measure)
 - #436 — C4, C5: electors appointed and popular votes per election, one-state filter (`/elections`)
 - #437 — headline metrics on `/elections`, under a bounded dashboard-side summary rule (new D-entry)
 - #429 — research (`priority:low`): the spread of persons per electoral vote over time, accounting

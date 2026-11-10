@@ -6325,3 +6325,58 @@ its own rows is the only rule a page that reads no T2 rows can apply.
 router rather than a pattern of the template, which the overview's greedy `<year>` would let
 match its subpages (`tests/e2e/conftest.py`, `is_chart_path`); C3's row will name the per-capita
 template.
+
+## D093: A chart beside a filtered table is never narrowed by the filter; the selected item is a second trace; every chart page is checked under its filters
+
+**Date:** 2026-11-10
+**Builds on:** D087, D088, D091, D092 · **Decided by:** the owner, approving #435's plan (architect-reviewed)
+
+**Context.** Chart C3 (#435) is the first chart beside a table that the page's filter narrows: T6
+on `/election/<year>/per-capita`, whose `state` filter #465 checked against T6's own rows (D092).
+C4 and C5 (#436) will sit beside state-filtered tables on `/elections`. Three questions recur for
+each: whether the filter narrows the chart, how the chart shows what the filter selected, and how
+a test sees a filtered render, since `TestEveryChart` rendered each page's default view only, so
+a filter that emptied the companion table (leaving the caption's pointer aimed at no table) went
+unseen. #432's review asked that a selected item be marked by a second trace, because
+`color_only_pairs` compares a per-point symbol list as written.
+
+**Decision.**
+- **(a) A chart beside a filtered table is never narrowed by the page's filter.** It draws every
+  row the page read; the table alone is narrowed. A caption sentence says so whenever the filter
+  selects something (C3: `labels.C3_SELECTED_NOTE`), so the fixed pointer
+  (`labels.CHART_TABLE_POINTER`) stays honest while the table holds one row.
+- **(b) The selected item is marked by a second trace with a non-color channel**: one point, a
+  marker symbol no other trace draws, never per-point styling of the data traces. C3's is an open
+  diamond at zero in the selected state's row, with no hover of its own (`hoverinfo: "skip"`), so
+  it covers no drawn number; the row names stand off the axis to leave it room.
+- **(c) Every chart page is checked under its filters.** `CHART_QUERIES`
+  (`tests/unit/test_dashboard_export.py`) lists each chart page's path values and queries, each
+  `filtered` (a value the rows hold) or `absent` (one they do not); `TestEveryChart` runs
+  `chart_problems` on each and checks that each chart's rows equal the unfiltered render's.
+  `test_every_chart_page_with_a_filter_lists_its_queries` fails a live chart page with a `query=`
+  parser that lists no query of each kind, so a chart story adding a filtered page lists its own.
+- **(d) C3's form, as D091 recorded C1's.** One horizontal bar per state and DC, drawn rows by
+  `persons_per_electoral_vote` (most first, ties by state name), then every row with no figure in
+  state-name order, each a marker at zero with a short label looked up from T6's cell
+  (`labels.C3_MARKER_LABELS`) and T6's cell in full in its hover, never a zero-length bar or an
+  infinity. The bars are two series split on T6's border cell, sharing one `offsetgroup` so each
+  row draws one centered bar: striped exactly for present-day borders, in every year, so the
+  encoding does not change between neighboring years. The governing census year is in the title
+  when every row's cell names the same year (never derived, never degrading the page when it does
+  not). Value-axis tick labels are hidden, since every bar and marker carries its own label. No
+  average line: the API serves none (D070(c)).
+- On this page T6 is never empty on a successful render (an empty body degrades the page, and a
+  filter naming a state T6 does not hold shows every state), so no second pointer wording exists;
+  (c) is the guard. A body naming one state twice is malformed and degrades the page, since (b)
+  marks one row.
+
+**Rationale.** A filter that narrowed the chart would hide the very thing a chart beside a
+one-state table adds: where that state ranks. Marking the selection as its own trace keeps
+`color_only_pairs` sound and keeps the data traces identical with and without a filter, which
+(c)'s row comparison then checks. A hand-written query table, rather than queries derived from
+each parser, makes each story state the filtered views it means to support, and the completeness
+assert makes forgetting it fail.
+
+**Action required.** #436 (C4, C5) lists its `/elections` queries in `CHART_QUERIES` and follows
+(a) and (b). #470 re-measures D071(g) on `/election/<year>/per-capita` with C3's selector
+(`#c3 .main-svg`), which discharges #435's re-measure.
