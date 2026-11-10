@@ -14,7 +14,11 @@ Each run is ONE browser navigation, and both numbers come from it:
 - ``first_data_s``: from navigation start until the first provenance line is visible;
 - ``outcome``: ``data``, or ``degraded`` when the page showed the plain-language message
   instead (a cold cache the refresher could not fill within the visitor's wait), which
-  never meets the target.
+  never meets the target;
+- ``chart_s`` (only with ``--chart SELECTOR``, e.g. ``"#c1 .main-svg"``): from
+  navigation start until that chart is drawn, after first data, or ``null`` if it is
+  not drawn within the wait (#433). plotly.js comes from its CDN after first data
+  (D087/D088), so this is not a D071(g) measure and never affects ``meets_target``.
 
 The browser must be the first request the server sees. A request sent first (a
 ``curl`` for the TTFB, say) would absorb the instance's start-up and start the cache
@@ -28,6 +32,9 @@ Playwright is in the ``dev`` dependency group (#321), so ``uv run`` works after
     uvx --with playwright python -m playwright install chromium
     uvx --with playwright python scripts/measure_dashboard_cold_start.py \\
         https://explore.us-presidential-election-center.org/ --runs 3 --label warm
+    uvx --with playwright python scripts/measure_dashboard_cold_start.py \\
+        https://explore.us-presidential-election-center.org/election/2016 --runs 3 \\
+        --chart "#c1 .main-svg"
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ import argparse
 import json
 import time
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 #: 10 Mbps each way and 100 ms round trip, as DevTools expresses them.
@@ -46,8 +54,11 @@ FIRST_DATA_SELECTOR = "#provenance li"
 DEGRADED_SELECTOR = "#unavailable"
 
 
-def measure(url: str) -> tuple[float, float, bool]:
-    """One cold-browser navigation: (TTFB, time to data or the message, degraded?)."""
+def measure(
+    url: str, chart: str | None = None
+) -> tuple[float, float, bool, float | None]:
+    """One cold-browser navigation: (TTFB, time to data or the message, degraded?,
+    time to ``chart`` drawn, or ``None`` when not asked, degraded or not drawn)."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
@@ -73,10 +84,17 @@ def measure(url: str) -> tuple[float, float, bool]:
             )
             elapsed = time.perf_counter() - start
             degraded = page.locator(DEGRADED_SELECTOR).count() > 0
+            chart_s = None
+            if chart and not degraded:
+                try:
+                    page.wait_for_selector(chart, state="visible", timeout=30_000)
+                    chart_s = time.perf_counter() - start
+                except PlaywrightTimeoutError:
+                    pass
             response_start_ms = page.evaluate(
                 "performance.getEntriesByType('navigation')[0].responseStart"
             )
-            return response_start_ms / 1000, elapsed, degraded
+            return response_start_ms / 1000, elapsed, degraded, chart_s
         finally:
             browser.close()
 
@@ -86,9 +104,14 @@ def main() -> None:
     parser.add_argument("url")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--label", default="", help="the server state being measured")
+    parser.add_argument(
+        "--chart",
+        metavar="SELECTOR",
+        help='also time until this chart is drawn, e.g. "#c1 .main-svg"',
+    )
     args = parser.parse_args()
     for run in range(1, args.runs + 1):
-        first_byte, data, degraded = measure(args.url)
+        first_byte, data, degraded, chart_s = measure(args.url, args.chart)
         result = {
             "label": args.label,
             "run": run,
@@ -97,6 +120,8 @@ def main() -> None:
             "outcome": "degraded" if degraded else "data",
             "meets_target": not degraded and first_byte <= 1.0 and data <= 3.0,
         }
+        if args.chart:
+            result["chart_s"] = None if chart_s is None else round(chart_s, 3)
         print(json.dumps(result), flush=True)
 
 

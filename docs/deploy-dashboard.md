@@ -1000,9 +1000,9 @@ C1 is the first chart on a page (`/election/<year>`), so its story re-measured D
 the instance's memory after it shipped. Dashboard version `v-f1a4ef516288-r22-a1` (deploy
 run 42781499052 of f1a4ef5), snapshot `37af4064…`, API origin warm by the keep-warm ping
 throughout. Measured 08:24–08:28Z, before the daily canary, by #277's method:
-`scripts/measure_dashboard_cold_start.py`'s navigation (390 px, 10 Mbps / 100 ms, a fresh
-browser context each run). Each run also waited for `#c1 .main-svg`, the chart drawn; that
-column is not a D071(g) measure.
+`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser
+context each run), with `--chart "#c1 .main-svg"` for the time until the chart is drawn;
+that column is not a D071(g) measure.
 
 The first run of each year was that year's first visit on the new instance, so a fill on a
 miss: both of its paths missed the API edge and reached the origin, which answered in
