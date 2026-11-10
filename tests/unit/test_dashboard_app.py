@@ -4818,6 +4818,9 @@ class TestMoveContract:
             ({"moved": (("a",), "/x/<year>/y", "extra")}, {}, "is not"),
             ({"moved": [("a",), "/x/<year>/y"]}, {}, "is not"),
             ({"moved": (("",), "/x/<year>/y")}, {}, "no keys"),
+            # A key that is not a name, however truthy, is no query key.
+            ({"moved": ((1,), "/x/<year>/y")}, {}, "no keys"),
+            ({"moved": ((b"state",), "/x/<year>/y")}, {}, "no keys"),
         ],
     )
     def test_a_bad_move_fails_the_import(
@@ -4825,6 +4828,23 @@ class TestMoveContract:
     ) -> None:
         with pytest.raises(RuntimeError, match=message):
             appmod.page_move(self.page(**page), self.registry(**target))
+
+    def test_each_path_variable_is_quoted_into_the_location(self) -> None:
+        """Every redirect today carries a four-digit year, which quoting leaves alone,
+        so the quoting is pinned directly: a value a looser ``validate`` let through
+        could never add a path segment, a query or a fragment to the Location."""
+        resolution = appmod.Resolution(
+            canonical="https://x/",
+            og_url="https://x/",
+            title="t",
+            description="d",
+            page={},
+            path_vars={"year": "a/b?c#d"},
+        )
+        move = appmod.Move(("k",), "/x/<year>/y", lambda params: [("k", "v")])
+        assert appmod.moved_location(resolution, move, "k=1") == (
+            "/x/a%2Fb%3Fc%23d/y?k=v"
+        )
 
     def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
         assert set(appmod.MOVES) == {"pages.election"}
