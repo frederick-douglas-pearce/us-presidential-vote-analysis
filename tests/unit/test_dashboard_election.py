@@ -1527,6 +1527,83 @@ class TestNeighbourLinks:
         assert lede(degraded) == MOD["LEDE"]
 
 
+class TestNeighborBar:
+    """#464: the earlier and later links sit in a bar above the heading, each on its
+    own side, drawn by classes ``style.css`` styles (its rules are
+    ``test_dashboard_theme.py``'s; the browser measures are the e2e suite's)."""
+
+    def test_on_success_the_links_come_first_then_the_heading_then_the_lede(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        page = MOD["layout"](year="1868")
+        (body,) = page.children
+        assert body.id == PAGE_ID
+        kinds = [type(child).__name__ for child in body.children]
+        # The page-local Location renders nothing; the nav is the first thing shown.
+        assert kinds[:4] == ["Location", "Nav", "H1", "P"]
+        nav, heading, lede_ = body.children[1:4]
+        assert nav.id == MOD["NAV_ID"]
+        assert heading.children == "The 1868 election"
+        assert lede_.className == "lede"
+        assert lede_.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        ids = [getattr(child, "id", None) for child in body.children]
+        assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
+        assert [h.children for h in of_type(page, "H1")] == ["The 1868 election"]
+
+    def test_the_states_with_no_links_keep_the_heading_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        not_found = MOD["layout"](year="1825")
+        assert type(not_found.children[0]).__name__ == "H1"
+        assert not_found.children[0].children == MOD["NOT_FOUND_HEADING"]
+
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        degraded = MOD["layout"](year="1868")
+        assert type(degraded.children[0]).__name__ == "H1"
+        assert len(of_type(degraded, "H1")) == 1
+        assert find(degraded, MOD["NAV_ID"]) is None
+
+    def test_the_heading_and_the_tab_share_one_wording(self) -> None:
+        assert MOD["HEADING"].format(year=1868) == "The 1868 election"
+        assert MOD["title"]("1868").startswith(MOD["HEADING"].format(year=1868) + " — ")
+        (heading,) = of_type(render(1868), "H1")
+        assert heading.children == MOD["HEADING"].format(year=1868)
+
+    @pytest.mark.parametrize("which", ["both", "first", "last"])
+    def test_each_link_carries_its_side_and_its_text_alone(self, which: str) -> None:
+        # 1868 is a recorded year with a served year on each side.
+        year = {"both": 1868, "first": YEARS[0], "last": YEARS[-1]}[which]
+        tree = render(year)
+        nav = find(tree, MOD["NAV_ID"])
+        assert nav.className == MOD["NEIGHBOR_NAV_CLASS"]
+        sides = {
+            MOD["EARLIER_ID"]: MOD["NEIGHBOR_EARLIER_CLASS"],
+            MOD["LATER_ID"]: MOD["NEIGHBOR_LATER_CLASS"],
+        }
+        expected = {
+            "both": [MOD["EARLIER_ID"], MOD["LATER_ID"]],
+            "first": [MOD["LATER_ID"]],
+            "last": [MOD["EARLIER_ID"]],
+        }[which]
+        links = of_type(nav, "Link")
+        assert [link.id for link in links] == expected
+        earlier, later = MOD["neighbours"](INDEX, year)
+        texts_by_id = {
+            MOD["EARLIER_ID"]: MOD["EARLIER_LINK"].format(year=earlier),
+            MOD["LATER_ID"]: MOD["LATER_LINK"].format(year=later),
+        }
+        for link in links:
+            assert link.className == sides[link.id]
+            # The chevrons are drawn by the stylesheet: no arrow in the link's text.
+            assert link.children == texts_by_id[link.id]
+
+
 # --- the title ------------------------------------------------------------------------
 
 

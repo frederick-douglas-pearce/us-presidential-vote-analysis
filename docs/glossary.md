@@ -452,9 +452,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   of the year control on `/candidate/<slug>`, and the lede sentence that offers it
   (`FILTER_SENTENCE` in `pages/candidate.py`); the earlier and later links on `/election/<year>`
   (`EARLIER_LINK` and `LATER_LINK` in `pages/election.py`) and their accessible name
-  (`ELECTION_NAV_LABEL` in `pages/election.py`).
+  (`ELECTION_NAV_LABEL` in `pages/election.py`, read by assistive technology, not shown). The
+  links sit in a bordered bar above the page heading, the earlier link at the left and the later
+  at the right, each with a chevron pointing its way (before the earlier link's text, after the
+  later's). The chevrons are drawn shapes with no text: they are not part of either link's name
+  and are never read aloud, so the words "Earlier" and "Later" carry the direction.
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`; the
-  earlier and later links: #324; their reader wording: owner decision, 2026-10-30, #324.
+  earlier and later links: #324; their reader wording: owner decision, 2026-10-30, #324; the bar
+  above the heading and its decorative chevrons: #464.
 - **Not:** *Census used*, which is also a year.
 - **Status:** settled
 
@@ -1360,6 +1365,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "figure" for a chart | chart | a rule | In this file and on the page a figure is a number ("no popular-vote figure"). Plotly and HTML call the chart a figure. |
 | "C1", "C2" … in page text | the chart's title | a rule | A chart ID is a registry key and a link fragment; readers know a chart by its title (owner decision, 2026-11-06, #432). |
 | "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `EARLIER_LINK`, `LATER_LINK` in `pages/election.py` | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
+| an arrow character ("←", "→", "«", "»") typed into a link's text | a drawn chevron beside the text, with the words unchanged | a rule (`.neighbor-nav` in `dashboard/explore/assets/style.css`) | A typed arrow is read aloud ("left arrow") and becomes part of the link's name; the words already say which way the link goes. |
 
 ## Open decisions
 
