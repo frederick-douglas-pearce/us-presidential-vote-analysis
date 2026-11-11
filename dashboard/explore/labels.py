@@ -855,8 +855,8 @@ def persons_per_electoral_vote(
     unrecognized ``coverage``; then ``coverage`` as :func:`_null_per_capita` reads it.
     Total, as :func:`share` is: any other value no figure can show (a non-finite
     number, an integer no float can hold, a bool, a string) reads
-    :data:`UNRECOGNIZED`, and so does a figure of zero or less, which no state's
-    population divided by its electors appointed can be (#435's review).
+    :data:`UNRECOGNIZED`, and so does a figure that rounds to zero or less, which no
+    state's population divided by its electors appointed can be (#435's review).
     """
     if is_blank(value):
         if coverage == NO_GOVERNING_FIGURE:
@@ -867,7 +867,8 @@ def persons_per_electoral_vote(
     number_ = finite(value)
     if number_ is None:
         return _unknown(value)
-    return UNRECOGNIZED if number_ <= 0 else f"{round(number_):,}"
+    shown = round(number_)
+    return UNRECOGNIZED if shown <= 0 else f"{shown:,}"
 
 
 def census_year(value: object) -> str:

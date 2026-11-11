@@ -6354,8 +6354,8 @@ unseen. #432's review asked that a selected item be marked by a second trace, be
   parser that lists no query of each kind, so a chart story adding a filtered page lists its own.
 - **(d) C3's form, as D091 recorded C1's.** One horizontal bar per state and DC, drawn rows by
   `persons_per_electoral_vote` (most first, ties by state name), then every row with no figure in
-  state-name order, each a marker at zero with a short label looked up from T6's cell (a figure of zero or less reads *Unrecognized value*, #435's review)
-  (`labels.C3_MARKER_LABELS`) and T6's cell in full in its hover, never a zero-length bar or an
+  state-name order, each a marker at zero with a short label looked up from T6's cell (`labels.C3_MARKER_LABELS`; a figure that rounds to zero or less reads
+  *Unrecognized value*, #435's review) and T6's cell in full in its hover, never a zero-length bar or an
   infinity. The bars are two series split on T6's border cell, sharing one `offsetgroup` so each
   row draws one centered bar: striped exactly for present-day borders, in every year, so the
   encoding does not change between neighboring years. The governing census year is in the title

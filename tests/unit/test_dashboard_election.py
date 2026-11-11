@@ -4067,6 +4067,8 @@ class TestC3:
             ("12", labels.UNRECOGNIZED),
             (0.0, labels.UNRECOGNIZED),
             (-5.0, labels.UNRECOGNIZED),
+            (0.4, labels.UNRECOGNIZED),
+            (0.5, labels.UNRECOGNIZED),
             (None, labels.NOT_IN_DATASET),
             ("", labels.NOT_IN_DATASET),
         ],
@@ -4094,7 +4096,7 @@ class TestC3:
             labels.C3_NO_FIGURE_HOVER.format(state=row["state"], cell=cell)
         ]
 
-    @pytest.mark.parametrize("value", [0, 0.0, -5.0, -0.4])
+    @pytest.mark.parametrize("value", [0, 0.0, -5.0, -0.4, 0.4, 0.5])
     def test_a_ratio_of_zero_or_less_reads_unrecognized_in_every_table(
         self, value: Any
     ) -> None:
@@ -4105,6 +4107,8 @@ class TestC3:
             labels.persons_per_electoral_vote(value, "covered", 3)
             == labels.UNRECOGNIZED
         )
+        # A figure is written to a whole person, so one that rounds to zero is too:
+        # 0.5 rounds half to even (round-2 review).
         assert labels.persons_per_electoral_vote(0.6, "covered", 3) == "1"
 
     def test_the_drawn_range_starts_at_zero_and_reaches_the_longest_bar(self) -> None:

@@ -789,6 +789,7 @@ C3_CHART_TEXTS = ", ".join(
 C3_SELECTED = f"{C3} .scatterlayer .trace:first-child .points path"
 #: The two bar series: plain (first when drawn) and striped.
 C3_STRIPED = f"{C3} .barlayer .trace:last-child .point path"
+C3_PLAIN = f"{C3} .barlayer .trace:first-child .point path"
 
 
 def c3_order(year: int) -> list[str]:
@@ -898,11 +899,14 @@ def test_c3_on_1848_labels_texas_and_stripes_present_day_bars(page: Page) -> Non
     for theme in ("light", "dark"):
         if theme == "dark":
             page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+            # The palette has switched before any token is read (round 2's review).
             page.wait_for_function(
-                f"""() => getComputedStyle(document.querySelector("{C3_STRIPED}"))
-                    .fill.startsWith("url(")"""
+                "getComputedStyle(document.documentElement).colorScheme === 'dark'"
             )
             expect(page.locator(C3_STRIPED).first).to_be_visible()
+        chart_1 = rgb(token(page, "--chart-1"))
+        # The plain bars (the first bar trace) are filled with the series color.
+        expect(page.locator(C3_PLAIN).first).to_have_css("fill", chart_1)
         assert page.locator(C3_STRIPED).first.evaluate(
             "el => getComputedStyle(el).fill"
         ).startswith("url(")
