@@ -1235,8 +1235,7 @@ The peak is below the baseline's 147.0 MB peak, so D071's F1 flip condition is n
 
 **Decision rule (#470).**
 
-- One Results by state run missed D071(g), so the rule calls for a follow-up
-  investigation: an issue of its own that links #470 and carries these runs as its
-  evidence.
+- One Results by state run missed D071(g), so the rule filed a follow-up investigation,
+  #482, which links #470 and carries these runs as its evidence.
 - Every 2016 first visit to the Overview was below 2.8 s, so that trigger did not fire.
 - Memory is far from F1's limit.
