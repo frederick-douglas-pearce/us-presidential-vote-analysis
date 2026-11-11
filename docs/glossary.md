@@ -583,8 +583,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Electoral rank
 - **Plain:** Where a candidate finished nationally by electoral votes counted (1 = most).
 - **Precise:** The national finishing rank on the counted basis, so it may not order the cast
-  totals.
-- **Shown as:** `LABELS["electoral_rank"]` (T3).
+  totals. Candidates with equal counted totals share a rank.
+- **Shown as:** `LABELS["electoral_rank"]` (T3); on the API's `/docs` page, the
+  `EcPvRow.electoral_rank` and `NationalSummaryRow.electoral_rank` field descriptions in
+  `src/usvote/api/models.py`.
 - **Source:** `NationalSummaryRow.electoral_rank`; D046 §4.
 - **Not:** *Took office* (1824).
 - **Status:** settled
@@ -1327,6 +1329,36 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** Nowhere as text; readers see it only as the page's colors, a chart's included.
 - **Source:** #359, acceptance criterion "Expose the resolved theme to Dash"; #432.
 - **Not:** *Theme choice*, which can also be Auto.
+- **Status:** settled
+
+### Three-method comparison (`election`, `elections`)
+- **Plain:** For one election: who led under each of the three methods (the Electoral
+  College, the popular vote and the hybrid), whether the popular vote or the hybrid would
+  have picked someone other than the Electoral College's winner or leader, each method's
+  margin, whether any candidate won a majority of the electors appointed, and the share of
+  electors from states that held a popular vote.
+- **Precise:** One object per election year (`ElectionSummary`): `year`,
+  `electoral_denominator`, `ec_winner`, `pv_winner`, `hybrid_winner` and their `_slug`
+  fields, `ec_determinative`, `pv_coverage`, `pv_flip`, `hybrid_flip`, `ec_margin`,
+  `pv_margin`, `hybrid_margin`. Served as `election` on `/v1/elections/{year}` and
+  `/v1/elections/{year}/summary`, where it is null if the data has no comparison for a
+  served year, and as each item of `elections` on `/v1/elections/summary`, one per election
+  year, oldest first. Outside the popular-vote window the popular-vote and hybrid fields are
+  null (*Outside the popular-vote window*); the Electoral College fields and `pv_coverage`
+  have values for every year served.
+- **Shown as:** on the API's `/docs` page, the `/v1/elections/summary` summary and
+  docstring (`get_all_election_summaries` in `src/usvote/api/routes.py`), and the
+  `AllElectionsSummaryResponse` docstring and its `data` and `elections` field
+  descriptions in `src/usvote/api/models.py`; the
+  `/v1/elections/{year}/summary` summary in `src/usvote/api/routes.py`. On the dashboard,
+  the election panel shows these fields under the heading "Under each method"
+  (`pages/election.py`), each with its own `LABELS` key.
+- **Source:** `ElectionSummary` and its class docstring ("The per-election three-method
+  comparison") in `src/usvote/api/models.py`; `_election_summary` in
+  `src/usvote/api/routes.py`; D037; D053; #102; #431.
+- **Not:** The per-candidate national results (`data` on the `/summary` routes, `summary`
+  on `/v1/elections/{year}`). Not an item of `/v1/elections`, which lists election years.
+  Not the dashboard panel's heading.
 - **Status:** settled
 
 ### Took office

@@ -105,7 +105,14 @@ API_TITLE = "US Presidential Vote API"
 #: 0.6.0 -> 0.7.0 by #386: three ``nominating_party`` fields on ``EcPvRow`` and
 #: ``NationalSummaryRow``, and four ``usgov_*`` fields on ``meta.provenance``. Additive,
 #: hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 4 -> 5 for the same event.
-API_VERSION = "0.7.0"
+#:
+#: 0.7.0 -> 0.8.0 by #431: the ``/v1/elections/summary`` route and its
+#: ``AllElectionsSummaryResponse`` model. Additive, hence minor. It reads existing
+#: tables, so ``SNAPSHOT_SCHEMA_VERSION`` did not move (D070(c)). The rows of
+#: ``/v1/elections/{year}/summary`` and the ``summary`` list on ``/v1/elections/{year}``
+#: (both read by ``rollup_by_year``) also gained a defined order for tied ranks
+#: (``candidate_slug``), where SQLite's order was undefined before.
+API_VERSION = "0.8.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."

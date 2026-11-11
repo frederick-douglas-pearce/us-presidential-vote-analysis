@@ -62,6 +62,7 @@ from usvote.snapshot import (
     assert_no_pv_aggregate_below_mit_window,
     assert_nominating_party_matches_catalog,
     assert_nominating_party_nulls_have_one_cause,
+    assert_rollup_and_hybrid_summary_cover_the_same_years,
     build_hybrid_tables,
     build_national_rollup,
     build_snapshot,
@@ -1354,6 +1355,71 @@ def test_the_hybrid_summary_guard_passes_a_clean_pre_window_row() -> None:
         }
     )
     assert_no_hybrid_pv_below_mit_window(summary)
+
+
+@pytest.mark.parametrize(
+    ("rollup_years", "summary_years", "match"),
+    [
+        ([1860, 2016, 2020], [1860, 2020], r"roll-up only \[2016\], summary only \[\]"),
+        ([1860, 2020], [1860, 2016, 2020], r"roll-up only \[\], summary only \[2016\]"),
+    ],
+    ids=["summary-missing-a-year", "rollup-missing-a-year"],
+)
+def test_the_year_set_guard_refuses_a_mismatch_either_way(
+    rollup_years: list[int], summary_years: list[int], match: str
+) -> None:
+    """The roll-up and the hybrid summary must cover the same years (#431, D094).
+
+    ``/v1/elections/summary`` promises one ``elections`` item per year in ``data``;
+    this is the build-time half of that promise. Both directions, since each one
+    alone would ship a year one list has and the other lacks.
+    """
+    rollup = pd.DataFrame({"year": rollup_years + rollup_years})  # two rows per year
+    summary = pd.DataFrame({"year": summary_years})
+    with pytest.raises(SnapshotError, match=match):
+        assert_rollup_and_hybrid_summary_cover_the_same_years(rollup, summary)
+
+
+def test_the_build_refuses_a_summary_missing_a_year(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``build_snapshot`` runs the year-set guard on the tables it built (#431, D094).
+
+    The guard's own tests call it directly, so they would pass with the call removed from
+    the build. Here the hybrid summary the build makes is wrapped to lose one year, and
+    the build must refuse it and write no file. The summary side is the one doctored,
+    because dropping roll-up rows would trip an earlier guard first.
+    """
+    import usvote.snapshot as snapshot_mod
+
+    real = snapshot_mod.build_hybrid_tables
+
+    def short(*args: object, **kwargs: object) -> tuple[pd.DataFrame, pd.DataFrame]:
+        fields, summary = real(*args, **kwargs)
+        assert summary["year"].nunique() >= 2, "fixture needs two years to drop one"
+        last = summary["year"].max()
+        return fields, summary[summary["year"] != last]
+
+    monkeypatch.setattr(snapshot_mod, "build_hybrid_tables", short)
+    out = tmp_path / "snapshot.sqlite"
+    fact = _ec_pv_frame()
+    with pytest.raises(SnapshotError, match="cover different years"):
+        build_snapshot(
+            fact,
+            str(out),
+            pv_status_df=_status_frame(fact),
+            per_capita_df=_per_capita_frame(fact),
+            party_keys_df=_party_keys(fact),
+            build_timestamp=_TS,
+        )
+    assert not out.exists()
+
+
+def test_the_year_set_guard_passes_matching_years() -> None:
+    """The negative leg: equal year sets pass, so the guard is not vacuous."""
+    rollup = pd.DataFrame({"year": [1860, 1860, 2016, 2020]})
+    summary = pd.DataFrame({"year": [1860, 2016, 2020]})
+    assert_rollup_and_hybrid_summary_cover_the_same_years(rollup, summary)
 
 
 def test_the_schema_version_moved_for_the_new_shape() -> None:

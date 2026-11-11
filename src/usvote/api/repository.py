@@ -25,6 +25,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import fields
 from pathlib import Path
+from typing import cast
 
 from usvote.snapshot_schema import (
     DATA_COLUMNS,
@@ -44,25 +45,43 @@ from usvote.snapshot_schema import (
 #: on overflow (:class:`SnapshotError`) rather than silently truncate: silent truncation
 #: is exactly the drop this codebase forbids.
 #:
-#: **The cap now sits below the table size, and that is correct.** Before #139 the whole
-#: snapshot was ~1,700 rows and this note said so; the widened 1824–2024 surface is
-#: ~5,600, so a hypothetical unscoped ``SELECT`` would trip the cap. None exists:
-#: :meth:`list_years` aggregates, :meth:`list_candidates` deduplicates to one row per
-#: ``(candidate, year)`` (as many as ``national_rollup`` holds), and every fact read
-#: goes through :meth:`_data_rows`, which always carries a ``WHERE``. What the cap
-#: protects is therefore unchanged — a *scoped* query returning thousands of rows
-#: means a grain/fan-out regression, not a large-but-valid result. Measured headroom on
-#: the widened surface: the widest scoped reads are one year (~357 rows), one
-#: candidate (~200) and one state (~150), so roughly 14×.
+#: **The cap sits below the fact table's size, and that is correct.** The 1824–2024
+#: ``ec_pv`` table is 5,623 rows (snapshot ``37af4064``), so returning its rows unscoped
+#: would trip the cap, and nothing does: every row-level ``ec_pv`` read goes through
+#: :meth:`_data_rows`, which always carries a ``WHERE``.
+#:
+#: **A read with no scoping ``WHERE`` is allowed only when its result is at most one row
+#: per (election, state) or (election, candidate)** (D094, amending D031's "every
+#: endpoint is scoped" premise). It is one of two kinds: a derived table read whole
+#: whose primary key is that grain (:meth:`national_summary_all` reads
+#: ``national_rollup`` and ``hybrid_summary``), or a ``GROUP BY``/``DISTINCT`` down to
+#: that grain (:meth:`list_years` over ``national_rollup``, #97; :meth:`list_candidates`
+#: over ``ec_pv``, #330). Such a result is bounded by the number of elections times a
+#: small per-election count, so the cap keeps its meaning: thousands of rows is a
+#: grain/fan-out regression (a join that multiplied rows), not a large-but-valid result.
+#: A whole-table read also needs a grain test with a twin proving it fires — for
+#: ``/v1/elections/summary``, ``_assert_summary_grain`` and
+#: ``test_the_summary_grain_check_fires_on_a_duplicated_row`` in
+#: ``tests/unit/test_api_endpoints.py``; a ``GROUP BY``/``DISTINCT`` read is at its
+#: grain by construction.
+#:
+#: Headroom, measured on snapshot ``37af4064`` (2026-11-10): the widest scoped reads are
+#: one year (357 rows), one candidate (192) and one state (132); the whole-table
+#: reads are 132 (``national_rollup``) and 51 (``hybrid_summary``); a whole read of the
+#: ``(year, state)``-keyed ``per_capita`` table (#428) would be 2,204. All are well
+#: under the cap.
 MAX_ROWS = 5000
 
 
 class SnapshotError(RuntimeError):
-    """Raised when the snapshot cannot be opened or is incompatible at startup.
+    """Raised when the snapshot is unusable: at startup, or when a read finds it broken.
 
-    A startup-time failure (missing file, empty/corrupt ``snapshot_meta``, a
-    ``schema_version`` the server was not built for) — fail loud at boot rather than
-    mis-serve a stale-shape snapshot or 500 per request (D028).
+    At startup (missing file, empty/corrupt ``snapshot_meta``, a ``schema_version`` the
+    server was not built for) it fails loud at boot rather than mis-serve a stale-shape
+    snapshot (D028). A read raises it too when the data breaks a guarantee the build
+    should have kept — the row cap, a slug with two names, the roll-up and hybrid
+    summary covering different years — and the request becomes a 500 rather than a
+    silently wrong answer.
     """
 
 
@@ -197,8 +216,10 @@ class SnapshotRepository:
         if len(rows) > MAX_ROWS:
             raise SnapshotError(
                 f"query returned more than the {MAX_ROWS}-row cap "
-                f"({sql!r}, params={params!r}) — a grain/fan-out regression; "
-                "no legitimate scoped query is this large."
+                f"({sql!r}, params={params!r}) — a grain/fan-out regression; no "
+                "legitimate read is this large (a scoped read, or an unscoped one "
+                "whose result is at most one row per election and state or candidate, "
+                "D094)."
             )
         return [dict(r) for r in rows]
 
@@ -275,13 +296,60 @@ class SnapshotRepository:
         return self._data_rows(clauses, params, "state, candidate_slug")
 
     def rollup_by_year(self, year: int) -> list[dict[str, object]]:
-        """The precomputed national roll-up rows for a year (no handler computation)."""
+        """The precomputed national roll-up rows for a year (no handler computation).
+
+        Ordered by rank, then ``candidate_slug``: ``president_electoral_rank`` is a
+        dense rank, so two candidates can share one, and without the tiebreaker their
+        order would be whatever SQLite's plan gave. :meth:`national_summary_all` uses
+        the same order, so the two routes agree row for row (#431).
+        """
         cols = ", ".join(ROLLUP_COLUMNS)
         return self._select(
             f"SELECT {cols} FROM {ROLLUP_TABLE} WHERE year = ? "  # noqa: S608
-            "ORDER BY president_electoral_rank",
+            "ORDER BY president_electoral_rank, candidate_slug",
             (year,),
         )
+
+    def national_summary_all(
+        self,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        """Every year's roll-up rows and every year's hybrid summary, whole (#431).
+
+        Two whole-table reads, allowed because each table is a derived table whose
+        primary key is its grain (see :data:`MAX_ROWS`, D094). Rows come oldest year
+        first, then by rank and ``candidate_slug`` (the per-year order); summaries
+        oldest year first.
+
+        **Fails loud when the two tables cover different years**, in either direction.
+        The per-year route renders a missing summary as ``election: null``, because
+        failing there would withhold that year's good rows. Here a missing year would
+        simply be absent from a list — a gap a client can only find by cross-checking
+        ``/v1/elections`` — so a mismatch raises :class:`SnapshotError` (a 500) instead.
+        The snapshot build refuses the same mismatch
+        (``assert_rollup_and_hybrid_summary_cover_the_same_years``); this is the serve-
+        time half, for a snapshot that reached the server some other way.
+        """
+        rows = self._select(
+            f"SELECT {', '.join(ROLLUP_COLUMNS)} FROM {ROLLUP_TABLE} "  # noqa: S608
+            "ORDER BY year, president_electoral_rank, candidate_slug",
+            (),
+        )
+        summaries = self._select(
+            f"SELECT {', '.join(HYBRID_SUMMARY_COLUMNS)} "  # noqa: S608
+            f"FROM {HYBRID_SUMMARY_TABLE} ORDER BY year",
+            (),
+        )
+        # ``year`` is an INTEGER column; rows are typed as plain objects.
+        row_years = {cast(int, r["year"]) for r in rows}
+        summary_years = {cast(int, s["year"]) for s in summaries}
+        if row_years != summary_years:
+            raise SnapshotError(
+                "national_rollup and hybrid_summary cover different years: roll-up "
+                f"only {sorted(row_years - summary_years)}, summary only "
+                f"{sorted(summary_years - row_years)}; the build should have refused "
+                "this snapshot (D094)."
+            )
+        return rows, summaries
 
     def hybrid_summary_by_year(self, year: int) -> dict[str, object] | None:
         """The per-election hybrid summary for a year, or ``None`` if absent (#102).
