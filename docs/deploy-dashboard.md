@@ -1056,3 +1056,186 @@ other years one or two.
   that limit is 384 MiB), so D071's F1 flip condition is not near
   (`gcloud app instances list`, `instance.memoryUsage`, in bytes). #310 measured
   106–126 MiB before any chart.
+
+### Election pages after the split and C3, measured after deploy (2026-11-11, #470)
+
+#465 split the one-election view into three pages, and #435 added C3 to the third, so #470
+re-measured D071(g) and the instance's memory on all three:
+
+- the Overview, `/election/<year>`, with C1;
+- Results by state, `/election/<year>/states`, with no chart;
+- People per electoral vote, `/election/<year>/per-capita`, with C3.
+
+These runs are also #435's own D071(g) re-measure.
+
+Dashboard version `v-74950100c6cb-r25-a1` (deploy run 42987028675 of 7495010, whose
+`dashboard/`, `uv.lock` and `pyproject.toml` are those of 5dc5306, the commit that shipped
+C3), snapshot `37af4064…` (the baseline's). Since the baseline the API is at 0.8.0 (#431,
+deploy run 42978898772, 07:21–07:23Z), whose deploy purged the API edge. The API origin was
+warm throughout, by the keep-warm ping (08:59:25Z and 09:04:25Z) and the runs' own fills; it
+logged no `Starting new instance` in the window. Measured 09:00–09:11Z, clear of the daily
+canary (its last run 2026-11-10 20:28Z, the next due 13:17Z), by #277's method:
+`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser context
+each run), with `--chart "#c1 .main-svg"` on the Overview and `--chart "#c3 .main-svg"` on
+People per electoral vote. The chart column is the time until the chart is drawn, which is
+not a D071(g) measure.
+
+**Four instances**, because the Overview and Results by state fill the same path
+(`/v1/elections/{year}`), so a first visit to each needs its own instance:
+
+- **A**, the deploy's new instance: a first visit to the Overview and then to People per
+  electoral vote for each year (People per electoral vote fills its own path,
+  `/v1/elections/{year}/per-capita`); then every year from the cache on all three pages.
+- **B**, after a [restart](#restarting-the-instance-to-empty-its-cache) at 09:07:27Z: a
+  first visit to Results by state for each year.
+- **C** and **D**, after restarts at 09:09:54Z and 09:10:20Z: one first visit to the 2016
+  Overview each.
+
+Warmup ran on each restarted instance, as a loading request, in 2.52–2.75 s. Each first
+visit was a genuine miss, by the run's `api fetch` lines: its fill is a line logged during
+that run, and no earlier line names that path on that instance since it started. On B, C
+and D, check 3 also ran before each first visit; on A, whose 18 first visits ran back to
+back, it did not, and the lines were read after the runs. Check 3's query as written
+(`api fetch /v1/elections/<year>`) is a substring match, so for People per electoral vote
+the line to look for is `api fetch /v1/elections/<year>/per-capita`.
+
+**Where each first visit's fill was answered.**
+
+- On A, all 18 fills missed the API edge and reached the origin, which answered in 5–17 ms.
+- On B, the fills for 1824, 1860, 2008 and 2012 reached the origin (7–9 ms), and the edge
+  answered the other five, though A had filled all nine through it a few minutes before.
+  Why those four missed is not established: an eviction, or a different data center, would
+  do it.
+- C's 2016 fill reached the origin (92 ms), and D's was answered by the edge.
+
+**Overview**
+
+| Year | First visit: TTFB / first data / chart (s) | From cache: TTFB (s) | From cache: first data (s) | From cache: chart (s) |
+|---|---|---|---|---|
+| 1824 | 0.16 / 1.62 / 4.73 | 0.10–0.12 | 1.03–1.08 | 3.96–4.08 |
+| 1860 | 0.10 / 1.59 / 4.50 | 0.09–0.12 | 1.10–1.11 | 3.99–4.12 |
+| 1872 | 0.29 / 1.68 / 4.60 | 0.11–0.13 | 1.07–1.11 | 4.01–4.05 |
+| 2016 | A 0.14 / 1.59 / 4.49; C 0.14 / 1.58 / 4.62; D 0.11 / 1.53 / 4.46 | 0.09–0.12 | 1.02–1.08 | 4.00–4.08 |
+| 2024 | 0.09 / 1.55 / 4.27 | 0.09–0.11 | 1.06–1.09 | 3.92–3.97 |
+| 2020 | 0.08 / 1.11 / 4.43 | 0.11–0.12 | 1.05–1.15 | 4.05 |
+| 2012 | 0.14 / 1.60 / 4.29 | 0.11–0.17 | 1.06–1.09 | 4.03 |
+| 2008 | 0.11 / 1.57 / 4.29 | 0.13–0.14 | 1.08–1.12 | 4.03–4.08 |
+| 2000 | 0.10 / 1.55 / 4.30 | 0.12–0.22 | 1.14–1.22 | 4.08–4.26 |
+
+2016 had three first visits (instances A, C and D) and five runs from the cache; each
+other year had one first visit and two runs from the cache. 2020's first visit (1.11 s to
+first data) is as fast as its runs from the cache, though it was a genuine miss: its one
+`/v1/elections/2020` fill is logged at 09:01:45.66Z, during that run, and reached the origin
+(7 ms). Why it was faster than the other first visits is not established.
+
+**Results by state**
+
+| Year | First visit: TTFB / first data (s) | From cache: TTFB (s) | From cache: first data (s) |
+|---|---|---|---|
+| 1824 | 0.12 / 1.70 | 0.10 | 1.16 |
+| 1860 | 0.13 / 1.73 | 0.07–**4.90** | 1.18–**5.98** |
+| 1872 | 0.13 / 1.92 | 0.11 | 1.54–1.65 |
+| 2016 | 0.12 / 1.97 | 0.11–0.12 | 1.83–1.91 |
+| 2024 | 0.14 / 1.57 | 0.08–0.14 | 1.14–1.16 |
+| 2020 | 0.11 / 1.54 | 0.09–0.13 | 1.11–1.21 |
+| 2012 | 0.14 / 1.61 | 0.09–0.12 | 1.14–1.23 |
+| 2008 | 0.17 / 1.67 | 0.10–0.14 | 1.12–1.15 |
+| 2000 | 0.18 / 1.61 | 0.10 | 1.17–1.22 |
+
+The first visits ran on instance B, and the runs from the cache on A, where the Overview's
+first visit had already filled the path.
+
+**People per electoral vote**
+
+| Year | First visit: TTFB / first data / chart (s) | From cache: TTFB (s) | From cache: first data (s) | From cache: chart (s) |
+|---|---|---|---|---|
+| 1824 | 0.09 / 1.54 / 4.35 | 0.09–0.11 | 1.12–1.13 | 4.04–4.06 |
+| 1860 | 0.09 / 1.60 / 4.37 | 0.13–0.14 | 1.07–1.12 | 3.96–4.08 |
+| 1872 | 0.12 / 1.54 / 4.41 | 0.09–0.12 | 1.02–1.08 | 4.03 |
+| 2016 | 0.12 / 1.61 / 4.48 | 0.09–0.12 | 1.05–1.06 | 4.06–4.11 |
+| 2024 | 0.10 / 1.55 / 4.45 | 0.10–0.16 | 1.08–1.12 | 4.14–4.15 |
+| 2020 | 0.11 / 1.56 / 4.50 | 0.09–0.10 | 1.07–1.09 | 4.13–4.18 |
+| 2012 | 0.12 / 1.57 / 4.45 | 0.12–0.14 | 1.04–1.07 | 4.05–4.09 |
+| 2008 | 0.07 / 1.53 / 4.30 | 0.09–0.10 | 1.04 | 4.08–4.12 |
+| 2000 | 0.10 / 1.56 / 4.19 | 0.08–0.11 | 1.03–1.06 | 4.03–4.09 |
+
+Every run on all three pages reached data, with no degraded page.
+
+**Whether D071(g) held, per page:**
+
+- **Overview:** TTFB on 32 of 32 runs (0.08–0.29 s), first data on 32 of 32 (1.11–1.68 s on
+  a first visit, 1.02–1.22 s from the cache).
+- **People per electoral vote:** TTFB on 27 of 27 (0.07–0.16 s), first data on 27 of 27
+  (1.53–1.61 s on a first visit, 1.02–1.13 s from the cache).
+- **Results by state:** TTFB on 26 of 27, first data on 26 of 27.
+  - The miss was 1860's second run from the cache: TTFB 4.90 s, first data 5.98 s.
+  - App Engine's request log shows the app served that request in 8.4 ms, logged at
+    09:03:11.11Z; the run before it was logged at 09:03:04.36Z and served in 8.9 ms.
+  - So the 4.9 s was spent outside the app's own handling of the request: on the measuring
+    machine, its network, or Google's front end, on the way in or out, which these logs do
+    not separate. It is still a miss by D071(g)'s measure.
+  - The other 26 runs took 0.07–0.18 s to first byte and 1.11–1.97 s to first data. Among
+    them, 2016 and 1872 were the page's slowest years, on a first visit and from the cache.
+
+**Against the baseline** (the Overview, year by year, against the 2026-11-10 record above):
+
+| Year | First visit: first data (s), 2026-11-10 → now | From cache: first data (s), 2026-11-10 → now |
+|---|---|---|
+| 1824 | 2.13 → 1.62 | 1.23–1.36 → 1.03–1.08 |
+| 1860 | 2.26 → 1.59 | 1.38–1.43 → 1.10–1.11 |
+| 1872 | 2.65 → 1.68 | 1.77–1.81 → 1.07–1.11 |
+| 2016 | 3.15 → 1.53–1.59 | 2.07–2.28 → 1.02–1.08 |
+| 2024 | 2.07 → 1.55 | 1.29–1.44 → 1.06–1.09 |
+| 2020 | 2.18 → 1.11 | 1.49 → 1.05–1.15 |
+| 2012 | 2.16 → 1.60 | 1.36 → 1.06–1.09 |
+| 2008 | 1.98 → 1.57 | 1.31 → 1.08–1.12 |
+| 2000 | 2.08 → 1.55 | 1.61 → 1.14–1.22 |
+
+- **First visits:** first data is faster on every year, by 0.41–1.07 s on the eight years
+  other than 2016 (0.41–0.97 s without 2020's fast first visit, above). 2016's three first
+  visits took 1.53–1.59 s, against that record's one at 3.15 s, so 2016 is no longer near
+  the target.
+- **From the cache:** first data is faster on every year, and each year's slowest run now is
+  faster than its fastest then: 1.02–1.22 s in all, against that record's 1.23–2.28 s.
+  2016's five runs took 1.02–1.08 s, against 2.07–2.28 s.
+- **Why, not separated.** Between the two versions the dashboard gained #464's bar of
+  earlier and later election links, #465's split and C3, and the API moved to 0.8.0. The
+  likeliest cause is the split, which moved Results by state (T2 and its four filters) and
+  People per electoral vote (T6) off the Overview (D092), but none of the four was measured
+  on its own.
+- The chart is drawn 2.86–3.05 s after first data on a run from the cache, about as in the
+  baseline.
+
+**Request budget held.** The dashboard logged 38 `api fetch` lines from A's first line
+(08:59:24Z) to the last run's fill (09:10:36Z), by check 2's query (§12) bounded to that
+window, counting its `api fetch` lines:
+
+- each instance's two prefetched paths (`/v1/meta` and `/v1/elections`) as it started;
+- on A, 18 fills, one for each first visit, and one `/v1/meta` recheck by the refresher
+  (09:04:25Z);
+- on B, nine fills, one for each Results by state page reached cold;
+- on C and D, one fill each.
+
+The runs from the cache made no fills. Neither did Results by state reached through a path
+the Overview had filled. The app logged no warnings and no 5xx. After the window, D logged
+two more: its refresher's `/v1/meta` recheck (09:15:24Z) and a fill of `/v1/elections/1872`
+(09:16:26Z, reaching the origin in 11 ms) that no run made. The refresher fills only the
+prefetched paths, so a page request from outside the measurement made it.
+
+**Memory.** Instance A, from `gcloud app instances list` (`instance.memoryUsage`, in bytes):
+
+- 115.1 MB (109.8 MiB), 30 % of the 384 MB D071 names for F1 (29 % of 384 MiB), after the
+  deploy probes (5 requests);
+- 135.4 MB (129.1 MiB), 35 % (34 %), after the first five years were filled on the Overview
+  and People per electoral vote (180 requests);
+- 143.7 MB (137.1 MiB), 37 % (36 %), after all nine years on all three pages (1,307
+  requests).
+
+The peak is below the baseline's 147.0 MB peak, so D071's F1 flip condition is not near.
+
+**Decision rule (#470).**
+
+- One Results by state run missed D071(g), so the rule filed a follow-up investigation,
+  #482, which links #470 and carries these runs as its evidence.
+- Every 2016 first visit to the Overview was below 2.8 s, so that trigger did not fire.
+- Memory is far from F1's limit.
