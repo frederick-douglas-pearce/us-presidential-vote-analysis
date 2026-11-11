@@ -260,21 +260,23 @@ def test_the_summary_grain_check_fires_on_a_duplicated_row(
         _assert_summary_grain(body)
 
 
+@pytest.mark.parametrize("storage", ["ASC", "DESC"])
 def test_tied_ranks_are_ordered_by_slug_on_both_summary_routes(
-    snapshot_path: str, settings: ApiSettings
+    snapshot_path: str, settings: ApiSettings, storage: str
 ) -> None:
     """A dense rank can tie (real 2016 has four candidates at rank 4); slug breaks it.
 
-    The table is rebuilt without its key and filled in reverse slug order, so an order
-    that relied on storage would come back ``cand-b`` first.
+    The table is rebuilt without its key and filled in each slug order in turn, so an
+    order that leaned on storage, whichever way SQLite's sort then returns ties, fails
+    one of the two cases.
     """
     _doctor(
         snapshot_path,
         "UPDATE national_rollup SET president_electoral_rank = 1 WHERE year = 2020",
-        "CREATE TABLE nr_rev AS SELECT * FROM national_rollup "
-        "ORDER BY year, candidate_slug DESC",
+        "CREATE TABLE nr_copy AS SELECT * FROM national_rollup "
+        f"ORDER BY year, candidate_slug {storage}",
         "DROP TABLE national_rollup",
-        "ALTER TABLE nr_rev RENAME TO national_rollup",
+        "ALTER TABLE nr_copy RENAME TO national_rollup",
     )
     with TestClient(create_app(settings)) as c:
         per_year = c.get("/v1/elections/2020/summary").json()["data"]
@@ -284,6 +286,25 @@ def test_tied_ranks_are_ordered_by_slug_on_both_summary_routes(
         "cand-a",
         "cand-b",
     ]
+
+
+def test_the_elections_list_is_oldest_first_whatever_the_storage_order(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """``elections`` is ordered by the query, not by the table's key (#431).
+
+    ``hybrid_summary`` is keyed by ``year``, so a plain scan already returns years in
+    order; the copy here has no key and stores them newest first.
+    """
+    _doctor(
+        snapshot_path,
+        "CREATE TABLE hs_rev AS SELECT * FROM hybrid_summary ORDER BY year DESC",
+        "DROP TABLE hybrid_summary",
+        "ALTER TABLE hs_rev RENAME TO hybrid_summary",
+    )
+    with TestClient(create_app(settings)) as c:
+        body = c.get("/v1/elections/summary").json()
+    assert [e["year"] for e in body["elections"]] == _EXPECTED_SUMMARY_YEARS
 
 
 def test_all_summaries_fail_loud_on_a_year_without_its_comparison(

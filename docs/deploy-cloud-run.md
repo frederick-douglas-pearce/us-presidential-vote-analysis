@@ -287,9 +287,10 @@ run built from. The second is what proves the cache purge took — the cache-bus
 reachability check cannot, since a unique url is always a MISS and so always reads the
 origin's fresh ETag (#148). Last, it requests the canonical `/v1/elections/summary` (every
 election's national summary, the dashboard's cross-election fill, #431): 200, an ETag naming
-this run's snapshot, and a body whose `meta.count`, `data` and `elections` agree. That request
-also refills the route's edge entry, but only at the colo the runner reached (`caches.default`
-is colo-local); every other colo fills on its first visitor.
+this run's snapshot, and a body whose `meta.count`, `data` and `elections` agree. The request
+also triggers the Worker's caching of GET `/v1` 200s, which refills the route's entry only at
+the colo the runner reached (`caches.default` is colo-local); every other colo fills on its first
+visitor. The step does not verify that the entry was stored (#478 tracks such a check).
 
 > **Do not enable Bot Fight Mode on this zone (#148 / D054).** It was on here from
 > 2026-07-25 to 2026-08-28, and it 403s every non-browser client from a datacenter ASN —

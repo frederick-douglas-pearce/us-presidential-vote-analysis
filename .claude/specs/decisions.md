@@ -6386,17 +6386,26 @@ assert makes forgetting it fail.
 **Context.** Phase 2's cross-election charts (C2 #434, C4/C5 #436, the headline metrics #437)
 need every election's national figures. #431 serves them in one response at a path with no query
 parameters, so the dashboard fills it once per data version (D074(ii)'s precedent; D072
-unchanged). It is the API's first **unscoped data read**: D031 ruled out pagination because
-"every endpoint is already scoped by year/state/candidate", and the `MAX_ROWS` comment said no
-unscoped `SELECT` existed. #428 (every state's per-election row) is the next such route.
+unchanged). It is the first route to return a table's rows with no scoping `WHERE`. D031 ruled
+out pagination because "every endpoint is already scoped by year/state/candidate", and the
+`MAX_ROWS` comment said no unscoped `SELECT` existed, which was already untrue: `list_years` (#97)
+and `list_candidates` (#330) read whole tables but aggregate them. #428 (every state's
+per-election row) is the next such route.
 
 **Decision.**
-- **(i) An unscoped read is allowed only on a bounded derived table whose grain is its primary
-  key**: `national_rollup` (`(year, candidate_slug)`, 132 rows) and `hybrid_summary` (`year`, 51
-  rows) for #431, measured on snapshot `37af4064`. It still goes through the capped select
-  (`MAX_ROWS`), and the route's tests include a grain test (one row per key) with a twin proving
-  it fires, since a fan-out would show as a repeated key long before it reached the cap. The fact
-  table `ec_pv` is never read unscoped.
+- **(i) A read with no scoping `WHERE` is allowed only when its result is at most one row per
+  (election, state) or (election, candidate).** It is one of two kinds: a derived table read
+  whole whose primary key is that grain (`national_rollup`, `(year, candidate_slug)`, 132 rows,
+  and `hybrid_summary`, `year`, 51 rows, for #431, measured on snapshot `37af4064`; `per_capita`
+  for #428), or a `GROUP BY`/`DISTINCT` down to that grain (`list_years` over `national_rollup`,
+  #97; `list_candidates` over `ec_pv`, #330). The fact grain `(year, state, candidate)` is
+  excluded, so `ec_pv` rows are never returned unscoped: every row-level `ec_pv` read goes
+  through `_data_rows`, which always carries a `WHERE`. Every read goes through the capped select
+  (`MAX_ROWS`). A whole-table read also needs a grain test with a twin proving it fires, since a
+  fan-out would show as a repeated key long before it reached the cap: for #431,
+  `_assert_summary_grain` and `test_the_summary_grain_check_fires_on_a_duplicated_row` in
+  `tests/unit/test_api_endpoints.py`. A `GROUP BY`/`DISTINCT` read is at its grain by
+  construction and needs none.
 - **(ii) Naming.** The all-years form of `/v1/elections/{year}/<x>` is `/v1/elections/<x>`, a
   literal declared before `/elections/{year}` in `routes.py` (`{year}` has no path convertor, so
   declared after it the literal would match `{year}` and answer 422). #431 is
@@ -6413,9 +6422,11 @@ unscoped `SELECT` existed. #428 (every state's per-election row) is the next suc
 - **(iv) Order is total.** `president_electoral_rank` is dense, so ranks can tie (2016 has four
   candidates at rank 4). Both `/summary` routes order by year, rank, then `candidate_slug`, so the
   all-years rows for a year equal the per-year rows, order included.
-- **(v) The deploy refills it.** The post-deploy smoke step requests the canonical
-  `/v1/elections/summary` after the purge (200, this run's ETag, a self-consistent body), which
-  refills the entry at the runner's colo only: `caches.default` is colo-local.
+- **(v) The deploy requests it after the purge.** The post-deploy smoke step requests the
+  canonical `/v1/elections/summary` (200, this run's ETag, a self-consistent body). The request
+  also triggers the Worker's caching of GET `/v1` 200s, which refills the entry at the runner's
+  colo only (`caches.default` is colo-local); the step does not verify that the entry was
+  stored. #478 tracks a check that the Worker caches at all.
 
 **Rationale.** Reading a derived table whole costs one query per data version and keeps every
 series out of the dashboard. A primary-key grain bounds the read by the number of elections, so

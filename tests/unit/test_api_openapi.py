@@ -174,6 +174,14 @@ def test_endpoints_carry_the_right_tags(client: TestClient) -> None:
     assert paths["/health"]["get"]["tags"] == ["Ops"]
 
 
+def test_the_all_years_summary_declares_no_parameters(client: TestClient) -> None:
+    """``/v1/elections/summary`` has one address and one edge entry (#431 AC1, D094):
+    a filter added later would split it into many cache keys, so the declared signature
+    is pinned, not only a response."""
+    operation = client.get("/openapi.json").json()["paths"]["/v1/elections/summary"]
+    assert not operation["get"].get("parameters"), operation["get"].get("parameters")
+
+
 # --- examples ---------------------------------------------------------------
 
 

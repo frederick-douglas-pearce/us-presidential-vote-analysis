@@ -2,8 +2,9 @@
 
 Every handler reads **only** through :class:`~usvote.api.repository.SnapshotRepository`
 (no SQL, parsing, aggregation, or computation; the roll-up and slug are precomputed
-in the snapshot, #95) and returns a typed Pydantic model wrapped in the shared
-``{data, meta}`` envelope.
+in the snapshot, #95) and returns a typed Pydantic model carrying ``data`` and ``meta``
+(``meta.count == len(data)``); some add route-specific sibling keys (``summary`` and
+``election`` on a year, ``elections`` on ``/v1/elections/summary``).
 
 **Why the cache logic is called manually, not as a router dependency.** The ``/v1`` ETag
 is a whole-snapshot constant, so a blanket ``cache_dependency`` (as ``/v1/meta`` uses)
@@ -143,7 +144,9 @@ def get_all_election_summaries(
     # route renders a missing summary as `election: null` instead, because there a
     # failure would withhold that year's good rows, while here a missing year would be a
     # silent gap in a list. No identifier, so the cache check runs first, as in
-    # list_elections and list_candidates.
+    # list_elections and list_candidates. A 304 needs this snapshot's tag for this URL,
+    # which only a 200 from this snapshot gives; a snapshot that fails the year check
+    # never serves one (as with list_candidates' two-name check).
     repo = _repo(request)
     cache_dependency(request, response)
     rows, summaries = repo.national_summary_all()

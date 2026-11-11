@@ -46,22 +46,30 @@ from usvote.snapshot_schema import (
 #: is exactly the drop this codebase forbids.
 #:
 #: **The cap sits below the fact table's size, and that is correct.** The 1824–2024
-#: ``ec_pv`` surface is ~5,600 rows, so an unscoped read of it would trip the cap, and
-#: none exists: every fact read goes through :meth:`_data_rows`, which always carries a
-#: ``WHERE``. **Unscoped reads are allowed only on a bounded derived table whose grain
-#: is its primary key** (D094, amending D031's "every endpoint is scoped" premise):
-#: :meth:`national_summary_all` reads ``national_rollup`` (PK ``(year,
-#: candidate_slug)``, 132 rows) and ``hybrid_summary`` (PK ``year``, one row per
-#: election, 51) whole (counts measured on snapshot ``37af4064``, 2026-11-10).
-#: :meth:`list_years` and :meth:`list_candidates` read whole tables too, but aggregate
-#: or deduplicate to at most one row per ``(candidate, year)``. Such a read is bounded
-#: by the number of elections times a small per-election count, so the cap still means
-#: what it did: a read returning thousands of rows is a grain/fan-out regression (a join
-#: that multiplied rows), not a large-but-valid result, and the grain tests on each
-#: unscoped route are what catch it first. Headroom: the widest scoped reads are one
-#: year (~357 rows), one candidate (~200) and one state (~150), the widest unscoped one
-#: 132; a whole read of the ``(year, state)``-keyed ``per_capita`` table (#428) would be
-#: 2,204, still under the cap.
+#: ``ec_pv`` table is 5,623 rows (snapshot ``37af4064``), so returning its rows unscoped
+#: would trip the cap, and nothing does: every row-level ``ec_pv`` read goes through
+#: :meth:`_data_rows`, which always carries a ``WHERE``.
+#:
+#: **A read with no scoping ``WHERE`` is allowed only when its result is at most one row
+#: per (election, state) or (election, candidate)** (D094, amending D031's "every
+#: endpoint is scoped" premise). It is one of two kinds: a derived table read whole
+#: whose primary key is that grain (:meth:`national_summary_all` reads
+#: ``national_rollup`` and ``hybrid_summary``), or a ``GROUP BY``/``DISTINCT`` down to
+#: that grain (:meth:`list_years` over ``national_rollup``, #97; :meth:`list_candidates`
+#: over ``ec_pv``, #330). Such a result is bounded by the number of elections times a
+#: small per-election count, so the cap keeps its meaning: thousands of rows is a
+#: grain/fan-out regression (a join that multiplied rows), not a large-but-valid result.
+#: A whole-table read also needs a grain test with a twin proving it fires — for
+#: ``/v1/elections/summary``, ``_assert_summary_grain`` and
+#: ``test_the_summary_grain_check_fires_on_a_duplicated_row`` in
+#: ``tests/unit/test_api_endpoints.py``; a ``GROUP BY``/``DISTINCT`` read is at its
+#: grain by construction.
+#:
+#: Headroom, measured on snapshot ``37af4064`` (2026-11-10): the widest scoped reads are
+#: one year (357 rows), one candidate (192) and one state (132); the whole-table
+#: reads are 132 (``national_rollup``) and 51 (``hybrid_summary``); a whole read of the
+#: ``(year, state)``-keyed ``per_capita`` table (#428) would be 2,204. All are well
+#: under the cap.
 MAX_ROWS = 5000
 
 
@@ -209,8 +217,9 @@ class SnapshotRepository:
             raise SnapshotError(
                 f"query returned more than the {MAX_ROWS}-row cap "
                 f"({sql!r}, params={params!r}) — a grain/fan-out regression; no "
-                "legitimate read is this large (scoped reads, and unscoped reads of a "
-                "derived table keyed by its grain, D094)."
+                "legitimate read is this large (a scoped read, or an unscoped one "
+                "whose result is at most one row per election and state or candidate, "
+                "D094)."
             )
         return [dict(r) for r in rows]
 
@@ -306,9 +315,10 @@ class SnapshotRepository:
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         """Every year's roll-up rows and every year's hybrid summary, whole (#431).
 
-        Two unscoped reads, allowed because each table is a bounded derived table keyed
-        by its grain (see :data:`MAX_ROWS`, D094). Rows come oldest year first, then by
-        rank and ``candidate_slug`` (the per-year order); summaries oldest year first.
+        Two whole-table reads, allowed because each table is a derived table whose
+        primary key is its grain (see :data:`MAX_ROWS`, D094). Rows come oldest year
+        first, then by rank and ``candidate_slug`` (the per-year order); summaries
+        oldest year first.
 
         **Fails loud when the two tables cover different years**, in either direction.
         The per-year route renders a missing summary as ``election: null``, because

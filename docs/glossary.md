@@ -584,7 +584,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** Where a candidate finished nationally by electoral votes counted (1 = most).
 - **Precise:** The national finishing rank on the counted basis, so it may not order the cast
   totals. Candidates with equal counted totals share a rank.
-- **Shown as:** `LABELS["electoral_rank"]` (T3).
+- **Shown as:** `LABELS["electoral_rank"]` (T3); on the API's `/docs` page, the
+  `EcPvRow.electoral_rank` and `NationalSummaryRow.electoral_rank` field descriptions in
+  `src/usvote/api/models.py`.
 - **Source:** `NationalSummaryRow.electoral_rank`; D046 §4.
 - **Not:** *Took office* (1824).
 - **Status:** settled
