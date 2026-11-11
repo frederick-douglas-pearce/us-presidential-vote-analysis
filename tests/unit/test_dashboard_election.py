@@ -4316,6 +4316,68 @@ class TestC3:
         assert all("var(" not in h for h in hovers)
         assert found["marks"]["hovertext"][0].startswith(f"{shown}TX<br>")
 
+    def test_the_legend_lists_the_bar_series_and_the_selection_never_the_markers(
+        self,
+    ) -> None:
+        """The acceptance gate's Class B survivors: which traces the legend lists is
+        each trace's own ``showlegend``, asserted rather than inferred."""
+        # 1848: both bar series, a marker (Texas), and Texas selected.
+        found = c3_traces(c3_figure(section(1848, state="TX")))
+        assert found["marks"]["showlegend"] is False
+        assert found["selected"]["showlegend"] is True
+        assert found["plain"]["showlegend"] is True
+        assert found["striped"]["showlegend"] is True
+
+    @pytest.mark.parametrize(("year", "state"), [(2024, None), (1864, "GA")])
+    def test_the_first_row_is_drawn_at_the_top_and_the_legend_has_room(
+        self, year: int, state: str | None
+    ) -> None:
+        """The acceptance gate's Class B survivors: the row axis is reversed (row 0,
+        the most people per electoral vote, drawn at the top, as the caption says), and
+        the height adds the legend's margin to the rows' and the bottom's."""
+        figure = c3_figure(section(year, state=state))
+        layout = figure["layout"]
+        assert layout["yaxis"]["autorange"] == "reversed"
+        entries = sum(1 for t in figure["data"] if t.get("showlegend"))
+        top = PC["_TOP_PX"] + PC["_LEGEND_PX"] * entries
+        rows = len(layout["yaxis"]["ticktext"])
+        assert layout["margin"]["t"] == top
+        assert layout["height"] == PC["_ROW_PX"] * rows + top + PC["_BOTTOM_PX"]
+
+    def test_the_chart_reads_t6_s_strings_never_its_own(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The acceptance gate's Class B survivors (the mechanism, not the outcome): C3
+        takes every drawn string and the stripe split from ``labels.per_capita_strings``,
+        so a sentinel there reaches the chart. A chart that formatted its own text, split
+        stripes on the raw value, or labeled an unknown cause with the cause itself would
+        reach today's outcome and miss these sentinels."""
+        real = labels.per_capita_strings
+        body = copy.deepcopy(per_capita_body(1848))
+        plain_row = next(r for r in body["data"] if r["boundary_basis"] == "at_election")
+        texas = next(r for r in body["data"] if r["state_usps"] == "TX")
+
+        def doctored(row: dict[str, Any]) -> dict[str, str]:
+            strings = real(row)
+            if row["state_usps"] == plain_row["state_usps"]:
+                strings["persons_per_electoral_vote"] = "SENTINEL 1,234"
+                strings["boundary_basis"] = labels.BOUNDARY_BASIS["present_day"]
+            if row["state_usps"] == "TX":
+                strings["persons_per_electoral_vote"] = "A cause no table names"
+            return strings
+
+        monkeypatch.setattr(labels, "per_capita_strings", doctored)
+        found = c3_traces(c3_figure(section(1848, body)))
+        usps = plain_row["state_usps"]
+        assert usps in found["striped"]["ids"]
+        assert usps not in found.get("plain", {"ids": []})["ids"]
+        i = found["striped"]["ids"].index(usps)
+        assert found["striped"]["text"][i] == "SENTINEL 1,234"
+        assert "SENTINEL 1,234" in found["striped"]["hovertext"][i]
+        assert texas["state_usps"] in found["marks"]["ids"]
+        j = found["marks"]["ids"].index("TX")
+        assert found["marks"]["text"][j] == labels.UNRECOGNIZED
+
     def test_the_lede_names_the_table_as_what_the_filter_narrows(self) -> None:
         assert PC["FILTER_SENTENCE"] == "Narrow the table to one state."
         assert lede_text(section(2024)).endswith(PC["FILTER_SENTENCE"])

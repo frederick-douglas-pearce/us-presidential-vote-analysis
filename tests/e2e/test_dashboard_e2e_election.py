@@ -971,6 +971,27 @@ def test_c3_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     assert page.evaluate("window.__e2e_mark") == 1
 
 
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.browser_context_args(color_scheme="dark")
+def test_c3_follows_a_dark_device_under_auto(page: Page) -> None:
+    """AC Shared, the System (Auto) choice (the acceptance gate's Class A finding):
+    with no saved choice, a device in dark mode draws C3 in the dark palette, its
+    plain bars and its stripes alike."""
+    open_c3(page, 1848)
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')") is None
+    assert page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
+    assert page.evaluate(
+        "getComputedStyle(document.documentElement).colorScheme"
+    ) == "dark"
+    expect(page.locator(C3_PLAIN).first).to_have_css(
+        "fill", rgb(token(page, "--chart-1"))
+    )
+    assert page.locator(C3_PLAIN).first.evaluate(
+        "el => getComputedStyle(el).fill"
+    ) != rgb("#2a78d6")  # not the light palette's --chart-1
+    assert stripe_color(page) == rgb(token(page, "--page"))
+
+
 @pytest.mark.plotlyjs_fetches(1, abort=True)
 @pytest.mark.expected_console_error(RESOURCE_ERROR)
 def test_with_plotlyjs_blocked_t6_and_c3_s_title_and_caption_render(
