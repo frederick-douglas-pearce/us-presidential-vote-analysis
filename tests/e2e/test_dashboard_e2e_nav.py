@@ -65,6 +65,11 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     "/election/1824/states": ("#election-states-page", ("elections", "true")),
     "/election/1824/per-capita": ("#election-per-capita-page", ("elections", "true")),
     "/election/1825/states": ("#election-states-not-found", ("elections", "true")),
+    # An unserved year on the per-capita page, chart C3's (#435).
+    "/election/1825/per-capita": (
+        "#election-per-capita-not-found",
+        ("elections", "true"),
+    ),
     "/states": ("#states", ("states", "page")),
     "/state/GA": ("#state", ("states", "true")),
     "/state/TX": (UNAVAILABLE, ("states", "true")),
@@ -73,7 +78,12 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
 }
 
 #: The templates whose document answers 404, which logs one console error.
-NOT_FOUND_PATHS = {"/election/1825", "/election/1825/states", "/no-such-page"}
+NOT_FOUND_PATHS = {
+    "/election/1825",
+    "/election/1825/states",
+    "/election/1825/per-capita",
+    "/no-such-page",
+}
 
 
 def template_params() -> list[Any]:

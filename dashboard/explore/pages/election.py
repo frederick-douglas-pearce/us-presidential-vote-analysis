@@ -207,20 +207,6 @@ def _nation_row(row: dict[str, Any], cells: dict[str, str]) -> html.Tr:
     )
 
 
-def _escaped(text: str) -> str:
-    """Served text as plotly's pseudo-HTML shows it as written (#433): a name holding
-    ``<`` or ``&`` is drawn, never read as markup, and ``(`` is written as an entity, so
-    no served string can spell a ``var(--token)`` reference, which the figure rules
-    refuse outside a color (``charts.color_problems``) and the chart callback would
-    resolve. plotly draws each entity as its character."""
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("(", "&#40;")
-    )
-
-
 def _plotted(value: Any, cell: str) -> float | None:
     """The value C1 draws for a share, or ``None`` for a marker: only a number
     :func:`explore.labels.finite` accepts whose T3 cell is a share (#433). The chart
@@ -274,12 +260,12 @@ def _c1_figure(
     ``cells`` are each row's :func:`_nation_cells`, the strings T3 shows. Total over
     every body T3 renders: it reads the served shares only through
     :func:`explore.labels.finite` and :func:`explore.labels.share` (:func:`_plotted`),
-    and each name and slug as ``str``, escaped (:func:`_escaped`).
+    and each name and slug as ``str``, escaped (:func:`explore.charts.escaped`).
     """
     n = len(summary)
     positions = list(range(n))
-    names = [_escaped(str(row["candidate"])) for row in summary]
-    slugs = [_escaped(str(row["candidate_slug"])) for row in summary]
+    names = [charts.escaped(str(row["candidate"])) for row in summary]
+    slugs = [charts.escaped(str(row["candidate_slug"])) for row in summary]
     offsets = (
         {"ec_share_full": -_SLOT, "pv_share": _SLOT}
         if has_popular_vote

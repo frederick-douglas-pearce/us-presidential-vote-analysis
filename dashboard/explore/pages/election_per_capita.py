@@ -2,7 +2,8 @@
 per electoral vote, at ``/election/<year>/per-capita``.
 
 Split out of the one-election view by #465 (the overview is ``pages/election.py``;
-the shared pieces are in :mod:`explore.election_view`). It reads one response,
+the shared pieces are in :mod:`explore.election_view`), with chart C3 (#435, D093)
+above T6. It reads one response,
 ``/v1/elections/{year}/per-capita``, filled on a miss; the year's heading and its
 neighbours come from the prefetched ``/v1/elections``. Its one filter is ``state`` (a
 USPS code, :func:`explore.election_view.parse_state`), checked against the rows this
@@ -12,12 +13,12 @@ page reads: a state T6's rows do not name falls back to every state (#465, amend
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, election_view, export, labels, query
+from explore import api, charts, components, election_view, export, labels, query
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filter leaves in T6.
@@ -25,6 +26,8 @@ PAGE_ID = "election-per-capita-page"
 #: The wrapper of the not-found state: a year the dataset does not serve.
 NOT_FOUND_ID = "election-per-capita-not-found"
 PER_CAPITA_TABLE_ID = "election-per-capita"
+#: Chart C3 (#435): every state's people per electoral vote, beside T6.
+C3_ID = "C3"
 #: The page's own URL and state control: distinct from the states page's, since Dash
 #: registers callbacks app-wide, keyed by output.
 URL_ID = "election-per-capita-url"
@@ -51,7 +54,8 @@ LEDE = (
     "How many people each state's electoral votes stood for: the state's population "
     "divided by its electors appointed."
 )
-FILTER_SENTENCE = "Narrow the rows to one state."
+#: It names the table: the filter never narrows C3 (#435's ba spec).
+FILTER_SENTENCE = "Narrow the table to one state."
 
 VALIDATE: api.Validate = (api.ELECTIONS_PATH, election_view.served_year)
 
@@ -125,15 +129,22 @@ def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
     As :func:`explore.election_view.rows` reads the year's rows: a non-empty list,
     each naming the validated year, so an empty list or a row of another year is a
     malformed body. Each must name a USPS code too, which the state filter and the
-    state link read. A null cell is not malformed:
-    :func:`explore.labels.per_capita_cells` says why it is null.
+    state link read, and no state may be named twice (C3 marks the selected state
+    with one point). A null cell is not malformed:
+    :func:`explore.labels.per_capita_strings` says why it is null.
     """
     path = f"/v1/elections/{year}/per-capita"
     rows = election_view.rows(value, year, "rows", path)
+    seen: set[str] = set()
     for row in rows:
         usps = row.get("state_usps")
         if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
             raise TypeError(f"{path} carries a bad state code")
+        # One row per state (the API's key is the year and the state): C3 marks the
+        # selected state with one point (#435).
+        if usps in seen:
+            raise TypeError(f"{path} names a state twice")
+        seen.add(usps)
     return sorted(rows, key=lambda r: str(r["state"]))
 
 
@@ -168,6 +179,282 @@ def _control(rows: list[dict[str, Any]], chosen: str | None) -> html.Div:
     )
 
 
+#: Pixels per state row and the margins around C3's plot (#435): one bar and its label
+#: per row at 390 px; the top margin holds the legend, one line per entry.
+_ROW_PX = 22
+_LEGEND_PX = 26
+_TOP_PX = 16
+_BOTTOM_PX = 48
+#: The marker and selected-mark sizes, and the gap between the row names and the axis
+#: (#435): the selected mark sits at zero, so it needs the gap on its left and, beside a
+#: marker, the marker's label set clear on its right. The e2e test
+#: ``test_c3_marks_the_selected_state_over_no_text`` observes it at 390 px.
+_MARK_PX = 14
+_SELECTED_PX = 12
+_STANDOFF_PX = 12
+
+#: The border cell that draws a bar striped: present-day borders, in every year.
+_STRIPED = labels.BOUNDARY_BASIS["present_day"]
+_AT_ELECTION = labels.BOUNDARY_BASIS["at_election"]
+
+
+def _drawn(row: dict[str, Any], cell: str) -> float | None:
+    """The ratio C3 draws as a bar, or ``None`` for a marker: a number
+    :func:`explore.labels.finite` accepts whose T6 cell is that figure, never a cause
+    (#435). The chart computes nothing; it draws the served value labeled with T6's
+    cell."""
+    number = labels.finite(row["persons_per_electoral_vote"])
+    return None if number is None or cell in labels.C3_MARKER_LABELS else number
+
+
+def _c3_order(
+    rows: list[dict[str, Any]], strings: dict[str, dict[str, str]]
+) -> tuple[list[tuple[dict[str, Any], float]], list[dict[str, Any]]]:
+    """C3's rows: the drawn ones by ratio, most first, ties by state name; then every
+    other row in T6's order (by state name)."""
+    drawn = []
+    others = []
+    for row in rows:
+        value = _drawn(row, strings[row["state_usps"]]["persons_per_electoral_vote"])
+        if value is None:
+            others.append(row)
+        else:
+            drawn.append((row, value))
+    drawn.sort(key=lambda pair: (-pair[1], str(pair[0]["state"])))
+    return drawn, others
+
+
+class C3(NamedTuple):
+    """C3's figure and what its caption needs to say."""
+
+    figure: dict[str, Any]
+    striped: bool
+    plain: str | None
+    markers: bool
+    census: bool
+
+
+def _c3_figure(
+    rows: list[dict[str, Any]],
+    strings: dict[str, dict[str, str]],
+    chosen: str | None,
+    year: int,
+) -> C3:
+    """C3's figure (#435, D093), from every T6 row (never narrowed by the filter) and
+    T6's cell strings (``strings``, by USPS code).
+
+    One row per state, on a numeric axis (reversed, names as tick text, escaped by
+    :func:`explore.charts.escaped`). A drawn ratio is a bar labeled with T6's cell;
+    the bars are two series split on T6's border cell, striped exactly for
+    present-day borders, sharing one ``offsetgroup`` so each row draws one centered
+    bar. Any other row gets a marker at zero labeled from T6's cell
+    (:data:`explore.labels.C3_MARKER_LABELS`), with the cell in full in its hover,
+    never a zero-length bar or an infinity. The selected state is one diamond filled
+    with the page color at the start of its row, in a series of its own (never a
+    per-point symbol list), drawn before the markers.
+    """
+    drawn, others = _c3_order(rows, strings)
+    ordered = [row for row, _ in drawn] + others
+    position = {row["state_usps"]: i for i, row in enumerate(ordered)}
+    names = [charts.escaped(str(row["state"])) for row in ordered]
+    data: list[dict[str, Any]] = []
+    plain_rows: list[tuple[dict[str, Any], float]] = []
+    striped_rows: list[tuple[dict[str, Any], float]] = []
+    for row, value in drawn:
+        striped = strings[row["state_usps"]]["boundary_basis"] == _STRIPED
+        (striped_rows if striped else plain_rows).append((row, value))
+    plain_name: str | None = None
+    if plain_rows:
+        plain_name = (
+            _AT_ELECTION
+            if all(
+                strings[row["state_usps"]]["boundary_basis"] == _AT_ELECTION
+                for row, _ in plain_rows
+            )
+            else labels.C3_PLAIN_SERIES
+        )
+    for series, name, pattern in (
+        (plain_rows, plain_name, None),
+        (striped_rows, _STRIPED, "/"),
+    ):
+        if not series:
+            continue
+        marker: dict[str, Any] = {"color": "var(--chart-1)"}
+        if pattern is not None:
+            marker["pattern"] = {
+                "shape": pattern,
+                "fillmode": "overlay",
+                "fgcolor": "var(--page)",
+            }
+        hovers = []
+        for row, _ in series:
+            cell = strings[row["state_usps"]]
+            hovers.append(
+                labels.C3_BAR_HOVER.format(
+                    state=charts.escaped(str(row["state"])),
+                    ratio=cell["persons_per_electoral_vote"],
+                    population=cell["population"],
+                    electoral_votes=cell["state_electoral_votes"],
+                    census_year=cell["governing_census_year"],
+                    boundary=cell["boundary_basis"],
+                )
+            )
+        data.append(
+            {
+                "type": "bar",
+                "orientation": "h",
+                "name": name,
+                "offsetgroup": "c3",
+                "ids": [str(row["state_usps"]) for row, _ in series],
+                "x": [value for _, value in series],
+                "y": [position[row["state_usps"]] for row, _ in series],
+                "text": [
+                    strings[row["state_usps"]]["persons_per_electoral_vote"]
+                    for row, _ in series
+                ],
+                "textposition": "outside",
+                "textfont": {"color": "var(--text)"},
+                "cliponaxis": False,
+                "marker": marker,
+                "hovertext": hovers,
+                "hovertemplate": "%{hovertext}<extra></extra>",
+                "showlegend": True,
+            }
+        )
+    # Before the marker trace, so a marker drawn in the same row is on top.
+    if chosen is not None:
+        data.append(
+            {
+                "type": "scatter",
+                "mode": "markers",
+                "name": labels.C3_SELECTED,
+                "showlegend": True,
+                "ids": [chosen],
+                "x": [0],
+                "y": [position[chosen]],
+                "cliponaxis": False,
+                # Filled with the page color, so the half over a bar's start is
+                # parted from it at 3:1 in both palettes, and ringed in the text
+                # color (#435's review).
+                "marker": {
+                    "symbol": "diamond",
+                    "size": _SELECTED_PX,
+                    "color": "var(--page)",
+                    "line": {"width": 2, "color": "var(--text)"},
+                },
+                "hoverinfo": "skip",
+            }
+        )
+    if others:
+        marks = []
+        for row in others:
+            ratio = strings[row["state_usps"]]["persons_per_electoral_vote"]
+            hover = (
+                f"{ratio}<br>{labels.UNRECOGNIZED_NOTE}"
+                if ratio == labels.UNRECOGNIZED
+                else ratio
+            )
+            marks.append(
+                (
+                    row,
+                    labels.C3_MARKER_LABELS.get(ratio, labels.UNRECOGNIZED),
+                    labels.C3_NO_FIGURE_HOVER.format(
+                        state=charts.escaped(str(row["state"])), cell=hover
+                    ),
+                )
+            )
+        data.append(
+            {
+                "type": "scatter",
+                "mode": "markers+text",
+                "name": labels.C3_NO_FIGURE_SERIES,
+                "showlegend": False,
+                "ids": [str(row["state_usps"]) for row, _, _ in marks],
+                "x": [0] * len(marks),
+                "y": [position[row["state_usps"]] for row, _, _ in marks],
+                "text": [label for _, label, _ in marks],
+                "textposition": "middle right",
+                "textfont": {"color": "var(--text)"},
+                "cliponaxis": False,
+                # Sized above the selected mark, so plotly sets this label clear of it.
+                "marker": {"symbol": "x", "size": _MARK_PX, "color": "var(--text)"},
+                "hovertext": [hover for _, _, hover in marks],
+                "hovertemplate": "%{hovertext}<extra></extra>",
+            }
+        )
+    census = {strings[row["state_usps"]]["governing_census_year"] for row in rows}
+    # A year only when every row names the same one: never a cause or an unknown.
+    one_census = len(census) == 1 and census.isdisjoint(
+        {labels.UNRECOGNIZED, labels.NOT_IN_DATASET}
+    )
+    title = (
+        labels.C3_TITLE.format(year=year, census_year=next(iter(census)))
+        if one_census
+        else labels.C3_TITLE_NO_CENSUS.format(year=year)
+    )
+    entries = sum(1 for trace in data if trace.get("showlegend"))
+    top = _TOP_PX + _LEGEND_PX * entries
+    longest = max((value for _, value in drawn), default=1.0)
+    layout: dict[str, Any] = {
+        "title": {"text": title},
+        "height": _ROW_PX * max(len(ordered), 1) + top + _BOTTOM_PX,
+        "margin": {"t": top, "b": _BOTTOM_PX, "r": 64},
+        "showlegend": entries > 0,
+        "xaxis": {
+            "range": [0, longest],
+            "showticklabels": False,
+            "title": {"text": labels.C3_X_AXIS},
+        },
+        "yaxis": {
+            "tickvals": list(range(len(ordered))),
+            "ticktext": names,
+            "autorange": "reversed",
+            "showgrid": False,
+            "zeroline": False,
+            # Room at the axis for the selected mark, which sits at zero.
+            "ticklabelstandoff": _STANDOFF_PX,
+        },
+    }
+    if entries:
+        layout["legend"] = {
+            "orientation": "h",
+            "yref": "container",
+            "y": 1,
+            "yanchor": "top",
+            "x": 0,
+            "xanchor": "left",
+        }
+    return C3(
+        {"data": data, "layout": layout},
+        striped=bool(striped_rows),
+        plain=plain_name,
+        markers=bool(others),
+        census=one_census,
+    )
+
+
+def _c3_caption(c3: C3, selected: str | None) -> str:
+    """C3's caption (#435): what the ratio is, which census, what the stripes mean (or
+    which borders every bar uses), what a marker means where one is drawn, and the
+    selected state's mark where the filter selects one. ``components.chart`` adds the
+    table pointer."""
+    parts = [
+        labels.C3_RATIO,
+        labels.C3_CENSUS if c3.census else labels.C3_CENSUS_MIXED,
+    ]
+    if c3.striped:
+        parts += [labels.C3_STRIPES, labels.BOUNDARY_NOTE]
+    elif c3.plain == _AT_ELECTION:
+        parts.append(labels.C3_ALL_AT_ELECTION)
+    if c3.plain == labels.C3_PLAIN_SERIES:
+        parts.append(labels.C3_PLAIN_MIXED)
+    if c3.markers:
+        parts.append(labels.C3_NO_FIGURE_NOTE)
+    if selected is not None:
+        parts.append(labels.C3_SELECTED_NOTE.format(state=selected))
+    return " ".join(parts)
+
+
 def _download(year: int, body: dict[str, Any], chosen: str | None) -> export.Download:
     """T6's download: the file named for the view and the table, the provenance of the
     response its rows come from, and this page's URL with the state applied."""
@@ -194,14 +481,19 @@ def render(
     """The page body for one ``/v1/elections/{year}/per-capita`` response, the year's
     row of ``/v1/elections`` (read through the same view), this page's filter pairs and
     the year's served neighbours: the earlier and later links, the heading, the lede
-    with its filter sentence, the section links, the state control, T6 and the
-    footer, from the per-capita response's own provenance."""
+    with its filter sentence, the section links, chart C3 (every state, whatever the
+    filter), the state control, T6 and the footer, from the per-capita response's own
+    provenance."""
     year = election_view.row_year(index_row)
     if year is None:
         raise TypeError("the index row names no year")
     rows = _per_capita_rows(per_capita["data"], year)
     chosen = chosen_state(pairs, rows)
     shown = [r for r in rows if chosen in (None, r["state_usps"])]
+    # T6's worded cells, once per row for every row: T6 and C3 both read them (#435).
+    strings = {r["state_usps"]: labels.per_capita_strings(r) for r in rows}
+    c3 = _c3_figure(rows, strings, chosen, year)
+    selected = next((str(r["state"]) for r in rows if r["state_usps"] == chosen), None)
     return html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
@@ -209,12 +501,18 @@ def render(
             html.H1(PER_CAPITA_HEADING.format(year=year)),
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             election_view.section_nav(year, election_view.PER_CAPITA),
+            components.chart(
+                C3_ID, c3.figure, PER_CAPITA_TABLE_ID, _c3_caption(c3, selected)
+            ),
             _control(rows, chosen),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
             *components.table(
                 shown,
                 lambda r: html.Tr(
-                    [components.state_cell(r), *labels.per_capita_cells(r)]
+                    [
+                        components.state_cell(r),
+                        *labels.per_capita_cells(r, strings[r["state_usps"]]),
+                    ]
                 ),
                 PER_CAPITA_FIELDS,
                 PER_CAPITA_TABLE_ID,
