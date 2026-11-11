@@ -71,13 +71,27 @@ curl() {
 """
 
 
+#: ``curl`` failing outright, as on a connection error: exit 7, ``%{http_code}`` = 000.
+_FAILING_CURL = _STUBS.replace(
+    "curl() {\n", 'curl() {\n  if [ "$CODE" = fail ]; then printf 000; return 7; fi\n'
+)
+
+#: The header name in HTTP/1.1 casing, which a fallback from HTTP/2 would send.
+_TITLE_CASE_ETAG = _STUBS.replace("\\r\\netag:", "\\r\\nETag:")
+
+
 def _run(
-    tmp_path: Path, body: str, *, etag: str = _VERSION, code: str = "200"
+    tmp_path: Path,
+    body: str,
+    *,
+    etag: str = _VERSION,
+    code: str = "200",
+    stubs: str = _STUBS,
 ) -> subprocess.CompletedProcess[str]:
     safe, block = _summary_block()
     script = tmp_path / "smoke.sh"
     script.write_text(
-        f"{_STUBS}{safe}\nset -uo pipefail\n{block}echo 'END REACHED'\n",
+        f"{stubs}{safe}\nset -uo pipefail\n{block}echo 'END REACHED'\n",
         encoding="utf-8",
     )
     body_file = tmp_path / "body.json"
@@ -135,6 +149,21 @@ def test_an_inconsistent_body_fails_with_its_own_message(tmp_path: Path) -> None
         in result.stdout
     )
     assert "END REACHED" not in result.stdout
+    # It fails at once: a bad body is a real answer, never retried.
+    assert "retrying" not in result.stdout
+    assert result.stdout.count("::error::") == 1
+
+
+def test_an_empty_body_is_inconsistent(tmp_path: Path) -> None:
+    result = _run(tmp_path, _body([], []))
+    assert result.returncode == 1
+    assert "is inconsistent (rows, elections: '0 0')" in result.stdout
+
+
+def test_a_year_twice_in_elections_is_inconsistent(tmp_path: Path) -> None:
+    result = _run(tmp_path, _body([2016], [2016, 2016]))
+    assert result.returncode == 1
+    assert "is inconsistent (rows, elections: '1 2')" in result.stdout
 
 
 def test_a_count_that_disagrees_with_data_is_inconsistent(tmp_path: Path) -> None:
@@ -163,6 +192,38 @@ def test_another_snapshots_etag_is_retried_then_refused(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert result.stdout.count("retrying") == 5
     assert "is not serving this deploy's snapshot" in result.stdout
+
+
+def test_a_hostile_etag_is_defused_in_every_message(tmp_path: Path) -> None:
+    """An ETag carrying a workflow command reaches the log only through ``safe()``."""
+    result = _run(tmp_path, _body([2016], [2016]), etag="##[error]planted")
+    assert result.returncode == 1
+    assert result.stdout.count("retrying") == 5
+    assert "##[" not in result.stdout
+    assert "# [error]planted" in result.stdout
+
+
+def test_a_long_etag_is_cut_to_200_characters(tmp_path: Path) -> None:
+    result = _run(tmp_path, _body([2016], [2016]), etag="x" * 400)
+    assert result.returncode == 1
+    assert "x" * 200 in result.stdout
+    assert "x" * 201 not in result.stdout
+
+
+def test_a_title_case_etag_header_is_read(tmp_path: Path) -> None:
+    assert "ETag:" in _TITLE_CASE_ETAG
+    result = _run(tmp_path, _body([2016], [2016]), stubs=_TITLE_CASE_ETAG)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_failing_curl_is_retried_not_fatal(tmp_path: Path) -> None:
+    """Under ``bash -e``, a curl error must fall back to 000 and retry, never end the
+    step silently."""
+    result = _run(tmp_path, _body([2016], [2016]), code="fail", stubs=_FAILING_CURL)
+    assert result.returncode == 1
+    assert result.stdout.count("HTTP 000, ETag 'none', want 200") == 5
+    assert result.stdout.count("retrying") == 5
+    assert "is not serving this deploy's snapshot (last: HTTP 000" in result.stdout
 
 
 def test_a_weak_etag_for_this_snapshot_passes(tmp_path: Path) -> None:
