@@ -38,7 +38,8 @@ from tests.unit.test_dashboard_theme import (
 #: Every chart ID ever issued, live and retired, with its whole row (page, companion
 #: table, retired): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
-#: registers it: C1 by #433; C2–C5 are assigned to #434–#436 by their issues.
+#: registers it: C1 by #433 and C3 by #435; C2, C4 and C5 are assigned to #434 and
+#: #436 by their issues.
 ISSUED: dict[str, tuple[str, str, bool]] = {
     "C1": ("/election/<year>", "election-nation", False),
     "C3": ("/election/<year>/per-capita", "election-per-capita", False),

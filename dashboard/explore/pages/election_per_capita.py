@@ -129,8 +129,9 @@ def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
     As :func:`explore.election_view.rows` reads the year's rows: a non-empty list,
     each naming the validated year, so an empty list or a row of another year is a
     malformed body. Each must name a USPS code too, which the state filter and the
-    state link read. A null cell is not malformed:
-    :func:`explore.labels.per_capita_cells` says why it is null.
+    state link read, and no state may be named twice (C3 marks the selected state
+    with one point). A null cell is not malformed:
+    :func:`explore.labels.per_capita_strings` says why it is null.
     """
     path = f"/v1/elections/{year}/per-capita"
     rows = election_view.rows(value, year, "rows", path)
@@ -248,24 +249,20 @@ def _c3_figure(
     present-day borders, sharing one ``offsetgroup`` so each row draws one centered
     bar. Any other row gets a marker at zero labeled from T6's cell
     (:data:`explore.labels.C3_MARKER_LABELS`), with the cell in full in its hover,
-    never a zero-length bar or an infinity. The selected state is one open point at
-    the start of its row, in a series of its own (never a per-point symbol list).
+    never a zero-length bar or an infinity. The selected state is one diamond filled
+    with the page color at the start of its row, in a series of its own (never a
+    per-point symbol list), drawn before the markers.
     """
     drawn, others = _c3_order(rows, strings)
     ordered = [row for row, _ in drawn] + others
     position = {row["state_usps"]: i for i, row in enumerate(ordered)}
     names = [charts.escaped(str(row["state"])) for row in ordered]
     data: list[dict[str, Any]] = []
-    plain_rows = [
-        (row, value)
-        for row, value in drawn
-        if strings[row["state_usps"]]["boundary_basis"] != _STRIPED
-    ]
-    striped_rows = [
-        (row, value)
-        for row, value in drawn
-        if strings[row["state_usps"]]["boundary_basis"] == _STRIPED
-    ]
+    plain_rows: list[tuple[dict[str, Any], float]] = []
+    striped_rows: list[tuple[dict[str, Any], float]] = []
+    for row, value in drawn:
+        striped = strings[row["state_usps"]]["boundary_basis"] == _STRIPED
+        (striped_rows if striped else plain_rows).append((row, value))
     plain_name: str | None = None
     if plain_rows:
         plain_name = (
@@ -324,6 +321,30 @@ def _c3_figure(
                 "showlegend": True,
             }
         )
+    # Before the marker trace, so a marker drawn in the same row is on top.
+    if chosen is not None:
+        data.append(
+            {
+                "type": "scatter",
+                "mode": "markers",
+                "name": labels.C3_SELECTED,
+                "showlegend": True,
+                "ids": [chosen],
+                "x": [0],
+                "y": [position[chosen]],
+                "cliponaxis": False,
+                # Filled with the page color, so the half over a bar's start is
+                # parted from it at 3:1 in both palettes, and ringed in the text
+                # color (#435's review).
+                "marker": {
+                    "symbol": "diamond",
+                    "size": _SELECTED_PX,
+                    "color": "var(--page)",
+                    "line": {"width": 2, "color": "var(--text)"},
+                },
+                "hoverinfo": "skip",
+            }
+        )
     if others:
         marks = []
         for row in others:
@@ -361,28 +382,11 @@ def _c3_figure(
                 "hovertemplate": "%{hovertext}<extra></extra>",
             }
         )
-    if chosen is not None:
-        data.append(
-            {
-                "type": "scatter",
-                "mode": "markers",
-                "name": labels.C3_SELECTED,
-                "showlegend": True,
-                "ids": [chosen],
-                "x": [0],
-                "y": [position[chosen]],
-                "cliponaxis": False,
-                "marker": {
-                    "symbol": "diamond-open",
-                    "size": _SELECTED_PX,
-                    "color": "var(--text)",
-                    "line": {"width": 2, "color": "var(--text)"},
-                },
-                "hoverinfo": "skip",
-            }
-        )
     census = {strings[row["state_usps"]]["governing_census_year"] for row in rows}
-    one_census = len(census) == 1 and census != {labels.UNRECOGNIZED}
+    # A year only when every row names the same one: never a cause or an unknown.
+    one_census = len(census) == 1 and census.isdisjoint(
+        {labels.UNRECOGNIZED, labels.NOT_IN_DATASET}
+    )
     title = (
         labels.C3_TITLE.format(year=year, census_year=next(iter(census)))
         if one_census

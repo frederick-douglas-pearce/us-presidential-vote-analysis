@@ -405,8 +405,9 @@ C3_X_AXIS = LABELS["persons_per_electoral_vote"]
 #: The plain bar series' name when any plain row's border cell is not "Borders at the
 #: election" (a defensive case: a served body never carries one).
 C3_PLAIN_SERIES = "Bars without stripes"
-#: The selected state's series (the page's filter): one open point at the start of its
-#: row. "Selected", not "you chose": a shared link carries the filter.
+#: The selected state's series (the page's filter): one diamond, filled with the page
+#: color and ringed in the text color, at the start of its row. "Selected", not "you
+#: chose": a shared link carries the filter.
 C3_SELECTED = "Selected state"
 #: The marker series' name, kept off the legend and never shown: the figure rules need
 #: every trace named.
@@ -854,7 +855,8 @@ def persons_per_electoral_vote(
     unrecognized ``coverage``; then ``coverage`` as :func:`_null_per_capita` reads it.
     Total, as :func:`share` is: any other value no figure can show (a non-finite
     number, an integer no float can hold, a bool, a string) reads
-    :data:`UNRECOGNIZED`.
+    :data:`UNRECOGNIZED`, and so does a figure of zero or less, which no state's
+    population divided by its electors appointed can be (#435's review).
     """
     if is_blank(value):
         if coverage == NO_GOVERNING_FIGURE:
@@ -863,7 +865,9 @@ def persons_per_electoral_vote(
             return NO_ELECTORAL_VOTES
         return _null_per_capita(coverage)
     number_ = finite(value)
-    return _unknown(value) if number_ is None else f"{round(number_):,}"
+    if number_ is None:
+        return _unknown(value)
+    return UNRECOGNIZED if number_ <= 0 else f"{round(number_):,}"
 
 
 def census_year(value: object) -> str:

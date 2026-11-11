@@ -435,15 +435,27 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
 }
 
 
-def chart_rows(tree: Any) -> list[Any]:
-    """Each chart's rows in ``tree``, as its figure names them: the category axis's
-    tick text (C1 and C3 put one row per tick)."""
-    found = []
-    for store in of_type(tree, "Store"):
-        store_id = getattr(store, "id", None)
-        if isinstance(store_id, dict) and store_id.get("type") == charts.SOURCE_TYPE:
-            found.append(store.data["layout"]["yaxis"]["ticktext"])
-    return found
+#: Each chart's selected-item trace, by the chart's DOM id and the trace's name (#435,
+#: D093(b)): the one trace a filter may add. Hand-written; a chart story that marks a
+#: selection adds its row.
+SELECTION_TRACES: dict[str, str] = {charts.dom_id("C3"): labels.C3_SELECTED}
+
+
+def chart_figures(tree: Any) -> dict[str, dict[str, Any]]:
+    """Each chart's unresolved figure in ``tree``, by the chart's DOM id (its source
+    store's)."""
+    return {
+        store.id["chart"]: store.data
+        for store in of_type(tree, "Store")
+        if isinstance(getattr(store, "id", None), dict)
+        and store.id.get("type") == charts.SOURCE_TYPE
+    }
+
+
+def table_row_count(tree: Any, table_id: str) -> int:
+    """How many body rows the table ``table_id`` renders in ``tree`` (0 when absent)."""
+    tables = [t for t in of_type(tree, "Table") if getattr(t, "id", None) == table_id]
+    return sum(len(of_type(t, "Tr")) - 1 for t in tables)
 
 
 # --- coverage is structural -----------------------------------------------------------
@@ -466,11 +478,11 @@ class TestEveryChart:
             assert chart_problems(tree, key, built, success) == [], key
 
     @pytest.mark.parametrize(
-        ("key", "values", "query"),
+        ("key", "values", "query", "kind"),
         [
-            (key, values, query)
+            (key, values, query, kind)
             for key, entries in CHART_QUERIES.items()
-            for values, query, _ in entries
+            for values, query, kind in entries
         ],
     )
     def test_every_chart_page_under_its_listed_queries(
@@ -479,12 +491,16 @@ class TestEveryChart:
         key: str,
         values: dict[str, str],
         query: str,
+        kind: str,
     ) -> None:
-        """#435, D093(c): each chart page rendered under a filter and under a filter
-        naming a value the page's rows do not hold passes the same checks as its default
-        render, so a filter that emptied a companion table (and left a caption pointing
-        at a table that is not rendered) fails here. And the filter never narrows a
-        chart (D093(a)): its rows are the unfiltered render's."""
+        """#435, D093(c): each chart page rendered under a filter (``filtered``) and
+        under one naming a value the rows do not hold (``absent``) passes the same
+        checks as its default render, so a filter that emptied a companion table (and
+        left a caption pointing at a table that is not rendered) fails here. And the
+        filter never narrows a chart (D093(a)): every trace but the chart's selected
+        item (:data:`SELECTION_TRACES`) equals the unfiltered render's, as do its row
+        labels; a ``filtered`` query on a page with a filter adds exactly one selected
+        point and narrows the companion table, and an ``absent`` one does neither."""
         page = page_of(key)
         success = page.get("success", "")
         parser = page.get("query")
@@ -497,7 +513,33 @@ class TestEveryChart:
         assert built, f"{key}{query}: no chart rendered"
         assert chart_problems(tree, key, built, success) == [], (key, query)
         plain = render(key, monkeypatch, **values)[0]
-        assert chart_rows(tree) == chart_rows(plain), (key, query)
+        selects = kind == "filtered" and parser is not None
+        filtered, unfiltered = chart_figures(tree), chart_figures(plain)
+        assert set(filtered) == set(unfiltered), (key, query)
+        for dom, figure in filtered.items():
+            name = SELECTION_TRACES.get(dom)
+            default = unfiltered[dom]
+            kept = [t for t in figure["data"] if name is None or t.get("name") != name]
+            marks = [t for t in figure["data"] if name is not None and t.get("name") == name]
+            assert kept == default["data"], (key, query, dom)
+            assert not [t for t in default["data"] if t.get("name") == name]
+            assert figure["layout"]["yaxis"].get("ticktext") == default["layout"][
+                "yaxis"
+            ].get("ticktext"), (key, query, dom)
+            if selects and name is not None:
+                assert len(marks) == 1 and len(marks[0]["x"]) == 1, (key, query, dom)
+            else:
+                assert marks == [], (key, query, dom)
+        for row in charts.CHARTS.values():
+            if row.retired or row.page != key:
+                continue
+            shown = table_row_count(tree, row.table)
+            everything = table_row_count(plain, row.table)
+            assert shown > 0, (key, query, row.table)
+            if selects:
+                assert shown < everything, (key, query, row.table)
+            else:
+                assert shown == everything, (key, query, row.table)
 
     def test_every_chart_page_with_a_filter_lists_its_queries(self) -> None:
         """#435, D093(c): every live chart page whose page reads filters (a ``query=``

@@ -785,7 +785,10 @@ C3_PLOT_TEXTS = f"{C3} .barlayer .bartext, {C3} .scatterlayer .textpoint text"
 C3_CHART_TEXTS = ", ".join(
     f"{C3} {part}" for part in (".ytick text", ".g-xtitle text", ".legend .legendtext")
 )
-C3_SELECTED = f"{C3} .scatterlayer .trace:last-child .points path"
+#: The selected state's mark: the first scatter trace, drawn before the markers.
+C3_SELECTED = f"{C3} .scatterlayer .trace:first-child .points path"
+#: The two bar series: plain (first when drawn) and striped.
+C3_STRIPED = f"{C3} .barlayer .trace:last-child .point path"
 
 
 def c3_order(year: int) -> list[str]:
@@ -842,9 +845,7 @@ def test_c3_on_2024_is_readable_at_390_px(page: Page) -> None:
     assert len(bars) == 51
     texts = [b["text"] for b in boxes(page, f"{C3} .barlayer .bartext")]
     assert len(texts) == 51 and "732,189" in texts and "192,284" in texts
-    by_row = sorted(bars, key=center)
-    for tick, bar in zip(ticks, by_row, strict=True):
-        assert abs(center(bar) - center(tick)) <= 1.5, (tick, bar)
+    assert_centered(ticks, bars)
     expect(page.locator(f"{C3} .legend .traces")).to_have_count(1)
     expect(page.locator(f"{C3} .xtick text")).to_have_count(0)
 
@@ -860,13 +861,63 @@ def test_c3_on_1864_marks_each_state_with_no_electoral_votes(page: Page) -> None
     expect(page.locator(C3_BARS)).to_have_count(36 - 11)
 
 
+def assert_centered(ticks: list[dict[str, Any]], bars: list[dict[str, Any]]) -> None:
+    """Each drawn bar centered on its row name (the shared ``offsetgroup``)."""
+    by_row = sorted(bars, key=center)
+    drawn = ticks[: len(by_row)]
+    for tick, bar in zip(drawn, by_row, strict=True):
+        assert abs(center(bar) - center(tick)) <= 1.5, (tick, bar)
+
+
+def stripe_color(page: Page) -> str:
+    """The color a striped bar's pattern draws its stripes in: the bar's fill is a
+    ``url(#…)`` pattern, whose stripe path is stroked in the pattern's color."""
+    color: str = page.locator(C3_STRIPED).first.evaluate(
+        """el => {
+            const fill = getComputedStyle(el).fill;
+            const id = /url\\("?#([^")]+)"?\\)/.exec(fill)[1];
+            const stripe = document.getElementById(id).querySelector("path");
+            return getComputedStyle(stripe).stroke;
+        }"""
+    )
+    return color
+
+
 @pytest.mark.plotlyjs_fetches(1)
 def test_c3_on_1848_labels_texas_and_stripes_present_day_bars(page: Page) -> None:
+    """1848 draws both bar series: each bar centered on its row name (the shared
+    ``offsetgroup`` matters only here), the plain bars filled ``--chart-1`` and the
+    present-day bars striped in the page color, before and after a theme switch."""
     open_c3(page, 1848)
-    assert_c3_readable(page, 1848)
+    ticks = assert_c3_readable(page, 1848)
     marks = [b["text"] for b in boxes(page, f"{C3} .scatterlayer .textpoint text")]
     assert marks == [labels.C3_NO_CENSUS_FIGURE]
     expect(page.locator(f"{C3} .legend .traces")).to_have_count(2)
+    expect(page.locator(f"{C3} .barlayer .trace")).to_have_count(2)
+    assert_centered(ticks, boxes(page, C3_BARS))
+    for theme in ("light", "dark"):
+        if theme == "dark":
+            page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+            page.wait_for_function(
+                f"""() => getComputedStyle(document.querySelector("{C3_STRIPED}"))
+                    .fill.startsWith("url(")"""
+            )
+            expect(page.locator(C3_STRIPED).first).to_be_visible()
+        assert page.locator(C3_STRIPED).first.evaluate(
+            "el => getComputedStyle(el).fill"
+        ).startswith("url(")
+        page.wait_for_function(
+            f"""() => {{
+                const el = document.querySelector("{C3_STRIPED}");
+                const fill = getComputedStyle(el).fill;
+                const m = /url\\("?#([^")]+)"?\\)/.exec(fill);
+                if (!m) return false;
+                const p = document.getElementById(m[1]);
+                return p && getComputedStyle(p.querySelector("path")).stroke
+                    === "{{page}}";
+            }}""".replace("{page}", rgb(token(page, "--page")))
+        )
+        assert stripe_color(page) == rgb(token(page, "--page"))
 
 
 @pytest.mark.plotlyjs_fetches(1)

@@ -6346,18 +6346,15 @@ unseen. #432's review asked that a selected item be marked by a second trace, be
   selects something (C3: `labels.C3_SELECTED_NOTE`), so the fixed pointer
   (`labels.CHART_TABLE_POINTER`) stays honest while the table holds one row.
 - **(b) The selected item is marked by a second trace with a non-color channel**: one point, a
-  marker symbol no other trace draws, never per-point styling of the data traces. C3's is an open
-  diamond at zero in the selected state's row, with no hover of its own (`hoverinfo: "skip"`), so
-  it covers no drawn number; the row names stand off the axis to leave it room.
+  marker symbol no other trace draws, never per-point styling of the data traces. C3's is a diamond filled with the page color and ringed in the text color, at zero in the selected state's row, drawn before the no-figure markers, with no hover of its own (`hoverinfo: "skip"`), so it covers no drawn number and the half over a bar's start is parted from it at 3:1 in both palettes; the row names stand off the axis to leave it room.
 - **(c) Every chart page is checked under its filters.** `CHART_QUERIES`
   (`tests/unit/test_dashboard_export.py`) lists each chart page's path values and queries, each
-  `filtered` (a value the rows hold) or `absent` (one they do not); `TestEveryChart` runs
-  `chart_problems` on each and checks that each chart's rows equal the unfiltered render's.
+  `filtered` (a value the rows hold) or `absent` (one they do not); `TestEveryChart` runs `chart_problems` on each and checks that each chart's traces, other than its selected item's (`SELECTION_TRACES`), and its row labels equal the unfiltered render's; a `filtered` query on a page with a filter draws one selected point and narrows the companion table, and an `absent` one does neither.
   `test_every_chart_page_with_a_filter_lists_its_queries` fails a live chart page with a `query=`
   parser that lists no query of each kind, so a chart story adding a filtered page lists its own.
 - **(d) C3's form, as D091 recorded C1's.** One horizontal bar per state and DC, drawn rows by
   `persons_per_electoral_vote` (most first, ties by state name), then every row with no figure in
-  state-name order, each a marker at zero with a short label looked up from T6's cell
+  state-name order, each a marker at zero with a short label looked up from T6's cell (a figure of zero or less reads *Unrecognized value*, #435's review)
   (`labels.C3_MARKER_LABELS`) and T6's cell in full in its hover, never a zero-length bar or an
   infinity. The bars are two series split on T6's border cell, sharing one `offsetgroup` so each
   row draws one centered bar: striped exactly for present-day borders, in every year, so the
@@ -6372,11 +6369,9 @@ unseen. #432's review asked that a selected item be marked by a second trace, be
 
 **Rationale.** A filter that narrowed the chart would hide the very thing a chart beside a
 one-state table adds: where that state ranks. Marking the selection as its own trace keeps
-`color_only_pairs` sound and keeps the data traces identical with and without a filter, which
-(c)'s row comparison then checks. A hand-written query table, rather than queries derived from
+`color_only_pairs` sound and keeps the data traces identical with and without a filter, which (c)'s trace comparison then checks. A hand-written query table, rather than queries derived from
 each parser, makes each story state the filtered views it means to support, and the completeness
 assert makes forgetting it fail.
 
-**Action required.** #436 (C4, C5) lists its `/elections` queries in `CHART_QUERIES` and follows
-(a) and (b). #470 re-measures D071(g) on `/election/<year>/per-capita` with C3's selector
+**Action required.** #436 (C4, C5) lists its `/elections` queries in `CHART_QUERIES`, names its selected-item trace in `SELECTION_TRACES`, and follows (a) and (b). #470 re-measures D071(g) on `/election/<year>/per-capita` with C3's selector
 (`#c3 .main-svg`), which discharges #435's re-measure.

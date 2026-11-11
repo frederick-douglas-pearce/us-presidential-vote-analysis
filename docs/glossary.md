@@ -885,7 +885,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.NOT_IN_DATASET` after `LABELS["ec_share_full"]` and a colon, as T3 shows that cell under
   its header. In C3, the short label of a marker drawn in place of a bar (through
   `labels.C3_MARKER_LABELS`), and, in `labels.C3_NO_FIGURE_HOVER`, the full cell (for
-  `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`).
+  `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`). In `labels.C3_BAR_HOVER`, each of the row's
+  other T6 cells (population, electors appointed, census used, borders used) as T6 shows it; for the
+  borders cell the caption adds `labels.C3_PLAIN_MIXED`.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1005,7 +1007,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** How many residents each of a state's electoral votes stood for at that election.
 - **Precise:** `persons_per_electoral_vote` = `population` ÷ `state_electoral_votes` (appointed),
   shown to a whole person. Null where the population is null (no census figure) or the allotment
-  is 0 (votes withheld: eleven states in 1864, three in 1868). Never 0 and never infinite. Where a
+  is 0 (votes withheld: eleven states in 1864, three in 1868). Never 0 and never infinite: a figure of 0 or less, or one that is not finite, reads *Unrecognized value*, since no state's population divided by its electors appointed can be one. Where a
   row carries both causes, the missing census figure is the one shown.
 - **Shown as:** `LABELS["persons_per_electoral_vote"]`; `labels.persons_per_electoral_vote`;
   `labels.NO_ELECTORAL_VOTES`; the heading of T7 (`pages/state.py`); the per-capita page's
@@ -1019,7 +1021,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** `PerCapitaRow`; D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
   names the same measure "persons per electoral vote"; readers see "people" (owner decision, 2026-10-11, #348).
   The field name `persons_per_electoral_vote` stays where field names are allowed.
-- **Not:** People per elector who voted.
+- **Not:** People per elector who voted. Zero.
 - **Status:** settled
 
 ### People per electoral vote chart (C3)
@@ -1045,11 +1047,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.UNRECOGNIZED` for any other cell), with T6's cell in full in its hover; never a
   zero-length bar and never an infinity. The bars are two series split on T6's border cell,
   sharing one row slot: striped exactly where the cell is `BOUNDARY_BASIS["present_day"]`, plain
-  for every other row. The stripes mean present-day borders in every year. The legend has an entry
-  for each series drawn. The plain series is named `BOUNDARY_BASIS["at_election"]` when every
+  for every other row. The stripes mean present-day borders in every year. The legend has an entry for each bar series drawn and, when a state is selected, one for its mark (`labels.C3_SELECTED`); the marker series has none (its name, `labels.C3_NO_FIGURE_SERIES`, is never shown). The plain series is named `BOUNDARY_BASIS["at_election"]` when every
   plain row is at the election, and `labels.C3_PLAIN_SERIES` otherwise, and in that case the
   caption adds `labels.C3_PLAIN_MIXED`. The selected state (the page's filter, once T6's rows name
-  it) is marked by one open point at the start of its row, in a series of its own named
+  it) is marked by one diamond, filled with the page color (`--page`) and ringed in the text color (`--text`), at zero in its row (the start of the row), in a series of its own named
   `labels.C3_SELECTED`, with no hover of its own; its row label is unchanged. The title names
   `governing_census_year` only when every row's census-year cell is the same year (2024 reads
   2020; 1924 and 1928 read 1910). The axis's tick labels are hidden, because every bar and marker
@@ -1367,8 +1368,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   dataset, took office, flip, Electoral College majority); a winner's name on the election panel
   that is not text; a number of the wrong type, or a non-finite one, in a count, share, margin,
   population, people-per-electoral-vote or census-year cell; and a number too large to show as a
-  share, margin or people-per-electoral-vote figure (a count, population or census year shows any
-  integer). It is also the cell for a null figure whose cause field holds an unrecognized code: a
+  share, margin or people-per-electoral-vote figure (a count, population or census year shows any integer); and a people-per-electoral-vote figure of zero or less, which no state's population divided by its electors appointed can be. It is also the cell for a null figure whose cause field holds an unrecognized code: a
   popular-vote cell whose `pv_status` is unrecognized, a population cell whose `coverage` is, and a
   people-per-electoral-vote cell whose `coverage` is and whose allotment is not zero (a zero
   allotment explains the null first). Candidate and state names are an open vocabulary: candidate
@@ -1390,7 +1390,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.margin`, `labels.number`, `labels.share` (so `labels.share_cell`), `labels.population`,
   `labels.persons_per_electoral_vote`, `labels.census_year`. In C3, the short label of a marker
   drawn in place of a bar (through `labels.C3_MARKER_LABELS`), and, in `labels.C3_NO_FIGURE_HOVER`,
-  the full cell (for `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`).
+  the full cell (for `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`). In `labels.C3_BAR_HOVER`,
+  each of the row's other T6 cells (population, electors appointed, census used, borders used) as T6
+  shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
+  the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan

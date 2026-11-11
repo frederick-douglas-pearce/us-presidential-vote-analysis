@@ -4060,18 +4060,257 @@ class TestC3:
             section(2024, body)
 
     @pytest.mark.parametrize(
-        "value", [float("nan"), True, "12", None, ""], ids=repr
+        ("value", "label"),
+        [
+            (float("nan"), labels.UNRECOGNIZED),
+            (True, labels.UNRECOGNIZED),
+            ("12", labels.UNRECOGNIZED),
+            (0.0, labels.UNRECOGNIZED),
+            (-5.0, labels.UNRECOGNIZED),
+            (None, labels.NOT_IN_DATASET),
+            ("", labels.NOT_IN_DATASET),
+        ],
+        ids=repr,
     )
     def test_a_value_no_figure_can_show_is_a_marker_never_a_bar(
-        self, value: Any
+        self, value: Any, label: str
     ) -> None:
+        """Each value T6 cannot show as a figure is a marker labeled with T6's own
+        cell (#435's review: the exact label, not any allowed one), and an
+        unrecognized one carries its note in the hover, as T6's cell does."""
         body = copy.deepcopy(per_capita_body(2024))
         body["data"][0]["persons_per_electoral_vote"] = value
-        usps = body["data"][0]["state_usps"]
-        found = c3_traces(c3_figure(section(2024, body)))
-        assert found["marks"]["ids"] == [usps]
-        assert usps not in found["striped"]["ids"]
-        assert found["marks"]["text"][0] in labels.C3_MARKER_LABELS.values()
+        row = body["data"][0]
+        tree = section(2024, body)
+        found = c3_traces(c3_figure(tree))
+        assert found["marks"]["ids"] == [row["state_usps"]]
+        assert row["state_usps"] not in found["striped"]["ids"]
+        assert found["marks"]["text"] == [label]
+        assert per_capita_rows(tree)[row["state"]]["persons_per_electoral_vote"] == label
+        cell = label
+        if label == labels.UNRECOGNIZED:
+            cell = f"{label}<br>{labels.UNRECOGNIZED_NOTE}"
+        assert found["marks"]["hovertext"] == [
+            labels.C3_NO_FIGURE_HOVER.format(state=row["state"], cell=cell)
+        ]
+
+    @pytest.mark.parametrize("value", [0, 0.0, -5.0, -0.4])
+    def test_a_ratio_of_zero_or_less_reads_unrecognized_in_every_table(
+        self, value: Any
+    ) -> None:
+        """#435's review (F2): no population divided by electors appointed is zero or
+        less, so the shared cell (T6, T7 and C3) reads it as unrecognized, and C3's
+        value axis never needs to reach below zero."""
+        assert (
+            labels.persons_per_electoral_vote(value, "covered", 3)
+            == labels.UNRECOGNIZED
+        )
+        assert labels.persons_per_electoral_vote(0.6, "covered", 3) == "1"
+
+    def test_the_drawn_range_starts_at_zero_and_reaches_the_longest_bar(self) -> None:
+        figure = c3_figure(section(2024))
+        rows = per_capita_body(2024)["data"]
+        longest = max(r["persons_per_electoral_vote"] for r in rows)
+        assert figure["layout"]["xaxis"]["range"] == [0, longest]
+
+    def test_stripes_are_the_page_color_over_the_bar_and_plain_bars_have_none(
+        self,
+    ) -> None:
+        found = c3_traces(c3_figure(section(1848)))
+        assert found["striped"]["marker"] == {
+            "color": "var(--chart-1)",
+            "pattern": {"shape": "/", "fillmode": "overlay", "fgcolor": "var(--page)"},
+        }
+        assert found["plain"]["marker"] == {"color": "var(--chart-1)"}
+
+    def test_the_selected_mark_is_page_filled_ringed_and_under_the_markers(
+        self,
+    ) -> None:
+        """#435's review (F3): the mark sits half over its bar's start, so it is filled
+        with the page color, which ``test_each_mark_meets_3_to_1_on_the_page``
+        (``test_dashboard_theme.py``) holds at 3:1 against ``--chart-1`` in both
+        palettes, ringed in the text color; drawn before the marker trace, so a
+        marker in its row is on top."""
+        from tests.unit.test_dashboard_theme import (
+            EXPLICIT_DARK,
+            LIGHT,
+            NON_TEXT,
+            block,
+            contrast,
+            parse_color,
+        )
+
+        figure = c3_figure(section(1864, state="GA"))
+        roles = [
+            "selected" if t["name"] == labels.C3_SELECTED else t["type"]
+            for t in figure["data"]
+        ]
+        assert roles.index("selected") < roles.index("scatter")
+        selected = c3_traces(figure)["selected"]
+        assert selected["marker"] == {
+            "symbol": "diamond",
+            "size": PC["_SELECTED_PX"],
+            "color": "var(--page)",
+            "line": {"width": 2, "color": "var(--text)"},
+        }
+        for palette in (LIGHT, EXPLICIT_DARK):
+            colors = block(palette)
+            pair = (parse_color(colors["--page"]), parse_color(colors["--chart-1"]))
+            assert contrast(*pair) >= NON_TEXT
+
+    @pytest.mark.parametrize(
+        ("year", "body", "state", "parts"),
+        [
+            (2024, None, None, ["C3_RATIO", "C3_CENSUS", "C3_STRIPES", "BOUNDARY_NOTE"]),
+            (
+                1848,
+                None,
+                None,
+                [
+                    "C3_RATIO",
+                    "C3_CENSUS",
+                    "C3_STRIPES",
+                    "BOUNDARY_NOTE",
+                    "C3_NO_FIGURE_NOTE",
+                ],
+            ),
+            (
+                1864,
+                None,
+                "GA",
+                [
+                    "C3_RATIO",
+                    "C3_CENSUS",
+                    "C3_STRIPES",
+                    "BOUNDARY_NOTE",
+                    "C3_NO_FIGURE_NOTE",
+                    "C3_SELECTED_NOTE",
+                ],
+            ),
+            (
+                1848,
+                "all_at_election",
+                None,
+                ["C3_RATIO", "C3_CENSUS", "C3_ALL_AT_ELECTION", "C3_NO_FIGURE_NOTE"],
+            ),
+            (
+                2024,
+                "unrecognized_border",
+                None,
+                [
+                    "C3_RATIO",
+                    "C3_CENSUS",
+                    "C3_STRIPES",
+                    "BOUNDARY_NOTE",
+                    "C3_PLAIN_MIXED",
+                ],
+            ),
+            (
+                2024,
+                "mixed_census",
+                None,
+                ["C3_RATIO", "C3_CENSUS_MIXED", "C3_STRIPES", "BOUNDARY_NOTE"],
+            ),
+        ],
+    )
+    def test_the_caption_is_exactly_its_configuration_s_sentences(
+        self, year: int, body: str | None, state: str | None, parts: list[str]
+    ) -> None:
+        """#435's review (ge.2): the whole caption, in order, so a sentence shown in
+        the wrong configuration fails, not only a missing one."""
+        doctored = copy.deepcopy(per_capita_body(year))
+        if body == "all_at_election":
+            for row in doctored["data"]:
+                row["boundary_basis"] = "at_election"
+        elif body == "unrecognized_border":
+            doctored["data"][0]["boundary_basis"] = "sideways"
+        elif body == "mixed_census":
+            doctored["data"][0]["governing_census_year"] = 1990
+        tree = section(year, doctored, state=state)
+        name = next(
+            (r["state"] for r in doctored["data"] if r["state_usps"] == state), ""
+        )
+        sentences = [
+            labels.C3_SELECTED_NOTE.format(state=name)
+            if part == "C3_SELECTED_NOTE"
+            else getattr(labels, part)
+            for part in parts
+        ]
+        expected = " ".join(sentences) + " " + labels.CHART_TABLE_POINTER + "."
+        assert c3_caption(tree) == expected
+
+    @pytest.mark.parametrize("census", [None, " "])
+    def test_an_absent_census_year_names_no_census(self, census: Any) -> None:
+        """#435's review (F4): a year whose every census-year cell is a cause names no
+        census in the title or caption."""
+        body = copy.deepcopy(per_capita_body(2024))
+        for row in body["data"]:
+            row["governing_census_year"] = census
+        tree = section(2024, body)
+        assert c3_title(tree) == labels.C3_TITLE_NO_CENSUS.format(year=2024)
+        caption = c3_caption(tree)
+        assert labels.C3_CENSUS_MIXED in caption and labels.C3_CENSUS not in caption
+
+    def test_equal_ratios_are_ordered_by_state_name(self) -> None:
+        """#435's review (ge.8a): called directly, with the tie in reverse name order,
+        since a render sorts rows by name first and the sort is stable."""
+        rows = [
+            r
+            for r in copy.deepcopy(per_capita_body(2024))["data"]
+            if r["state_usps"] in ("AK", "WY")
+        ]
+        for row in rows:
+            row["persons_per_electoral_vote"] = 100.0
+        rows.sort(key=lambda r: str(r["state"]), reverse=True)
+        strings = {r["state_usps"]: labels.per_capita_strings(r) for r in rows}
+        drawn, rest = PC["_c3_order"](rows, strings)
+        assert [r["state"] for r, _ in drawn] == ["Alaska", "Wyoming"] and rest == []
+
+    def test_a_hostile_state_name_is_drawn_as_written(self) -> None:
+        body = copy.deepcopy(per_capita_body(1848))
+        hostile = "<b>A & B</b>"
+        for row in body["data"]:
+            if row["state_usps"] in ("TX", "NY"):
+                row["state"] = hostile + row["state_usps"]
+        tree = section(1848, body)
+        figure = c3_figure(tree)
+        escaped = "&lt;b&gt;A &amp; B&lt;/b&gt;"
+        ticks = figure["layout"]["yaxis"]["ticktext"]
+        assert f"{escaped}TX" in ticks and f"{escaped}NY" in ticks
+        found = c3_traces(figure)
+        bars = found["plain"]["hovertext"] + found["striped"]["hovertext"]
+        assert any(h.startswith(f"{escaped}NY<br>") for h in bars)
+        assert found["marks"]["hovertext"][0].startswith(f"{escaped}TX<br>")
+
+    @pytest.mark.parametrize(
+        "name", ["var(--chart-1)", "var(--unset)", "x var(--page) y", "(a)"]
+    )
+    def test_a_state_name_spelling_a_token_reference_is_drawn_as_written(
+        self, name: str
+    ) -> None:
+        """As C1's round 1: a served name holding ``var(`` would make
+        ``components.chart`` refuse the figure and take the page down."""
+        from explore import charts
+
+        body = copy.deepcopy(per_capita_body(1848))
+        for row in body["data"]:
+            if row["state_usps"] in ("TX", "NY"):
+                row["state"] = name + row["state_usps"]
+        tree = section(1848, body)
+        assert c3(tree) is not None and find(tree, PER_CAPITA) is not None
+        figure = c3_figure(tree)
+        assert charts.figure_problems(figure) == []
+        shown = name.replace("(", "&#40;")
+        ticks = figure["layout"]["yaxis"]["ticktext"]
+        assert f"{shown}TX" in ticks and f"{shown}NY" in ticks
+        found = c3_traces(figure)
+        hovers = (
+            found["plain"]["hovertext"]
+            + found["striped"]["hovertext"]
+            + found["marks"]["hovertext"]
+        )
+        assert all("var(" not in h for h in hovers)
+        assert found["marks"]["hovertext"][0].startswith(f"{shown}TX<br>")
 
     def test_the_lede_names_the_table_as_what_the_filter_narrows(self) -> None:
         assert PC["FILTER_SENTENCE"] == "Narrow the table to one state."
