@@ -1206,8 +1206,8 @@ Every run on all three pages reached data, with no degraded page.
 - The chart is drawn 2.86–3.05 s after first data on a run from the cache, about as in the
   baseline.
 
-**Request budget held.** The dashboard logged 38 `api fetch` lines from A's start
-(08:59:24Z) to the last run's fill (09:10:36Z), by the §12 `api fetch` query bounded to that
+**Request budget held.** The dashboard logged 38 `api fetch` lines from A's first
+line (08:59:24Z) to the last run's fill (09:10:36Z), by the §12 `api fetch` query bounded to that
 window:
 
 - each instance's two prefetched paths (`/v1/meta` and `/v1/elections`) as it started;
