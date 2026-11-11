@@ -1249,6 +1249,85 @@ class TestNotDrawnLogCheck:
         """The one placement rule the fixture and the collection hook share."""
         assert chart_log_checked(Path("/repo") / path) is checked
 
+    # The check itself, driven directly (#467 acceptance, Class B): each block below
+    # also writes its records past this test's own conftest check, which the marker
+    # holds to the exact total.
+    UNIT = Path("/repo/tests/unit/test_dashboard_x.py")
+
+    @staticmethod
+    def log(*charts_: str) -> None:
+        for chart_id in charts_:
+            logging.getLogger(LOGGER).error("x", extra={"chart_id": chart_id})
+
+    @pytest.mark.expected_chart_failure("C1")
+    def test_the_check_fails_a_record_it_was_not_told_about(self) -> None:
+        from tests.unit.conftest import chart_log_check
+
+        with (
+            pytest.raises(pytest.fail.Exception, match="C1: 1 not-drawn record"),
+            chart_log_check(self.UNIT, []),
+        ):
+            self.log("C1")
+
+    @pytest.mark.expected_chart_failure("C1", 2)
+    def test_the_check_passes_what_its_markers_declare(self) -> None:
+        from tests.unit.conftest import chart_log_check
+
+        with chart_log_check(self.UNIT, [pytest.mark.expected_chart_failure("C1").mark]):
+            self.log("C1")
+        with (
+            pytest.raises(pytest.fail.Exception, match="C1: 0 not-drawn record"),
+            chart_log_check(self.UNIT, [pytest.mark.expected_chart_failure("C1").mark]),
+        ):
+            pass
+        with chart_log_check(self.UNIT, []):
+            pass
+        self.log("C1")  # outside any block: only this test's own check sees it
+
+    @pytest.mark.expected_chart_failure("C1", 3)
+    def test_repeated_markers_for_one_chart_add_up(self) -> None:
+        from tests.unit.conftest import chart_log_check
+
+        twice = [
+            pytest.mark.expected_chart_failure("C1").mark,
+            pytest.mark.expected_chart_failure("C1", 2).mark,
+        ]
+        with chart_log_check(self.UNIT, twice):
+            self.log("C1", "C1", "C1")
+
+    @pytest.mark.expected_chart_failure("C1")
+    def test_an_unchecked_file_is_not_checked(self) -> None:
+        from tests.unit.conftest import chart_log_check
+
+        with chart_log_check(Path("/repo/tests/e2e/test_dashboard_e2e_x.py"), []):
+            self.log("C1")
+
+    def test_the_collection_hook_refuses_a_misplaced_marker_only(self) -> None:
+        """``tests/conftest.py``'s hook, called directly: an item carrying the marker
+        outside the unit dashboard files is a usage error naming it; one inside, or an
+        unmarked one anywhere, is not."""
+        from types import SimpleNamespace
+
+        from tests.conftest import pytest_collection_modifyitems
+
+        mark = pytest.mark.expected_chart_failure("C1").mark
+
+        def item(path: str, marked: bool) -> Any:
+            return SimpleNamespace(
+                nodeid=f"{path}::t",
+                path=Path("/repo") / path,
+                get_closest_marker=lambda name: mark if marked else None,
+            )
+
+        fine = [
+            item("tests/unit/test_dashboard_x.py", True),
+            item("tests/e2e/test_dashboard_e2e_x.py", False),
+        ]
+        pytest_collection_modifyitems(None, fine)  # type: ignore[arg-type]
+        wrong = [*fine, item("tests/e2e/test_dashboard_e2e_x.py", True)]
+        with pytest.raises(pytest.UsageError, match="tests/e2e/test_dashboard_e2e_x"):
+            pytest_collection_modifyitems(None, wrong)  # type: ignore[arg-type]
+
     def test_the_marker_binds_its_count_by_position_or_name(self) -> None:
         from tests.unit.conftest import _expected_chart_failure
 
