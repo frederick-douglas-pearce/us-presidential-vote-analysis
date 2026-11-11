@@ -24,7 +24,7 @@ import pytest
 
 from explore import app as appmod
 from explore import charts, components, labels
-from tests.chart_log import LOGGER, Records, chart_log_problems
+from tests.chart_log import LOGGER, Records, chart_log_checked, chart_log_problems
 from tests.unit.test_dashboard_elections import of_type
 from tests.unit.test_dashboard_export import TEST_FIGURE
 from tests.unit.test_dashboard_guards import RUNTIME_MODULES
@@ -1233,6 +1233,21 @@ class TestNotDrawnLogCheck:
         handler from an earlier test)."""
         handlers = logging.getLogger(LOGGER).handlers
         assert [type(h) for h in handlers].count(Records) == 1, handlers
+
+    @pytest.mark.parametrize(
+        ("path", "checked"),
+        [
+            ("tests/unit/test_dashboard_charts.py", True),
+            ("tests/e2e/test_dashboard_e2e_charts.py", False),
+            ("tests/unit/test_api_app.py", False),
+            ("tests/integration/test_dashboard_x.py", False),
+        ],
+    )
+    def test_only_unit_dashboard_files_are_checked(
+        self, path: str, checked: bool
+    ) -> None:
+        """The one placement rule the fixture and the collection hook share."""
+        assert chart_log_checked(Path("/repo") / path) is checked
 
     def test_the_marker_binds_its_count_by_position_or_name(self) -> None:
         from tests.unit.conftest import _expected_chart_failure

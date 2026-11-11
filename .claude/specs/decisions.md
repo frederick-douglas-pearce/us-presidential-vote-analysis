@@ -6474,9 +6474,9 @@ them.
   (a problem can repr a served value, one per row), with the chart's ID on the record as
   `chart_id`.
 - **(d) The unit suite fails on that log.** An autouse fixture in `tests/unit/conftest.py` fails
-  any `test_dashboard_*` test that leaves such a record it did not declare with
+  any `tests/unit/test_dashboard_*` test that leaves such a record it did not declare with
   `@pytest.mark.expected_chart_failure(chart_id, count=1)`, exactly that many per chart
-  (`tests/chart_log.py`). `TestEveryChart.test_every_rendered_page` renders every registered
+  (`tests/chart_log.py`); the marker anywhere else is a collection error (`tests/conftest.py`). `TestEveryChart.test_every_rendered_page` renders every registered
   page's default view, so a shipped chart that is not drawn there fails the suite. The D070(b)
   guard's success run, which caught the old failure as a failed routing request, now fails on the
   log line on its stderr. `TestChartNotDrawn` breaks each live chart alone on its page and
@@ -6488,8 +6488,9 @@ them.
   figure builder (`_c1_figure`, `_c3_figure`) raising anything other than `KeyError` or
   `TypeError` still takes its page down; those two degrade the page, and they come from the rows
   the tables read too. `charts.figure_problems` itself runs on served values, so a check that
-  raises instead of returning a problem still takes the page down, as a builder raising does
-  (not new: before this entry either outcome did; totality is #484). The title and caption
+  raises instead of returning a problem costs the page its tables as a builder raising does: a
+  `KeyError` or `TypeError` degrades it, anything else takes it down (not new: before this entry
+  either outcome did; totality is #484). The title and caption
   caveat in (a).
 
 **Rationale.** A chart is never a page's success marker (D087), so a chart the page cannot draw

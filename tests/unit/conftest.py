@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.chart_log import LOGGER, Records, chart_log_problems
+from tests.chart_log import LOGGER, Records, chart_log_checked, chart_log_problems
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
@@ -104,23 +104,18 @@ def no_undeclared_chart_failure(request: pytest.FixtureRequest) -> Iterator[None
 
     ``components.chart`` logs a figure that breaks the chart rules at error level and
     renders the chart's title and caption alone, so the page keeps its tables (D095).
-    This collects every such record during a ``test_dashboard_*`` test and fails it on
+    This collects every such record during a ``tests/unit/test_dashboard_*`` test and fails it on
     any the test did not declare with ``@pytest.mark.expected_chart_failure(chart_id,
     count=1)``, exactly that many per chart (:func:`tests.chart_log.chart_log_problems`).
     ``TestEveryChart.test_every_rendered_page`` renders every registered page's default
-    view, so a shipped chart that is not drawn there fails the suite.
+    view, so a shipped chart that is not drawn there fails the suite. A marker outside
+    ``tests/unit/test_dashboard_*.py`` is refused at collection (``tests/conftest.py``).
     """
-    markers = list(request.node.iter_markers("expected_chart_failure"))
-    if not request.node.path.name.startswith("test_dashboard_"):
-        if markers:
-            pytest.fail(
-                "expected_chart_failure is checked only in test_dashboard_* files",
-                pytrace=False,
-            )
+    if not chart_log_checked(request.node.path):
         yield
         return
     expected: dict[str, int] = {}
-    for marker in markers:
+    for marker in request.node.iter_markers("expected_chart_failure"):
         chart_id, count = _expected_chart_failure(*marker.args, **marker.kwargs)
         expected[chart_id] = expected.get(chart_id, 0) + count
     handler = Records()

@@ -40,10 +40,12 @@ map is `tests/dashboard_fixtures.py`, stdlib-only so the e2e server can import i
 
 **A chart that is not drawn fails its test** (#467, D095). `components.chart` logs a figure that
 breaks the chart rules at error level on `explore.components` and renders the chart without a
-drawing; an autouse fixture in `tests/unit/conftest.py` fails any `test_dashboard_*` test that
-leaves such a record it did not declare with `@pytest.mark.expected_chart_failure(chart_id,
-count=1)` (exactly that many per chart; the check is `tests/chart_log.py`, tested in
-`TestNotDrawnLogCheck`). `TestEveryChart.test_every_rendered_page` renders every registered
+drawing; an autouse fixture in `tests/unit/conftest.py` fails any `tests/unit/test_dashboard_*`
+test that leaves such a record it did not declare with
+`@pytest.mark.expected_chart_failure(chart_id, count=1)` (exactly that many per chart; the
+check is `tests/chart_log.py`, tested in `TestNotDrawnLogCheck`), and `tests/conftest.py`
+refuses the marker anywhere else at collection, since the e2e server renders in a subprocess
+whose log no in-process handler sees. `TestEveryChart.test_every_rendered_page` renders every registered
 page's default view, so it is where a shipped chart that is not drawn fails the suite, and
 `TestChartNotDrawn` (`test_dashboard_export.py`) breaks each live chart alone on its page.
 
