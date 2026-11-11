@@ -324,19 +324,19 @@ articles and announcements). Every rule binds all three unless the rule states a
   HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
   (`figcaption`). The title is written as page text (a paragraph, not a heading), so it shows and
   wraps even when the drawing cannot load. The caption ends with the table pointer,
-  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a chart with no title or no caption. Each
-  series writes its own hover text or shows none. A figure that breaks the chart rules
-  `charts.figure_problems` checks (a series whose hover text would be plotly's own, a color that
-  is not a theme token, and the rest) is not drawn. The chart keeps its title, its caption and
-  the pointer, with nothing shown between them, as when plotly.js cannot load. The page keeps
-  its tables and its other charts, and the failure is logged at error level for the developer.
-  Readers see no message about it. The chart title is plain text and says what the chart shows;
-  the caption may state a finding (*A chart title describes; a caption may state a finding*).
-  For assistive technology, a drawn chart, and one still waiting for plotly.js or whose load
-  failed, is an image named by its chart title, and what is drawn inside it is skipped; a chart
-  that is not drawn is no image, only its title and caption as text. Either way the companion
-  table carries the numbers. Pointing at a
-  mark shows only the hover text written for that series, for the nearest point. Axis numbers are
+  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a
+  chart with no title or no caption. Each series writes its own hover text or shows none. A figure
+  that breaks the chart rules `charts.figure_problems` checks (a series whose hover text would be
+  plotly's own, a color that is not a theme token, and the rest) is not drawn. The chart keeps its
+  title, its caption and the pointer, with nothing shown between them, as when plotly.js cannot
+  load. The page keeps its tables and its other charts, and the failure is logged at error level
+  for the developer. Readers see no message about it. The chart title is plain text and says what
+  the chart shows; the caption may state a finding (*A chart title describes; a caption may state
+  a finding*). For assistive technology, a drawn chart, and one still waiting for plotly.js or
+  whose load failed, is an image named by its chart title, and what is drawn inside it is skipped;
+  a chart that is not drawn is no image, only its title and caption as text. Either way the
+  companion table carries the numbers. Pointing at a mark shows only the hover text written for
+  that series, for the nearest point. Axis numbers are
   written in full with thousands separators, as the tables write them, never shortened ("80M",
   "1.2B"). The legend is only a key: clicking it hides nothing. A reader cannot zoom or drag a
   chart, and no toolbar shows on it. Every chart has a **chart ID**, `C<n>`, issued in order of
