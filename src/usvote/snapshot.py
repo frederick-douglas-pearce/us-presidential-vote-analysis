@@ -1005,6 +1005,30 @@ def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
             )
 
 
+def assert_rollup_and_hybrid_summary_cover_the_same_years(
+    rollup_df: pd.DataFrame, summary_df: pd.DataFrame
+) -> None:
+    """Assert ``national_rollup`` and ``hybrid_summary`` hold exactly the same years.
+
+    ``/v1/elections/summary`` (#431, D094) serves both tables whole and promises one
+    ``elections`` item for each year in ``data``. Both derive from the same frame, but
+    nothing enforced that their year sets agree; the API checks it per request
+    (``SnapshotRepository.national_summary_all``), and this moves the failure to the
+    build, where a bad snapshot never reaches a deploy. Checked both ways: a year with
+    roll-up rows and no summary, and a summary year with no roll-up rows, are both
+    refused.
+    """
+    rollup_years = set(rollup_df["year"].astype(int))
+    summary_years = set(summary_df["year"].astype(int))
+    if rollup_years != summary_years:
+        raise SnapshotError(
+            "national_rollup and hybrid_summary cover different years: roll-up only "
+            f"{sorted(rollup_years - summary_years)}, summary only "
+            f"{sorted(summary_years - rollup_years)}. Every served election needs both "
+            "its national rows and its three-method comparison (D094)."
+        )
+
+
 #: The shared remedy for a per-capita frame that disagrees with the served facts.
 _STALE_CENSUS_REMEDY = (
     "Both derive from the EC spine, so this is a census load that is stale against "
@@ -1345,6 +1369,7 @@ def build_snapshot(
     assert_nominating_party_nulls_have_one_cause(data_df, rollup_df, keyed)
     hybrid_summary_df = _to_int64(hybrid_summary_df, ("ec_denominator",))
     assert_no_hybrid_pv_below_mit_window(hybrid_summary_df)
+    assert_rollup_and_hybrid_summary_cover_the_same_years(rollup_df, hybrid_summary_df)
     per_capita_table = build_per_capita_table(per_capita_df, data_df)
 
     ts = build_timestamp if build_timestamp is not None else datetime.now(UTC)

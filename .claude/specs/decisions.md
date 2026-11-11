@@ -6375,3 +6375,54 @@ assert makes forgetting it fail.
 
 **Action required.** #436 (C4, C5) lists its `/elections` queries in `CHART_QUERIES`, names its selected-item trace in `SELECTION_TRACES`, and follows (a) and (b). #470 re-measures D071(g) on `/election/<year>/per-capita` with C3's selector
 (`#c3 .main-svg`), which discharges #435's re-measure.
+
+---
+
+## D094: An all-years route reads a derived table whole; it is named under `/v1/elections/` and fails loud where the per-year route renders null
+
+**Date:** 2026-11-10
+**Amends:** D031 · **Builds on:** D070(c), D072, D074(ii) · **Decided by:** the owner, approving #431's plan (architect-reviewed)
+
+**Context.** Phase 2's cross-election charts (C2 #434, C4/C5 #436, the headline metrics #437)
+need every election's national figures. #431 serves them in one response at a path with no query
+parameters, so the dashboard fills it once per data version (D074(ii)'s precedent; D072
+unchanged). It is the API's first **unscoped data read**: D031 ruled out pagination because
+"every endpoint is already scoped by year/state/candidate", and the `MAX_ROWS` comment said no
+unscoped `SELECT` existed. #428 (every state's per-election row) is the next such route.
+
+**Decision.**
+- **(i) An unscoped read is allowed only on a bounded derived table whose grain is its primary
+  key**: `national_rollup` (`(year, candidate_slug)`, 132 rows) and `hybrid_summary` (`year`, 51
+  rows) for #431, measured on snapshot `37af4064`. It still goes through the capped select
+  (`MAX_ROWS`), and the route's tests include a grain test (one row per key) with a twin proving
+  it fires, since a fan-out would show as a repeated key long before it reached the cap. The fact
+  table `ec_pv` is never read unscoped.
+- **(ii) Naming.** The all-years form of `/v1/elections/{year}/<x>` is `/v1/elections/<x>`, a
+  literal declared before `/elections/{year}` in `routes.py` (`{year}` has no path convertor, so
+  declared after it the literal would match `{year}` and answer 422). #431 is
+  `/v1/elections/summary`; its response is `{data, elections, meta}`, `elections` being the list
+  form of the per-year `election`. #428's plan gate decides its name under this rule.
+- **(iii) The all-years route fails loud where the per-year route renders null.** The per-year
+  `/summary` renders a missing comparison as `election: null`, since failing there would
+  withhold that year's good rows. On the all-years route a missing year would be a silent gap in
+  a list, found only by cross-checking `/v1/elections`, so `SnapshotRepository.national_summary_all`
+  raises (a 500, never edge-cached) unless the roll-up and the comparison cover the same years,
+  in both directions. The snapshot build refuses the same mismatch
+  (`assert_rollup_and_hybrid_summary_cover_the_same_years`), so the serve-time check guards a
+  snapshot that reached the server some other way.
+- **(iv) Order is total.** `president_electoral_rank` is dense, so ranks can tie (2016 has four
+  candidates at rank 4). Both `/summary` routes order by year, rank, then `candidate_slug`, so the
+  all-years rows for a year equal the per-year rows, order included.
+- **(v) The deploy refills it.** The post-deploy smoke step requests the canonical
+  `/v1/elections/summary` after the purge (200, this run's ETag, a self-consistent body), which
+  refills the entry at the runner's colo only: `caches.default` is colo-local.
+
+**Rationale.** Reading a derived table whole costs one query per data version and keeps every
+series out of the dashboard. A primary-key grain bounds the read by the number of elections, so
+the cap keeps its meaning (a large result is a fan-out, not a valid answer). One naming rule
+saves #428 from re-arguing it. Failing loud follows the codebase's rule against silent drops; the
+per-year null stays because that route has rows worth serving without the comparison.
+
+**Action required.** #428 follows (i), (ii) and (iii) for its table and takes `API_VERSION`
+0.9.0 if it merges after #431. #434 is implemented only after #431 is deployed, since its
+`on_miss` fill would otherwise meet a live API without the route.

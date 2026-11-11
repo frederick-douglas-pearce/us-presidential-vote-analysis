@@ -355,7 +355,8 @@ class EcPvRow(BaseModel):
         validation_alias="president_electoral_rank",
         description=(
             "This candidate's national EC finishing rank (1 = most EVs), on the "
-            "COUNTED basis — so it may not order the cast totals."
+            "COUNTED basis — so it may not order the cast totals. Candidates with "
+            "equal counted totals share a rank."
         ),
     )
     took_office: bool = Field(
@@ -518,7 +519,8 @@ class NationalSummaryRow(BaseModel):
         validation_alias="president_electoral_rank",
         description=(
             "National EC finishing rank (1 = most EVs), on the COUNTED basis — so it "
-            "may not order the cast totals."
+            "may not order the cast totals. Candidates with equal counted totals "
+            "share a rank."
         ),
     )
     took_office: bool = Field(
@@ -1087,6 +1089,36 @@ class ElectionSummaryResponse(BaseModel):
 
     data: list[NationalSummaryRow]
     election: ElectionSummary | None = None
+    meta: Meta
+
+
+# A dedicated model for /v1/elections/summary (#431, D094) rather than a widened
+# ElectionSummaryResponse: that model's singular `election` is one object, and this
+# route needs a list of them beside the rows. It reuses the two row models unchanged,
+# so the public field names and their model↔column drift guard come with them. The class
+# docstring and the two field descriptions publish on /docs (ba spec, #431), so design
+# notes stay in this comment; the three state the same order and grain and change
+# together.
+class AllElectionsSummaryResponse(BaseModel):
+    """Every election year's national results (`data`) and three-method comparison
+    (`elections`), as `/v1/elections/summary` returns them."""
+
+    data: list[NationalSummaryRow] = Field(
+        description=(
+            "One item per candidate per election year: that candidate's national "
+            "results. Oldest year first, then by `electoral_rank` within a year, then "
+            "by `candidate_slug` where candidates share a rank. `meta.count` is the "
+            "number of these items."
+        )
+    )
+    elections: list[ElectionSummary] = Field(
+        description=(
+            "One item per election year, oldest first: that year's three-method "
+            "comparison, the same object `/v1/elections/{year}/summary` returns as "
+            "`election`. `elections` has exactly one item for each year in `data`. Not "
+            "included in `meta.count`."
+        )
+    )
     meta: Meta
 
 

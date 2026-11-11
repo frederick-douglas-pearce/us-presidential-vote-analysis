@@ -140,6 +140,9 @@ _ELECTION_OBJECT_PATHS = (
     + [f"/v1/elections/{y}/summary" for y in (1860, 2016, 2020)]
 )
 
+#: The path whose response carries a **list** of those objects, ``elections`` (#431).
+_ELECTIONS_LIST_PATH = "/v1/elections/summary"
+
 #: Every field the ``election`` object is allowed to carry. A **whitelist**, because the
 #: sweeps above iterate ``body["data"]`` and so cannot see this object at all — #102 added
 #: a public surface outside their reach, and the way this guard would fail is a future
@@ -186,6 +189,25 @@ def test_the_election_object_carries_no_unexpected_field(client: TestClient) -> 
         assert not unexpected, f"{path}: unvetted field(s) on the public surface: {unexpected}"
 
 
+def test_every_item_of_the_elections_list_carries_no_unexpected_field(
+    client: TestClient,
+) -> None:
+    """The same whitelist over ``/v1/elections/summary``'s ``elections`` list (#431).
+
+    #102's lesson again: the sweeps iterate ``data``, and ``election`` was outside them
+    until the test above. ``elections`` is a new key, so it gets the same check, item by
+    item, and must not be empty (an empty list would pass vacuously).
+    """
+    body = client.get(_ELECTIONS_LIST_PATH).json()
+    assert body["elections"], "no elections items to check"
+    for election in body["elections"]:
+        unexpected = set(election) - _ALLOWED_ELECTION_FIELDS
+        assert not unexpected, (
+            f"{_ELECTIONS_LIST_PATH} {election.get('year')}: unvetted field(s): "
+            f"{unexpected}"
+        )
+
+
 # --- the nominating party (#386) --------------------------------------------
 # New sweeps beside the ones above, which stay as they were: the note is a second
 # free-text column, so it gets the count reason's treatment, and the value and source
@@ -202,6 +224,10 @@ def _party_rows(client: TestClient) -> list[tuple[str, dict]]:
     for year in (1860, 2016, 2020):
         path = f"/v1/elections/{year}/summary"
         rows += [(path, row) for row in client.get(path).json()["data"]]
+    rows += [
+        (_ELECTIONS_LIST_PATH, row)
+        for row in client.get(_ELECTIONS_LIST_PATH).json()["data"]
+    ]
     return rows
 
 

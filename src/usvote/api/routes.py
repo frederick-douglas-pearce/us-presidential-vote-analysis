@@ -101,6 +101,59 @@ def list_elections(
     return models.Envelope(data=data, meta=_meta(repo, len(data)))
 
 
+# Declared BEFORE "/elections/{year}": Starlette matches routes in declaration order,
+# and `{year}` has no path convertor (the int is checked after matching), so declared
+# after it this path would match `{year}` and answer 422 (#431, D094).
+@router.get(
+    "/elections/summary",
+    response_model=models.AllElectionsSummaryResponse,
+    summary=(
+        "Every election year's national results and three-method comparison, in one "
+        "response."
+    ),
+    tags=["Elections"],
+)
+def get_all_election_summaries(
+    request: Request,
+    response: Response,
+) -> models.AllElectionsSummaryResponse:
+    """Every election year's national results and three-method comparison, in one
+    response: for each year, the same `data` and `election` that
+    `/v1/elections/{year}/summary` returns.
+
+    `data` has one item per candidate per election year, with that candidate's national
+    results, oldest year first; within a year, by `electoral_rank`, with candidates who
+    share a rank ordered by `candidate_slug`. `elections` has one item per election
+    year, oldest first, including who led under each of the three methods (the Electoral
+    College, the popular vote and the hybrid), whether the popular-vote or hybrid winner
+    differs from the Electoral College's winner or leader, the three margins, whether
+    any candidate won a majority of the electors appointed, and the share of electors
+    from states that held a popular vote. Match the two on `year`. `meta.count` is the
+    number of items in `data`; items in `elections` are not included.
+
+    The years are the ones `/v1/elections` lists. Years outside the popular-vote window
+    (`meta.provenance.coverage.pv_year_min` to `pv_year_max`) have no popular-vote
+    figures in this dataset; each field's description says when it is null. For one
+    election, use `/v1/elections/{year}/summary`. The response changes only when the
+    data version does.
+    """
+    # #431 / D094: the whole docstring above publishes on /docs, so notes stay here.
+    # Reads the national_rollup and hybrid_summary tables whole, through one repository
+    # method that fails loud (SnapshotError -> 500) if their years differ; the per-year
+    # route renders a missing summary as `election: null` instead, because there a
+    # failure would withhold that year's good rows, while here a missing year would be a
+    # silent gap in a list. No identifier, so the cache check runs first, as in
+    # list_elections and list_candidates.
+    repo = _repo(request)
+    cache_dependency(request, response)
+    rows, summaries = repo.national_summary_all()
+    data = [models.NationalSummaryRow.model_validate(r) for r in rows]
+    elections = [models.ElectionSummary.model_validate(s) for s in summaries]
+    return models.AllElectionsSummaryResponse(
+        data=data, elections=elections, meta=_meta(repo, len(data))
+    )
+
+
 @router.get(
     "/elections/{year}",
     response_model=models.ElectionResponse,

@@ -191,7 +191,8 @@ check on the nominating party and never a source of it (D077 amending D018;
 ### `national_rollup` — precomputed summary
 
 One row per `(year, candidate_slug)` so `/v1/elections/{year}/summary` **reads** instead of
-computing in a route handler: `national_electoral_votes` (cast),
+computing in a route handler (and `/v1/elections/summary` reads the whole table, ordered by
+year, rank and then `candidate_slug`, since ranks are dense and can tie; #431, D094): `national_electoral_votes` (cast),
 `national_counted_electoral_votes` (counted), `national_electoral_denominator`,
 `national_pv_votes` (NULL for a no-PV getter), and `national_pv_denominator` (each state's
 total counted once — the **non-null** `state_total_votes` per state, so a no-PV getter's
@@ -223,7 +224,10 @@ Added in **#102** (E8-S8). One row per **year** — not per candidate — carryi
 winners (each with its public `candidate_slug` beside the display name), the two flip
 booleans, the three top-2 margins in **percentage points**, `ec_determinative`,
 `ec_denominator` and `pv_coverage`. `/v1/elections/{year}` and
-`/v1/elections/{year}/summary` return it as a single `election` key.
+`/v1/elections/{year}/summary` return it as a single `election` key, and
+`/v1/elections/summary` returns the whole table as an `elections` list, refusing (500) a
+snapshot whose years differ from `national_rollup`'s, which the build also refuses (#431,
+D094).
 
 The grain is why it is a fourth table rather than more columns on `national_rollup`: the
 winners and margins are properties of the *election*, and broadcasting them across a

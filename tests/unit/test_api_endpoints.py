@@ -141,6 +141,191 @@ def test_summary_ignores_row_filters_on_the_year_endpoint(client: TestClient) ->
     assert {r["candidate_slug"] for r in body["summary"]} == {"cand-a", "cand-b"}
 
 
+# --- every election's national summary (#431) -------------------------------
+
+#: The order ``/v1/elections/summary`` must serve, written out by hand from
+#: ``tests/fixtures/api_snapshot.py`` (year, then rank, then slug) rather than read back
+#: from the snapshot, so a defect both routes share cannot pass by agreeing with itself.
+_EXPECTED_SUMMARY_ORDER = [
+    (1860, "john-bell"),
+    (1860, "cand-d"),
+    (2016, "cand-b"),
+    (2016, "cand-a"),
+    (2020, "cand-b"),
+    (2020, "cand-a"),
+]
+_EXPECTED_SUMMARY_YEARS = [1860, 2016, 2020]
+
+
+def _assert_summary_grain(body: dict) -> None:
+    """One row per ``(year, candidate_slug)``; one ``elections`` item per year in ``data``.
+
+    The unscoped route's fan-out guard (D094): a read that multiplied rows would repeat
+    a key here before it came anywhere near ``MAX_ROWS``.
+    """
+    keys = [(r["year"], r["candidate_slug"]) for r in body["data"]]
+    assert len(keys) == len(set(keys)), f"duplicate (year, candidate) rows: {keys}"
+    election_years = [e["year"] for e in body["elections"]]
+    assert len(election_years) == len(set(election_years)), election_years
+    assert set(election_years) == {r["year"] for r in body["data"]}
+
+
+def test_all_summaries_serve_the_expected_rows_in_order(client: TestClient) -> None:
+    body = client.get("/v1/elections/summary").json()
+    assert [(r["year"], r["candidate_slug"]) for r in body["data"]] == (
+        _EXPECTED_SUMMARY_ORDER
+    )
+    assert [e["year"] for e in body["elections"]] == _EXPECTED_SUMMARY_YEARS
+    assert body["meta"]["count"] == len(body["data"])
+    assert body["meta"]["provenance"]["snapshot_version"]
+    _assert_summary_grain(body)
+
+
+def test_the_summary_fixture_is_not_vacuous() -> None:
+    """The per-year loops below need several years, and a year with several candidates."""
+    years = {y for y, _ in _EXPECTED_SUMMARY_ORDER}
+    assert len(years) >= 2
+    assert max(sum(1 for y, _ in _EXPECTED_SUMMARY_ORDER if y == yr) for yr in years) >= 2
+
+
+def test_all_summaries_match_each_per_year_summary(client: TestClient) -> None:
+    """For every served year, the rows and the block equal the per-year route's (AC2)."""
+    body = client.get("/v1/elections/summary").json()
+    years = [item["year"] for item in client.get("/v1/elections").json()["data"]]
+    assert years == _EXPECTED_SUMMARY_YEARS
+    elections = {e["year"]: e for e in body["elections"]}
+    for year in years:
+        per_year = client.get(f"/v1/elections/{year}/summary").json()
+        assert [r for r in body["data"] if r["year"] == year] == per_year["data"], year
+        assert elections[year] == per_year["election"], year
+
+
+def test_all_summaries_cover_exactly_the_listed_years(client: TestClient) -> None:
+    body = client.get("/v1/elections/summary").json()
+    listed = {item["year"] for item in client.get("/v1/elections").json()["data"]}
+    assert {e["year"] for e in body["elections"]} == listed
+    assert {r["year"] for r in body["data"]} == listed
+
+
+def test_all_summaries_carry_the_snapshot_etag(client: TestClient) -> None:
+    resp = client.get("/v1/elections/summary")
+    assert resp.status_code == 200
+    reference = client.get("/v1/elections/2020/summary")
+    assert resp.headers["etag"] == reference.headers["etag"]
+    assert resp.headers["cache-control"] == reference.headers["cache-control"]
+    again = client.get(
+        "/v1/elections/summary", headers={"If-None-Match": resp.headers["etag"]}
+    )
+    assert again.status_code == 304
+    assert again.content == b""
+
+
+def test_all_summaries_ignore_an_unknown_query_parameter(client: TestClient) -> None:
+    """No query parameters: an unknown one is ignored (200, same body), as elsewhere."""
+    plain = client.get("/v1/elections/summary")
+    odd = client.get("/v1/elections/summary", params={"year": 2020})
+    assert odd.status_code == 200
+    assert odd.json() == plain.json()
+
+
+def test_the_all_years_path_does_not_shadow_or_get_shadowed_by_the_year_path(
+    client: TestClient,
+) -> None:
+    """``/elections/summary`` is declared before ``/elections/{year}`` (D094)."""
+    assert client.get("/v1/elections/summary").status_code == 200
+    assert client.get("/v1/elections/2020").status_code == 200
+    assert client.get("/v1/elections/2020/summary").status_code == 200
+    assert client.get("/v1/elections/abc").status_code == 422
+
+
+def test_the_summary_grain_check_fires_on_a_duplicated_row(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """The twin that proves ``_assert_summary_grain`` can fail.
+
+    The build keys ``national_rollup`` by ``(year, candidate_slug)``, so a duplicate
+    needs a doctored table without that key.
+    """
+    _doctor(
+        snapshot_path,
+        "CREATE TABLE nr_nokey AS SELECT * FROM national_rollup",
+        "DROP TABLE national_rollup",
+        "ALTER TABLE nr_nokey RENAME TO national_rollup",
+        "INSERT INTO national_rollup SELECT * FROM national_rollup "
+        "WHERE year = 2020 AND candidate_slug = 'cand-b'",
+    )
+    with TestClient(create_app(settings)) as c:
+        body = c.get("/v1/elections/summary").json()
+    with pytest.raises(AssertionError, match="duplicate"):
+        _assert_summary_grain(body)
+
+
+def test_tied_ranks_are_ordered_by_slug_on_both_summary_routes(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """A dense rank can tie (real 2016 has four candidates at rank 4); slug breaks it.
+
+    The table is rebuilt without its key and filled in reverse slug order, so an order
+    that relied on storage would come back ``cand-b`` first.
+    """
+    _doctor(
+        snapshot_path,
+        "UPDATE national_rollup SET president_electoral_rank = 1 WHERE year = 2020",
+        "CREATE TABLE nr_rev AS SELECT * FROM national_rollup "
+        "ORDER BY year, candidate_slug DESC",
+        "DROP TABLE national_rollup",
+        "ALTER TABLE nr_rev RENAME TO national_rollup",
+    )
+    with TestClient(create_app(settings)) as c:
+        per_year = c.get("/v1/elections/2020/summary").json()["data"]
+        every = c.get("/v1/elections/summary").json()["data"]
+    assert [r["candidate_slug"] for r in per_year] == ["cand-a", "cand-b"]
+    assert [r["candidate_slug"] for r in every if r["year"] == 2020] == [
+        "cand-a",
+        "cand-b",
+    ]
+
+
+def test_all_summaries_fail_loud_on_a_year_without_its_comparison(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """A roll-up year with no hybrid row is a 500 here, while the per-year route stays
+    200 with ``election: null`` (the deliberate divergence, D094)."""
+    _doctor(snapshot_path, "DELETE FROM hybrid_summary WHERE year = 2016")
+    with TestClient(create_app(settings), raise_server_exceptions=False) as c:
+        assert c.get("/v1/elections/summary").status_code == 500
+        per_year = c.get("/v1/elections/2016/summary")
+        assert per_year.status_code == 200
+        assert per_year.json()["election"] is None
+
+
+def test_all_summaries_fail_loud_on_a_comparison_without_its_year(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """The other direction: a hybrid year with no roll-up rows is a 500 too."""
+    _doctor(snapshot_path, "DELETE FROM national_rollup WHERE year = 2016")
+    with TestClient(create_app(settings), raise_server_exceptions=False) as c:
+        assert c.get("/v1/elections/summary").status_code == 500
+
+
+def test_the_repository_names_both_directions_of_a_year_mismatch(
+    snapshot_path: str,
+) -> None:
+    repo = _doctor(snapshot_path, "DELETE FROM hybrid_summary WHERE year = 2016")
+    with pytest.raises(SnapshotError, match=r"roll-up only \[2016\], summary only \[\]"):
+        repo.national_summary_all()
+
+
+def test_all_summaries_read_under_the_row_cap(
+    settings: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unscoped read goes through the capped select: a cap below 6 rows is a 500."""
+    monkeypatch.setattr("usvote.api.repository.MAX_ROWS", 5, raising=True)
+    with TestClient(create_app(settings), raise_server_exceptions=False) as c:
+        assert c.get("/v1/elections/summary").status_code == 500
+        assert c.get("/v1/elections/2020/summary").status_code == 200
+
+
 # --- one state --------------------------------------------------------------
 
 
@@ -392,6 +577,7 @@ def test_no_endpoint_exposes_candidate_id(client: TestClient) -> None:
         "/v1/elections",
         "/v1/elections/2020",
         "/v1/elections/2020/summary",
+        "/v1/elections/summary",
         "/v1/states/CA",
         "/v1/candidates",
         "/v1/candidates/cand-a",

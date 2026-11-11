@@ -4,7 +4,8 @@
 # It pulls the pre-built snapshot from a private GCS bucket, builds the slim image in CI
 # (D033), pushes to Artifact Registry, deploys to Cloud Run with the cost knobs, purges
 # the Cloudflare edge cache AFTER the new revision serves traffic (D034 fork 3), and runs
-# post-deploy assertions (origin lock 403 + Cloudflare 200 + /health).
+# post-deploy assertions (origin lock 403 + Cloudflare 200 + /health, and the canonical
+# /v1/elections/summary, which also refills it at the runner's colo, #431).
 #
 # ALL environment-specific values come from repo Variables/Secrets so nothing is
 # hardcoded — set them once during provisioning (see docs/deploy-cloud-run.md):
@@ -289,4 +290,50 @@ jobs:
             }
             expect_location "/" 307 "/docs" || exit 1
             expect_location "/v1/meta/" 404 "" || exit 1
+
+            # /v1/elections/summary (#431, D094): every election's national summary in
+            # one response, the dashboard's cross-election fill. Requested at its
+            # CANONICAL url (no query string, so the same cache key the dashboard uses)
+            # right after the purge, which both checks it and refills it. Scope: the
+            # refill is the RUNNER'S colo only (`caches.default` is colo-local); other
+            # colos fill on their first visitor, from an origin this request just woke.
+            # Asserts 200, an ETag naming this deploy's snapshot (W/ stripped, as above),
+            # and the body's own consistency: meta.count == len(data) > 0, and the years
+            # in `elections` are exactly the years in `data`. Prints only parsed
+            # integers, never body bytes; header values go through safe().
+            sum_hdr=$(mktemp); sum_body=$(mktemp)
+            sum_ok=0
+            for i in $(seq 1 5); do
+              code=$(curl -s -o "$sum_body" -D "$sum_hdr" -w '%{http_code}' --max-time 20 "https://${CF_HOST}/v1/elections/summary") || code=000
+              etag=$(tr -d '\r' < "$sum_hdr" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
+              if [ "$code" = "200" ] && [ "$etag" = "$SNAPSHOT_VERSION" ]; then
+                # Exit 0 and print "<rows> <years>" only when consistent; else exit 1.
+                if counts=$(python - "$sum_body" <<'PY'
+          import json, sys
+          b = json.load(open(sys.argv[1]))
+          rows, elections = b["data"], b["elections"]
+          row_years = {int(r["year"]) for r in rows}
+          election_years = [int(e["year"]) for e in elections]
+          ok = (
+              int(b["meta"]["count"]) == len(rows) > 0
+              and len(election_years) == len(set(election_years))
+              and set(election_years) == row_years
+          )
+          print(len(rows), len(election_years))
+          sys.exit(0 if ok else 1)
+          PY
+                ); then
+                  echo "  ✓ /v1/elections/summary: 200, this snapshot, ${counts% *} rows over ${counts#* } elections (try ${i})"
+                  sum_ok=1; break
+                fi
+                echo "::error::/v1/elections/summary is inconsistent (rows, elections: '$(safe "${counts:-unparsed}")') — meta.count, data and elections disagree"
+                exit 1
+              fi
+              echo "  … /v1/elections/summary: HTTP ${code}, ETag '$(safe "${etag:-none}")', want 200 + ${SNAPSHOT_VERSION:0:12}… (try ${i}); retrying"
+              sleep 4
+            done
+            if [ "$sum_ok" -ne 1 ]; then
+              echo "::error::/v1/elections/summary is not serving this deploy's snapshot (last: HTTP ${code}, ETag '$(safe "${etag:-none}")')"
+              exit 1
+            fi
           fi

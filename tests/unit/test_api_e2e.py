@@ -2,10 +2,10 @@
 
 Drives the *running* app with FastAPI's ``TestClient`` across every ``/v1`` surface in one
 walk — ``/health`` → ``/v1/meta`` → ``/v1/elections`` → ``/v1/elections/{year}`` (+ sibling
-``summary``) → ``/v1/states/{usps}`` → ``/v1/candidates/{slug}`` — asserting the real
-``{data, meta}`` envelope, the content-hash **ETag** + conditional-304, human provenance,
-and that the fixture's 2016 **EC-winner-≠-PV-winner flip** is observable through the
-national summary.
+``summary``) → ``/v1/elections/summary`` → ``/v1/states/{usps}`` → ``/v1/candidates/{slug}``
+— asserting the real ``{data, meta}`` envelope, the content-hash **ETag** +
+conditional-304, human provenance, and that the fixture's 2016 **EC-winner-≠-PV-winner
+flip** is observable through the national summary.
 
 It runs in CI: the snapshot is built from an in-memory synthetic frame via
 :func:`usvote.snapshot.build_snapshot`, so there is **no live Postgres** (D028). The
@@ -84,6 +84,13 @@ def test_health_then_meta_then_data_walk(client: TestClient) -> None:
     assert by_state["Nevada"]["pv_status"] == "not_participating"
     assert by_state["Texas"]["pv_status"] == "popular_vote"  # held, just not covered
     assert historical["summary"][0]["national_electoral_denominator"] == 18
+
+    # Every election's national summary in one response (#431).
+    every = client.get("/v1/elections/summary").json()
+    _assert_envelope(every)
+    assert [e["year"] for e in every["elections"]] == [1860, 2016, 2020]
+    flip = next(e for e in every["elections"] if e["year"] == 2016)
+    assert flip["pv_flip"] is True
 
     cand = client.get("/v1/candidates/cand-a").json()
     _assert_envelope(cand)

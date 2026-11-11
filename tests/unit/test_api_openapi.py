@@ -33,8 +33,8 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
     # value and stop pinning the thing that matters: that a human moved it when the
     # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245,
-    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386.
-    assert info["version"] == "0.7.0"
+    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386, 0.7.0 -> 0.8.0 by #431.
+    assert info["version"] == "0.8.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -164,6 +164,7 @@ def test_openapi_tags_are_grouped_and_described(client: TestClient) -> None:
 def test_endpoints_carry_the_right_tags(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     assert paths["/v1/elections"]["get"]["tags"] == ["Elections"]
+    assert paths["/v1/elections/summary"]["get"]["tags"] == ["Elections"]
     assert paths["/v1/states/{usps}"]["get"]["tags"] == ["States"]
     assert paths["/v1/candidates"]["get"]["tags"] == ["Candidates"]
     assert paths["/v1/candidates/{slug}"]["get"]["tags"] == ["Candidates"]
