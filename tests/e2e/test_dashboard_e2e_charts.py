@@ -27,6 +27,7 @@ from tests.e2e.dashboard_pages import (
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     RESOURCE_ERROR,
+    STATE_SUCCESS,
     assert_chunk_failure_stops,
     assert_rendered,
     watch_chunk_errors,
@@ -111,7 +112,8 @@ def test_the_installed_plotlyjs_is_the_version_the_address_names() -> None:
 
 @pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.parametrize(
-    ("path", "success"), [("/", HOME_SUCCESS), ("/elections", ELECTIONS_SUCCESS)]
+    # /elections draws C2 since #434, so the page with filters but no chart is a state's.
+    ("path", "success"), [("/", HOME_SUCCESS), ("/state/GA", STATE_SUCCESS)]
 )
 def test_a_page_with_no_chart_fetches_no_plotlyjs(
     page: Page, path: str, success: str

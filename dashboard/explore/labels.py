@@ -388,6 +388,49 @@ C1_NO_PV_CAPTION = (
     "{first}–{last}, not {year}."
 )
 
+#: Chart C2 (#434; ba spec, approved by the owner at #434's plan gate, 2026-11-12, with
+#: its historical claims): each election's Electoral College leader's electoral share
+#: against the majority line, on the elections index, beside its companion table. Not
+#: ``LABELS`` keys. The point series is named ``LABELS["ec_share_full"]``, the axis
+#: too, and each point's text is :func:`share_cell` of the served share, as T3 writes
+#: it. Its marker labels are :data:`C1_NO_SHARE` and :data:`UNRECOGNIZED`, reused.
+C2_TITLE = "The Electoral College leader's electoral share in each election"
+C2_X_AXIS = LABELS["ec_share_full"]
+#: The dashed line's label: "each election's", since the number of electors appointed
+#: changes with the year (never a fixed number such as 270).
+C2_MAJORITY_LINE = "Majority line: half of each<br>election's electors appointed"
+#: The name of the marker series, kept off the legend and never shown: the figure
+#: rules need every trace named.
+C2_NO_SHARE_SERIES = "No point for this value"
+#: A point's hover, filled with strings the page writes: the year as written, the
+#: name as served, the companion table's cells, and the majority line every year.
+C2_HOVER = (
+    "{year}: {candidate}<br>Electoral share (counted ÷ appointed): {share}<br>"
+    "Electoral votes counted: {counted}<br>Electors appointed: {appointed}<br>"
+    "{majority}"
+)
+#: The caption's sentences, joined in the order ``pages/elections.py`` gives, between
+#: which it puts :data:`C1_EC_BASIS`.
+C2_LEADER_POINT = (
+    "Each point is that election's Electoral College leader: the candidate with the "
+    "most electoral votes counted."
+)
+C2_MAJORITY_NOTE = (
+    "The dashed line marks half of each election's electors appointed: a leader whose "
+    "electoral share is more than half had a majority of them. With half or less, no "
+    "candidate had a majority, and the election went to the House of Representatives."
+)
+C2_TOOK_OFFICE = (
+    "The leader did not always take office: in 1824 the leader, Andrew Jackson, had "
+    "no majority, and the House of Representatives chose John Quincy Adams."
+)
+#: The companion table's first note (with :data:`C2_TOOK_OFFICE`), under the table and
+#: in its CSV's preamble, which has no caption.
+C2_LEADER_ROW = (
+    "Each row is that election's Electoral College leader: the candidate with the "
+    "most electoral votes counted."
+)
+
 #: Chart C3 (#435; ba spec, revised after the architect's review and approved by the
 #: owner at #435's plan gate, 2026-11-10): every state's people per electoral vote on
 #: an election's People per electoral vote page, beside T6. Not ``LABELS`` keys. Each

@@ -17,6 +17,8 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "dashboard"
 RECORDED_FILES: dict[str, str] = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
+    # Every election's national summary, N1 (#431), chart C2's source (#434).
+    "/v1/elections/summary": "v1_elections_summary.json",
     **{
         f"/v1/elections/{year}": f"v1_elections_{year}.json"
         for year in (1824, 1860, 1868, 1872, 1896, 2016, 2024)

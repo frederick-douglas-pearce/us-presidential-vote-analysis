@@ -22,12 +22,13 @@ import pytest
 from dash import no_update
 from dash.development.base_component import Component
 
-from explore import api, components, labels
+from explore import api, charts, components, labels
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     META,
     RECORDED,
     VERSION,
+    RecordingBucket,
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     cached_client,
     component_ids,
@@ -479,10 +480,12 @@ class TestShareableUrl:
         assert response.status_code == 200
         written = response.get_json()["response"][MOD["URL_ID"]]["search"]
         assert written == "?pv=1&year_from=1900"
+        assert calls == [] and bucket.waits == []  # the callback reads nothing
         assert routed_years(route("/elections", written)) == [
             y for y in PV_YEARS if y >= 1900
         ]
-        assert calls == [] and bucket.waits == []
+        # The render fills N1 once, on a miss, for chart C2 (#434); never the index.
+        assert calls == [api.SUMMARY_PATH] and len(bucket.waits) == 1
 
     def test_the_callback_leaves_an_unchanged_url_alone(self) -> None:
         callback = MOD["on_filter_change"]
@@ -521,10 +524,14 @@ class TestRequestBudget:
             response = route("/elections", search)
             # Each render is the filtered one, answered from the cache.
             assert routed_years(response) == shown_years(render(parse(search[1:])))
+            # Only the first render fills N1, on a miss, for chart C2 (#434, D096);
+            # every filter change after it is answered from the cache.
+            assert calls == [api.SUMMARY_PATH], search
+            assert len(bucket.waits) == 1, search
         for years, pv in (([1900, LAST], ["1"]), ([FIRST, 1950], [])):
             MOD["on_filter_change"](years, pv, FIRST, LAST, "")
-        assert calls == []
-        assert bucket.waits == []
+        assert calls == [api.SUMMARY_PATH]
+        assert len(bucket.waits) == 1
 
     def test_the_callback_reads_no_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class NoView:
@@ -549,6 +556,12 @@ class TestRequestBudget:
             if path == api.META_PATH:
                 body = copy.deepcopy(META)
                 provenance = body["provenance"]
+            elif path == api.SUMMARY_PATH:
+                body = copy.deepcopy(RECORDED[api.SUMMARY_PATH])
+                provenance = body["meta"]["provenance"]
+                if state["version"] == "version-B":
+                    for key in ("data", "elections"):
+                        body[key] = [r for r in body[key] if r["year"] >= 2000]
             else:
                 body = copy.deepcopy(BODY)
                 provenance = body["meta"]["provenance"]
@@ -565,6 +578,9 @@ class TestRequestBudget:
         before = PAGE["layout"]()
         assert shown_years(before) == YEARS
         assert "version-A" in texts(before)
+        # C2's N1 is filled on a miss in each snapshot (#434); D072's prefetch is not.
+        assert calls == [api.SUMMARY_PATH]
+        calls.clear()
         state["version"] = "version-B"
         # Until the refresher runs, renders keep serving A from the cache.
         assert shown_years(PAGE["layout"]()) == YEARS
@@ -576,7 +592,8 @@ class TestRequestBudget:
         assert shown_years(after) == [row["year"] for row in later]
         assert "version-B" in texts(after)
         assert "version-A" not in texts(after)
-        assert calls == []  # the new body came with the swap, not a fill on a miss
+        # The index came with the swap, not a fill on a miss; N1 is B's own miss.
+        assert calls == [api.SUMMARY_PATH]
 
 
 # --- labels -----------------------------------------------------------------------
@@ -930,6 +947,398 @@ class TestHasText:
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path"] == "/elections"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PAGE["on_miss"] == ()
+    # N1, chart C2's source, a literal filled on a miss (#434, D074(ii)).
+    assert PAGE["on_miss"] == (api.SUMMARY_PATH,)
     assert PAGE["success"] == PAGE_ID
     assert VERSION  # the recorded snapshot every cached render answers from
+
+
+# --- chart C2 (#434, D096) ------------------------------------------------------------
+
+SUMMARY: dict[str, Any] = RECORDED[api.SUMMARY_PATH]
+C2 = charts.dom_id("C2")
+LEADERS = MOD["LEADER_TABLE_ID"]
+#: The years with a recorded ``/v1/elections/{year}``: T3's rows to reconcile against.
+RECONCILED = (1824, 1860, 1868, 1872, 1896, 2016, 2024)
+#: T3's worded cells, from the overview's own function (one source for T3 and C1).
+NATION_CELLS = dash.page_registry["pages.election"]["layout"].__globals__[
+    "_nation_cells"
+]
+
+
+def render_c2(
+    summary: Any = None, index: Any = None, query: dict[str, Any] | None = None
+) -> Any:
+    """The page for the index and an N1 body (the recording unless given)."""
+    return MOD["render"](
+        copy.deepcopy(BODY if index is None else index),
+        MOD["parse_filters"](query or {}),
+        copy.deepcopy(SUMMARY if summary is None else summary),
+    )
+
+
+def c2_figure(tree: Any) -> dict[str, Any]:
+    (store,) = [
+        node
+        for node in of_type(tree, "Store")
+        if isinstance(getattr(node, "id", None), dict) and node.id.get("chart") == C2
+    ]
+    figure: dict[str, Any] = store.data
+    return figure
+
+
+def points(tree: Any) -> dict[str, tuple[Any, str, str]]:
+    """Each year's main point: its x, text and hover, by the year (the trace's ids)."""
+    trace = c2_figure(tree)["data"][0]
+    assert trace["name"] == labels.LABELS["ec_share_full"]
+    return {
+        year: (x, text, hover)
+        for year, x, text, hover in zip(
+            trace["ids"], trace["x"], trace["text"], trace["hovertext"], strict=True
+        )
+    }
+
+
+def leader_rows(tree: Any) -> list[list[str]]:
+    table = find(tree, LEADERS)
+    return [texts(tr.children) for tr in of_type(of_type(table, "Tbody"), "Tr")]
+
+
+def rank1(year: int) -> dict[str, Any]:
+    summary: list[dict[str, Any]] = RECORDED[f"/v1/elections/{year}"]["summary"]
+    (row,) = [r for r in summary if r["electoral_rank"] == 1]
+    return row
+
+
+def n1_client(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[list[str], Any]:
+    """A process client serving the recordings, with N1 answered by ``answer(path)``."""
+    calls: list[str] = []
+
+    def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+        calls.append(path)
+        if path == api.SUMMARY_PATH:
+            result: api.Response = answer(path)
+            return result
+        return api.Response(body=RECORDED[path], version=VERSION)
+
+    bucket = RecordingBucket()
+    client = offline_client(
+        fetch, bucket=bucket, prefetch_paths=lambda: [api.ELECTIONS_PATH]
+    )
+    client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+    client.refresh()
+    calls.clear()
+    bucket.waits.clear()
+    monkeypatch.setattr(api, "CLIENT", client)
+    return calls, bucket
+
+
+class TestC2:
+    def test_registered_on_the_index_with_its_own_companion_table(self) -> None:
+        assert charts.CHARTS["C2"] == charts.Chart("/elections", LEADERS)
+        assert MOD["C2_ID"] == "C2" and C2 == "c2"
+        tree = render_c2()
+        assert type(find(tree, C2)).__name__ == "Figure"  # the #c2 fragment's target
+        assert PAGE_ID not in [n.id for n in of_type(find(tree, C2), "Div") if n.id]
+
+    def test_the_page_order_puts_the_chart_above_the_list(self) -> None:
+        tree = render_c2()
+        headings = [h.children for h in of_type(tree, "H2")]
+        assert headings[:3] == [
+            MOD["C2_HEADING"],
+            MOD["C2_TABLE_HEADING"],
+            MOD["LIST_HEADING"],
+        ]
+        assert of_type(tree, "H1")[0].children == "Elections"
+        assert of_type(tree, "P")[0].children == (
+            f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        )
+
+    def test_one_point_for_every_served_year_oldest_first(self) -> None:
+        tree = render_c2()
+        figure = c2_figure(tree)
+        assert [str(y) for y in YEARS] == figure["data"][0]["ids"]
+        assert figure["layout"]["yaxis"]["ticktext"] == [str(y) for y in YEARS]
+        assert (YEARS[0], YEARS[-1]) == (FIRST, LAST)  # the span is coverage's
+        assert len(figure["data"]) == 1  # no marker: every leader has a share
+        assert charts.figure_problems(figure) == []
+
+    def test_one_point_per_year_however_the_index_is_cut(self) -> None:
+        """No literal span: an index serving fewer years gets that many points."""
+        index = copy.deepcopy(BODY)
+        index["data"] = [r for r in index["data"] if r["year"] <= 1900]
+        index["meta"]["provenance"]["coverage"]["year_max"] = 1900
+        summary = copy.deepcopy(SUMMARY)
+        for key in ("data", "elections"):
+            summary[key] = [r for r in summary[key] if r["year"] <= 1900]
+        ids = points(render_c2(summary, index))
+        assert list(ids) == [str(r["year"]) for r in index["data"]]
+
+    @pytest.mark.parametrize("year", RECONCILED)
+    def test_each_recorded_year_reconciles_with_t3_s_leader(self, year: int) -> None:
+        x, text, hover = points(render_c2())[str(year)]
+        row = rank1(year)
+        has_pv = (
+            year
+            >= RECORDED[api.ELECTIONS_PATH]["meta"]["provenance"]["coverage"][
+                "pv_year_min"
+            ]
+        )
+        cell = NATION_CELLS(row, has_pv)
+        assert x == row["ec_share_full"]
+        assert text == cell["ec_share_full"]
+        assert cell["national_electoral_votes_counted"] in hover
+        assert cell["national_electoral_denominator"] in hover
+        assert hover.startswith(f"{year}: {row['candidate']}<br>")
+
+    def test_1824_sits_below_the_line_and_reads_as_no_majority(self) -> None:
+        x, text, hover = points(render_c2())["1824"]
+        assert x < 0.5 and text == "37.9%"
+        assert hover.endswith(f"<br>{labels.NO_EC_MAJORITY}")
+        assert "Andrew Jackson" in hover
+
+    @pytest.mark.parametrize(("year", "text"), [("1876", "50.1%"), ("2000", "50.4%")])
+    def test_1876_and_2000_sit_just_above_the_line(self, year: str, text: str) -> None:
+        x, shown, hover = points(render_c2())[year]
+        assert 0.5 < x < 0.51 and shown == text
+        assert hover.endswith(f"<br>{labels.EC_MAJORITY}")
+
+    @pytest.mark.parametrize(
+        ("year", "counted", "appointed"),
+        [("2016", "304", "538"), ("1868", "214", "294"), ("1872", "286", "366")],
+    )
+    def test_the_counted_basis(self, year: str, counted: str, appointed: str) -> None:
+        _, _, hover = points(render_c2())[year]
+        assert f"Electoral votes counted: {counted}<br>" in hover
+        assert f"Electors appointed: {appointed}<br>" in hover
+
+    def test_every_hover_carries_a_majority_line(self) -> None:
+        for year, (_, _, hover) in points(render_c2()).items():
+            assert hover.rsplit("<br>", 1)[1] in (
+                labels.EC_MAJORITY,
+                labels.NO_EC_MAJORITY,
+            ), year
+
+    def test_a_null_majority_is_named_by_its_field(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        summary["elections"][1]["ec_determinative"] = None
+        _, _, hover = points(render_c2(summary))[str(summary["elections"][1]["year"])]
+        assert hover.endswith(
+            f"<br>{labels.LABELS['ec_determinative']}: {labels.NOT_IN_DATASET}"
+        )
+
+    @pytest.mark.parametrize(
+        ("value", "label"),
+        [(None, labels.C1_NO_SHARE), ("zz", labels.UNRECOGNIZED)],
+    )
+    def test_a_share_with_no_figure_is_a_labeled_marker(
+        self, value: Any, label: str
+    ) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r for r in summary["data"] if r["year"] == 1860 and r["electoral_rank"] == 1
+        ]
+        row["ec_share_full"] = value
+        tree = render_c2(summary)
+        figure = c2_figure(tree)
+        x, text, _ = points(tree)["1860"]
+        assert x is None and text == ""
+        (marks,) = figure["data"][1:]
+        assert marks["name"] == labels.C2_NO_SHARE_SERIES
+        assert marks["ids"] == ["1860"] and marks["x"] == [0]
+        assert marks["text"] == [label] and marks["marker"]["symbol"] == "x"
+        assert charts.figure_problems(figure) == []
+
+    def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
+        layout = c2_figure(render_c2())["layout"]
+        (line,) = layout["shapes"]
+        assert (line["x0"], line["x1"], line["line"]["dash"]) == (0.5, 0.5, "dash")
+        assert [a["text"] for a in layout["annotations"]] == [
+            labels.C2_MAJORITY_LINE
+        ] * 2
+        assert layout["xaxis"]["range"] == [0, 1]
+
+    def test_the_title_is_page_text(self) -> None:
+        assert find(render_c2(), f"{C2}-title").children == labels.C2_TITLE
+
+    def test_the_companion_table_holds_the_points_values(self) -> None:
+        tree = render_c2()
+        rows = leader_rows(tree)
+        shown = points(tree)
+        assert [r[0] for r in rows] == [str(y) for y in YEARS]
+        for row in rows:
+            year, candidate, counted, appointed, share, majority, took = row
+            _, text, hover = shown[year]
+            assert share == text
+            assert hover == labels.C2_HOVER.format(
+                year=year,
+                candidate=candidate,
+                share=share,
+                counted=counted,
+                appointed=appointed,
+                majority=majority,
+            )
+            assert took in ("Yes", "No")
+        assert rows[0][1] == "Andrew Jackson" and rows[0][6] == "No"
+        table = find(tree, LEADERS)
+        links = {a.href for a in of_type(table, "Link")}
+        assert {f"/election/{y}" for y in YEARS} <= links
+
+    @pytest.mark.parametrize(
+        "query", [{"year_from": "1900"}, {"pv": "1"}, {"year_to": "1880"}]
+    )
+    def test_no_filter_narrows_the_chart_or_its_table(
+        self, query: dict[str, str]
+    ) -> None:
+        filtered, plain = render_c2(query=query), render_c2()
+        assert c2_figure(filtered) == c2_figure(plain)
+        assert leader_rows(filtered) == leader_rows(plain)
+        assert shown_years(filtered) != shown_years(plain)  # T1 is narrowed
+
+    def test_the_download_names_the_leaders(self) -> None:
+        (link,) = [
+            a
+            for a in of_type(render_c2(), "A")
+            if getattr(a, "id", None) == f"{LEADERS}-csv"
+        ]
+        assert link.download == "elections-electoral-college-leaders.csv"
+        assert link.children == "Download the Electoral College leaders (CSV)"
+
+
+def _without(year: int) -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    summary["elections"] = [e for e in summary["elections"] if e["year"] != year]
+    return summary
+
+
+def _second_leader() -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    extra = copy.deepcopy(next(r for r in summary["data"] if r["year"] == 1860))
+    extra["candidate_slug"] = "someone-else"
+    summary["data"].append(extra)
+    return summary
+
+
+def _unserved() -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    summary["data"].append({**summary["data"][0], "year": 1826})
+    return summary
+
+
+def _bool_rank() -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    for row in summary["data"]:
+        if row["year"] == 1824 and row["electoral_rank"] == 1:
+            row["electoral_rank"] = True
+    return summary
+
+
+MALFORMED = {
+    "a served year with no elections item": _without(1876),
+    "two rank-1 rows in a year": _second_leader(),
+    "a row for a year not served": _unserved(),
+    "a rank that is a bool": _bool_rank(),
+    "data that is not a list": {**SUMMARY, "data": {}},
+    "no elections key": {k: v for k, v in SUMMARY.items() if k != "elections"},
+    "a year that is a string": {
+        **SUMMARY,
+        "elections": [{**SUMMARY["elections"][0], "year": "1824"}]
+        + SUMMARY["elections"][1:],
+    },
+    "not an object": [],
+}
+
+
+class TestC2Validation:
+    @pytest.mark.parametrize("name", MALFORMED)
+    def test_a_malformed_body_is_refused(self, name: str) -> None:
+        with pytest.raises((TypeError, KeyError)):
+            MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(MALFORMED[name]))
+
+    def test_the_recording_is_accepted(self) -> None:
+        leaders = MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY))
+        assert [r["year"] for r in leaders] == YEARS
+        assert all(r["electoral_rank"] == 1 for r in leaders)
+        assert leaders[0]["ec_determinative"] is False
+
+    def test_an_index_year_outside_its_span_is_refused(self) -> None:
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"]["year_max"] = 2020
+        with pytest.raises(TypeError):
+            MOD["leaders"](index, copy.deepcopy(SUMMARY))
+
+    @pytest.mark.parametrize("name", MALFORMED)
+    def test_a_malformed_body_degrades_only_the_section(self, name: str) -> None:
+        tree = render_c2(MALFORMED[name])
+        assert tree.id == PAGE_ID  # the page's success marker: T1 rendered
+        assert shown_years(tree) == YEARS
+        assert find(tree, C2) is None and find(tree, LEADERS) is None
+        unavailable = find(tree, MOD["LEADER_UNAVAILABLE_ID"])
+        assert unavailable.children == MOD["C2_UNAVAILABLE"]
+        assert components.UNAVAILABLE_MESSAGE not in texts(tree)
+        assert "isn't responding" not in MOD["C2_UNAVAILABLE"]
+
+
+class TestC2Degraded:
+    def test_an_unavailable_n1_leaves_t1_and_retries_once_per_render(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(path: str) -> api.Response:
+            raise api.ApiUnavailable("down")
+
+        calls, bucket = n1_client(monkeypatch, down)
+        for search in ("", "?year_from=1900"):
+            calls.clear()
+            response = route("/elections", search)
+            ids = routed_ids(response)
+            assert PAGE_ID in ids and TABLE_ID in ids
+            assert MOD["LEADER_UNAVAILABLE_ID"] in ids
+            assert C2 not in ids and LEADERS not in ids
+            # At most one fill per render, of N1 only (D096).
+            assert calls == [api.SUMMARY_PATH], search
+
+    def test_a_malformed_n1_from_the_api_leaves_t1(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        n1_client(
+            monkeypatch,
+            lambda path: api.Response(body=_second_leader(), version=VERSION),
+        )
+        tree = PAGE["layout"]()
+        assert tree.id == PAGE_ID
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+        assert find(tree, C2) is None
+
+    def test_the_index_down_degrades_the_whole_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        tree = PAGE["layout"]()
+        assert components.UNAVAILABLE_MESSAGE in texts(tree)
+        assert find(tree, C2) is None and find(tree, PAGE_ID) is None
+        assert MOD["FILTER_SENTENCE"] not in texts(tree)
+        assert MOD["LEDE"] in texts(tree)
+
+
+class TestN1Fixture:
+    """The N1 recording agrees with the per-year recordings of the same snapshot."""
+
+    def test_same_snapshot_as_the_index(self) -> None:
+        assert SUMMARY["meta"]["provenance"] == BODY["meta"]["provenance"]
+
+    @pytest.mark.parametrize("year", RECONCILED)
+    def test_each_recorded_year_matches(self, year: int) -> None:
+        body = RECORDED[f"/v1/elections/{year}"]
+        (item,) = [e for e in SUMMARY["elections"] if e["year"] == year]
+        assert item == body["election"]
+        rows = [r for r in SUMMARY["data"] if r["year"] == year]
+
+        def key(r: dict[str, Any]) -> tuple[int, str]:
+            return r["electoral_rank"], r["candidate_slug"]
+
+        # Order-insensitive within ties: the year recordings predate 0.8.0's order.
+        assert sorted(rows, key=key) == sorted(body["summary"], key=key)
