@@ -1347,8 +1347,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   null (*Outside the popular-vote window*); the Electoral College fields and `pv_coverage`
   have values for every year served.
 - **Shown as:** on the API's `/docs` page, the `/v1/elections/summary` summary and
-  docstring (`get_all_election_summaries` in `src/usvote/api/routes.py`), and the `AllElectionsSummaryResponse` docstring and its
-  `data` and `elections` field descriptions in `src/usvote/api/models.py`; the
+  docstring (`get_all_election_summaries` in `src/usvote/api/routes.py`), and the
+  `AllElectionsSummaryResponse` docstring and its `data` and `elections` field
+  descriptions in `src/usvote/api/models.py`; the
   `/v1/elections/{year}/summary` summary in `src/usvote/api/routes.py`. On the dashboard,
   the election panel shows these fields under the heading "Under each method"
   (`pages/election.py`), each with its own `LABELS` key.
