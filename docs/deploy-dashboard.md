@@ -1071,14 +1071,14 @@ These runs are also #435's own D071(g) re-measure.
 Dashboard version `v-74950100c6cb-r25-a1` (deploy run 42987028675 of 7495010, whose
 `dashboard/`, `uv.lock` and `pyproject.toml` are those of 5dc5306, the commit that shipped
 C3), snapshot `37af4064…` (the baseline's). Since the baseline the API is at 0.8.0 (#431,
-deploy run 42978898772, 07:21–07:23Z), whose deploy purged the API edge. The API origin was warm
-throughout, by the keep-warm ping (08:59:25Z and 09:04:25Z) and the runs' own fills; it
+deploy run 42978898772, 07:21–07:23Z), whose deploy purged the API edge. The API origin was
+warm throughout, by the keep-warm ping (08:59:25Z and 09:04:25Z) and the runs' own fills; it
 logged no `Starting new instance` in the window. Measured 09:00–09:11Z, clear of the daily
 canary (its last run 2026-11-10 20:28Z, the next due 13:17Z), by #277's method:
-`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser
-context each run), with `--chart "#c1 .main-svg"` on the Overview and
-`--chart "#c3 .main-svg"` on People per electoral vote. The chart column is the time until
-the chart is drawn, which is not a D071(g) measure.
+`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser context
+each run), with `--chart "#c1 .main-svg"` on the Overview and `--chart "#c3 .main-svg"` on
+People per electoral vote. The chart column is the time until the chart is drawn, which is
+not a D071(g) measure.
 
 **Four instances**, because the Overview and Results by state fill the same path
 (`/v1/elections/{year}`), so a first visit to each needs its own instance:
@@ -1174,8 +1174,8 @@ Every run on all three pages reached data, with no degraded page.
   - So the 4.9 s was spent outside the app's own handling of the request: on the measuring
     machine, its network, or Google's front end, on the way in or out, which these logs do
     not separate. It is still a miss by D071(g)'s measure.
-  - The other 26 runs took 0.07–0.18 s to first byte and 1.11–1.97 s to first data. Among them, 2016 and 1872 were the page's slowest
-    years, on a first visit and from the cache.
+  - The other 26 runs took 0.07–0.18 s to first byte and 1.11–1.97 s to first data. Among
+    them, 2016 and 1872 were the page's slowest years, on a first visit and from the cache.
 
 **Against the baseline** (the Overview, year by year, against the 2026-11-10 record above):
 
@@ -1195,8 +1195,8 @@ Every run on all three pages reached data, with no degraded page.
   other than 2016 (0.41–0.97 s without 2020's fast first visit, above). 2016's three first
   visits took 1.53–1.59 s, against that record's one at 3.15 s, so 2016 is no longer near
   the target.
-- **From the cache:** first data is faster on every year, and each year's slowest run now
-  is faster than its fastest then: 1.02–1.22 s in all, against that record's 1.23–2.28 s.
+- **From the cache:** first data is faster on every year, and each year's slowest run now is
+  faster than its fastest then: 1.02–1.22 s in all, against that record's 1.23–2.28 s.
   2016's five runs took 1.02–1.08 s, against 2.07–2.28 s.
 - **Why, not separated.** Between the two versions the dashboard gained #464's bar of
   earlier and later election links, #465's split and C3, and the API moved to 0.8.0. The
@@ -1206,8 +1206,8 @@ Every run on all three pages reached data, with no degraded page.
 - The chart is drawn 2.86–3.05 s after first data on a run from the cache, about as in the
   baseline.
 
-**Request budget held.** The dashboard logged 38 `api fetch` lines from A's first
-line (08:59:24Z) to the last run's fill (09:10:36Z), by the §12 `api fetch` query bounded to that
+**Request budget held.** The dashboard logged 38 `api fetch` lines from A's first line
+(08:59:24Z) to the last run's fill (09:10:36Z), by the §12 `api fetch` query bounded to that
 window:
 
 - each instance's two prefetched paths (`/v1/meta` and `/v1/elections`) as it started;
