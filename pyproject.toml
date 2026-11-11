@@ -196,6 +196,7 @@ addopts = "-m 'not integration and not e2e' --strict-markers"
 markers = [
     "integration: tests that require a live Postgres database (excluded by default)",
     "e2e: browser tests of the dashboard via Playwright (excluded by default)",
+    "expected_chart_failure(chart_id, count=1): a tests/unit/test_dashboard_* test expects exactly count not-drawn records for chart_id (#467; tests/unit/conftest.py; placement enforced at collection, tests/conftest.py)",
 ]
 
 # `pytest --cov=usvote` reads this. Measure the installed package, not the

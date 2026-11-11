@@ -6,7 +6,9 @@ store holding the theme in effect (#359), which charts read (#432), the site
 navigation (#448), and the chart builder (#432).
 
 Pure functions of what a page already read, so they read no API: a page reads through
-its own render-scoped view and hands them what it read.
+its own render-scoped view and hands them what it read. The one side effect is the
+chart builder's error log when a figure breaks the chart rules and is not drawn (#467,
+D095).
 ``TestSharedPieces.test_the_shared_modules_read_no_api`` (in
 ``test_dashboard_elections.py``) checks that this module imports nothing from
 ``explore`` but the other shared modules, and names no ``api`` or ``CLIENT``.
@@ -15,12 +17,19 @@ its own render-scoped view and hands them what it read.
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from dash import dcc, html
 
 from explore import charts, export, labels, query
+
+log = logging.getLogger(__name__)
+
+#: How many of a figure's problems the not-drawn log line lists (#467): a problem can
+#: repr a served value, and one per row on C3 would be 51.
+LOGGED_PROBLEMS = 3
 
 #: The id of the theme toggle's group (#359, #447), in ``app.layout`` on every page.
 THEME_CONTROL_ID = "theme-control"
@@ -399,8 +408,18 @@ def chart(
     (#452): ``charts.CHART_MOUNT_CALLBACK`` puts the graph in it, hidden and with no
     figure, only once plotly.js has loaded, and ``charts.CHART_CALLBACK`` then draws it
     in the theme in effect and shows it, so it never flashes plotly's own colors and a
-    blocked CDN leaves the mount point empty, with no loop. Raises
-    ``ValueError`` for anything else, which is a page's bug, never a reader's input.
+    blocked CDN leaves the mount point empty, with no loop.
+
+    A figure that :func:`explore.charts.figure_problems` refuses is **not drawn**
+    (#467, D095): served data can reach those rules (a name, a value), so the chart
+    must cost only itself. It is logged at error level, naming the chart, its page and
+    its problems, and the figure is returned with its title and caption but no mount
+    point and no store, so no callback runs for it and plotly.js is not fetched for it;
+    the page keeps its tables and its other charts. The unit suite fails on that log
+    line (the unit suite's ``no_undeclared_chart_failure``, D095). An unregistered or
+    retired ID, another table, an empty caption or a title that is not plain text
+    raises ``ValueError``: only a code change reaches those, so they are a page's bug,
+    never a reader's input.
     """
     row = charts.CHARTS.get(chart_id)
     if row is None or row.retired:
@@ -415,15 +434,27 @@ def chart(
     text = title.get("text") if isinstance(title, dict) else None
     if not (isinstance(text, str) and labels.has_text(text)) or "<" in text:
         raise ValueError(f"{chart_id} has no plain-text chart title")
-    problems = charts.figure_problems(source)
-    if problems:
-        raise ValueError(f"{chart_id}: {problems}")
     dom = charts.dom_id(chart_id)
     title_id = f"{dom}-title"
     named: dict[str, Any] = {"aria-labelledby": title_id}
+    heading = html.P(text, id=title_id, className="chart-title")
+    pointer = html.Figcaption(
+        [caption, " ", html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}"), "."]
+    )
+    problems = charts.figure_problems(source)
+    if problems:
+        log.error(
+            "%s on %s not drawn: %d figure problem(s): %r",
+            chart_id,
+            row.page,
+            len(problems),
+            problems[:LOGGED_PROBLEMS],
+            extra={"chart_id": chart_id},
+        )
+        return html.Figure([heading, pointer], id=dom, className="chart")
     return html.Figure(
         [
-            html.P(text, id=title_id, className="chart-title"),
+            heading,
             html.Div(
                 id=charts.mount_id(dom),
                 role="img",
@@ -431,14 +462,7 @@ def chart(
                 **named,
             ),
             dcc.Store(id=charts.source_id(dom), data=source),
-            html.Figcaption(
-                [
-                    caption,
-                    " ",
-                    html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}"),
-                    ".",
-                ]
-            ),
+            pointer,
         ],
         id=dom,
         className="chart",

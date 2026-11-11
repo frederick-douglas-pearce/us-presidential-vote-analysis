@@ -9,17 +9,23 @@ real :func:`usvote.snapshot.build_snapshot` writer, so it needs **no live Postgr
 
 A test that needs a bespoke frame can override the ``synthetic_frame`` fixture locally;
 the ``snapshot_path`` / ``settings`` / ``client`` chain then rebuilds from it.
+
+It also holds the dashboard tests' check on charts that were not drawn (#467, D095):
+:func:`no_undeclared_chart_failure`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import contextlib
+import logging
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.chart_log import LOGGER, Records, chart_log_checked, chart_log_problems
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
@@ -85,3 +91,55 @@ def client(settings: ApiSettings) -> Iterator[TestClient]:
     # ``with`` runs the lifespan, so app.state.repository is opened (no live DB).
     with TestClient(create_app(settings)) as c:
         yield c
+
+
+def _expected_chart_failure(chart_id: str, count: int = 1) -> tuple[str, int]:
+    """The ``expected_chart_failure`` marker's arguments, bound as a signature so a
+    positional count counts and a bare marker is a ``TypeError``."""
+    return chart_id, count
+
+
+@contextlib.contextmanager
+def chart_log_check(path: Path, markers: Iterable[pytest.Mark]) -> Iterator[None]:
+    """The check :func:`no_undeclared_chart_failure` runs around one test (#467).
+
+    For a file :func:`tests.chart_log.chart_log_checked` admits, it collects every
+    error record ``components.chart`` leaves while the block runs and, on leaving it,
+    fails on any the ``expected_chart_failure`` ``markers`` did not declare, exactly
+    that many per chart (counts of repeated markers for one chart add up). A plain
+    context manager so ``TestNotDrawnLogCheck`` can drive it directly."""
+    if not chart_log_checked(path):
+        yield
+        return
+    expected: dict[str, int] = {}
+    for marker in markers:
+        chart_id, count = _expected_chart_failure(*marker.args, **marker.kwargs)
+        expected[chart_id] = expected.get(chart_id, 0) + count
+    handler = Records()
+    logger = logging.getLogger(LOGGER)
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+    problems = chart_log_problems(handler.records, expected)
+    if problems:
+        pytest.fail(f"chart not-drawn log: {problems}", pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def no_undeclared_chart_failure(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail a dashboard test that leaves a chart not drawn it did not declare (#467).
+
+    ``components.chart`` logs a figure that breaks the chart rules at error level and
+    renders the chart's title and caption alone, so the page keeps its tables (D095).
+    Around every ``tests/unit/test_dashboard_*`` test, :func:`chart_log_check` collects
+    every such record and fails the test on any it did not declare with
+    ``@pytest.mark.expected_chart_failure(chart_id, count=1)``.
+    ``TestEveryChart.test_every_rendered_page`` renders every registered page's default
+    view, so a shipped chart that is not drawn there fails the suite. A marker outside
+    ``tests/unit/test_dashboard_*.py`` is refused at collection (``tests/conftest.py``).
+    """
+    markers = request.node.iter_markers("expected_chart_failure")
+    with chart_log_check(request.node.path, markers):
+        yield

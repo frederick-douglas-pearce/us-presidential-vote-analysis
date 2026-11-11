@@ -3640,8 +3640,9 @@ class TestC1:
         self, name: str
     ) -> None:
         """Round 1: a served name holding ``var(`` once made ``components.chart``
-        refuse the figure and took the whole page down. ``(`` is written as an entity,
-        which plotly draws as ``(``."""
+        refuse the figure and took the whole page down; since #467 (D095) it would only
+        leave the chart not drawn, and the escape keeps it drawn. ``(`` is written as
+        an entity, which plotly draws as ``(``."""
         body = year_body(2016)
         body["summary"][0]["candidate"] = name
         tree = render(2016, body=body)
@@ -4293,7 +4294,8 @@ class TestC3:
         self, name: str
     ) -> None:
         """As C1's round 1: a served name holding ``var(`` would make
-        ``components.chart`` refuse the figure and take the page down."""
+        ``components.chart`` refuse the figure, so the chart would not be drawn (#467,
+        D095); the escape keeps it drawn."""
         from explore import charts
 
         body = copy.deepcopy(per_capita_body(1848))

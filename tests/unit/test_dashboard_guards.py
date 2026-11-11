@@ -475,7 +475,8 @@ assert "isn't responding" not in text
 
 
 def _success_program(extra: str = "") -> str:
-    """The API answers from fixtures. ``extra`` registers a twin's page before the run."""
+    """The API answers from fixtures. ``extra`` is code run after the app imports and
+    before the pages load: a twin's page to register, or a patch."""
     return (
         _PRELUDE
         + _fixture_transport()
@@ -745,9 +746,18 @@ def test_the_runtime_imports_no_usvote_and_reaches_only_the_public_api() -> None
     assert set(result["hosts"]) == {PUBLIC_API_HOST}
 
 
+#: The start of the line ``components.chart`` logs, in ``app.py``'s ``basicConfig``
+#: format, for a figure it does not draw (#467, D095).
+NOT_DRAWN_LINE = "ERROR explore.components:"
+
+
 def test_the_success_path_reaches_only_the_public_api_and_reads_no_files() -> None:
-    """The success run: the API answers, so prefetch, renders and a miss all execute."""
-    result = _result(_run(_success_program()))
+    """The success run: the API answers, so prefetch, renders and a miss all execute.
+    No chart is left not drawn (#467): before D095 a figure that broke the chart rules made
+    the routing request fail here; now the page renders, so its log line is checked."""
+    completed = _run(_success_program())
+    assert NOT_DRAWN_LINE not in completed.stderr, completed.stderr[-3000:]
+    result = _result(completed)
     _assert_runtime_clean(result)
     # The program asserted the order; this pins that the run reached all three stages.
     assert result["served"][0] == "/v1/meta"
@@ -776,6 +786,15 @@ dash.register_page(
     prefetch=(api.META_PATH,), on_miss=(), success="twin-ok",
 )
 """
+
+
+def test_a_chart_not_drawn_in_the_success_run_reaches_its_stderr() -> None:
+    """Non-vacuity for the check above: with every figure refused, the run still
+    renders every page (each chart keeps its DOM id), and the line is on stderr."""
+    forced = "import explore.charts as _c\n_c.figure_problems = lambda f: ['forced']\n"
+    completed = _run(_success_program(forced))
+    assert completed.returncode == 0, completed.stderr[-3000:]
+    assert NOT_DRAWN_LINE in completed.stderr
 
 
 def test_the_success_run_fails_a_page_that_skips_its_post_success_content() -> None:
