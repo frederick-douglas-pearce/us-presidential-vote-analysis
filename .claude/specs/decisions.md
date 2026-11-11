@@ -6437,3 +6437,59 @@ per-year null stays because that route has rows worth serving without the compar
 **Action required.** #428 follows (i), (ii) and (iii) for its table and takes `API_VERSION`
 0.9.0 if it merges after #431. #434 is implemented only after #431 is deployed, since its
 `on_miss` fill would otherwise meet a live API without the route.
+
+## D095: A chart whose figure breaks the chart rules is not drawn; its page renders, and the failure is logged at error level and fails the unit suite
+
+**Date:** 2026-11-11
+**Amends:** D087 (its "Lazily" bullet) · **Builds on:** D088, D091 · **Decided by:** the owner, approving #467's plan (architect-reviewed)
+
+**Context.** `components.chart` raised `ValueError` when a figure failed `charts.figure_problems`.
+No page's layout catches it (each catches `ApiUnavailable`, `KeyError` and `TypeError`), so the
+routing callback errored and the page rendered none of its tables. It did not reach its degraded
+state, as #467 had assumed: it reached no state at all. Served data can reach those rules: #433's
+review found a served candidate name holding `var(` that failed the color rule (closed there by
+escaping the name). D087 made a chart progressive enhancement for a failed fetch of plotly.js; a
+failed build had no such rule. C2 (#434) and C4/C5 (#436) are next, so the contract is set before
+them.
+
+**Decision.**
+- **(a) The split is by cause.** What served data can reach leaves the chart not drawn; what only
+  a code change can reach still raises `ValueError`. So a figure that `figure_problems` refuses is
+  not drawn, and an unregistered or retired ID, another companion table, an empty caption or a
+  title that is not plain text raises. No title or caption C1 or C3 builds can fail those checks
+  from served data (C1's title formats the year; C3's names a census year only when every row
+  agrees). **A chart story whose title or caption names served text** (C4/C5's state filter, for
+  one) words it so it cannot fail those checks, or moves that check onto the not-drawn path in
+  that story.
+- **(b) The shape of a chart that is not drawn** is the chart's `figure` element with its DOM id
+  (so a fragment link still lands), its title as page text and its caption ending in the table
+  pointer, with **no mount point and no source store**. With no store neither MATCH callback
+  (`CHART_MOUNT_CALLBACK`, `CHART_CALLBACK`) runs for it, so plotly.js is not fetched for it. A
+  reader sees what D088's blocked load shows: the title, the caption, the pointer and the table.
+  No message names the failure to readers.
+- **(c) The failure is logged** at error level on the `explore.components` logger, naming the
+  chart's ID, its page, its problem count and the first `components.LOGGED_PROBLEMS` problems
+  (a problem can repr a served value, one per row), with the chart's ID on the record as
+  `chart_id`.
+- **(d) The unit suite fails on that log.** An autouse fixture in `tests/unit/conftest.py` fails
+  any `test_dashboard_*` test that leaves such a record it did not declare with
+  `@pytest.mark.expected_chart_failure(chart_id, count=1)`, exactly that many per chart
+  (`tests/chart_log.py`). `TestEveryChart.test_every_rendered_page` renders every registered
+  page's default view, so a shipped chart that is not drawn there fails the suite. The D070(b)
+  guard's success run, which caught the old failure as a failed routing request, now fails on the
+  log line on its stderr. `TestChartNotDrawn` breaks each live chart alone on its page and
+  requires every other component the page renders.
+- **(e) It holds for every chart** through `components.chart` (E14): a chart story inherits it
+  with nothing added, and its page's chart is in `TestChartNotDrawn` by its registry row.
+- **(f) No page catches around `components.chart`**, and no layout's `except` is widened for it.
+- **(g) Residuals.** Nothing alerts on the log line in production (App Engine's logs only). A
+  figure builder (`_c1_figure`, `_c3_figure`) raising anything other than `KeyError` or
+  `TypeError` still takes its page down; those two degrade the page, and they come from the rows
+  the tables read too. The title and caption caveat in (a).
+
+**Rationale.** A chart is never a page's success marker (D087), so a chart the page cannot draw
+must not cost the tables that carry the same numbers. A broken figure is still a developer's
+bug, so it is loud where a developer looks (the log, and a red test on any page's default
+render) rather than swallowed, and quiet where a reader looks. Reusing the blocked-load shape
+adds no reader state and no wording. A bare `except ValueError` around the call would also catch
+the static refusals in (a), which must stay failures.

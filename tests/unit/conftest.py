@@ -9,10 +9,14 @@ real :func:`usvote.snapshot.build_snapshot` writer, so it needs **no live Postgr
 
 A test that needs a bespoke frame can override the ``synthetic_frame`` fixture locally;
 the ``snapshot_path`` / ``settings`` / ``client`` chain then rebuilds from it.
+
+It also holds the dashboard tests' check on charts that were not drawn (#467, D095):
+:func:`no_undeclared_chart_failure`.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -20,6 +24,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.chart_log import LOGGER, Records, chart_log_problems
 from tests.fixtures.api_snapshot import (
     SNAPSHOT_TS,
     synthetic_ec_pv_frame,
@@ -85,3 +90,34 @@ def client(settings: ApiSettings) -> Iterator[TestClient]:
     # ``with`` runs the lifespan, so app.state.repository is opened (no live DB).
     with TestClient(create_app(settings)) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def no_undeclared_chart_failure(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail a dashboard test that leaves a chart not drawn it did not declare (#467).
+
+    ``components.chart`` logs a figure that breaks the chart rules at error level and
+    renders the chart's title and caption alone, so the page keeps its tables (D095).
+    This collects every such record during a ``test_dashboard_*`` test and fails it on
+    any the test did not declare with ``@pytest.mark.expected_chart_failure(chart_id,
+    count=1)``, exactly that many per chart (:func:`tests.chart_log.chart_log_problems`).
+    ``TestEveryChart.test_every_rendered_page`` renders every registered page's default
+    view, so a shipped chart that is not drawn there fails the suite.
+    """
+    if not request.node.path.name.startswith("test_dashboard_"):
+        yield
+        return
+    expected: dict[str, int] = {}
+    for marker in request.node.iter_markers("expected_chart_failure"):
+        chart_id = marker.args[0]
+        expected[chart_id] = expected.get(chart_id, 0) + marker.kwargs.get("count", 1)
+    handler = Records()
+    logger = logging.getLogger(LOGGER)
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+    problems = chart_log_problems(handler.records, expected)
+    if problems:
+        pytest.fail(f"chart not-drawn log: {problems}", pytrace=False)

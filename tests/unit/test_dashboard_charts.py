@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ import pytest
 
 from explore import app as appmod
 from explore import charts, components, labels
+from tests.chart_log import LOGGER, Records, chart_log_problems
 from tests.unit.test_dashboard_elections import of_type
 from tests.unit.test_dashboard_export import TEST_FIGURE
 from tests.unit.test_dashboard_guards import RUNTIME_MODULES
@@ -260,15 +262,54 @@ class TestChartBuilder:
         ],
         ids=["color", "hover", "template", "override", "markup", "number", "color-only"],
     )
-    def test_it_refuses_a_figure_with_problems(
-        self, change: Any, message: str
+    @pytest.mark.expected_chart_failure("C1")
+    def test_a_figure_with_problems_is_not_drawn_and_is_logged(
+        self, change: Any, message: str, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Each rule ``figure_problems`` gathers reaches the builder."""
+        """Each rule ``figure_problems`` gathers reaches the builder (#432), and a
+        figure that breaks one is not drawn (#467, D095): the chart keeps its DOM id,
+        its title and its caption with the table pointer, and has no mount point and
+        no source store, so no callback runs for it; one error record names the chart,
+        its page and the rule. The conftest check holds the count to exactly one."""
         figure = copy.deepcopy(TEST_FIGURE)
-        build(figure)  # the control: the figure passes before the change
+        drawn = build(figure)  # the control: the figure passes before the change
+        assert self.mounted(drawn)
+        caplog.clear()
         change(figure)
-        with pytest.raises(ValueError, match=message):
-            build(figure)
+        built = build(figure)
+        assert built.id == "c1" and not self.mounted(built)
+        assert [getattr(c, "id", None) for c in built.children] == ["c1-title", None]
+        assert built.children[0].children == TEST_FIGURE["layout"]["title"]["text"]
+        caption = built.children[1]
+        assert caption.children[0] == "A caption."
+        assert caption.children[2].href == "#elections-table"
+        [record] = [r for r in caplog.records if r.name == "explore.components"]
+        assert record.levelno == logging.ERROR and record.chart_id == "C1"  # type: ignore[attr-defined]
+        assert "C1 on /elections not drawn" in record.getMessage()
+        assert message in record.getMessage()
+
+    @staticmethod
+    def mounted(chart: Any) -> bool:
+        """Whether a built chart holds its mount point and its source store."""
+        ids = [getattr(c, "id", None) for c in chart.children]
+        return charts.mount_id("c1") in ids and charts.source_id("c1") in ids
+
+    @pytest.mark.expected_chart_failure("C1")
+    def test_the_log_lists_at_most_three_problems(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A problem can repr a served value, one per row: the line counts them all
+        and lists the first :data:`components.LOGGED_PROBLEMS`."""
+        figure = copy.deepcopy(TEST_FIGURE)
+        figure["data"][0]["hovertext"] = [f"<b>{n}</b>" for n in range(5)]
+        figure["data"][0]["x"] = [str(n) for n in range(5)]
+        figure["data"][0]["y"] = [0.1] * 5
+        problems = charts.figure_problems(figure)
+        assert len(problems) > components.LOGGED_PROBLEMS == 3
+        build(figure)
+        [record] = [r for r in caplog.records if r.name == "explore.components"]
+        assert f"{len(problems)} figure problem(s)" in record.getMessage()
+        assert record.args[-1] == problems[:3]  # type: ignore[index]
 
 
 # --- the figure rules ------------------------------------------------------------------
@@ -1136,3 +1177,66 @@ class TestMountCallback:
             "sendBeacon",
         ):
             assert banned not in script, banned
+
+
+# --- the not-drawn log check (#467, D095) --------------------------------------------
+
+
+class TestNotDrawnLogCheck:
+    """The check ``tests/unit/conftest.py`` runs after every dashboard test, on the
+    error records ``components.chart`` leaves when it does not draw a figure."""
+
+    @staticmethod
+    def record(chart_id: Any = "C1") -> logging.LogRecord:
+        record = logging.LogRecord(
+            "explore.components", logging.ERROR, __file__, 1, "x not drawn", None, None
+        )
+        if chart_id is not None:
+            record.chart_id = chart_id
+        return record
+
+    def test_no_record_and_none_expected_is_clean(self) -> None:
+        assert chart_log_problems([], {}) == []
+
+    def test_an_unexpected_record_fails(self) -> None:
+        assert chart_log_problems([self.record()], {}) == [
+            "C1: 1 not-drawn record(s), expected 0"
+        ]
+
+    def test_an_expected_record_is_clean(self) -> None:
+        assert chart_log_problems([self.record()], {"C1": 1}) == []
+
+    def test_a_wrong_count_or_a_missing_record_fails(self) -> None:
+        two = [self.record(), self.record()]
+        assert chart_log_problems(two, {"C1": 1}) == [
+            "C1: 2 not-drawn record(s), expected 1"
+        ]
+        assert chart_log_problems([], {"C1": 1}) == [
+            "C1: 0 not-drawn record(s), expected 1"
+        ]
+
+    def test_another_chart_is_not_excused_by_the_expected_one(self) -> None:
+        records = [self.record("C1"), self.record("C3")]
+        assert chart_log_problems(records, {"C1": 1}) == [
+            "C3: 1 not-drawn record(s), expected 0"
+        ]
+
+    def test_a_record_naming_no_chart_fails(self) -> None:
+        assert chart_log_problems([self.record(None)], {}) == [
+            "an error record naming no chart: x not drawn"
+        ]
+
+    # The record this test writes reaches the conftest check too, which holds it to one.
+    @pytest.mark.expected_chart_failure("C1")
+    def test_the_handler_keeps_only_error_records_of_the_builder_logger(self) -> None:
+        handler = Records()
+        logger = logging.getLogger(LOGGER)
+        logger.addHandler(handler)
+        try:
+            logger.warning("not an error")
+            logger.error("an error", extra={"chart_id": "C1"})
+            logging.getLogger("explore.api").error("another logger")
+        finally:
+            logger.removeHandler(handler)
+        assert [r.getMessage() for r in handler.records] == ["an error"]
+        assert components.log.name == LOGGER

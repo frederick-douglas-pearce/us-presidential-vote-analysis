@@ -324,9 +324,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
   (`figcaption`). The title is written as page text (a paragraph, not a heading), so it shows and
   wraps even when the drawing cannot load. The caption ends with the table pointer,
-  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a
-  chart with no title or no caption, and a series whose hover text would be plotly's own: each
-  series writes its own hover text or shows none. The chart title is plain text and says what
+  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a chart with no title or no caption. Each
+  series writes its own hover text or shows none. A figure that breaks the chart rules
+  `charts.figure_problems` checks (a series whose hover text would be plotly's own, a color that
+  is not a theme token, and the rest) is not drawn. The chart keeps its title, its caption and
+  the pointer, with its space left empty as when plotly.js cannot load. The page keeps its tables
+  and its other charts, and the failure is logged at error level for the developer. Readers see
+  no message about it. The chart title is plain text and says what
   the chart shows; the caption may state a finding (*A chart title describes; a caption may
   state a finding*). Assistive technology names the drawing by the chart
   title and skips what is drawn inside it; the companion table carries the numbers. Pointing at a
@@ -342,8 +346,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   page's theme tokens and follow the *Theme in effect*: switching the theme redraws every chart on
   the page, with no reload and no request. Series always differ by more than color. The drawing
   needs plotly.js, which the browser fetches from plotly's CDN when the page's first chart
-  mounts; a page with no chart fetches nothing from it. If the fetch fails, the drawing's space
-  stays empty, and the title, the caption, the pointer and the page's tables still show. A chart
+  mounts; a page with no chart fetches nothing from it. If the fetch fails, or the figure breaks the chart rules, the drawing's space stays empty, and
+  the title, the caption, the pointer and the page's tables still show. A chart
   is never a page's success marker. A chart has no download of its own: its companion table's CSV
   carries its numbers.
 - **Shown as:** `components.chart`, which writes each chart's title as page text above the
@@ -361,7 +365,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   leaves its space empty: owner decision on #452, 2026-11-07, recorded in D088; owner decisions
   at #432's plan gate, 2026-11-06 (the table pointer's wording, no toolbar, no chart IDs in
   reader text); `CHARTS` and `dom_id`, `TEMPLATE` and `CHART_CONFIG` in
-  `dashboard/explore/charts.py`.
+  `dashboard/explore/charts.py`; a figure that breaks the chart rules is not drawn, and its page
+  keeps its tables: #467 acceptance criteria, recorded in D095.
 - **Not:** A *figure*: in this file and on the page, a figure is a number ("no popular-vote
   figure"), and Plotly's and HTML's word for a chart stays in code. Not a page's title (the
   browser tab, `og:title`): a chart has a chart title. Not a stand-in for its companion table.
@@ -451,6 +456,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, and
   `NOT_FOUND_SENTENCE` in `pages/state.py` and `pages/candidate.py`). An empty filter result
   (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`).
+  A chart that is not drawn (*Chart*): its page still shows, with its tables.
 - **Status:** settled
 
 ### Election pages (overview, results by state, people per electoral vote)

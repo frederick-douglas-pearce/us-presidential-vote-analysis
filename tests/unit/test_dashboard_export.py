@@ -369,6 +369,20 @@ def chart_problems(
             problems.append(f"{key}: {live[dom]} belongs on {row.page}")
         if row.table not in tables:
             problems.append(f"{key}: {live[dom]} has no companion table {row.table}")
+    # A chart that is not drawn (#467, D095) has no mount point, so it is found by its
+    # figure: it still belongs on its row's page, beside its companion table, which its
+    # caption points at.
+    for figure in of_type(tree, "Figure"):
+        figure_id = getattr(figure, "id", None)
+        if figure_id not in live or mount_points(figure):
+            continue
+        row = charts.CHARTS[live[figure_id]]
+        if row.page != key:
+            problems.append(f"{key}: {live[figure_id]} (not drawn) belongs on {row.page}")
+        if row.table not in tables:
+            problems.append(
+                f"{key}: {live[figure_id]} (not drawn) has no companion table {row.table}"
+            )
     for store in of_type(tree, "Store"):
         store_id = getattr(store, "id", None)
         if isinstance(store_id, dict) and store_id.get("type") == charts.SOURCE_TYPE:
@@ -465,7 +479,11 @@ class TestEveryChart:
     """Every chart is built by ``components.chart`` (#432), with a registered ID, on its
     registry row's page, beside its companion table, and is never a page's success
     marker; and no layout holds a ``dcc.Graph`` (#452). No page renders a chart before
-    C1 (#433); the checks run on every page now and on test registries below."""
+    C1 (#433); the checks run on every page now and on test registries below.
+
+    ``test_every_rendered_page`` is also where a shipped chart that is not drawn fails
+    the suite (#467, D095): it renders every registered page's default view, and the
+    conftest check fails a test that leaves a not-drawn record it did not declare."""
 
     def test_every_rendered_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for page in dash.page_registry.values():
@@ -676,6 +694,132 @@ class TestEveryChart:
         ]
         assert chart_problems(tree, "/elections", built, "c1-title") == [
             "/elections: the success marker is inside chart c1"
+        ]
+
+
+def broken(figure: dict[str, Any]) -> dict[str, Any]:
+    """``figure`` breaking one real chart rule (#467): a hover mode the template fixes,
+    which every figure can carry whatever its traces."""
+    figure = copy.deepcopy(figure)
+    figure["layout"]["hovermode"] = "x unified"
+    assert charts.figure_problems(figure), "the breakage breaks no rule"
+    return figure
+
+
+def ids_in(tree: Any) -> set[str]:
+    """Every component id in ``tree`` (pattern ids by their repr)."""
+    return {
+        repr(c.id) if isinstance(c.id, dict) else c.id
+        for c in components_in(tree)
+        if getattr(c, "id", None) is not None
+    }
+
+
+class TestChartNotDrawn:
+    """#467, D095: a figure that breaks the chart rules costs only its chart. Each live
+    chart, on its page's default render, broken alone: it keeps its DOM id, title and
+    caption with no mount point and no store; every other component the page renders
+    (its tables and their downloads, its success marker, the election panel, the
+    provenance footer, every other chart's mount point and store) is still there; and
+    exactly one error record names it (the conftest check, through the marker). One
+    chart per page today, so the other-charts half bites when C2, C4 and C5 share
+    ``/elections``; the two-chart test below covers it now."""
+
+    @pytest.mark.parametrize(
+        "chart_id",
+        [
+            pytest.param(c, marks=pytest.mark.expected_chart_failure(c), id=c)
+            for c, row in charts.CHARTS.items()
+            if not row.retired
+        ],
+    )
+    def test_a_chart_that_breaks_a_rule_costs_only_itself(
+        self, monkeypatch: pytest.MonkeyPatch, chart_id: str
+    ) -> None:
+        row = charts.CHARTS[chart_id]
+        page = page_of(row.page)
+        success = page["success"]
+        plain, drawn = chart_render(lambda: render(row.page, monkeypatch)[0], monkeypatch)
+        assert chart_id in [c for c, _ in drawn], f"{chart_id} not on {row.page}"
+        real = components.chart
+
+        def breaking(*args: Any, **kwargs: Any) -> Any:
+            named = dict(zip(("chart_id", "figure", "table_id", "caption"), args, strict=False))
+            named.update(kwargs)
+            if named["chart_id"] == chart_id:
+                named["figure"] = broken(named["figure"])
+            return real(**named)
+
+        monkeypatch.setattr(components, "chart", breaking)
+        tree, built = chart_render(
+            lambda: render(row.page, monkeypatch)[0], monkeypatch
+        )
+        monkeypatch.setattr(components, "chart", real)
+        dom = charts.dom_id(chart_id)
+        [figure] = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom]
+        assert mount_points(figure) == [] and of_type(figure, "Store") == []
+        assert f"{dom}-title" in ids_in(figure)
+        assert f"#{row.table}" in [a.href for a in of_type(figure, "A")]
+        gone = {repr(charts.mount_id(dom)), repr(charts.source_id(dom))}
+        assert gone <= ids_in(plain)
+        assert ids_in(tree) == ids_in(plain) - gone, chart_id
+        assert _contains(tree, success) and _contains(tree, row.table)
+        assert chart_problems(tree, row.page, built, success) == []
+
+    @pytest.mark.expected_chart_failure("C2")
+    def test_the_other_chart_on_the_page_is_still_drawn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two charts beside one table, the second broken: the first keeps its mount
+        point and store, the table and the success marker stay. Built through a test
+        registry, never a registered page (the page registry is process-global)."""
+        monkeypatch.setattr(
+            charts,
+            "CHARTS",
+            {
+                "C1": charts.Chart("/elections", "elections-table"),
+                "C2": charts.Chart("/elections", "elections-table"),
+            },
+        )
+
+        def layout() -> Any:
+            return html.Div(
+                [
+                    components.chart("C1", TEST_FIGURE, "elections-table", "One."),
+                    components.chart(
+                        "C2", broken(TEST_FIGURE), "elections-table", "Two."
+                    ),
+                    html.Table(id="elections-table"),
+                    html.P(id="elections"),
+                ]
+            )
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert [m.id["chart"] for m in mount_points(tree)] == ["c1"]
+        stores = [s.id["chart"] for s in of_type(tree, "Store")]
+        assert stores == ["c1"]
+        assert {"c2", "c2-title", "elections-table", "elections"} <= ids_in(tree)
+        assert chart_problems(tree, "/elections", built, "elections") == []
+
+    @pytest.mark.expected_chart_failure("C1")
+    def test_a_chart_not_drawn_still_needs_its_page_and_table(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``chart_problems`` finds a chart that is not drawn by its figure, so its
+        page and companion-table checks still run."""
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+
+        def layout() -> Any:
+            return html.Div(
+                [components.chart("C1", broken(TEST_FIGURE), "elections-table", "C.")]
+            )
+
+        tree, built = chart_render(layout, monkeypatch)
+        assert chart_problems(tree, "/states", built, "states") == [
+            "/states: C1 (not drawn) belongs on /elections",
+            "/states: C1 (not drawn) has no companion table elections-table",
         ]
 
 
