@@ -5,7 +5,8 @@
 # (D033), pushes to Artifact Registry, deploys to Cloud Run with the cost knobs, purges
 # the Cloudflare edge cache AFTER the new revision serves traffic (D034 fork 3), and runs
 # post-deploy assertions (origin lock 403 + Cloudflare 200 + /health, and the canonical
-# /v1/elections/summary, which also refills it at the runner's colo, #431).
+# /v1/elections/summary, whose request also triggers the Worker to cache it at the
+# runner's colo; not verified, #478, #431).
 #
 # ALL environment-specific values come from repo Variables/Secrets so nothing is
 # hardcoded — set them once during provisioning (see docs/deploy-cloud-run.md):
@@ -311,8 +312,11 @@ jobs:
               etag=$(tr -d '\r' < "$sum_hdr" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
               if [ "$code" = "200" ] && [ "$etag" = "$SNAPSHOT_VERSION" ]; then
                 # Exit 0 = consistent, 1 = inconsistent (prints "<rows> <elections>"),
-                # 2 = unparseable (prints nothing).
-                counts=$(python - "$sum_body" 2>/dev/null <<'PY'
+                # 2 = unparseable (prints nothing). The step runs under `bash -e`, so the
+                # exit code is captured in an `if`, where a failing command does not end
+                # the step; a bare `counts=$(...)` then `rc=$?` would exit before the
+                # messages below print.
+                if counts=$(python - "$sum_body" 2>/dev/null <<'PY'
           import json, sys
           try:
               b = json.load(open(sys.argv[1]))
@@ -330,8 +334,7 @@ jobs:
           print(len(rows), len(election_years))
           sys.exit(0 if ok else 1)
           PY
-                )
-                rc=$?
+                ); then rc=0; else rc=$?; fi
                 if [ "$rc" -eq 0 ]; then
                   echo "  ✓ /v1/elections/summary: 200, this snapshot, ${counts% *} rows over ${counts#* } elections (try ${i})"
                   sum_ok=1; break
