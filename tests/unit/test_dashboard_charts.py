@@ -1226,6 +1226,29 @@ class TestNotDrawnLogCheck:
             "an error record naming no chart: x not drawn"
         ]
 
+    def test_the_conftest_check_is_listening_during_a_dashboard_test(self) -> None:
+        """The autouse fixture runs for this file: exactly one of its handlers is on
+        the builder's logger while a ``test_dashboard_*`` test body runs (so it is
+        loaded, autouse, admits these files, attaches before the body and leaked no
+        handler from an earlier test)."""
+        handlers = logging.getLogger(LOGGER).handlers
+        assert [type(h) for h in handlers].count(Records) == 1, handlers
+
+    def test_the_marker_binds_its_count_by_position_or_name(self) -> None:
+        from tests.unit.conftest import _expected_chart_failure
+
+        assert _expected_chart_failure("C1") == ("C1", 1)
+        assert _expected_chart_failure("C1", 2) == ("C1", 2)
+        assert _expected_chart_failure("C1", count=3) == ("C1", 3)
+        with pytest.raises(TypeError):
+            _expected_chart_failure()  # type: ignore[call-arg]
+
+    @pytest.mark.expected_chart_failure("C1", 2)
+    def test_a_positional_count_is_held_exactly(self) -> None:
+        logger = logging.getLogger(LOGGER)
+        logger.error("one", extra={"chart_id": "C1"})
+        logger.error("two", extra={"chart_id": "C1"})
+
     # The record this test writes reaches the conftest check too, which holds it to one.
     @pytest.mark.expected_chart_failure("C1")
     def test_the_handler_keeps_only_error_records_of_the_builder_logger(self) -> None:

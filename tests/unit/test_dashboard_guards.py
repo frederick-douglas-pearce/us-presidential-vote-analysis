@@ -475,7 +475,8 @@ assert "isn't responding" not in text
 
 
 def _success_program(extra: str = "") -> str:
-    """The API answers from fixtures. ``extra`` registers a twin's page before the run."""
+    """The API answers from fixtures. ``extra`` is code run after the app imports and
+    before the pages load: a twin's page to register, or a patch."""
     return (
         _PRELUDE
         + _fixture_transport()
@@ -752,7 +753,7 @@ NOT_DRAWN_LINE = "ERROR explore.components:"
 
 def test_the_success_path_reaches_only_the_public_api_and_reads_no_files() -> None:
     """The success run: the API answers, so prefetch, renders and a miss all execute.
-    No chart goes undrawn (#467): before D095 a figure that broke the chart rules made
+    No chart is left not drawn (#467): before D095 a figure that broke the chart rules made
     the routing request fail here; now the page renders, so its log line is checked."""
     completed = _run(_success_program())
     assert NOT_DRAWN_LINE not in completed.stderr, completed.stderr[-3000:]

@@ -328,12 +328,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   series writes its own hover text or shows none. A figure that breaks the chart rules
   `charts.figure_problems` checks (a series whose hover text would be plotly's own, a color that
   is not a theme token, and the rest) is not drawn. The chart keeps its title, its caption and
-  the pointer, with its space left empty as when plotly.js cannot load. The page keeps its tables
-  and its other charts, and the failure is logged at error level for the developer. Readers see
-  no message about it. The chart title is plain text and says what
-  the chart shows; the caption may state a finding (*A chart title describes; a caption may
-  state a finding*). Assistive technology names the drawing by the chart
-  title and skips what is drawn inside it; the companion table carries the numbers. Pointing at a
+  the pointer, with nothing shown between them, as when plotly.js cannot load. The page keeps
+  its tables and its other charts, and the failure is logged at error level for the developer.
+  Readers see no message about it. The chart title is plain text and says what the chart shows;
+  the caption may state a finding (*A chart title describes; a caption may state a finding*).
+  For assistive technology, a drawn chart, and one still waiting for plotly.js or whose load
+  failed, is an image named by its chart title, and what is drawn inside it is skipped; a chart
+  that is not drawn is no image, only its title and caption as text. Either way the companion
+  table carries the numbers. Pointing at a
   mark shows only the hover text written for that series, for the nearest point. Axis numbers are
   written in full with thousands separators, as the tables write them, never shortened ("80M",
   "1.2B"). The legend is only a key: clicking it hides nothing. A reader cannot zoom or drag a
@@ -346,10 +348,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   page's theme tokens and follow the *Theme in effect*: switching the theme redraws every chart on
   the page, with no reload and no request. Series always differ by more than color. The drawing
   needs plotly.js, which the browser fetches from plotly's CDN when the page's first chart
-  mounts; a page with no chart fetches nothing from it. If the fetch fails, or the figure breaks the chart rules, the drawing's space stays empty, and
-  the title, the caption, the pointer and the page's tables still show. A chart
-  is never a page's success marker. A chart has no download of its own: its companion table's CSV
-  carries its numbers.
+  mounts; a page with no chart fetches nothing from it. If the fetch fails, or the figure breaks
+  the chart rules, no drawing appears, and the title, the caption, the pointer and the page's
+  tables still show. A chart is never a page's success marker. A chart has no download of its
+  own: its companion table's CSV carries its numbers.
 - **Shown as:** `components.chart`, which writes each chart's title as page text above the
   drawing (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below
   it; `labels.CHART_TABLE_POINTER`; each chart's own wording (title, axis titles, trace names,

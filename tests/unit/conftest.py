@@ -92,6 +92,12 @@ def client(settings: ApiSettings) -> Iterator[TestClient]:
         yield c
 
 
+def _expected_chart_failure(chart_id: str, count: int = 1) -> tuple[str, int]:
+    """The ``expected_chart_failure`` marker's arguments, bound as a signature so a
+    positional count counts and a bare marker is a ``TypeError``."""
+    return chart_id, count
+
+
 @pytest.fixture(autouse=True)
 def no_undeclared_chart_failure(request: pytest.FixtureRequest) -> Iterator[None]:
     """Fail a dashboard test that leaves a chart not drawn it did not declare (#467).
@@ -104,13 +110,19 @@ def no_undeclared_chart_failure(request: pytest.FixtureRequest) -> Iterator[None
     ``TestEveryChart.test_every_rendered_page`` renders every registered page's default
     view, so a shipped chart that is not drawn there fails the suite.
     """
+    markers = list(request.node.iter_markers("expected_chart_failure"))
     if not request.node.path.name.startswith("test_dashboard_"):
+        if markers:
+            pytest.fail(
+                "expected_chart_failure is checked only in test_dashboard_* files",
+                pytrace=False,
+            )
         yield
         return
     expected: dict[str, int] = {}
-    for marker in request.node.iter_markers("expected_chart_failure"):
-        chart_id = marker.args[0]
-        expected[chart_id] = expected.get(chart_id, 0) + marker.kwargs.get("count", 1)
+    for marker in markers:
+        chart_id, count = _expected_chart_failure(*marker.args, **marker.kwargs)
+        expected[chart_id] = expected.get(chart_id, 0) + count
     handler = Records()
     logger = logging.getLogger(LOGGER)
     logger.addHandler(handler)

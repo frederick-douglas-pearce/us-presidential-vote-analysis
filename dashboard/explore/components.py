@@ -416,9 +416,10 @@ def chart(
     its problems, and the figure is returned with its title and caption but no mount
     point and no store, so no callback runs for it and plotly.js is not fetched for it;
     the page keeps its tables and its other charts. The unit suite fails on that log
-    line (its conftest, D095). An unregistered or retired ID, another table,
-    an empty caption or a title that is not plain text raises ``ValueError``: only a
-    code change reaches those, so they are a page's bug, never a reader's input.
+    line (the unit suite's ``no_undeclared_chart_failure``, D095). An unregistered or
+    retired ID, another table, an empty caption or a title that is not plain text
+    raises ``ValueError``: only a code change reaches those, so they are a page's bug,
+    never a reader's input.
     """
     row = charts.CHARTS.get(chart_id)
     if row is None or row.retired:

@@ -6466,7 +6466,9 @@ them.
   pointer, with **no mount point and no source store**. With no store neither MATCH callback
   (`CHART_MOUNT_CALLBACK`, `CHART_CALLBACK`) runs for it, so plotly.js is not fetched for it. A
   reader sees what D088's blocked load shows: the title, the caption, the pointer and the table.
-  No message names the failure to readers.
+  The match is visual: for assistive technology, a blocked load leaves an empty image named by
+  the chart title, while a chart that is not drawn has no image, only its title and its caption,
+  ending in the pointer, as text. No message names the failure to readers.
 - **(c) The failure is logged** at error level on the `explore.components` logger, naming the
   chart's ID, its page, its problem count and the first `components.LOGGED_PROBLEMS` problems
   (a problem can repr a served value, one per row), with the chart's ID on the record as
@@ -6485,7 +6487,10 @@ them.
 - **(g) Residuals.** Nothing alerts on the log line in production (App Engine's logs only). A
   figure builder (`_c1_figure`, `_c3_figure`) raising anything other than `KeyError` or
   `TypeError` still takes its page down; those two degrade the page, and they come from the rows
-  the tables read too. The title and caption caveat in (a).
+  the tables read too. `charts.figure_problems` itself runs on served values, so a check that
+  raises instead of returning a problem still takes the page down, as a builder raising does
+  (not new: before this entry either outcome did; totality is #484). The title and caption
+  caveat in (a).
 
 **Rationale.** A chart is never a page's success marker (D087), so a chart the page cannot draw
 must not cost the tables that carry the same numbers. A broken figure is still a developer's

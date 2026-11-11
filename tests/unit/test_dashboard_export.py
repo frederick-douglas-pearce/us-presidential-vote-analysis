@@ -494,6 +494,9 @@ class TestEveryChart:
             # The custom-404 page reads no data and declares no success marker.
             success = page.get("success", "")
             assert chart_problems(tree, key, built, success) == [], key
+            # #467: every chart a default render builds is drawn (a mount point), which
+            # observes the not-drawn branch without going through its log.
+            assert all(mount_points(figure) for _, figure in built), key
 
     @pytest.mark.parametrize(
         ("key", "values", "query", "kind"),
