@@ -6476,7 +6476,8 @@ them.
 - **(d) The unit suite fails on that log.** An autouse fixture in `tests/unit/conftest.py` fails
   any `tests/unit/test_dashboard_*` test that leaves such a record it did not declare with
   `@pytest.mark.expected_chart_failure(chart_id, count=1)`, exactly that many per chart
-  (`tests/chart_log.py`); the marker anywhere else is a collection error (`tests/conftest.py`). `TestEveryChart.test_every_rendered_page` renders every registered
+  (`tests/chart_log.py`); the marker anywhere else is refused at collection with a usage error
+  (`tests/conftest.py`). `TestEveryChart.test_every_rendered_page` renders every registered
   page's default view, so a shipped chart that is not drawn there fails the suite. The D070(b)
   guard's success run, which caught the old failure as a failed routing request, now fails on the
   log line on its stderr. `TestChartNotDrawn` breaks each live chart alone on its page and
