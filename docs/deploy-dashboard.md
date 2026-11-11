@@ -1047,14 +1047,15 @@ other years one or two.
   about 2.18 s, around first data, when the chart mounted (D088). dcc's `async-graph.js`
   finished at 5.02 s, and the chart was drawn at 5.41 s. **So the first data cell does not
   wait for plotly.js**, and from the cache the chart draws 2.9–3.2 s after first data.
-- **Request budget held.** The dashboard logged 18 `api fetch` lines for nine years, the two
-fills each (`ELECTION_MISSES` then; one page made both before #465), and no others; no
-warnings and no 5xx. - **Memory:** the instance used 115.6 MB (110.2 MiB) after the deploy
-probes (10 requests), 144.7 MB (138.0 MiB) after the first five years were filled (280
-requests) and 147.0 MB (140.2 MiB) after nine (496 requests): 38 % of the 384 MB D071 names
-for F1 (37 % if that limit is 384 MiB), so D071's F1 flip condition is not near (`gcloud app
-instances list`, `instance.memoryUsage`, in bytes). #310 measured 106–126 MiB before any
-chart.
+- **Request budget held.** The dashboard logged 18 `api fetch` lines for nine years, the
+  two fills each (`ELECTION_MISSES` then; one page made both before #465), and no others; no
+  warnings and no 5xx.
+- **Memory:** the instance used 115.6 MB (110.2 MiB) after the deploy probes (10 requests),
+  144.7 MB (138.0 MiB) after the first five years were filled (280 requests) and 147.0 MB
+  (140.2 MiB) after nine (496 requests): 38 % of the 384 MB D071 names for F1 (37 % if
+  that limit is 384 MiB), so D071's F1 flip condition is not near
+  (`gcloud app instances list`, `instance.memoryUsage`, in bytes). #310 measured
+  106–126 MiB before any chart.
 
 ### Election pages after the split and C3, measured after deploy (2026-11-11, #470)
 
@@ -1206,7 +1207,8 @@ Every run on all three pages reached data, with no degraded page.
   baseline.
 
 **Request budget held.** The dashboard logged 38 `api fetch` lines from A's first line
-(08:59:24Z) to the last run's fill (09:10:36Z), by check 2's query (§12) bounded to that window, counting its `api fetch` lines:
+(08:59:24Z) to the last run's fill (09:10:36Z), by check 2's query (§12) bounded to that
+window, counting its `api fetch` lines:
 
 - each instance's two prefetched paths (`/v1/meta` and `/v1/elections`) as it started;
 - on A, 18 fills, one for each first visit, and one `/v1/meta` recheck by the refresher
