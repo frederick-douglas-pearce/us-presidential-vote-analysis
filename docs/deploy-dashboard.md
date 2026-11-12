@@ -1239,3 +1239,77 @@ The peak is below the baseline's 147.0 MB peak, so D071's F1 flip condition is n
   #482, which links #470 and carries these runs as its evidence.
 - Every 2016 first visit to the Overview was below 2.8 s, so that trigger did not fire.
 - Memory is far from F1's limit.
+
+### Chart C2 on the elections index, measured after deploy (2026-11-12, #434)
+
+C2 (#434, D096) is the first chart on `/elections`, and it fills N1
+(`/v1/elections/summary`) on the first visit after a start, so its story re-measured D071(g)
+on that page (D096(f)). No earlier record measures `/elections`, so there is no baseline.
+
+Dashboard version `v-e86957ade9ef-r26-a1` (deploy run 43134835942 of e86957a, the merge of
+#487, which shipped C2), snapshot `37af4064…`, API 0.8.0, with no API deploy since the
+#470 record. The API origin was warm throughout, by the keep-warm ping (its last `/health`
+before the runs at 01:33:05Z); it logged no `Starting new instance` in the window. Measured
+01:34–01:38Z, clear of the daily canary (its last run 2026-11-11 20:13Z, the next due
+13:17Z), by #277's method: `scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps /
+100 ms, a fresh browser context each run), with `--chart "#c2 .main-svg"`. The chart column
+is the time until the chart is drawn, which is not a D071(g) measure.
+
+**Three instances**, one first visit each:
+
+- **A**, the deploy's new instance: a first visit, then six runs from the cache. The deploy's
+  probes request `/`, not `/elections`, so they fill nothing N1 needs.
+- **B** and **C**, after [restarts](#restarting-the-instance-to-empty-its-cache) at
+  01:35:45Z and 01:36:57Z: one first visit each. Warmup ran on each as a loading request
+  (1.93 s and 2.03 s), and each was serving its snapshot 2–3 s after the delete.
+
+Each first visit was a genuine miss: its `api fetch /v1/elections/summary` line was logged
+during that run (01:34:13Z, 01:36:08Z, 01:37:21Z), and no earlier line names that path on
+that instance. On B and C, check 3 ran before the run. The API's request log shows no
+`/v1/` request in the window, so the edge answered all three fills.
+
+| Run | Instance | TTFB (s) | First data (s) | Chart (s) |
+|---|---|---|---|---|
+| First visit | A | 0.23 | 1.64 | 4.84 |
+| First visit | B | 0.20 | 1.63 | 4.22 |
+| First visit | C | 0.16 | 1.60 | 5.09 |
+| From the cache (6 runs) | A | 0.09–0.20 | 1.11–1.31 | 4.32–4.66 |
+
+Every run reached data, with no degraded page and no C2 section degraded.
+
+- **TTFB met D071(g) on 9 of 9 runs** (0.09–0.23 s, against ≤ 1 s).
+- **First data met it on 9 of 9** (1.60–1.64 s on a first visit, 1.11–1.31 s from the
+  cache, against ≤ 3 s). A first visit took about 0.3–0.5 s longer than a run from the
+  cache: N1's one fill.
+- The chart is drawn 2.6–3.5 s after first data on a first visit, and 3.1–3.5 s after it
+  from the cache, a little later than C1 and C3 on the election pages (2.86–3.05 s from
+  the cache, in #470's record).
+
+**Request budget held.** The dashboard logged 9 `api fetch` lines from A's first line
+(01:33:04Z) to C's fill (01:37:21Z): each instance's two prefetched paths (`/v1/meta` and
+`/v1/elections`) as it started, and one N1 fill for each first visit. The runs from the
+cache, and a filter change (`?pv=1`, checked by hand after the runs), made none. The app
+logged no warnings and no 5xx.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes):
+
+- A: 115.2 MB (109.9 MiB), 30 % of the 384 MB D071 names for F1, after the deploy probes
+  (5 requests); 130.1 MB (124.0 MiB), 34 %, after its seven runs (131 requests).
+- C: 123.7 MB (118.0 MiB), 32 %, after its first visit and the hand checks below
+  (85 requests).
+
+The peak is below #470's 143.7 MB, so D071's F1 flip condition is not near.
+
+**Checked by hand on the deployed version**, after the runs:
+
+- At 390 px (light and dark) and 1280 px, the page has no sideways scroll; every year's tick
+  and point label shows, and the dashed line and the points differ without color.
+- The companion table has one row per served year (1824–2024). 1824 reads Andrew Jackson,
+  99 of 261, 37.9 %, no majority, did not take office, and sits below the line; 1876
+  (185 of 369, 50.1 %) and 2000 (271 of 538, 50.4 %) sit just above it; 2016 is 304 of 538;
+  1868 and 1872 read 214 of 294 and 286 of 366, counted votes of electors appointed. Each
+  year links to its `/election/<year>` and each name to its candidate page.
+- `?pv=1` narrows the list of elections and leaves C2's table unchanged (D096(b)).
+- Both downloads are offered: the Electoral College leaders and the elections (CSV).
+- §9's checks: `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200, and
+  the plotly.js path a 404.
