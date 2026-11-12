@@ -254,9 +254,10 @@ def _row(election: dict[str, Any]) -> html.Tr:
 
 def n1_items(index: dict[str, Any], summary: Any) -> dict[int, dict[str, Any]]:
     """N1's ``elections`` items by year, one for each year the index serves (D096(c)):
-    the one check of those items, shared by C2 (:func:`leaders`) and the averages
-    (#437, D097), so an item both read is accepted or refused by both alike (C2 adds its
-    own rank-1 rule, :func:`leaders`).
+    the one check of those items, which C2 (:func:`leaders`) and the averages (#437,
+    D097) both call, so the rule for a valid item is in one place. Each refuses more on
+    its own reads: C2 a missing ``ec_determinative`` and its rank-1 rule on ``data``
+    rows, the averages a missing margin among the years shown.
 
     Pure; raises ``KeyError`` for a missing key and ``TypeError`` for a year (in the
     index's rows or in N1's items) that :func:`explore.election_view.row_year` refuses

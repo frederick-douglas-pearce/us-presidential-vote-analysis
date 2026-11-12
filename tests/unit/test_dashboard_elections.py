@@ -1819,9 +1819,11 @@ class TestMetricsDegraded:
             ("an item with no ec_margin", None),
         ],
     )
-    def test_an_item_level_defect_degrades_the_averages_and_c2(
+    def test_an_item_level_defect_degrades_the_averages(
         self, name: str, summary: Any
     ) -> None:
+        """Each defect replaces the averages with their sentence and keeps the count;
+        C2 degrades too, unless the missing field is one it does not read (a margin)."""
         if name == "an elections item for a year not served":
             summary = copy.deepcopy(SUMMARY)
             summary["elections"].append({**summary["elections"][0], "year": 1826})

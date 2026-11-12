@@ -6587,12 +6587,12 @@ is served for every election (1824–2024), `pv_margin` only inside the popular-
   row (a count, sum or mean), on any page, now and later. It does not govern formatting one served
   value into a cell, or a chart drawing served values (D091).
 - **(c) Inputs.** One grain, one pinned view; responses are joined only on the grain key, and each
-  response is checked by one pure function that every reader of it calls, so no reader accepts an
-  item another's check refuses; a reader may add a check of its own (C2's rank-1 rule, below). On
-  `/elections`, N1's
-  `elections` items are checked by `n1_items` (`pages/elections.py`), which C2's `leaders` also
-  calls (D096(c)); the averages never reuse C2's rank-1 check, since a tie at rank 1 is valid API
-  data (D094(iv)) that only C2 refuses.
+  response's items are checked by one pure function that every reader calls. A reader may refuse
+  more on its own reads. On `/elections`, N1's `elections` items are checked by `n1_items`
+  (`pages/elections.py`), which C2's `leaders` also calls (D096(c)); C2 also refuses a missing
+  `ec_determinative` and applies its rank-1 rule to `data` rows, and the averages refuse a missing
+  margin among the years shown. The averages never reuse C2's rank-1 check, since a tie at rank 1
+  is valid API data (D094(iv)) that only C2 refuses.
 - **(d) The row set** is the rows the page's own table shows under its parsed query (`/elections`:
   T1's `shown`), so `og:url` reopens the same figures. A mean counts each year once, however often
   the index lists it (#334). The count follows the table's rows, a year the index lists twice
@@ -6625,5 +6625,5 @@ is served for every election (1824–2024), `pv_margin` only inside the popular-
 **Rationale.** A summary the dashboard computes is a claim the API never made, so it is held to
 what a reader can check: served inputs, one grain, the simplest aggregates, and its own N and
 years in view. Two averages over different years read as one comparison unless each says which
-elections it covers. Checking a response with one shared function keeps one N1 item from being
-accepted by one reader and refused by another, whichever filter is applied.
+elections it covers. Checking a response's items with one function every reader calls keeps the
+rule for a valid item in one place.
