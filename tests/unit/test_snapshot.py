@@ -1453,10 +1453,14 @@ def _state_rows(*rows: tuple[str, int | None, int | None, str]) -> pd.DataFrame:
         ),
         (
             (("A", 5, 11, "popular_vote"), ("B", 6, None, "popular_vote")),
-            "popular votes but no state total",
+            "not null together",
+        ),
+        (
+            (("A", 5, 11, "popular_vote"), ("F", None, 11, "popular_vote")),
+            "not null together",
         ),
     ],
-    ids=["two-totals", "two-statuses", "votes-without-a-total"],
+    ids=["two-totals", "two-statuses", "votes-without-a-total", "a-total-without-votes"],
 )
 def test_the_per_state_guard_refuses_a_second_value(
     rows: tuple[tuple[str, int | None, int | None, str], ...], match: str

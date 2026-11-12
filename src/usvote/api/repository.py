@@ -63,11 +63,12 @@ from usvote.snapshot_schema import (
 #: (a join that multiplied rows), not a large-but-valid result.
 #: A whole-table read also needs a grain test with a twin proving it fires — for
 #: ``/v1/elections/summary``, ``_assert_summary_grain`` and
-#: ``test_the_summary_grain_check_fires_on_a_duplicated_row``, and for
-#: ``/v1/elections/states``, ``_assert_state_grain`` and
-#: ``test_the_state_grain_check_fires_on_a_duplicated_row``, all in
-#: ``tests/unit/test_api_endpoints.py``; a ``GROUP BY``/``DISTINCT`` read is at its
-#: grain by construction.
+#: ``test_the_summary_grain_check_fires_on_a_duplicated_row`` in
+#: ``tests/unit/test_api_endpoints.py``, and for ``/v1/elections/states``,
+#: ``_assert_state_grain`` and
+#: ``test_the_state_grain_check_fires_on_a_duplicated_row`` in
+#: ``tests/unit/test_api_election_states.py``; a ``GROUP BY``/``DISTINCT`` read is at
+#: its grain by construction.
 #:
 #: Headroom, measured on snapshot ``37af4064`` (2026-11-10): the widest scoped reads are
 #: one year (357 rows), one candidate (192) and one state (132); the whole-table

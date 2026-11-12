@@ -6656,12 +6656,12 @@ that `max` would have resolved them silently.
   both routes.
 - **(b) One total and one status per state.** A state's popular-vote total is its **at most one
   distinct non-null** `state_total_votes`. A NULL beside it is a candidate with no figure, never a
-  second total, and a NULL total sits only beside a NULL `candidate_votes`. A state has **exactly
-  one** `pv_status`. The build refuses any other shape
+  second total: `state_total_votes` and `candidate_votes` are null on the same rows. A state has
+  **exactly one** `pv_status`. The build refuses any other shape
   (`snapshot.assert_state_popular_fields_are_per_state`), before the national roll-up, so the roll-up's
-  `max` is covered too. The route refuses it again at serve time (`SnapshotRepository.state_rows_all`,
-  a 500), together with `per_capita` and `ec_pv` covering different `(year, state)` keys in
-  either direction (D094(iii)). Both reads are D094(i) kinds: `per_capita` whole (primary key
+  `max` is covered too. The route refuses a second total or a second status again at serve time
+  (`SnapshotRepository.state_rows_all`, a 500), together with `per_capita` and `ec_pv` covering
+  different `(year, state)` keys in either direction (D094(iii)). Both reads are D094(i) kinds: `per_capita` whole (primary key
   `(year, state)`), and `ec_pv` grouped down to `(year, state)`. They are merged in the repository,
   on `(year, state)`, so the route handler aggregates nothing. No snapshot schema bump.
 - **(c) The deploy requests it after the purge**, through the same check as `/v1/elections/summary`

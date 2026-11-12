@@ -307,14 +307,41 @@ def test_the_literal_path_does_not_shadow_or_get_shadowed_by_the_year_path(
     assert client.get("/v1/elections/abc").status_code == 422
 
 
-def test_the_read_goes_through_the_row_cap(
+def test_the_route_is_a_500_over_the_row_cap(
     settings: ApiSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both unscoped reads go through the capped select: a cap below 8 rows is a 500."""
+    """Over the cap the route fails loud (a 500), and the per-year route still answers."""
     monkeypatch.setattr("usvote.api.repository.MAX_ROWS", 7, raising=True)
     with TestClient(create_app(settings), raise_server_exceptions=False) as c:
         assert c.get(_PATH).status_code == 500
         assert c.get("/v1/elections/2020/per-capita").status_code == 200
+
+
+def test_the_per_capita_read_goes_through_the_row_cap(
+    snapshot_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``per_capita``'s 8 rows trip a cap of 7 in its own read, the first of the two."""
+    repo = SnapshotRepository.open(snapshot_path)
+    monkeypatch.setattr("usvote.api.repository.MAX_ROWS", 7, raising=True)
+    with pytest.raises(SnapshotError, match=r"7-row cap.*FROM per_capita"):
+        repo.state_rows_all()
+
+
+def test_the_grouped_ec_pv_read_goes_through_the_row_cap(
+    snapshot_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second read is capped too, not only the first.
+
+    With one ``per_capita`` row removed that read returns 7 and passes a cap of 7, so
+    the read that trips it is ``ec_pv`` grouped to its 8 ``(year, state)`` keys, before
+    the key-set check would have refused the mismatch.
+    """
+    repo = _doctor(
+        snapshot_path, "DELETE FROM per_capita WHERE year = 2020 AND state = 'Texas'"
+    )
+    monkeypatch.setattr("usvote.api.repository.MAX_ROWS", 7, raising=True)
+    with pytest.raises(SnapshotError, match=r"7-row cap.*FROM ec_pv"):
+        repo.state_rows_all()
 
 
 # --- fail loud: one total and one status per state ---------------------------
@@ -366,6 +393,29 @@ def test_a_per_capita_key_missing_from_ec_pv_is_a_500(
     with TestClient(create_app(settings), raise_server_exceptions=False) as c:
         assert c.get(_PATH).status_code == 500
         assert c.get("/v1/elections/2020/per-capita").status_code == 200
+        assert c.get("/v1/elections/2020").status_code == 200
+
+
+def test_key_sets_of_equal_size_that_differ_are_a_500(
+    snapshot_path: str, settings: ApiSettings
+) -> None:
+    """The check compares the keys, not how many there are.
+
+    Relabeling ``per_capita``'s 2020 Texas row as Utah keeps both tables at 8 keys, so a
+    count check would pass it; each table now holds one key the other lacks.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "UPDATE per_capita SET state = 'Utah', state_usps = 'UT' "
+        "WHERE year = 2020 AND state = 'Texas'",
+    )
+    with pytest.raises(
+        SnapshotError,
+        match=r"per_capita only \[\(2020, 'Utah'\)\], ec_pv only \[\(2020, 'Texas'\)\]",
+    ):
+        repo.state_rows_all()
+    with TestClient(create_app(settings), raise_server_exceptions=False) as c:
+        assert c.get(_PATH).status_code == 500
         assert c.get("/v1/elections/2020").status_code == 200
 
 

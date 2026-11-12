@@ -318,7 +318,7 @@ jobs:
                 code=$(curl -s -o "$body" -D "$hdr" -w '%{http_code}' --max-time 20 "https://${CF_HOST}${path}") || code=000
                 etag=$(tr -d '\r' < "$hdr" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
                 if [ "$code" = "200" ] && [ "$etag" = "$SNAPSHOT_VERSION" ]; then
-                  if out=$(python "$checker" "$body" 2>/dev/null); then rc=0; else rc=$?; fi
+                  if out=$(python -I "$checker" "$body" 2>/dev/null); then rc=0; else rc=$?; fi
                   if [ "$rc" -eq 0 ]; then
                     echo "  ✓ ${path}: 200, this snapshot, $(safe "${out}") (try ${i})"
                     return 0

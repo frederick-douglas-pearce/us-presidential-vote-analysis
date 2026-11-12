@@ -1469,9 +1469,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   to `national_pv_denominator`. The candidates' `popular_votes` in a state can add up to less
   than it, because it includes votes for candidates who are not in this dataset.
 - **Shown as:** on the API's `/docs` page, the `ElectionStateRow.state_popular_total` and
-  `EcPvRow.state_popular_total` field descriptions in `src/usvote/api/models.py`, and the
-  `/v1/elections/states` docstring in `src/usvote/api/routes.py`. Not shown on the dashboard;
-  showing it needs its own `LABELS` key.
+  `EcPvRow.state_popular_total` field descriptions and the `ElectionStateRow` model docstring in
+  `src/usvote/api/models.py`; the `/v1/elections/states` summary and docstring in
+  `src/usvote/api/routes.py`; and the API description's **Persons per electoral vote.** paragraph
+  (`_DESCRIPTION_TEMPLATE` in `src/usvote/api/app.py`). Not shown on the dashboard; showing it
+  needs its own `LABELS` key.
 - **Source:** `EcPvRow.state_popular_total`, `ElectionStateRow.state_popular_total`;
   `_aggregate_fusion_lines`, `assert_totals_reconcile` and `assert_totals_not_exceeded` in
   `src/usvote/mit/transform.py`; `docs/api-snapshot.md` (`national_pv_denominator`); #428 plan
@@ -1754,8 +1756,8 @@ decision and who makes it.
 - **The API's published text** and **Candidate**: merged API text does not yet follow these
   rules: *The API's published text is reader wording*; *In the API's published text, public
   names are vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal
-  and survey terms*, and the `EcPvRow.state_popular_total` description (*State's total popular
-  vote*). Separately, reader text does not call `candidate_slug` "durable" (owner
+  and survey terms*. That text includes the `EcPvRow.state_popular_total` description (*State's
+  total popular vote*), which writes "None" and "PV". Separately, reader text does not call `candidate_slug` "durable" (owner
   decision, 2026-10-16, #379), but these still do: the *Candidate* entry's **Precise**; the
   `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
   `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in

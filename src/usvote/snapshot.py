@@ -575,9 +575,11 @@ def assert_state_popular_fields_are_per_state(data_df: pd.DataFrame) -> None:
       state's real total (1976, 1988, 2004 and 2016 on snapshot ``37af4064``). Two
       different non-null totals would otherwise be resolved silently by the ``max`` in
       :func:`usvote.hybrid.roll_up_national`, which is why this runs before the roll-up;
-    - **a NULL ``state_total_votes`` only beside a NULL ``candidate_votes``**, which is
-      what makes "a NULL total is a candidate row with no figure" a checked fact rather
-      than an assumption;
+    - **``state_total_votes`` and ``candidate_votes`` null together** on every row: a
+      row with no popular votes has no state total, and a row with a state total has
+      popular votes. That makes "a NULL total is a candidate row with no figure", and
+      the published "null on a row for a candidate with no popular-vote figure", a
+      checked fact rather than an assumption;
     - **exactly one ``pv_status``.** This re-checks, on the served frame,
       :func:`add_pv_status`'s ``m:1`` merge, which already makes it constant by
       construction.
@@ -598,15 +600,15 @@ def assert_state_popular_fields_are_per_state(data_df: pd.DataFrame) -> None:
             "total and status are facts about the state, served once per (year, "
             "state) (D098)."
         )
-    orphan = data_df.loc[
-        data_df["state_total_votes"].isna() & data_df["candidate_votes"].notna(),
+    apart = data_df.loc[
+        data_df["state_total_votes"].isna() != data_df["candidate_votes"].isna(),
         ["year", "state", "candidate"],
     ]
-    if not orphan.empty:
+    if not apart.empty:
         raise SnapshotError(
-            "a fact row has popular votes but no state total: "
-            f"{orphan.to_dict('records')[:5]}. A NULL state_total_votes must mean the "
-            "candidate has no popular-vote figure in that state (D098)."
+            "a fact row's popular votes and state total are not null together: "
+            f"{apart.to_dict('records')[:5]}. A NULL state_total_votes must mean the "
+            "candidate has no popular-vote figure in that state, and only that (D098)."
         )
 
 
