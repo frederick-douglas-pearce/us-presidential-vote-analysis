@@ -160,6 +160,12 @@ ROSTER_PATH = "/v1/elections/{year_max}"
 #: (D074(ii)); whether to warm it is #310's question beside the roster (D072).
 CANDIDATES_PATH = "/v1/candidates"
 
+#: Every election's national results and three-method comparison in one response (N1,
+#: #431, D094): chart C2's source on the elections index (#434, D096). A literal,
+#: declared in ``on_miss`` and filled on a miss (D074(ii)), so D072's prefetch extent
+#: is unchanged.
+SUMMARY_PATH = "/v1/elections/summary"
+
 _PLACEHOLDER_RE = re.compile(r"{(.*?)}")
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")

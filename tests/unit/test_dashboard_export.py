@@ -38,6 +38,8 @@ from tests.unit.test_dashboard_guards import DOWNLOAD_IDS
 #: Every table's id (its link's is ``export.link_id(id)``), by the page that renders it.
 TABLES = {
     "elections-table": "/elections",
+    # Chart C2's companion table (#434).
+    "elections-leader-table": "/elections",
     "election-states": "/election/<year>/states",
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
@@ -54,7 +56,8 @@ TABLES = {
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
-    "/elections": ["/v1/elections"],
+    # The index, then N1 for chart C2, in the same view (#434).
+    "/elections": ["/v1/elections", "/v1/elections/summary"],
     # #465 split the one-election view's reads across its three pages: each fills one
     # path (the per-capita page reads no /v1/elections/{year}), and none adds a read.
     "/election/<year>": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
@@ -446,6 +449,23 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({"year": "1864"}, "state=GA", "filtered"),
         ({"year": "1864"}, "state=ZZ", "absent"),
     ],
+    # #434, D096: the filters narrow T1, never C2 or its companion table. 1700 is four
+    # digits the parser keeps and the layout replaces with the span's start.
+    "/elections": [
+        ({}, "year_from=1824&year_to=1900", "filtered"),
+        ({}, "year_from=1700", "absent"),
+    ],
+}
+
+#: The tables each chart page's filter narrows (#434, D096, amending D093(c)): under a
+#: ``filtered`` query every one listed narrows, under an ``absent`` one none does, and
+#: a chart's companion table not listed here equals the unfiltered render under every
+#: query. Hand-written: a chart story adding a filtered page lists its tables, and
+#: ``test_every_chart_page_with_a_filter_lists_its_queries`` fails a live chart page
+#: with a ``query=`` parser that lists none.
+FILTERED_TABLES: dict[str, tuple[str, ...]] = {
+    "/election/<year>/per-capita": ("election-per-capita",),
+    "/elections": ("elections-table",),
 }
 
 
@@ -521,7 +541,10 @@ class TestEveryChart:
         filter never narrows a chart (D093(a)): every trace but the chart's selected
         item (:data:`SELECTION_TRACES`) equals the unfiltered render's, as do its row
         labels; a ``filtered`` query on a page with a filter adds exactly one selected
-        point and narrows the companion table, and an ``absent`` one does neither."""
+        point (where the chart marks one) and narrows each table
+        :data:`FILTERED_TABLES` lists for the page, and an ``absent`` one does neither;
+        a companion table that list does not name is unchanged under every query (#434,
+        D096, amending D093(c))."""
         page = page_of(key)
         success = page.get("success", "")
         parser = page.get("query")
@@ -551,27 +574,36 @@ class TestEveryChart:
                 assert len(marks) == 1 and len(marks[0]["x"]) == 1, (key, query, dom)
             else:
                 assert marks == [], (key, query, dom)
-        for row in charts.CHARTS.values():
-            if row.retired or row.page != key:
-                continue
-            shown = table_row_count(tree, row.table)
-            everything = table_row_count(plain, row.table)
-            assert shown > 0, (key, query, row.table)
+        narrowed = FILTERED_TABLES.get(key, ())
+        for table in narrowed:
+            shown = table_row_count(tree, table)
+            everything = table_row_count(plain, table)
+            assert shown > 0, (key, query, table)
             if selects:
-                assert shown < everything, (key, query, row.table)
+                assert shown < everything, (key, query, table)
             else:
-                assert shown == everything, (key, query, row.table)
+                assert shown == everything, (key, query, table)
+        for row in charts.CHARTS.values():
+            if row.retired or row.page != key or row.table in narrowed:
+                continue
+            # A companion table no filter reaches (D096): unchanged under every query.
+            shown = table_row_count(tree, row.table)
+            assert shown > 0, (key, query, row.table)
+            assert shown == table_row_count(plain, row.table), (key, query, row.table)
 
     def test_every_chart_page_with_a_filter_lists_its_queries(self) -> None:
         """#435, D093(c): every live chart page whose page reads filters (a ``query=``
         parser) lists at least one filtered query and one naming an absent value in
-        :data:`CHART_QUERIES`, so a chart story adding a filtered page lists its own."""
+        :data:`CHART_QUERIES`, and the tables its filter narrows in
+        :data:`FILTERED_TABLES` (#434, D096), so a chart story adding a filtered page
+        lists its own."""
         for chart_id, row in charts.CHARTS.items():
             if row.retired:
                 continue
             kinds = {kind for _, _, kind in CHART_QUERIES.get(row.page, [])}
             if page_of(row.page).get("query") is not None:
                 assert {"filtered", "absent"} <= kinds, (chart_id, row.page)
+                assert FILTERED_TABLES.get(row.page), (chart_id, row.page)
             else:
                 assert kinds, (chart_id, row.page)
 
@@ -1237,6 +1269,7 @@ class TestExactlyTheView:
         }
         assert names == {
             "elections-table-csv": "elections.csv",
+            "elections-leader-table-csv": "elections-electoral-college-leaders.csv",
             "election-states-csv": "election-1824-by-state.csv",
             "election-nation-csv": "election-1824-national.csv",
             "election-per-capita-csv": "election-1824-per-capita.csv",
@@ -1962,10 +1995,29 @@ def _election(body: dict[str, Any]) -> None:
 #: Per page: the responses to doctor, each with every field a ``labels`` function
 #: words in one row of each table (and the panel) set to a value no cell has wording
 #: for, so every such cell is exercised.
+#: The worded fields of C2's companion table a doctored N1 reaches (#434): its first
+#: row is 1824's Electoral College leader, so every one shows; never ``electoral_rank``,
+#: which picks the leader.
+LEADER_ROW_FIELDS = (
+    "national_electoral_votes_counted",
+    "national_electoral_denominator",
+    "ec_share_full",
+    "took_office",
+)
+
+
+def _leaders(body: dict[str, Any]) -> None:
+    _row(*LEADER_ROW_FIELDS)(body)
+    body["elections"][0]["ec_determinative"] = SENTINEL
+
+
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
         {},
-        {"/v1/elections": _row("has_popular_vote", "candidate_count")},
+        {
+            "/v1/elections": _row("has_popular_vote", "candidate_count"),
+            "/v1/elections/summary": _leaders,
+        },
     ),
     "/election/<year>": ({"year": "2016"}, {"/v1/elections/2016": _election}),
     "/election/<year>/states": ({"year": "2016"}, {"/v1/elections/2016": _election}),
@@ -1996,7 +2048,11 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 #: cause being the doctored status). Derived from the field lists above, which a new
 #: worded column must join for its cell to be checked.
 UNRECOGNIZED_CELLS = {
-    "/elections": {"elections-table": 2},
+    "/elections": {
+        "elections-table": 2,
+        # One per doctored field, ``ec_determinative`` from the year's item (#434).
+        "elections-leader-table": len(LEADER_ROW_FIELDS) + 1,
+    },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
         "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),

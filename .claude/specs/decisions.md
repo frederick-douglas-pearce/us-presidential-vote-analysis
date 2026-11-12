@@ -6500,3 +6500,66 @@ bug, so it is loud where a developer looks (the log, and a red test on any page'
 render) rather than swallowed, and quiet where a reader looks. Reusing the blocked-load shape
 adds no reader state and no wording. A bare `except ValueError` around the call would also catch
 the static refusals in (a), which must stay failures.
+
+## D096: Chart C2 shows every election's Electoral College leader against the majority line; no filter reaches it or its table, and a failed N1 read degrades only its section
+
+**Date:** 2026-11-11
+**Amends:** D093(c) (which tables a chart page's filter narrows) · **Builds on:** D072, D074(ii), D091, D094, D095 · **Decided by:** the owner, approving #434's plan (architect-reviewed)
+
+**Context.** #434 adds chart C2 to `/elections`: one point per served election, the Electoral
+College leader's `ec_share_full` (counted votes over electors appointed, D041/D046), against the
+majority line. Its data is N1, `/v1/elections/summary` (#431, D094). `/elections` already carries
+T1 and two filters (a year range and "only years with a popular vote"), and #436 will add a state
+filter for C4 and C5. D093(c)'s check required a filtered query on a chart page to narrow the
+chart's companion table.
+
+**Decision.**
+- **(a) Form.** A horizontal dot plot, one row per year `/v1/elections` serves (oldest at the top,
+  the year as tick text; C2's own row height, one tick line), one circle per row at the leader's
+  served `ec_share_full` on a fixed 0–100 % axis, labeled with the companion table's cell for it
+  (`labels.share_cell`, so 1876 reads 50.1 % and 2000 50.4 %), and C1's dashed majority line at
+  0.5 as a layout shape, labeled above the plot and again below the share axis (the chart is
+  about 1.4k px tall). The hover names the year, the leader, the share, electoral votes counted
+  and electors appointed, and every year the served `ec_determinative` (`labels.ec_majority`).
+  A share the table does not show as one is a labeled `x` marker at zero, never a dropped year.
+  The chart derives nothing; title and caption are constants, so they name no served text
+  (D095(a)).
+- **(b) No filter reaches C2 or its companion table.** The table (`elections-leader-table`,
+  `year`, `candidate`, `national_electoral_votes_counted`, `national_electoral_denominator`,
+  `ec_share_full`, `ec_determinative`, `took_office`) is a national all-years summary, like T3
+  and the election panel: the page's filters narrow T1 only. D093(c) is amended: the tables
+  each chart page's filter narrows are a hand-written literal, `FILTERED_TABLES`
+  (`test_dashboard_export.py`); under a `filtered` query every one listed narrows and under an
+  `absent` one none does, a chart's companion table not listed equals the unfiltered render
+  under every query, and every live chart page with a `query=` parser must list at least one.
+  D093(a) (a filter never narrows a chart) is unchanged.
+- **(c) The N1 read.** `api.SUMMARY_PATH` is a literal in `/elections`' `on_miss`, filled on
+  first use (D074(ii)); D072's prefetch extent is unchanged. It is read in the same view as
+  `/v1/elections`, after it. A body is accepted only if every year in it and in the index is a
+  checked year (`election_view.row_year`) inside the served span, every N1 year is served, and
+  every served year has exactly one `elections` item and exactly one `data` row whose
+  `electoral_rank` is the `int` 1 (a `bool` is refused). A tie at rank 1 is valid API data
+  (D094(iv)) but has no single leader, so it is refused by design; no served year has one.
+- **(d) A failed or malformed N1 degrades only C2's section.** The section shows its heading and
+  `C2_UNAVAILABLE` (`elections-leader-unavailable`), with no chart and no companion table and
+  deliberately no `c2` id, so the D070(b) guard's chart check keeps its meaning; T1, the
+  filters and the footer render, and the page's success marker is unchanged. This differs from
+  the election panel's rule, where a malformed `election` block degrades the page: that block
+  shares T3's body, while N1 is a separate response whose defects say nothing about T1. The
+  section's `try` covers everything built from N1 (the validation, the figure, the cells, and
+  the companion table and its download, which read each row's slug and the provenance the CSV
+  preamble names), never `components.chart` (D095(f)). Cost: in that state each filter change
+  retries N1 once (at most `MAX_REQUEST_WAIT_S` of render wait and one fill token). Residual,
+  as D095(g): an N1 defect that raises anything but `KeyError` or `TypeError` still takes the
+  page down.
+- **(e) The guard's burst.** With N1, the D070(b) guard's success run plans ten fills, the
+  bucket's whole `FILL_BURST`; the next page to add a fill on a miss (#428, #436, #437) trips its
+  static assert unless the guard's bucket is made permissive there.
+- **(f) After deploy.** D071(g) is re-measured on `/elections` (`#c2 .main-svg`) and recorded in
+  the runbook's §12 by a docs PR, which closes #434.
+
+**Rationale.** The chart puts the years the series quotes (1824, 1876, 2000, 2016) among every
+election. A state filter (#436) could never reach a national leader table, so letting the year
+filters narrow it (the alternative) would leave the page with a split rule; T3 and the panel
+already set the never-filtered precedent. A section that degrades alone keeps the page's list of
+elections, which needs nothing N1 carries.

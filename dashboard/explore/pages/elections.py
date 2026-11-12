@@ -14,6 +14,11 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   response's own ``meta.provenance``.
 - **The table** is :func:`explore.components.table`, which offers its rows as a CSV
   (#309) built from the same list as its body.
+- **Chart C2** (#434, D096) sits above the filters, with its own companion table: each
+  election's Electoral College leader's electoral share against the majority line,
+  from N1 (:data:`explore.api.SUMMARY_PATH`), filled on a miss. No filter narrows
+  either, and a failed or malformed N1 shows only that section's own sentence, so T1
+  still renders.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query
+from explore import api, charts, components, election_view, export, labels, query
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in the table.
@@ -35,6 +40,53 @@ URL_ID = "elections-url"
 
 #: T1's columns, in display order, by public field name.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
+
+#: Chart C2 (#434, D096) and its companion table, never narrowed by a filter.
+C2_ID = "C2"
+LEADER_TABLE_ID = "elections-leader-table"
+LEADER_UNAVAILABLE_ID = "elections-leader-unavailable"
+#: The companion table's columns, in display order, by public field name: the year's
+#: Electoral College leader's national row, with the year's ``ec_determinative`` from
+#: N1's ``elections`` item, and ``took_office`` last (owner, #434's plan gate).
+LEADER_FIELDS = (
+    "year",
+    "candidate",
+    "national_electoral_votes_counted",
+    "national_electoral_denominator",
+    "ec_share_full",
+    "ec_determinative",
+    "took_office",
+)
+#: The leader table's cells :func:`_leader_cells` words, in :data:`LEADER_FIELDS`
+#: order (the year is a link and the candidate a linked name).
+LEADER_WORDED = LEADER_FIELDS[2:]
+#: Exported though not shown: the key of the candidate's history link.
+LEADER_EXTRA = ("candidate_slug",)
+
+#: Page-level wording (ba spec, approved by the owner at #434's plan gate, 2026-11-11).
+LEDE = "Every US presidential election in this dataset."
+#: Shown only on success, after :data:`LEDE` (the degraded page has no filters).
+FILTER_SENTENCE = (
+    "Narrow the list of elections by year, or to the years with a popular vote in "
+    "this dataset."
+)
+C2_HEADING = "Did the Electoral College leader win a majority?"
+C2_TABLE_HEADING = "Each election's Electoral College leader"
+LIST_HEADING = "List of elections"
+#: C2's section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
+#: wording: the D070(b) guard's success run asserts that absent from every page.
+C2_UNAVAILABLE = (
+    "The chart and table of each election's Electoral College leader can't be shown "
+    "right now. Please try again in a minute."
+)
+
+#: C2's pixels per row (one tick line, so every year's label shows at 390 px) and the
+#: margins around its plot: the top holds the majority line's label, the bottom the
+#: share axis and the label again, and the right the widest point label, "100.0%".
+_C2_ROW_PX = 24
+_C2_TOP_PX = 56
+_C2_BOTTOM_PX = 112
+_C2_RIGHT_PX = 64
 
 #: The query keys this page reads. ``year_from`` and ``year_to`` are the API's own names
 #: for a year range, so later tables with a year range share them.
@@ -68,7 +120,8 @@ dash.register_page(
     # No years: the index HTML never waits on the API, so this cannot read the span.
     description="Every US presidential election in the dataset, filterable by year.",
     prefetch=(api.ELECTIONS_PATH,),
-    on_miss=(),
+    # N1, filled on first use for C2 (#434): a literal (D074(ii)), never prefetched.
+    on_miss=(api.SUMMARY_PATH,),
     success=PAGE_ID,
     query=parse_filters,
     # The site navigation link this page marks (#448):
@@ -167,8 +220,292 @@ def _row(election: dict[str, Any]) -> html.Tr:
     )
 
 
-def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
-    """The page body for one ``/v1/elections`` response and this page's filter pairs."""
+def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
+    """Each served year's Electoral College leader, oldest first: N1's one ``data`` row
+    with ``electoral_rank`` 1, with the year's ``ec_determinative`` from its one
+    ``elections`` item (#434, D096). Derives nothing.
+
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for anything else C2
+    cannot show: a year (in the index's rows or in N1's) that
+    :func:`explore.election_view.row_year` refuses or that lies outside the served
+    span, an N1 year the index does not serve, a served year with no ``elections`` item
+    or two, or with no rank-1 row or two (a tie at rank 1 is valid API data, D094(iv),
+    but C2 needs one leader per year). ``electoral_rank`` counts only as an ``int``,
+    never a ``bool``. A year the index lists twice is one served year: refusing the
+    duplicate is the index's own rule (#334).
+    """
+    first, last = span(index["meta"]["provenance"]["coverage"])
+    served: set[int] = set()
+    for row in index["data"]:
+        year = election_view.row_year(row)
+        if year is None or not first <= year <= last:
+            raise TypeError("/v1/elections names a year outside its served span")
+        served.add(year)
+    if not isinstance(summary, dict):
+        raise TypeError(f"{api.SUMMARY_PATH} is not an object")
+    rows, items = summary["data"], summary["elections"]
+    if not isinstance(rows, list) or not isinstance(items, list):
+        raise TypeError(f"{api.SUMMARY_PATH} carries no lists")
+    by_year: dict[int, dict[str, Any]] = {}
+    for item in items:
+        year = election_view.row_year(item)
+        if year is None or year not in served or year in by_year:
+            raise TypeError(f"{api.SUMMARY_PATH}: a bad elections item")
+        by_year[year] = item
+    leader: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        year = election_view.row_year(row)
+        if year is None or year not in served:
+            raise TypeError(f"{api.SUMMARY_PATH}: a row for a year not served")
+        rank = row.get("electoral_rank")
+        if type(rank) is int and rank == 1:
+            if year in leader:
+                raise TypeError(f"{api.SUMMARY_PATH}: two leaders in {year}")
+            leader[year] = row
+    if set(by_year) != served or set(leader) != served:
+        raise TypeError(f"{api.SUMMARY_PATH} misses a served year")
+    return [
+        {**leader[year], "ec_determinative": by_year[year]["ec_determinative"]}
+        for year in sorted(served)
+    ]
+
+
+def _leader_cells(row: dict[str, Any]) -> dict[str, str]:
+    """The leader table's worded cells, computed once per row per render and read by
+    both the table and C2, so the chart writes every number as the table does."""
+    return {
+        "national_electoral_votes_counted": labels.number(
+            row["national_electoral_votes_counted"]
+        ),
+        "national_electoral_denominator": labels.number(
+            row["national_electoral_denominator"]
+        ),
+        "ec_share_full": labels.share_cell(row["ec_share_full"]),
+        "ec_determinative": labels.ec_majority(row["ec_determinative"]),
+        "took_office": labels.yes_no(row["took_office"]),
+    }
+
+
+def _leader_row(row: dict[str, Any], cells: dict[str, str]) -> html.Tr:
+    year = row["year"]
+    return html.Tr(
+        [
+            html.Td(dcc.Link(str(year), href=f"/election/{year}")),
+            components.candidate_cell(row),
+            *(labels.cell(cells[field]) for field in LEADER_WORDED),
+        ]
+    )
+
+
+def _majority(cell: str) -> str:
+    """The hover's last line, every year: the majority cell itself when it says
+    whether anyone won one, else named by its field, as the table's header names it."""
+    if cell in (labels.EC_MAJORITY, labels.NO_EC_MAJORITY):
+        return cell
+    return f"{labels.LABELS['ec_determinative']}: {cell}"
+
+
+def _c2_figure(
+    rows: list[dict[str, Any]], cells: list[dict[str, str]]
+) -> dict[str, Any]:
+    """C2's figure (#434, D096): one row per served year, oldest on top, each with one
+    point, the leader's served ``ec_share_full``, labeled with the table's cell for it,
+    against a dashed line at half of each election's electors appointed.
+
+    A share the table does not show as one is drawn as a labeled marker at zero
+    (:data:`explore.labels.C1_NO_SHARE` for a null or blank, else the table's cell),
+    never a dropped year. Every hover and text item is a string the page wrote.
+    """
+    n = len(rows)
+    positions = list(range(n))
+    years = [str(row["year"]) for row in rows]
+    xs: list[float | None] = []
+    texts: list[str] = []
+    hovers: list[str] = []
+    marks: list[tuple[int, str, str, str]] = []  # (y, label, hover, id)
+    for i, (row, cell) in enumerate(zip(rows, cells, strict=True)):
+        shown = cell["ec_share_full"]
+        number = labels.finite(row["ec_share_full"])
+        # A finite value whose cell is no share (one whose percentage overflows reads
+        # UNRECOGNIZED) is a marker too: the point stands only where the table shows it.
+        x = number if number is not None and shown != labels.UNRECOGNIZED else None
+        share = (
+            f"{shown}<br>{labels.UNRECOGNIZED_NOTE}"
+            if shown == labels.UNRECOGNIZED
+            else shown
+        )
+        hover = labels.C2_HOVER.format(
+            year=years[i],
+            candidate=charts.escaped(str(row["candidate"])),
+            share=share,
+            counted=cell["national_electoral_votes_counted"],
+            appointed=cell["national_electoral_denominator"],
+            majority=_majority(cell["ec_determinative"]),
+        )
+        xs.append(x)
+        texts.append(shown if x is not None else "")
+        hovers.append(hover)
+        if x is None:
+            label = labels.C1_NO_SHARE if shown == labels.NOT_IN_DATASET else shown
+            marks.append((i, label, hover, years[i]))
+    data: list[dict[str, Any]] = [
+        {
+            "type": "scatter",
+            "mode": "markers+text",
+            "name": labels.LABELS["ec_share_full"],
+            "showlegend": False,
+            "ids": years,
+            "x": xs,
+            "y": positions,
+            "text": texts,
+            "textposition": "middle right",
+            "textfont": {"color": "var(--text)"},
+            "cliponaxis": False,
+            "marker": {"symbol": "circle", "size": 10, "color": "var(--chart-1)"},
+            "hovertext": hovers,
+            "hovertemplate": "%{hovertext}<extra></extra>",
+        }
+    ]
+    if marks:
+        data.append(
+            {
+                "type": "scatter",
+                "mode": "markers+text",
+                "name": labels.C2_NO_SHARE_SERIES,
+                "showlegend": False,
+                "ids": [mark[3] for mark in marks],
+                "x": [0] * len(marks),
+                "y": [mark[0] for mark in marks],
+                "text": [mark[1] for mark in marks],
+                "textposition": "middle right",
+                "textfont": {"color": "var(--text)"},
+                "cliponaxis": False,
+                "marker": {"symbol": "x", "size": 10, "color": "var(--text)"},
+                "hovertext": [mark[2] for mark in marks],
+                "hovertemplate": "%{hovertext}<extra></extra>",
+            }
+        )
+    line_label = {
+        "text": labels.C2_MAJORITY_LINE,
+        "xref": "x",
+        "x": 0.5,
+        "yref": "paper",
+        "showarrow": False,
+        "font": {"color": "var(--text)", "size": 12},
+    }
+    return {
+        "data": data,
+        "layout": {
+            "title": {"text": labels.C2_TITLE},
+            "height": _C2_ROW_PX * max(n, 1) + _C2_TOP_PX + _C2_BOTTOM_PX,
+            "margin": {"t": _C2_TOP_PX, "b": _C2_BOTTOM_PX, "r": _C2_RIGHT_PX},
+            "xaxis": {
+                "range": [0, 1],
+                "tickformat": ".0%",
+                "dtick": 0.25,
+                "title": {"text": labels.C2_X_AXIS},
+            },
+            "yaxis": {
+                "tickvals": positions,
+                "ticktext": years,
+                "autorange": "reversed",
+                "showgrid": False,
+                "zeroline": False,
+            },
+            "shapes": [
+                {
+                    "type": "line",
+                    "xref": "x",
+                    "x0": 0.5,
+                    "x1": 0.5,
+                    "yref": "paper",
+                    "y0": 0,
+                    "y1": 1,
+                    "layer": "below",
+                    "line": {
+                        "dash": "dash",
+                        "width": 2,
+                        "color": "var(--chart-reference)",
+                    },
+                }
+            ],
+            # The line's label above the plot and again below the share axis: the
+            # chart is tall, so the top one has scrolled away by the last rows.
+            "annotations": [
+                {**line_label, "y": 1, "yanchor": "bottom"},
+                {**line_label, "y": 0, "yanchor": "top", "yshift": -70},
+            ],
+        },
+    }
+
+
+def _c2_caption() -> str:
+    """C2's caption: which candidate each point is, what the share counts, what the
+    line marks and that the leader did not always take office. Constant, so it names
+    no served text (D095(a)); ``components.chart`` adds the table pointer."""
+    return " ".join(
+        (
+            labels.C2_LEADER_POINT,
+            labels.C1_EC_BASIS,
+            labels.C2_MAJORITY_NOTE,
+            labels.C2_TOOK_OFFICE,
+        )
+    )
+
+
+def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
+    """C2's section (#434, D096): its heading, the chart and its companion table, or,
+    when N1 could not be read (``summary`` is ``None``) or is malformed, the heading and
+    :data:`C2_UNAVAILABLE` only. The ``try`` covers everything built from N1 (the
+    validation, the figure, the cells, and the companion table and its download), so no
+    ``KeyError`` or ``TypeError`` from N1 reaches the page; never ``components.chart``,
+    which no page catches around (D095(f))."""
+    heading = html.H2(C2_HEADING)
+    try:
+        if summary is None:
+            raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
+        rows = leaders(index, summary)
+        cells = [_leader_cells(row) for row in rows]
+        figure = _c2_figure(rows, cells)
+        download = export.Download(
+            filename="elections-electoral-college-leaders.csv",
+            name="the Electoral College leaders",
+            provenance=summary["meta"]["provenance"],
+            # No filter reaches this table, so its view names none.
+            view_url=export.view_url(CANONICAL_HOST, "/elections", ""),
+        )
+        by_row = {id(row): cell for row, cell in zip(rows, cells, strict=True)}
+        # Inside the try: the table and its CSV read N1 too (each row's slug, the
+        # provenance the preamble names), and a defect there is N1's, not the page's.
+        table = components.table(
+            rows,
+            lambda r: _leader_row(r, by_row[id(r)]),
+            LEADER_FIELDS,
+            LEADER_TABLE_ID,
+            download,
+            extra=LEADER_EXTRA,
+            notes=(labels.C2_LEADER_ROW, labels.C2_TOOK_OFFICE),
+        )
+    except (KeyError, TypeError):
+        return [
+            heading,
+            html.P(C2_UNAVAILABLE, id=LEADER_UNAVAILABLE_ID, className="note"),
+        ]
+    return [
+        heading,
+        components.chart(C2_ID, figure, LEADER_TABLE_ID, _c2_caption()),
+        html.H2(C2_TABLE_HEADING),
+        *table,
+        labels.glossary(LEADER_FIELDS),
+    ]
+
+
+def render(
+    body: dict[str, Any], pairs: list[tuple[str, str]], summary: Any = None
+) -> html.Div:
+    """The whole page for one ``/v1/elections`` response, this page's filter pairs and
+    N1's body (``None`` when it could not be read): the heading and lede, C2's section,
+    then the list of elections. The filters narrow T1 only."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     chosen = filters(pairs, coverage)
@@ -213,7 +550,11 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
     )
     return html.Div(
         [
+            html.H1("Elections"),
+            html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
+            *_leader_section(body, summary),
+            html.H2(LIST_HEADING),
             controls,
             html.P(
                 f"Showing {len(shown)} of {len(elections)} elections",
@@ -236,20 +577,17 @@ def render(body: dict[str, Any], pairs: list[tuple[str, str]]) -> html.Div:
 
 
 def layout(**query: Any) -> html.Div:
+    """The elections index. On success, :func:`render`'s body is the whole page; the
+    degraded state gets the heading and :data:`LEDE` here. N1 is read in the same view,
+    after the index, in its own ``try``: a failed read degrades only C2's section."""
     try:
         with api.CLIENT.view() as view:
             body = view.get(api.ELECTIONS_PATH)
-        content = render(body, parse_filters(query))
+            try:
+                summary = view.get(api.SUMMARY_PATH)
+            except api.ApiUnavailable:
+                summary = None
+        return render(body, parse_filters(query), summary)
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
-    return html.Div(
-        [
-            html.H1("Elections"),
-            html.P(
-                "Every US presidential election in this dataset. Narrow the list by "
-                "year, or to the years with a popular vote in this dataset.",
-                className="lede",
-            ),
-            content,
-        ]
-    )
+    return html.Div([html.H1("Elections"), html.P(LEDE, className="lede"), content])

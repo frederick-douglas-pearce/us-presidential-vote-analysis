@@ -18,8 +18,9 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from explore import components, labels
+from explore import charts, components, labels
 from tests.e2e.dashboard_pages import (
+    C2,
     ELECTIONS_ROWS,
     ELECTIONS_SUCCESS,
     FIELDS,
@@ -27,21 +28,25 @@ from tests.e2e.dashboard_pages import (
     FIRST,
     GLOSSARY,
     LAST,
+    LEADER_ROWS,
     MARKS,
     PROVENANCE,
     PV,
     PV_BOX,
     PV_FIRST,
+    RESOURCE_ERROR,
     ROUTER_OUTPUT,
     UPDATE_PATH,
     assert_chunk_failure_stops,
     assert_rendered,
     lower_thumb,
+    recorded,
     row_years,
     search,
     watch_chunk_errors,
     years_shown,
 )
+from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
 
 pytestmark = pytest.mark.e2e
 
@@ -169,3 +174,101 @@ def test_a_failed_slider_chunk_stops_logging(page: Page) -> None:
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     assert_chunk_failure_stops(page, seen)
+
+
+# --- chart C2 (#434, D096) ------------------------------------------------------------
+
+#: C2's drawn texts: each point's share and, outside the plot, its year ticks, the share
+#: axis's title and the majority line's two labels.
+C2_POINT_TEXTS = f"{C2} .scatterlayer .textpoint text"
+C2_CHART_TEXTS = ", ".join(
+    f"{C2} {part}"
+    for part in (".ytick text", ".xtick text", ".g-xtitle text", ".annotation-text")
+)
+C2_POINTS = f"{C2} .scatterlayer .trace:first-child .points path"
+
+
+def open_c2(page: Page, query: str = "") -> None:
+    page.goto(f"/elections{query}")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    page.locator(f"{C2} .main-svg").first.wait_for()
+    page.locator(f"{C2} .ytick text").first.wait_for()
+
+
+def served_years() -> list[str]:
+    return [str(row["year"]) for row in recorded("/v1/elections")["data"]]
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c2_is_readable_at_390_px(page: Page) -> None:
+    """AC Phone width: every year's tick and every point's text inside 390 px, none over
+    another, and no sideways scroll; one point per served year."""
+    open_c2(page)
+    expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    ticks = boxes(page, f"{C2} .ytick text")
+    assert [b["text"] for b in ticks] == served_years()
+    shares = boxes(page, C2_POINT_TEXTS)
+    assert len(shares) == len(ticks)
+    assert {"37.9%", "50.1%", "50.4%", "98.5%"} <= {b["text"] for b in shares}
+    expect(page.locator(C2_POINTS)).to_have_count(len(ticks))
+    others = boxes(page, C2_CHART_TEXTS)
+    assert sum(b["text"] == labels.C2_X_AXIS for b in others) == 1
+    labeled = [b for b in shares + others if b["w"] > 0]
+    for i, a in enumerate(labeled):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= 390, a
+        for b in labeled[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c2_and_its_table_ignore_the_filters(page: Page) -> None:
+    """D096: a filter narrows T1, never C2 or its companion table."""
+    open_c2(page, "?year_from=1900")
+    ticks = [b["text"] for b in boxes(page, f"{C2} .ytick text")]
+    assert ticks == served_years()
+    expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
+    assert row_years(page) == years_shown(year_from=1900)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c2_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
+    open_c2(page)
+    point = page.locator(C2_POINTS).first
+    light = point.evaluate("el => getComputedStyle(el).fill")
+    assert light == rgb(token(page, "--chart-1"))
+    seen: list[str] = []
+
+    def on_request(request: Request) -> None:
+        seen.append(f"{request.method} {urlsplit(request.url).path}")
+
+    page.on("request", on_request)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    expect(point).not_to_have_css("fill", light)
+    assert point.evaluate("el => getComputedStyle(el).fill") == rgb(
+        token(page, "--chart-1")
+    )
+    page.wait_for_timeout(SETTLE_MS)
+    assert seen == [], seen
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(RESOURCE_ERROR)
+def test_with_plotlyjs_blocked_c2_s_title_caption_and_both_tables_render(
+    page: Page,
+) -> None:
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    memo = f"window.{charts.PLOTLYJS_MEMO}"
+    page.wait_for_function(f"{memo} !== undefined")
+    assert page.evaluate(f"async () => await {memo}") is False
+    expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
+    expect(page.locator(f"{C2} figcaption")).to_contain_text(labels.C2_LEADER_POINT)
+    expect(page.locator(f"{C2} figcaption a")).to_have_attribute(
+        "href", "#elections-leader-table"
+    )
+    expect(page.locator("#elections-leader-table")).to_be_visible()
+    expect(page.locator(ELECTIONS_ROWS)).to_have_count(len(served_years()))
+    expect(page.locator(f"{C2} .js-plotly-plot")).to_have_count(0)

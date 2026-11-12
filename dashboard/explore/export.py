@@ -75,6 +75,9 @@ EC_FIELDS = frozenset(
         "electoral_rank",
         "took_office",
         "ec_share_full",
+        # The three-method comparison's Electoral College majority, in C2's companion
+        # table (#434).
+        "ec_determinative",
         "pv_coverage",
     }
 )

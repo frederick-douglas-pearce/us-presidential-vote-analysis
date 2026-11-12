@@ -50,7 +50,8 @@ first, so its render makes the success run's first fills on a miss,
 election pages (#307, #465) make the next ones, :data:`ELECTION_MISSES`, rendered at
 1824: the overview, ``/election/<year>``, reads :data:`MISS_PATH` on a miss, the
 per-capita page its table (#280) and the states page nothing more, each render's own
-slice checked (:data:`ELECTION_PAGE_MISSES`), through the render-scoped view pages use; the run checks every named miss, in some registered page's ``on_miss`` and in
+slice checked (:data:`ELECTION_PAGE_MISSES`), through the render-scoped view pages use;
+the elections index then fills N1 for chart C2, :data:`ELECTIONS_MISSES` (#434); the run checks every named miss, in some registered page's ``on_miss`` and in
 the snapshot. It validates the year from the
 ``/v1/elections`` it prefetches before formatting it into a path (#312), and the
 success run renders each of the three at 1825 too: each page's own not-found state,
@@ -117,6 +118,8 @@ FIXTURE_FILES = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
     "/v1/elections/1824": "v1_elections_1824.json",
+    # N1 (#431), the elections index's fill on a miss for chart C2 (#434).
+    "/v1/elections/summary": "v1_elections_summary.json",
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
@@ -132,7 +135,7 @@ FIXTURE_FILES = {
 #: success run at :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render,
 #: under the guard. Checked per page, so a link that moved to another page fails.
 DOWNLOAD_IDS_BY_PAGE = {
-    "/elections": ("elections-table-csv",),
+    "/elections": ("elections-leader-table-csv", "elections-table-csv"),
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),
@@ -174,7 +177,12 @@ ELECTION_PAGE_MISSES = {
 #: the pages (by concrete path: the overview, then ``/per-capita``, then ``/states``).
 ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
-#: The fills on a miss after :data:`ELECTION_MISSES`, in the order the success run
+#: The elections index's fill on a miss after :data:`ELECTION_MISSES` (``/elections``
+#: sorts after ``/election/1824…`` and before ``/state/GA``): N1, chart C2's source
+#: (#434, D096). With it the success run plans ten fills, the bucket's whole burst.
+ELECTIONS_MISSES = ["/v1/elections/summary"]
+
+#: The fills on a miss after :data:`ELECTIONS_MISSES`, in the order the success run
 #: renders the pages that make them: the state page's roster,
 #: ``/v1/elections/{year_max}`` resolved from the recorded index (shared with
 #: ``/states``), then its own rows, then its per-capita table (#280).
@@ -509,7 +517,7 @@ for page in PAGES:
         misses.append(template.format(**values))
 assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
 # Every named fill, so a page that stops declaring one in on_miss fails by name.
-assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}) <= set(
+assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r}) <= set(
     misses
 ), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
@@ -534,7 +542,8 @@ for page in PAGES:
     path = concrete(page)
     key = page.get("path_template") or page["path"]
     # The candidate history's render makes the first fills on a miss
-    # (CANDIDATE_MISSES), then the election pages', at 1824 (ELECTION_MISSES).
+    # (CANDIDATE_MISSES), then the election pages', at 1824 (ELECTION_MISSES), then
+    # the elections index's N1 for chart C2 (ELECTIONS_MISSES, #434).
     before = len(SERVED)
     text = route(client, path)
     served_by_page[key] = SERVED[before:]
@@ -572,7 +581,7 @@ assert unrendered_charts(
     {{"C9": _charts.Chart("/elections", "t"), "C8": _charts.Chart("/elections", "t", True)}}
 ) == ["C9"]
 
-for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {STATE_MISSES!r}:
+for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)
 
 # A year the index does not serve: refused from the cached index, so nothing is
@@ -632,7 +641,7 @@ assert states_page["success"] == "states", states_page["success"]
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
-expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{STATE_MISSES!r}]
+expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{ELECTIONS_MISSES!r}, *{STATE_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
 """
         + _ALL_MODULES_LOADED
@@ -855,7 +864,9 @@ def test_the_guard_values_render_the_miss_path() -> None:
     assert "/v1/elections/{year}".format(**GUARD_PATH_VALUES) == MISS_PATH
     assert ELECTION_MISSES[0] == MISS_PATH
     # Every fill on a miss the success run expects is answered from a recording.
-    assert set(CANDIDATE_MISSES + ELECTION_MISSES + STATE_MISSES) <= set(FIXTURE_FILES)
+    assert set(
+        CANDIDATE_MISSES + ELECTION_MISSES + ELECTIONS_MISSES + STATE_MISSES
+    ) <= set(FIXTURE_FILES)
 
 
 def test_the_guard_program_can_fail(tmp_path: Path) -> None:
