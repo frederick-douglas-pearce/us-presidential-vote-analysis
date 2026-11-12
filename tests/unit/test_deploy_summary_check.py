@@ -91,6 +91,15 @@ _FAILING_CURL = _STUBS.replace(
 #: The header name in HTTP/1.1 casing, which a fallback from HTTP/2 would send.
 _TITLE_CASE_ETAG = _STUBS.replace("\\r\\netag:", "\\r\\nETag:")
 
+#: A ``python`` that runs the checker only in isolated mode (``-I``). The response body
+#: comes from the edge, and the checker file sits in a temp dir that ``python`` would
+#: otherwise put first on ``sys.path`` (#428 review), so a checker run without ``-I``
+#: exits 3 here, which the probe reports as unparseable.
+_ISOLATED_PYTHON = _STUBS.replace(
+    'python() { "$PY" "$@"; }',
+    'python() { [ "$1" = -I ] || return 3; "$PY" "$@"; }',
+)
+
 
 def _run(
     tmp_path: Path,
@@ -242,6 +251,17 @@ def test_a_failing_curl_is_retried_not_fatal(tmp_path: Path) -> None:
     assert result.stdout.count("HTTP 000, ETag 'none', want 200") == 5
     assert result.stdout.count("retrying") == 5
     assert "is not serving this deploy's snapshot (last: HTTP 000" in result.stdout
+
+
+@pytest.mark.parametrize("route", ["summary", "states"])
+def test_the_checker_runs_in_isolated_mode(tmp_path: Path, route: str) -> None:
+    assert '[ "$1" = -I ]' in _ISOLATED_PYTHON
+    body = (
+        _body([2016], [2016]) if route == "summary" else _states_body([(2016, "Texas")])
+    )
+    result = _run(tmp_path, body, stubs=_ISOLATED_PYTHON, route=route)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "unparseable" not in result.stdout
 
 
 def test_a_weak_etag_for_this_snapshot_passes(tmp_path: Path) -> None:

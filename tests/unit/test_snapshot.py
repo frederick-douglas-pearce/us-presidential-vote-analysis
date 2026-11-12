@@ -1423,7 +1423,7 @@ def test_the_year_set_guard_passes_matching_years() -> None:
     assert_rollup_and_hybrid_summary_cover_the_same_years(rollup, summary)
 
 
-def _state_rows(*rows: tuple[str, int | None, int | None, str]) -> pd.DataFrame:
+def _state_rows(*rows: tuple[str, int | None, int | None, str | None]) -> pd.DataFrame:
     """2020 Texas fact rows as (candidate, candidate_votes, state_total_votes, pv_status)."""
     return pd.DataFrame(
         [
@@ -1452,6 +1452,10 @@ def _state_rows(*rows: tuple[str, int | None, int | None, str]) -> pd.DataFrame:
             "other than one pv_status",
         ),
         (
+            (("A", 5, 11, "popular_vote"), ("B", 6, 11, None)),
+            "other than one pv_status",
+        ),
+        (
             (("A", 5, 11, "popular_vote"), ("B", 6, None, "popular_vote")),
             "not null together",
         ),
@@ -1460,10 +1464,16 @@ def _state_rows(*rows: tuple[str, int | None, int | None, str]) -> pd.DataFrame:
             "not null together",
         ),
     ],
-    ids=["two-totals", "two-statuses", "votes-without-a-total", "a-total-without-votes"],
+    ids=[
+        "two-totals",
+        "two-statuses",
+        "a-status-and-a-null",
+        "votes-without-a-total",
+        "a-total-without-votes",
+    ],
 )
 def test_the_per_state_guard_refuses_a_second_value(
-    rows: tuple[tuple[str, int | None, int | None, str], ...], match: str
+    rows: tuple[tuple[str, int | None, int | None, str | None], ...], match: str
 ) -> None:
     """Each (year, state) has one total and one status (#428, D098(b)).
 

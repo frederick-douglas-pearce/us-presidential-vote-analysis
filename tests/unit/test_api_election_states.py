@@ -377,6 +377,23 @@ def test_two_statuses_in_one_state_are_a_500(
         assert c.get("/v1/elections/1860").status_code == 200
 
 
+def test_a_state_with_no_status_is_a_500(snapshot_path: str) -> None:
+    """Exactly one status, not at most one: a state whose rows carry none is refused.
+
+    ``ec_pv.pv_status`` is ``NOT NULL``, so the table is first copied without its
+    constraints; the route would otherwise serve the state with a null status.
+    """
+    repo = _doctor(
+        snapshot_path,
+        "CREATE TABLE ec_pv_loose AS SELECT * FROM ec_pv",
+        "DROP TABLE ec_pv",
+        "ALTER TABLE ec_pv_loose RENAME TO ec_pv",
+        "UPDATE ec_pv SET pv_status = NULL WHERE year = 1860 AND state = 'Vermont'",
+    )
+    with pytest.raises(SnapshotError, match=r"0 popular-vote statuses .*1860, 'Vermont'"):
+        repo.state_rows_all()
+
+
 def test_a_per_capita_key_missing_from_ec_pv_is_a_500(
     snapshot_path: str, settings: ApiSettings
 ) -> None:
