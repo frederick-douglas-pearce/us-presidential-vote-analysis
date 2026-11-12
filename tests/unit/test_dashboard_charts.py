@@ -1379,6 +1379,7 @@ BASE: dict[str, Any] = {
             "texttemplate": "%{text}",
             "hovertemplate": "%{customdata}<extra></extra>",
             "customdata": ["x"],
+            "hovertext": ["h"],
         },
         {
             "type": "scatter",
@@ -1411,6 +1412,7 @@ KINDS: dict[str, Any] = {
     "placeholder": "%{y}",
     "long": "%{" * 100_000,
     "integer": 7,
+    "huge integer": 10**5000,
     "float": 1.5,
     "boolean": True,
     "null": None,
@@ -1501,9 +1503,17 @@ class TestTotality:
     (``test_it_names_no_sub_check``)."""
 
     def test_the_base_passes(self) -> None:
+        """And holds every declared slot, so the sweeps below change each one."""
         assert charts.figure_problems(BASE) == []
-        named = {dotted(p) for p in slots(BASE)}
-        assert "data[0].marker.pattern.shape" in named and "layout.xaxis" in named
+        held = {normalized(dotted(p)) for p in slots(BASE)}
+        assert {
+            f"{ANCHOR_PATHS[anchor]}.{key}"
+            for anchor, table in EXPECTED_KINDS.items()
+            if anchor != "any"
+            for key in table
+        } <= held
+        keys = {p[-1] for p in slots(BASE)}
+        assert set(EXPECTED_KINDS["any"]) <= keys
 
     @pytest.mark.parametrize("kind", list(KINDS))
     def test_every_slot_of_the_base_holding_each_kind(self, kind: str) -> None:
@@ -1566,14 +1576,16 @@ class TestTotality:
     @pytest.mark.parametrize(
         ("value", "problem"),
         [
-            ({1}, "data[0].name: a set, not a JSON value"),
-            (("a",), "data[0].name: a tuple, not a JSON value"),
-            (object(), "data[0].name: a object, not a JSON value"),
-            ({1: "a"}, "data[0].name: a int key, not a string"),
+            ({1}, "data[0].name: set, not a JSON value"),
+            (("a",), "data[0].name: tuple, not a JSON value"),
+            (object(), "data[0].name: object, not a JSON value"),
+            ({1: "a"}, "data[0].name: int key, not a string"),
             (float("nan"), "data[0].name: not a finite number"),
             (float("inf"), "data[0].name: not a finite number"),
+            (10**5000, "data[0].name: an integer beyond 2**53 - 1"),
+            (-(2**53), "data[0].name: an integer beyond 2**53 - 1"),
         ],
-        ids=["set", "tuple", "object", "int-key", "nan", "inf"],
+        ids=["set", "tuple", "object", "int-key", "nan", "inf", "huge", "past-safe"],
     )
     def test_what_is_no_json_value_is_refused_alone(
         self, value: Any, problem: str
@@ -1628,6 +1640,9 @@ EXPECTED_KINDS: dict[str, dict[str, set[str]]] = {
         "name": {"a string"},
         "hoverinfo": {"a string"},
         "textposition": {"a string"},
+        "text": {"a string", "a list of strings"},
+        "hovertext": {"a string", "a list of strings"},
+        "customdata": {"a list", "a list of strings"},
         "marker": {"an object"},
         "line": {"an object"},
     },
@@ -1668,10 +1683,11 @@ SAMPLES: dict[str, list[Any]] = {
     "an object": [{"a": "b"}],
 }
 
-#: Slots a check reads by name that ``SLOT_KINDS`` does not list, each refused on any
-#: value or read with no expectation of its kind (``data`` and ``layout`` are the
-#: figure's own; a trace's ``legend``, ``width``, ``offset`` and strings are refused
-#: by their own rules).
+#: Slots a check reads by name that ``SLOT_KINDS`` does not list by anchor: ``data`` and
+#: ``layout``, the figure's own (``figure_problems`` checks both); slots whose own rule
+#: pins the value whatever its kind (a trace's ``legend``, refused unless exactly
+#: ``"legend"``; a bar's ``width`` and ``offset``, ``config`` and the layout's fixed
+#: keys, each refused on any value); and the template keys, declared under ``any``.
 OTHER_READS = {
     "data",
     "layout",
@@ -1679,9 +1695,6 @@ OTHER_READS = {
     "data[i].legend",
     "data[i].width",
     "data[i].offset",
-    "data[i].text",
-    "data[i].hovertext",
-    "data[i].customdata",
     "data[i].hovertemplate",
     "data[i].texttemplate",
     "layout.template",
@@ -1801,13 +1814,16 @@ class TestSlotKinds:
                         assert here, (path, value)
 
     def test_every_slot_read_by_name_is_declared(
-        self, live_figures: dict[str, Any]
+        self, live_figures: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """What the checks read by name, over the base, every case of the base with one
         slot changed, and each live chart's figure, is each a declared slot; and each
-        declared slot is read. Reads by pattern (the walk's ``items()``, the layout's
-        axis and second-legend scans) are invisible to this recorder, so ``any`` and
-        the axis anchor are declared by hand."""
+        declared slot is read by a check other than ``slot_problems``, which reads
+        every declared slot by construction and is swapped out here so that half can
+        fail. Reads by pattern (the walk's ``items()``, the layout's axis and
+        second-legend scans) are invisible to this recorder, so ``any`` and the axis
+        anchor are declared by hand."""
+        monkeypatch.setattr(charts, "slot_problems", lambda figure: [])
         log: set[str] = set()
         figures = [BASE, *live_figures.values()]
         figures += [
@@ -1843,3 +1859,56 @@ class TestPlaceholderScan:
                 assert charts._without_placeholders(text) == self.PATTERN.sub(
                     "", text
                 )
+
+
+class TestTotalityGuards:
+    """#484 (D099): what the totality tests above cannot see. The bound's value, pinned
+    by hand (a bound past the recursion limit would let ``components.chart``'s copy
+    raise on a figure the check accepts); a figure exactly that deep drawn; no ``try``
+    or ``suppress`` in the check or the chart builder (D095(f): totality is never a
+    catch); and the caller's figure left whole on the not-drawn path."""
+
+    def test_the_depth_bound_is_sixteen(self) -> None:
+        assert charts.MAX_DEPTH == 16
+        assert charts.MAX_INTEGER == 9_007_199_254_740_991
+
+    @pytest.mark.usefixtures("registry")
+    def test_a_figure_exactly_as_deep_as_the_bound_is_drawn(self) -> None:
+        figure = copy.deepcopy(TEST_FIGURE)
+        figure["layout"]["meta"] = nested(charts.MAX_DEPTH - 2)
+        assert charts.figure_problems(figure) == []
+        assert of_type(build(figure), "Store")  # drawn: it has its source store
+
+    def test_no_catch_in_the_check_or_the_chart_builder(self) -> None:
+        sources = {
+            "charts": ast.parse(Path(charts.__file__).read_text(encoding="utf-8")),
+            "components.chart": next(
+                node
+                for node in ast.walk(
+                    ast.parse(Path(components.__file__).read_text(encoding="utf-8"))
+                )
+                if isinstance(node, ast.FunctionDef) and node.name == "chart"
+            ),
+        }
+        found = {
+            name: [
+                type(node).__name__
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.Try, ast.TryStar))
+                or (isinstance(node, ast.Name) and node.id == "suppress")
+                or (isinstance(node, ast.Attribute) and node.attr == "suppress")
+            ]
+            for name, tree in sources.items()
+        }
+        assert found == {"charts": [], "components.chart": []}
+
+    @pytest.mark.usefixtures("registry")
+    @pytest.mark.expected_chart_failure("C1", 2)
+    def test_the_not_drawn_path_leaves_the_caller_s_figure_whole(self) -> None:
+        deep = copy.deepcopy(TEST_FIGURE)
+        deep["layout"]["meta"] = nested(5_000)
+        odd = copy.deepcopy(TEST_FIGURE)
+        odd["data"][0]["name"] = {"a set"}
+        for figure in (deep, odd):
+            assert of_type(build(figure), "Store") == []  # not drawn
+            assert figure["layout"]["title"] == TEST_FIGURE["layout"]["title"]

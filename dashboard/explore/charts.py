@@ -9,9 +9,11 @@ is a ``var(--token)`` reference to a token in ``style.css``, which
 :data:`CHART_CALLBACK` resolves in the browser, so ``style.css`` stays the one source of
 every color.
 
-:func:`figure_problems` is total (#484, D099): it refuses a figure that is no JSON
-value of bounded depth before any other check reads it, and a slot holding a kind its
-check does not expect (:data:`SLOT_KINDS`), so it returns problems and never raises.
+:func:`figure_problems` is total (#484, D099): it returns problems and never raises.
+It refuses, alone, a figure that is no JSON value of bounded depth before any other
+check reads it, and it refuses a slot holding a kind its check does not expect
+(:data:`SLOT_KINDS`); each check guards the kinds it reads, since that refusal gates
+none of them.
 
 No ``dcc.Graph`` is ever in a server-rendered layout (#452, D088): ``components.chart``
 renders an empty mount point, and :data:`CHART_MOUNT_CALLBACK` puts the graph in it only
@@ -262,6 +264,10 @@ _AXIS_RE = re.compile(r"[xy]axis\d*")
 #: :func:`json_problems` refuses anything deeper before any of them runs.
 MAX_DEPTH = 16
 
+#: The largest integer a figure may hold (#484, D099): JavaScript's largest exact
+#: integer, ``Number.MAX_SAFE_INTEGER``, since plotly.js reads every number as a double.
+MAX_INTEGER = 2**53 - 1
+
 
 def _child(path: str, name: str) -> str:
     return f"{path}.{name}" if path else name
@@ -269,13 +275,17 @@ def _child(path: str, name: str) -> str:
 
 def json_problems(figure: Any) -> list[str]:
     """What keeps ``figure`` from being a JSON value of bounded depth (#484, D099): a
-    key that is not a string, a value that is not an object, a list, a string, a finite
-    number, a boolean or null (a tuple, a set or NaN is refused), and nesting deeper
-    than :data:`MAX_DEPTH`. It walks with a stack of its own, never by recursion, and
-    descends no further than the bound, so it ends on any input, a cyclic one included;
-    its messages name a path and a type, never a value's ``repr``. Every other check
-    assumes what this one checks: :func:`figure_problems` returns its problems alone,
-    and ``components.chart`` runs it before it copies a figure."""
+    key that is not a string; a value that is not an object, a list, a string, a finite
+    number, a boolean or null (a tuple, a set, NaN and infinity are refused); an integer
+    beyond :data:`MAX_INTEGER`, which plotly.js would round and which Python cannot
+    write as text past a few thousand digits; and nesting deeper than
+    :data:`MAX_DEPTH`. It walks with a stack of its own, never by recursion, and
+    descends no further than the bound, so it ends on any input; a container shared or
+    cycled into several places is walked once per path to it, so its time is bounded by
+    the depth, not by the figure's size (only code builds one). Its messages name a
+    path and a type, never a value's ``repr``. Every other check assumes what this one
+    checks: :func:`figure_problems` returns its problems alone, and
+    ``components.chart`` runs it before it copies a figure."""
     problems: list[str] = []
     stack: list[tuple[str, Any, int]] = [("", figure, 1)]
     while stack:
@@ -291,7 +301,7 @@ def json_problems(figure: Any) -> list[str]:
                         inner.append((_child(path, key), item, depth + 1))
                     else:
                         problems.append(
-                            f"{path or 'figure'}: a {type(key).__name__} key,"
+                            f"{path or 'figure'}: {type(key).__name__} key,"
                             " not a string"
                         )
             else:
@@ -303,9 +313,13 @@ def json_problems(figure: Any) -> list[str]:
         elif isinstance(value, float):
             if not math.isfinite(value):
                 problems.append(f"{path or 'figure'}: not a finite number")
-        elif not (value is None or isinstance(value, (str, int))):
+        elif isinstance(value, int) and not isinstance(value, bool):
+            # Compared, never written as text, which raises past a few thousand digits.
+            if abs(value) > MAX_INTEGER:
+                problems.append(f"{path or 'figure'}: an integer beyond 2**53 - 1")
+        elif not (value is None or isinstance(value, (str, bool))):
             problems.append(
-                f"{path or 'figure'}: a {type(value).__name__}, not a JSON value"
+                f"{path or 'figure'}: {type(value).__name__}, not a JSON value"
             )
     return problems
 
@@ -698,10 +712,13 @@ LIST = frozenset({"a list", "a list of strings"})
 #: Keyed by where the slot sits: ``trace`` is each item of ``data``, ``marker``,
 #: ``pattern`` and ``line`` are a trace's ``marker``, its ``marker.pattern`` and its
 #: ``line``, ``axis`` is each layout key :data:`_AXIS_RE` matches, ``annotation`` each
-#: item of ``layout.annotations``, and ``any`` a key at any depth. Slots a check
-#: refuses on any value already (a trace's ``legend``, ``width`` and ``offset``,
-#: ``text``, ``hovertext`` and ``customdata``; the layout's fixed keys, ``template``
-#: and ``scattergap``; ``config``; a color key) are not listed. Policy, beyond types:
+#: item of ``layout.annotations``, and ``any`` a key at any depth. Not listed: the
+#: slots whose own rule pins the value whatever its kind: a trace's ``legend`` (refused
+#: unless exactly ``"legend"``), a bar's ``width`` and ``offset``, the layout's fixed
+#: keys, ``template`` and ``scattergap``, and ``config`` (each refused on any value),
+#: and a color key (a token reference only). The items of a trace's ``text``,
+#: ``hovertext`` and ``customdata`` are each a string (:func:`template_problems`), and
+#: the slots themselves are typed here. Policy, beyond types:
 #: ``textposition`` is one string, since a list would credit a direct label that
 #: ``["none", …]`` never draws, and a marker symbol and a pattern shape are one
 #: string, since a list per point would tell categories apart inside one trace, as
@@ -715,6 +732,9 @@ SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
         "name": STRING,
         "hoverinfo": STRING,
         "textposition": STRING,
+        "text": STRINGS,
+        "hovertext": STRINGS,
+        "customdata": LIST,
         "marker": OBJECT,
         "line": OBJECT,
     },
@@ -816,8 +836,12 @@ def figure_problems(figure: Any) -> list[str]:
     Total (#484, D099): for any input it returns a list of strings and never raises. A
     figure that is not a JSON value of bounded depth gets :func:`json_problems`' alone,
     since every other check assumes one; a slot holding a kind its check does not
-    expect is refused (:func:`slot_problems`). A check added here runs only on what
-    :func:`json_problems` accepts, so it inherits both with nothing added."""
+    expect is refused (:func:`slot_problems`). That refusal gates nothing, so every
+    check still reads a mistyped slot: a check added here inherits only the structural
+    guarantee (JSON kinds, bounded depth, finite numbers in range), must guard the kinds
+    it indexes into as each check here does, and must declare in :data:`SLOT_KINDS`
+    each slot it reads by name, which
+    ``TestSlotKinds.test_every_slot_read_by_name_is_declared`` enforces."""
     if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
         return ["not a figure dict with a list of traces"]
     structural = json_problems(figure)

@@ -12,6 +12,7 @@ import copy
 import csv
 import functools
 import io
+import logging
 import math
 import re
 from collections.abc import Callable
@@ -759,6 +760,14 @@ BREAKAGES: dict[str, Callable[[dict[str, Any]], None]] = {
     "too_deep": _too_deep,
 }
 
+#: What the not-drawn log line names for each breakage (#484): the problem the breakage
+#: made, so a not-drawn path logging some other problem fails.
+BREAKAGE_PROBLEMS = {
+    "fixed_key": "layout.hovermode: fixed by the template",
+    "mistyped_slot": "data[0].name: an object, not a string",
+    "too_deep": "nested deeper than",
+}
+
 
 def ids_in(tree: Any) -> set[str]:
     """Every component id in ``tree`` (pattern ids by their repr)."""
@@ -791,7 +800,11 @@ class TestChartNotDrawn:
         ],
     )
     def test_a_chart_that_breaks_a_rule_costs_only_itself(
-        self, monkeypatch: pytest.MonkeyPatch, chart_id: str, breakage: str
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        chart_id: str,
+        breakage: str,
     ) -> None:
         row = charts.CHARTS[chart_id]
         page = page_of(row.page)
@@ -808,10 +821,17 @@ class TestChartNotDrawn:
             return real(**named)
 
         monkeypatch.setattr(components, "chart", breaking)
-        tree, built = chart_render(
-            lambda: render(row.page, monkeypatch)[0], monkeypatch
-        )
+        with caplog.at_level(logging.ERROR, logger=components.log.name):
+            tree, built = chart_render(
+                lambda: render(row.page, monkeypatch)[0], monkeypatch
+            )
         monkeypatch.setattr(components, "chart", real)
+        [logged] = [
+            r.getMessage()
+            for r in caplog.records
+            if getattr(r, "chart_id", None) == chart_id
+        ]
+        assert BREAKAGE_PROBLEMS[breakage] in logged, logged[:300]
         dom = charts.dom_id(chart_id)
         [figure] = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom]
         assert mount_points(figure) == [] and of_type(figure, "Store") == []
@@ -2365,6 +2385,10 @@ SERVED_KINDS: dict[str, Any] = {
     "object": {"a": "b"},
     "list": ["a", 1],
     "integer": 7,
+    "large integer": 2**60,
+    "float": 1.5,
+    "nan": float("nan"),
+    "infinity": float("inf"),
     "boolean": True,
     "null": None,
     "string": "<b>var(--x)%{y}",
@@ -2376,7 +2400,11 @@ class TestServedValuesReachNoFigureUntyped:
     chart's first served row, leaves the chart drawn, or its page (or its section)
     degraded, and never the page with its success marker and the chart not drawn. The
     figure builders type and escape what they draw from, which is what protects the
-    page; this fails a builder that passes a served value through as served. No
+    page. This fails a builder whose raw served value lands where a chart rule refuses
+    its kind (markup, a token, a non-string label or hover string, a non-finite number,
+    an integer past 2**53 - 1); a raw number in ``x``, ``y`` or ``marker.size`` it does
+    not see. Each render must read the doctored path, and some field's doctoring must
+    change the chart's built figure, so a row the figure is not built from fails. No
     ``expected_chart_failure`` marker, so the conftest check fails any chart not drawn
     too."""
 
@@ -2397,7 +2425,18 @@ class TestServedValuesReachNoFigureUntyped:
         dom = charts.dom_id(chart_id)
         fields = list(RECORDED[path][key][0])
         assert fields  # the premise: a row to doctor
+        source = repr(charts.source_id(dom))
+
+        def built_figure(tree: Any) -> Any:
+            stores = [
+                s for s in of_type(tree, "Store") if repr(getattr(s, "id", None)) == source
+            ]
+            return stores[0].data if stores else None
+
+        plain = built_figure(render(row.page, monkeypatch, **values)[0])
+        assert plain is not None  # the premise: drawn from the recorded body
         outcomes: dict[str, list[str]] = {}
+        changed = []
         for field in fields:
             with monkeypatch.context() as patch:
 
@@ -2405,8 +2444,12 @@ class TestServedValuesReachNoFigureUntyped:
                     body[key][0][field] = copy.deepcopy(SERVED_KINDS[kind])
 
                 doctor(patch, path, change)
-                tree, _ = render(row.page, patch, **values)
+                tree, reads = render(row.page, patch, **values)
+            assert path in reads, (field, reads)
             figures = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom]
+            built = built_figure(tree)
+            if built is not None and built != plain:
+                changed.append(field)
             if figures and mount_points(figures[0]):
                 outcome = "drawn"
             elif figures:
@@ -2420,3 +2463,4 @@ class TestServedValuesReachNoFigureUntyped:
             outcomes.setdefault(outcome, []).append(field)
         assert set(outcomes) <= {"drawn", "degraded"}, outcomes
         assert "drawn" in outcomes  # the premise: most fields leave the chart drawn
+        assert changed, outcomes  # the premise: the doctored row reaches the figure
