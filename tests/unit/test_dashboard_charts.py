@@ -1599,6 +1599,12 @@ class TestTotality:
         figure["layout"]["hovermode"] = "x unified"  # another rule, not reported
         assert charts.figure_problems(figure) == [problem]
 
+    @pytest.mark.parametrize("value", [2**53 - 1, -(2**53 - 1)], ids=["max", "min"])
+    def test_the_largest_exact_integer_is_accepted(self, value: int) -> None:
+        """The integer bound's edge (#484's mutation pass): JavaScript's largest exact
+        integer, either sign, is a value the figure may hold."""
+        assert charts.figure_problems(replaced(BASE, ("layout", "meta"), value)) == []
+
     def test_a_cyclic_figure_ends(self) -> None:
         figure = copy.deepcopy(BASE)
         figure["layout"]["meta"] = figure["layout"]
