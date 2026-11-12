@@ -1499,8 +1499,10 @@ def live_figures(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 class TestTotality:
     """#484 (D099): ``figure_problems`` returns a list of strings and never raises,
     whatever any one slot holds. It calls ``figure_problems`` and no sub-check by
-    name, so a check added later is covered with nothing added
-    (``test_it_names_no_sub_check``)."""
+    name (``test_it_names_no_sub_check``), so a check added later is swept here, with
+    no change to this class, over every slot BASE holds; a slot it newly reads by name
+    must be declared in ``SLOT_KINDS`` and held by BASE
+    (``test_every_slot_read_by_name_is_declared``, ``test_the_base_passes``)."""
 
     def test_the_base_passes(self) -> None:
         """And holds every declared slot, so the sweeps below change each one."""

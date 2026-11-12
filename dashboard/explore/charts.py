@@ -281,8 +281,10 @@ def json_problems(figure: Any) -> list[str]:
     write as text past a few thousand digits; and nesting deeper than
     :data:`MAX_DEPTH`. It walks with a stack of its own, never by recursion, and
     descends no further than the bound, so it ends on any input; a container shared or
-    cycled into several places is walked once per path to it, so its time is bounded by
-    the depth, not by the figure's size (only code builds one). Its messages name a
+    cycled into several places is walked once per path to it, so its time grows with
+    the number of such paths, which the depth bound keeps finite but which each level
+    of sharing multiplies (only code builds one; a parsed API body never shares). Its
+    messages name a
     path and a type, never a value's ``repr``. Every other check assumes what this one
     checks: :func:`figure_problems` returns its problems alone, and
     ``components.chart`` runs it before it copies a figure."""

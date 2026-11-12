@@ -6715,7 +6715,8 @@ The cases that did not draw degraded the page before the chart (D095(g)'s builde
   still reads a mistyped slot: a new rule must guard the kinds it indexes into, as each rule here
   does, and must declare each slot it reads by name in `SLOT_KINDS`, which
   `TestSlotKinds.test_every_slot_read_by_name_is_declared` enforces. `TestTotality` fails a rule
-  that raises on any one-slot change of its base figure or of a live chart's figure.
+  that raises when any one slot of its base figure, or of a live chart's figure at the first
+  item of each list, holds a value of each kind in `KINDS`.
 - **(b) It runs before the copy.** `components.chart` runs `json_problems` before
   `copy.deepcopy`. A figure it refuses takes the not-drawn path (D095(b), (c)), with its title read
   in place, never removed from the caller's figure
@@ -6758,7 +6759,8 @@ rather than of each rule: a bounded JSON value of finite, exact numbers. On it, 
 guards the kinds it reads, and the sweeps show none raises. A catch would also catch the static
 refusals D095(a) keeps as failures. Declared kinds turn a silent pass into a refusal, which under
 D095 costs only the chart. The served-value test pins what actually protects the page today, the
-builders' typing and escaping. It fails a builder whose raw served value lands where a rule refuses
+builders' typing and escaping. It fails a builder whose raw served value, in its first served
+row, lands where a rule refuses
 its kind (markup, a token, a non-string label or hover string, a non-finite number, an integer past
 2**53 − 1). A raw number in `x`, `y` or `marker.size` it does not see.
 
@@ -6766,4 +6768,5 @@ its kind (markup, a token, a non-string label or hover string, a non-finite numb
 figure builder that raises takes its page down or degrades it. A problem message can still `repr`
 a long value from a color or markup rule, so a long string can cost up to `LOGGED_PROBLEMS` times
 its length in log text. A figure that shares one container in many places is walked once per
-place, bounded by the depth limit but not by its size. Only code builds one.
+place, so its cost multiplies with each level of sharing, up to the depth limit. Only code builds
+one.
