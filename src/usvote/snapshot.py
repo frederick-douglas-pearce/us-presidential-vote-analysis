@@ -576,8 +576,8 @@ def assert_state_popular_fields_are_per_state(data_df: pd.DataFrame) -> None:
       different non-null totals would otherwise be resolved silently by the ``max`` in
       :func:`usvote.hybrid.roll_up_national`, which is why this runs before the roll-up;
     - **``state_total_votes`` and ``candidate_votes`` null together** on every row: a
-      row with no popular votes has no state total, and a row with a state total has
-      popular votes. That makes "a NULL total is a candidate row with no figure", and
+      row with no popular votes has no state total, and a row with popular votes has a
+      state total. That makes "a NULL total is a candidate row with no figure", and
       the published "null on a row for a candidate with no popular-vote figure", a
       checked fact rather than an assumption;
     - **exactly one ``pv_status``.** This re-checks, on the served frame,
