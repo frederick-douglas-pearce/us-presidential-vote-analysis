@@ -1738,6 +1738,24 @@ class TestMetrics:
             'elections, select "Only years with a popular vote in this dataset".',
         ]
 
+    def test_a_range_after_the_window_names_the_window(self) -> None:
+        """No year shown lies inside the popular-vote window when every one is after
+        it (the window doctored to end in 2020, 2024 shown with no popular-vote
+        margin): the popular-vote value names the window, not a missing margin."""
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1976, pv_year_max=2020
+        )
+        summary = copy.deepcopy(SUMMARY)
+        for item in summary["elections"]:
+            if item["year"] == 2024:
+                item["pv_margin"] = None
+        tree = render_c2(summary, index=index, query={"year_from": "2024"})
+        assert metric_text(tree, "pv_margin_mean") == (
+            "No average: this dataset's popular-vote figures cover 1976–2020, "
+            "not the years shown"
+        )
+
     def test_the_hint_names_the_checkbox_by_its_own_text(self) -> None:
         """``METRIC_SAME_ELECTIONS`` tells the reader to select the popular-vote
         checkbox by its label, so the two must not drift apart."""
@@ -1995,6 +2013,7 @@ class TestMetricsModule:
             (1, 1, 2000, 2000),
             (None, 0, 2000, None),
             (1.0, 1, 2000, 2000, True),
+            (1.0, 0, 2000, 2000),  # a number needs at least one election
         ],
     )
     def test_a_mean_in_no_state_cannot_be_built(self, args: tuple[Any, ...]) -> None:
@@ -2042,6 +2061,12 @@ class TestMetricMeanWording:
                 "not the years shown",
             ),
             ([1900, 1980], (1976, 2024), labels.METRIC_NO_AVERAGE_NULL),
+            (
+                [2028],  # after the window: both of its bounds are checked
+                (1976, 2024),
+                "No average: this dataset's popular-vote figures cover 1976–2024, "
+                "not the years shown",
+            ),
         ],
     )
     def test_each_cause(
