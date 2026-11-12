@@ -1711,6 +1711,33 @@ class TestMetrics:
                 f"popular-vote figures cover {note}"
             )
 
+    def test_the_note_shows_for_an_electoral_year_after_the_window(self) -> None:
+        """The trigger's other half: an election served after the popular-vote window
+        (here 2024, with the window doctored to end in 2020 and its margin missing)
+        enters the electoral average only, so the window is a cause and the note shows,
+        with the hint while the popular-vote filter is off."""
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1976, pv_year_max=2020
+        )
+        summary = copy.deepcopy(SUMMARY)
+        for item in summary["elections"]:
+            if item["year"] == 2024:
+                item["pv_margin"] = None
+        tree = render_c2(summary, index=index, query={"year_from": "1976"})
+        assert metric_text(tree, "ec_margin_mean").endswith(
+            "over 13 elections (1976–2024)"
+        )
+        assert metric_text(tree, "pv_margin_mean").endswith(
+            "over 12 elections (1976–2020)"
+        )
+        assert notes_of(tree) == [
+            labels.MARGIN_NOTE,
+            "The two averages do not cover the same elections: this dataset's "
+            "popular-vote figures cover 1976–2020. To compare the two over the same "
+            'elections, select "Only years with a popular vote in this dataset".',
+        ]
+
     def test_the_hint_names_the_checkbox_by_its_own_text(self) -> None:
         """``METRIC_SAME_ELECTIONS`` tells the reader to select the popular-vote
         checkbox by its label, so the two must not drift apart."""

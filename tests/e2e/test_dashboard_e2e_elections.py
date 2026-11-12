@@ -281,7 +281,8 @@ METRIC_TEXTS = f"{METRICS} p, {METRICS} dt, {METRICS} dd"
 
 
 #: Each view the legibility test lays out: the default, and a range before the
-#: popular-vote years, whose popular-vote value is the longest text the block shows.
+#: popular-vote years, whose popular-vote value is the longest value text the block
+#: shows.
 METRIC_VIEWS = {
     "": (
         "Showing 51 of 51 elections",
