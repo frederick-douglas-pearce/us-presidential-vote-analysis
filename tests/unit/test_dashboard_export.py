@@ -2006,9 +2006,16 @@ LEADER_ROW_FIELDS = (
 )
 
 
+#: The ``elections`` item fields the averages on ``/elections`` read (#437): a value of
+#: either makes that average read "Unrecognized value", never a mean over it.
+AVERAGED_FIELDS = ("ec_margin", "pv_margin")
+
+
 def _leaders(body: dict[str, Any]) -> None:
     _row(*LEADER_ROW_FIELDS)(body)
     body["elections"][0]["ec_determinative"] = SENTINEL
+    for field in AVERAGED_FIELDS:
+        body["elections"][0][field] = SENTINEL
 
 
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
@@ -2052,6 +2059,8 @@ UNRECOGNIZED_CELLS = {
         "elections-table": 2,
         # One per doctored field, ``ec_determinative`` from the year's item (#434).
         "elections-leader-table": len(LEADER_ROW_FIELDS) + 1,
+        # One per average whose field a doctored item holds (#437).
+        "elections-metrics": len(AVERAGED_FIELDS),
     },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
@@ -2248,7 +2257,7 @@ class TestNoRawValues:
             **{
                 d.id: d
                 for d in of_type(tree, "Div")
-                if getattr(d, "id", None) == "election-panel"
+                if getattr(d, "id", None) in ("election-panel", "elections-metrics")
             },
         }
         assert set(UNRECOGNIZED_CELLS[key]) >= on_page

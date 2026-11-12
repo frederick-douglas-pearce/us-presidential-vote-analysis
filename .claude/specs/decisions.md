@@ -6563,3 +6563,64 @@ election. A state filter (#436) could never reach a national leader table, so le
 filters narrow it (the alternative) would leave the page with a split rule; T3 and the panel
 already set the never-filtered precedent. A section that degrades alone keeps the page's list of
 elections, which needs nothing N1 carries.
+
+## D097: The dashboard computes a summary only as a count, sum or mean over served rows of one grain; each mean shows its own N and years, and none is recomputed from a served figure
+
+**Date:** 2026-11-11
+**Builds on:** D070(c), D072, D094, D095, D096 · **Decided by:** the owner (the rule, 2026-11-05, #437's issue body; the plan, approved at #437's plan gate, architect-reviewed)
+
+**Context.** #437 adds headline metrics to `/elections`: the number of elections the filters show,
+and the average Electoral College and popular-vote margins over them. The API cannot serve totals
+for filters the reader chooses without a request per filter change and an edge cache split into
+many entries, so the dashboard computes them. The two margins cover different years: `ec_margin`
+is served for every election (1824–2024), `pv_margin` only inside the popular-vote window
+(1976–2024), so the default view averages 51 elections against 13.
+
+**Decision.**
+- **(a) The rule (owner, verbatim).** Inputs are served fields of one grain, from the render's
+  pinned view. Only count, sum and mean over rows. Never a ratio of fields, and never recomputing a
+  figure the API serves (for example, a margin rebuilt from shares, or a national total). A mean
+  excludes nulls and shows its N ("over N elections"). A sum with any null reads "no figure". A
+  null flag is never counted as false. Wherever a served figure exists, the metric reconciles to it.
+  The reader wording of each "no figure" state is a `ba` spec's (for #437: "No average: <reason>").
+- **(b) Scope.** The rule governs every figure the dashboard computes over more than one served
+  row (a count, sum or mean), on any page, now and later. It does not govern formatting one served
+  value into a cell, or a chart drawing served values (D091).
+- **(c) Inputs.** One grain, one pinned view; responses are joined only on the grain key, and each
+  response is validated once, by one function its readers share. On `/elections`, N1's
+  `elections` items are checked by `n1_items` (`pages/elections.py`), which C2's `leaders` also
+  calls (D096(c)); the averages never reuse C2's rank-1 check, since a tie at rank 1 is valid API
+  data (D094(iv)) that only C2 refuses.
+- **(d) The row set** is the rows the page's own table shows under its parsed query (`/elections`:
+  T1's `shown`), so `og:url` reopens the same figures. A mean counts each year once, however often
+  the index lists it (#334).
+- **(e) A mean** states its N and its window: the earliest and latest years whose value entered it,
+  not the filter's bounds. No contributing value ⇒ no figure, never 0 or NaN. A value that is
+  neither null nor a figure (`labels.finite`) makes the whole metric read `labels.UNRECOGNIZED`;
+  it is never left out, which would drop a year and misstate N. A non-finite result reads the same.
+- **(f) One module.** Every summary is computed in `explore/metrics.py`, a shared module (it reads
+  no API and imports only `labels`). Its `METRICS` table names each metric's source as a public
+  `/v1` `(model, field)` pair, and the page reads the field from it. Labels are
+  `labels.METRIC_LABELS`, keyed by metric key; `LABELS` stays keyed by public field name.
+- **(g) Stable ids, no registry.** Metric keys and their DOM ids are never renamed or reused, as a
+  chart ID is (`charts.CHARTS`). Metrics get no `CHARTS` registry ID: a registry row implies a companion
+  table and the figure rules; a narrative tab (E9-S7) can link a metric by fragment, and a registry
+  is added when one needs more.
+- **(h) Failure, on `/elections`.** The count reads T1's rows and always shows on success. An
+  unreadable N1, an item-level defect (`n1_items` refuses it), a missing margin field or a malformed
+  popular-vote window replaces both averages with `METRICS_UNAVAILABLE` (never
+  `UNAVAILABLE_MESSAGE`'s wording); a rank-level defect degrades C2 only; a bad margin value makes
+  that average read "Unrecognized value". The page's success marker is unchanged.
+- **(i) Requests.** The metrics add no API path, fill or `view.get`. A filter change makes no
+  request once N1 is cached; while N1 fails, each filter change retries it once, C2's own retry
+  (D096(d)), which the metrics inherit and do not add to.
+- **(j) Not decided here.** Whether #436's state filter narrows the national metrics, and whether
+  #428's N2 rows feed any. A metric at another grain is a separate metric with its own N and
+  window, never mixed with an election-grain one; a national total rebuilt from state rows is a
+  recomputed served figure, which (a) forbids.
+
+**Rationale.** A summary the dashboard computes is a claim the API never made, so it is held to
+what a reader can check: served inputs, one grain, the simplest aggregates, and its own N and
+years in view. Two averages over different years read as one comparison unless each says which
+elections it covers. Validating a response once keeps one body from being accepted by one reader
+and refused by another, whichever filter is applied.

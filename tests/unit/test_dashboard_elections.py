@@ -22,7 +22,7 @@ import pytest
 from dash import no_update
 from dash.development.base_component import Component
 
-from explore import api, charts, components, labels
+from explore import api, charts, components, labels, metrics
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     META,
@@ -685,6 +685,7 @@ SHARED_MODULES = (
     "election_view.py",  # the election pages' shared pieces (#465)
     "export.py",
     "labels.py",
+    "metrics.py",  # the dashboard's own summaries (#437, D097)
     "query.py",
 )
 
@@ -1471,3 +1472,413 @@ class TestN1Fixture:
         # Order-insensitive: the year recordings predate 0.8.0's order within ties, and
         # this checks content; C2 reads only each year's rank-1 row.
         assert sorted(rows, key=key) == sorted(body["summary"], key=key)
+
+
+# --- the headline metrics (#437, D097) ------------------------------------------------
+
+METRICS_BLOCK = MOD["METRICS_ID"]
+METRIC_IDS = MOD["METRIC_IDS"]
+ITEMS: dict[int, dict[str, Any]] = {e["year"]: e for e in SUMMARY["elections"]}
+
+#: Each case's query and, per average, ``(mean, n, first, last, text)`` or the no-average
+#: text. The means were computed once at plan time from the recorded N1's JSON, outside
+#: the code under test, with ``sum()/len()`` and again with ``statistics.fmean`` (which
+#: sums with ``math.fsum``), the two agreeing to the last digit; the text is the mean to
+#: one decimal, as the panel shows a margin.
+CASES: dict[str, tuple[dict[str, str], Any, Any]] = {
+    "the full span": (
+        {},
+        (41.15552204050586, 51, 1824, 2024, "41.2 percentage points"),
+        (5.687741898936854, 13, 1976, 2024, "5.7 percentage points"),
+    ),
+    "a range inside the popular-vote window": (
+        {"year_from": "1980", "year_to": "2000"},
+        (52.47831474597274, 6, 1980, 2000, "52.5 percentage points"),
+        (8.38330161022184, 6, 1980, 2000, "8.4 percentage points"),
+    ),
+    "a range wholly before it": (
+        {"year_to": "1900"},
+        (33.859688838064855, 20, 1824, 1900, "33.9 percentage points"),
+        "No average: this dataset's popular-vote figures cover 1976–2024, not the "
+        "years shown",
+    ),
+    "a single year": (
+        {"year_from": "2000", "year_to": "2000"},
+        (0.9293680297397799, 1, 2000, 2000, "0.9 percentage points"),
+        (0.5112914484084907, 1, 2000, 2000, "0.5 percentage points"),
+    ),
+    "only years with a popular vote": (
+        {"pv": "1"},
+        (33.471547040320274, 13, 1976, 2024, "33.5 percentage points"),
+        (5.687741898936854, 13, 1976, 2024, "5.7 percentage points"),
+    ),
+    "a range straddling the window": (
+        {"year_from": "1960", "year_to": "1990"},
+        (57.04359722539511, 8, 1960, 1988, "57.0 percentage points"),
+        (9.435891644389528, 4, 1976, 1988, "9.4 percentage points"),
+    ),
+    "an empty selection": (
+        {"pv": "1", "year_to": "1900"},
+        "No average: no elections match these filters",
+        "No average: no elections match these filters",
+    ),
+}
+
+
+def metric_text(tree: Any, key: str) -> str:
+    """A metric's whole shown text (the count line, or an average's value)."""
+    node = find(tree, METRIC_IDS[key])
+    assert node is not None, key
+    return "".join(texts(node.children))
+
+
+def notes_of(tree: Any) -> list[str]:
+    block = find(tree, METRICS_BLOCK)
+    return ["".join(texts(p.children)) for p in of_type(block, "P")][1:]
+
+
+def over(n: int, first: int, last: int) -> str:
+    """The wording after an average's value, written out (ba spec, #437)."""
+    if n == 1:
+        return f", over 1 election ({first})"
+    return f", over {n} elections ({first}–{last})"
+
+
+def _shown_pairs(tree: Any, field: str) -> list[tuple[int, Any]]:
+    return [(year, ITEMS[year][field]) for year in sorted(set(shown_years(tree)))]
+
+
+class TestMetrics:
+    @pytest.mark.parametrize("name", list(CASES))
+    def test_each_mean_equals_its_literal(self, name: str) -> None:
+        query, *expected = CASES[name]
+        tree = render_c2(query=query)
+        for key, want in zip(MOD["MEANS"], expected, strict=True):
+            field = metrics.METRICS[key].source.field
+            mean = metrics.mean(_shown_pairs(tree, field))
+            if isinstance(want, str):
+                assert (mean.value, mean.n) == (None, 0), (name, key)
+                assert metric_text(tree, key) == want, (name, key)
+                continue
+            value, n, first, last, text = want
+            assert (mean.n, mean.first, mean.last) == (n, first, last), (name, key)
+            assert mean.value == pytest.approx(value, rel=1e-12), (name, key)
+            assert metric_text(tree, key) == text + over(n, first, last), (name, key)
+
+    @pytest.mark.parametrize("name", list(CASES))
+    def test_the_count_is_t1_s_row_count(self, name: str) -> None:
+        tree = render_c2(query=CASES[name][0])
+        shown = len(rows(tree))
+        assert metric_text(tree, "elections_shown") == (
+            f"Showing {shown} of {len(YEARS)} elections"
+        )
+
+    def test_an_empty_selection_shows_no_zero_and_no_nan(self) -> None:
+        tree = render_c2(query=CASES["an empty selection"][0])
+        assert rows(tree) == []
+        for key in MOD["MEANS"]:
+            text = metric_text(tree, key)
+            assert not any(ch.isdigit() for ch in text) and "nan" not in text.lower()
+
+    def test_both_averages_name_their_own_elections_and_years_side_by_side(
+        self,
+    ) -> None:
+        """The default view is the mismatched case: the two Ns and windows both show,
+        in one list, and a note says the two do not cover the same elections."""
+        tree = render_c2()
+        (dl,) = of_type(find(tree, METRICS_BLOCK), "Dl")
+        assert [dt.children for dt in of_type(dl, "Dt")] == [
+            "Average electoral margin",
+            "Average popular-vote margin",
+        ]
+        shown = "".join(texts(dl.children))
+        assert "over 51 elections (1824–2024)" in shown
+        assert "over 13 elections (1976–2024)" in shown
+        assert notes_of(tree) == [
+            labels.MARGIN_NOTE,
+            "The two averages do not cover the same elections: this dataset's "
+            "popular-vote figures cover 1976–2024. To compare the two over the same "
+            'elections, select "Only years with a popular vote in this dataset".',
+        ]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "a range inside the popular-vote window",
+            "a single year",
+            "only years with a popular vote",
+            "a range wholly before it",
+            "an empty selection",
+        ],
+    )
+    def test_no_note_when_the_two_cover_the_same_elections_or_one_has_none(
+        self, name: str
+    ) -> None:
+        assert notes_of(render_c2(query=CASES[name][0])) == [labels.MARGIN_NOTE]
+
+    def test_the_hint_shows_only_while_the_popular_vote_filter_is_off(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        for item in summary["elections"]:
+            if item["year"] == 2024:
+                item["pv_margin"] = None
+        tree = render_c2(summary, query={"pv": "1"})
+        assert metric_text(tree, "pv_margin_mean").endswith(
+            "over 12 elections (1976–2020)"
+        )
+        assert notes_of(tree) == [
+            labels.MARGIN_NOTE,
+            "The two averages do not cover the same elections: this dataset's "
+            "popular-vote figures cover 1976–2024.",
+        ]
+
+    def test_a_single_year_reconciles_to_its_served_margin(self) -> None:
+        """Wherever a served figure exists, the metric reconciles to it: an average
+        over one election shows that year's panel margin cell exactly (a precision pin:
+        a mean of one value is that value)."""
+        tree = render_c2(query=CASES["a single year"][0])
+        for key in MOD["MEANS"]:
+            dd = find(tree, METRIC_IDS[key])
+            value, rest = (span.children for span in of_type(dd, "Span"))
+            field = metrics.METRICS[key].source.field
+            assert value == labels.margin(ITEMS[2000][field], True)
+            assert rest == ", over 1 election (2000)"
+
+    def test_the_metric_table_drives_what_is_averaged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity of the source check: the page reads each mean's field from
+        ``metrics.METRICS``, so pointing a row at another field changes the figure."""
+        monkeypatch.setitem(
+            metrics.METRICS,
+            "ec_margin_mean",
+            metrics.Metric("mean", metrics.Source("ElectionSummary", "hybrid_margin")),
+        )
+        tree = render_c2(query={"pv": "1"})
+        assert metric_text(tree, "ec_margin_mean") == (
+            "19.4 percentage points, over 13 elections (1976–2024)"
+        )
+
+    def test_a_year_listed_twice_counts_once_in_an_average(self) -> None:
+        index = copy.deepcopy(BODY)
+        index["data"].append(next(r for r in index["data"] if r["year"] == 2000))
+        tree = render_c2(index=index, query=CASES["a single year"][0])
+        assert metric_text(tree, "elections_shown") == "Showing 2 of 52 elections"
+        assert metric_text(tree, "ec_margin_mean").endswith(", over 1 election (2000)")
+
+    def test_an_unrecognized_margin_reads_so_and_names_no_n(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        for item in summary["elections"]:
+            if item["year"] == 2000:
+                item["ec_margin"] = "x"
+        tree = render_c2(summary)
+        dd = find(tree, METRIC_IDS["ec_margin_mean"])
+        assert dd.children == labels.UNRECOGNIZED
+        assert dd.title == labels.UNRECOGNIZED_NOTE
+        assert metric_text(tree, "pv_margin_mean").startswith("5.7 percentage points")
+        assert notes_of(tree) == [labels.MARGIN_NOTE]
+
+    def test_metrics_render_only_inside_the_list_of_elections(self) -> None:
+        tree = render_c2()
+        order = [getattr(n, "id", None) for n in in_order(tree)]
+        assert order.index(YEARS_ID) < order.index(METRICS_BLOCK)
+        assert order.index(METRICS_BLOCK) < order.index(TABLE_ID)
+
+
+class TestMetricsDegraded:
+    def test_an_unreadable_n1_keeps_the_count(self) -> None:
+        tree = render()  # no N1 body
+        assert metric_text(tree, "elections_shown") == "Showing 51 of 51 elections"
+        sentence = find(tree, MOD["METRICS_UNAVAILABLE_ID"])
+        assert sentence.children == MOD["METRICS_UNAVAILABLE"]
+        assert of_type(find(tree, METRICS_BLOCK), "Dl") == []
+        assert components.UNAVAILABLE_MESSAGE not in MOD["METRICS_UNAVAILABLE"]
+        assert "isn't responding" not in MOD["METRICS_UNAVAILABLE"]
+
+    @pytest.mark.parametrize(
+        ("name", "summary"),
+        [
+            ("a served year with no elections item", _without(1876)),
+            ("an elections item for a year not served", None),
+            ("two items for one year", _second_item()),
+            ("an item with no ec_margin", None),
+        ],
+    )
+    def test_an_item_level_defect_degrades_the_averages_and_c2(
+        self, name: str, summary: Any
+    ) -> None:
+        if name == "an elections item for a year not served":
+            summary = copy.deepcopy(SUMMARY)
+            summary["elections"].append({**summary["elections"][0], "year": 1826})
+        if name == "an item with no ec_margin":
+            summary = copy.deepcopy(SUMMARY)
+            del summary["elections"][3]["ec_margin"]
+        tree = render_c2(summary)
+        assert find(tree, MOD["METRICS_UNAVAILABLE_ID"]) is not None, name
+        assert find(tree, METRIC_IDS["elections_shown"]) is not None
+        assert shown_years(tree) == YEARS
+        if name != "an item with no ec_margin":  # C2 reads no margin
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, name
+
+    def test_a_rank_level_defect_leaves_the_averages(self) -> None:
+        """A tie at rank 1 is valid API data (D094(iv)) that C2 refuses by design; the
+        averages read no ``data`` row, so they still show."""
+        tree = render_c2(_second_leader())
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+        assert find(tree, MOD["METRICS_UNAVAILABLE_ID"]) is None
+        assert metric_text(tree, "ec_margin_mean").startswith("41.2 percentage points")
+
+    def test_a_malformed_popular_vote_window_degrades_only_the_averages(self) -> None:
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"]["pv_year_min"] = True
+        tree = render_c2(index=index)
+        assert find(tree, MOD["METRICS_UNAVAILABLE_ID"]) is not None
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is None
+        assert shown_years(tree) == YEARS
+
+    def test_the_degraded_page_has_no_metrics(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        tree = PAGE["layout"]()
+        assert find(tree, METRICS_BLOCK) is None
+        assert find(tree, METRIC_IDS["elections_shown"]) is None
+
+
+class TestMetricsFilters:
+    def test_a_filter_change_makes_no_request_once_n1_is_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch)
+        route("/elections", "")  # fills N1 on its miss
+        calls.clear()
+        seen = set()
+        for search in ("?pv=1", "?year_to=1900", "?year_from=1980&year_to=2000", ""):
+            response = route("/elections", search)
+            node = json_node(response.get_json(), METRIC_IDS["ec_margin_mean"])
+            assert node is not None, search
+            seen.add(str(node["props"]["children"]))
+            assert calls == [], search
+        assert len(seen) == 4  # each filter change showed its own figure
+        assert len(bucket.waits) == 1  # N1's one fill, before the filter changes
+
+    @pytest.mark.parametrize("query", SHARED)
+    def test_og_url_reopens_the_same_figures(self, query: str) -> None:
+        resolution = appmod.resolve("/elections", query, None)
+        assert resolution.og_url is not None
+        normal = urllib.parse.urlsplit(resolution.og_url).query
+        raw, reopened = (render_c2(query=parse(q)) for q in (query, normal))
+        for key in METRIC_IDS:
+            assert metric_text(raw, key) == metric_text(reopened, key), (query, key)
+
+
+class TestMetricLabels:
+    def test_every_metric_has_a_label_and_no_metric_key_is_a_field_label(self) -> None:
+        assert list(labels.METRIC_LABELS) == list(metrics.METRICS)
+        assert set(labels.METRIC_LABELS).isdisjoint(labels.LABELS)
+        assert set(METRIC_IDS) == set(metrics.METRICS)
+        assert set(MOD["MEANS"]) == {
+            k for k, m in metrics.METRICS.items() if m.kind == "mean"
+        }
+
+    def test_every_source_is_a_public_api_field(self) -> None:
+        assert metric_source_problems(metrics.METRICS.values()) == []
+
+    def test_the_source_check_fails_what_it_should(self) -> None:
+        bad = [
+            metrics.Metric("mean", metrics.Source("ElectionSummary", "nonsense")),
+            metrics.Metric("mean", metrics.Source("NoSuchModel", "year")),
+            metrics.Metric("count", metrics.Source("ElectionSummary", "ec_denominator")),
+        ]
+        assert metric_source_problems(bad) == [
+            "ElectionSummary.nonsense",
+            "NoSuchModel.year",
+            "ElectionSummary.ec_denominator",
+        ]
+
+
+def metric_source_problems(rows: Any) -> list[str]:
+    """Each metric source that names no public field of its ``/v1`` model (a snapshot
+    column the model accepts only as an input alias is not one). Test-only: the
+    runtime imports no ``usvote``."""
+    from usvote.api import models
+
+    problems = []
+    for metric in rows:
+        model = getattr(models, metric.source.model, None)
+        fields = getattr(model, "model_fields", {})
+        if metric.source.field not in fields:
+            problems.append(f"{metric.source.model}.{metric.source.field}")
+    return problems
+
+
+class TestMetricsModule:
+    @pytest.mark.parametrize("value", [None, "", "  "])
+    def test_a_null_or_blank_is_left_out(self, value: Any) -> None:
+        mean = metrics.mean([(1976, 2.0), (1980, value), (1984, 4.0)])
+        assert mean == metrics.Mean(3.0, 2, 1976, 1984)
+
+    @pytest.mark.parametrize(
+        "value", [True, False, "x", float("nan"), float("inf"), float("-inf"), 10**400]
+    )
+    def test_a_value_no_figure_can_show_makes_the_mean_unrecognized(
+        self, value: Any
+    ) -> None:
+        assert metrics.mean([(1976, 2.0), (1980, value)]) == metrics.UNRECOGNIZED
+
+    def test_a_sum_that_overflows_is_unrecognized(self) -> None:
+        assert metrics.mean([(1976, 1e308), (1980, 1e308)]) == metrics.UNRECOGNIZED
+
+    def test_no_value_is_no_average(self) -> None:
+        assert metrics.mean([]) == metrics.NO_AVERAGE
+        assert metrics.mean([(1824, None)]) == metrics.NO_AVERAGE
+        assert metrics.NO_AVERAGE.value is None and not metrics.NO_AVERAGE.unrecognized
+
+    def test_an_int_and_a_negative_zero_are_figures(self) -> None:
+        assert metrics.mean([(1976, 1), (1980, -0.0)]) == metrics.Mean(
+            0.5, 2, 1976, 1980
+        )
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (1.0, 0, None, None),
+            (None, 1, 2000, 2000),
+            (1.0, 1, 2004, 2000),
+            (float("nan"), 1, 2000, 2000),
+            (1.0, 1, None, 2000),
+            (1, 1, 2000, 2000),
+            (None, 0, 2000, None),
+            (1.0, 1, 2000, 2000, True),
+        ],
+    )
+    def test_a_mean_in_no_state_cannot_be_built(self, args: tuple[Any, ...]) -> None:
+        with pytest.raises(ValueError):
+            metrics.Mean(*args)
+
+    def test_count_counts_rows(self) -> None:
+        assert metrics.count([]) == 0
+        assert metrics.count(BODY["data"]) == len(YEARS)
+
+
+class TestN1Items:
+    def test_the_recording_gives_one_item_per_served_year(self) -> None:
+        items = MOD["n1_items"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY))
+        assert sorted(items) == YEARS
+        assert items[2000]["ec_margin"] == ITEMS[2000]["ec_margin"]
+
+    @pytest.mark.parametrize(
+        "name", ["a served year with no elections item", "two items for one year"]
+    )
+    def test_an_item_defect_is_refused(self, name: str) -> None:
+        summary = _without(1876) if name.startswith("a served") else _second_item()
+        with pytest.raises(TypeError):
+            MOD["n1_items"](copy.deepcopy(BODY), summary)
+
+    def test_it_reads_no_data_row(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"] = "not a list"
+        assert sorted(MOD["n1_items"](copy.deepcopy(BODY), summary)) == YEARS

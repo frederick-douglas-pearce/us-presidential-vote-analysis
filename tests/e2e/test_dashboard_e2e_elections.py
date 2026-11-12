@@ -272,3 +272,64 @@ def test_with_plotlyjs_blocked_c2_s_title_caption_and_both_tables_render(
     expect(page.locator("#elections-leader-table")).to_be_visible()
     expect(page.locator(ELECTIONS_ROWS)).to_have_count(len(served_years()))
     expect(page.locator(f"{C2} .js-plotly-plot")).to_have_count(0)
+
+
+# --- the headline metrics (#437, D097) ------------------------------------------------
+
+METRICS = "#elections-metrics"
+METRIC_TEXTS = f"{METRICS} p, {METRICS} dt, {METRICS} dd"
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_metrics_are_legible_at_390_px_in_both_themes(
+    page: Page, theme: str
+) -> None:
+    """AC Rendering: the count, both averages and their notes inside 390 px with no
+    sideways scroll and none over another, in each theme, in the text colors the
+    theme's tokens name (each figure is labeled text, so nothing rests on color)."""
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    page.locator(f"#{components.THEME_BUTTON_IDS[theme]}").click()
+    expect(page.locator("html")).to_have_attribute("data-theme", theme)
+    expect(page.locator("#elections-shown")).to_have_text(
+        f"Showing {len(served_years())} of {len(served_years())} elections"
+    )
+    expect(page.locator(f"{METRICS} dt")).to_have_text(
+        [labels.METRIC_LABELS["ec_margin_mean"], labels.METRIC_LABELS["pv_margin_mean"]]
+    )
+    expect(page.locator("#elections-ec-margin-mean")).to_have_text(
+        "41.2 percentage points, over 51 elections (1824–2024)"
+    )
+    expect(page.locator("#elections-pv-margin-mean")).to_have_text(
+        "5.7 percentage points, over 13 elections (1976–2024)"
+    )
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    shown = boxes(page, METRIC_TEXTS)
+    # The count line, two terms, two values, and the margin and different-elections
+    # notes.
+    assert len(shown) == 1 + 2 + 2 + 2
+    for i, a in enumerate(shown):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= 390, a
+        for b in shown[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+    dd = page.locator("#elections-ec-margin-mean")
+    assert dd.evaluate("el => getComputedStyle(el).color") == rgb(token(page, "--text"))
+    note = page.locator(f"{METRICS} p.note").first
+    assert note.evaluate("el => getComputedStyle(el).color") == rgb(
+        token(page, "--text-secondary")
+    )
+
+
+def test_a_filter_change_updates_the_metrics(page: Page) -> None:
+    page.goto("/elections")
+    assert_view(page)
+    check_pv(page)
+    assert_view(page, pv_only=True)
+    expect(page.locator("#elections-ec-margin-mean")).to_have_text(
+        "33.5 percentage points, over 13 elections (1976–2024)"
+    )
+    expect(page.locator("#elections-shown")).to_have_text(
+        f"Showing 13 of {len(served_years())} elections"
+    )
+    # Both averages now cover the same elections: only the margin note remains.
+    expect(page.locator(f"{METRICS} p.note")).to_have_text([labels.MARGIN_NOTE])

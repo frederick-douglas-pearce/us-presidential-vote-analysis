@@ -19,16 +19,31 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   from N1 (:data:`explore.api.SUMMARY_PATH`), filled on a miss. No filter narrows
   either, and a failed or malformed N1 shows only that section's own sentence, so T1
   still renders.
+- **The headline metrics** (#437, D097) sit between the filters and T1: the count of
+  elections shown, then the average electoral and popular-vote margins over them, each
+  with its own N and years, computed by :mod:`explore.metrics` from T1's own shown rows
+  and N1's ``elections`` items (:func:`n1_items`, the one check C2 shares). A failed or
+  malformed N1 replaces the averages with :data:`METRICS_UNAVAILABLE`; the count stays.
 """
 
 from __future__ import annotations
 
+import functools
 from typing import Any, NamedTuple
 
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, charts, components, election_view, export, labels, query
+from explore import (
+    api,
+    charts,
+    components,
+    election_view,
+    export,
+    labels,
+    metrics,
+    query,
+)
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in the table.
@@ -78,6 +93,23 @@ LIST_HEADING = "List of elections"
 C2_UNAVAILABLE = (
     "The chart and table of each election's Electoral College leader can't be shown "
     "right now. Please try again in a minute."
+)
+
+#: The headline metrics (#437, D097): the block, its count line and each average's
+#: value, by metric key; DOM ids are stable and never renamed.
+METRICS_ID = "elections-metrics"
+METRICS_UNAVAILABLE_ID = "elections-metrics-unavailable"
+METRIC_IDS = {
+    "elections_shown": "elections-shown",
+    "ec_margin_mean": "elections-ec-margin-mean",
+    "pv_margin_mean": "elections-pv-margin-mean",
+}
+#: The averages, in the order they show.
+MEANS = ("ec_margin_mean", "pv_margin_mean")
+#: The averages when N1 cannot be read or is malformed; the count still shows (ba spec,
+#: #437). Never ``UNAVAILABLE_MESSAGE``'s wording, as :data:`C2_UNAVAILABLE`.
+METRICS_UNAVAILABLE = (
+    "The average margins can't be shown right now. Please try again in a minute."
 )
 
 #: C2's pixels per row (one tick line, so every year's label shows at 390 px) and the
@@ -220,19 +252,17 @@ def _row(election: dict[str, Any]) -> html.Tr:
     )
 
 
-def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
-    """Each served year's Electoral College leader, oldest first: N1's one ``data`` row
-    with ``electoral_rank`` 1, with the year's ``ec_determinative`` from its one
-    ``elections`` item (#434, D096). Derives nothing.
+def n1_items(index: dict[str, Any], summary: Any) -> dict[int, dict[str, Any]]:
+    """N1's ``elections`` items by year, one for each year the index serves (D096(c)):
+    the one check of those items, shared by C2 (:func:`leaders`) and the averages
+    (#437, D097), so a body both read is accepted or refused by both alike.
 
-    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for anything else C2
-    cannot show: a year (in the index's rows or in N1's) that
-    :func:`explore.election_view.row_year` refuses or that lies outside the served
-    span, an N1 year the index does not serve, a served year with no ``elections`` item
-    or two, or with no rank-1 row or two (a tie at rank 1 is valid API data, D094(iv),
-    but C2 needs one leader per year). ``electoral_rank`` counts only as an ``int``,
-    never a ``bool``. A year the index lists twice is one served year: refusing the
-    duplicate is the index's own rule (#334).
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for a year (in the
+    index's rows or in N1's items) that :func:`explore.election_view.row_year` refuses
+    or that lies outside the served span, an N1 year the index does not serve, or a
+    served year with no ``elections`` item or two. A year the index lists twice is one
+    served year: refusing the duplicate is the index's own rule (#334). It reads no
+    ``data`` row: those are C2's alone.
     """
     first, last = span(index["meta"]["provenance"]["coverage"])
     served: set[int] = set()
@@ -243,15 +273,36 @@ def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
         served.add(year)
     if not isinstance(summary, dict):
         raise TypeError(f"{api.SUMMARY_PATH} is not an object")
-    rows, items = summary["data"], summary["elections"]
-    if not isinstance(rows, list) or not isinstance(items, list):
-        raise TypeError(f"{api.SUMMARY_PATH} carries no lists")
+    items = summary["elections"]
+    if not isinstance(items, list):
+        raise TypeError(f"{api.SUMMARY_PATH} carries no list of elections")
     by_year: dict[int, dict[str, Any]] = {}
     for item in items:
         year = election_view.row_year(item)
         if year is None or year not in served or year in by_year:
             raise TypeError(f"{api.SUMMARY_PATH}: a bad elections item")
         by_year[year] = item
+    if set(by_year) != served:
+        raise TypeError(f"{api.SUMMARY_PATH} misses a served year")
+    return by_year
+
+
+def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
+    """Each served year's Electoral College leader, oldest first: N1's one ``data`` row
+    with ``electoral_rank`` 1, with the year's ``ec_determinative`` from its one
+    ``elections`` item (#434, D096). Derives nothing.
+
+    Pure; raises what :func:`n1_items` raises, and ``TypeError`` for anything else C2
+    cannot show: a ``data`` row whose year :func:`explore.election_view.row_year`
+    refuses or the index does not serve, or a served year with no rank-1 row or two (a
+    tie at rank 1 is valid API data, D094(iv), but C2 needs one leader per year).
+    ``electoral_rank`` counts only as an ``int``, never a ``bool``.
+    """
+    by_year = n1_items(index, summary)
+    served = set(by_year)
+    rows = summary["data"]
+    if not isinstance(rows, list):
+        raise TypeError(f"{api.SUMMARY_PATH} carries no list of rows")
     leader: dict[int, dict[str, Any]] = {}
     for row in rows:
         year = election_view.row_year(row)
@@ -262,7 +313,7 @@ def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
             if year in leader:
                 raise TypeError(f"{api.SUMMARY_PATH}: two leaders in {year}")
             leader[year] = row
-    if set(by_year) != served or set(leader) != served:
+    if set(leader) != served:
         raise TypeError(f"{api.SUMMARY_PATH} misses a served year")
     return [
         {**leader[year], "ec_determinative": by_year[year]["ec_determinative"]}
@@ -500,12 +551,78 @@ def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
     ]
 
 
+def _shown_year(row: Any) -> int:
+    """A shown T1 row's year, checked (:func:`n1_items` already refused a bad one)."""
+    year = election_view.row_year(row)
+    if year is None:
+        raise TypeError("/v1/elections names a year that is not one")
+    return year
+
+
+def _averages(
+    index: dict[str, Any], summary: Any, shown: list[Any], pv_only: bool
+) -> list[Any]:
+    """The two average margins over the elections T1 shows (#437, D097), as a ``dl``
+    and its notes, or :data:`METRICS_UNAVAILABLE` alone when N1 could not be read
+    (``summary`` is ``None``), its ``elections`` items fail :func:`n1_items`, an item
+    lacks a margin field, or the index's popular-vote window is malformed.
+
+    Each year shown counts once, however often the index lists it (#334). Each mean
+    reads the field ``metrics.METRICS`` names, so that table drives what is averaged.
+    """
+    try:
+        if summary is None:
+            raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
+        items = n1_items(index, summary)
+        coverage = index["meta"]["provenance"]["coverage"]
+        pv_window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
+        years = sorted({_shown_year(e) for e in shown})
+        means = {
+            key: metrics.mean(
+                (year, items[year][metrics.METRICS[key].source.field]) for year in years
+            )
+            for key in MEANS
+        }
+    except (KeyError, TypeError):
+        return [
+            html.P(METRICS_UNAVAILABLE, id=METRICS_UNAVAILABLE_ID, className="note")
+        ]
+    windows = {"ec_margin_mean": None, "pv_margin_mean": pv_window}
+    entries: list[Any] = []
+    for key in MEANS:
+        value, over = labels.metric_mean(means[key], years, windows[key])
+        children: Any = (
+            value
+            if over is None
+            else [html.Span(value, className="metric-value"), html.Span(over)]
+        )
+        entries += [
+            html.Dt(labels.METRIC_LABELS[key]),
+            labels.cell(children, functools.partial(html.Dd, id=METRIC_IDS[key])),
+        ]
+    notes = [html.P(labels.MARGIN_NOTE, className="note")]
+    ec, pv = (means[key] for key in MEANS)
+    if (
+        ec.value is not None
+        and pv.value is not None
+        and (ec.n, ec.first, ec.last) != (pv.n, pv.first, pv.last)
+    ):
+        sentence = labels.METRIC_DIFFERENT_ELECTIONS.format(
+            first=pv_window[0], last=pv_window[1]
+        )
+        if not pv_only:
+            sentence = f"{sentence} {labels.METRIC_SAME_ELECTIONS}"
+        notes.append(html.P(sentence, className="note"))
+    return [html.Dl(entries, className="metrics"), *notes]
+
+
 def render(
     body: dict[str, Any], pairs: list[tuple[str, str]], summary: Any = None
 ) -> html.Div:
     """The whole page for one ``/v1/elections`` response, this page's filter pairs and
     N1's body (``None`` when it could not be read): the heading and lede, C2's section,
-    then the list of elections. The filters narrow T1 only."""
+    then the list of elections with its headline metrics. The filters narrow T1 and the
+    metrics computed from it only."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     chosen = filters(pairs, coverage)
@@ -556,9 +673,19 @@ def render(
             *_leader_section(body, summary),
             html.H2(LIST_HEADING),
             controls,
-            html.P(
-                f"Showing {len(shown)} of {len(elections)} elections",
-                className="count",
+            html.Div(
+                [
+                    html.P(
+                        labels.METRIC_LABELS["elections_shown"].format(
+                            shown=metrics.count(shown),
+                            total=metrics.count(elections),
+                        ),
+                        id=METRIC_IDS["elections_shown"],
+                        className="count",
+                    ),
+                    *_averages(body, summary, shown, chosen.pv_only),
+                ],
+                id=METRICS_ID,
             ),
             *components.table(
                 shown,
