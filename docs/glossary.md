@@ -16,8 +16,8 @@ is also listed under **Open decisions**. Wording still under review in an open p
 not marked here; that pull request carries it.
 
 **This file records what terms mean; the code ships the wording.** The dashboard's shipped
-wording lives in `dashboard/explore/labels.py` (`LABELS`, the closed-value tables, the null
-and help-text constants, the names of the site's controls and links, and every chart's text),
+wording lives in `dashboard/explore/labels.py` (`LABELS`, the metric labels `METRIC_LABELS`,
+the closed-value tables, the null and help-text constants, the names of the site's controls and links, and every chart's text),
 with a few page-level sentences in `dashboard/explore/components.py`,
 `dashboard/explore/export.py` and the modules under `dashboard/explore/pages/`, and the site
 title in `dashboard/explore/config.py` (`SITE_TITLE`). The API's published text is its
@@ -159,6 +159,43 @@ articles and announcements). Every rule binds all three unless the rule states a
   wording: allotment, electors appointed).
 - **Not:** *Electoral votes cast.* An appointed elector who did not vote opens a gap between the
   two (`ELECTORAL_VOTE_SHORTFALLS` in `src/usvote/transform.py`). Not "electoral votes won".
+- **Status:** settled
+
+### Average margin (over the elections shown)
+- **Plain:** For the elections the list on the Elections page shows, the typical gap between first
+  and second place under one method: the Electoral College or the popular vote. Each average says
+  how many elections it covers and which years, because this dataset has popular-vote figures only
+  for recent elections, so the two averages can cover different elections.
+- **Precise:** The arithmetic mean of a served margin (*Margin*): `ec_margin` or `pv_margin` on the
+  `elections` items of `/v1/elections/summary`, over the years in T1's shown list (the same parsed
+  filters T1 applies), each election weighted equally. A null is left out, never read as zero. N is
+  the number of elections whose margin entered the average; its years are the earliest and latest of
+  those, so they can be narrower than the years shown (over 1960–2024, the popular-vote average
+  covers 1976–2024). Computed by the dashboard (`metrics.mean`), never served by the API, under
+  D097: only count, sum and mean over served fields of one grain, never a ratio of fields or a
+  recomputed served figure. Shown in percentage points to one decimal through `labels.margin`, so
+  the average over one election equals that year's panel cell. With no contributing election it
+  reads *No average*. A margin of the wrong type or a non-finite one among the years shown, or a
+  mean no figure can show, reads *Unrecognized value*. If `/v1/elections/summary` cannot be read
+  or is malformed, the two averages are replaced by one sentence and the count of elections shown
+  still shows.
+- **Shown as:** `labels.METRIC_LABELS["ec_margin_mean"]` and `labels.METRIC_LABELS["pv_margin_mean"]`;
+  the value `labels.metric_mean` (`labels.METRIC_OVER`, `labels.METRIC_OVER_ONE`); under the
+  averages, `labels.MARGIN_NOTE`, then `labels.METRIC_DIFFERENT_ELECTIONS` only when both averages
+  are numbers, their number of elections or years differ, and at least one year in the electoral
+  average lies outside the popular-vote window (`coverage`'s `pv_year_min`–`pv_year_max`), so the
+  window is a cause of the difference; a difference that comes only from a missing margin inside
+  the window shows no note, since each average shows its own number and years.
+  `labels.METRIC_SAME_ELECTIONS` follows that note while the popular-vote filter is off.
+  `METRICS_UNAVAILABLE` in `pages/elections.py`. On `/elections`, under `LIST_HEADING`, after the
+  count of elections shown and before T1.
+- **Source:** #437 acceptance criteria; the rule, owner-approved 2026-11-05 (#437 issue body),
+  recorded in D097; `ElectionSummary.ec_margin` and `pv_margin` in `src/usvote/api/models.py`;
+  `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #437, approved at its
+  plan gate.
+- **Not:** A margin the API serves (*Margin*). The hybrid margin, which has no average. An average
+  weighted by electors or votes. A gap measured from the Electoral College's winner or leader. Two
+  averages over the same elections unless their number and years match.
 - **Status:** settled
 
 ### Borders used for the population (boundary basis)
@@ -463,7 +500,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `pages/state.py` and `pages/candidate.py`). An empty filter result (`components.NO_ROWS`). The
   panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is not drawn (*Chart*): its page
   still shows, with its tables. A chart section's own unavailable state (`C2_UNAVAILABLE` in
-  `pages/elections.py`, id `elections-leader-unavailable`): the rest of the page still shows.
+  `pages/elections.py`, id `elections-leader-unavailable`): the rest of the page still shows. The
+  averages' own unavailable state (`METRICS_UNAVAILABLE` in `pages/elections.py`): the count of
+  elections shown and the rest of the page still show.
 - **Status:** settled
 
 ### Election pages (overview, results by state, people per electoral vote)
@@ -552,6 +591,18 @@ articles and announcements). Every rule binds all three unless the rule states a
   counted (*Electoral votes counted*); years the candidate took office (*Took office*).
 - **Status:** settled
 
+### Elections shown (count)
+- **Plain:** How many elections the list on the Elections page shows under the filters in effect,
+  out of all the elections in this dataset.
+- **Precise:** The number of `/v1/elections` rows T1 shows after the year-range and popular-vote
+  filters (`metrics.count`), beside the number of elections served. An average's own number of
+  elections (*Average margin*) can be smaller: it includes only elections that have that margin.
+- **Shown as:** `labels.METRIC_LABELS["elections_shown"]`, the count line above T1 on `/elections`.
+- **Source:** #437 acceptance criteria; D097; `METRICS` in `dashboard/explore/metrics.py`.
+- **Not:** The number of elections an average covers. *Candidates in the dataset*. Another page's
+  "Showing n of m rows" line, which counts table rows.
+- **Status:** settled
+
 ### Electoral College winner, or leader with no majority (`ec_winner`)
 - **Plain:** The candidate with the most electoral votes counted. When that candidate has a
   majority of the electors appointed, they are the Electoral College winner. When no one has a
@@ -589,7 +640,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   majority, and the election went to the House of Representatives. The leader did not always take
   office: in 1824 the House chose John Quincy Adams. Its table also says whether each leader took
   office. The chart and its table always show every election in this dataset; the page's filters
-  narrow only the list of elections.
+  narrow only the list of elections and the averages computed from it.
 - **Precise:**
   - Chart ID C2 in `CHARTS` (`dashboard/explore/charts.py`), on `/elections`, element id `c2`.
   - Its *Companion table* is `elections-leader-table`, in the C2 section, before the list of
@@ -628,8 +679,9 @@ articles and announcements). Every rule binds all three unless the rule states a
     (existing `LABELS` keys, `took_office` last), the table notes `labels.C2_LEADER_ROW` and
     `labels.C2_TOOK_OFFICE`, the download "the Electoral College leaders"
     (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`. After the section,
-    `LIST_HEADING` heads the filters and T1: the list of elections, the only part of the page the
-    filters narrow.
+    `LIST_HEADING` heads the filters, the count of elections shown, the averages (*Average
+    margin*) and T1: the list of elections and the numbers computed from it, the only part of the
+    page the filters narrow.
 - **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); `CHARTS`;
   `NationalSummaryRow.ec_share_full`, `electoral_rank`, `national_electoral_votes_counted` and
   `national_electoral_denominator`, `ElectionSummary.ec_determinative` and
@@ -851,11 +903,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   popular-vote margin is Gore's lead over Bush. `ec_margin` is null with fewer than two scored
   candidates; the popular-vote and hybrid margins are null outside the popular-vote window.
 - **Shown as:** `LABELS["ec_margin"]`, `LABELS["pv_margin"]`, `LABELS["hybrid_margin"]`;
-  `labels.margin`; the panel note `labels.MARGIN_NOTE`.
+  `labels.margin`; the panel note `labels.MARGIN_NOTE`, also shown under the averages on
+  `/elections` (*Average margin*).
 - **Source:** `ElectionSummary.ec_margin`, `pv_margin`, `hybrid_margin` and
   `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037; help-text wording
   (`labels.MARGIN_NOTE`): approved by the owner in place on the #352 branch deploy, 2026-10-12.
-- **Not:** A percent change. A gap measured from the Electoral College's winner or leader.
+- **Not:** A percent change. A gap measured from the Electoral College's winner or leader. An
+  average over several elections (*Average margin*).
 - **Status:** settled
 
 ### Nominating party
@@ -933,6 +987,25 @@ articles and announcements). Every rule binds all three unless the rule states a
   which is the National Archives' own sentence about the count (*Count status*). On a
   `no_nomination` row, not the reason no party nominated the candidate: it says how the votes
   arose.
+- **Status:** settled
+
+### No average (no election shown has that margin)
+- **Plain:** The page shows no average because none of the elections shown has that margin in this
+  dataset: no election matches the filters, or, for the popular vote, every election shown is from
+  years this dataset has no popular-vote figures for. It is not zero.
+- **Precise:** `labels.metric_mean` of an average with no contributing election and no unrecognized
+  value. Its cause is checked in order: no row shown (`labels.METRIC_NO_AVERAGE_FILTERS`); for the
+  popular-vote average, no year shown inside the popular-vote window of `meta.provenance.coverage`
+  (`labels.METRIC_NO_AVERAGE_PV_YEARS`, which names `pv_year_min`–`pv_year_max`); otherwise every
+  margin among the years shown is null (`labels.METRIC_NO_AVERAGE_NULL`; no served year reaches it).
+  Never 0, "nan" or an empty cell.
+- **Shown as:** `labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`,
+  `labels.METRIC_NO_AVERAGE_NULL`, through `labels.metric_mean`.
+- **Source:** #437 acceptance criteria ("An empty selection shows 'no figure', never zero or NaN");
+  D097; reader wording: `ba` spec for #437, approved at its plan gate.
+- **Not:** Zero, or a margin of zero. *Not in this dataset* for one value. *No popular-vote figure in
+  this dataset*, a candidate's missing popular-vote count. *Unrecognized value*. The "no figure" of
+  D097's rule for a sum, whose reader wording a later spec sets.
 - **Status:** settled
 
 ### No popular-vote figure in this dataset (inside the window)
@@ -1438,8 +1511,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `src/usvote/api/models.py`; the `/v1/elections/{year}/summary` summary in
   `src/usvote/api/routes.py`. On the dashboard, the election panel shows these fields under the
   heading "Under each method" (`pages/election.py`), each with its own `LABELS` key. On the
-  dashboard, `/elections` reads `/v1/elections/summary` for C2: each item's `ec_determinative`, in
-  C2's hover and its companion table.
+  dashboard, `/elections` reads `/v1/elections/summary` for C2 (each item's `ec_determinative`, in
+  C2's hover and its companion table) and for the averages (each item's `ec_margin` and
+  `pv_margin`, *Average margin*).
 - **Source:** `ElectionSummary` and its class docstring ("The per-election three-method
   comparison") in `src/usvote/api/models.py`; `_election_summary` in
   `src/usvote/api/routes.py`; D037; D053; #102; #431.
@@ -1496,7 +1570,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   page are shown as served (#367). In the Party notes list under a table, a candidate name that is
   not text reads this, while the table's cell shows that name as served. A null or blank text is
   not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
-  served year reaches this cell; it is defensive. In a CSV download the field is written as the API
+  served year reaches this cell; it is defensive. On `/elections`, an average margin reads it too
+  when a margin among the years shown is of the wrong type or not finite, or when the average is a
+  number no margin cell could show; it then names no number of elections or years (*Average
+  margin*). In a CSV download the field is written as the API
   served it; for a null figure with an unrecognized cause, the figure's column is empty and the
   cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
@@ -1513,7 +1590,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   the full cell (for `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`). In `labels.C3_BAR_HOVER`,
   each of the row's other T6 cells (population, electors appointed, census used, borders used) as T6
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
-  the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`.
+  the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
+  `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
+  value's help text (set by `labels.cell`).
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
@@ -1534,7 +1613,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   data; it is not a promise. Pages read it from the response, never from a literal.
 - **Shown as:** the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`; the CSV
   preamble; `labels.BEFORE_WINDOW`; `NO_PV_SENTENCE` in `pages/election.py`; C1's caption sentence
-  `labels.C1_NO_PV_CAPTION`, which names the years the popular-vote figures cover.
+  `labels.C1_NO_PV_CAPTION`, and on `/elections` `labels.METRIC_NO_AVERAGE_PV_YEARS` and
+  `labels.METRIC_DIFFERENT_ELECTIONS`, each of which names the years the popular-vote figures
+  cover.
 - **Source:** `Coverage` in `src/usvote/api/models.py`; D048 §1;
   `posts/2026-08-06-222-votes-away.md` (both windows published on every response).
 - **Not:** *Census figure* (per-capita `coverage`); *Share of electors from popular-vote states*.
@@ -1588,6 +1669,10 @@ Every `LABELS` key and the entry that defines it.
 | `pv_coverage` | Share of electors from popular-vote states |
 | `hybrid_score` | Hybrid |
 
+Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under its entry's
+**Shown as**: `elections_shown` (*Elections shown*), `ec_margin_mean` and `pv_margin_mean`
+(*Average margin*).
+
 ---
 
 ## Say instead
@@ -1611,7 +1696,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
 | "the state you chose" for a filter's state | Selected state | `labels.C3_SELECTED`, `labels.C3_SELECTED_NOTE` | A shared link carries the filter; the reader who opens it chose nothing. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
@@ -1625,6 +1710,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `labels.EARLIER_LINK`, `labels.LATER_LINK`, on every election page | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
 | "Summary" for an election's first page | Overview | `labels.SECTION_OVERVIEW` | The API serves T3's data as `summary`; one term, one meaning. |
 | an arrow character ("←", "→", "«", "»") typed into a link's text | a drawn chevron beside the text, with the words unchanged | a rule (`.neighbor-nav` in `dashboard/explore/assets/style.css`) | A typed arrow is read aloud ("left arrow") and becomes part of the link's name; the words already say which way the link goes. |
+| "win margin", "winning margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
+| "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
 
 ## Open decisions
 

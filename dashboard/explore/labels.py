@@ -39,7 +39,7 @@ from :data:`NOMINATING_PARTY`, never word-cased from the code.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TypeGuard
 
 from dash import html
@@ -557,6 +557,49 @@ MARGIN_NOTE = (
     "candidates under that method. Each method ranks the candidates on its own."
 )
 
+#: The metrics on ``/elections`` (#437, D097), keyed by metric key, never by a public
+#: field name: ``LABELS`` stays keyed by field. The keys are ``explore.metrics``'
+#: ``METRICS`` (ba spec, approved by the owner at #437's plan gate, 2026-11-11). The
+#: count's label is the line above T1, formatted with the elections shown and served.
+METRIC_LABELS: dict[str, str] = {
+    "elections_shown": "Showing {shown} of {total} elections",
+    "ec_margin_mean": "Average electoral margin",
+    "pv_margin_mean": "Average popular-vote margin",
+}
+#: An average over two or more elections; ``{margin}`` is :func:`margin`'s cell, the
+#: years the earliest and latest whose margin entered it (:func:`metric_mean`).
+METRIC_OVER = "{margin}, over {n} elections ({first}–{last})"
+#: An average over one election: the one year, never "2000–2000".
+METRIC_OVER_ONE = "{margin}, over 1 election ({year})"
+#: No average, because no election matches the filters (T1 then shows its own empty
+#: text, `empty=` in `pages/elections.py`, below the metrics).
+METRIC_NO_AVERAGE_FILTERS = "No average: no elections match these filters"
+#: No popular-vote average, because no year shown lies inside the popular-vote window;
+#: the years come from ``coverage``, never a literal.
+METRIC_NO_AVERAGE_PV_YEARS = (
+    "No average: this dataset's popular-vote figures cover {first}–{last}, "
+    "not the years shown"
+)
+#: No average, because every margin among the elections shown is null (no served year
+#: reaches it; it keeps a null's dataset-first, no-cause reading).
+METRIC_NO_AVERAGE_NULL = (
+    "No average: this dataset has no margin for the elections shown"
+)
+#: After :data:`MARGIN_NOTE`, only when both averages are numbers, their N or years
+#: differ, and a year in the electoral average lies outside the popular-vote window, so
+#: the window is a cause of the difference (owner, #437's code review): two year sets
+#: are never read as one comparison, and the note never names a reason that is not one.
+METRIC_DIFFERENT_ELECTIONS = (
+    "The two averages do not cover the same elections: this dataset's popular-vote "
+    "figures cover {first}–{last}."
+)
+#: Follows :data:`METRIC_DIFFERENT_ELECTIONS` while the popular-vote filter is off; it
+#: names the elections page's checkbox by its own text.
+METRIC_SAME_ELECTIONS = (
+    'To compare the two over the same elections, select "Only years with a popular '
+    'vote in this dataset".'
+)
+
 
 #: Each nominating-party code's display form (#389, D077; owner approval at #389's plan
 #: gate). A closed table: a code outside it reads :data:`UNRECOGNIZED`, and
@@ -1021,6 +1064,42 @@ def margin(value: object, applicable: bool) -> str:
     if points is None:
         return _unknown(value, _null(applicable))
     return f"{points:.1f} percentage points"
+
+
+def metric_mean(
+    mean: Any, years: Sequence[int], pv_window: tuple[int, int] | None = None
+) -> tuple[str, str | None]:
+    """An average margin's value on ``/elections`` (#437), as ``(value, over)``: the
+    value text, and the text after it naming its N and years, or ``None`` where there is
+    none to name. ``mean`` is an ``explore.metrics.Mean`` (this module imports no
+    ``metrics``, which imports it); ``years`` the distinct years shown; ``pv_window``
+    the popular-vote window, given for the popular-vote average only.
+
+    Checked in order: an unrecognized mean (:data:`UNRECOGNIZED`, with no N or years);
+    no contributing election, worded by its cause (no year shown, then a popular-vote
+    average with no year shown inside the window, then every margin null); else the
+    number, through :func:`margin`, so the average over one election reads exactly as
+    that year's panel cell.
+    """
+    if mean.unrecognized:
+        return UNRECOGNIZED, None
+    if mean.n == 0:
+        if not years:
+            return METRIC_NO_AVERAGE_FILTERS, None
+        if pv_window is not None and not any(
+            pv_window[0] <= year <= pv_window[1] for year in years
+        ):
+            first, last = pv_window
+            return METRIC_NO_AVERAGE_PV_YEARS.format(first=first, last=last), None
+        return METRIC_NO_AVERAGE_NULL, None
+    text = margin(mean.value, True)
+    if mean.n == 1:
+        whole = METRIC_OVER_ONE.format(margin=text, year=mean.first)
+    else:
+        whole = METRIC_OVER.format(
+            margin=text, n=mean.n, first=mean.first, last=mean.last
+        )
+    return text, whole.removeprefix(text)
 
 
 def ec_majority(value: object) -> str:

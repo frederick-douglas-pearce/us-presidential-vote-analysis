@@ -502,10 +502,16 @@ fieldset.filter legend { padding: 0; }
 .panel dt { font-weight: 600; cursor: help; }
 .panel dd { margin: 0; }
 .panel .glossary dt { font-weight: normal; cursor: auto; }
+/* The headline metrics on /elections (#437): each average's label beside its value, the
+   label column stopping at half the width as the panel's does, so a phone wraps it. */
+.metrics { display: grid; grid-template-columns: fit-content(50%) 1fr; gap: 0.35rem 1rem; margin: 0.5rem 0; }
+.metrics dt { font-weight: 600; }
+.metrics dt, .metrics dd { overflow-wrap: anywhere; }
+.metrics dd { margin: 0; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
 /* The readable measure. T1 and the States list are here too: at full width their few
    short columns would spread thin. */
-.explore p, .glossary, .panel, .filters, .unavailable, .states, .provenance-footer ul,
+.explore p, .glossary, .panel, .metrics, .filters, .unavailable, .states, .provenance-footer ul,
 .table-scroll #elections-table, .neighbor-nav, .election-sections {
   max-width: var(--measure);
 }
