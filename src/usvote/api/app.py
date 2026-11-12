@@ -112,7 +112,11 @@ API_TITLE = "US Presidential Vote API"
 #: ``/v1/elections/{year}/summary`` and the ``summary`` list on ``/v1/elections/{year}``
 #: (both read by ``rollup_by_year``) also gained a defined order for tied ranks
 #: (``candidate_slug``), where SQLite's order was undefined before.
-API_VERSION = "0.8.0"
+#:
+#: 0.8.0 -> 0.9.0 by #428: the ``/v1/elections/states`` route and its
+#: ``ElectionStateRow`` model. Additive, hence minor. It reads existing tables, so
+#: ``SNAPSHOT_SCHEMA_VERSION`` did not move (D070(c)).
+API_VERSION = "0.9.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."
@@ -145,8 +149,10 @@ not depend on a consumer re-deriving it from the raw totals.
 
 **Persons per electoral vote.** How many residents each state's electoral votes stood
 for — the governing census's population divided by the state's allotment — by election
-(`/v1/elections/{year}/per-capita`) or by state (`/v1/states/{usps}/per-capita`), from
-decennial census population (see the provenance note below).
+(`/v1/elections/{year}/per-capita`), by state (`/v1/states/{usps}/per-capita`), or for
+every state in every election at once (`/v1/elections/states`, which also gives each
+state's total popular vote), from decennial census population (see the provenance note
+below).
 
 **Coverage:** {coverage_window} (US presidential elections).
 

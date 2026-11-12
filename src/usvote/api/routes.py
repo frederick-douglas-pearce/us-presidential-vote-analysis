@@ -158,6 +158,56 @@ def get_all_election_summaries(
 
 
 @router.get(
+    "/elections/states",
+    response_model=models.Envelope[models.ElectionStateRow],
+    summary=(
+        "Every election year, state by state: electors appointed, population, persons "
+        "per electoral vote and total popular vote, in one response."
+    ),
+    tags=["Elections"],
+)
+def get_all_election_states(
+    request: Request,
+    response: Response,
+) -> models.Envelope[models.ElectionStateRow]:
+    """Every election year, state by state, in one response: one item per state per
+    election year, oldest year first and, within a year, by state name (`state`). For
+    each year, the items are the states `/v1/elections/{year}/per-capita` returns, in
+    the same order and with the same value in every field that route serves. Each item
+    adds the state's total popular vote (`state_popular_total`) and whether the state
+    held a popular vote that year (`pv_status`). A state that took no part in an
+    election has an item for it too, with `pv_status` 'not_participating'. There are no
+    candidate rows: for each candidate's results in each state, use
+    `/v1/elections/{year}`. `meta.count` is the number of items.
+
+    A year's `state_electoral_votes` add up to that year's `electoral_denominator` on
+    `/v1/elections/{year}/summary`. Years outside the popular-vote window
+    (`meta.provenance.coverage.pv_year_min` to `pv_year_max`) have no popular-vote
+    figures in this dataset, so every item in those years has a null
+    `state_popular_total`. Inside the window, a year's `state_popular_total` values add
+    up to the `national_pv_denominator` that `/v1/elections/{year}/summary` gives for
+    that year (on each item of its `data`). Each field's description says when it is
+    null.
+
+    The years are the ones `/v1/elections` lists. For one election, use
+    `/v1/elections/{year}/per-capita`, which has no popular-vote fields; for one state,
+    `/v1/states/{usps}/per-capita` and `/v1/states/{usps}`. The response changes only
+    when the data version does.
+    """
+    # #428 / D098: the whole docstring above publishes on /docs, so notes stay here.
+    # Declared before /elections/{year}, which would otherwise match it (D094(ii)).
+    # Reads per_capita whole and ec_pv grouped to (year, state), through one repository
+    # method that fails loud (SnapshotError -> 500) on two totals or two statuses in a
+    # state, or on the two tables covering different (year, state) keys (D094(iii)).
+    # No identifier, so the cache check runs first, as in /elections/summary.
+    repo = _repo(request)
+    cache_dependency(request, response)
+    rows = repo.state_rows_all()
+    data = [models.ElectionStateRow.model_validate(r) for r in rows]
+    return models.Envelope(data=data, meta=_meta(repo, len(data)))
+
+
+@router.get(
     "/elections/{year}",
     response_model=models.ElectionResponse,
     responses=_NOT_FOUND_RESPONSE,

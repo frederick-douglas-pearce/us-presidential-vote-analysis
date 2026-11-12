@@ -63,6 +63,7 @@ from usvote.snapshot import (
     assert_nominating_party_matches_catalog,
     assert_nominating_party_nulls_have_one_cause,
     assert_rollup_and_hybrid_summary_cover_the_same_years,
+    assert_state_popular_fields_are_per_state,
     build_hybrid_tables,
     build_national_rollup,
     build_snapshot,
@@ -1420,6 +1421,88 @@ def test_the_year_set_guard_passes_matching_years() -> None:
     rollup = pd.DataFrame({"year": [1860, 1860, 2016, 2020]})
     summary = pd.DataFrame({"year": [1860, 2016, 2020]})
     assert_rollup_and_hybrid_summary_cover_the_same_years(rollup, summary)
+
+
+def _state_rows(*rows: tuple[str, int | None, int | None, str]) -> pd.DataFrame:
+    """2020 Texas fact rows as (candidate, candidate_votes, state_total_votes, pv_status)."""
+    return pd.DataFrame(
+        [
+            {
+                "year": 2020,
+                "state": "Texas",
+                "candidate": c,
+                "candidate_votes": pd.NA if v is None else v,
+                "state_total_votes": pd.NA if t is None else t,
+                "pv_status": st,
+            }
+            for c, v, t, st in rows
+        ]
+    ).astype({"candidate_votes": "Int64", "state_total_votes": "Int64"})
+
+
+@pytest.mark.parametrize(
+    ("rows", "match"),
+    [
+        (
+            (("A", 5, 11, "popular_vote"), ("B", 6, 12, "popular_vote")),
+            "more than one popular-vote total",
+        ),
+        (
+            (("A", 5, 11, "popular_vote"), ("B", 6, 11, "legislature_chosen")),
+            "other than one pv_status",
+        ),
+        (
+            (("A", 5, 11, "popular_vote"), ("B", 6, None, "popular_vote")),
+            "popular votes but no state total",
+        ),
+    ],
+    ids=["two-totals", "two-statuses", "votes-without-a-total"],
+)
+def test_the_per_state_guard_refuses_a_second_value(
+    rows: tuple[tuple[str, int | None, int | None, str], ...], match: str
+) -> None:
+    """Each (year, state) has one total and one status (#428, D098(b)).
+
+    Called on a doctored frame directly: a doctored roster would trip
+    ``add_pv_status``'s m:1 merge before the build reached this guard.
+    """
+    with pytest.raises(SnapshotError, match=match):
+        assert_state_popular_fields_are_per_state(_state_rows(*rows))
+
+
+def test_the_per_state_guard_passes_a_null_total_beside_a_real_one() -> None:
+    """A candidate with no figure (a faithless elector's choice) is not a second total.
+
+    Every state on the real snapshot has this shape in 1976, 1988, 2004 and 2016, so a
+    guard that counted the NULL would refuse every real build.
+    """
+    assert_state_popular_fields_are_per_state(
+        _state_rows(
+            ("A", 5, 11, "popular_vote"),
+            ("B", 6, 11, "popular_vote"),
+            ("F", None, None, "popular_vote"),
+        )
+    )
+
+
+def test_the_build_refuses_two_totals_in_one_state(tmp_path: Path) -> None:
+    """``build_snapshot`` runs the per-state guard (the direct tests above would pass
+    with the call removed). One 2020 Texas row is given a second total."""
+    fact = _ec_pv_frame()
+    texas = (fact["year"] == 2020) & (fact["state"] == "Texas")
+    first = fact.index[texas][0]
+    fact.loc[first, "state_total_votes"] = fact.loc[first, "state_total_votes"] + 1
+    out = tmp_path / "snapshot.sqlite"
+    with pytest.raises(SnapshotError, match="more than one popular-vote total"):
+        build_snapshot(
+            fact,
+            str(out),
+            pv_status_df=_status_frame(fact),
+            per_capita_df=_per_capita_frame(fact),
+            party_keys_df=_party_keys(fact),
+            build_timestamp=_TS,
+        )
+    assert not out.exists()
 
 
 def test_the_schema_version_moved_for_the_new_shape() -> None:

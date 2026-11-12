@@ -562,6 +562,54 @@ def assert_no_pv_below_mit_window(data_df: pd.DataFrame) -> None:
     )
 
 
+def assert_state_popular_fields_are_per_state(data_df: pd.DataFrame) -> None:
+    """Assert each ``(year, state)`` has one popular-vote total and one status (#428).
+
+    ``state_total_votes`` and ``pv_status`` are facts about a state, repeated on every
+    candidate row of it, and ``/v1/elections/states`` serves them once per
+    ``(year, state)`` (D098(b)). Three checks, per ``(year, state)``:
+
+    - **at most one distinct non-null ``state_total_votes``.** A NULL is not a second
+      total: the EC-left join gives a candidate with no popular-vote figure (a
+      faithless elector's choice) a dense row in every state with NULL PV, beside the
+      state's real total (1976, 1988, 2004 and 2016 on snapshot ``37af4064``). Two
+      different non-null totals would otherwise be resolved silently by the ``max`` in
+      :func:`usvote.hybrid.roll_up_national`, which is why this runs before the roll-up;
+    - **a NULL ``state_total_votes`` only beside a NULL ``candidate_votes``**, which is
+      what makes "a NULL total is a candidate row with no figure" a checked fact rather
+      than an assumption;
+    - **exactly one ``pv_status``.** This re-checks, on the served frame,
+      :func:`add_pv_status`'s ``m:1`` merge, which already makes it constant by
+      construction.
+
+    The API's ``SnapshotRepository.state_rows_all`` refuses the first and third at
+    serve time too, for a snapshot that reached the server some other way.
+    """
+    key = ["year", "state"]
+    per_state = data_df.groupby(key, dropna=False).agg(
+        n_totals=("state_total_votes", "nunique"),
+        n_statuses=("pv_status", lambda s: s.nunique(dropna=False)),
+    )
+    bad = per_state.loc[(per_state["n_totals"] > 1) | (per_state["n_statuses"] != 1)]
+    if not bad.empty:
+        raise SnapshotError(
+            "a (year, state) carries more than one popular-vote total or other than "
+            f"one pv_status: {bad.reset_index().to_dict('records')[:5]}. Each state's "
+            "total and status are facts about the state, served once per (year, "
+            "state) (D098)."
+        )
+    orphan = data_df.loc[
+        data_df["state_total_votes"].isna() & data_df["candidate_votes"].notna(),
+        ["year", "state", "candidate"],
+    ]
+    if not orphan.empty:
+        raise SnapshotError(
+            "a fact row has popular votes but no state total: "
+            f"{orphan.to_dict('records')[:5]}. A NULL state_total_votes must mean the "
+            "candidate has no popular-vote figure in that state (D098)."
+        )
+
+
 def assert_no_pv_aggregate_below_mit_window(rollup_df: pd.DataFrame) -> None:
     """Assert the roll-up carries no PV aggregate below :data:`MIT_PV_YEAR_MIN`.
 
@@ -1348,6 +1396,7 @@ def build_snapshot(
     assert_count_status_reasons_are_catalogued(data_df)
     assert_nominating_party_matches_catalog(data_df)
     assert_no_pv_below_mit_window(data_df)
+    assert_state_popular_fields_are_per_state(data_df)
 
     # The hybrid is derived from `slugged` (the join-view shape, which still carries
     # `candidate_id`) and the **curated** roster, never from `hybrid_redistributable` —

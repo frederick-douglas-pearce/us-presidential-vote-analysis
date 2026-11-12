@@ -54,22 +54,26 @@ from usvote.snapshot_schema import (
 #: per (election, state) or (election, candidate)** (D094, amending D031's "every
 #: endpoint is scoped" premise). It is one of two kinds: a derived table read whole
 #: whose primary key is that grain (:meth:`national_summary_all` reads
-#: ``national_rollup`` and ``hybrid_summary``), or a ``GROUP BY``/``DISTINCT`` down to
-#: that grain (:meth:`list_years` over ``national_rollup``, #97; :meth:`list_candidates`
-#: over ``ec_pv``, #330). Such a result is bounded by the number of elections times a
-#: small per-election count, so the cap keeps its meaning: thousands of rows is a
-#: grain/fan-out regression (a join that multiplied rows), not a large-but-valid result.
+#: ``national_rollup`` and ``hybrid_summary``, #431; :meth:`state_rows_all` reads
+#: ``per_capita``, #428), or a ``GROUP BY``/``DISTINCT`` down to that grain
+#: (:meth:`list_years` over ``national_rollup``, #97; :meth:`list_candidates` over
+#: ``ec_pv``, #330; :meth:`state_rows_all` over ``ec_pv`` to ``(year, state)``, #428).
+#: Such a result is bounded by the number of elections times a small per-election
+#: count, so the cap keeps its meaning: thousands of rows is a grain/fan-out regression
+#: (a join that multiplied rows), not a large-but-valid result.
 #: A whole-table read also needs a grain test with a twin proving it fires — for
 #: ``/v1/elections/summary``, ``_assert_summary_grain`` and
-#: ``test_the_summary_grain_check_fires_on_a_duplicated_row`` in
+#: ``test_the_summary_grain_check_fires_on_a_duplicated_row``, and for
+#: ``/v1/elections/states``, ``_assert_state_grain`` and
+#: ``test_the_state_grain_check_fires_on_a_duplicated_row``, all in
 #: ``tests/unit/test_api_endpoints.py``; a ``GROUP BY``/``DISTINCT`` read is at its
 #: grain by construction.
 #:
 #: Headroom, measured on snapshot ``37af4064`` (2026-11-10): the widest scoped reads are
 #: one year (357 rows), one candidate (192) and one state (132); the whole-table
-#: reads are 132 (``national_rollup``) and 51 (``hybrid_summary``); a whole read of the
-#: ``(year, state)``-keyed ``per_capita`` table (#428) would be 2,204. All are well
-#: under the cap.
+#: reads are 132 (``national_rollup``), 51 (``hybrid_summary``) and 2,204
+#: (``per_capita``, #428), and ``ec_pv`` grouped to ``(year, state)`` is 2,204 too. All
+#: are under the cap.
 MAX_ROWS = 5000
 
 
@@ -80,8 +84,10 @@ class SnapshotError(RuntimeError):
     server was not built for) it fails loud at boot rather than mis-serve a stale-shape
     snapshot (D028). A read raises it too when the data breaks a guarantee the build
     should have kept — the row cap, a slug with two names, the roll-up and hybrid
-    summary covering different years — and the request becomes a 500 rather than a
-    silently wrong answer.
+    summary covering different years, a ``(year, state)`` with two popular-vote totals
+    or two popular-vote statuses, ``per_capita`` and ``ec_pv`` covering different
+    ``(year, state)`` keys — and the request becomes a 500 rather than a silently wrong
+    answer.
     """
 
 
@@ -350,6 +356,66 @@ class SnapshotRepository:
                 "this snapshot (D094)."
             )
         return rows, summaries
+
+    def state_rows_all(self) -> list[dict[str, object]]:
+        """Every ``(year, state)``: its per-capita row, PV total and PV status (#428).
+
+        Two reads, both allowed unscoped (see :data:`MAX_ROWS`, D094(i)):
+        ``per_capita`` whole, whose primary key ``(year, state)`` is its grain, and
+        ``ec_pv`` grouped down to ``(year, state)``, since ``state_total_votes`` and
+        ``pv_status`` repeat on every candidate row of a state. Rows come in
+        ``per_capita``'s ``(year, state)`` order, the order
+        ``/v1/elections/{year}/per-capita`` uses within a year.
+
+        **Per state, one non-null total and one status** (D098(b)). A candidate with no
+        popular-vote figure (a faithless elector's choice) has a NULL
+        ``state_total_votes`` on its rows beside the state's real total, so the total is
+        the one non-null value, as ``usvote.hybrid.roll_up_national`` takes it.
+        **De-duplicates loudly**, as :meth:`list_candidates` does: two different
+        non-null totals, or other than one ``pv_status``, in a ``(year, state)`` raise
+        :class:`SnapshotError` rather than pick one. The build refuses both
+        (``snapshot.assert_state_popular_fields_are_per_state``); this is the serve-time
+        half.
+
+        **Fails loud when the two tables cover different ``(year, state)`` keys**, in
+        either direction (D094(iii)): a missing key would be a silent gap in a list. The
+        build refuses that too (``snapshot.build_per_capita_table``).
+        """
+        rows = self._select(
+            f"SELECT {', '.join(PER_CAPITA_COLUMNS)} FROM {PER_CAPITA_TABLE} "  # noqa: S608
+            "ORDER BY year, state",
+            (),
+        )
+        grouped = self._select(
+            "SELECT year, state, MAX(state_total_votes) AS state_total_votes, "
+            "COUNT(DISTINCT state_total_votes) AS n_totals, "
+            "MIN(pv_status) AS pv_status, COUNT(DISTINCT pv_status) AS n_statuses "
+            f"FROM {DATA_TABLE} GROUP BY year, state ORDER BY year, state",  # noqa: S608
+            (),
+        )
+        popular: dict[tuple[object, object], dict[str, object]] = {}
+        for g in grouped:
+            key = (g["year"], g["state"])
+            if cast(int, g["n_totals"]) > 1 or g["n_statuses"] != 1:
+                raise SnapshotError(
+                    f"ec_pv carries {g['n_totals']} popular-vote totals and "
+                    f"{g['n_statuses']} popular-vote statuses for {key}; each "
+                    "(year, state) must have at most one non-null total and exactly "
+                    "one status. The build should have refused this snapshot (D098)."
+                )
+            popular[key] = {
+                "state_total_votes": g["state_total_votes"],
+                "pv_status": g["pv_status"],
+            }
+        row_keys = {(r["year"], r["state"]) for r in rows}
+        if row_keys != popular.keys():
+            raise SnapshotError(
+                "per_capita and ec_pv cover different (year, state) keys: per_capita "
+                f"only {sorted(row_keys - popular.keys(), key=str)}, ec_pv only "
+                f"{sorted(popular.keys() - row_keys, key=str)}; the build should have "
+                "refused this snapshot (D094)."
+            )
+        return [{**r, **popular[(r["year"], r["state"])]} for r in rows]
 
     def hybrid_summary_by_year(self, year: int) -> dict[str, object] | None:
         """The per-election hybrid summary for a year, or ``None`` if absent (#102).

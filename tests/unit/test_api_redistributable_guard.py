@@ -208,6 +208,41 @@ def test_every_item_of_the_elections_list_carries_no_unexpected_field(
         )
 
 
+# --- /v1/elections/states (#428) ---------------------------------------------
+# Its own sweep, not an entry in _ALL_ROW_PATHS: those sweeps read candidate-row fields
+# (source, electoral_count_status_reason) that a (year, state) item does not have. An
+# exact field set, written by hand rather than read off the model, so a field added to
+# the model (or leaking through the repository merge) fails here until it is vetted.
+
+_STATES_PATH = "/v1/elections/states"
+_STATE_ITEM_FIELDS = frozenset(
+    {
+        "year",
+        "state",
+        "state_usps",
+        "governing_census_year",
+        "state_electoral_votes",
+        "population",
+        "population_series",
+        "boundary_basis",
+        "coverage",
+        "persons_per_electoral_vote",
+        "state_popular_total",
+        "pv_status",
+    }
+)
+
+
+def test_every_state_item_carries_exactly_the_vetted_fields(client: TestClient) -> None:
+    """No item adds, or loses, a field; ``pv_status`` is closed; no roster ``note``."""
+    data = client.get(_STATES_PATH).json()["data"]
+    assert data, "no items to check"
+    for item in data:
+        assert set(item) == _STATE_ITEM_FIELDS, f"{item.get('year')} {item.get('state')}"
+        assert item["pv_status"] in PV_STATUS_VALUES, item
+        assert "note" not in item
+
+
 # --- the nominating party (#386) --------------------------------------------
 # New sweeps beside the ones above, which stay as they were: the note is a second
 # free-text column, so it gets the count reason's treatment, and the value and source
