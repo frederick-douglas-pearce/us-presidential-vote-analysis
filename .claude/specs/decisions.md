@@ -6679,3 +6679,74 @@ the per-state routes, would break D097(a) and (c).
 **Action required.** #436 registers the path in `on_miss` (#428's dashboard AC lands there) and
 is implemented only after #428 is deployed, since its fill would otherwise meet a live API without
 the route (a 422 from `{year}`). #428 closes after the deploy's smoke passes.
+
+## D099: The chart rules check is total: a figure must be a JSON value of bounded depth before any rule reads it, and each slot a rule reads has a declared kind
+
+**Date:** 2026-11-12
+**Closes:** D095(g)'s third residual · **Builds on:** D091, D095 · **Decided by:** the owner, approving #484's plan (architect-reviewed)
+
+**Context.** D095 makes a figure that `charts.figure_problems` refuses cost only its chart. The
+check itself runs on figures built from served values, so a check that raised instead of returning
+a problem still cost the page its tables (D095(g)). At #484's plan step, a sweep of every slot of a
+two-trace figure against 15 value kinds found two ways to raise: nesting 5,000 deep (a
+`RecursionError` in every recursive walk), and values that are not JSON (a `set` reaching
+`json.dumps`, an integer key reaching a key pattern). It also found 369 cases where a value of an
+unexpected type passed silently, and a placeholder pattern, `%\{[^}]*\}`, that took 58 to 116 s
+on a 400 KB string of `%{`, on the app's one worker. `components.chart` also deep-copied each
+figure before checking it, and `copy.deepcopy` recurses. Doctoring each live chart's served rows
+(every first-row field of C1, C2 and C3, 11 JSON kinds, about 530 renders) left no chart not
+drawn: the builders stringify and escape served text and pass numbers through `labels.finite`.
+The cases that did not draw degraded the page before the chart (D095(g)'s builder residual).
+
+**Decision.**
+- **(a) A structural check gates every rule.** `charts.json_problems` refuses a key that is not a
+  string; a value that is not an object, a list, a string, a finite number, a boolean or null (so a
+  tuple, a set, NaN and infinity are refused, a deliberate tightening: before this, a tuple was
+  never walked, so a color inside one went unchecked); and nesting deeper than `charts.MAX_DEPTH`
+  (16). Depth counts containers from the root, the figure included: the figure is 1, `data` 2, a
+  trace 3, its `marker` 4 and `marker.pattern` 5, as deep as any live chart's figure nests. It
+  walks with its own stack and stops descending at the bound, so it ends on any input, a cyclic one
+  included. Its messages name a path and a type, never a value's `repr`. `figure_problems` returns
+  its problems **alone**: every other rule recurses, and some `repr` values, which assumes a JSON
+  value of bounded depth. A rule added later runs only on what this check accepts, so it inherits
+  totality with nothing added.
+- **(b) It runs before the copy.** `components.chart` runs `json_problems` before
+  `copy.deepcopy`. A figure it refuses takes the not-drawn path (D095(b), (c)), with its title read
+  in place. The title and caption `ValueError`s stay as D095(a) has them. No `except` is added
+  anywhere, so D095(f) holds.
+- **(c) Each slot a rule reads by name has a declared kind.** `charts.SLOT_KINDS` lists those slots
+  by where they sit (a trace, its marker, pattern and line, the layout, each layout axis, each
+  annotation, a key at any depth) with the JSON kinds the rule expects. `slot_problems` refuses any
+  other kind, at that slot's path. `ANCHOR_KINDS` holds an axis and an annotation to being objects.
+  Policy beyond types: `textposition` is one string, since a list credits a direct label that
+  `["none", …]` never draws; and a marker symbol and a pattern shape are one string (owner, #484),
+  since a per-point list would tell categories apart inside one trace, which the color rule
+  already refuses for `color`. A chart that needs another kind widens its slot in its own story.
+  `EXPECTED_KINDS` in `test_dashboard_charts.py` is a hand-written literal that must equal the
+  table. A recording `dict` subclass checks that every slot the rules read by name (`get`, `[]`,
+  `in`) is declared and every declared slot is read. It cannot see reads by pattern (the walk's
+  `items()`, the layout's axis and second-legend scans), so those slots are declared by hand.
+- **(d) The placeholder scan is linear.** `_placeholder_spans` finds each `%{` up to the first `}`
+  after it and stops at the first `%{` that has no `}` after it. Its matches are exactly the
+  pattern's, which an exhaustive test over every string of up to 7 characters from `%{}a\n` pins.
+- **(e) AC4 of #484, reworded at the plan gate (owner; the issue comment holds it).** (1) Each live
+  `CHARTS` row's own figure is broken three ways: a key the template fixes, a slot holding an
+  unexpected kind, and nesting 5,000 deep. Each leaves the page's tables and success marker, and the
+  chart not drawn (`TestChartNotDrawn`). (2) A served-value test doctors every field of each live
+  chart's first served row with values of unexpected types. It requires the chart drawn, or the
+  page (or section) degraded, never the success marker with the chart not drawn
+  (`TestServedValuesReachNoFigureUntyped`). `SERVED_ROWS` must name every live row, so C4 and C5 join
+  both halves through their registry rows (D095(e)).
+
+**Rationale.** Totality is a property of the check's input, not of each rule: once the input is a
+bounded JSON value, none of today's rules can raise on it, and a rule written the same way
+cannot either, without remembering to guard. A catch would also catch the static refusals D095(a) keeps as failures. Declared kinds turn a
+silent pass into a refusal, which under D095 costs only the chart. The served-value test pins what
+actually protects the page today, the builders' typing and escaping, and fails the builder that
+first passes a served value through as served.
+
+**Residuals.** D095(g)'s first two stay open: nothing alerts on the not-drawn log line, and a
+figure builder that raises takes its page down or degrades it. A problem message can still `repr`
+a long value from a color or markup rule, so a long string can cost up to `LOGGED_PROBLEMS` times
+its length in log text. A figure that shares one container in many places is walked once per
+place, bounded by the depth limit but not by its size. Only code builds one.

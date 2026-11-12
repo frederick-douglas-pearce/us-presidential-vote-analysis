@@ -732,13 +732,32 @@ class TestEveryChart:
         ]
 
 
-def broken(figure: dict[str, Any]) -> dict[str, Any]:
-    """``figure`` breaking one real chart rule (#467): a hover mode the template fixes,
-    which every figure can carry whatever its traces."""
+def broken(figure: dict[str, Any], breakage: str = "fixed_key") -> dict[str, Any]:
+    """``figure`` breaking one real chart rule (#467), by :data:`BREAKAGES`' named
+    breakage: by default a hover mode the template fixes, which every figure can carry
+    whatever its traces."""
     figure = copy.deepcopy(figure)
-    figure["layout"]["hovermode"] = "x unified"
+    BREAKAGES[breakage](figure)
     assert charts.figure_problems(figure), "the breakage breaks no rule"
     return figure
+
+
+def _too_deep(figure: dict[str, Any]) -> None:
+    deep: Any = "x"
+    for _ in range(5_000):
+        deep = [deep]
+    figure["layout"]["meta"] = deep
+
+
+#: The ways a test breaks a live chart's own figure (#467, #484): a key the template
+#: fixes; a slot holding a kind its check does not expect (every chart's first trace
+#: names itself); and nesting deeper than any recursive walk can follow, which
+#: ``components.chart`` must refuse before it copies the figure (D099).
+BREAKAGES: dict[str, Callable[[dict[str, Any]], None]] = {
+    "fixed_key": lambda figure: figure["layout"].__setitem__("hovermode", "x unified"),
+    "mistyped_slot": lambda figure: figure["data"][0].__setitem__("name", {}),
+    "too_deep": _too_deep,
+}
 
 
 def ids_in(tree: Any) -> set[str]:
@@ -761,15 +780,18 @@ class TestChartNotDrawn:
     ``/elections``; the two-chart test below covers it now."""
 
     @pytest.mark.parametrize(
-        "chart_id",
+        ("chart_id", "breakage"),
         [
-            pytest.param(c, marks=pytest.mark.expected_chart_failure(c), id=c)
+            pytest.param(
+                c, b, marks=pytest.mark.expected_chart_failure(c), id=f"{c}-{b}"
+            )
             for c, row in charts.CHARTS.items()
             if not row.retired
+            for b in BREAKAGES
         ],
     )
     def test_a_chart_that_breaks_a_rule_costs_only_itself(
-        self, monkeypatch: pytest.MonkeyPatch, chart_id: str
+        self, monkeypatch: pytest.MonkeyPatch, chart_id: str, breakage: str
     ) -> None:
         row = charts.CHARTS[chart_id]
         page = page_of(row.page)
@@ -782,7 +804,7 @@ class TestChartNotDrawn:
             named = dict(zip(("chart_id", "figure", "table_id", "caption"), args, strict=False))
             named.update(kwargs)
             if named["chart_id"] == chart_id:
-                named["figure"] = broken(named["figure"])
+                named["figure"] = broken(named["figure"], breakage)
             return real(**named)
 
         monkeypatch.setattr(components, "chart", breaking)
@@ -2324,3 +2346,77 @@ class TestNoRawValues:
             chart = components.chart("C1", doctored, "elections-table", "Caption")
             assert raw_values(chart) == ["ec_share_full"], path
 
+
+
+#: Per live chart (#484): the page it renders on with its path values, and the served
+#: rows its figure is built from, by path and key. Every live ``CHARTS`` row has one
+#: (``test_every_live_chart_has_its_served_rows``), so C4 and C5 join here by theirs.
+SERVED_ROWS: dict[str, tuple[dict[str, str], str, str]] = {
+    "C1": ({"year": "2016"}, "/v1/elections/2016", "summary"),
+    "C2": ({}, "/v1/elections/summary", "data"),
+    "C3": ({"year": "2016"}, "/v1/elections/2016/per-capita", "data"),
+}
+
+#: What a chart's section shows when its own read fails, where it has one: C2's (#434).
+SECTION_UNAVAILABLE = {"C2": "elections-leader-unavailable"}
+
+#: The unexpected kinds a served field is doctored to (#484).
+SERVED_KINDS: dict[str, Any] = {
+    "object": {"a": "b"},
+    "list": ["a", 1],
+    "integer": 7,
+    "boolean": True,
+    "null": None,
+    "string": "<b>var(--x)%{y}",
+}
+
+
+class TestServedValuesReachNoFigureUntyped:
+    """#484 (D099): a served value of an unexpected type, in any field of a live
+    chart's first served row, leaves the chart drawn, or its page (or its section)
+    degraded, and never the page with its success marker and the chart not drawn. The
+    figure builders type and escape what they draw from, which is what protects the
+    page; this fails a builder that passes a served value through as served. No
+    ``expected_chart_failure`` marker, so the conftest check fails any chart not drawn
+    too."""
+
+    def test_every_live_chart_has_its_served_rows(self) -> None:
+        assert set(SERVED_ROWS) == {
+            c for c, row in charts.CHARTS.items() if not row.retired
+        }
+        assert set(SECTION_UNAVAILABLE) <= set(SERVED_ROWS)
+
+    @pytest.mark.parametrize("kind", list(SERVED_KINDS))
+    @pytest.mark.parametrize("chart_id", list(SERVED_ROWS))
+    def test_each_field_of_a_served_row(
+        self, chart_id: str, kind: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        row = charts.CHARTS[chart_id]
+        values, path, key = SERVED_ROWS[chart_id]
+        success = page_of(row.page)["success"]
+        dom = charts.dom_id(chart_id)
+        fields = list(RECORDED[path][key][0])
+        assert fields  # the premise: a row to doctor
+        outcomes: dict[str, list[str]] = {}
+        for field in fields:
+            with monkeypatch.context() as patch:
+
+                def change(body: dict[str, Any], field: str = field) -> None:
+                    body[key][0][field] = copy.deepcopy(SERVED_KINDS[kind])
+
+                doctor(patch, path, change)
+                tree, _ = render(row.page, patch, **values)
+            figures = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom]
+            if figures and mount_points(figures[0]):
+                outcome = "drawn"
+            elif figures:
+                outcome = "not drawn"
+            elif not _contains(tree, success) or _contains(
+                tree, SECTION_UNAVAILABLE.get(chart_id, "")
+            ):
+                outcome = "degraded"
+            else:
+                outcome = "missing"
+            outcomes.setdefault(outcome, []).append(field)
+        assert set(outcomes) <= {"drawn", "degraded"}, outcomes
+        assert "drawn" in outcomes  # the premise: most fields leave the chart drawn

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import ast
 import copy
+import itertools
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +28,7 @@ from explore import app as appmod
 from explore import charts, components, labels
 from tests.chart_log import LOGGER, Records, chart_log_checked, chart_log_problems
 from tests.unit.test_dashboard_elections import of_type
-from tests.unit.test_dashboard_export import TEST_FIGURE
+from tests.unit.test_dashboard_export import TEST_FIGURE, render
 from tests.unit.test_dashboard_guards import RUNTIME_MODULES
 from tests.unit.test_dashboard_theme import (
     EXPLICIT_DARK,
@@ -1358,3 +1360,486 @@ class TestNotDrawnLogCheck:
             logger.removeHandler(handler)
         assert [r.getMessage() for r in handler.records] == ["an error"]
         assert components.log.name == LOGGER
+
+
+# --- totality (#484, D099) -------------------------------------------------------------
+
+
+#: A figure holding every slot :data:`charts.SLOT_KINDS` names, at every level the
+#: checks read (layout, trace, marker, line, pattern, axis, legend, annotation), that
+#: passes every rule: the base each case below changes one slot of.
+BASE: dict[str, Any] = {
+    "data": [
+        {
+            "type": "bar",
+            "name": "A",
+            "marker": {"color": "var(--chart-1)", "pattern": {"shape": "/"}},
+            "text": ["a"],
+            "textposition": "auto",
+            "texttemplate": "%{text}",
+            "hovertemplate": "%{customdata}<extra></extra>",
+            "customdata": ["x"],
+        },
+        {
+            "type": "scatter",
+            "mode": "markers+lines+text",
+            "name": "B",
+            "marker": {"symbol": "diamond", "color": "var(--chart-2)"},
+            "line": {"dash": "dot", "color": "var(--chart-2)"},
+            "text": ["b"],
+            "hoverinfo": "text",
+            "hovertemplate": "%{text}",
+            "legend": "legend",
+        },
+    ],
+    "layout": {
+        "font": {"family": "var(--font-body)", "size": 12},
+        "legend": {"font": {"color": "var(--text)"}},
+        "xaxis": {"tickformat": ",d", "title": {"text": "t"}},
+        "yaxis": {"automargin": True},
+        "annotations": [{"text": "A", "font": {"size": 12}}],
+    },
+}
+
+#: Each JSON value kind a slot is replaced by (AC1 of #484): strings empty, holding
+#: ``var(``, ``<`` and ``%{``, and very long; a number of each kind, a boolean, null; a
+#: list and an object, nested.
+KINDS: dict[str, Any] = {
+    "empty": "",
+    "token": "var(--x)",
+    "markup": "<b>",
+    "placeholder": "%{y}",
+    "long": "%{" * 100_000,
+    "integer": 7,
+    "float": 1.5,
+    "boolean": True,
+    "null": None,
+    "list": ["a", ["b"]],
+    "object": {"a": {"b": 1}},
+}
+
+
+def nested(levels: int) -> Any:
+    """A string inside ``levels`` lists."""
+    value: Any = "x"
+    for _ in range(levels):
+        value = [value]
+    return value
+
+
+SlotPath = tuple[str | int, ...]
+
+
+def slots(value: Any, path: SlotPath = ()) -> list[SlotPath]:
+    """Every slot under ``value``: each key of an object and each item of a list, as a
+    path from the root. The test's own walk, never the module's."""
+    found: list[SlotPath] = []
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            found += [(*path, key), *slots(inner, (*path, key))]
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            found += [(*path, index), *slots(inner, (*path, index))]
+    return found
+
+
+def first_items(paths: list[SlotPath]) -> list[SlotPath]:
+    """``paths`` without a list item but the first, so a long list costs one slot."""
+    return [p for p in paths if all(part == 0 for part in p if isinstance(part, int))]
+
+
+def at(figure: Any, path: SlotPath) -> tuple[Any, str | int]:
+    holder = figure
+    for part in path[:-1]:
+        holder = holder[part]
+    return holder, path[-1]
+
+
+def replaced(figure: Any, path: SlotPath, value: Any) -> Any:
+    figure = copy.deepcopy(figure)
+    holder, last = at(figure, path)
+    holder[last] = value
+    return figure
+
+
+def dotted(path: SlotPath) -> str:
+    """``path`` written as the module writes one (``data[0].marker``)."""
+    text = ""
+    for part in path:
+        text += f"[{part}]" if isinstance(part, int) else (f".{part}" if text else part)
+    return text
+
+
+def is_total(figure: Any) -> bool:
+    problems = charts.figure_problems(figure)
+    return isinstance(problems, list) and all(isinstance(p, str) for p in problems)
+
+
+@pytest.fixture
+def live_figures(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Each live registered chart's figure, as its page's default render builds it."""
+    figures: dict[str, Any] = {}
+    real = components.chart
+
+    def recording(chart_id: str, figure: Any, *args: Any, **kwargs: Any) -> Any:
+        figures[chart_id] = copy.deepcopy(figure)
+        return real(chart_id, figure, *args, **kwargs)
+
+    monkeypatch.setattr(components, "chart", recording)
+    live = {c: row for c, row in charts.CHARTS.items() if not row.retired}
+    for row in live.values():
+        render(row.page, monkeypatch)
+    monkeypatch.setattr(components, "chart", real)
+    assert set(figures) == set(live)  # the premise: every live chart was built
+    return figures
+
+
+class TestTotality:
+    """#484 (D099): ``figure_problems`` returns a list of strings and never raises,
+    whatever any one slot holds. It calls ``figure_problems`` and no sub-check by
+    name, so a check added later is covered with nothing added
+    (``test_it_names_no_sub_check``)."""
+
+    def test_the_base_passes(self) -> None:
+        assert charts.figure_problems(BASE) == []
+        named = {dotted(p) for p in slots(BASE)}
+        assert "data[0].marker.pattern.shape" in named and "layout.xaxis" in named
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_every_slot_of_the_base_holding_each_kind(self, kind: str) -> None:
+        raised = []
+        for path in slots(BASE):
+            try:
+                total = is_total(replaced(BASE, path, KINDS[kind]))
+            except Exception as error:  # noqa: BLE001 - the finding to report
+                raised.append(f"{dotted(path)}: {type(error).__name__}")
+            else:
+                if not total:
+                    raised.append(f"{dotted(path)}: not a list of strings")
+        assert raised == []
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_every_slot_of_every_live_chart_holding_each_kind(
+        self, kind: str, live_figures: dict[str, Any]
+    ) -> None:
+        """Each live chart's own figure (C4 and C5 join by their registry rows), one
+        item of each list."""
+        raised = []
+        for chart_id, figure in live_figures.items():
+            for path in first_items(slots(figure)):
+                holder, last = at(figure, path)
+                kept = holder[last]
+                holder[last] = KINDS[kind]
+                try:
+                    if not is_total(figure):
+                        raised.append(f"{chart_id} {dotted(path)}: not a list of str")
+                except Exception as error:  # noqa: BLE001 - the finding to report
+                    raised.append(f"{chart_id} {dotted(path)}: {type(error).__name__}")
+                finally:
+                    holder[last] = kept
+        assert raised == []
+
+    @pytest.mark.parametrize(
+        "path", [("layout", "meta"), ("data", 0, "customdata")], ids=dotted
+    )
+    def test_the_depth_bound_is_counted_from_the_root(self, path: SlotPath) -> None:
+        """Containers from the root, the figure counted: at ``layout.meta`` (under two)
+        and ``data[0].customdata`` (under three) the deepest value accepted is
+        ``MAX_DEPTH`` less that many lists deep, and one more is refused, at its own
+        path."""
+        allowed = charts.MAX_DEPTH - len(path)
+        assert charts.figure_problems(replaced(BASE, path, nested(allowed))) == []
+        problems = charts.figure_problems(replaced(BASE, path, nested(allowed + 1)))
+        deepest = dotted(path) + "[0]" * allowed
+        assert problems == [f"{deepest}: nested deeper than {charts.MAX_DEPTH}"]
+
+    @pytest.mark.parametrize("path", slots(BASE), ids=dotted)
+    def test_a_value_deeper_than_the_recursion_limit_is_refused(
+        self, path: SlotPath
+    ) -> None:
+        deep = nested(5_000)
+        with pytest.raises(RecursionError):  # the premise: a recursive walk fails
+            copy.deepcopy(deep)
+        problems = charts.figure_problems(replaced(BASE, path, deep))
+        assert problems and all("nested deeper than" in p for p in problems)
+
+    @pytest.mark.parametrize(
+        ("value", "problem"),
+        [
+            ({1}, "data[0].name: a set, not a JSON value"),
+            (("a",), "data[0].name: a tuple, not a JSON value"),
+            (object(), "data[0].name: a object, not a JSON value"),
+            ({1: "a"}, "data[0].name: a int key, not a string"),
+            (float("nan"), "data[0].name: not a finite number"),
+            (float("inf"), "data[0].name: not a finite number"),
+        ],
+        ids=["set", "tuple", "object", "int-key", "nan", "inf"],
+    )
+    def test_what_is_no_json_value_is_refused_alone(
+        self, value: Any, problem: str
+    ) -> None:
+        """Refused by the structural check, whose problems come back alone, since
+        every other check assumes a JSON value."""
+        figure = copy.deepcopy(BASE)
+        figure["data"][0]["name"] = value
+        figure["layout"]["hovermode"] = "x unified"  # another rule, not reported
+        assert charts.figure_problems(figure) == [problem]
+
+    def test_a_cyclic_figure_ends(self) -> None:
+        figure = copy.deepcopy(BASE)
+        figure["layout"]["meta"] = figure["layout"]
+        problems = charts.figure_problems(figure)
+        assert problems and all("nested deeper than" in p for p in problems)
+
+    def test_a_long_placeholder_string_is_checked_in_linear_time(self) -> None:
+        figure = copy.deepcopy(BASE)
+        long = "%{" * 100_000
+        figure["data"][0].update(text=long, texttemplate=long, hovertemplate=long)
+        started = time.perf_counter()
+        assert is_total(figure)
+        assert time.perf_counter() - started < 2
+
+    def test_it_names_no_sub_check(self) -> None:
+        """AC3: this class reaches the module only through ``figure_problems`` (and
+        the depth bound it tests)."""
+        tree = ast.parse(Path(__file__).read_text())
+        [cls] = [
+            n
+            for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == "TestTotality"
+        ]
+        used = {
+            n.attr
+            for n in ast.walk(cls)
+            if isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "charts"
+        }
+        assert used == {"figure_problems", "MAX_DEPTH"}
+
+
+#: The kinds each slot a check reads may hold (#484, D099), written by hand, never read
+#: from ``charts.SLOT_KINDS``, which must equal it: a kind widened or a slot dropped
+#: there fails here.
+EXPECTED_KINDS: dict[str, dict[str, set[str]]] = {
+    "trace": {
+        "type": {"a string"},
+        "mode": {"a string"},
+        "name": {"a string"},
+        "hoverinfo": {"a string"},
+        "textposition": {"a string"},
+        "marker": {"an object"},
+        "line": {"an object"},
+    },
+    "marker": {"symbol": {"a string"}, "pattern": {"an object"}},
+    "pattern": {"shape": {"a string"}},
+    "line": {"dash": {"a string"}},
+    "layout": {"legend": {"an object"}, "annotations": {"a list", "a list of strings"}},
+    "axis": {"tickformat": {"a string"}},
+    "annotation": {"text": {"a string"}},
+    "any": {
+        "family": {"a string"},
+        "hovertemplate": {"a string", "a list of strings"},
+        "texttemplate": {"a string", "a list of strings"},
+    },
+}
+EXPECTED_ANCHOR_KINDS = {"axis": {"an object"}, "annotation": {"an object"}}
+
+#: Where each anchor sits in :data:`BASE`, one path or more.
+ANCHORS: dict[str, list[SlotPath]] = {
+    "trace": [("data", 0), ("data", 1)],
+    "marker": [("data", 0, "marker"), ("data", 1, "marker")],
+    "pattern": [("data", 0, "marker", "pattern")],
+    "line": [("data", 1, "line")],
+    "layout": [("layout",)],
+    "axis": [("layout", "xaxis"), ("layout", "yaxis")],
+    "annotation": [("layout", "annotations", 0)],
+    "any": [("data", 0), ("layout", "font"), ("layout", "annotations", 0, "font")],
+}
+
+#: A value of each kind, as ``charts`` names kinds.
+SAMPLES: dict[str, list[Any]] = {
+    "a string": ["s"],
+    "a list of strings": [["s"], []],
+    "a list": [[1], [["a"]], [{"a": "b"}]],
+    "a number": [7, 1.5],
+    "a boolean": [True],
+    "null": [None],
+    "an object": [{"a": "b"}],
+}
+
+#: Slots a check reads by name that ``SLOT_KINDS`` does not list, each refused on any
+#: value or read with no expectation of its kind (``data`` and ``layout`` are the
+#: figure's own; a trace's ``legend``, ``width``, ``offset`` and strings are refused
+#: by their own rules).
+OTHER_READS = {
+    "data",
+    "layout",
+    "config",
+    "data[i].legend",
+    "data[i].width",
+    "data[i].offset",
+    "data[i].text",
+    "data[i].hovertext",
+    "data[i].customdata",
+    "data[i].hovertemplate",
+    "data[i].texttemplate",
+    "layout.template",
+    "layout.scattergap",
+    *(f"layout.{key}" for key in charts.FIXED_LAYOUT_KEYS),
+    *(f"layout.legend.{key}" for key in charts.FIXED_LEGEND_KEYS),
+    *(f"layout.<axis>.{key}" for key in charts.FIXED_AXIS_KEYS),
+}
+
+#: Where each anchor of ``SLOT_KINDS`` sits, as a normalized read path.
+ANCHOR_PATHS = {
+    "trace": "data[i]",
+    "marker": "data[i].marker",
+    "pattern": "data[i].marker.pattern",
+    "line": "data[i].line",
+    "layout": "layout",
+    "axis": "layout.<axis>",
+    "annotation": "layout.annotations[i]",
+}
+
+
+class Reads(dict[str, Any]):
+    """An object that records each key read from it by name (``get``, ``[]``,
+    ``in``), found or not, into ``log``."""
+
+    def __init__(self, data: dict[str, Any], path: str, log: set[str]) -> None:
+        super().__init__(data)
+        self.path, self.log = path, log
+
+    def _read(self, key: Any) -> None:
+        self.log.add(f"{self.path}.{key}" if self.path else str(key))
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._read(key)
+        return super().get(key, default)
+
+    def __getitem__(self, key: Any) -> Any:
+        self._read(key)
+        return super().__getitem__(key)
+
+    def __contains__(self, key: object) -> bool:
+        self._read(key)
+        return super().__contains__(key)
+
+
+def recording(value: Any, path: str, log: set[str]) -> Any:
+    if isinstance(value, dict):
+        return Reads(
+            {k: recording(v, f"{path}.{k}" if path else k, log) for k, v in value.items()},
+            path,
+            log,
+        )
+    if isinstance(value, list):
+        return [recording(v, f"{path}[{i}]", log) for i, v in enumerate(value)]
+    return value
+
+
+def normalized(path: str) -> str:
+    path = re.sub(r"\[\d+\]", "[i]", path)
+    return re.sub(r"^layout\.[xy]axis\d*", "layout.<axis>", path)
+
+
+def kind_refusals(problems: list[str], path: SlotPath) -> list[str]:
+    """The problems refusing the kind ``path`` holds: another rule may refuse an
+    expected kind's sample (a ``tickformat`` that shortens numbers), this one may not."""
+    form = re.compile(rf"{re.escape(dotted(path))}: ({'|'.join(SAMPLES)}), not ")
+    return [p for p in problems if form.match(p)]
+
+
+class TestSlotKinds:
+    """#484 (D099): a slot a check reads, holding a kind that check does not expect, is
+    refused by a problem at that slot's own path; a kind it expects is not."""
+
+    def test_the_table_is_the_hand_written_one(self) -> None:
+        assert {
+            anchor: {key: set(kinds) for key, kinds in table.items()}
+            for anchor, table in charts.SLOT_KINDS.items()
+        } == EXPECTED_KINDS
+        assert {
+            anchor: set(kinds) for anchor, kinds in charts.ANCHOR_KINDS.items()
+        } == EXPECTED_ANCHOR_KINDS
+
+    def test_every_kind_is_sampled(self) -> None:
+        named = {k for t in EXPECTED_KINDS.values() for kinds in t.values() for k in kinds}
+        assert named <= set(SAMPLES)
+
+    @pytest.mark.parametrize(
+        ("anchor", "key"),
+        [(a, k) for a, table in EXPECTED_KINDS.items() for k in table],
+        ids=lambda v: str(v),
+    )
+    def test_a_slot_refuses_each_kind_it_does_not_expect(
+        self, anchor: str, key: str
+    ) -> None:
+        expected = EXPECTED_KINDS[anchor][key]
+        for base_path in ANCHORS[anchor]:
+            path = (*base_path, key)
+            for kind, values in SAMPLES.items():
+                for value in values:
+                    problems = charts.figure_problems(replaced(BASE, path, value))
+                    if kind in expected:
+                        assert kind_refusals(problems, path) == [], (path, value)
+                    else:
+                        here = [p for p in problems if p.startswith(f"{dotted(path)}:")]
+                        assert here, (path, value)
+
+    @pytest.mark.parametrize("anchor", list(EXPECTED_ANCHOR_KINDS))
+    def test_an_anchor_refuses_each_kind_it_does_not_expect(self, anchor: str) -> None:
+        for path in ANCHORS[anchor]:
+            for kind, values in SAMPLES.items():
+                for value in values:
+                    problems = charts.figure_problems(replaced(BASE, path, value))
+                    if kind in EXPECTED_ANCHOR_KINDS[anchor]:
+                        assert kind_refusals(problems, path) == [], (path, value)
+                    else:
+                        here = [p for p in problems if p.startswith(f"{dotted(path)}:")]
+                        assert here, (path, value)
+
+    def test_every_slot_read_by_name_is_declared(
+        self, live_figures: dict[str, Any]
+    ) -> None:
+        """What the checks read by name, over the base, every case of the base with one
+        slot changed, and each live chart's figure, is each a declared slot; and each
+        declared slot is read. Reads by pattern (the walk's ``items()``, the layout's
+        axis and second-legend scans) are invisible to this recorder, so ``any`` and
+        the axis anchor are declared by hand."""
+        log: set[str] = set()
+        figures = [BASE, *live_figures.values()]
+        figures += [
+            replaced(BASE, path, value)
+            for path in slots(BASE)
+            for value in ("s", 7, None, ["s"], {"a": "b"})
+        ]
+        for figure in figures:
+            charts.figure_problems(recording(figure, "", log))
+        read = {normalized(p) for p in log}
+        declared = {
+            f"{ANCHOR_PATHS[anchor]}.{key}"
+            for anchor, table in EXPECTED_KINDS.items()
+            if anchor != "any"
+            for key in table
+        }
+        assert read - declared - OTHER_READS == set()
+        assert declared - read == set()
+
+
+class TestPlaceholderScan:
+    """#484 (D099): the linear scan finds exactly the regex's placeholders."""
+
+    PATTERN = re.compile(r"%\{[^}]*\}")
+
+    def test_it_matches_the_pattern_on_every_short_string(self) -> None:
+        for length in range(8):
+            for chars in itertools.product("%{}a\n", repeat=length):
+                text = "".join(chars)
+                spans = [m.span() for m in self.PATTERN.finditer(text)]
+                assert list(charts._placeholder_spans(text)) == spans, text
+                assert charts._placeholders(text) == self.PATTERN.findall(text)
+                assert charts._without_placeholders(text) == self.PATTERN.sub(
+                    "", text
+                )

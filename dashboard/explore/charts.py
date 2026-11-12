@@ -9,6 +9,10 @@ is a ``var(--token)`` reference to a token in ``style.css``, which
 :data:`CHART_CALLBACK` resolves in the browser, so ``style.css`` stays the one source of
 every color.
 
+:func:`figure_problems` is total (#484, D099): it refuses a figure that is no JSON
+value of bounded depth before any other check reads it, and a slot holding a kind its
+check does not expect (:data:`SLOT_KINDS`), so it returns problems and never raises.
+
 No ``dcc.Graph`` is ever in a server-rendered layout (#452, D088): ``components.chart``
 renders an empty mount point, and :data:`CHART_MOUNT_CALLBACK` puts the graph in it only
 once plotly.js has loaded, so dcc's own loader never appends a script or fetches, and a
@@ -21,6 +25,7 @@ A shared module: it imports nothing from ``explore`` and reads no API
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Iterator, Mapping
 from itertools import combinations
@@ -250,9 +255,65 @@ _EXTRA_LEGEND_RE = re.compile(r"legend\d+")
 _AXIS_RE = re.compile(r"[xy]axis\d*")
 
 
+#: How deep a figure may nest (#484, D099), in containers counted from the root: the
+#: figure is 1, ``data`` 2, a trace 3, its ``marker`` 4 and a ``marker.pattern`` 5,
+#: which is as deep as any chart's figure (and :data:`TEMPLATE`) nests. Every check
+#: below recurses, and so does the ``copy.deepcopy`` in ``components.chart``, so
+#: :func:`json_problems` refuses anything deeper before any of them runs.
+MAX_DEPTH = 16
+
+
+def _child(path: str, name: str) -> str:
+    return f"{path}.{name}" if path else name
+
+
+def json_problems(figure: Any) -> list[str]:
+    """What keeps ``figure`` from being a JSON value of bounded depth (#484, D099): a
+    key that is not a string, a value that is not an object, a list, a string, a finite
+    number, a boolean or null (a tuple, a set or NaN is refused), and nesting deeper
+    than :data:`MAX_DEPTH`. It walks with a stack of its own, never by recursion, and
+    descends no further than the bound, so it ends on any input, a cyclic one included;
+    its messages name a path and a type, never a value's ``repr``. Every other check
+    assumes what this one checks: :func:`figure_problems` returns its problems alone,
+    and ``components.chart`` runs it before it copies a figure."""
+    problems: list[str] = []
+    stack: list[tuple[str, Any, int]] = [("", figure, 1)]
+    while stack:
+        path, value, depth = stack.pop()
+        if isinstance(value, (dict, list)):
+            if depth > MAX_DEPTH:
+                problems.append(f"{path or 'figure'}: nested deeper than {MAX_DEPTH}")
+                continue
+            inner: list[tuple[str, Any, int]] = []
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if isinstance(key, str):
+                        inner.append((_child(path, key), item, depth + 1))
+                    else:
+                        problems.append(
+                            f"{path or 'figure'}: a {type(key).__name__} key,"
+                            " not a string"
+                        )
+            else:
+                inner = [
+                    (f"{path}[{index}]", item, depth + 1)
+                    for index, item in enumerate(value)
+                ]
+            stack.extend(reversed(inner))
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                problems.append(f"{path or 'figure'}: not a finite number")
+        elif not (value is None or isinstance(value, (str, int))):
+            problems.append(
+                f"{path or 'figure'}: a {type(value).__name__}, not a JSON value"
+            )
+    return problems
+
+
 def _walk(value: Any, path: str = "", key: str = "") -> Iterator[tuple[str, str, Any]]:
     """Every ``(path, key, value)`` under ``value``, a figure or a part of one; a list's
-    items carry the list's key (``colorway[0]``'s is ``colorway``)."""
+    items carry the list's key (``colorway[0]``'s is ``colorway``). It recurses, so it
+    is handed only what :func:`json_problems` accepts."""
     if isinstance(value, dict):
         for name, inner in value.items():
             here = f"{path}.{name}" if path else str(name)
@@ -384,9 +445,35 @@ def _mode(trace: Mapping[str, Any]) -> str:
     return mode if isinstance(mode, str) else ""
 
 
-#: What a template writes that the reader never sees as written: a ``%{…}``
-#: placeholder.
-_PLACEHOLDER_RE = re.compile(r"%\{[^}]*\}")
+def _placeholder_spans(text: str) -> Iterator[tuple[int, int]]:
+    """Where ``text`` holds a ``%{…}`` placeholder, which a template writes and the
+    reader never sees as written: each ``%{`` up to the first ``}`` after it, leftmost
+    first and never overlapping, the matches of the pattern ``%\\{[^}]*\\}``. Linear
+    (#484, D099): a ``%{`` with no ``}`` after it ends the scan, since no later one has
+    a ``}`` after it either, where the pattern searched again from every ``%{`` to the
+    end, so a long string of them took minutes."""
+    start = 0
+    while (begin := text.find("%{", start)) >= 0:
+        end = text.find("}", begin + 2)
+        if end < 0:
+            return
+        yield begin, end + 1
+        start = end + 1
+
+
+def _placeholders(text: str) -> list[str]:
+    """Each placeholder in ``text`` (:func:`_placeholder_spans`)."""
+    return [text[begin:end] for begin, end in _placeholder_spans(text)]
+
+
+def _without_placeholders(text: str) -> str:
+    """``text`` with every placeholder removed (:func:`_placeholder_spans`)."""
+    parts, start = [], 0
+    for begin, end in _placeholder_spans(text):
+        parts.append(text[start:begin])
+        start = end
+    parts.append(text[start:])
+    return "".join(parts)
 
 
 def _drawn_text(trace: Mapping[str, Any]) -> Any:
@@ -432,7 +519,7 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
         text = _drawn_text(trace)
         named = isinstance(text, str) and (
             "%{fullData.name}" in text
-            or _PLACEHOLDER_RE.sub("", text).strip() == name.strip()
+            or _without_placeholders(text).strip() == name.strip()
         )
         if name in names or (shown and named):
             found["label"] = json.dumps(name)
@@ -574,7 +661,7 @@ def template_problems(figure: Mapping[str, Any]) -> list[str]:
         if key in _TEMPLATE_KEYS and isinstance(value, str):
             problems += [
                 f"{path}: {placeholder!r} is not a string the page wrote"
-                for placeholder in _PLACEHOLDER_RE.findall(value)
+                for placeholder in _placeholders(value)
                 if not _ALLOWED_PLACEHOLDER_RE.fullmatch(placeholder)
             ]
         elif key.endswith("hoverformat") and not path.endswith("]"):
@@ -600,6 +687,123 @@ def bar_problems(figure: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+#: The JSON kinds a slot may hold (#484, D099), as :func:`_kind` names them.
+STRING = frozenset({"a string"})
+STRINGS = frozenset({"a string", "a list of strings"})
+OBJECT = frozenset({"an object"})
+LIST = frozenset({"a list", "a list of strings"})
+
+#: Each slot a check reads by name, and the kinds that check expects there (#484,
+#: D099): any other kind is refused (:func:`slot_problems`), never passed silently.
+#: Keyed by where the slot sits: ``trace`` is each item of ``data``, ``marker``,
+#: ``pattern`` and ``line`` are a trace's ``marker``, its ``marker.pattern`` and its
+#: ``line``, ``axis`` is each layout key :data:`_AXIS_RE` matches, ``annotation`` each
+#: item of ``layout.annotations``, and ``any`` a key at any depth. Slots a check
+#: refuses on any value already (a trace's ``legend``, ``width`` and ``offset``,
+#: ``text``, ``hovertext`` and ``customdata``; the layout's fixed keys, ``template``
+#: and ``scattergap``; ``config``; a color key) are not listed. Policy, beyond types:
+#: ``textposition`` is one string, since a list would credit a direct label that
+#: ``["none", …]`` never draws, and a marker symbol and a pattern shape are one
+#: string, since a list per point would tell categories apart inside one trace, as
+#: :func:`color_problems` refuses a list ``color`` for. A chart that needs another
+#: kind widens its slot in its own story. ``EXPECTED_KINDS`` in
+#: ``test_dashboard_charts.py``, a hand-written literal, must equal this.
+SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
+    "trace": {
+        "type": STRING,
+        "mode": STRING,
+        "name": STRING,
+        "hoverinfo": STRING,
+        "textposition": STRING,
+        "marker": OBJECT,
+        "line": OBJECT,
+    },
+    "marker": {"symbol": STRING, "pattern": OBJECT},
+    "pattern": {"shape": STRING},
+    "line": {"dash": STRING},
+    "layout": {"legend": OBJECT, "annotations": LIST},
+    "axis": {"tickformat": STRING},
+    "annotation": {"text": STRING},
+    "any": {"family": STRING, "hovertemplate": STRINGS, "texttemplate": STRINGS},
+}
+
+#: The kind of each item a check reads into by pattern or by index: a layout axis and
+#: an annotation are objects (a trace that is not one is :func:`hover_problems`').
+ANCHOR_KINDS: Mapping[str, frozenset[str]] = {"axis": OBJECT, "annotation": OBJECT}
+
+
+def _kind(value: Any) -> str:
+    """``value``'s JSON kind, as :data:`SLOT_KINDS` names it."""
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if value is None:
+        return "null"
+    if isinstance(value, dict):
+        return "an object"
+    if all(isinstance(item, str) for item in value):
+        return "a list of strings"
+    return "a list"
+
+
+def _kinds_problem(path: str, value: Any, kinds: frozenset[str]) -> list[str]:
+    kind = _kind(value)
+    if kind in kinds:
+        return []
+    return [f"{path}: {kind}, not {' or '.join(sorted(kinds))}"]
+
+
+def _slots_problems(holder: Any, anchor: str, path: str) -> list[str]:
+    """Each slot of ``anchor`` in ``holder`` (an object, else nothing to read) holding a
+    kind :data:`SLOT_KINDS` does not list for it."""
+    if not isinstance(holder, dict):
+        return []
+    return [
+        problem
+        for key, kinds in SLOT_KINDS[anchor].items()
+        if key in holder
+        for problem in _kinds_problem(_child(path, key), holder[key], kinds)
+    ]
+
+
+def slot_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each slot a check reads that holds a kind the check does not expect (#484, D099,
+    :data:`SLOT_KINDS`): reported, so the figure is refused rather than passed."""
+    problems = []
+    for index, trace in enumerate(figure.get("data") or []):
+        here = f"data[{index}]"
+        problems += _slots_problems(trace, "trace", here)
+        if not isinstance(trace, dict):
+            continue
+        marker, line = trace.get("marker"), trace.get("line")
+        problems += _slots_problems(marker, "marker", f"{here}.marker")
+        if isinstance(marker, dict):
+            problems += _slots_problems(
+                marker.get("pattern"), "pattern", f"{here}.marker.pattern"
+            )
+        problems += _slots_problems(line, "line", f"{here}.line")
+    layout = figure.get("layout")
+    problems += _slots_problems(layout, "layout", "layout")
+    if isinstance(layout, dict):
+        for name, axis in layout.items():
+            if _AXIS_RE.fullmatch(name):
+                here = f"layout.{name}"
+                problems += _kinds_problem(here, axis, ANCHOR_KINDS["axis"])
+                problems += _slots_problems(axis, "axis", here)
+        notes = layout.get("annotations")
+        for index, note in enumerate(notes if isinstance(notes, list) else []):
+            here = f"layout.annotations[{index}]"
+            problems += _kinds_problem(here, note, ANCHOR_KINDS["annotation"])
+            problems += _slots_problems(note, "annotation", here)
+    for path, key, value in _walk(figure):
+        if key in SLOT_KINDS["any"] and not path.endswith("]"):
+            problems += _kinds_problem(path, value, SLOT_KINDS["any"][key])
+    return problems
+
+
 def figure_problems(figure: Any) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
     with a list of traces, sets no template or config of its own and overrides none of
@@ -607,10 +811,20 @@ def figure_problems(figure: Any) -> list[str]:
     markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
     numbering them and names every scatter trace's mode, writes its own hover text with
     no number format, sets no bar's width or offset, and never tells two traces apart
-    by color alone."""
+    by color alone.
+
+    Total (#484, D099): for any input it returns a list of strings and never raises. A
+    figure that is not a JSON value of bounded depth gets :func:`json_problems`' alone,
+    since every other check assumes one; a slot holding a kind its check does not
+    expect is refused (:func:`slot_problems`). A check added here runs only on what
+    :func:`json_problems` accepts, so it inherits both with nothing added."""
     if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
         return ["not a figure dict with a list of traces"]
+    structural = json_problems(figure)
+    if structural:
+        return structural
     problems = [
+        *slot_problems(figure),
         *color_problems(figure),
         *markup_problems(figure),
         *override_problems(figure),
