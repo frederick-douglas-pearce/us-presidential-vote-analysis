@@ -205,6 +205,29 @@ _PER_CAPITA_EXAMPLE: dict[str, Any] = {
     "persons_per_electoral_vote": 677344.6545454545,
 }
 
+# Two /v1/elections/states items (#428), values read from snapshot 37af4064: one
+# inside the popular-vote window, and one legislature-chosen state before it, whose
+# total is null.
+_ELECTION_STATE_EXAMPLE: dict[str, Any] = {
+    **_PER_CAPITA_EXAMPLE,
+    "state_popular_total": 17500881,
+    "pv_status": "popular_vote",
+}
+_ELECTION_STATE_PRE_1976_EXAMPLE: dict[str, Any] = {
+    "year": 1860,
+    "state": "South Carolina",
+    "state_usps": "SC",
+    "governing_census_year": 1850,
+    "state_electoral_votes": 8,
+    "population": 668507,
+    "population_series": "resident",
+    "boundary_basis": "present_day",
+    "coverage": "covered",
+    "persons_per_electoral_vote": 83563.375,
+    "state_popular_total": None,
+    "pv_status": "legislature_chosen",
+}
+
 # The served values for 2000 (Bush and Gore received electoral votes).
 # test_api_models.test_the_year_list_examples_match_the_recorded_served_rows pins
 # YearListItem's published examples to the recorded /v1/elections response
@@ -789,6 +812,49 @@ class PerCapitaRow(BaseModel):
         description=(
             "population / state_electoral_votes. None where population is None or the "
             "allotment is 0 — never 0 and never infinite."
+        ),
+    )
+
+
+# #428 / D098: the /v1/elections/states row. A subclass, so the PerCapitaRow fields have
+# one definition and one description on both routes. The two added fields come from
+# ec_pv grouped to (year, state) (SnapshotRepository.state_rows_all): the state's one
+# non-null total, and its one pv_status. The docstring below publishes on /docs.
+class ElectionStateRow(PerCapitaRow):
+    """One state in one election year: every field `/v1/elections/{year}/per-capita`
+    serves for it, with the same values, plus the state's total popular vote
+    (`state_popular_total`) and whether it held a popular vote (`pv_status`).
+    """
+
+    model_config = _config(_ELECTION_STATE_EXAMPLE, _ELECTION_STATE_PRE_1976_EXAMPLE)
+
+    state_popular_total: int | None = Field(
+        default=None,
+        validation_alias="state_total_votes",
+        description=(
+            "The total votes for President in this state in this election, as the "
+            "popular-vote source named in `meta.provenance` reports them. It includes "
+            "votes for candidates who are not in this dataset, so the `popular_votes` "
+            "of this state's candidates on `/v1/elections/{year}` can add up to less "
+            "than it. There, the same total repeats on this state's candidate rows, "
+            "and is null on a row for a candidate with no popular-vote figure in this "
+            "dataset, such as a faithless elector's choice. Inside the popular-vote "
+            "window, a year's values add up to that year's `national_pv_denominator`. "
+            "null where this dataset has no total for this state that year, which "
+            "includes every year outside the popular-vote window "
+            "(`meta.provenance.coverage.pv_year_min` to `pv_year_max`)."
+        ),
+    )
+    pv_status: str = Field(
+        description=(
+            "Whether this state held a popular vote for President in this election: "
+            "'popular_vote' (one was held), 'legislature_chosen' (the state "
+            "legislature chose the electors, so none was held), or "
+            "'not_participating' (the state took no part in the election). Never "
+            "null. It is a fact about the election, not about this dataset: a "
+            "'popular_vote' state has a null `state_popular_total` in every year "
+            "outside the popular-vote window. The same value as `pv_status` on each "
+            "of this state's rows on `/v1/elections/{year}`."
         ),
     )
 

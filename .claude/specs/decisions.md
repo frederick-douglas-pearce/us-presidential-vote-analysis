@@ -6627,3 +6627,55 @@ what a reader can check: served inputs, one grain, the simplest aggregates, and 
 years in view. Two averages over different years read as one comparison unless each says which
 elections it covers. Checking a response's items with one function every reader calls keeps the
 rule for a valid item in one place.
+
+## D098: The all-years state route is `/v1/elections/states`; a state's popular-vote total is its one non-null value
+
+**Date:** 2026-11-12
+**Amends:** D094(ii) · **Builds on:** D070(c), D094(i), D094(iii), D094(v) · **Decided by:** the owner, approving #428's plan (architect-reviewed)
+
+**Context.** #428 (N2) serves every `(year, state)` in one response: the `per_capita` fields,
+plus the state's `state_popular_total` and `pv_status`, for C4/C5 (#436) and the spread of persons
+per electoral vote across states (#429). D094(ii) names an all-years route by dropping `{year}`
+from its per-year form, which would give `/v1/elections/per-capita`. But this row carries two
+popular-vote fields the per-year per-capita route does not, so that name would say the rows are
+the per-capita rows, and an API user looking for state popular-vote totals would not look there.
+Both added fields come from `ec_pv`, where they repeat on every candidate row of a state. Measured
+on snapshot `37af4064`, `pv_status` is constant per `(year, state)`, but `state_total_votes` is
+not: in 1976, 1988, 2004 and 2016 every state carries a NULL total beside its real one. That NULL
+belongs to the dense EC-left row of a candidate with no popular-vote figure (a faithless
+elector's choice), and `usvote.hybrid.roll_up_national` already takes the state's total as the
+`max` over those rows. Until now no check refused two different non-null totals in one state, so
+that `max` would have resolved them silently.
+
+**Decision.**
+- **(a) Naming (amends D094(ii)).** An all-years literal under `/v1/elections/` names the per-year
+  segment when its rows are that per-year route's rows (`/v1/elections/summary`). Otherwise it
+  names the grain, so `/v1/elections/states` means one row per (election, state). It is declared
+  before `/elections/{year}`, as D094(ii) requires, and tagged `Elections`. Its row is
+  `ElectionStateRow`, a subclass of `PerCapitaRow`, so the shared fields have one definition on
+  both routes.
+- **(b) One total and one status per state.** A state's popular-vote total is its **at most one
+  distinct non-null** `state_total_votes`. A NULL beside it is a candidate with no figure, never a
+  second total: `state_total_votes` and `candidate_votes` are null on the same rows. A state has
+  **exactly one** `pv_status`. The build refuses any other shape
+  (`snapshot.assert_state_popular_fields_are_per_state`), before the national roll-up, so the roll-up's
+  `max` is covered too. The route refuses a second total or a second status again at serve time
+  (`SnapshotRepository.state_rows_all`, a 500), together with `per_capita` and `ec_pv` covering
+  different `(year, state)` keys in either direction (D094(iii)). Both reads are D094(i) kinds: `per_capita` whole (primary key
+  `(year, state)`), and `ec_pv` grouped down to `(year, state)`. They are merged in the repository,
+  on `(year, state)`, so the route handler aggregates nothing. No snapshot schema bump.
+- **(c) The deploy requests it after the purge**, through the same check as `/v1/elections/summary`
+  (D094(v)). The smoke step's `probe_json` runs both routes: 200, this run's ETag, and a
+  self-consistent body, which here means `meta.count` equals the rows and no `(year, state)`
+  repeats.
+
+**Rationale.** A name should say what the rows are, and the D094(ii) rule's purpose, a list form
+recognizable from its per-year form, holds only where the rows are the same. The null-tolerant
+rule is the one the national roll-up already relies on, now checked rather than assumed. The
+literal reading ("one value, NULL counted") would refuse every real snapshot. The dashboard
+cannot rebuild these rows itself: taking a state's total from candidate-grain rows, or joining
+the per-state routes, would break D097(a) and (c).
+
+**Action required.** #436 registers the path in `on_miss` (#428's dashboard AC lands there) and
+is implemented only after #428 is deployed, since its fill would otherwise meet a live API without
+the route (a 422 from `{year}`). #428 closes after the deploy's smoke passes.

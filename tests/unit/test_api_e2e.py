@@ -92,6 +92,14 @@ def test_health_then_meta_then_data_walk(client: TestClient) -> None:
     flip = next(e for e in every["elections"] if e["year"] == 2016)
     assert flip["pv_flip"] is True
 
+    # Every state's per-election row in one response (#428).
+    states = client.get("/v1/elections/states").json()
+    _assert_envelope(states)
+    by_key = {(r["year"], r["state"]): r for r in states["data"]}
+    assert by_key[(2020, "Texas")]["state_popular_total"] == 11_000_000
+    assert by_key[(1860, "Vermont")]["pv_status"] == "legislature_chosen"
+    assert by_key[(1860, "Nevada")]["pv_status"] == "not_participating"
+
     cand = client.get("/v1/candidates/cand-a").json()
     _assert_envelope(cand)
     assert {r["candidate_slug"] for r in cand["data"]} == {"cand-a"}

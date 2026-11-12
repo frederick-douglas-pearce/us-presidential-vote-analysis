@@ -33,8 +33,9 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     # A literal, deliberately — comparing against `app.API_VERSION` would pass under any
     # value and stop pinning the thing that matters: that a human moved it when the
     # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245,
-    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386, 0.7.0 -> 0.8.0 by #431.
-    assert info["version"] == "0.8.0"
+    # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386, 0.7.0 -> 0.8.0 by #431,
+    # 0.8.0 -> 0.9.0 by #428.
+    assert info["version"] == "0.9.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.
@@ -165,6 +166,7 @@ def test_endpoints_carry_the_right_tags(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     assert paths["/v1/elections"]["get"]["tags"] == ["Elections"]
     assert paths["/v1/elections/summary"]["get"]["tags"] == ["Elections"]
+    assert paths["/v1/elections/states"]["get"]["tags"] == ["Elections"]
     assert paths["/v1/states/{usps}"]["get"]["tags"] == ["States"]
     assert paths["/v1/candidates"]["get"]["tags"] == ["Candidates"]
     assert paths["/v1/candidates/{slug}"]["get"]["tags"] == ["Candidates"]
@@ -182,6 +184,12 @@ def test_the_all_years_summary_declares_no_parameters(client: TestClient) -> Non
     assert not operation["get"].get("parameters"), operation["get"].get("parameters")
 
 
+def test_the_all_years_states_route_declares_no_parameters(client: TestClient) -> None:
+    """``/v1/elections/states`` (#428 AC1): one address, one edge entry, pinned likewise."""
+    operation = client.get("/openapi.json").json()["paths"]["/v1/elections/states"]
+    assert not operation["get"].get("parameters"), operation["get"].get("parameters")
+
+
 # --- examples ---------------------------------------------------------------
 
 
@@ -191,6 +199,7 @@ def test_response_schemas_carry_examples(client: TestClient) -> None:
         "EcPvRow",
         "NationalSummaryRow",
         "ElectionSummary",
+        "ElectionStateRow",
         "Provenance",
         "Meta",
         "ErrorBody",

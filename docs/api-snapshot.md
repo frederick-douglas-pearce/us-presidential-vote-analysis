@@ -305,7 +305,13 @@ Nevada 1864 correction.
 
 Served at `GET /v1/elections/{year}/per-capita` (every state in one election; optional
 `state` filter) and `GET /v1/states/{usps}/per-capita` (one state across years;
-`year_from` / `year_to`). The view name, the columns read and the three vocabularies are
+`year_from` / `year_to`). `GET /v1/elections/states` (#428, D098) reads the whole table,
+ordered by `(year, state)`, and adds each state's `state_total_votes` and `pv_status` from
+`ec_pv` grouped to `(year, state)`. Per state that is the one non-null total (a candidate
+with no popular-vote figure has a NULL total on its rows beside the state's real one) and the
+one status; the build refuses a second of either
+(`assert_state_popular_fields_are_per_state`), and the route refuses one too (500), as it
+does `per_capita` and `ec_pv` covering different keys. The view name, the columns read and the three vocabularies are
 **copies** in `usvote/snapshot.py` and `usvote/snapshot_schema.py`, because neither module
 may import `usvote.census`. `tests/unit/test_snapshot.py::TestPerCapitaContract` holds each
 copy equal to its census original.

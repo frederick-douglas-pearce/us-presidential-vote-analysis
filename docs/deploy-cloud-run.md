@@ -285,9 +285,12 @@ It also asserts **which snapshot is serving**, at both ends: the origin's `/heal
 `snapshot_version` and the *canonical* `/v1/meta` ETag must both equal the content hash this
 run built from. The second is what proves the cache purge took — the cache-busted
 reachability check cannot, since a unique url is always a MISS and so always reads the
-origin's fresh ETag (#148). Last, it requests the canonical `/v1/elections/summary` (every
-election's national summary, the dashboard's cross-election fill, #431): 200, an ETag naming
-this run's snapshot, and a body whose `meta.count`, `data` and `elections` agree. The request
+origin's fresh ETag (#148). Last, it requests the canonical all-years routes, the dashboard's
+cross-election fills: `/v1/elections/summary` (every election's national summary, #431) and
+`/v1/elections/states` (every state's per-election row, #428). Each must answer 200, with an
+ETag naming this run's snapshot and a self-consistent body: for the summary, `meta.count`,
+`data` and `elections` agree; for the states, `meta.count` equals the rows and no
+`(year, state)` repeats. One shell function, `probe_json`, runs both. Each request
 also triggers the Worker's caching of GET `/v1` 200s, which refills the route's entry only at
 the colo the runner reached (`caches.default` is colo-local); every other colo fills on its first
 visitor. The step does not verify that the entry was stored (#478 tracks such a check).

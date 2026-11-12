@@ -93,6 +93,7 @@ def test_candidate_id_is_never_a_model_field() -> None:
         models.NationalSummaryRow,
         models.YearListItem,
         models.CandidateListItem,
+        models.ElectionStateRow,
     ):
         assert "candidate_id" not in _mapped_columns(model)
         assert "candidate_id" not in model.model_fields
@@ -150,6 +151,7 @@ def test_key_public_models_ship_an_example() -> None:
         models.NationalSummaryRow,
         models.YearListItem,
         models.CandidateListItem,
+        models.ElectionStateRow,
         models.Provenance,
         models.Meta,
         models.SnapshotMetaResponse,
@@ -165,6 +167,36 @@ def test_every_per_capita_column_is_mapped_or_dropped() -> None:
     assert not missing, (
         f"unmapped per_capita columns (add a field or drop them): {missing}"
     )
+
+
+def test_the_election_state_row_maps_exactly_the_per_capita_columns_and_two_more() -> None:
+    """``ElectionStateRow`` (#428) consumes ``per_capita``'s columns plus two from ``ec_pv``.
+
+    An equality, not a containment: the repository hands the model exactly these keys
+    (``SnapshotRepository.state_rows_all``), so a field reading any other column would
+    validate to its default and serve a silent null.
+    """
+    assert _mapped_columns(models.ElectionStateRow) == set(PER_CAPITA_COLUMNS) | {
+        "state_total_votes",
+        "pv_status",
+    }
+
+
+def test_the_election_state_row_has_its_own_examples() -> None:
+    """The subclass must not inherit ``PerCapitaRow``'s example, which lacks its fields.
+
+    Both examples carry the two added fields, and the pre-1976 one shows a state that held
+    no popular vote with its null total.
+    """
+    extra = models.ElectionStateRow.model_config.get("json_schema_extra")
+    assert isinstance(extra, dict)
+    examples: Any = extra["examples"]
+    assert len(examples) == 2
+    for ex in examples:
+        assert {"state_popular_total", "pv_status"} <= set(ex)
+    assert examples[1]["pv_status"] == "legislature_chosen"
+    assert examples[1]["state_popular_total"] is None
+    assert models.ElectionStateRow.__doc__ != models.PerCapitaRow.__doc__
 
 
 # Recorded ``/v1`` responses from the deployed API (test input only). They were not

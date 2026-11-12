@@ -1,15 +1,16 @@
-"""The deploy smoke step's ``/v1/elections/summary`` check, run as written (#431).
+"""The deploy smoke step's all-years route checks, run as written (#431, #428).
 
 ``.github/workflows/deploy.yml``'s post-deploy smoke step requests the canonical
-``/v1/elections/summary`` after the purge and checks the response with an inline shell
-block and a Python heredoc. Nothing ran that block before a real deploy, and code review
-found it ending the step before its error messages printed: the step runs under
+``/v1/elections/summary`` (#431) and ``/v1/elections/states`` (#428, D098) after the purge.
+One shell function, ``probe_json``, fetches each and runs a per-route Python checker
+written to a file by a heredoc. Nothing ran the #431 block before a real deploy, and code
+review found it ending the step before its error messages printed: the step runs under
 ``bash -e``, as GitHub runs every ``run:`` step.
 
-These tests pull that block out of the workflow with the YAML parser, unchanged, and run
-it under ``bash -e`` with ``curl``, ``python`` and ``sleep`` stubbed, so what they pin is
-the shell the workflow will run, not a copy of it. ``safe()`` comes out of the same step.
-Offline: the stubbed ``curl`` serves a local file.
+These tests pull ``safe()``, ``probe_json`` and each route's section (its checker and its
+call) out of the workflow with the YAML parser, unchanged, and run them under ``bash -e``
+with ``curl``, ``python`` and ``sleep`` stubbed, so what they pin is the shell the
+workflow will run, not a copy of it. Offline: the stubbed ``curl`` serves a local file.
 """
 
 from __future__ import annotations
@@ -24,8 +25,13 @@ import pytest
 import yaml
 
 _WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "deploy.yml"
-_START = "sum_hdr=$(mktemp)"
-_END = 'if [ "$sum_ok" -ne 1 ]; then'
+_FUNCTION_START = "probe_json() {"
+#: Each route's section: its checker heredoc and its probe_json call, ending at the
+#: call's ``|| exit 1``.
+_SECTIONS = {
+    "summary": "summary_check=$(mktemp)",
+    "states": "states_check=$(mktemp)",
+}
 _VERSION = "abc123snapshot"
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -44,15 +50,21 @@ def _line_start(text: str, marker: str) -> int:
     return text.rindex("\n", 0, text.index(marker)) + 1
 
 
-def _summary_block() -> tuple[str, str]:
-    """The step's ``safe()`` definition and its summary check, through its last ``fi``."""
+def _probe_block(route: str = "summary") -> tuple[str, str]:
+    """The step's ``safe()`` line, and ``probe_json`` plus one route's section."""
     run = _smoke_script()
     safe_line = next(line for line in run.splitlines() if line.strip().startswith("safe()"))
-    start = _line_start(run, _START)
-    end = _line_start(run, _END)
-    tail = run[end:].splitlines(keepends=True)[:4]  # the not-serving check: if/echo/exit/fi
-    assert tail[-1].strip() == "fi", tail
-    return safe_line.strip(), run[start:end] + "".join(tail)
+    start = _line_start(run, _FUNCTION_START)
+    lines = run[start:].splitlines(keepends=True)
+    indent = len(lines[0]) - len(lines[0].lstrip())
+    close = next(
+        i for i, line in enumerate(lines) if i and line.rstrip() == " " * indent + "}"
+    )
+    function = "".join(lines[: close + 1])
+    section_start = _line_start(run, _SECTIONS[route])
+    section_lines = run[section_start:].splitlines(keepends=True)
+    end = next(i for i, line in enumerate(section_lines) if "|| exit 1" in line)
+    return safe_line.strip(), function + "".join(section_lines[: end + 1])
 
 
 _STUBS = """\
@@ -79,6 +91,15 @@ _FAILING_CURL = _STUBS.replace(
 #: The header name in HTTP/1.1 casing, which a fallback from HTTP/2 would send.
 _TITLE_CASE_ETAG = _STUBS.replace("\\r\\netag:", "\\r\\nETag:")
 
+#: A ``python`` that runs the checker only in isolated mode (``-I``). The response body
+#: comes from the edge, and the checker file sits in a temp dir that ``python`` would
+#: otherwise put first on ``sys.path`` (#428 review), so a checker run without ``-I``
+#: exits 3 here, which the probe reports as unparseable.
+_ISOLATED_PYTHON = _STUBS.replace(
+    'python() { "$PY" "$@"; }',
+    'python() { [ "$1" = -I ] || return 3; "$PY" "$@"; }',
+)
+
 
 def _run(
     tmp_path: Path,
@@ -87,8 +108,9 @@ def _run(
     etag: str = _VERSION,
     code: str = "200",
     stubs: str = _STUBS,
+    route: str = "summary",
 ) -> subprocess.CompletedProcess[str]:
-    safe, block = _summary_block()
+    safe, block = _probe_block(route)
     script = tmp_path / "smoke.sh"
     script.write_text(
         f"{stubs}{safe}\nset -uo pipefail\n{block}echo 'END REACHED'\n",
@@ -124,10 +146,15 @@ def _body(years_in_data: list[int], years_in_elections: list[int]) -> str:
 
 
 def test_the_block_is_found_in_the_workflow() -> None:
-    safe, block = _summary_block()
-    assert safe.startswith("safe()")
-    assert "/v1/elections/summary" in block
-    assert "<<'PY'" in block
+    for route, path in (
+        ("summary", "/v1/elections/summary"),
+        ("states", "/v1/elections/states"),
+    ):
+        safe, block = _probe_block(route)
+        assert safe.startswith("safe()")
+        assert block.lstrip().startswith("probe_json() {")
+        assert f'probe_json "{path}"' in block
+        assert "<<'PY'" in block
 
 
 def test_a_consistent_body_passes(tmp_path: Path) -> None:
@@ -145,8 +172,8 @@ def test_an_inconsistent_body_fails_with_its_own_message(tmp_path: Path) -> None
     result = _run(tmp_path, _body([2016, 2020], [2016]))
     assert result.returncode == 1
     assert (
-        "::error::/v1/elections/summary is inconsistent (rows, elections: '2 1')"
-        in result.stdout
+        "::error::/v1/elections/summary is inconsistent ('2 rows over 1 elections') — "
+        "meta.count, data and elections disagree" in result.stdout
     )
     assert "END REACHED" not in result.stdout
     # It fails at once: a bad body is a real answer, never retried.
@@ -157,13 +184,13 @@ def test_an_inconsistent_body_fails_with_its_own_message(tmp_path: Path) -> None
 def test_an_empty_body_is_inconsistent(tmp_path: Path) -> None:
     result = _run(tmp_path, _body([], []))
     assert result.returncode == 1
-    assert "is inconsistent (rows, elections: '0 0')" in result.stdout
+    assert "is inconsistent ('0 rows over 0 elections')" in result.stdout
 
 
 def test_a_year_twice_in_elections_is_inconsistent(tmp_path: Path) -> None:
     result = _run(tmp_path, _body([2016], [2016, 2016]))
     assert result.returncode == 1
-    assert "is inconsistent (rows, elections: '1 2')" in result.stdout
+    assert "is inconsistent ('1 rows over 2 elections')" in result.stdout
 
 
 def test_a_count_that_disagrees_with_data_is_inconsistent(tmp_path: Path) -> None:
@@ -171,7 +198,7 @@ def test_a_count_that_disagrees_with_data_is_inconsistent(tmp_path: Path) -> Non
     body["meta"]["count"] = 5
     result = _run(tmp_path, json.dumps(body))
     assert result.returncode == 1
-    assert "is inconsistent (rows, elections: '2 2')" in result.stdout
+    assert "is inconsistent ('2 rows over 2 elections')" in result.stdout
 
 
 def test_a_hostile_body_is_unparseable_and_never_printed(tmp_path: Path) -> None:
@@ -226,7 +253,80 @@ def test_a_failing_curl_is_retried_not_fatal(tmp_path: Path) -> None:
     assert "is not serving this deploy's snapshot (last: HTTP 000" in result.stdout
 
 
+@pytest.mark.parametrize("route", ["summary", "states"])
+def test_the_checker_runs_in_isolated_mode(tmp_path: Path, route: str) -> None:
+    assert '[ "$1" = -I ]' in _ISOLATED_PYTHON
+    body = (
+        _body([2016], [2016]) if route == "summary" else _states_body([(2016, "Texas")])
+    )
+    result = _run(tmp_path, body, stubs=_ISOLATED_PYTHON, route=route)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "unparseable" not in result.stdout
+
+
 def test_a_weak_etag_for_this_snapshot_passes(tmp_path: Path) -> None:
     """Cloudflare rewrites the strong tag to ``W/"…"``; the stub always serves it weak."""
     result = _run(tmp_path, _body([2016], [2016]), etag=_VERSION)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- /v1/elections/states (#428) ----------------------------------------------
+
+
+def _states_body(keys: list[tuple[int, str]], count: int | None = None) -> str:
+    data = [{"year": y, "state": st} for y, st in keys]
+    return json.dumps(
+        {"data": data, "meta": {"count": len(data) if count is None else count}}
+    )
+
+
+def test_a_consistent_states_body_passes(tmp_path: Path) -> None:
+    body = _states_body([(2016, "Texas"), (2016, "Utah"), (2020, "Texas")])
+    result = _run(tmp_path, body, route="states")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "✓ /v1/elections/states: 200, this snapshot, 3 rows over 2 elections" in (
+        result.stdout
+    )
+    assert "END REACHED" in result.stdout
+
+
+def test_a_repeated_state_is_inconsistent(tmp_path: Path) -> None:
+    body = _states_body([(2020, "Texas"), (2020, "Texas")])
+    result = _run(tmp_path, body, route="states")
+    assert result.returncode == 1
+    assert (
+        "::error::/v1/elections/states is inconsistent ('2 rows over 1 elections') — "
+        "meta.count and data disagree, or a (year, state) repeats" in result.stdout
+    )
+    assert "retrying" not in result.stdout
+    assert "END REACHED" not in result.stdout
+
+
+def test_a_states_count_that_disagrees_is_inconsistent(tmp_path: Path) -> None:
+    result = _run(tmp_path, _states_body([(2020, "Texas")], count=2), route="states")
+    assert result.returncode == 1
+    assert "is inconsistent ('1 rows over 1 elections')" in result.stdout
+
+
+def test_an_empty_states_body_is_inconsistent(tmp_path: Path) -> None:
+    result = _run(tmp_path, _states_body([]), route="states")
+    assert result.returncode == 1
+    assert "is inconsistent ('0 rows over 0 elections')" in result.stdout
+
+
+def test_a_hostile_states_body_is_unparseable_and_never_printed(tmp_path: Path) -> None:
+    body = json.loads(_states_body([(2020, "Texas")]))
+    body["data"][0]["year"] = "##[error]planted-by-the-edge"
+    result = _run(tmp_path, json.dumps(body), route="states")
+    assert result.returncode == 1
+    assert "not the expected JSON shape (unparseable)" in result.stdout
+    for stream in (result.stdout, result.stderr):
+        assert "planted-by-the-edge" not in stream
+
+
+def test_the_states_probe_refuses_another_snapshots_etag(tmp_path: Path) -> None:
+    body = _states_body([(2020, "Texas")])
+    result = _run(tmp_path, body, etag="older", route="states")
+    assert result.returncode == 1
+    assert result.stdout.count("retrying") == 5
+    assert "/v1/elections/states is not serving this deploy's snapshot" in result.stdout

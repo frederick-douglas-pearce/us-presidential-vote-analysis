@@ -154,7 +154,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C2_MAJORITY_LINE`, and the caption sentences `labels.C1_EC_BASIS` and
   `labels.C2_MAJORITY_NOTE`.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
-  `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`; D041; D046 §5;
+  `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
+  `ElectionStateRow` (the same field, on `/v1/elections/states`); D041; D046 §5;
   D068; `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast" (the reader
   wording: allotment, electors appointed).
 - **Not:** *Electoral votes cast.* An appointed elector who did not vote opens a gap between the
@@ -537,7 +538,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   and later links keeping the page, the 302); D092; reader wording: `ba` spec for #465, approved by
   the owner at its plan gate (2026-11-10).
 - **Not:** *Site navigation*. The earlier and later links (*Election year*). The API's `summary`.
-  A filter: the section links change the page, not the rows.
+  A filter: the section links change the page, not the rows. The API route `/v1/elections/states`,
+  which has one item per state per election and no candidate rows; Results by state shows
+  candidates' results.
 - **Status:** settled
 
 ### Election year
@@ -1179,7 +1182,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C3_BAR_HOVER` and `labels.C3_NO_FIGURE_HOVER`, the marker label
   `labels.C3_NO_ELECTORAL_VOTES` with `labels.NO_ELECTORAL_VOTES` in its hover, and the caption
   sentences `labels.C3_RATIO` and `labels.C3_NO_FIGURE_NOTE`.
-- **Source:** `PerCapitaRow`; D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
+- **Source:** `PerCapitaRow`; `ElectionStateRow` (the same field, on `/v1/elections/states`);
+  D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
   names the same measure "persons per electoral vote"; readers see "people" (owner decision, 2026-10-11, #348).
   The field name `persons_per_electoral_vote` stays where field names are allowed.
 - **Not:** People per elector who voted. Zero.
@@ -1243,16 +1247,18 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** `pv_status`, one of exactly three values per `(year, state)`: `popular_vote`,
   `legislature_chosen`, `not_participating`. Never null, and there is no "unknown". It is a fact
   about the election, not about the dataset: a `popular_vote` row can still lack a figure. The
-  public values come from the in-repo absence catalog (D048 §3).
+  public values come from the in-repo absence catalog (D048 §3). On `/v1/elections/states` it is
+  served once per `(year, state)`; on the candidate rows it repeats on each of the state's rows.
 - **Shown as:** `LABELS["pv_status"]`; values `labels.PV_STATUS` (cell and filter);
   `labels.LEGISLATURE_CHOSE` and `labels.TOOK_NO_PART` in the popular-vote cell. The filter is
   named "popular-vote status" by the states page's `FILTER_SENTENCE`
-  (`pages/election_states.py`).
+  (`pages/election_states.py`); on the API's `/docs` page, the `EcPvRow.pv_status` and
+  `ElectionStateRow.pv_status` field descriptions in `src/usvote/api/models.py`.
 - **Source:** `src/usvote/pv/status.py`, `PV_STATUS_VALUES` and its comment; `EcPvRow.pv_status`;
   D024 §4; D048 §2–3; `posts/2026-08-18-presidential-elections-are-messy.md`, "How the record
   keeps them apart" (the three values as readers see them: held, the legislature chose the
   electors, took no part); `posts/2026-08-06-222-votes-away.md` (a status saying whether a popular
-  vote was held there at all).
+  vote was held there at all); `ElectionStateRow.pv_status`; #428.
 - **Not:** *Popular vote in this dataset*, which is year-level and about the dataset.
 - **Status:** settled
 
@@ -1450,6 +1456,32 @@ articles and announcements). Every rule binds all three unless the rule states a
   two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`.
 - **Not:** —
 - **Status:** settled
+
+### State's total popular vote (`state_popular_total`)
+- **Plain:** All the votes for President in a state in one election, for every candidate,
+  including candidates who are not in this dataset, as the popular-vote source reports them.
+- **Precise:** `state_popular_total` on `/v1` rows (warehouse column `state_total_votes`, MIT
+  Election Lab's `totalvotes`). On `/v1/elections/states` it is served once per
+  `(year, state)` (`ElectionStateRow`). On the candidate rows (`EcPvRow`) it repeats on each of
+  the state's rows, and is null on a row whose candidate has no popular-vote figure (a
+  faithless elector's choice, for example in 2016). Null in every year outside the
+  popular-vote window. Inside the window, a year's values, each state included once, add up
+  to `national_pv_denominator`. The candidates' `popular_votes` in a state can add up to less
+  than it, because it includes votes for candidates who are not in this dataset.
+- **Shown as:** on the API's `/docs` page, the `ElectionStateRow.state_popular_total` and
+  `EcPvRow.state_popular_total` field descriptions and the `ElectionStateRow` model docstring in
+  `src/usvote/api/models.py`; the `/v1/elections/states` summary and docstring in
+  `src/usvote/api/routes.py`; and the API description's **Persons per electoral vote.** paragraph
+  (`_DESCRIPTION_TEMPLATE` in `src/usvote/api/app.py`). Not shown on the dashboard; showing it
+  needs its own `LABELS` key.
+- **Source:** `EcPvRow.state_popular_total`, `ElectionStateRow.state_popular_total`;
+  `_aggregate_fusion_lines`, `assert_totals_reconcile` and `assert_totals_not_exceeded` in
+  `src/usvote/mit/transform.py`; `docs/api-snapshot.md` (`national_pv_denominator`); #428 plan
+  measurements (snapshot `37af4064`).
+- **Not:** *Popular votes* (one candidate's). The sum of the dataset's candidates' popular votes
+  in the state. Zero where a total is missing.
+- **Status:** settled; wording pending (#379: the `EcPvRow.state_popular_total` description
+  writes "None" and "PV")
 
 ### Theme choice (Dark, Auto or Light)
 - **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
@@ -1724,7 +1756,8 @@ decision and who makes it.
 - **The API's published text** and **Candidate**: merged API text does not yet follow these
   rules: *The API's published text is reader wording*; *In the API's published text, public
   names are vocabulary*; *"Counted" is reserved for vote counts*; and *Plain words over legal
-  and survey terms*. Separately, reader text does not call `candidate_slug` "durable" (owner
+  and survey terms*. That text includes the `EcPvRow.state_popular_total` description (*State's
+  total popular vote*), which writes "None" and "PV". Separately, reader text does not call `candidate_slug` "durable" (owner
   decision, 2026-10-16, #379), but these still do: the *Candidate* entry's **Precise**; the
   `/v1/candidates/{slug}` docstring in `src/usvote/api/routes.py`; and the
   `EcPvRow.candidate_slug` and `NationalSummaryRow.candidate_slug` field descriptions in
