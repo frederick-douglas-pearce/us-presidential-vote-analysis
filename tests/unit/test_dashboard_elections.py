@@ -1323,11 +1323,14 @@ MALFORMED = {
 
 
 def _shape_defects() -> dict[str, Any]:
-    """#487's scope ruling: every key of N1's first row, first ``elections`` item,
-    ``meta.provenance`` and its ``coverage``, deleted and set to a wrong type, so no N1
-    defect the section can raise on is left untested, whichever piece reads the key."""
+    """#487's scope ruling: every key of N1's body itself, its ``meta``, its first row,
+    first ``elections`` item, ``meta.provenance`` and its ``coverage``, deleted and set
+    to a wrong type, so no N1 defect the section can raise on is left untested,
+    whichever piece reads the key (the top level and ``meta``: round 2's finding)."""
     cases: dict[str, Any] = {}
     places = {
+        "N1": lambda b: b,
+        "meta": lambda b: b["meta"],
         "data[0]": lambda b: b["data"][0],
         "elections[0]": lambda b: b["elections"][0],
         "meta.provenance": lambda b: b["meta"]["provenance"],
