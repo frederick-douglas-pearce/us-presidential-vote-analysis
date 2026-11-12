@@ -74,6 +74,15 @@ def find(node: Any, wanted: str) -> Any:
     return None
 
 
+def in_order(node: Any) -> list[Any]:
+    """Every component in a rendered tree, in document order."""
+    if isinstance(node, (list, tuple)):
+        return [c for child in node for c in in_order(child)]
+    if isinstance(node, Component):
+        return [node, *in_order(getattr(node, "children", None))]
+    return []
+
+
 def of_type(node: Any, name: str) -> list[Any]:
     """Every component of type ``name`` in a rendered tree, depth-first."""
     if isinstance(node, (list, tuple)):
@@ -1053,12 +1062,25 @@ class TestC2:
         assert of_type(tree, "P")[0].children == (
             f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
         )
+        # The chart itself, in document order, above the list's heading and T1.
+        order = in_order(tree)
+        chart = order.index(find(tree, C2))
+        (list_heading,) = [
+            n
+            for n in order
+            if type(n).__name__ == "H2" and n.children == MOD["LIST_HEADING"]
+        ]
+        assert chart < order.index(list_heading) < order.index(find(tree, TABLE_ID))
 
     def test_one_point_for_every_served_year_oldest_first(self) -> None:
         tree = render_c2()
         figure = c2_figure(tree)
         assert [str(y) for y in YEARS] == figure["data"][0]["ids"]
         assert figure["layout"]["yaxis"]["ticktext"] == [str(y) for y in YEARS]
+        # Oldest on top: rows 0…n−1 on a reversed axis.
+        assert figure["data"][0]["y"] == list(range(len(YEARS)))
+        assert figure["layout"]["yaxis"]["tickvals"] == list(range(len(YEARS)))
+        assert figure["layout"]["yaxis"]["autorange"] == "reversed"
         assert (YEARS[0], YEARS[-1]) == (FIRST, LAST)  # the span is coverage's
         assert len(figure["data"]) == 1  # no marker: every leader has a share
         assert charts.figure_problems(figure) == []
@@ -1127,9 +1149,46 @@ class TestC2:
             f"<br>{labels.LABELS['ec_determinative']}: {labels.NOT_IN_DATASET}"
         )
 
+    def test_the_point_is_the_served_ec_share_full(self) -> None:
+        """Not a sibling or a derived value: 1860's leader's ``ec_share_full`` alone is
+        doctored (deliberately inconsistent with its counts and ``ec_share_hybrid``), and
+        the point, its text and the table's cell all follow it."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r for r in summary["data"] if r["year"] == 1860 and r["electoral_rank"] == 1
+        ]
+        assert row["ec_share_hybrid"] != 0.25  # the premise
+        row["ec_share_full"] = 0.25
+        tree = render_c2(summary)
+        x, text, hover = points(tree)["1860"]
+        assert (x, text) == (0.25, "25.0%")
+        assert "(counted ÷ appointed): 25.0%<br>" in hover
+        (shown,) = [r for r in leader_rows(tree) if r[0] == "1860"]
+        assert shown[4] == "25.0%"
+
+    def test_the_candidate_is_escaped_in_the_hover(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        name = "A <b>&</b> B"
+        summary["data"][0]["candidate"] = name  # 1824's leader
+        figure = c2_figure(render_c2(summary))
+        _, _, hover = points(render_c2(summary))["1824"]
+        assert hover.startswith(f"1824: {charts.escaped(name)}<br>")
+        assert charts.escaped(name) != name  # the premise
+        assert charts.figure_problems(figure) == []
+
+    def test_an_index_listing_a_year_twice_draws_it_once(self) -> None:
+        index = copy.deepcopy(BODY)
+        index["data"].append(copy.deepcopy(index["data"][0]))
+        assert list(points(render_c2(index=index))) == [str(y) for y in YEARS]
+
     @pytest.mark.parametrize(
         ("value", "label"),
-        [(None, labels.C1_NO_SHARE), ("zz", labels.UNRECOGNIZED)],
+        [
+            (None, labels.C1_NO_SHARE),
+            ("zz", labels.UNRECOGNIZED),
+            # Finite, but its percentage overflows, so its cell reads UNRECOGNIZED.
+            (1e308, labels.UNRECOGNIZED),
+        ],
     )
     def test_a_share_with_no_figure_is_a_labeled_marker(
         self, value: Any, label: str
@@ -1147,6 +1206,9 @@ class TestC2:
         assert marks["name"] == labels.C2_NO_SHARE_SERIES
         assert marks["ids"] == ["1860"] and marks["x"] == [0]
         assert marks["text"] == [label] and marks["marker"]["symbol"] == "x"
+        if label == labels.UNRECOGNIZED:
+            note = f"{labels.UNRECOGNIZED}<br>{labels.UNRECOGNIZED_NOTE}"
+            assert note in marks["hovertext"][0]
         assert charts.figure_problems(figure) == []
 
     def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
@@ -1220,8 +1282,18 @@ def _second_leader() -> dict[str, Any]:
 
 
 def _unserved() -> dict[str, Any]:
+    # A rank-2 row (1824's Adams), so only the unserved-year check refuses it.
     summary = copy.deepcopy(SUMMARY)
-    summary["data"].append({**summary["data"][0], "year": 1826})
+    assert summary["data"][1]["electoral_rank"] == 2  # the premise
+    summary["data"].append({**summary["data"][1], "year": 1826})
+    return summary
+
+
+def _second_item() -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    item = copy.deepcopy(summary["elections"][0])
+    item["ec_determinative"] = not item["ec_determinative"]
+    summary["elections"].append(item)
     return summary
 
 
@@ -1237,6 +1309,7 @@ MALFORMED = {
     "a served year with no elections item": _without(1876),
     "two rank-1 rows in a year": _second_leader(),
     "a row for a year not served": _unserved(),
+    "a served year with two elections items": _second_item(),
     "a rank that is a bool": _bool_rank(),
     "data that is not a list": {**SUMMARY, "data": {}},
     "no elections key": {k: v for k, v in SUMMARY.items() if k != "elections"},
@@ -1249,7 +1322,59 @@ MALFORMED = {
 }
 
 
+def _shape_defects() -> dict[str, Any]:
+    """#487's scope ruling: every key of N1's first row, first ``elections`` item,
+    ``meta.provenance`` and its ``coverage``, deleted and set to a wrong type, so no N1
+    defect the section can raise on is left untested, whichever piece reads the key."""
+    cases: dict[str, Any] = {}
+    places = {
+        "data[0]": lambda b: b["data"][0],
+        "elections[0]": lambda b: b["elections"][0],
+        "meta.provenance": lambda b: b["meta"]["provenance"],
+        "meta.provenance.coverage": lambda b: b["meta"]["provenance"]["coverage"],
+    }
+    for where, at in places.items():
+        for key in at(SUMMARY):
+            for change, value in (("deleted", None), ("None", None), ("[]", [])):
+                body = copy.deepcopy(SUMMARY)
+                if change == "deleted":
+                    del at(body)[key]
+                else:
+                    at(body)[key] = value
+                cases[f"{where}.{key} {change}"] = body
+    return cases
+
+
+SHAPE_DEFECTS = _shape_defects()
+
+
 class TestC2Validation:
+    def test_a_row_for_a_year_not_served_is_refused_by_its_own_check(self) -> None:
+        with pytest.raises(TypeError, match="not served"):
+            MOD["leaders"](copy.deepcopy(BODY), _unserved())
+
+    @pytest.mark.parametrize("name", SHAPE_DEFECTS)
+    def test_no_n1_defect_reaches_the_page(self, name: str) -> None:
+        """The page's success marker and T1 always render; C2's section is whole (a
+        key the section never reads) or shows only its own sentence."""
+        tree = render_c2(SHAPE_DEFECTS[name])
+        assert tree.id == PAGE_ID
+        assert shown_years(tree) == YEARS
+        whole = find(tree, C2) is not None and find(tree, LEADERS) is not None
+        degraded = find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+        assert whole != degraded, name
+        if degraded:
+            assert find(tree, C2) is None and find(tree, LEADERS) is None
+
+    def test_the_shape_defects_reach_the_table_s_own_reads(self) -> None:
+        """Non-vacuity: the cases include the two the table alone reads (#487, cr.1)."""
+        for name in (
+            "data[0].candidate_slug deleted",
+            "meta.provenance.coverage deleted",
+        ):
+            tree = render_c2(SHAPE_DEFECTS[name])
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, name
+
     @pytest.mark.parametrize("name", MALFORMED)
     def test_a_malformed_body_is_refused(self, name: str) -> None:
         with pytest.raises((TypeError, KeyError)):
@@ -1340,5 +1465,6 @@ class TestN1Fixture:
         def key(r: dict[str, Any]) -> tuple[int, str]:
             return r["electoral_rank"], r["candidate_slug"]
 
-        # Order-insensitive within ties: the year recordings predate 0.8.0's order.
+        # Order-insensitive: the year recordings predate 0.8.0's order within ties, and
+        # this checks content; C2 reads only each year's rank-1 row.
         assert sorted(rows, key=key) == sorted(body["summary"], key=key)

@@ -334,8 +334,7 @@ C1_TITLE = "Each candidate's electoral share and popular-vote share in {year}"
 C1_TITLE_NO_PV = "Each candidate's electoral share in {year}"
 #: The share axis's title. The candidate axis has none: the names are its ticks.
 C1_X_AXIS = "Share"
-#: The name of the marker series, kept off the legend and never shown: the figure
-#: rules need every trace named.
+#: The name of the marker series, kept off the legend and never shown.
 C1_NO_FIGURE_SERIES = "No bar for this value"
 #: The dashed line's label (``<br>`` is the one line break a chart string may carry).
 C1_MAJORITY_LINE = "Majority line: half of<br>electors appointed"
@@ -388,7 +387,7 @@ C1_NO_PV_CAPTION = (
     "{first}–{last}, not {year}."
 )
 
-#: Chart C2 (#434; ba spec, approved by the owner at #434's plan gate, 2026-11-12, with
+#: Chart C2 (#434; ba spec, approved by the owner at #434's plan gate, 2026-11-11, with
 #: its historical claims): each election's Electoral College leader's electoral share
 #: against the majority line, on the elections index, beside its companion table. Not
 #: ``LABELS`` keys. The point series is named ``LABELS["ec_share_full"]``, the axis
@@ -399,8 +398,7 @@ C2_X_AXIS = LABELS["ec_share_full"]
 #: The dashed line's label: "each election's", since the number of electors appointed
 #: changes with the year (never a fixed number such as 270).
 C2_MAJORITY_LINE = "Majority line: half of each<br>election's electors appointed"
-#: The name of the marker series, kept off the legend and never shown: the figure
-#: rules need every trace named.
+#: The name of the marker series, kept off the legend and never shown.
 C2_NO_SHARE_SERIES = "No point for this value"
 #: A point's hover, filled with strings the page writes: the year as written, the
 #: name as served, the companion table's cells, and the majority line every year.

@@ -6503,7 +6503,7 @@ the static refusals in (a), which must stay failures.
 
 ## D096: Chart C2 shows every election's Electoral College leader against the majority line; no filter reaches it or its table, and a failed N1 read degrades only its section
 
-**Date:** 2026-11-12
+**Date:** 2026-11-11
 **Amends:** D093(c) (which tables a chart page's filter narrows) · **Builds on:** D072, D074(ii), D091, D094, D095 · **Decided by:** the owner, approving #434's plan (architect-reviewed)
 
 **Context.** #434 adds chart C2 to `/elections`: one point per served election, the Electoral
@@ -6546,9 +6546,12 @@ chart's companion table.
   filters and the footer render, and the page's success marker is unchanged. This differs from
   the election panel's rule, where a malformed `election` block degrades the page: that block
   shares T3's body, while N1 is a separate response whose defects say nothing about T1. The
-  section's `try` covers the validation, the figure and the cells, never `components.chart` or
-  `components.table` (D095(f)). Cost: in that state each filter change retries N1 once (at most
-  `MAX_REQUEST_WAIT_S` of render wait and one fill token).
+  section's `try` covers everything built from N1 (the validation, the figure, the cells, and
+  the companion table and its download, which read each row's slug and the provenance the CSV
+  preamble names), never `components.chart` (D095(f)). Cost: in that state each filter change
+  retries N1 once (at most `MAX_REQUEST_WAIT_S` of render wait and one fill token). Residual,
+  as D095(g): an N1 defect that raises anything but `KeyError` or `TypeError` still takes the
+  page down.
 - **(e) The guard's burst.** With N1, the D070(b) guard's success run plans ten fills, the
   bucket's whole `FILL_BURST`; the next page to add a fill on a miss (#428, #436, #437) trips its
   static assert unless the guard's bucket is made permissive there.

@@ -63,7 +63,7 @@ LEADER_WORDED = LEADER_FIELDS[2:]
 #: Exported though not shown: the key of the candidate's history link.
 LEADER_EXTRA = ("candidate_slug",)
 
-#: Page-level wording (ba spec, approved by the owner at #434's plan gate, 2026-11-12).
+#: Page-level wording (ba spec, approved by the owner at #434's plan gate, 2026-11-11).
 LEDE = "Every US presidential election in this dataset."
 #: Shown only on success, after :data:`LEDE` (the degraded page has no filters).
 FILTER_SENTENCE = (
@@ -225,20 +225,22 @@ def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
     with ``electoral_rank`` 1, with the year's ``ec_determinative`` from its one
     ``elections`` item (#434, D096). Derives nothing.
 
-    Pure; raises ``TypeError`` for anything C2 cannot show: a year (in the index's
-    rows or in N1's) that :func:`explore.election_view.row_year` refuses or that lies
-    outside the served span, an N1 year the index does not serve, a served year with no
-    ``elections`` item or two, or with no rank-1 row or two (a tie at rank 1 is valid
-    API data, D094(iv), but C2 needs one leader per year). ``electoral_rank`` counts
-    only as an ``int``, never a ``bool``.
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for anything else C2
+    cannot show: a year (in the index's rows or in N1's) that
+    :func:`explore.election_view.row_year` refuses or that lies outside the served
+    span, an N1 year the index does not serve, a served year with no ``elections`` item
+    or two, or with no rank-1 row or two (a tie at rank 1 is valid API data, D094(iv),
+    but C2 needs one leader per year). ``electoral_rank`` counts only as an ``int``,
+    never a ``bool``. A year the index lists twice is one served year: refusing the
+    duplicate is the index's own rule (#334).
     """
     first, last = span(index["meta"]["provenance"]["coverage"])
-    served: list[int] = []
+    served: set[int] = set()
     for row in index["data"]:
         year = election_view.row_year(row)
         if year is None or not first <= year <= last:
             raise TypeError("/v1/elections names a year outside its served span")
-        served.append(year)
+        served.add(year)
     if not isinstance(summary, dict):
         raise TypeError(f"{api.SUMMARY_PATH} is not an object")
     rows, items = summary["data"], summary["elections"]
@@ -260,7 +262,7 @@ def leaders(index: dict[str, Any], summary: Any) -> list[dict[str, Any]]:
             if year in leader:
                 raise TypeError(f"{api.SUMMARY_PATH}: two leaders in {year}")
             leader[year] = row
-    if set(by_year) != set(served) or set(leader) != set(served):
+    if set(by_year) != served or set(leader) != served:
         raise TypeError(f"{api.SUMMARY_PATH} misses a served year")
     return [
         {**leader[year], "ec_determinative": by_year[year]["ec_determinative"]}
@@ -324,10 +326,9 @@ def _c2_figure(
     for i, (row, cell) in enumerate(zip(rows, cells, strict=True)):
         shown = cell["ec_share_full"]
         number = labels.finite(row["ec_share_full"])
-        is_share = shown != labels.UNRECOGNIZED and shown == labels.share(
-            row["ec_share_full"]
-        )
-        x = number if number is not None and is_share else None
+        # A finite value whose cell is no share (one whose percentage overflows reads
+        # UNRECOGNIZED) is a marker too: the point stands only where the table shows it.
+        x = number if number is not None and shown != labels.UNRECOGNIZED else None
         share = (
             f"{shown}<br>{labels.UNRECOGNIZED_NOTE}"
             if shown == labels.UNRECOGNIZED
@@ -455,8 +456,10 @@ def _c2_caption() -> str:
 def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
     """C2's section (#434, D096): its heading, the chart and its companion table, or,
     when N1 could not be read (``summary`` is ``None``) or is malformed, the heading and
-    :data:`C2_UNAVAILABLE` only. The ``try`` covers the validation and the figure and
-    cells, never ``components.chart`` or ``components.table`` (D095(f))."""
+    :data:`C2_UNAVAILABLE` only. The ``try`` covers everything built from N1 (the
+    validation, the figure, the cells, and the companion table and its download), so no
+    ``KeyError`` or ``TypeError`` from N1 reaches the page; never ``components.chart``,
+    which no page catches around (D095(f))."""
     heading = html.H2(C2_HEADING)
     try:
         if summary is None:
@@ -471,17 +474,10 @@ def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
             # No filter reaches this table, so its view names none.
             view_url=export.view_url(CANONICAL_HOST, "/elections", ""),
         )
-    except (KeyError, TypeError):
-        return [
-            heading,
-            html.P(C2_UNAVAILABLE, id=LEADER_UNAVAILABLE_ID, className="note"),
-        ]
-    by_row = {id(row): row_cells for row, row_cells in zip(rows, cells, strict=True)}
-    return [
-        heading,
-        components.chart(C2_ID, figure, LEADER_TABLE_ID, _c2_caption()),
-        html.H2(C2_TABLE_HEADING),
-        *components.table(
+        by_row = {id(row): cell for row, cell in zip(rows, cells, strict=True)}
+        # Inside the try: the table and its CSV read N1 too (each row's slug, the
+        # provenance the preamble names), and a defect there is N1's, not the page's.
+        table = components.table(
             rows,
             lambda r: _leader_row(r, by_row[id(r)]),
             LEADER_FIELDS,
@@ -489,7 +485,17 @@ def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
             download,
             extra=LEADER_EXTRA,
             notes=(labels.C2_LEADER_ROW, labels.C2_TOOK_OFFICE),
-        ),
+        )
+    except (KeyError, TypeError):
+        return [
+            heading,
+            html.P(C2_UNAVAILABLE, id=LEADER_UNAVAILABLE_ID, className="note"),
+        ]
+    return [
+        heading,
+        components.chart(C2_ID, figure, LEADER_TABLE_ID, _c2_caption()),
+        html.H2(C2_TABLE_HEADING),
+        *table,
         labels.glossary(LEADER_FIELDS),
     ]
 

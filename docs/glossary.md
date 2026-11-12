@@ -574,7 +574,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   D041; D038 (the 1824 rationale); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time
   it happened" (the electoral leader, majority outright, who took office);
   `posts/2026-08-06-222-votes-away.md`, "The record the argument runs on top of" (Electoral College
-  winner). Post 2 (`2026-08-18-presidential-elections-are-messy.md`).
+  winner); `posts/2026-08-18-presidential-elections-are-messy.md` (1824: Jackson led with no
+  majority, and the House chose John Quincy Adams).
 - **Not:** *Took office*, which is who became president. *Electoral College majority*, which is
   the yes or no behind the name.
 - **Status:** settled
@@ -626,14 +627,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   - In `pages/elections.py`: `C2_HEADING`, `C2_TABLE_HEADING`, the companion table's columns
     (existing `LABELS` keys, `took_office` last), the table notes `labels.C2_LEADER_ROW` and
     `labels.C2_TOOK_OFFICE`, the download "the Electoral College leaders"
-    (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`.
+    (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`. After the section,
+    `LIST_HEADING` heads the filters and T1: the list of elections, the only part of the page the
+    filters narrow.
 - **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); `CHARTS`;
   `NationalSummaryRow.ec_share_full`, `electoral_rank`, `national_electoral_votes_counted` and
   `national_electoral_denominator`, `ElectionSummary.ec_determinative` and
   `AllElectionsSummaryResponse` in `src/usvote/api/models.py`; D041; D046 §4; D091; D093; D096;
   `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99 of 261, 37.9 percent; the House
   chose John Quincy Adams); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it
-  happened"; reader wording: `ba` spec for #434, approved at its plan gate (2026-11-12), with its
+  happened"; reader wording: `ba` spec for #434, approved at its plan gate (2026-11-11), with its
   historical claims.
 - **Not:** A chart of winners: in 1824 the leader had no majority. The chart does not show who took
   office (*Took office*); its companion table does, in its last column. Not votes cast. The line is
@@ -1452,7 +1455,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `elections-leader-table`, on `/elections`); `labels.yes_no`.
 - **Source:** `NationalSummaryRow.took_office`; owner decision, 2026-10-10, #348 (a separate term
   from the Electoral College winner); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one
-  time it happened". The C2 companion-table column: owner, #434 plan gate (2026-11-12).
+  time it happened"; the C2 companion-table column: owner, #434 plan gate (2026-11-11).
 - **Not:** *Electoral College winner, or leader with no majority* (1824).
 - **Status:** settled
 
