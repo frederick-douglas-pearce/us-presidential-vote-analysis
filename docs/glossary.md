@@ -181,10 +181,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   still shows.
 - **Shown as:** `labels.METRIC_LABELS["ec_margin_mean"]` and `labels.METRIC_LABELS["pv_margin_mean"]`;
   the value `labels.metric_mean` (`labels.METRIC_OVER`, `labels.METRIC_OVER_ONE`); under the
-  averages, `labels.MARGIN_NOTE`, then, when the two averages do not cover the same elections,
-  `labels.METRIC_DIFFERENT_ELECTIONS`, followed by `labels.METRIC_SAME_ELECTIONS` while the
-  popular-vote filter is off; `METRICS_UNAVAILABLE` in `pages/elections.py`. On `/elections`, under
-  `LIST_HEADING`, after the count of elections shown and before T1.
+  averages, `labels.MARGIN_NOTE`, then `labels.METRIC_DIFFERENT_ELECTIONS` only when both averages
+  are numbers, their number of elections or years differ, and at least one year in the electoral
+  average lies outside the popular-vote window (`coverage`'s `pv_year_min`–`pv_year_max`), so the
+  window is a cause of the difference; a difference that comes only from a missing margin inside
+  the window shows no note, since each average shows its own number and years.
+  `labels.METRIC_SAME_ELECTIONS` follows that note while the popular-vote filter is off.
+  `METRICS_UNAVAILABLE` in `pages/elections.py`. On `/elections`, under `LIST_HEADING`, after the
+  count of elections shown and before T1.
 - **Source:** #437 acceptance criteria; the rule, owner-approved 2026-11-05 (#437 issue body),
   recorded in D097; `ElectionSummary.ec_margin` and `pv_margin` in `src/usvote/api/models.py`;
   `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #437, approved at its

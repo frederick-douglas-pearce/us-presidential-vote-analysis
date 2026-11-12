@@ -571,7 +571,8 @@ METRIC_LABELS: dict[str, str] = {
 METRIC_OVER = "{margin}, over {n} elections ({first}–{last})"
 #: An average over one election: the one year, never "2000–2000".
 METRIC_OVER_ONE = "{margin}, over 1 election ({year})"
-#: No average, because no election matches the filters (T1's own empty text, below).
+#: No average, because no election matches the filters (T1 then shows its own empty
+#: text, `empty=` in `pages/elections.py`, below the metrics).
 METRIC_NO_AVERAGE_FILTERS = "No average: no elections match these filters"
 #: No popular-vote average, because no year shown lies inside the popular-vote window;
 #: the years come from ``coverage``, never a literal.
@@ -584,8 +585,10 @@ METRIC_NO_AVERAGE_PV_YEARS = (
 METRIC_NO_AVERAGE_NULL = (
     "No average: this dataset has no margin for the elections shown"
 )
-#: After :data:`MARGIN_NOTE`, only when both averages are numbers and their N or years
-#: differ: two year sets are never read as one comparison.
+#: After :data:`MARGIN_NOTE`, only when both averages are numbers, their N or years
+#: differ, and a year in the electoral average lies outside the popular-vote window, so
+#: the window is a cause of the difference (owner, #437's code review): two year sets
+#: are never read as one comparison, and the note never names a reason that is not one.
 METRIC_DIFFERENT_ELECTIONS = (
     "The two averages do not cover the same elections: this dataset's popular-vote "
     "figures cover {first}–{last}."
@@ -1090,8 +1093,6 @@ def metric_mean(
             return METRIC_NO_AVERAGE_PV_YEARS.format(first=first, last=last), None
         return METRIC_NO_AVERAGE_NULL, None
     text = margin(mean.value, True)
-    if text == UNRECOGNIZED:
-        return UNRECOGNIZED, None
     if mean.n == 1:
         whole = METRIC_OVER_ONE.format(margin=text, year=mean.first)
     else:

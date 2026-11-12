@@ -602,10 +602,17 @@ def _averages(
         ]
     notes = [html.P(labels.MARGIN_NOTE, className="note")]
     ec, pv = (means[key] for key in MEANS)
+    # The note names the popular-vote window as the reason the two differ, so it shows
+    # only where the window is one: a year in the electoral average lies outside it. A
+    # difference from a missing margin inside the window shows each average's own N
+    # and years, and no note (owner, #437's code review).
     if (
         ec.value is not None
         and pv.value is not None
         and (ec.n, ec.first, ec.last) != (pv.n, pv.first, pv.last)
+        and ec.first is not None
+        and ec.last is not None
+        and (ec.first < pv_window[0] or ec.last > pv_window[1])
     ):
         sentence = labels.METRIC_DIFFERENT_ELECTIONS.format(
             first=pv_window[0], last=pv_window[1]
