@@ -139,10 +139,13 @@ PER_CAPITA_COVERAGE: dict[str, str] = {
 NO_ELECTORAL_VOTES = "No electoral votes this election"
 
 #: Why each election reads the census it does: one line under each per-capita table.
+#: It follows the glossary's *Census used* and does not say the census set the
+#: state's electoral votes, which is false for some rows (#423).
 GOVERNING_CENSUS_NOTE = (
-    "Each election uses the census that set the state's electoral votes, not the "
-    "nearest one: 2020 uses the 2010 census, and 1924 and 1928 use 1910, because "
-    "Congress did not redistribute House seats after the 1920 census."
+    "Population is from the census used for the latest redistribution of House "
+    "seats made before the election, which is not always the nearest census: 2020 "
+    "uses the 2010 census, and 1924 and 1928 use 1910, because Congress did not "
+    "redistribute House seats after the 1920 census."
 )
 
 #: What each ``boundary_basis`` value describes. Neutral about the Census Bureau's

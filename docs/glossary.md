@@ -338,8 +338,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   and T7; on the API's `/docs` page, the `PerCapitaRow.governing_census_year` field description in
   `src/usvote/api/models.py`. In C3, the title `labels.C3_TITLE` (the census year), the hover line
   "Census used" (`labels.C3_BAR_HOVER`), and the caption sentences `labels.C3_CENSUS` and
-  `labels.C3_CENSUS_MIXED`, which follow this entry's Plain and do not say the census set the
-  state's electoral votes; #423 keeps them in step with the reworded note.
+  `labels.C3_CENSUS_MIXED`. These, and the help text `labels.GOVERNING_CENSUS_NOTE`, follow this
+  entry's Plain and do not say the census set the state's electoral votes.
 - **Source:** `PerCapitaRow.governing_census_year`; `governing_census_year` in
   `src/usvote/apportionment.py`, which computes it, and `GOVERNING_CENSUS_BY_ELECTION` there, that
   function over every election; `tests/unit/test_apportionment.py`, which pins the mapping to a
@@ -350,19 +350,17 @@ articles and announcements). Every rule binds all three unless the rule states a
   lists the rows where the census used did not set the state's electoral votes;
   `posts/2026-09-03-how-did-we-get-to-538-electors.md`, "The decade Congress skipped" (the 1920
   gap, and the 1910 map electing 1924 and 1928); header wording: owner decision, 2026-10-10, #348;
-  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12; this definition
+  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12, reworded so its
+  first clause holds for every row: owner decision, 2026-11-13, #423; this definition
   (Plain: the census of the latest apportionment made before electors are chosen; Precise: the
   rule for electors, anchored to the term of the President chosen, with its proviso): owner
   decision, 2026-11-02, #356 code review.
 - **Not:** The census nearest the election. Not, in every row, the census that set the state's
   electoral votes (see **Precise**). Not a population figure in every row: 1848 Texas has none
   (*Census figure*).
-- **Status:** settled; wording pending (#423: `labels.GOVERNING_CENSUS_NOTE` says each election
-  "uses the census that set the state's electoral votes", which does not hold for a state at the
-  elections between its admission and the first apportionment that included it, for California
-  1852–1860, or for DC from 1964. #379: the `PerCapitaRow.governing_census_year` field description
-  in `src/usvote/api/models.py` says "in force at this election", which does not hold for 1912 and
-  the other elections two years after a census)
+- **Status:** settled; wording pending (#379: the `PerCapitaRow.governing_census_year` field
+  description in `src/usvote/api/models.py` says "in force at this election", which does not hold
+  for 1912 and the other elections two years after a census, and uses "apportionment" in prose)
 
 ### Chart (C1, C2, …)
 - **Plain:** A drawing of some of this dataset's numbers on a page, with a title, a caption under
@@ -1842,7 +1840,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. In the API's published text, null is the JSON value and is written "null", never "None" (owner decision, 2026-10-15, #374). |
 | "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | `LABELS["coverage"]`, `LABELS["pv_coverage"]`; years covered: the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`, `export.preamble` | The project uses the word for three different things. |
 | "counted" for anything but votes | used, covers, included | a rule (see Wording rules) | "Counted" is reserved for vote counts (owner decision, 2026-10-10). |
-| "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state at the elections between its admission and the first redistribution of House seats that included it, for California 1852–1860, and for DC from 1964 (`docs/governing-census.md`). `labels.GOVERNING_CENSUS_NOTE` still says it until #423. |
+| "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state at the elections between its admission and the first redistribution of House seats that included it, for California 1852–1860, and for DC from 1964 (`docs/governing-census.md`). |
 | "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
 | "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
@@ -1887,11 +1885,7 @@ decision and who makes it.
   `national_electoral_denominator` and `ElectionSummary.electoral_denominator`, which should say
   "each state counted once". #379 rewrites all of them. The owner approves the rewrite, on a
   label spec from `ba`.
-- **Census used**: `labels.GOVERNING_CENSUS_NOTE` says each election "uses the census that set
-  the state's electoral votes", which does not hold for a state at the elections between its
-  admission and the first apportionment that included it, for California 1852–1860, or for DC
-  from 1964 (`docs/governing-census.md`, #356). The census the note names is right for every
-  election. #423 rewords the note. The owner approves the rewrite, on a label spec from `ba`.
-  Separately, the API's `PerCapitaRow.governing_census_year` description says "in force at this
-  election" and uses "apportionment" in prose; #379 rewords it (owner decision, 2026-11-02), on a
-  label spec from `ba`.
+- **Census used**: the API's `PerCapitaRow.governing_census_year` description says "in force at
+  this election", which does not hold for 1912 and the other elections two years after a census,
+  and uses "apportionment" in prose. #379 rewords it (owner decision, 2026-11-02). The owner
+  approves the rewrite, on a label spec from `ba`.

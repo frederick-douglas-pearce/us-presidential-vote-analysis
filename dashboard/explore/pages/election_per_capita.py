@@ -49,7 +49,8 @@ NOT_FOUND = api.NotFound(
 PER_CAPITA_HEADING = "The {year} election: people per electoral vote"
 PER_CAPITA_GENERIC_HEADING = "Election: people per electoral vote"
 #: The lede, then, on a successful render only, the sentence naming its filter. It
-#: makes no claim about which census applies (#423 is pending).
+#: makes no claim about which census applies: :data:`labels.GOVERNING_CENSUS_NOTE`,
+#: under T6, says that (#423).
 LEDE = (
     "How many people each state's electoral votes stood for: the state's population "
     "divided by its electors appointed."
