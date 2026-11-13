@@ -5,10 +5,12 @@ version and the runner image, and Chromium's system libraries in a step of their
 with a time cap on every step from the cache restore on. Each property below fails
 silently if it regresses: the run stays green while the cache never fills or never hits,
 or a hung package mirror goes back to canceling the whole job instead of failing the step
-that hung. So each is checked here, and every negative case shows that its own check, and
-only that check, catches its mutation.
+that hung. So each is checked here. Every negative case asserts the exact set of problems
+its mutation raises, so no check fires on it unexpectedly; ``_version_after_restore`` and
+``_rename_restore`` trip two checks each, by construction.
 
-Checked: the permissions of the workflow and of every job; no ``--with-deps``; exactly
+Checked: the permissions of the workflow and of every job; no ``--with-deps``; no
+combined ``actions/cache`` step; no ``PLAYWRIGHT_BROWSERS_PATH`` at any scope; exactly
 one step of each kind, in order; a cap on every step from the restore on, and those caps
 plus :data:`SETUP_MARGIN_MINUTES` under the job's cap; no ``continue-on-error`` on the
 job or any step; the version, restore, install-deps and test steps unconditional; the
@@ -333,6 +335,11 @@ def _version_dropped_from_key(w: dict[str, Any]) -> None:
     with_["key"] = with_["key"].replace("${{ steps.playwright.outputs.version }}-", "")
 
 
+def _runner_os_dropped_from_key(w: dict[str, Any]) -> None:
+    with_ = _step(w, "restore")["with"]
+    with_["key"] = with_["key"].replace("${{ runner.os }}-", "")
+
+
 def _runner_arch_dropped_from_key(w: dict[str, Any]) -> None:
     with_ = _step(w, "restore")["with"]
     with_["key"] = with_["key"].replace("${{ runner.arch }}-", "")
@@ -413,6 +420,7 @@ MUTATIONS: list[tuple[Callable[[dict[str, Any]], None], tuple[str, ...]]] = [
     (_restore_conditional, ("has an if",)),
     (_version_conditional, ("has an if",)),
     (_version_dropped_from_key, ("does not read the version step's version",)),
+    (_runner_os_dropped_from_key, ("does not read runner.os",)),
     (_runner_arch_dropped_from_key, ("does not read runner.arch",)),
     (_save_on_hit, ("does not skip on a cache hit",)),
     (_download_ref_less, ("does not skip on a cache hit",)),
