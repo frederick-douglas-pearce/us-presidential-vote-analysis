@@ -1945,9 +1945,10 @@ def test_the_governing_census_is_shown_with_its_reason() -> None:
         "uses the 2010 census, and 1924 and 1928 use 1910, because Congress did not "
         "redistribute House seats after the 1920 census."
     )
-    # The census used did not set the electoral votes of a newly admitted state,
-    # California 1852-1860 or DC from 1964 (#423; docs/governing-census.md), so the
-    # note never says it did.
+    # The note's old first clause said the census "set the state's electoral votes",
+    # false for a newly admitted state, California 1852-1860 and DC from 1964 (#423;
+    # docs/governing-census.md). This catches only the case-sensitive words
+    # "electoral votes"; the pin above fixes the exact text.
     assert "electoral votes" not in labels.GOVERNING_CENSUS_NOTE
 
 

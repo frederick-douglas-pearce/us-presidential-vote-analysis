@@ -335,9 +335,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   1850), and for DC from 1964 (the Twenty-third Amendment). The row still shows this census's
   population, where it has one. `docs/governing-census.md` lists the rows.
 - **Shown as:** `LABELS["governing_census_year"]`; help text `labels.GOVERNING_CENSUS_NOTE` under T6
-  and T7; on the API's `/docs` page, the `PerCapitaRow.governing_census_year` field description in
-  `src/usvote/api/models.py`. In C3, the title `labels.C3_TITLE` (the census year), the hover line
-  "Census used" (`labels.C3_BAR_HOVER`), and the caption sentences `labels.C3_CENSUS` and
+  and T7 and in their downloads' preambles; on the API's `/docs` page, the
+  `PerCapitaRow.governing_census_year` field description in `src/usvote/api/models.py`. In C3,
+  the title `labels.C3_TITLE` (the census year), the hover line "Census used"
+  (`labels.C3_BAR_HOVER`), and the caption sentences `labels.C3_CENSUS` and
   `labels.C3_CENSUS_MIXED`. These, and the help text `labels.GOVERNING_CENSUS_NOTE`, follow this
   entry's Plain and do not say the census set the state's electoral votes.
 - **Source:** `PerCapitaRow.governing_census_year`; `governing_census_year` in
@@ -350,8 +351,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   lists the rows where the census used did not set the state's electoral votes;
   `posts/2026-09-03-how-did-we-get-to-538-electors.md`, "The decade Congress skipped" (the 1920
   gap, and the 1910 map electing 1924 and 1928); header wording: owner decision, 2026-10-10, #348;
-  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12, reworded so its
-  first clause holds for every row: owner decision, 2026-11-13, #423; this definition
+  the help text's wording: the owner's ruling at the #352 plan gate, 2026-10-12, reworded so that
+  no row contradicts its first clause (it describes the population a row shows, and 1848 Texas
+  shows none): owner decision, 2026-11-13, #423; this definition
   (Plain: the census of the latest apportionment made before electors are chosen; Precise: the
   rule for electors, anchored to the term of the President chosen, with its proviso): owner
   decision, 2026-11-02, #356 code review.
