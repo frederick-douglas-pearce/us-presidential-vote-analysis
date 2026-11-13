@@ -2,33 +2,46 @@
 
 Each per-capita row reads the population of one census, its **governing census**
 (`governing_census_year`): the census of the latest apportionment of House seats made before the
-election, when the state's electors were chosen. That is the census the law ties a state's
-electoral votes to. A state has as many electors as the senators and representatives it is entitled
-to when the President chosen at that election takes office, except that where no apportionment has
-followed the latest census by the time electors are chosen, the existing apportionment applies
-([11], [12]).
+election, when the state's electors were chosen. For most states and years that census also set
+the state's electoral votes; the rows where it did not are listed under
+[Where a census did not set a state's electoral votes](#where-a-census-did-not-set-a-states-electoral-votes).
+A state has as many electors as the senators and representatives it is entitled to when the
+President chosen at that election takes office, except that where no apportionment has followed
+the latest census by the time electors are chosen, the existing apportionment applies ([11],
+[12]).
 
 The dashboard explains the choice in one line under each per-capita table,
-`labels.GOVERNING_CENSUS_NOTE`, which read as follows on 2026-11-02 (its rewording is #423):
+`labels.GOVERNING_CENSUS_NOTE`. It read as follows on 2026-11-02:
 
 > Each election uses the census that set the state's electoral votes, not the nearest one: 2020
 > uses the 2010 census, and 1924 and 1928 use 1910, because Congress did not redistribute House
 > seats after the 1920 census.
+
+As reworded by #423 (owner decision, 2026-11-13), it reads as follows, so that no row contradicts
+its opening clause, including those under
+[Where a census did not set a state's electoral votes](#where-a-census-did-not-set-a-states-electoral-votes);
+where a row has no population (Texas 1848), its cell says so:
+
+> Population is from the census used for the latest redistribution of House seats made before
+> the election, which is not always the nearest census: 2020 uses the 2010 census, and 1924 and
+> 1928 use 1910, because Congress did not redistribute House seats after the 1920 census.
 
 This page records the sources for that note and the check of the pipeline's election → census
 mapping against them, so the research is not repeated (#356). Checked 2026-11-02.
 
 ## Findings
 
-| Claim in the note | Finding | Sources |
+| Claim in the 2026-11-02 note | Finding | Sources |
 |---|---|---|
 | Congress did not redistribute House seats after the 1920 census. | **Confirmed.** No apportionment act followed the 1920 census, the only census in US history without one. The next apportionment came under the act of June 18, 1929, which provided for apportioning each census; the 1930 census was the first apportioned under it. | [1] note 2; [2]; [3] |
 | 1924 and 1928 use the 1910 census. | **Confirmed.** With no apportionment after the 1920 census, electors were chosen in 1924 and 1928 under the existing one, the 1910 census's (the act of August 8, 1911). Every state's allotment is the same in 1912, 1916, 1920, 1924 and 1928. | [1] note 2; [4]; [11]; [12]; this dataset (below) |
 | 2020 uses the 2010 census. | **Confirmed.** The President transmits each apportionment at the first regular session of the Eighty-second Congress (1951) "and of each fifth Congress thereafter", so the 2020 census's came in 2021, after the 2020 electors were chosen. 2020 therefore used the existing 2010 apportionment, which had set 2012 and 2016 as well; the 2020 census's first set 2024. | [6]; [7]; [12]; this dataset |
 | Each election uses the census that set the state's electoral votes. | **True for every state-year except those in the next section.** 2,152 of the 2,174 non-zero state allotments outside DC equal two plus the House seats apportioned from the governing census. The other 22 are the admission rows and West Virginia's two rows listed below. California 1852–1860 matches the table, but its seats came from its admission act; DC is outside the count. For all of these the governing census is still the census of the latest apportionment, but it did not set that state's electoral votes. | [1] notes 3, 5, 7; [8] |
 
-The note's three examples stand. Its opening clause overstates for the rows in the next section;
-rewording it is #423 (owner decision, 2026-11-02, at #356's acceptance-criterion 4).
+The note's three examples stand. Its opening clause overstated for the rows in the next section;
+rewording it was #423 (owner decision, 2026-11-02, at #356's acceptance-criterion 4). #423 (owner
+decision, 2026-11-13) replaced that clause with the census used for the latest redistribution of
+House seats made before the election, which no row contradicts, and kept the three examples.
 
 ## Where a census did not set a state's electoral votes
 
