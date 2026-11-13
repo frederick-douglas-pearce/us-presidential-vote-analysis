@@ -221,7 +221,7 @@ def test_the_workflow_keeps_the_install_guarantees() -> None:
     assert workflow_problems(_load()) == []
 
 
-# --- negative cases: each mutation trips its own check and nothing else -------------
+# --- negative cases: each asserts the exact set of problems its mutation raises -----
 
 
 def _steps(w: dict[str, Any]) -> list[dict[str, Any]]:
@@ -265,8 +265,16 @@ def _continue_on_error(w: dict[str, Any]) -> None:
     _step(w, "install-deps")["continue-on-error"] = True
 
 
-def _browsers_path(w: dict[str, Any]) -> None:
+def _browsers_path_workflow(w: dict[str, Any]) -> None:
+    w["env"] = {"PLAYWRIGHT_BROWSERS_PATH": "/opt/browsers"}
+
+
+def _browsers_path_job(w: dict[str, Any]) -> None:
     w["jobs"][JOB]["env"] = {"PLAYWRIGHT_BROWSERS_PATH": "/opt/browsers"}
+
+
+def _browsers_path_step(w: dict[str, Any]) -> None:
+    _step(w, "download")["env"] = {"PLAYWRIGHT_BROWSERS_PATH": "/opt/browsers"}
 
 
 def _restore_after_download(w: dict[str, Any]) -> None:
@@ -403,7 +411,9 @@ MUTATIONS: list[tuple[Callable[[dict[str, Any]], None], tuple[str, ...]]] = [
     (_with_deps, ("--with-deps",)),
     (_combined_cache_step, ("saves only on job success",)),
     (_continue_on_error, ("continue-on-error",)),
-    (_browsers_path, ("PLAYWRIGHT_BROWSERS_PATH",)),
+    (_browsers_path_workflow, ("PLAYWRIGHT_BROWSERS_PATH",)),
+    (_browsers_path_job, ("PLAYWRIGHT_BROWSERS_PATH",)),
+    (_browsers_path_step, ("PLAYWRIGHT_BROWSERS_PATH",)),
     (_restore_after_download, ("order: version, restore",)),
     (_save_after_tests, ("order: version, restore",)),
     # Also lands the uncapped version step inside the capped run of steps.
