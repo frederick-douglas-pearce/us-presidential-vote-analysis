@@ -2750,6 +2750,64 @@ class TestOverTimeDegraded:
         assert sorted(calls) == sorted(FILLS)
 
 
+class TestOverTimeMechanisms:
+    """Guards the acceptance gate's mutation pass found missing (#436)."""
+
+    def test_a_boolean_count_is_an_unrecognized_marker_never_a_bar(self) -> None:
+        """``True`` is an ``int`` to ``isinstance``; a bar needs a count of type ``int``
+        itself, so a served boolean is a marker in both charts."""
+        states = copy.deepcopy(N2)
+        for row in states["data"]:
+            if row["state_usps"] == "GA" and row["year"] == 2016:
+                row["state_popular_total"] = True
+                row["state_electoral_votes"] = True
+        tree = render_over_time({"state": "GA"}, states=states)
+        c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
+        assert 2016 not in year_points(c4, labels.LABELS["state_electoral_votes"])
+        assert 2016 not in year_points(c5, labels.LABELS["state_popular_total"])
+        assert year_points(c4, labels.C4_NO_FIGURE_SERIES)[2016] == (
+            0,
+            labels.UNRECOGNIZED,
+        )
+        assert year_points(c5, labels.UNRECOGNIZED)[2016] == (0, labels.UNRECOGNIZED)
+
+    @pytest.mark.parametrize("query", [{}, {"state": "AK"}])
+    def test_every_served_year_keeps_its_row_by_an_explicit_range(
+        self, query: dict[str, Any]
+    ) -> None:
+        """Plotly's autorange would fit the drawn points, so Alaska's empty rows before
+        1960 would vanish: each chart fixes the year axis's range to every served
+        year, oldest on top (D100(a))."""
+        tree = render_over_time(query)
+        for dom in (C4, C5):
+            yaxis = chart_figure(tree, dom)["layout"]["yaxis"]
+            assert yaxis["range"] == [len(YEARS) - 0.5, -0.5], dom
+            assert yaxis["autorange"] is False, dom
+
+    def test_an_unavailable_n2_in_the_layout_keeps_the_page_and_all_states(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The layout reads N2 in its own ``try``: an N2 outage with the index and N1
+        up costs only the state choice, never the page (D100(e))."""
+        calls: list[str] = []
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            calls.append(path)
+            if path == api.ELECTION_STATES_PATH:
+                raise api.ApiUnavailable("down")
+            return api.Response(body=RECORDED[path], version=VERSION)
+
+        client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        tree = PAGE["layout"](state="GA")
+        assert find(tree, PAGE_ID) is not None
+        assert find(tree, MOD["OVER_TIME_NO_STATES_ID"]) is not None
+        assert chart_figure(tree, C4) == chart_figure(render_over_time(), C4)
+        assert api.ELECTION_STATES_PATH in calls
+
+
 def caption(tree: Any, dom: str) -> str:
     """A chart's caption text, without its table pointer."""
     (figcaption,) = of_type(find(tree, dom), "Figcaption")

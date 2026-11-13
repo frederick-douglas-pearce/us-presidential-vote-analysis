@@ -6810,7 +6810,11 @@ chooses whose series is drawn.
   `electoral_denominator` (through `n1_items`, D097(c)); C5 reads each served year's one
   `national_pv_denominator` across N1's `data` rows (`national_pv`), strictly: a null beside a
   figure counts as two values, as D077 and D098 count NULL, and two values make the section
-  unavailable. A repeated NaN is one value, shown as unrecognized. One state: exactly N2's rows for
+  unavailable. A repeated NaN is one value, shown as unrecognized. A national total has no
+  `pv_status`, so its table cell never takes `labels.popular_votes`' state rule or a made-up
+  status: a null reads `labels.NOT_APPLICABLE` outside the popular-vote window (the cell T3 and
+  the election panel show there) and `labels.NO_NATIONAL_TOTAL` inside it (`labels.national_total`,
+  from the ba spec approved at the plan gate). One state: exactly N2's rows for
   that state (`n2_rows`: one row per year and state, one name per code, no gap after the state's
   first served year, and `state_electoral_votes`, `state_popular_total` and `pv_status` on every
   row), from its first served election; the rows before it are empty, with no point, and a
