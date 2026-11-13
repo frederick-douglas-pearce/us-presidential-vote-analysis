@@ -568,7 +568,6 @@ class TestRequestBudget:
         for search in ("?state=GA", "?state=GA&year_from=1900", "?state=AK&pv=1"):
             route("/elections", search)
         assert calls == FILLS
-        assert calls == FILLS
         assert len(bucket.waits) == 2
 
     @pytest.mark.parametrize(
@@ -2635,7 +2634,7 @@ class TestOverTimeValidation:
     def test_a_missing_key(self) -> None:
         self.refuses(lambda b: b["data"][0].pop("state"))
         self.refuses(lambda b: b.pop("data"))
-        # Each field the one-state view reads, on any row (#436's review, cr.2).
+        # Each field the one-state view reads, on any row (#436's review).
         for field in ("state_electoral_votes", "state_popular_total", "pv_status"):
             self.refuses(lambda b, f=field: b["data"][-1].pop(f))
 
@@ -2650,7 +2649,12 @@ class TestOverTimeValidation:
                 ]
             )
         )
-        self.refuses(lambda b: b["data"][0].update(state_usps="ALX"))
+        # A longer code on a row that leaves no gap (the last served year), so only
+        # the code check can refuse it; the control shows a valid new code passes.
+        self.refuses(lambda b: b["data"].append({**b["data"][-1], "state_usps": "WYX"}))
+        ok = copy.deepcopy(N2)
+        ok["data"].append({**ok["data"][-1], "state_usps": "WX", "state": "Wx"})
+        assert "WX" in MOD["n2_rows"](ok, YEARS)
 
     def test_national_pv_is_strict(self) -> None:
         def refuses(change: Any) -> None:
@@ -2698,7 +2702,7 @@ class TestOverTimeDegraded:
             {"data": []},
             {"meta": {}},
             # Valid rows, but no provenance the one-state download could read
-            # (#436's review, cr.2): the all-states view stays.
+            # (#436's review): the all-states view stays.
             {"data": copy.deepcopy(N2["data"])},
             {"data": copy.deepcopy(N2["data"]), "meta": {"provenance": {}}},
             # One row of the chosen state lacks a field the one-state view reads.
@@ -2753,7 +2757,7 @@ def caption(tree: Any, dom: str) -> str:
 
 
 class TestOverTimeCaptions:
-    """Each mode's caption sentences (#436's review, cr.1): the all-states sentences
+    """Each mode's caption sentences (#436's review): the all-states sentences
     only with all states, whatever the chosen state's first election."""
 
     def test_all_states(self) -> None:

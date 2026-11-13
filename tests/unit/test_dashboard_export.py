@@ -473,9 +473,9 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
 
 #: The tables each chart page's filters reach, and the query keys that reach each
 #: (#434, D096, amending D093(c); per key since #436, D100): under a ``filtered`` query
-#: that keeps one of a table's keys, the table's CSV (its rows and its view URL)
-#: differs from the unfiltered render's; under any other query it equals it, so a view
-#: URL naming another table's key fails. A chart's companion table not listed here
+#: that keeps one of a table's keys, the table's CSV rows differ from the unfiltered
+#: render's; under any other query its whole CSV, view URL included, equals it, so a
+#: view URL naming another table's key fails. A chart's companion table not listed here
 #: equals the unfiltered render under every query. Hand-written: a chart story adding a
 #: filtered page lists its tables, and
 #: ``test_every_chart_page_with_a_filter_lists_its_queries`` fails a live chart page
