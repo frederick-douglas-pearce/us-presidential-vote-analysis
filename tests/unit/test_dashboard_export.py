@@ -1955,8 +1955,8 @@ def figure_texts(figure: Any) -> list[str]:
     templates (placeholders and markup removed), ``text`` and ``hovertext``, every string
     in ``customdata`` (which a ``%{customdata.…}`` placeholder shows), and annotations.
     The chart title reaches the page as HTML, so a built chart's title is scanned as
-    ordinary children too. Shape labels are not read: no chart draws one before C4 and
-    C5 (#436)."""
+    ordinary children too, and shape labels (``layout.shapes[].label.text``, #436),
+    though C5 labels its band with annotations."""
     if not isinstance(figure, dict):
         return []
     found: list[str] = []
@@ -1980,6 +1980,13 @@ def figure_texts(figure: Any) -> list[str]:
         for note in layout.get("annotations") or []
         if isinstance(note, dict) and "text" in note
     ]
+    found += [
+        str(shape["label"]["text"])
+        for shape in layout.get("shapes") or []
+        if isinstance(shape, dict)
+        and isinstance(shape.get("label"), dict)
+        and "text" in shape["label"]
+    ]
     for trace in figure.get("data") or []:
         if not isinstance(trace, dict):
             continue
@@ -1994,6 +2001,23 @@ def figure_texts(figure: Any) -> list[str]:
         if isinstance(group, dict) and isinstance(group.get("text"), str):
             found.append(group["text"])
     return [text for text in found if text.strip()]
+
+
+def test_figure_texts_reads_shape_labels() -> None:
+    """#436: a shape's label is page text, so the no-raw-values scan reads it; a shape
+    with no label, or one that is not an object, adds nothing."""
+    figure = {
+        "data": [],
+        "layout": {
+            "shapes": [
+                {"type": "rect", "label": {"text": SENTINEL}},
+                {"type": "line"},
+                {"type": "rect", "label": "x"},
+                "x",
+            ]
+        },
+    }
+    assert figure_texts(figure) == [SENTINEL]
 
 
 def raw_values(tree: Any) -> list[str]:

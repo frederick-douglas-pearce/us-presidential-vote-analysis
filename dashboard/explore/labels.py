@@ -823,11 +823,14 @@ def glossary(
     fields: Iterable[str],
     summary: str = "Column names",
     chosen: Mapping[str, str] | None = None,
+    ident: str | None = None,
 ) -> html.Details:
     """Each column's plain label beside the API field name it shows. A list that is no
     table (the election panel) names its ``summary`` otherwise, and a label that
-    depends on the data (``ec_winner``'s, #355) comes from ``chosen``."""
+    depends on the data (``ec_winner``'s, #355) comes from ``chosen``. ``ident`` is the
+    list's DOM id, where a page has several (#436)."""
     shown = {**LABELS, **(chosen or {})}
+    kwargs: dict[str, Any] = {} if ident is None else {"id": ident}
     return html.Details(
         [
             html.Summary(summary),
@@ -840,6 +843,7 @@ def glossary(
             ),
         ],
         className="glossary",
+        **kwargs,
     )
 
 

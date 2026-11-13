@@ -33,14 +33,19 @@ PV_BOX = "#elections-pv input[type=checkbox]"
 LOWER_THUMB = f"{YEARS} [role=slider].dash-slider-thumb-1"
 UPPER_THUMB = f"{YEARS} [role=slider].dash-slider-thumb-2"
 MARKS = f"{YEARS} .dash-slider-mark"
-#: T1's column-name list: the page's last, after C2's companion table's (#434).
-GLOSSARY = f"{ELECTIONS_SUCCESS} > details.glossary:last-of-type"
+#: T1's column-name list, by its id: the page has three since #436.
+GLOSSARY = "#elections-glossary"
 #: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
 
 #: Chart C2 (#434) and its companion table, above the filters.
 C2 = "#c2"
 LEADER_ROWS = "#elections-leader-table tbody tr"
+#: Charts C4 and C5, their shared companion table and the state control (#436).
+C4 = "#c4"
+C5 = "#c5"
+OVER_TIME_ROWS = "#elections-over-time-table tbody tr"
+STATE_CONTROL = "#elections-state"
 
 # Ids of the state history (pages/state.py).
 STATE_SUCCESS = "#state"

@@ -61,6 +61,8 @@ TABLE_ID = "elections-table"
 YEARS_ID = "elections-years"
 PV_ID = "elections-pv"
 URL_ID = "elections-url"
+#: T1's column-name list: the page has three since #436.
+GLOSSARY_ID = "elections-glossary"
 
 #: T1's columns, in display order, by public field name.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
@@ -1542,7 +1544,7 @@ def render(
                 notes=(labels.HAS_POPULAR_VOTE_NOTE,),
                 empty="No elections match these filters.",
             ),
-            labels.glossary(FIELDS),
+            labels.glossary(FIELDS, ident=GLOSSARY_ID),
             *_over_time_section(body, summary, states, pairs),
             components.provenance_footer(provenance),
         ],
