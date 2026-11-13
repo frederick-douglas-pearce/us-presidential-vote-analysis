@@ -11,7 +11,8 @@ its mutation raises, so no check fires on it unexpectedly; ``_version_after_rest
 
 Checked: the permissions of the workflow and of every job; no ``--with-deps``; no
 combined ``actions/cache`` step; no ``PLAYWRIGHT_BROWSERS_PATH`` at any scope; exactly
-one step of each kind, in order; a cap on every step from the restore on, and those caps
+one step of each kind, in order; the download limited to the headless shell and the
+system libraries installed for it; a cap on every step from the restore on, and those caps
 plus :data:`SETUP_MARGIN_MINUTES` under the job's cap; no ``continue-on-error`` on the
 job or any step; the version, restore, install-deps and test steps unconditional; the
 download and save skipped exactly on a cache hit of the restore step; the version step
@@ -158,6 +159,12 @@ def workflow_problems(workflow: dict[str, Any]) -> list[str]:
     if not at["download"] < at["install-deps"] < at["tests"]:
         problems.append("order: download, install-deps, tests")
 
+    # The cache holds the headless shell, and apt installs that browser's libraries.
+    if not re.search(r"\s--only-shell\s+chromium\b", _run(download)):
+        problems.append("the download is not limited to the headless shell")
+    if not re.search(r"playwright install-deps chromium-headless-shell\b", _run(deps)):
+        problems.append("install-deps does not target chromium-headless-shell")
+
     # A cap on every step from the restore on, and the caps fire before the job's.
     for step in steps[at["restore"] :]:
         if _cap(step) is None:
@@ -255,6 +262,16 @@ def _second_job_writes(w: dict[str, Any]) -> None:
 def _with_deps(w: dict[str, Any]) -> None:
     step = _step(w, "download")
     step["run"] = step["run"].replace("install ", "install --with-deps ", 1)
+
+
+def _only_shell_dropped(w: dict[str, Any]) -> None:
+    step = _step(w, "download")
+    step["run"] = step["run"].replace("--only-shell ", "")
+
+
+def _deps_wrong_target(w: dict[str, Any]) -> None:
+    step = _step(w, "install-deps")
+    step["run"] = step["run"].replace("chromium-headless-shell", "chromium")
 
 
 def _combined_cache_step(w: dict[str, Any]) -> None:
@@ -410,6 +427,8 @@ MUTATIONS: list[tuple[Callable[[dict[str, Any]], None], tuple[str, ...]]] = [
     (_second_job_writes, ("job other sets permissions",)),
     (_with_deps, ("--with-deps",)),
     (_combined_cache_step, ("saves only on job success",)),
+    (_only_shell_dropped, ("not limited to the headless shell",)),
+    (_deps_wrong_target, ("does not target chromium-headless-shell",)),
     (_continue_on_error, ("continue-on-error",)),
     (_browsers_path_workflow, ("PLAYWRIGHT_BROWSERS_PATH",)),
     (_browsers_path_job, ("PLAYWRIGHT_BROWSERS_PATH",)),
