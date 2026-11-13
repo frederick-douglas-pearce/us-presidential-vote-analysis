@@ -8,15 +8,16 @@ or a hung package mirror goes back to canceling the whole job instead of failing
 that hung. So each is checked here, and every negative case shows that its own check, and
 only that check, catches its mutation.
 
-Checked: the permissions of the workflow and of every job; no ``--with-deps``; the step
-order; a cap on every step from the restore on, and those caps plus
-:data:`SETUP_MARGIN_MINUTES` under the job's cap; no ``continue-on-error``; the install
-and test steps unconditional; the download and save skipped exactly on a cache hit of the
-restore step; the version step writing the version it reads and the runner image; the
-key reading both, with no literal version; the save reusing the restore's resolved key;
-the cache path. Not checked: step names and the exact cap values, which would only
-restate the YAML; and the setup steps before the restore (checkout, uv, Python,
-``uv sync``, the version read), which carry no cap of their own.
+Checked: the permissions of the workflow and of every job; no ``--with-deps``; exactly
+one step of each kind, in order; a cap on every step from the restore on, and those caps
+plus :data:`SETUP_MARGIN_MINUTES` under the job's cap; no ``continue-on-error`` on the
+job or any step; the version, restore, install-deps and test steps unconditional; the
+download and save skipped exactly on a cache hit of the restore step; the version step
+writing the version it reads and the runner image; the key reading both and the runner's
+OS and architecture, with no literal version; the save reusing the restore's resolved
+key; the cache path. Not checked: step names and the exact cap values, which would only
+restate the YAML; and a cap on the setup steps before the restore (checkout, uv, Python,
+``uv sync``, the version read), which carry none.
 """
 
 from __future__ import annotations
@@ -131,6 +132,8 @@ def workflow_problems(workflow: dict[str, Any]) -> list[str]:
             problems.append("actions/cache saves only on job success; use restore + save")
         if step.get("continue-on-error"):
             problems.append(f"continue-on-error on {step.get('name')!r}")
+    if job.get("continue-on-error"):
+        problems.append(f"continue-on-error on job {JOB}")
     for scope in (workflow, job, *steps):
         if "PLAYWRIGHT_BROWSERS_PATH" in (scope.get("env") or {}):
             problems.append("PLAYWRIGHT_BROWSERS_PATH moves the browser off the cache path")
@@ -165,7 +168,7 @@ def workflow_problems(workflow: dict[str, Any]) -> list[str]:
             f"reach the job cap ({job_cap!r})"
         )
 
-    for step in (deps, tests):
+    for step in (version, restore, deps, tests):
         if "if" in step:
             problems.append(f"{step.get('name')!r} has an if: {step['if']!r}")
 
@@ -295,8 +298,44 @@ def _caps_reach_the_job_cap(w: dict[str, Any]) -> None:
     )
 
 
+def _job_continue_on_error(w: dict[str, Any]) -> None:
+    w["jobs"][JOB]["continue-on-error"] = True
+
+
+def _duplicate_download(w: dict[str, Any]) -> None:
+    steps = _steps(w)
+    download = _step(w, "download")
+    steps.insert(steps.index(download) + 1, copy.deepcopy(download))
+
+
+def _deps_after_tests(w: dict[str, Any]) -> None:
+    _move(w, "install-deps", None)
+
+
 def _deps_conditional(w: dict[str, Any]) -> None:
     _step(w, "install-deps")["if"] = "false"
+
+
+def _tests_conditional(w: dict[str, Any]) -> None:
+    _step(w, "tests")["if"] = "false"
+
+
+def _restore_conditional(w: dict[str, Any]) -> None:
+    _step(w, "restore")["if"] = "false"
+
+
+def _version_conditional(w: dict[str, Any]) -> None:
+    _step(w, "version")["if"] = "false"
+
+
+def _version_dropped_from_key(w: dict[str, Any]) -> None:
+    with_ = _step(w, "restore")["with"]
+    with_["key"] = with_["key"].replace("${{ steps.playwright.outputs.version }}-", "")
+
+
+def _runner_arch_dropped_from_key(w: dict[str, Any]) -> None:
+    with_ = _step(w, "restore")["with"]
+    with_["key"] = with_["key"].replace("${{ runner.arch }}-", "")
 
 
 def _save_on_hit(w: dict[str, Any]) -> None:
@@ -366,7 +405,15 @@ MUTATIONS: list[tuple[Callable[[dict[str, Any]], None], tuple[str, ...]]] = [
     (_uncap_restore, ("no timeout-minutes",)),
     (_uncap_deps, ("no timeout-minutes",)),
     (_caps_reach_the_job_cap, ("reach the job cap",)),
+    (_job_continue_on_error, ("continue-on-error on job",)),
+    (_duplicate_download, ("download steps, not 1",)),
+    (_deps_after_tests, ("order: download, install-deps",)),
     (_deps_conditional, ("has an if",)),
+    (_tests_conditional, ("has an if",)),
+    (_restore_conditional, ("has an if",)),
+    (_version_conditional, ("has an if",)),
+    (_version_dropped_from_key, ("does not read the version step's version",)),
+    (_runner_arch_dropped_from_key, ("does not read runner.arch",)),
     (_save_on_hit, ("does not skip on a cache hit",)),
     (_download_ref_less, ("does not skip on a cache hit",)),
     (_download_unconditional, ("does not skip on a cache hit",)),
