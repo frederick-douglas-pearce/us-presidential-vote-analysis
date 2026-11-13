@@ -48,6 +48,8 @@ ISSUED: dict[str, tuple[str, str, bool]] = {
     "C1": ("/election/<year>", "election-nation", False),
     "C3": ("/election/<year>/per-capita", "election-per-capita", False),
     "C2": ("/elections", "elections-leader-table", False),
+    "C4": ("/elections", "elections-over-time-table", False),
+    "C5": ("/elections", "elections-over-time-table", False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.

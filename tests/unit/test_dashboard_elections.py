@@ -57,6 +57,10 @@ PAGE_ID = MOD["PAGE_ID"]
 TABLE_ID = MOD["TABLE_ID"]
 YEARS_ID = MOD["YEARS_ID"]
 PV_ID = MOD["PV_ID"]
+#: The paths a first render fills on a miss, in order: N1 for C2 and the averages
+#: (#434, #437), then N2 for C4 and C5 (#436).
+FILLS_TUPLE = (api.SUMMARY_PATH, api.ELECTION_STATES_PATH)
+FILLS = list(FILLS_TUPLE)
 
 
 def find(node: Any, wanted: str) -> Any:
@@ -340,7 +344,7 @@ class TestParser:
             ({"year_from": "176"}, []),
             ({"pv": "true"}, []),
             ({"pv": ""}, []),
-            ({"from": "1900", "state": "OH"}, []),
+            ({"from": "1900", "state": "OH"}, [("state", "OH")]),
             ({"year_from": 1900}, []),
         ],
     )
@@ -454,6 +458,7 @@ class TestShareableUrl:
         assert entry["inputs"] == [
             {"id": YEARS_ID, "property": "value"},
             {"id": PV_ID, "property": "value"},
+            {"id": MOD["STATE_ID"], "property": "value"},
         ]
         assert entry["state"] == [
             {"id": YEARS_ID, "property": "min"},
@@ -476,11 +481,14 @@ class TestShareableUrl:
             "inputs": [
                 {"id": YEARS_ID, "property": "value", "value": [1900, LAST]},
                 {"id": PV_ID, "property": "value", "value": ["1"]},
+                {"id": MOD["STATE_ID"], "property": "value", "value": None},
             ],
             "state": [
                 {"id": YEARS_ID, "property": "min", "value": FIRST},
                 {"id": YEARS_ID, "property": "max", "value": LAST},
-                {"id": MOD["URL_ID"], "property": "search", "value": ""},
+                # The URL already names the year the slider shows; the change is the
+                # pv control's, so only its key is replaced (#436).
+                {"id": MOD["URL_ID"], "property": "search", "value": "?year_from=1900"},
             ],
             "changedPropIds": [f"{PV_ID}.value"],
         }
@@ -493,17 +501,27 @@ class TestShareableUrl:
         assert routed_years(route("/elections", written)) == [
             y for y in PV_YEARS if y >= 1900
         ]
-        # The render fills N1 once, on a miss, for chart C2 (#434); never the index.
-        assert calls == [api.SUMMARY_PATH] and len(bucket.waits) == 1
+        # The render fills N1 once, on a miss, for chart C2 (#434), and N2 for C4 and
+        # C5 (#436); never the index.
+        assert calls == FILLS and len(bucket.waits) == 2
 
     def test_the_callback_leaves_an_unchanged_url_alone(self) -> None:
-        callback = MOD["on_filter_change"]
-        assert callback([1900, LAST], ["1"], FIRST, LAST, "") == "?pv=1&year_from=1900"
-        assert callback([1900, LAST], ["1"], FIRST, LAST, "?pv=1&year_from=1900") is (
+        def callback(years: Any, pv: Any, last: Any, current: Any) -> Any:
+            # The pv control changed, so its key and nothing else is replaced; then
+            # the years, so theirs.
+            by_pv = MOD["next_search"](PV_ID, years, pv, None, FIRST, last, current)
+            current = (current or "") if by_pv is no_update else by_pv
+            by_years = MOD["next_search"](
+                YEARS_ID, years, pv, None, FIRST, last, current
+            )
+            return by_years if by_years is not no_update else by_pv
+
+        assert callback([1900, LAST], ["1"], LAST, "") == "?pv=1&year_from=1900"
+        assert callback([1900, LAST], ["1"], LAST, "?pv=1&year_from=1900") is (
             no_update
         )
-        assert callback([FIRST, LAST], [], FIRST, LAST, None) is no_update
-        assert callback([FIRST, LAST], [], FIRST, LAST, "?pv=1") == ""
+        assert callback([FIRST, LAST], [], LAST, None) is no_update
+        assert callback([FIRST, LAST], [], LAST, "?pv=1") == ""
 
     @pytest.mark.parametrize(
         ("years", "pv", "search"),
@@ -533,14 +551,22 @@ class TestRequestBudget:
             response = route("/elections", search)
             # Each render is the filtered one, answered from the cache.
             assert routed_years(response) == shown_years(render(parse(search[1:])))
-            # Only the first render fills N1, on a miss, for chart C2 (#434, D096);
-            # every filter change after it is answered from the cache.
-            assert calls == [api.SUMMARY_PATH], search
-            assert len(bucket.waits) == 1, search
-        for years, pv in (([1900, LAST], ["1"]), ([FIRST, 1950], [])):
-            MOD["on_filter_change"](years, pv, FIRST, LAST, "")
-        assert calls == [api.SUMMARY_PATH]
-        assert len(bucket.waits) == 1
+            # Only the first render fills N1, on a miss, for chart C2 (#434, D096),
+            # and N2 for C4 and C5 (#436); every filter change after it is answered
+            # from the cache.
+            assert calls == FILLS, search
+            assert len(bucket.waits) == 2, search
+        for search in ("?state=GA", "?state=GA&year_from=1900", "?state=AK&pv=1"):
+            route("/elections", search)
+        assert calls == FILLS
+        for control, years, pv, state in (
+            (YEARS_ID, [1900, LAST], ["1"], None),
+            (PV_ID, [FIRST, 1950], [], None),
+            (MOD["STATE_ID"], [FIRST, LAST], [], "GA"),
+        ):
+            MOD["next_search"](control, years, pv, state, FIRST, LAST, "")
+        assert calls == FILLS
+        assert len(bucket.waits) == 2
 
     def test_the_callback_reads_no_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class NoView:
@@ -548,9 +574,12 @@ class TestRequestBudget:
                 raise AssertionError("the filter callback read the API")
 
         monkeypatch.setattr(api, "CLIENT", NoView())
-        assert MOD["on_filter_change"]([1900, LAST], [], FIRST, LAST, "") == (
-            "?year_from=1900"
-        )
+        assert MOD["next_search"](
+            YEARS_ID, [1900, LAST], [], None, FIRST, LAST, ""
+        ) == ("?year_from=1900")
+        assert MOD["next_search"](
+            MOD["STATE_ID"], [FIRST, LAST], [], "GA", FIRST, LAST, "?pv=1"
+        ) == ("?pv=1&state=GA")
 
     def test_a_snapshot_cutover_reaches_the_view_through_the_refresher(
         self, monkeypatch: pytest.MonkeyPatch
@@ -571,6 +600,11 @@ class TestRequestBudget:
                 if state["version"] == "version-B":
                     for key in ("data", "elections"):
                         body[key] = [r for r in body[key] if r["year"] >= 2000]
+            elif path == api.ELECTION_STATES_PATH:
+                body = copy.deepcopy(RECORDED[api.ELECTION_STATES_PATH])
+                provenance = body["meta"]["provenance"]
+                if state["version"] == "version-B":
+                    body["data"] = [r for r in body["data"] if r["year"] >= 2000]
             else:
                 body = copy.deepcopy(BODY)
                 provenance = body["meta"]["provenance"]
@@ -587,8 +621,9 @@ class TestRequestBudget:
         before = PAGE["layout"]()
         assert shown_years(before) == YEARS
         assert "version-A" in texts(before)
-        # C2's N1 is filled on a miss in each snapshot (#434); D072's prefetch is not.
-        assert calls == [api.SUMMARY_PATH]
+        # C2's N1 and C4 and C5's N2 are filled on a miss in each snapshot (#434,
+        # #436); D072's prefetch is not.
+        assert calls == FILLS
         calls.clear()
         state["version"] = "version-B"
         # Until the refresher runs, renders keep serving A from the cache.
@@ -601,8 +636,9 @@ class TestRequestBudget:
         assert shown_years(after) == [row["year"] for row in later]
         assert "version-B" in texts(after)
         assert "version-A" not in texts(after)
-        # The index came with the swap, not a fill on a miss; N1 is B's own miss.
-        assert calls == [api.SUMMARY_PATH]
+        # The index came with the swap, not a fill on a miss; N1 and N2 are B's own
+        # misses.
+        assert calls == FILLS
 
 
 # --- labels -----------------------------------------------------------------------
@@ -959,8 +995,9 @@ class TestHasText:
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path"] == "/elections"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
-    # N1, chart C2's source, a literal filled on a miss (#434, D074(ii)).
-    assert PAGE["on_miss"] == (api.SUMMARY_PATH,)
+    # N1, chart C2's source, and N2, C4 and C5's one-state source: literals filled
+    # on a miss (#434, #436, D074(ii)).
+    assert PAGE["on_miss"] == FILLS_TUPLE
     assert PAGE["success"] == PAGE_ID
     assert VERSION  # the recorded snapshot every cached render answers from
 
@@ -1425,8 +1462,11 @@ class TestC2Degraded:
             assert PAGE_ID in ids and TABLE_ID in ids
             assert MOD["LEADER_UNAVAILABLE_ID"] in ids
             assert C2 not in ids and LEADERS not in ids
-            # At most one fill per render, of N1 only (D096).
-            assert calls == [api.SUMMARY_PATH], search
+            # At most one fill per path per render: N1, which failed, and N2 (D096,
+            # #436), which a cached snapshot answers from the next render on.
+            assert calls.count(api.SUMMARY_PATH) == 1, search
+            assert calls.count(api.ELECTION_STATES_PATH) <= 1, search
+            assert set(calls) <= set(FILLS), search
 
     def test_a_malformed_n1_from_the_api_leaves_t1(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1923,7 +1963,7 @@ class TestMetricsFilters:
             seen.add(str(node["props"]["children"]))
             assert calls == [], search
         assert len(seen) == 4  # each filter change showed its own figure
-        assert len(bucket.waits) == 1  # N1's one fill, before the filter changes
+        assert len(bucket.waits) == 2  # N1's and N2's fills, before the filters
 
     @pytest.mark.parametrize("query", SHARED)
     def test_og_url_reopens_the_same_figures(self, query: str) -> None:

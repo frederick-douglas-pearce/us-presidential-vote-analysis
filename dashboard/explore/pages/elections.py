@@ -24,12 +24,21 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   with its own N and years, computed by :mod:`explore.metrics` from T1's own shown rows
   and N1's ``elections`` items (:func:`n1_items`, the one check C2 shares). A failed or
   malformed N1 replaces the averages with :data:`METRICS_UNAVAILABLE`; the count stays.
+- **Charts C4 and C5** (#436, D100) follow T1, beside one companion table they share:
+  electors appointed and the total popular vote in each election, for all states from
+  N1, or for the one state the page's ``state`` filter chooses from N2
+  (:data:`explore.api.ELECTION_STATES_PATH`, filled on a miss). The state filter
+  switches their series and nothing else; the year and popular-vote filters never
+  reach them. A failed or malformed N1 shows only the section's own sentence; a failed
+  or malformed N2 keeps the all-states charts and hides the state choice.
 """
 
 from __future__ import annotations
 
 import functools
+from collections.abc import Iterable
 from typing import Any, NamedTuple
+from urllib.parse import parse_qs
 
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
@@ -120,28 +129,99 @@ _C2_TOP_PX = 56
 _C2_BOTTOM_PX = 112
 _C2_RIGHT_PX = 64
 
+#: Charts C4 and C5 (#436, D100), the companion table they share, and the state
+#: control that switches their series.
+C4_ID = "C4"
+C5_ID = "C5"
+OVER_TIME_TABLE_ID = "elections-over-time-table"
+OVER_TIME_UNAVAILABLE_ID = "elections-over-time-unavailable"
+OVER_TIME_NO_STATES_ID = "elections-over-time-no-states"
+STATE_ID = "elections-state"
+#: The companion table's columns, in display order, by public field name: all states
+#: (N1), and one state (N2's rows for it), whose download adds the state's code.
+OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
+OVER_TIME_STATE_FIELDS = (
+    "year",
+    "state",
+    "state_electoral_votes",
+    "state_popular_total",
+    "pv_status",
+)
+OVER_TIME_STATE_EXTRA = ("state_usps",)
+
+#: The section's page-level wording (ba spec, approved at #436's plan gate).
+OVER_TIME_HEADING = "Electors appointed and the total popular vote over time"
+OVER_TIME_FILTER_SENTENCE = (
+    "Choose a state to show its own figures in these two charts and their table; All "
+    "states shows the national figures."
+)
+#: Shown only with the state control.
+OVER_TIME_REACH = (
+    "The state changes nothing else on the page: the chart of each election's "
+    "Electoral College leader, the list of elections and its averages stay the same."
+)
+#: Shown whenever the charts render.
+OVER_TIME_LIST_FILTERS = (
+    "The list's year and popular-vote filters do not change these two charts or their "
+    "table."
+)
+#: The section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
+#: wording, as :data:`C2_UNAVAILABLE`.
+OVER_TIME_UNAVAILABLE = (
+    "The charts and table of electors appointed and the total popular vote can't be "
+    "shown right now. Please try again in a minute."
+)
+#: Shown in place of the filter sentence and the state control when N2 cannot be read
+#: or is malformed; the charts and their table then show all states.
+OVER_TIME_NO_STATES = (
+    "Choosing a state can't be offered right now, so these charts and their table "
+    "show all states. Please try again in a minute."
+)
+OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular vote"
+#: The state control's placeholder, which is "every state".
+ALL_STATES = "All states"
+
+#: C4 and C5's pixels per row (one tick line, so every year's label shows at 390 px),
+#: and the margins around their plots: the top holds C5's band label, the bottom the
+#: value axis's title, and the right the widest bar label.
+_OVER_TIME_ROW_PX = 24
+_OVER_TIME_TOP_PX = 56
+_OVER_TIME_BOTTOM_PX = 48
+_OVER_TIME_RIGHT_PX = 88
+#: Each C5 marker label's symbol, so no two marker series differ by color alone.
+_C5_SYMBOLS = {
+    labels.C5_LEGISLATURE: "diamond",
+    labels.C5_TOOK_NO_PART: "x",
+    labels.C5_NO_TOTAL: "circle-open",
+    labels.UNRECOGNIZED: "square-open",
+}
+
 #: The query keys this page reads. ``year_from`` and ``year_to`` are the API's own names
-#: for a year range, so later tables with a year range share them.
+#: for a year range, so later tables with a year range share them. ``state`` is the
+#: per-capita page's key, read by the same parser (#436).
 YEAR_FROM = query.YEAR_FROM
 YEAR_TO = query.YEAR_TO
 PV = "pv"
+STATE = election_view.STATE
 
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
     """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
 
     Syntactic and total, and it reads no API: Dash's index runs it to build ``og:url``,
-    before any data is read. Keeps ``year_from`` / ``year_to`` only as four ASCII digits
-    and ``pv`` only as ``"1"``; a key repeated with differing values is dropped, and so
-    is a key it does not know. A range whose start is after its end drops both bounds.
-    Whether a year lies inside the served span is the layout's question
-    (:func:`filters`).
+    before any data is read. Keeps ``year_from`` / ``year_to`` only as four ASCII
+    digits, ``pv`` only as ``"1"`` and ``state`` only as a USPS code
+    (:func:`explore.election_view.parse_state`, #436); a key repeated with differing
+    values is dropped, and so is a key it does not know. A range whose start is after
+    its end drops both bounds. Whether a year lies inside the served span, or a state
+    is served, is the layout's question (:func:`filters`, :func:`chosen_state`).
     """
     if not isinstance(params, dict):
         return []
     kept = query.parse_year_range(params)
     if query.single(params.get(PV)) == "1":
         kept[PV] = "1"
+    kept.update(election_view.parse_state(params))
     return sorted(kept.items())
 
 
@@ -152,8 +232,9 @@ dash.register_page(
     # No years: the index HTML never waits on the API, so this cannot read the span.
     description="Every US presidential election in the dataset, filterable by year.",
     prefetch=(api.ELECTIONS_PATH,),
-    # N1, filled on first use for C2 (#434): a literal (D074(ii)), never prefetched.
-    on_miss=(api.SUMMARY_PATH,),
+    # N1, filled on first use for C2 (#434), and N2 for C4 and C5's one-state series
+    # (#436): literals (D074(ii)), never prefetched.
+    on_miss=(api.SUMMARY_PATH, api.ELECTION_STATES_PATH),
     success=PAGE_ID,
     query=parse_filters,
     # The site navigation link this page marks (#448):
@@ -221,23 +302,82 @@ def applied_search(chosen: Filters, first: int, last: int) -> str:
     return query.encode_search(params.items())
 
 
+#: Each filter control's query keys (#436): a change replaces only the keys of the
+#: control that changed, so a key no control shows (a ``state`` the page could not
+#: apply while N2 was unavailable) stays in the link.
+CONTROL_KEYS: dict[str, tuple[str, ...]] = {
+    YEARS_ID: (YEAR_FROM, YEAR_TO),
+    PV_ID: (PV,),
+    STATE_ID: (STATE,),
+}
+
+
+def merged_search(
+    triggered: Any,
+    years: Any,
+    pv: Any,
+    state: Any,
+    first: Any,
+    last: Any,
+    current: Any,
+) -> str:
+    """The query string after the control ``triggered`` changed (#436, D100), in the
+    normal form ``og:url`` uses: the current search through :func:`parse_filters`,
+    only the triggered control's keys (:data:`CONTROL_KEYS`) replaced by its value,
+    and the result through :func:`parse_filters` again. Pure; reads no API. A trigger
+    that is no filter control replaces nothing."""
+    params: dict[str, Any] = {}
+    if isinstance(current, str):
+        params.update(
+            parse_filters(parse_qs(current.removeprefix("?"), keep_blank_values=True))
+        )
+    owned = CONTROL_KEYS.get(triggered, ()) if isinstance(triggered, str) else ()
+    for key in owned:
+        params.pop(key, None)
+    if triggered == YEARS_ID:
+        params.update(query.year_range_search(years, first, last))
+    elif triggered == PV_ID:
+        if isinstance(pv, list) and "1" in pv:
+            params[PV] = "1"
+    elif triggered == STATE_ID and isinstance(state, str) and state:
+        params[STATE] = state
+    return query.encode_search(parse_filters(params))
+
+
+def next_search(
+    triggered: Any,
+    years: Any,
+    pv: Any,
+    state: Any,
+    first: Any,
+    last: Any,
+    current: Any,
+) -> Any:
+    """What the filter callback writes: :func:`merged_search`, or ``no_update`` when
+    that is the search the URL already has, which would navigate for nothing. Pure;
+    reads no API."""
+    search = merged_search(triggered, years, pv, state, first, last, current)
+    return no_update if search == (current or "") else search
+
+
 @callback(
     Output(URL_ID, "search"),
     Input(YEARS_ID, "value"),
     Input(PV_ID, "value"),
+    Input(STATE_ID, "value"),
     State(YEARS_ID, "min"),
     State(YEARS_ID, "max"),
     State(URL_ID, "search"),
     prevent_initial_call=True,
 )
-def on_filter_change(years: Any, pv: Any, first: Any, last: Any, current: Any) -> Any:
+def on_filter_change(
+    years: Any, pv: Any, state: Any, first: Any, last: Any, current: Any
+) -> Any:
     """A filter change becomes a URL change; the router re-renders from the cache.
 
-    Reads no API. Writing the search the URL already has would navigate for nothing,
-    so an unchanged one is left alone.
+    Reads no API. Only the changed control's keys change (:func:`next_search`).
     """
-    search = search_for(years, pv, first, last)
-    return no_update if search == (current or "") else search
+    return next_search(dash.ctx.triggered_id, years, pv, state, first, last, current)
 
 
 def _row(election: dict[str, Any]) -> html.Tr:
@@ -625,13 +765,710 @@ def _averages(
     return [html.Dl(entries, className="metrics"), *notes]
 
 
-def render(
-    body: dict[str, Any], pairs: list[tuple[str, str]], summary: Any = None
+# --- Charts C4 and C5 (#436, D100) ---------------------------------------------------
+
+
+def _same(a: Any, b: Any) -> bool:
+    """Whether two served values are one value: of one type and equal, so a null beside
+    a figure is two values, as D077 and D098 count NULL. A NaN repeated is one value
+    (it is unequal to itself), which its cell then reads as unrecognized."""
+    if type(a) is not type(b):
+        return False
+    return bool(a == b) or (isinstance(a, float) and a != a and b != b)
+
+
+def national_pv(summary: Any, served: Iterable[int]) -> dict[int, Any]:
+    """Each served year's one ``national_pv_denominator`` across N1's ``data`` rows
+    (#436): C5's all-states value. A year's value may be null.
+
+    Pure and strict; raises ``KeyError`` for a row without the field and ``TypeError``
+    for a body with no list of rows, a row whose year
+    :func:`explore.election_view.row_year` refuses or that is not served, a served
+    year with no row, or two values in one year (a null beside a figure counts as
+    two). It reads nothing but the year and that field.
+    """
+    years = set(served)
+    if not isinstance(summary, dict):
+        raise TypeError(f"{api.SUMMARY_PATH} is not an object")
+    rows = summary["data"]
+    if not isinstance(rows, list):
+        raise TypeError(f"{api.SUMMARY_PATH} carries no list of rows")
+    totals: dict[int, Any] = {}
+    for row in rows:
+        year = election_view.row_year(row)
+        if year is None or year not in years:
+            raise TypeError(f"{api.SUMMARY_PATH}: a row for a year not served")
+        value = row["national_pv_denominator"]
+        if year in totals and not _same(totals[year], value):
+            raise TypeError(f"{api.SUMMARY_PATH}: two national totals in {year}")
+        totals[year] = value
+    if set(totals) != years:
+        raise TypeError(f"{api.SUMMARY_PATH} misses a served year")
+    return totals
+
+
+def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]:
+    """N2's rows by USPS code, each state's in year order from its first served
+    election (#436, D100): C4 and C5's one-state series and their table's rows.
+
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for a body whose rows
+    are not a non-empty list, a row that is not an object, a year
+    :func:`explore.election_view.row_year` refuses or that is not served, a USPS code
+    :data:`explore.query.USPS_RE` refuses, two rows for one year and state, two names
+    for one code, or a gap: a served year after a state's first with no row for it.
+    """
+    years = sorted(set(served))
+    if not isinstance(body, dict):
+        raise TypeError(f"{api.ELECTION_STATES_PATH} is not an object")
+    rows = body["data"]
+    if not isinstance(rows, list) or not rows:
+        raise TypeError(f"{api.ELECTION_STATES_PATH} carries no list of rows")
+    by_state: dict[str, dict[int, dict[str, Any]]] = {}
+    names: dict[str, Any] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise TypeError(f"{api.ELECTION_STATES_PATH}: a row that is not an object")
+        year = election_view.row_year(row)
+        if year is None or year not in years:
+            raise TypeError(f"{api.ELECTION_STATES_PATH}: a row for a year not served")
+        usps = row["state_usps"]
+        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
+            raise TypeError(f"{api.ELECTION_STATES_PATH} carries a bad state code")
+        name = row["state"]
+        if not _same(names.setdefault(usps, name), name):
+            raise TypeError(f"{api.ELECTION_STATES_PATH} names {usps} two ways")
+        state_years = by_state.setdefault(usps, {})
+        if year in state_years:
+            raise TypeError(f"{api.ELECTION_STATES_PATH} repeats {usps} in {year}")
+        state_years[year] = row
+    series: dict[str, list[dict[str, Any]]] = {}
+    for usps, state_years in by_state.items():
+        expected = [year for year in years if year >= min(state_years)]
+        if sorted(state_years) != expected:
+            raise TypeError(f"{api.ELECTION_STATES_PATH} skips a year for {usps}")
+        series[usps] = [state_years[year] for year in expected]
+    return series
+
+
+def chosen_state(
+    pairs: list[tuple[str, str]], series: dict[str, list[dict[str, Any]]] | None
+) -> str | None:
+    """The state C4 and C5 show: the query's, if N2 serves it, else ``None`` ("all
+    states"), as the per-capita page keeps its state. With N2 unavailable
+    (``series`` is ``None``) every state falls back."""
+    state = dict(pairs).get(STATE)
+    return state if series is not None and state in series else None
+
+
+def _plain(name: Any) -> str | None:
+    """A served state name a title or caption may name (#436): text with something in
+    it and nothing ``components.chart`` refuses in a title or plotly could read as
+    markup or a token; else ``None``, and the "selected state" form is used."""
+    if not isinstance(name, str) or not labels.has_text(name):
+        return None
+    if "<" in name or "var(" in name:
+        return None
+    return name
+
+
+class Point(NamedTuple):
+    """One row of C4 and C5 (#436): its year, the served appointed allotment and total
+    popular vote, and the companion table's cells for them (and, for one state, for
+    its ``pv_status``)."""
+
+    year: int
+    appointed: Any
+    appointed_cell: str
+    total: Any
+    total_cell: str
+    status: Any
+    status_cell: str | None
+
+
+def _all_states_points(
+    items: dict[int, dict[str, Any]],
+    totals: dict[int, Any],
+    coverage: dict[str, Any],
+) -> list[Point]:
+    """All states: each served year's N1 allotment and national total, worded once."""
+    points = []
+    for year in sorted(items):
+        appointed = items[year]["electoral_denominator"]
+        points.append(
+            Point(
+                year=year,
+                appointed=appointed,
+                appointed_cell=labels.number(appointed),
+                total=totals[year],
+                total_cell=labels.national_total(totals[year], year, coverage),
+                status=None,
+                status_cell=None,
+            )
+        )
+    return points
+
+
+def _state_points(rows: list[dict[str, Any]], coverage: dict[str, Any]) -> list[Point]:
+    """One state: its N2 rows, from its first election, worded once."""
+    points = []
+    for row in rows:
+        year = election_view.row_year(row)
+        if year is None:
+            raise TypeError(f"{api.ELECTION_STATES_PATH} names a year that is not one")
+        status = row["pv_status"]
+        points.append(
+            Point(
+                year=year,
+                appointed=row["state_electoral_votes"],
+                appointed_cell=labels.number(row["state_electoral_votes"]),
+                total=row["state_popular_total"],
+                total_cell=labels.popular_votes(
+                    row["state_popular_total"],
+                    status,
+                    year,
+                    coverage,
+                    labels.NO_STATE_TOTAL,
+                ),
+                status=status,
+                status_cell=labels.pv_status(status),
+            )
+        )
+    return points
+
+
+def _figure_value(value: Any, *, zero: bool) -> int | None:
+    """A served count a bar can draw: an ``int`` (never a ``bool``) no larger than
+    :data:`explore.charts.MAX_INTEGER`, above zero, or at zero too where ``zero``.
+    Anything else is a marker."""
+    if type(value) is not int or value > charts.MAX_INTEGER:
+        return None
+    return value if value > 0 or (zero and value == 0) else None
+
+
+def _noted(cell: str) -> str:
+    """A cell as a hover writes it: an unrecognized one adds its note."""
+    if cell == labels.UNRECOGNIZED:
+        return f"{cell}<br>{labels.UNRECOGNIZED_NOTE}"
+    return cell
+
+
+def _hover(point: Point, state: str | None, *, total: bool) -> str:
+    """A row's hover in C4 (``total`` false) or C5: the table's cells. ``state`` is
+    the escaped state name, or ``None`` for all states."""
+    year = str(point.year)
+    if state is None:
+        if total:
+            return labels.C5_HOVER.format(year=year, total=_noted(point.total_cell))
+        return labels.C4_HOVER.format(year=year, appointed=_noted(point.appointed_cell))
+    status = _noted(point.status_cell or labels.UNRECOGNIZED)
+    if total:
+        return labels.C5_STATE_HOVER.format(
+            year=year, state=state, total=_noted(point.total_cell), pv_status=status
+        )
+    return labels.C4_STATE_HOVER.format(
+        year=year,
+        state=state,
+        appointed=_noted(point.appointed_cell),
+        pv_status=status,
+    )
+
+
+def _bar_trace(
+    name: str, drawn: list[tuple[Point, int, str, str]], position: dict[int, int]
+) -> dict[str, Any]:
+    """A series of bars, one per drawn row, each labeled with its table cell."""
+    return {
+        "type": "bar",
+        "orientation": "h",
+        "name": name,
+        "showlegend": False,
+        "ids": [str(point.year) for point, _, _, _ in drawn],
+        "x": [value for _, value, _, _ in drawn],
+        "y": [position[point.year] for point, _, _, _ in drawn],
+        "text": [cell for _, _, cell, _ in drawn],
+        "textposition": "outside",
+        "textfont": {"color": "var(--text)"},
+        "cliponaxis": False,
+        "marker": {"color": "var(--chart-1)"},
+        "hovertext": [hover for _, _, _, hover in drawn],
+        "hovertemplate": "%{hovertext}<extra></extra>",
+    }
+
+
+def _marker_trace(
+    name: str,
+    symbol: str,
+    marks: list[tuple[Point, str, str]],
+    position: dict[int, int],
+) -> dict[str, Any]:
+    """A series of labeled markers at zero, one per row with nothing to draw."""
+    return {
+        "type": "scatter",
+        "mode": "markers+text",
+        "name": name,
+        "showlegend": False,
+        "ids": [str(point.year) for point, _, _ in marks],
+        "x": [0] * len(marks),
+        "y": [position[point.year] for point, _, _ in marks],
+        "text": [label for _, label, _ in marks],
+        "textposition": "middle right",
+        "textfont": {"color": "var(--text)"},
+        "cliponaxis": False,
+        "marker": {"symbol": symbol, "size": 10, "color": "var(--text)"},
+        "hovertext": [hover for _, _, hover in marks],
+        "hovertemplate": "%{hovertext}<extra></extra>",
+    }
+
+
+def _over_time_layout(
+    title: str, axis: str, years: list[int], longest: int
+) -> dict[str, Any]:
+    """C4 and C5's shared layout: one row per served year, oldest on top, in every mode
+    (an explicit range, so a state's empty rows before its first election keep their
+    place), and value-axis ticks hidden, as C3's."""
+    n = len(years)
+    return {
+        "title": {"text": title},
+        "height": _OVER_TIME_ROW_PX * max(n, 1)
+        + _OVER_TIME_TOP_PX
+        + _OVER_TIME_BOTTOM_PX,
+        "margin": {
+            "t": _OVER_TIME_TOP_PX,
+            "b": _OVER_TIME_BOTTOM_PX,
+            "r": _OVER_TIME_RIGHT_PX,
+        },
+        "showlegend": False,
+        "xaxis": {
+            "range": [0, max(longest, 1)],
+            "showticklabels": False,
+            "title": {"text": axis},
+        },
+        "yaxis": {
+            "tickvals": list(range(n)),
+            "ticktext": [str(year) for year in years],
+            "range": [n - 0.5, -0.5],
+            "autorange": False,
+            "showgrid": False,
+            "zeroline": False,
+        },
+    }
+
+
+class OverTime(NamedTuple):
+    """A chart's figure and what its caption needs to say."""
+
+    figure: dict[str, Any]
+    zeros: bool
+    missing: bool
+    before: bool
+    after: bool
+
+
+def _c4_figure(
+    points: list[Point], years: list[int], title: str, state: str | None
+) -> OverTime:
+    """C4's figure (#436, D100): the appointed allotment of each row with one, as a
+    bar labeled with its table cell; a zero allotment is a labeled marker by its cause
+    (the D091 exception), and a null or unknown one a marker in a series of its own.
+    ``state`` is the escaped state name, or ``None`` for all states."""
+    position = {year: i for i, year in enumerate(years)}
+    drawn: list[tuple[Point, int, str, str]] = []
+    zeros: list[tuple[Point, str, str]] = []
+    missing: list[tuple[Point, str, str]] = []
+    for point in points:
+        hover = _hover(point, state, total=False)
+        value = _figure_value(point.appointed, zero=False)
+        if value is not None and point.appointed_cell != labels.UNRECOGNIZED:
+            drawn.append((point, value, point.appointed_cell, hover))
+        elif type(point.appointed) is int and point.appointed == 0:
+            label = (
+                labels.C4_NO_ELECTORS_TOOK_NO_PART
+                if point.status == "not_participating"
+                else labels.C4_NO_ELECTORS
+            )
+            zeros.append((point, label, hover))
+        else:
+            label = (
+                labels.NOT_IN_DATASET
+                if point.appointed_cell == labels.NOT_IN_DATASET
+                else labels.UNRECOGNIZED
+            )
+            missing.append((point, label, hover))
+    name = labels.LABELS[
+        "electoral_denominator" if state is None else "state_electoral_votes"
+    ]
+    data: list[dict[str, Any]] = []
+    if drawn:
+        data.append(_bar_trace(name, drawn, position))
+    if zeros:
+        data.append(_marker_trace(labels.C4_NO_ELECTORS, "x", zeros, position))
+    if missing:
+        data.append(
+            _marker_trace(labels.C4_NO_FIGURE_SERIES, "circle-open", missing, position)
+        )
+    longest = max((value for _, value, _, _ in drawn), default=1)
+    figure = {
+        "data": data,
+        "layout": _over_time_layout(title, labels.C4_X_AXIS, years, longest),
+    }
+    return OverTime(figure, bool(zeros), bool(missing), False, False)
+
+
+def _band(
+    rows: list[int], label: str, *, top: bool
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """A shaded band over ``rows`` (positions, consecutive) and its labels: at the
+    band's lower edge, inside it, and, for the band before the window (``top``), above
+    the plot too, since the chart is tall."""
+    first, last = rows[0], rows[-1]
+    shape = {
+        "type": "rect",
+        "xref": "paper",
+        "x0": 0,
+        "x1": 1,
+        "yref": "y",
+        "y0": first - 0.5,
+        "y1": last + 0.5,
+        "layer": "below",
+        "fillcolor": "var(--chart-grid)",
+        "line": {"width": 1, "color": "var(--chart-reference)"},
+    }
+    common = {
+        "text": label,
+        "showarrow": False,
+        "font": {"color": "var(--text)", "size": 12},
+    }
+    notes = [
+        {
+            **common,
+            "xref": "paper",
+            "x": 1,
+            "xanchor": "right",
+            "yref": "y",
+            "y": last + 0.5,
+            "yanchor": "bottom",
+        }
+    ]
+    if top:
+        notes.append(
+            {**common, "xref": "paper", "x": 0.5, "yref": "paper", "y": 1}
+            | {"yanchor": "bottom"}
+        )
+    return shape, notes
+
+
+def _c5_figure(
+    points: list[Point],
+    years: list[int],
+    title: str,
+    state: str | None,
+    window: tuple[int, int],
+) -> OverTime:
+    """C5's figure (#436, D100): the total popular vote of each row with one, as a bar
+    labeled with its table cell. The years before and after the popular-vote window
+    (``window``, read from ``coverage``) are a labeled band, which alone marks a held
+    popular vote outside it; every other row with nothing to draw is a labeled marker,
+    one series per label (:data:`explore.labels.C5_MARKER_LABELS`), wherever it falls,
+    inside the band included. ``state`` is the escaped state name, or ``None``."""
+    position = {year: i for i, year in enumerate(years)}
+    pv_min, pv_max = window
+    banded = {
+        labels.NOT_APPLICABLE,
+        labels.AFTER_WINDOW,
+        labels.BEFORE_WINDOW.format(pv_year_min=pv_min),
+    }
+    drawn: list[tuple[Point, int, str, str]] = []
+    marks: dict[str, list[tuple[Point, str, str]]] = {}
+    for point in points:
+        hover = _hover(point, state, total=True)
+        value = _figure_value(point.total, zero=True)
+        if value is not None and point.total_cell == labels.number(value):
+            drawn.append((point, value, point.total_cell, hover))
+            continue
+        outside = not pv_min <= point.year <= pv_max
+        if outside and point.total_cell in banded:
+            continue
+        label = labels.C5_MARKER_LABELS.get(point.total_cell, labels.UNRECOGNIZED)
+        marks.setdefault(label, []).append((point, label, hover))
+    name = labels.LABELS[
+        "national_pv_denominator" if state is None else "state_popular_total"
+    ]
+    data: list[dict[str, Any]] = []
+    if drawn:
+        data.append(_bar_trace(name, drawn, position))
+    for label, symbol in _C5_SYMBOLS.items():
+        if label in marks:
+            data.append(_marker_trace(label, symbol, marks[label], position))
+    longest = max((value for _, value, _, _ in drawn), default=1)
+    layout = _over_time_layout(title, labels.C5_X_AXIS, years, longest)
+    shapes: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
+    before = [position[year] for year in years if year < pv_min]
+    after = [position[year] for year in years if year > pv_max]
+    if before:
+        shape, notes = _band(
+            before, labels.C5_BEFORE_BAND.format(pv_year_min=pv_min), top=True
+        )
+        shapes.append(shape)
+        annotations += notes
+    if after:
+        shape, notes = _band(
+            after, labels.C5_AFTER_BAND.format(pv_year_max=pv_max), top=False
+        )
+        shapes.append(shape)
+        annotations += notes
+    if shapes:
+        layout["shapes"] = shapes
+        layout["annotations"] = annotations
+    return OverTime(
+        {"data": data, "layout": layout}, False, bool(marks), bool(before), bool(after)
+    )
+
+
+def _c4_caption(c4: OverTime, state: str | None, first: int | None) -> str:
+    """C4's caption: what electors appointed is, what an all-states bar adds up, what
+    each marker means where one is drawn, and a state's first election where it comes
+    after the dataset's first. Names a served state only in plain text (``state`` is
+    the plain name or ``None``); ``components.chart`` adds the table pointer."""
+    parts = [labels.C4_BASIS]
+    if first is None:
+        parts.append(labels.C4_ALL_STATES)
+    if c4.zeros:
+        parts.append(labels.C4_ZERO_NOTE)
+    if c4.missing:
+        parts.append(labels.C4_NO_FIGURE_NOTE)
+    return " ".join(parts + _first_note(state, first))
+
+
+def _c5_caption(
+    c5: OverTime, state: str | None, first: int | None, window: tuple[int, int]
+) -> str:
+    """C5's caption: what the total counts, what an all-states bar adds up, what the
+    band and the markers mean where drawn, and a state's first election."""
+    parts = [labels.C5_BASIS]
+    if first is None:
+        parts.append(labels.C5_ALL_STATES)
+    if c5.before:
+        parts.append(labels.C5_BEFORE_NOTE.format(pv_year_min=window[0]))
+    if c5.after:
+        parts.append(labels.C5_AFTER_NOTE.format(pv_year_max=window[1]))
+    if c5.missing:
+        parts.append(labels.C5_MARKER_NOTE)
+    return " ".join(parts + _first_note(state, first))
+
+
+def _first_note(state: str | None, first: int | None) -> list[str]:
+    """The first-election sentence, for a state whose first election comes after the
+    dataset's first (``first`` is that year, else ``None``)."""
+    if first is None:
+        return []
+    if state is None:
+        return [labels.FIRST_ELECTION_NOTE_SELECTED.format(year=first)]
+    return [labels.FIRST_ELECTION_NOTE.format(state=state, year=first)]
+
+
+def _state_control(
+    series: dict[str, list[dict[str, Any]]] | None, chosen: str | None
 ) -> html.Div:
-    """The whole page for one ``/v1/elections`` response, this page's filter pairs and
-    N1's body (``None`` when it could not be read): the heading and lede, C2's section,
-    then the list of elections with its headline metrics. The filters narrow T1 and the
-    metrics computed from it only."""
+    """The state control, its options N2's states by name. Rendered on every successful
+    render, so the filter callback's inputs always exist: with N2 unavailable
+    (``series`` is ``None``) it is hidden, with no options and no value. Its value is
+    always ``None`` or one of its options."""
+    options = [
+        {"label": str(rows[0]["state"]), "value": usps}
+        for usps, rows in sorted(
+            (series or {}).items(), key=lambda kv: str(kv[1][0]["state"])
+        )
+    ]
+    value = chosen if any(option["value"] == chosen for option in options) else None
+    hidden: dict[str, Any] = (
+        {} if series is not None else {"style": {"display": "none"}}
+    )
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Label(
+                        labels.LABELS[STATE], htmlFor=STATE_ID, className="label"
+                    ),
+                    dcc.Dropdown(
+                        id=STATE_ID,
+                        options=options,
+                        value=value,
+                        placeholder=ALL_STATES,
+                        clearable=True,
+                    ),
+                ],
+                className="filter",
+            )
+        ],
+        className="filters",
+        **hidden,
+    )
+
+
+def _over_time_row(point: Point, row: dict[str, Any]) -> html.Tr:
+    """A row of the companion table: the year, linked to its election, then (for one
+    state) the state's name linked to its history, and the cells C4 and C5 write."""
+    year = html.Td(dcc.Link(str(point.year), href=f"/election/{point.year}"))
+    if point.status_cell is None:
+        return html.Tr(
+            [year, labels.cell(point.appointed_cell), labels.cell(point.total_cell)]
+        )
+    return html.Tr(
+        [
+            year,
+            components.state_cell(row),
+            labels.cell(point.appointed_cell),
+            labels.cell(point.total_cell),
+            labels.cell(point.status_cell),
+        ]
+    )
+
+
+def _over_time_section(
+    index: dict[str, Any],
+    summary: Any,
+    states: Any,
+    pairs: list[tuple[str, str]],
+) -> list[Any]:
+    """C4 and C5's section (#436, D100): its heading, the state choice, both charts and
+    their one companion table.
+
+    A failed (``summary`` is ``None``) or malformed N1 shows the heading and
+    :data:`OVER_TIME_UNAVAILABLE` only, beside the hidden state control. A failed
+    (``states`` is ``None``) or malformed N2 keeps the all-states charts and table and
+    shows :data:`OVER_TIME_NO_STATES` in place of the control, hidden; a ``state`` in
+    the link stays in it but is not applied. The ``try`` covers everything built from
+    N1 and N2; never ``components.chart``, which no page catches around (D095(f))."""
+    heading = html.H2(OVER_TIME_HEADING)
+    try:
+        if summary is None:
+            raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
+        coverage = index["meta"]["provenance"]["coverage"]
+        window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
+        items = n1_items(index, summary)
+        years = sorted(items)
+        totals = national_pv(summary, years)
+        series: dict[str, list[dict[str, Any]]] | None = None
+        state_provenance: Any = None
+        if states is not None:
+            try:
+                series = n2_rows(states, years)
+                state_provenance = states["meta"]["provenance"]
+            except (KeyError, TypeError):
+                series = None
+        chosen = chosen_state(pairs, series)
+        if chosen is None or series is None:
+            rows: list[dict[str, Any]] = [
+                {
+                    "year": year,
+                    "electoral_denominator": items[year]["electoral_denominator"],
+                    "national_pv_denominator": totals[year],
+                }
+                for year in years
+            ]
+            points = _all_states_points(items, totals, coverage)
+            fields: tuple[str, ...] = OVER_TIME_FIELDS
+            extra: tuple[str, ...] = ()
+            name: Any = None
+            first: int | None = None
+            download = export.Download(
+                filename="elections-electors-and-popular-vote-all-states.csv",
+                name="electors appointed and the total popular vote, all states",
+                provenance=summary["meta"]["provenance"],
+                view_url=export.view_url(CANONICAL_HOST, "/elections", ""),
+            )
+        else:
+            rows = series[chosen]
+            points = _state_points(rows, coverage)
+            fields, extra = OVER_TIME_STATE_FIELDS, OVER_TIME_STATE_EXTRA
+            name = rows[0]["state"]
+            first = points[0].year if points[0].year > years[0] else None
+            download = export.Download(
+                filename=f"elections-electors-and-popular-vote-{chosen}.csv",
+                name="electors appointed and the total popular vote for this state",
+                provenance=state_provenance,
+                view_url=export.view_url(
+                    CANONICAL_HOST,
+                    "/elections",
+                    query.encode_search([(STATE, chosen)]),
+                ),
+            )
+        if not rows:
+            raise TypeError("the over-time table has no rows")
+        plain = _plain(name)
+        state = None if chosen is None else charts.escaped(str(name))
+        if chosen is None:
+            c4_title, c5_title = labels.C4_TITLE, labels.C5_TITLE
+        elif plain is None:
+            c4_title, c5_title = labels.C4_TITLE_SELECTED, labels.C5_TITLE_SELECTED
+        else:
+            c4_title = labels.C4_TITLE_STATE.format(state=plain)
+            c5_title = labels.C5_TITLE_STATE.format(state=plain)
+        c4 = _c4_figure(points, years, c4_title, state)
+        c5 = _c5_figure(points, years, c5_title, state, window)
+        c4_caption = _c4_caption(c4, plain, first)
+        c5_caption = _c5_caption(c5, plain, first, window)
+        by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
+        notes = (
+            labels.C4_BASIS,
+            labels.C5_BASIS,
+            labels.OVER_TIME_WINDOW_NOTE.format(
+                pv_year_min=window[0], pv_year_max=window[1]
+            ),
+        )
+        table = components.table(
+            rows,
+            lambda r: _over_time_row(by_row[id(r)], r),
+            fields,
+            OVER_TIME_TABLE_ID,
+            download,
+            extra=extra,
+            notes=notes,
+        )
+    except (KeyError, TypeError):
+        return [
+            heading,
+            _state_control(None, None),
+            html.P(
+                OVER_TIME_UNAVAILABLE, id=OVER_TIME_UNAVAILABLE_ID, className="note"
+            ),
+        ]
+    if series is None:
+        choice = [
+            html.P(OVER_TIME_NO_STATES, id=OVER_TIME_NO_STATES_ID, className="note"),
+            _state_control(None, None),
+        ]
+    else:
+        choice = [
+            html.P(OVER_TIME_FILTER_SENTENCE, className="note"),
+            _state_control(series, chosen),
+            html.P(OVER_TIME_REACH, className="note"),
+        ]
+    return [
+        heading,
+        *choice,
+        html.P(OVER_TIME_LIST_FILTERS, className="note"),
+        components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, c4_caption),
+        components.chart(C5_ID, c5.figure, OVER_TIME_TABLE_ID, c5_caption),
+        html.H2(OVER_TIME_TABLE_HEADING),
+        *table,
+        labels.glossary(fields),
+    ]
+
+
+def render(
+    body: dict[str, Any],
+    pairs: list[tuple[str, str]],
+    summary: Any = None,
+    states: Any = None,
+) -> html.Div:
+    """The whole page for one ``/v1/elections`` response, this page's filter pairs,
+    N1's body and N2's (each ``None`` when it could not be read): the heading and lede,
+    C2's section, the list of elections with its headline metrics, then C4 and C5's
+    section. The year and popular-vote filters narrow T1 and the metrics computed from
+    it only; the state filter switches C4, C5 and their table only."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     chosen = filters(pairs, coverage)
@@ -706,6 +1543,7 @@ def render(
                 empty="No elections match these filters.",
             ),
             labels.glossary(FIELDS),
+            *_over_time_section(body, summary, states, pairs),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
@@ -714,8 +1552,10 @@ def render(
 
 def layout(**query: Any) -> html.Div:
     """The elections index. On success, :func:`render`'s body is the whole page; the
-    degraded state gets the heading and :data:`LEDE` here. N1 is read in the same view,
-    after the index, in its own ``try``: a failed read degrades only C2's section."""
+    degraded state gets the heading and :data:`LEDE` here. N1 and then N2 are read in
+    the same view, after the index, each in its own ``try``: a failed N1 degrades only
+    C2's section, the averages and C4 and C5's section, and a failed N2 only the state
+    choice."""
     try:
         with api.CLIENT.view() as view:
             body = view.get(api.ELECTIONS_PATH)
@@ -723,7 +1563,11 @@ def layout(**query: Any) -> html.Div:
                 summary = view.get(api.SUMMARY_PATH)
             except api.ApiUnavailable:
                 summary = None
-        return render(body, parse_filters(query), summary)
+            try:
+                states = view.get(api.ELECTION_STATES_PATH)
+            except api.ApiUnavailable:
+                states = None
+        return render(body, parse_filters(query), summary, states)
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div([html.H1("Elections"), html.P(LEDE, className="lede"), content])

@@ -19,6 +19,8 @@ RECORDED_FILES: dict[str, str] = {
     "/v1/elections": "v1_elections.json",
     # Every election's national summary, N1 (#431), chart C2's source (#434).
     "/v1/elections/summary": "v1_elections_summary.json",
+    # Every state's row for every election, N2 (#428), charts C4 and C5's source (#436).
+    "/v1/elections/states": "v1_elections_states.json",
     **{
         f"/v1/elections/{year}": f"v1_elections_{year}.json"
         for year in (1824, 1860, 1868, 1872, 1896, 2016, 2024)
