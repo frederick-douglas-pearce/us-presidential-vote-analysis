@@ -161,7 +161,13 @@ at `/election/<year>`) needs no marker; a test of a not-found render at such a p
 computed from the recorded responses; the tests read shared labels and constants from
 `explore` directly. A page a story changes keeps its e2e test current there, and a new page's `on_miss` paths need recorded responses, or its
 browser test sees only the degraded state. CI runs the suite in `e2e.yml` on changes under
-`dashboard/` and the other paths D082 lists; it is advisory. pytest-playwright deletes
+`dashboard/` and the other paths D082 lists; it is advisory. CI never uses `--with-deps`
+(#486): it restores the headless shell from a cache keyed on the installed Playwright
+version and the runner image, downloads and saves it only on a miss, then installs
+Chromium's system libraries with `playwright install-deps` in a step of their own. Each
+install step and the tests carry a `timeout-minutes` that fires before the job's, so a
+stalled package mirror fails its own step rather than cancelling the job;
+`tests/unit/test_e2e_workflow.py` guards that shape. pytest-playwright deletes
 `./test-results/` (traces, kept by `--tracing retain-on-failure`) at the start of every pytest
 session, the default unit run included, so copy a local trace out before running pytest
 again; CI uploads them in the same job.
