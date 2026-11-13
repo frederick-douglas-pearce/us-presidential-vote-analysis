@@ -26,7 +26,9 @@ bottom is what the backlog expands into GitHub issues and stories.
 | **E8** Internal API | **Done, and past its MVP bar** (#94) — a read-only SQLite snapshot served by FastAPI with no live DB (D028), publicly deployed to Cloud Run behind Cloudflare and **live at `https://api.us-presidential-election-center.org`** (#101, D034/D035). The served window was widened from the MIT-only 1976–2024 back to the full **1824–2024** EC span in #139. **Open:** hybrid/flip/margin fields (#102) — E7 has landed, so this is no longer gated |
 | **E9** Public dashboard *(re-scoped from "analytical explorer data mart", D070)* | **Scoped, not started** — a dashboard at `explore.us-presidential-election-center.org` that reads the public API; the mart is deferred under YAGNI. Gated on a platform research spike (E9-S1); see [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
 | **E10** Census / apportionment analysis | **Done** — every story landed (tracker #129) — added after this outline was written; per-capita series on the public API since #245 |
-| **E14** Dashboard UI *(split out of E9, 2026-10-12)* | **Scoped** (#361, `epic:dashboard-ui`) — layout, theming, visual design, accessibility and the chart presentation foundation; E9 keeps the data path. See [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
+| **E14** Dashboard UI *(split out of E9, 2026-10-12)* | **Scoped** (#361, `epic:dashboard-ui`) — layout, theming, visual design, accessibility fixes to presentation, and the chart presentation foundation (accessibility audits, tooling and the public statement are E16); E9 keeps the data path. See [`backlog-dashboard.md`](../.claude/specs/backlog-dashboard.md) |
+| **E15** Observability and discoverability *(added 2026-11-13)* | **Filed** (#500, `epic:observability`) — traffic history and its runbook, privacy-first analytics with a dashboard privacy page, robots/sitemap and search-engine submission, API indexing, API usage reporting, uptime alerting, the apex redirect. See [`backlog-observability.md`](../.claude/specs/backlog-observability.md) |
+| **E16** Accessibility *(added 2026-11-13)* | **Filed** (#501, `epic:accessibility`) — WCAG 2.2 AA: audit tool, baseline, manual checks, public statement, later a CI gate; fixes land in the owning epic with the `a11y` label. See [`backlog-accessibility.md`](../.claude/specs/backlog-accessibility.md) |
 | *(unnumbered)* Publishing | **Done and in use** — see below |
 
 Two workstreams sit outside the original E1–E9 outline:
@@ -186,6 +188,9 @@ flips and margins, and expose them through an internal API that powers our app.
   votes; non-blocking nice-to-have (D007).
 - **Hybrid no-270 legal treatment** — the "no candidate reaches 270" ambiguity relevant
   to the hybrid method; parked for a later decision (D010).
+- **Apex intro page, and possibly a chat feature.** The apex redirects to the dashboard for
+  now (E15, #510). A general project intro page there is planned and overlaps E9-S8's
+  landing page. A chatbot is an idea only, with no issue.
 - **Presentation platform** — the actual frontend/dashboard host. Deferral lifted by
   D070; chosen by the E9-S1 research spike (recorded as D071).
 - ~~**`social/` content**~~ — **REAL, and in use** (D012). Became the **"Counted, Not
@@ -214,7 +219,9 @@ the original plan; the **Status** column is where each one actually got to.
 | **E8** | Internal API | FastAPI/REST over `ec_pv_redistributable` via a read-only embedded snapshot (no live DB); redistributable-only; MVP bar = powers our app; **depends only on E6, not E7** (D028–D032) | M3 (scoped + filed, #94) | **Done + publicly deployed**; #102 open |
 | **E9** | Public dashboard *(was: analytical explorer data mart — re-scoped, D070)* | dashboard over the public API: raw tables → charts → narrative tabs → landing page; mart deferred (YAGNI) | M3 (named) | Scoped (`epic:dashboard`) |
 | **E10** | Census / apportionment analysis | state population + apportionment; the per-capita elector-weight drift question | *(added later)* | **Done** — every story landed (tracker #129) |
-| **E14** | Dashboard UI | presentation across the dashboard: layout and responsive behavior, light/dark theming, visual design, accessibility, chart templates and palette; split out of E9 | *(added later)* | Scoped (#361, `epic:dashboard-ui`) |
+| **E14** | Dashboard UI | presentation across the dashboard: layout and responsive behavior, light/dark theming, visual design, accessibility fixes to presentation (audits and the statement: E16), chart templates and palette; split out of E9 | *(added later)* | Scoped (#361, `epic:dashboard-ui`) |
+| **E15** | Observability and discoverability | traffic history, privacy-first analytics, robots/sitemap and search engines, API indexing and usage, uptime alerting, the apex redirect | *(added later)* | Filed (#500, `epic:observability`) |
+| **E16** | Accessibility | WCAG 2.2 AA audit tool, baseline, manual checks, public statement, CI gate; owns no fixes | *(added later)* | Filed (#501, `epic:accessibility`) |
 
 **Critical path:** E1 → E2 (backbone) with E3 running in parallel. PV is dual-source
 (D014): **E4 (UCSB historical, un-deferred, high-priority)** and E5 (MIT modern) feed E6
