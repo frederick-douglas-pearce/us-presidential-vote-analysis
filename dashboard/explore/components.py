@@ -416,7 +416,10 @@ def chart(
     its problems, and the figure is returned with its title and caption but no mount
     point and no store, so no callback runs for it and plotly.js is not fetched for it;
     the page keeps its tables and its other charts. The unit suite fails on that log
-    line (the unit suite's ``no_undeclared_chart_failure``, D095). An unregistered or
+    line (the unit suite's ``no_undeclared_chart_failure``, D095). The check is total
+    (#484, D099), and :func:`explore.charts.json_problems` runs before the figure is
+    copied, so a figure nested too deep, or holding what is no JSON value, is not drawn
+    rather than raising in the copy. An unregistered or
     retired ID, another table, an empty caption or a title that is not plain text
     raises ``ValueError``: only a code change reaches those, so they are a page's bug,
     never a reader's input.
@@ -428,9 +431,19 @@ def chart(
         raise ValueError(f"{chart_id}'s companion table is {row.table!r}")
     if not labels.has_text(caption):
         raise ValueError(f"{chart_id} has no caption")
-    source = copy.deepcopy(figure)
-    layout = source.get("layout") if isinstance(source, dict) else None
-    title = layout.pop("title", None) if isinstance(layout, dict) else None
+    # Before the copy, which recurses: a figure nested too deep, or holding what is
+    # no JSON value, is not drawn rather than raising here (#484, D099). Its title is
+    # then read in place, since only the copy's may be removed.
+    problems = charts.json_problems(figure)
+    source = None if problems else copy.deepcopy(figure)
+    holder = figure if source is None else source
+    layout = holder.get("layout") if isinstance(holder, dict) else None
+    if not isinstance(layout, dict):
+        title = None
+    elif source is None:
+        title = layout.get("title")
+    else:
+        title = layout.pop("title", None)
     text = title.get("text") if isinstance(title, dict) else None
     if not (isinstance(text, str) and labels.has_text(text)) or "<" in text:
         raise ValueError(f"{chart_id} has no plain-text chart title")
@@ -441,7 +454,7 @@ def chart(
     pointer = html.Figcaption(
         [caption, " ", html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}"), "."]
     )
-    problems = charts.figure_problems(source)
+    problems = problems or charts.figure_problems(source)
     if problems:
         log.error(
             "%s on %s not drawn: %d figure problem(s): %r",
