@@ -139,6 +139,8 @@ OVER_TIME_TABLE_ID = "elections-over-time-table"
 OVER_TIME_UNAVAILABLE_ID = "elections-over-time-unavailable"
 OVER_TIME_NO_STATES_ID = "elections-over-time-no-states"
 STATE_ID = "elections-state"
+#: The state control's wrapper, hidden while N1 or N2 cannot be read.
+STATE_CONTROL_ID = "elections-state-control"
 #: The companion table's columns, in display order, by public field name: all states
 #: (N1), and one state (N2's rows for it), whose download adds the state's code.
 OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
@@ -282,21 +284,8 @@ def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
     )
 
 
-def search_for(years: Any, pv: Any, first: Any, last: Any) -> str:
-    """The query string for the controls' values, in the normal form ``og:url`` uses.
-
-    Defaults are omitted, the pairs pass through :func:`parse_filters`, and the result
-    is ``""`` or starts with ``?`` (a ``dcc.Location`` joins pathname and search
-    verbatim).
-    """
-    params = query.year_range_search(years, first, last)
-    if isinstance(pv, list) and "1" in pv:
-        params[PV] = "1"
-    return query.encode_search(parse_filters(params))
-
-
 def applied_search(chosen: Filters, first: int, last: int) -> str:
-    """The filters a render applied, in the normal form :func:`search_for` writes:
+    """The filters a render applied, in the normal form :func:`merged_search` writes:
     already checked, so they are encoded without the parser."""
     params = query.year_range_search([chosen.year_from, chosen.year_to], first, last)
     if chosen.pv_only:
@@ -818,6 +807,8 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
     :func:`explore.election_view.row_year` refuses or that is not served, a USPS code
     :data:`explore.query.USPS_RE` refuses, two rows for one year and state, two names
     for one code, or a gap: a served year after a state's first with no row for it.
+    Every row must carry ``state_electoral_votes``, ``state_popular_total`` and
+    ``pv_status`` (``KeyError``), so the result does not depend on the state chosen.
     """
     years = sorted(set(served))
     if not isinstance(body, dict):
@@ -836,6 +827,12 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
         usps = row["state_usps"]
         if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
             raise TypeError(f"{api.ELECTION_STATES_PATH} carries a bad state code")
+        # Present on every row, whichever state is chosen, so a malformed N2 refuses
+        # here (the all-states view stays) and never in the one-state build (#436's
+        # review). Their values are worded by ``labels``, which reads an unknown one as
+        # unrecognized.
+        for field in ("state_electoral_votes", "state_popular_total", "pv_status"):
+            row[field]
         name = row["state"]
         if not _same(names.setdefault(usps, name), name):
             raise TypeError(f"{api.ELECTION_STATES_PATH} names {usps} two ways")
@@ -1227,13 +1224,16 @@ def _c5_figure(
     )
 
 
-def _c4_caption(c4: OverTime, state: str | None, first: int | None) -> str:
-    """C4's caption: what electors appointed is, what an all-states bar adds up, what
-    each marker means where one is drawn, and a state's first election where it comes
-    after the dataset's first. Names a served state only in plain text (``state`` is
-    the plain name or ``None``); ``components.chart`` adds the table pointer."""
+def _c4_caption(
+    c4: OverTime, all_states: bool, state: str | None, first: int | None
+) -> str:
+    """C4's caption: what electors appointed is, what a bar adds up with all states
+    (``all_states``), what each marker means where one is drawn, and a state's first
+    election where it comes after the dataset's first. Names a served state only in
+    plain text (``state`` is the plain name or ``None``); ``components.chart`` adds the
+    table pointer."""
     parts = [labels.C4_BASIS]
-    if first is None:
+    if all_states:
         parts.append(labels.C4_ALL_STATES)
     if c4.zeros:
         parts.append(labels.C4_ZERO_NOTE)
@@ -1243,12 +1243,16 @@ def _c4_caption(c4: OverTime, state: str | None, first: int | None) -> str:
 
 
 def _c5_caption(
-    c5: OverTime, state: str | None, first: int | None, window: tuple[int, int]
+    c5: OverTime,
+    all_states: bool,
+    state: str | None,
+    first: int | None,
+    window: tuple[int, int],
 ) -> str:
-    """C5's caption: what the total counts, what an all-states bar adds up, what the
-    band and the markers mean where drawn, and a state's first election."""
+    """C5's caption: what the total counts, what a bar adds up with all states, what
+    the band and the markers mean where drawn, and a state's first election."""
     parts = [labels.C5_BASIS]
-    if first is None:
+    if all_states:
         parts.append(labels.C5_ALL_STATES)
     if c5.before:
         parts.append(labels.C5_BEFORE_NOTE.format(pv_year_min=window[0]))
@@ -1305,6 +1309,7 @@ def _state_control(
             )
         ],
         className="filters",
+        id=STATE_CONTROL_ID,
         **hidden,
     )
 
@@ -1358,9 +1363,17 @@ def _over_time_section(
             try:
                 series = n2_rows(states, years)
                 state_provenance = states["meta"]["provenance"]
+                # The one-state download reads N2's provenance; check it here, by the
+                # function that reads it, so a malformed one falls back to all states.
+                export.preamble(
+                    (*OVER_TIME_STATE_FIELDS, *OVER_TIME_STATE_EXTRA),
+                    state_provenance,
+                    "",
+                )
             except (KeyError, TypeError):
                 series = None
         chosen = chosen_state(pairs, series)
+        all_states = chosen is None or series is None
         if chosen is None or series is None:
             rows: list[dict[str, Any]] = [
                 {
@@ -1410,8 +1423,8 @@ def _over_time_section(
             c5_title = labels.C5_TITLE_STATE.format(state=plain)
         c4 = _c4_figure(points, years, c4_title, state)
         c5 = _c5_figure(points, years, c5_title, state, window)
-        c4_caption = _c4_caption(c4, plain, first)
-        c5_caption = _c5_caption(c5, plain, first, window)
+        c4_caption = _c4_caption(c4, all_states, plain, first)
+        c5_caption = _c5_caption(c5, all_states, plain, first, window)
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
         notes = (
             labels.C4_BASIS,

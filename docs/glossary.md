@@ -146,7 +146,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral share. It can be 0 for a state whose votes were withheld (1864, 1868). It is the top
   rung of the ladder **appointed ≥ cast ≥ counted**. `electoral_denominator` on each
   `/v1/elections/summary` item is the same national figure.
-- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7);
+- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7, and the C4/C5 table and C4's bars with one
+  state chosen);
   `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line "Electors appointed"
   (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`, and the caption
   sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`. In C3, the hover
@@ -399,8 +400,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   the chart rules, no drawing appears, and the title, the caption, the pointer and the page's
   tables still show. A chart is never a page's success marker. A chart has no download of its
   own: its companion table's CSV carries its numbers.
-- **Shown as:** C4 and C5 are on `/elections`, after the list of elections, with one companion
-  table between them. `components.chart`, which writes each chart's title as page text above the drawing
+- **Shown as:** `components.chart`, which writes each chart's title as page text above the drawing
   (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below it;
   `labels.CHART_TABLE_POINTER`; each chart's own wording (title, axis titles, trace names, legend
   title, hover text, annotations, caption) in `labels.py`; the axis number format, the hover
@@ -409,6 +409,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`/election/<year>`), is the first chart a page renders. C3 is on an election's People per
   electoral vote page (`/election/<year>/per-capita`). The home page's lede (`pages/home.py`)
   already says "Tables and charts". C2 is on the elections index (`/elections`), above the filters.
+  C4 and C5 are on `/elections`, after the list of elections, followed by the one companion
+  table they share.
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
@@ -697,7 +699,7 @@ articles and announcements). Every rule binds all three unless the rule states a
     (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`. After the section,
     `LIST_HEADING` heads the filters, the count of elections shown, the averages (*Average
     margin*) and T1: the list of elections and the numbers computed from it, the only part of the
-    page the filters narrow.
+    page the year and popular-vote filters narrow.
 - **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); `CHARTS`;
   `NationalSummaryRow.ec_share_full`, `electoral_rank`, `national_electoral_votes_counted` and
   `national_electoral_denominator`, `ElectionSummary.ec_determinative` and
@@ -894,8 +896,11 @@ articles and announcements). Every rule binds all three unless the rule states a
     `OVER_TIME_NO_STATES` in its place; a `state` in the link stays in it but is not applied. T1,
     the chart of each election's Electoral College leader and the averages are unaffected either
     way.
-- **Shown as:** `OVER_TIME_*` and the table heading in `pages/elections.py`; `C4_*`, `C5_*`,
-  `FIRST_ELECTION_NOTE`, `NO_STATE_TOTAL` and `NO_NATIONAL_TOTAL` in `labels.py`; then
+- **Shown as:** `OVER_TIME_*`, `ALL_STATES` (the state control's placeholder), the table heading
+  and the downloads "electors appointed and the total popular vote, all states"
+  (`elections-electors-and-popular-vote-all-states.csv`) and "electors appointed and the total
+  popular vote for this state" (`elections-electors-and-popular-vote-<usps>.csv`) in
+  `pages/elections.py`; `C4_*`, `C5_*`, `FIRST_ELECTION_NOTE` and `FIRST_ELECTION_NOTE_SELECTED`, `NO_STATE_TOTAL` and `NO_NATIONAL_TOTAL` in `labels.py`; then
   `labels.CHART_TABLE_POINTER`.
 - **Source:**
   - #436 ACs (owner, 2026-11-05);
@@ -1124,7 +1129,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C3_MARKER_LABELS`), and, in `labels.C3_NO_FIGURE_HOVER`, the full cell (for
   `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`). In `labels.C3_BAR_HOVER`, each of the row's
   other T6 cells (population, electors appointed, census used, borders used) as T6 shows it; for the
-  borders cell the caption adds `labels.C3_PLAIN_MIXED`.
+  borders cell the caption adds `labels.C3_PLAIN_MIXED`. In C4,
+  `labels.NOT_IN_DATASET` labels the marker drawn in place of a bar for a null allotment, in the
+  series `labels.C4_NO_FIGURE_SERIES` (never shown), with `labels.C4_NO_FIGURE_NOTE` in the
+  caption; its hover (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1519,7 +1527,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["state"]`; the state control on `/elections` (placeholder "All
   states"), named by `OVER_TIME_FILTER_SENTENCE` and, while it cannot be offered,
   `OVER_TIME_NO_STATES` (`pages/elections.py`); `labels.C4_TITLE_STATE`, `labels.C5_TITLE_STATE`
-  and their "selected state" forms; `labels.FIRST_ELECTION_NOTE`; the name linking to
+  and their "selected state" forms; `labels.FIRST_ELECTION_NOTE` and its "selected state" form `labels.FIRST_ELECTION_NOTE_SELECTED`; the name linking to
   `/state/<usps>` in the C4/C5 table; the state filter on `/election/<year>/states`, named by that
   page's `FILTER_SENTENCE` (`pages/election_states.py`), and on `/election/<year>/per-capita`, named
   by its `FILTER_SENTENCE` (`pages/election_per_capita.py`), both with the placeholder "All states",
@@ -1729,7 +1737,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`).
+  value's help text (set by `labels.cell`). In C4 and C5, `labels.UNRECOGNIZED` labels
+  the marker drawn in place of a bar for such a value (C5 through `labels.C5_MARKER_LABELS`), and
+  `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C5_STATE_HOVER` write
+  it with `labels.UNRECOGNIZED_NOTE`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan

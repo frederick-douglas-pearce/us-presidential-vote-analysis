@@ -152,6 +152,15 @@ def parse(query: str) -> dict[str, Any]:
     return dash._pages._parse_query_string(f"?{query}") if query else {}
 
 
+def from_controls(years: Any, pv: Any, first: Any, last: Any) -> str:
+    """The search the year and popular-vote controls write from an empty URL: the
+    years control's change, then the pv control's, each replacing only its own keys
+    (``merged_search``, #436)."""
+    after_years = MOD["merged_search"](YEARS_ID, years, pv, None, first, last, "")
+    search: str = MOD["merged_search"](PV_ID, years, pv, None, first, last, after_years)
+    return search
+
+
 def controls(tree: Any) -> tuple[Any, Any]:
     return find(tree, YEARS_ID), find(tree, PV_ID)
 
@@ -423,7 +432,7 @@ class TestShareableUrl:
     ) -> None:
         """A fixed point: the URL written from a render's controls is its og:url's."""
         years, pv = controls(render(parse(query)))
-        written = MOD["search_for"](years.value, pv.value, years.min, years.max)
+        written = from_controls(years.value, pv.value, years.min, years.max)
         og_url = appmod.resolve("/elections", query, None).og_url
         assert og_url is not None
         expected = urllib.parse.urlsplit(og_url).query
@@ -440,7 +449,7 @@ class TestShareableUrl:
         omits it. The two URLs still render the same view."""
         cached_client(monkeypatch)
         years, pv = controls(render(parse(query)))
-        written = MOD["search_for"](years.value, pv.value, years.min, years.max)
+        written = from_controls(years.value, pv.value, years.min, years.max)
         og_url = appmod.resolve("/elections", query, None).og_url
         assert og_url is not None
         shared = urllib.parse.urlsplit(og_url).query
@@ -533,10 +542,10 @@ class TestShareableUrl:
             (["1900", 1950], [], "?year_to=1950"),
         ],
     )
-    def test_search_for_is_total_and_normal(
+    def test_the_merge_from_the_controls_is_total_and_normal(
         self, years: Any, pv: Any, search: str
     ) -> None:
-        assert MOD["search_for"](years, pv, FIRST, LAST) == search
+        assert from_controls(years, pv, FIRST, LAST) == search
 
 
 # --- request budget and the snapshot cutover -----------------------------------------
@@ -559,27 +568,56 @@ class TestRequestBudget:
         for search in ("?state=GA", "?state=GA&year_from=1900", "?state=AK&pv=1"):
             route("/elections", search)
         assert calls == FILLS
-        for control, years, pv, state in (
-            (YEARS_ID, [1900, LAST], ["1"], None),
-            (PV_ID, [FIRST, 1950], [], None),
-            (MOD["STATE_ID"], [FIRST, LAST], [], "GA"),
-        ):
-            MOD["next_search"](control, years, pv, state, FIRST, LAST, "")
         assert calls == FILLS
         assert len(bucket.waits) == 2
 
-    def test_the_callback_reads_no_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        ("changed", "years", "pv", "state", "current", "written"),
+        [
+            (YEARS_ID, [1900, LAST], [], None, "", "?year_from=1900"),
+            (PV_ID, [FIRST, LAST], ["1"], None, "?state=GA", "?pv=1&state=GA"),
+            (MOD["STATE_ID"], [FIRST, LAST], [], "GA", "?pv=1", "?pv=1&state=GA"),
+        ],
+    )
+    def test_the_callback_reads_no_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        changed: str,
+        years: Any,
+        pv: Any,
+        state: Any,
+        current: str,
+        written: str,
+    ) -> None:
+        """The callback as Dash dispatches it, under a client that fails any read: each
+        control's change writes the URL and reads nothing (#436's review)."""
+
         class NoView:
+            def ensure_refresher(self) -> None:  # app.py's hook on every request
+                pass
+
             def view(self) -> Any:
                 raise AssertionError("the filter callback read the API")
 
         monkeypatch.setattr(api, "CLIENT", NoView())
-        assert MOD["next_search"](
-            YEARS_ID, [1900, LAST], [], None, FIRST, LAST, ""
-        ) == ("?year_from=1900")
-        assert MOD["next_search"](
-            MOD["STATE_ID"], [FIRST, LAST], [], "GA", FIRST, LAST, "?pv=1"
-        ) == ("?pv=1&state=GA")
+        body = {
+            "output": "elections-url.search",
+            "outputs": {"id": MOD["URL_ID"], "property": "search"},
+            "inputs": [
+                {"id": YEARS_ID, "property": "value", "value": years},
+                {"id": PV_ID, "property": "value", "value": pv},
+                {"id": MOD["STATE_ID"], "property": "value", "value": state},
+            ],
+            "state": [
+                {"id": YEARS_ID, "property": "min", "value": FIRST},
+                {"id": YEARS_ID, "property": "max", "value": LAST},
+                {"id": MOD["URL_ID"], "property": "search", "value": current},
+            ],
+            "changedPropIds": [f"{changed}.value"],
+        }
+        response = appmod.server.test_client().post("/_dash-update-component", json=body)
+        assert response.status_code == 200
+        assert response.get_json()["response"][MOD["URL_ID"]]["search"] == written
 
     def test_a_snapshot_cutover_reaches_the_view_through_the_refresher(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2324,7 +2362,7 @@ class TestC5:
         self, year: int
     ) -> None:
         """The recorded years where a candidate has no popular-vote figure still
-        carry one national total on every row (architect 4)."""
+        carry one national total on every row (D100(c))."""
         rows = [row for row in SUMMARY["data"] if row["year"] == year]
         assert any(row["national_pv_votes"] is None for row in rows)  # the premise
         totals = MOD["national_pv"](SUMMARY, YEARS)
@@ -2369,12 +2407,29 @@ class TestC5:
         assert 1868 not in marked and 1972 not in marked
         assert charts.figure_problems(figure) == []
 
-    def test_no_bar_is_a_zero_or_a_null(self) -> None:
+    def test_no_bar_is_a_null_and_a_zero_total_is_a_bar(self) -> None:
         for query in ({}, {"state": "GA"}, {"state": "SC"}):
             figure = chart_figure(render_over_time(query), C5)
             for t in figure["data"]:
                 if t["type"] == "bar":
-                    assert all(isinstance(x, int) and x > 0 for x in t["x"]), query
+                    assert all(isinstance(x, int) and x >= 0 for x in t["x"]), query
+        # A zero total is a drawn, labeled bar (D091); D100(d)'s exception is for
+        # allotments only.
+        states = copy.deepcopy(N2)
+        for row in states["data"]:
+            if row["state_usps"] == "GA" and row["year"] == 2016:
+                row["state_popular_total"] = 0
+        figure = chart_figure(render_over_time({"state": "GA"}, states=states), C5)
+        drawn = year_points(figure, labels.LABELS["state_popular_total"])
+        assert drawn[2016] == (0, "0")
+
+    def test_every_marker_label_has_a_symbol(self) -> None:
+        """A C5 marker label with no symbol would be dropped silently (#436's
+        review): inside the band that would read as a held popular vote."""
+        symbols = MOD["_C5_SYMBOLS"]
+        assert set(labels.C5_MARKER_LABELS.values()) | {labels.UNRECOGNIZED} <= set(
+            symbols
+        )
 
     @pytest.mark.parametrize("query", [{}, {"state": "GA"}, {"state": "AK"}])
     def test_both_charts_share_one_year_axis(self, query: dict[str, Any]) -> None:
@@ -2427,6 +2482,9 @@ class TestOverTimeFilter:
             (PV_ID, [FIRST, LAST], ["1"], None, "?state=GA", "?pv=1&state=GA"),
             (None, [1900, LAST], ["1"], "TX", "?state=GA", "?state=GA"),
             (STATE_ID, [FIRST, LAST], [], "<b>", "", ""),
+            # Only the changed control's keys move, whatever another control shows.
+            (STATE_ID, [1900, LAST], [], "GA", "", "?state=GA"),
+            (PV_ID, [FIRST, LAST], ["1"], None, "?year_from=1700", "?pv=1&year_from=1700"),
         ],
     )
     def test_the_merge_replaces_only_the_changed_control_s_keys(
@@ -2577,6 +2635,22 @@ class TestOverTimeValidation:
     def test_a_missing_key(self) -> None:
         self.refuses(lambda b: b["data"][0].pop("state"))
         self.refuses(lambda b: b.pop("data"))
+        # Each field the one-state view reads, on any row (#436's review, cr.2).
+        for field in ("state_electoral_votes", "state_popular_total", "pv_status"):
+            self.refuses(lambda b, f=field: b["data"][-1].pop(f))
+
+    def test_a_trailing_gap_and_a_longer_code(self) -> None:
+        last = max(YEARS)
+        self.refuses(
+            lambda b: b.update(
+                data=[
+                    r
+                    for r in b["data"]
+                    if not (r["state_usps"] == "GA" and r["year"] == last)
+                ]
+            )
+        )
+        self.refuses(lambda b: b["data"][0].update(state_usps="ALX"))
 
     def test_national_pv_is_strict(self) -> None:
         def refuses(change: Any) -> None:
@@ -2608,6 +2682,7 @@ class TestOverTimeDegraded:
         assert shown_years(tree) == YEARS  # T1 is unaffected
         control = find(tree, STATE_ID)  # the callback's input still exists
         assert control.options == [] and control.value is None
+        assert find(tree, MOD["STATE_CONTROL_ID"]).style == {"display": "none"}
 
     def test_a_malformed_n1_shows_only_the_section_s_sentence(self) -> None:
         summary = copy.deepcopy(SUMMARY)
@@ -2616,7 +2691,28 @@ class TestOverTimeDegraded:
         assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is not None
         assert find(tree, C4) is None
 
-    @pytest.mark.parametrize("bad", [None, {"data": []}, {"meta": {}}])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            None,
+            {"data": []},
+            {"meta": {}},
+            # Valid rows, but no provenance the one-state download could read
+            # (#436's review, cr.2): the all-states view stays.
+            {"data": copy.deepcopy(N2["data"])},
+            {"data": copy.deepcopy(N2["data"]), "meta": {"provenance": {}}},
+            # One row of the chosen state lacks a field the one-state view reads.
+            {
+                **copy.deepcopy(N2),
+                "data": [
+                    {k: v for k, v in r.items() if k != "pv_status"}
+                    if (r["state_usps"], r["year"]) == ("GA", 1900)
+                    else r
+                    for r in N2["data"]
+                ],
+            },
+        ],
+    )
     def test_an_unavailable_or_malformed_n2_keeps_all_states(self, bad: Any) -> None:
         tree = MOD["render"](
             copy.deepcopy(BODY), [("state", "GA")], copy.deepcopy(SUMMARY), bad
@@ -2625,6 +2721,7 @@ class TestOverTimeDegraded:
         assert chart_figure(tree, C4) == chart_figure(render_over_time(), C4)
         control = find(tree, STATE_ID)
         assert control.options == [] and control.value is None
+        assert find(tree, MOD["STATE_CONTROL_ID"]).style == {"display": "none"}
         link = find(tree, f"{OVER_TIME}-csv")
         assert "state=" not in urllib.parse.unquote(link.href)
         assert rows(tree) == rows(render())  # T1 and C2 are unaffected
@@ -2647,6 +2744,55 @@ class TestOverTimeDegraded:
         calls, _ = n1_client(monkeypatch, down)
         route("/elections", "?state=GA")
         assert sorted(calls) == sorted(FILLS)
+
+
+def caption(tree: Any, dom: str) -> str:
+    """A chart's caption text, without its table pointer."""
+    (figcaption,) = of_type(find(tree, dom), "Figcaption")
+    return str(figcaption.children[0])
+
+
+class TestOverTimeCaptions:
+    """Each mode's caption sentences (#436's review, cr.1): the all-states sentences
+    only with all states, whatever the chosen state's first election."""
+
+    def test_all_states(self) -> None:
+        tree = render_over_time()
+        c4, c5 = caption(tree, C4), caption(tree, C5)
+        assert labels.C4_ALL_STATES in c4 and labels.C5_ALL_STATES in c5
+        assert labels.C5_BEFORE_NOTE.format(pv_year_min=PV_MIN) in c5
+        assert labels.C4_ZERO_NOTE not in c4 and labels.C5_MARKER_NOTE not in c5
+
+    @pytest.mark.parametrize("usps", ["GA", "SC", "AK"])
+    def test_one_state(self, usps: str) -> None:
+        tree = render_over_time({"state": usps})
+        c4, c5 = caption(tree, C4), caption(tree, C5)
+        assert labels.C4_ALL_STATES not in c4 and labels.C5_ALL_STATES not in c5
+        first = state_rows(usps)[0]["year"]
+        note = labels.FIRST_ELECTION_NOTE.format(state=state_name(usps), year=first)
+        assert (note in c4 and note in c5) is (first > YEARS[0])
+        zeros = any(r["state_electoral_votes"] == 0 for r in state_rows(usps))
+        assert (labels.C4_ZERO_NOTE in c4) is zeros
+        assert labels.C5_MARKER_NOTE in c5 if usps != "AK" else True
+
+    def test_a_name_that_is_not_plain_text_uses_the_selected_state_forms(
+        self,
+    ) -> None:
+        states = copy.deepcopy(N2)
+        for row in states["data"]:
+            if row["state_usps"] == "AK":
+                row["state"] = "<b>Alaska</b>"
+        tree = render_over_time({"state": "AK"}, states=states)
+        texts_ = texts(tree)
+        assert labels.C4_TITLE_SELECTED in texts_ and labels.C5_TITLE_SELECTED in texts_
+        assert labels.FIRST_ELECTION_NOTE_SELECTED.format(year=1960) in caption(tree, C4)
+        assert labels.C4_ALL_STATES not in caption(tree, C4)
+        hovers = chart_figure(tree, C4)["data"][0]["hovertext"]
+        assert all("&lt;b&gt;Alaska&lt;/b&gt;" in h for h in hovers)
+
+
+def state_name(usps: str) -> str:
+    return str(state_rows(usps)[0]["state"])
 
 
 class TestN2Fixture:

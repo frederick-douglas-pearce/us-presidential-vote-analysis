@@ -465,6 +465,9 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({}, "state=AK", "filtered"),
         ({}, "state=GA&year_from=1900", "filtered"),
         ({}, "state=ZZ", "absent"),
+        # The popular-vote filter reaches T1 only (#436's review).
+        ({}, "pv=1", "filtered"),
+        ({}, "state=GA&pv=1", "filtered"),
     ],
 }
 
@@ -652,8 +655,13 @@ class TestEveryChart:
             csv_text, everything = table_csv(tree, table), table_csv(plain, table)
             assert csv_text is not None, (key, query, table)
             if selects and kept_keys & set(table_keys):
-                assert csv_text != everything, (key, query, table)
+                # The rows differ, not only the view URL the preamble names (#436's
+                # review): a table that stopped narrowing or switching fails here.
+                assert everything is not None, (key, query, table)
+                assert Csv(csv_text).rows != Csv(everything).rows, (key, query, table)
             else:
+                # The whole file, view URL included, so a view URL naming another
+                # table's key fails.
                 assert csv_text == everything, (key, query, table)
         for row in charts.CHARTS.values():
             if row.retired or row.page != key or row.table in narrowed:
@@ -673,9 +681,21 @@ class TestEveryChart:
             if row.retired:
                 continue
             kinds = {kind for _, _, kind in CHART_QUERIES.get(row.page, [])}
-            if page_of(row.page).get("query") is not None:
+            parser = page_of(row.page).get("query")
+            if parser is not None:
                 assert {"filtered", "absent"} <= kinds, (chart_id, row.page)
                 assert FILTERED_TABLES.get(row.page), (chart_id, row.page)
+                # Every key a table or a series reads is kept by some filtered query
+                # (#436's review, D100(b)), so no key's reach goes unchecked.
+                kept = {
+                    k
+                    for _, query, kind in CHART_QUERIES[row.page]
+                    if kind == "filtered"
+                    for k, _ in parser(parse(query))
+                }
+                keys = {k for ks in FILTERED_TABLES[row.page].values() for k in ks}
+                keys |= set(SERIES_KEYS.get(charts.dom_id(chart_id), ()))
+                assert keys <= kept, (chart_id, row.page, keys - kept)
             else:
                 assert kinds, (chart_id, row.page)
 
@@ -2578,9 +2598,9 @@ SERVED_KINDS: dict[str, Any] = {
 
 
 class TestServedValuesReachNoFigureUntyped:
-    """#484 (D099): a served value of an unexpected type, in any field of a live
-    chart's first served row, leaves the chart drawn, or its page (or its section)
-    degraded, and never the page with its success marker and the chart not drawn. The
+    """#484 (D099): a served value of an unexpected type, in any field of the served
+    rows a live chart's ``SERVED_ROWS`` entry selects, leaves the chart drawn, or its
+    page (or its section) degraded, and never the page with its success marker and the chart not drawn. The
     figure builders type and escape what they draw from, which is what protects the
     page. This fails a builder whose raw served value lands where a chart rule refuses
     its kind (markup, a token, a non-string label or hover string, a non-finite number,

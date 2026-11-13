@@ -6796,9 +6796,11 @@ chooses whose series is drawn.
   table. Both rules are page text (`OVER_TIME_REACH`, `OVER_TIME_LIST_FILTERS`).
 - **(b) A filter's reach is checked per key (amends D093(c) and D096(b)).** `FILTERED_TABLES`
   (`test_dashboard_export.py`) maps each table a page's filters reach to the query keys that reach
-  it. Under a `filtered` query keeping one of a table's keys, the table's CSV (its rows and its
-  view URL) differs from the unfiltered render's; under any other query it equals it, so a view URL
-  naming another table's key fails. `SERIES_KEYS` names the keys that choose a chart's series
+  it. Under a `filtered` query keeping one of a table's keys, the table's CSV rows differ from the
+  unfiltered render's (not only its view URL); under any other query its whole CSV, view URL
+  included, equals it, so a view URL naming another table's key fails. Every key a table or a
+  series reads is kept by some `filtered` query in `CHART_QUERIES`, which
+  `test_every_chart_page_with_a_filter_lists_its_queries` checks. `SERIES_KEYS` names the keys that choose a chart's series
   (C4, C5: `state`): under any query, every trace but a chart's selection trace equals the chart's
   render under the query reduced to those keys, so every other chart reduces to the empty query,
   which is D093(a) unchanged for C1 to C3. A chart with series keys must differ from the
@@ -6810,23 +6812,27 @@ chooses whose series is drawn.
   figure counts as two values, as D077 and D098 count NULL, and two values make the section
   unavailable. A repeated NaN is one value, shown as unrecognized. One state: exactly N2's rows for
   that state (`n2_rows`: one row per year and state, one name per code, no gap after the state's
-  first served year), from its first served election; the rows before it are empty, with no
-  point, and a caption sentence names that first year. The dashboard adds nothing up. N2
+  first served year, and `state_electoral_votes`, `state_popular_total` and `pv_status` on every
+  row), from its first served election; the rows before it are empty, with no point, and a
+  caption sentence names that first year. The dashboard adds nothing up. N2
   (`/v1/elections/states`) is a literal in `on_miss`, filled on first use (D074(ii)); D072 is
   unchanged.
 - **(d) Causes, not zeros.** A zero allotment is a labeled marker naming its cause, never a bar
   (an exception to D091's "a zero is a drawn, labeled bar", which the AC requires); the table
-  still shows the served 0. A null or unknown allotment is a marker in a series of its own. In C5
-  the years before (and after) the popular-vote window are one shaded band whose bounds come from
-  `meta.provenance.coverage`, never literals, labeled in `annotations`; the band alone marks a
-  held popular vote outside the window, which gets no marker. Every other cause (a legislature's
+  still shows the served 0. A null or unknown allotment is a marker in a series of its own. A
+  count no bar can draw (negative, or past `charts.MAX_INTEGER`) is an unrecognized marker whose
+  hover carries the table's cell (owner, #436's review). In C5 the years before the popular-vote
+  window are a shaded band, and the years after it (where a snapshot has any) a second one, their
+  bounds from `meta.provenance.coverage`, never literals, labeled in `annotations`; a band alone
+  marks a held popular vote outside the window, which gets no marker. Every other cause (a legislature's
   choice, a state taking no part, a null inside the window, an unrecognized value) is a labeled
   marker wherever it falls, inside the band included, one series per label with its own symbol. A
   `legislature_chosen` state appointed electors, so C4 draws its bar. Every hover and label is
   the companion table's cell, or a short form looked up by it.
 - **(e) Degrading.** A failed or malformed N1 shows only the section's sentence
-  (`OVER_TIME_UNAVAILABLE`). A failed or malformed N2 keeps the all-states charts and table (they
-  read N1 and the index only), hides the state control and shows `OVER_TIME_NO_STATES`; a
+  (`OVER_TIME_UNAVAILABLE`). A failed or malformed N2 (its rows, as (c) checks them, or a
+  provenance the one-state download cannot read, checked by a dry run of `export.preamble`) keeps
+  the all-states charts and table (they read N1 and the index only), hides the state control and shows `OVER_TIME_NO_STATES`; a
   `state` in the link stays in it but is not applied. T1, C2 and the metrics are unaffected
   either way. Rationale: N2 is about 680 KB uncompressed and is filled cold within a render's one
   deadline beside N1 (`api.fetch` sends no `Accept-Encoding`; #494), so a slow edge degrading the
@@ -6848,8 +6854,8 @@ chooses whose series is drawn.
 
 **Rationale.** A switch is the only design that shows one state's figures legibly without a
 forbidden ratio, and scoping D093(a) by structure rather than by chart ID keeps it binding for every
-chart whose rows are the filter's items. Checking reach per key, by CSV text, catches both
-narrowing and switching, and a view URL that names a key its table does not read.
+chart whose rows are the filter's items. Checking reach per key catches both narrowing and
+switching by the rows, and a view URL that names a key its table does not read by the whole file.
 
 **Residuals.** The `/elections#c4` fragment does not land on the chart after Dash renders, so
 #436's optional link from C3 to C4 does not ship (#496, a strict xfail in the e2e suite). N1's
