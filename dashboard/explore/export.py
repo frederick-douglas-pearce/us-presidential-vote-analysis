@@ -79,6 +79,9 @@ EC_FIELDS = frozenset(
         # table (#434).
         "ec_determinative",
         "pv_coverage",
+        # The appointed allotment on N1's ``elections`` items, in C4's companion table
+        # (#436).
+        "electoral_denominator",
     }
 )
 
@@ -95,6 +98,10 @@ POPULAR_VOTE_FIELDS = frozenset(
         "pv_share",
         "hybrid_score",
         "has_popular_vote",
+        # The total popular vote, the nation's and a state's, in C5's companion table
+        # (#436).
+        "national_pv_denominator",
+        "state_popular_total",
     }
 )
 

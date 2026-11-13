@@ -120,6 +120,8 @@ FIXTURE_FILES = {
     "/v1/elections/1824": "v1_elections_1824.json",
     # N1 (#431), the elections index's fill on a miss for chart C2 (#434).
     "/v1/elections/summary": "v1_elections_summary.json",
+    # N2 (#428), the elections index's fill on a miss for charts C4 and C5 (#436).
+    "/v1/elections/states": "v1_elections_states.json",
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
@@ -135,7 +137,11 @@ FIXTURE_FILES = {
 #: success run at :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render,
 #: under the guard. Checked per page, so a link that moved to another page fails.
 DOWNLOAD_IDS_BY_PAGE = {
-    "/elections": ("elections-leader-table-csv", "elections-table-csv"),
+    "/elections": (
+        "elections-leader-table-csv",
+        "elections-table-csv",
+        "elections-over-time-table-csv",
+    ),
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),
@@ -177,10 +183,12 @@ ELECTION_PAGE_MISSES = {
 #: the pages (by concrete path: the overview, then ``/per-capita``, then ``/states``).
 ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
-#: The elections index's fill on a miss after :data:`ELECTION_MISSES` (``/elections``
+#: The elections index's fills on a miss after :data:`ELECTION_MISSES` (``/elections``
 #: sorts after ``/election/1824…`` and before ``/state/GA``): N1, chart C2's source
-#: (#434, D096). With it the success run plans ten fills, the bucket's whole burst.
-ELECTIONS_MISSES = ["/v1/elections/summary"]
+#: (#434, D096), then N2, charts C4 and C5's one-state source (#436, D100). With them
+#: the success run plans eleven fills, past the bucket's burst of ten, so the program
+#: runs on a permissive bucket.
+ELECTIONS_MISSES = ["/v1/elections/summary", "/v1/elections/states"]
 
 #: The fills on a miss after :data:`ELECTIONS_MISSES`, in the order the success run
 #: renders the pages that make them: the state page's roster,
@@ -521,13 +529,11 @@ assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {
     misses
 ), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
-# for real, and enough of them run into this subprocess's timeout. Fail fast instead.
-planned = 1 + len([path for path in registered if path != api.META_PATH])
-planned += len(set(misses))
-assert planned <= api.FILL_BURST, (
-    f"{{planned}} planned fills exceed the bucket's burst of {{api.FILL_BURST}}: replace "
-    "api.CLIENT's bucket here with a permissive one, e.g. TokenBucket(burst=inf)"
-)
+# for real, and enough of them run into this subprocess's timeout. The run plans more
+# fills than the burst since #436 (and #429 adds the next), so the process client's
+# bucket is a permissive one, unconditionally (D100): the burst guarded this program's
+# warmup, never production's, whose bucket is unchanged.
+api.CLIENT._bucket = api.TokenBucket(burst=float("inf"))
 
 client = appmod.server.test_client()
 assert client.get("/_ah/warmup").status_code == 200  # refresh: meta, then prefetch

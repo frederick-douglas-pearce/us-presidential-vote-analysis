@@ -3560,6 +3560,8 @@ PAGE_API_NAMES = {
     "CANDIDATES_PATH",
     # N1, chart C2's source on the elections index (#434).
     "SUMMARY_PATH",
+    # N2, charts C4 and C5's one-state source on the elections index (#436).
+    "ELECTION_STATES_PATH",
     "Validate",
     "accepted",
     # A constant pair a page registers as ``not_found=`` (#325); reads nothing.

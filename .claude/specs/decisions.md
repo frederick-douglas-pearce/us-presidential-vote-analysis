@@ -6770,3 +6770,97 @@ a long value from a color or markup rule, so a long string can cost up to `LOGGE
 its length in log text. A figure that shares one container in many places is walked once per
 place, so its cost multiplies with each level of sharing, up to the depth limit. Only code builds
 one.
+
+## D100: Charts C4 and C5 switch their series to the chosen state; a filter's reach is checked per key; a failed N2 keeps the all-states view
+
+**Date:** 2026-11-13
+**Amends:** D093(a), D093(c), D096(b) · **Closes:** D097(j)'s first question · **Builds on:** D074(ii), D091, D095, D098 · **Decided by:** the owner, approving #436's plan (architect-reviewed)
+
+**Context.** #436's ACs have C4 (electors appointed) and C5 (the total popular vote) show all
+states or one chosen state, and check a chosen state's values against N2's rows. D093(a),
+recorded after the issue was written, says a chart beside a filtered table is never narrowed by
+the page's filter, and its Action required named #436. At the plan step no design met both: one
+state's figures (3 to 55 electors, at most about 17.5 million votes) drawn over the national
+series (up to 538 and 158 million) sit flat near zero, and a state's share of the national figure
+is a ratio D097(a) forbids. D093(a)'s reason assumes the filter's value is one of the chart's
+rows (C3's states). C4 and C5's rows are years, so the filter does not choose among their rows; it
+chooses whose series is drawn.
+
+**Decision.**
+- **(a) Scope of D093(a) and (b).** They govern a chart whose rows are the items the filter
+  selects among. A chart whose rows are not the filter's items, where the filter chooses which
+  entity's series is drawn, switches its series. Its year axis (rows and tick text) is the same in
+  every mode. C4 and C5 are the first such charts; their `state` filter switches both charts and
+  their one companion table together, and nothing else on `/elections` (T1, the headline metrics
+  and C2 stay as they are). The list's year and popular-vote filters never reach C4, C5 or their
+  table. Both rules are page text (`OVER_TIME_REACH`, `OVER_TIME_LIST_FILTERS`).
+- **(b) A filter's reach is checked per key (amends D093(c) and D096(b)).** `FILTERED_TABLES`
+  (`test_dashboard_export.py`) maps each table a page's filters reach to the query keys that reach
+  it. Under a `filtered` query keeping one of a table's keys, the table's CSV rows differ from the
+  unfiltered render's (not only its view URL); under any other query its whole CSV, view URL
+  included, equals it, so a view URL naming another table's key fails. Every key a table or a
+  series reads is kept by some `filtered` query in `CHART_QUERIES`, which
+  `test_every_chart_page_with_a_filter_lists_its_queries` checks. `SERIES_KEYS` names the keys that choose a chart's series
+  (C4, C5: `state`): under any query, every trace but a chart's selection trace equals the chart's
+  render under the query reduced to those keys, so every other chart reduces to the empty query,
+  which is D093(a) unchanged for C1 to C3. A chart with series keys must differ from the
+  unfiltered render under a `filtered` query keeping one (not vacuous). Tick text equals the
+  unfiltered render's for every chart.
+- **(c) What each mode reads.** All states: C4 reads each N1 `elections` item's
+  `electoral_denominator` (through `n1_items`, D097(c)); C5 reads each served year's one
+  `national_pv_denominator` across N1's `data` rows (`national_pv`), strictly: a null beside a
+  figure counts as two values, as D077 and D098 count NULL, and two values make the section
+  unavailable. A repeated NaN is one value, shown as unrecognized. A national total has no
+  `pv_status`, so its table cell never takes `labels.popular_votes`' state rule or a made-up
+  status: a null reads `labels.NOT_APPLICABLE` outside the popular-vote window (the cell T3 and
+  the election panel show there) and `labels.NO_NATIONAL_TOTAL` inside it (`labels.national_total`,
+  from the ba spec approved at the plan gate). One state: exactly N2's rows for
+  that state (`n2_rows`: one row per year and state, one name per code, no gap after the state's
+  first served year, and `state_electoral_votes`, `state_popular_total` and `pv_status` on every
+  row), from its first served election; the rows before it are empty, with no point, and a
+  caption sentence names that first year. The dashboard adds nothing up. N2
+  (`/v1/elections/states`) is a literal in `on_miss`, filled on first use (D074(ii)); D072 is
+  unchanged.
+- **(d) Causes, not zeros.** A zero allotment is a labeled marker naming its cause, never a bar
+  (an exception to D091's "a zero is a drawn, labeled bar", which the AC requires); the table
+  still shows the served 0. A null or unknown allotment is a marker in a series of its own. A
+  count no bar can draw (negative, or past `charts.MAX_INTEGER`) is an unrecognized marker whose
+  hover carries the table's cell (owner, #436's review). In C5 the years before the popular-vote
+  window are a shaded band, and the years after it (where a snapshot has any) a second one, their
+  bounds from `meta.provenance.coverage`, never literals, labeled in `annotations`; a band alone
+  marks a held popular vote outside the window, which gets no marker. Every other cause (a legislature's
+  choice, a state taking no part, a null inside the window, an unrecognized value) is a labeled
+  marker wherever it falls, inside the band included, one series per label with its own symbol. A
+  `legislature_chosen` state appointed electors, so C4 draws its bar. Every hover and label is
+  the companion table's cell, or a short form looked up by it.
+- **(e) Degrading.** A failed or malformed N1 shows only the section's sentence
+  (`OVER_TIME_UNAVAILABLE`). A failed or malformed N2 (its rows, as (c) checks them, or a
+  provenance the one-state download cannot read, checked by a dry run of `export.preamble`) keeps
+  the all-states charts and table (they read N1 and the index only), hides the state control and shows `OVER_TIME_NO_STATES`; a
+  `state` in the link stays in it but is not applied. T1, C2 and the metrics are unaffected
+  either way. Rationale: N2 is about 680 KB uncompressed and is filled cold within a render's one
+  deadline beside N1 (`api.fetch` sends no `Accept-Encoding`; #494), so a slow edge degrading the
+  whole section for a choice most readers never make would cost the national charts too.
+- **(f) The filter callback merges.** One callback serves the years, popular-vote and state
+  controls. It replaces only the changed control's keys in the current search
+  (`merged_search`), so a key no control shows (a `state` the page could not apply) survives a
+  year change. The state control renders on every successful render, hidden with no options and
+  no value while N2 is unavailable, and its value is always `None` or one of its options.
+- **(g) The metrics.** The state filter does not narrow the headline metrics, closing D097(j)'s
+  first question; whether N2 feeds a metric stays open, under D097(a).
+- **(h) The D070(b) guard's bucket.** With N2 the guard's success run plans eleven fills, past
+  `FILL_BURST`. Its program now replaces the process client's bucket with a permissive one
+  unconditionally, and the planned-fills assert is gone (D096(e) anticipated this): the burst
+  guarded the test program's warmup, never production's bucket, which is unchanged.
+- **(i) D071(g).** As D096(f): the PR is "Part of #436"; after the owner deploys, a docs PR
+  re-measures `/elections` with `--chart "#c5 .main-svg"` and records N2's cold fill time and the
+  instance's resident memory per snapshot, not only an edge-hit render, and closes #436.
+
+**Rationale.** A switch is the only design that shows one state's figures legibly without a
+forbidden ratio, and scoping D093(a) by structure rather than by chart ID keeps it binding for every
+chart whose rows are the filter's items. Checking reach per key catches both narrowing and
+switching by the rows, and a view URL that names a key its table does not read by the whole file.
+
+**Residuals.** The `/elections#c4` fragment does not land on the chart after Dash renders, so
+#436's optional link from C3 to C4 does not ship (#496, a strict xfail in the e2e suite). N1's
+`elections` items do not carry `national_pv_denominator`, so C5 reads N1's candidate rows (#495).

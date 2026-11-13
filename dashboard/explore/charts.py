@@ -51,8 +51,8 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
-#: here once retired. C1 (#433) was the first, C3 (#435) the second and C2 (#434) the
-#: third; C4 and C5 are assigned to #436 by its issue. ``components.chart`` reads it by
+#: here once retired. C1 (#433) was the first, C3 (#435) the second, C2 (#434) the
+#: third, and C4 and C5 (#436) the fourth and fifth. ``components.chart`` reads it by
 #: attribute at call time. ``ISSUED``, a hand-written literal of every issued ID with
 #: its whole row, must equal this (``TestChartRegistry`` in
 #: ``test_dashboard_charts.py`` reads it), and
@@ -68,6 +68,11 @@ CHARTS: Mapping[str, Chart] = {
     # line, never narrowed by the page's filters, on the elections index, beside its
     # own companion table (#434, D096).
     "C2": Chart("/elections", "elections-leader-table"),
+    # Electors appointed and the total popular vote in each election, all states or the
+    # one state the page's state filter chooses, on the elections index, beside one
+    # companion table they share (#436, D100).
+    "C4": Chart("/elections", "elections-over-time-table"),
+    "C5": Chart("/elections", "elections-over-time-table"),
 }
 
 

@@ -16,8 +16,8 @@ import logging
 import math
 import re
 from collections.abc import Callable
-from typing import Any
-from urllib.parse import unquote_to_bytes, urlsplit
+from typing import Any, NamedTuple
+from urllib.parse import unquote_to_bytes, urlencode, urlsplit
 
 import dash
 import pandas as pd
@@ -41,6 +41,8 @@ TABLES = {
     "elections-table": "/elections",
     # Chart C2's companion table (#434).
     "elections-leader-table": "/elections",
+    # Charts C4 and C5's companion table (#436).
+    "elections-over-time-table": "/elections",
     "election-states": "/election/<year>/states",
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
@@ -57,8 +59,9 @@ TABLES = {
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
-    # The index, then N1 for chart C2, in the same view (#434).
-    "/elections": ["/v1/elections", "/v1/elections/summary"],
+    # The index, then N1 for chart C2, then N2 for C4 and C5, in the same view (#434,
+    # #436).
+    "/elections": ["/v1/elections", "/v1/elections/summary", "/v1/elections/states"],
     # #465 split the one-election view's reads across its three pages: each fills one
     # path (the per-capita page reads no /v1/elections/{year}), and none adds a read.
     "/election/<year>": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
@@ -455,18 +458,44 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
     "/elections": [
         ({}, "year_from=1824&year_to=1900", "filtered"),
         ({}, "year_from=1700", "absent"),
+        # #436, D100: the state switches C4 and C5's series and their table only.
+        # Georgia from 1824 (with 1864's zero allotment), Alaska from 1960, and a
+        # state with a year filter, which reaches T1 only.
+        ({}, "state=GA", "filtered"),
+        ({}, "state=AK", "filtered"),
+        ({}, "state=GA&year_from=1900", "filtered"),
+        ({}, "state=ZZ", "absent"),
+        # The popular-vote filter reaches T1 only (#436's review).
+        ({}, "pv=1", "filtered"),
+        ({}, "state=GA&pv=1", "filtered"),
     ],
 }
 
-#: The tables each chart page's filter narrows (#434, D096, amending D093(c)): under a
-#: ``filtered`` query every one listed narrows, under an ``absent`` one none does, and
-#: a chart's companion table not listed here equals the unfiltered render under every
-#: query. Hand-written: a chart story adding a filtered page lists its tables, and
+#: The tables each chart page's filters reach, and the query keys that reach each
+#: (#434, D096, amending D093(c); per key since #436, D100): under a ``filtered`` query
+#: that keeps one of a table's keys, the table's CSV rows differ from the unfiltered
+#: render's; under any other query its whole CSV, view URL included, equals it, so a
+#: view URL naming another table's key fails. A chart's companion table not listed here
+#: equals the unfiltered render under every query. Hand-written: a chart story adding a
+#: filtered page lists its tables, and
 #: ``test_every_chart_page_with_a_filter_lists_its_queries`` fails a live chart page
 #: with a ``query=`` parser that lists none.
-FILTERED_TABLES: dict[str, tuple[str, ...]] = {
-    "/election/<year>/per-capita": ("election-per-capita",),
-    "/elections": ("elections-table",),
+FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
+    "/election/<year>/per-capita": {"election-per-capita": ("state",)},
+    "/elections": {
+        "elections-table": ("year_from", "year_to", "pv"),
+        "elections-over-time-table": ("state",),
+    },
+}
+
+#: The query keys that choose a chart's series, by the chart's DOM id (#436, D100): a
+#: chart whose rows are not the filter's items, where the filter chooses whose series is
+#: drawn. Under any query such a chart equals its render under that query reduced to
+#: these keys; every other chart reduces to the empty query, which is D093(a)'s "a
+#: filter never narrows a chart". Hand-written.
+SERIES_KEYS: dict[str, tuple[str, ...]] = {
+    charts.dom_id("C4"): ("state",),
+    charts.dom_id("C5"): ("state",),
 }
 
 
@@ -485,6 +514,18 @@ def chart_figures(tree: Any) -> dict[str, dict[str, Any]]:
         if isinstance(getattr(store, "id", None), dict)
         and store.id.get("type") == charts.SOURCE_TYPE
     }
+
+
+def urlencode_pairs(pairs: list[tuple[str, str]]) -> str:
+    """A query string, without its ``?``, as :data:`CHART_QUERIES` writes one."""
+    return urlencode(pairs)
+
+
+def table_csv(tree: Any, table_id: str) -> str | None:
+    """The table ``table_id``'s download in ``tree`` as its data URL (its CSV text,
+    view URL included), or ``None`` when it renders none."""
+    link = links(tree).get(export.link_id(table_id))
+    return None if link is None else str(link.href)
 
 
 def table_row_count(tree: Any, table_id: str) -> int:
@@ -540,12 +581,16 @@ class TestEveryChart:
         checks as its default render, so a filter that emptied a companion table (and
         left a caption pointing at a table that is not rendered) fails here. And the
         filter never narrows a chart (D093(a)): every trace but the chart's selected
-        item (:data:`SELECTION_TRACES`) equals the unfiltered render's, as do its row
-        labels; a ``filtered`` query on a page with a filter adds exactly one selected
-        point (where the chart marks one) and narrows each table
-        :data:`FILTERED_TABLES` lists for the page, and an ``absent`` one does neither;
-        a companion table that list does not name is unchanged under every query (#434,
-        D096, amending D093(c))."""
+        item (:data:`SELECTION_TRACES`) equals its render under the query reduced to
+        the chart's :data:`SERIES_KEYS` (#436, D100; the unfiltered render for every
+        other chart), and its row labels equal the unfiltered render's; a chart with
+        series keys differs from the unfiltered render under a ``filtered`` query that
+        keeps one (not vacuous). A ``filtered`` query on a page with a filter adds
+        exactly one selected point (where the chart marks one); each table
+        :data:`FILTERED_TABLES` lists differs from the unfiltered render (by its CSV)
+        under a ``filtered`` query keeping one of its keys and equals it under any
+        other; a companion table that list does not name is unchanged under every
+        query (#434, D096, amending D093(c))."""
         page = page_of(key)
         success = page.get("success", "")
         parser = page.get("query")
@@ -559,14 +604,37 @@ class TestEveryChart:
         assert chart_problems(tree, key, built, success) == [], (key, query)
         plain = render(key, monkeypatch, **values)[0]
         selects = kind == "filtered" and parser is not None
+        kept_keys = (
+            {k for k, _ in parser(parse(query))} if parser is not None else set()
+        )
         filtered, unfiltered = chart_figures(tree), chart_figures(plain)
         assert set(filtered) == set(unfiltered), (key, query)
         for dom, figure in filtered.items():
             name = SELECTION_TRACES.get(dom)
             default = unfiltered[dom]
+            series = SERIES_KEYS.get(dom, ())
+            reduced_pairs = [
+                (k, v)
+                for k, v in (parser(parse(query)) if parser else [])
+                if k in series
+            ]
+            reduced = (
+                chart_figures(
+                    render(
+                        key,
+                        monkeypatch,
+                        urlencode_pairs(reduced_pairs),
+                        **values,
+                    )[0]
+                )[dom]
+                if reduced_pairs
+                else default
+            )
             kept = [t for t in figure["data"] if name is None or t.get("name") != name]
-            marks = [t for t in figure["data"] if name is not None and t.get("name") == name]
-            assert kept == default["data"], (key, query, dom)
+            marks = [
+                t for t in figure["data"] if name is not None and t.get("name") == name
+            ]
+            assert kept == reduced["data"], (key, query, dom)
             assert not [t for t in default["data"] if t.get("name") == name]
             assert figure["layout"]["yaxis"].get("ticktext") == default["layout"][
                 "yaxis"
@@ -575,15 +643,26 @@ class TestEveryChart:
                 assert len(marks) == 1 and len(marks[0]["x"]) == 1, (key, query, dom)
             else:
                 assert marks == [], (key, query, dom)
-        narrowed = FILTERED_TABLES.get(key, ())
-        for table in narrowed:
+            if selects and kept_keys & set(series):
+                # Not vacuous: the chosen state switches the series (#436, D100).
+                assert figure["data"] != default["data"], (key, query, dom)
+            elif not selects:
+                assert figure["data"] == default["data"], (key, query, dom)
+        narrowed = FILTERED_TABLES.get(key, {})
+        for table, table_keys in narrowed.items():
             shown = table_row_count(tree, table)
-            everything = table_row_count(plain, table)
             assert shown > 0, (key, query, table)
-            if selects:
-                assert shown < everything, (key, query, table)
+            csv_text, everything = table_csv(tree, table), table_csv(plain, table)
+            assert csv_text is not None, (key, query, table)
+            if selects and kept_keys & set(table_keys):
+                # The rows differ, not only the view URL the preamble names (#436's
+                # review): a table that stopped narrowing or switching fails here.
+                assert everything is not None, (key, query, table)
+                assert Csv(csv_text).rows != Csv(everything).rows, (key, query, table)
             else:
-                assert shown == everything, (key, query, table)
+                # The whole file, view URL included, so a view URL naming another
+                # table's key fails.
+                assert csv_text == everything, (key, query, table)
         for row in charts.CHARTS.values():
             if row.retired or row.page != key or row.table in narrowed:
                 continue
@@ -602,9 +681,21 @@ class TestEveryChart:
             if row.retired:
                 continue
             kinds = {kind for _, _, kind in CHART_QUERIES.get(row.page, [])}
-            if page_of(row.page).get("query") is not None:
+            parser = page_of(row.page).get("query")
+            if parser is not None:
                 assert {"filtered", "absent"} <= kinds, (chart_id, row.page)
                 assert FILTERED_TABLES.get(row.page), (chart_id, row.page)
+                # Every key a table or a series reads is kept by some filtered query
+                # (#436's review, D100(b)), so no key's reach goes unchecked.
+                kept = {
+                    k
+                    for _, query, kind in CHART_QUERIES[row.page]
+                    if kind == "filtered"
+                    for k, _ in parser(parse(query))
+                }
+                keys = {k for ks in FILTERED_TABLES[row.page].values() for k in ks}
+                keys |= set(SERIES_KEYS.get(charts.dom_id(chart_id), ()))
+                assert keys <= kept, (chart_id, row.page, keys - kept)
             else:
                 assert kinds, (chart_id, row.page)
 
@@ -636,7 +727,9 @@ class TestEveryChart:
             built = components.chart("C1", TEST_FIGURE, "elections-table", "Caption")
             table = html.Table(id="elections-table")
             plain = dash.dcc.Graph(id="plain")
-            return html.Div([built, table, by_hand, plain, twin, graph, section, subclass])
+            return html.Div(
+                [built, table, by_hand, plain, twin, graph, section, subclass]
+            )
 
         tree, built = chart_render(layout, monkeypatch)
         assert [chart_id for chart_id, _ in built] == ["C1"]
@@ -809,12 +902,16 @@ class TestChartNotDrawn:
         row = charts.CHARTS[chart_id]
         page = page_of(row.page)
         success = page["success"]
-        plain, drawn = chart_render(lambda: render(row.page, monkeypatch)[0], monkeypatch)
+        plain, drawn = chart_render(
+            lambda: render(row.page, monkeypatch)[0], monkeypatch
+        )
         assert chart_id in [c for c, _ in drawn], f"{chart_id} not on {row.page}"
         real = components.chart
 
         def breaking(*args: Any, **kwargs: Any) -> Any:
-            named = dict(zip(("chart_id", "figure", "table_id", "caption"), args, strict=False))
+            named = dict(
+                zip(("chart_id", "figure", "table_id", "caption"), args, strict=False)
+            )
             named.update(kwargs)
             if named["chart_id"] == chart_id:
                 named["figure"] = broken(named["figure"], breakage)
@@ -1312,6 +1409,9 @@ class TestExactlyTheView:
         assert names == {
             "elections-table-csv": "elections.csv",
             "elections-leader-table-csv": "elections-electoral-college-leaders.csv",
+            "elections-over-time-table-csv": (
+                "elections-electors-and-popular-vote-all-states.csv"
+            ),
             "election-states-csv": "election-1824-by-state.csv",
             "election-nation-csv": "election-1824-national.csv",
             "election-per-capita-csv": "election-1824-per-capita.csv",
@@ -1339,9 +1439,7 @@ class TestNulls:
         assert all(r["popular_votes"] is None for r in recorded)  # the premise
         assert {r["popular_votes"] for r in states.rows} == {""}
         # Breckinridge and Bell carry no party row (#389): an empty cell, as served.
-        nulls = {
-            r["candidate"] for r in states.rows if r["nominating_party"] == ""
-        }
+        nulls = {r["candidate"] for r in states.rows if r["nominating_party"] == ""}
         assert {"John C. Breckinridge", "John Bell"} <= nulls
         tree, _ = render("/election/<year>", monkeypatch, year="1860")
         nation = download(tree, "election-nation")
@@ -1877,8 +1975,8 @@ def figure_texts(figure: Any) -> list[str]:
     templates (placeholders and markup removed), ``text`` and ``hovertext``, every string
     in ``customdata`` (which a ``%{customdata.…}`` placeholder shows), and annotations.
     The chart title reaches the page as HTML, so a built chart's title is scanned as
-    ordinary children too. Shape labels are not read: no chart draws one before C4 and
-    C5 (#436)."""
+    ordinary children too, and shape labels (``layout.shapes[].label.text``, #436),
+    though C5 labels its band with annotations."""
     if not isinstance(figure, dict):
         return []
     found: list[str] = []
@@ -1902,6 +2000,13 @@ def figure_texts(figure: Any) -> list[str]:
         for note in layout.get("annotations") or []
         if isinstance(note, dict) and "text" in note
     ]
+    found += [
+        str(shape["label"]["text"])
+        for shape in layout.get("shapes") or []
+        if isinstance(shape, dict)
+        and isinstance(shape.get("label"), dict)
+        and "text" in shape["label"]
+    ]
     for trace in figure.get("data") or []:
         if not isinstance(trace, dict):
             continue
@@ -1916,6 +2021,23 @@ def figure_texts(figure: Any) -> list[str]:
         if isinstance(group, dict) and isinstance(group.get("text"), str):
             found.append(group["text"])
     return [text for text in found if text.strip()]
+
+
+def test_figure_texts_reads_shape_labels() -> None:
+    """#436: a shape's label is page text, so the no-raw-values scan reads it; a shape
+    with no label, or one that is not an object, adds nothing."""
+    figure = {
+        "data": [],
+        "layout": {
+            "shapes": [
+                {"type": "rect", "label": {"text": SENTINEL}},
+                {"type": "line"},
+                {"type": "rect", "label": "x"},
+                "x",
+            ]
+        },
+    }
+    assert figure_texts(figure) == [SENTINEL]
 
 
 def raw_values(tree: Any) -> list[str]:
@@ -2060,12 +2182,37 @@ def _leaders(body: dict[str, Any]) -> None:
         body["elections"][0][field] = SENTINEL
 
 
+def _over_time(body: dict[str, Any]) -> None:
+    """N1 as C4 and C5 read it with all states (#436): the first year's appointed
+    allotment, and the national total on every row of one year inside the window (one
+    row alone would make two values and degrade the section)."""
+    _leaders(body)
+    body["elections"][0]["electoral_denominator"] = SENTINEL
+    for row in body["data"]:
+        if row["year"] == 2016:
+            row["national_pv_denominator"] = SENTINEL
+
+
+#: The state the one-state entry chooses: N2's first recorded row's, derived from the
+#: recording (#436).
+DOCTORED_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
+
+#: Each doctored render, by page key and, after a ``?``, the query it renders under
+#: (#436: ``/elections`` renders all states and one state).
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
         {},
         {
             "/v1/elections": _row("has_popular_vote", "candidate_count"),
-            "/v1/elections/summary": _leaders,
+            "/v1/elections/summary": _over_time,
+        },
+    ),
+    f"/elections?state={DOCTORED_STATE}": (
+        {},
+        {
+            "/v1/elections/states": _row(
+                "state_electoral_votes", "state_popular_total", "pv_status"
+            ),
         },
     ),
     "/election/<year>": ({"year": "2016"}, {"/v1/elections/2016": _election}),
@@ -2077,7 +2224,9 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/state/<usps>": (
         {"usps": "GA"},
         {
-            "/v1/states/GA": _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE),
+            "/v1/states/GA": _row(
+                *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
+            ),
             "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
     ),
@@ -2103,6 +2252,15 @@ UNRECOGNIZED_CELLS = {
         "elections-leader-table": len(LEADER_ROW_FIELDS) + 1,
         # One per average whose field a doctored item holds (#437).
         "elections-metrics": len(AVERAGED_FIELDS),
+        # The first year's allotment and 2016's national total (#436).
+        "elections-over-time-table": 2,
+    },
+    # One state (#436): its first row's allotment, total and status.
+    f"/elections?state={DOCTORED_STATE}": {
+        "elections-table": 0,
+        "elections-leader-table": 0,
+        "elections-metrics": 0,
+        "elections-over-time-table": 3,
     },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
@@ -2201,7 +2359,9 @@ class TestOnePartyPerRow:
             paul = [r for r in file.rows if r["candidate"] == "Ron Paul"]
             assert paul, table
             for field in (
-                "nominating_party", "nominating_party_source", "nominating_party_note"
+                "nominating_party",
+                "nominating_party_source",
+                "nominating_party_note",
             ):
                 assert {r[field] for r in paul} == {""}, (table, field)
             assert any(
@@ -2284,9 +2444,10 @@ class TestNoRawValues:
         values, changes = DOCTORED[key]
         for path, change in changes.items():
             doctor(monkeypatch, path, change)
-        tree, _ = render(key, monkeypatch, **values)
+        page_key, _, query = key.partition("?")
+        tree, _ = render(page_key, monkeypatch, query, **values)
         tables = tables_in(tree)
-        on_page = {t for t, page in TABLES.items() if page == key}
+        on_page = {t for t, page in TABLES.items() if page == page_key}
         assert on_page <= set(tables)  # the premise: no degraded page
         assert raw_values(tree) == []
         unknown = cells_reading(tree, labels.UNRECOGNIZED)
@@ -2367,18 +2528,59 @@ class TestNoRawValues:
             assert raw_values(chart) == ["ec_share_full"], path
 
 
+class Served(NamedTuple):
+    """One served source of a chart's figure (#484; a list per chart since #436): the
+    page's path values and query, the path, and the rows of its body to doctor (each
+    field is doctored in every one of them at once)."""
 
-#: Per live chart (#484): the page it renders on with its path values, and the served
-#: rows its figure is built from, by path and key. Every live ``CHARTS`` row has one
-#: (``test_every_live_chart_has_its_served_rows``), so C4 and C5 join here by theirs.
-SERVED_ROWS: dict[str, tuple[dict[str, str], str, str]] = {
-    "C1": ({"year": "2016"}, "/v1/elections/2016", "summary"),
-    "C2": ({}, "/v1/elections/summary", "data"),
-    "C3": ({"year": "2016"}, "/v1/elections/2016/per-capita", "data"),
+    values: dict[str, str]
+    query: str
+    path: str
+    rows: Callable[[dict[str, Any]], list[dict[str, Any]]]
+
+
+def _first(key: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """A body's first row under ``key``."""
+    return lambda body: [body[key][0]]
+
+
+def _year_rows(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """Every ``data`` row of one year: N1 repeats a year's national total on each, so
+    doctoring one row would make two values and degrade the section (#436)."""
+    return lambda body: [row for row in body["data"] if row["year"] == year]
+
+
+#: N2's first recorded row's state, so its doctored row is the one the chart draws
+#: under ``?state=`` (derived from the recording, never a hard-coded code).
+N2_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
+
+#: Per live chart (#484): the page it renders on with its path values and query, and
+#: the served rows its figure is built from. Every live ``CHARTS`` row has an entry
+#: (``test_every_live_chart_has_its_served_rows``). C4 and C5 read N1 with all states
+#: and N2 with one (#436); C5's N1 rows are every row of one year inside the window.
+SERVED_ROWS: dict[str, list[Served]] = {
+    "C1": [Served({"year": "2016"}, "", "/v1/elections/2016", _first("summary"))],
+    "C2": [Served({}, "", "/v1/elections/summary", _first("data"))],
+    "C3": [
+        Served({"year": "2016"}, "", "/v1/elections/2016/per-capita", _first("data"))
+    ],
+    "C4": [
+        Served({}, "", api.SUMMARY_PATH, _first("elections")),
+        Served({}, f"state={N2_STATE}", api.ELECTION_STATES_PATH, _first("data")),
+    ],
+    "C5": [
+        Served({}, "", api.SUMMARY_PATH, _year_rows(2016)),
+        Served({}, f"state={N2_STATE}", api.ELECTION_STATES_PATH, _first("data")),
+    ],
 }
 
-#: What a chart's section shows when its own read fails, where it has one: C2's (#434).
-SECTION_UNAVAILABLE = {"C2": "elections-leader-unavailable"}
+#: What a chart's section shows when its own read fails, where it has one: C2's (#434),
+#: and C4 and C5's (#436).
+SECTION_UNAVAILABLE = {
+    "C2": "elections-leader-unavailable",
+    "C4": "elections-over-time-unavailable",
+    "C5": "elections-over-time-unavailable",
+}
 
 #: The unexpected kinds a served field is doctored to (#484).
 SERVED_KINDS: dict[str, Any] = {
@@ -2396,9 +2598,9 @@ SERVED_KINDS: dict[str, Any] = {
 
 
 class TestServedValuesReachNoFigureUntyped:
-    """#484 (D099): a served value of an unexpected type, in any field of a live
-    chart's first served row, leaves the chart drawn, or its page (or its section)
-    degraded, and never the page with its success marker and the chart not drawn. The
+    """#484 (D099): a served value of an unexpected type, in any field of the served
+    rows a live chart's ``SERVED_ROWS`` entry selects, leaves the chart drawn, or its
+    page (or its section) degraded, and never the page with its success marker and the chart not drawn. The
     figure builders type and escape what they draw from, which is what protects the
     page. This fails a builder whose raw served value lands where a chart rule refuses
     its kind (markup, a token, a non-string label or hover string, a non-finite number,
@@ -2415,25 +2617,32 @@ class TestServedValuesReachNoFigureUntyped:
         assert set(SECTION_UNAVAILABLE) <= set(SERVED_ROWS)
 
     @pytest.mark.parametrize("kind", list(SERVED_KINDS))
-    @pytest.mark.parametrize("chart_id", list(SERVED_ROWS))
+    @pytest.mark.parametrize(
+        ("chart_id", "entry"),
+        [(c, i) for c, entries in SERVED_ROWS.items() for i in range(len(entries))],
+    )
     def test_each_field_of_a_served_row(
-        self, chart_id: str, kind: str, monkeypatch: pytest.MonkeyPatch
+        self, chart_id: str, entry: int, kind: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         row = charts.CHARTS[chart_id]
-        values, path, key = SERVED_ROWS[chart_id]
+        values, search, path, rows = SERVED_ROWS[chart_id][entry]
         success = page_of(row.page)["success"]
         dom = charts.dom_id(chart_id)
-        fields = list(RECORDED[path][key][0])
-        assert fields  # the premise: a row to doctor
+        targets = rows(RECORDED[path])
+        assert targets  # the premise: a row to doctor
+        fields = list(targets[0])
+        assert fields
         source = repr(charts.source_id(dom))
 
         def built_figure(tree: Any) -> Any:
             stores = [
-                s for s in of_type(tree, "Store") if repr(getattr(s, "id", None)) == source
+                s
+                for s in of_type(tree, "Store")
+                if repr(getattr(s, "id", None)) == source
             ]
             return stores[0].data if stores else None
 
-        plain = built_figure(render(row.page, monkeypatch, **values)[0])
+        plain = built_figure(render(row.page, monkeypatch, search, **values)[0])
         assert plain is not None  # the premise: drawn from the recorded body
         outcomes: dict[str, list[str]] = {}
         changed = []
@@ -2441,12 +2650,15 @@ class TestServedValuesReachNoFigureUntyped:
             with monkeypatch.context() as patch:
 
                 def change(body: dict[str, Any], field: str = field) -> None:
-                    body[key][0][field] = copy.deepcopy(SERVED_KINDS[kind])
+                    for target in rows(body):
+                        target[field] = copy.deepcopy(SERVED_KINDS[kind])
 
                 doctor(patch, path, change)
-                tree, reads = render(row.page, patch, **values)
+                tree, reads = render(row.page, patch, search, **values)
             assert path in reads, (field, reads)
-            figures = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom]
+            figures = [
+                f for f in of_type(tree, "Figure") if getattr(f, "id", None) == dom
+            ]
             built = built_figure(tree)
             if built is not None and built != plain:
                 changed.append(field)

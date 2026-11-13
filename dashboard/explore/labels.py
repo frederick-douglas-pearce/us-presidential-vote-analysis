@@ -96,6 +96,13 @@ LABELS: dict[str, str] = {
     "pv_coverage": "Share of electors appointed by states that held a popular vote",
     # T3's hybrid column (#308). ``pv_coverage`` above means the same on a summary row.
     "hybrid_score": "Hybrid score",
+    # Charts C4 and C5 and their companion table (#436): N1's ``elections`` item's
+    # appointed allotment (the same national figure as
+    # ``national_electoral_denominator``), N1's per-year total popular vote, and a
+    # ``/v1/elections/states`` row's total popular vote.
+    "electoral_denominator": "Electors appointed (nation)",
+    "national_pv_denominator": "Total popular vote (nation)",
+    "state_popular_total": "Total popular vote (state)",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -154,6 +161,10 @@ BEFORE_WINDOW = "Popular vote held; not in this dataset before {pv_year_min}"
 AFTER_WINDOW = "Popular vote held; not in this dataset yet"
 NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this state"
 NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
+#: A total popular vote with no figure inside the window (#436): a state's, in the
+#: C4/C5 table with one state chosen, and the nation's, with all states.
+NO_STATE_TOTAL = "No total popular vote in this dataset for this state"
+NO_NATIONAL_TOTAL = "No total popular vote in this dataset for this election"
 
 #: What the party column shows (#389): a table note under T2–T5 and in their
 #: downloads. The second sentence keeps the rule-2 years true (D077).
@@ -631,6 +642,117 @@ NOMINATING_PARTY: dict[str, str] = {
 }
 
 
+# --- Charts C4 and C5 (#436, D100): ba spec, approved at #436's plan gate -------------
+
+#: C4's titles: all states, one state by name, and the form for a name that is not
+#: plain text (``components.chart`` refuses ``<`` in a title).
+C4_TITLE = "Electors appointed in each election, all states"
+C4_TITLE_STATE = "Electors appointed by {state} in each election"
+C4_TITLE_SELECTED = "Electors appointed by the selected state in each election"
+C4_X_AXIS = "Electors appointed"
+C4_HOVER = "{year}, all states<br>Electors appointed: {appointed}"
+C4_STATE_HOVER = (
+    "{year}: {state}<br>Electors appointed: {appointed}<br>"
+    "Popular vote in this state: {pv_status}"
+)
+#: C4's marker labels: a zero allotment, by its cause, and the series that carries it;
+#: a null allotment reads :data:`NOT_IN_DATASET` and an unknown value
+#: :data:`UNRECOGNIZED`, in :data:`C4_NO_FIGURE_SERIES`.
+C4_NO_ELECTORS_TOOK_NO_PART = "No electors: took no part"
+C4_NO_ELECTORS = "No electors appointed"
+C4_NO_FIGURE_SERIES = "No figure for this election"
+C4_BASIS = (
+    "Electors appointed is a state's allotment of electoral votes: how many electors "
+    "it was entitled to choose. It is not the electoral votes cast or counted, which "
+    "can be fewer."
+)
+C4_ALL_STATES = (
+    "With all states, each bar is the whole Electoral College that year: every "
+    "state's electors appointed, added up."
+)
+C4_ZERO_NOTE = (
+    "A labeled marker in place of a bar marks an election in which the state "
+    "appointed no electors, and its label says why. The table shows that allotment "
+    "as 0."
+)
+C4_NO_FIGURE_NOTE = (
+    "A labeled marker in place of a bar means this dataset has no number of electors "
+    "to draw for that election. It is not a zero."
+)
+FIRST_ELECTION_NOTE = (
+    "The first election in this dataset for {state} is {year}, so the rows before it "
+    "are empty."
+)
+FIRST_ELECTION_NOTE_SELECTED = (
+    "The first election in this dataset for the selected state is {year}, so the rows "
+    "before it are empty."
+)
+
+C5_TITLE = "Total popular vote in each election, all states"
+C5_TITLE_STATE = "Total popular vote in {state} in each election"
+C5_TITLE_SELECTED = "Total popular vote in the selected state in each election"
+C5_X_AXIS = "Total popular vote"
+C5_HOVER = "{year}, all states<br>Total popular vote: {total}"
+C5_STATE_HOVER = (
+    "{year}: {state}<br>Total popular vote: {total}<br>"
+    "Popular vote in this state: {pv_status}"
+)
+#: The band's labels: before the window (at its upper and lower edges) and after it.
+C5_BEFORE_BAND = "This dataset's popular-vote figures<br>begin in {pv_year_min}"
+C5_AFTER_BAND = "This dataset's popular-vote figures<br>run to {pv_year_max}"
+#: C5's marker labels, short enough for 390 px.
+C5_LEGISLATURE = "Legislature chose the electors"
+C5_TOOK_NO_PART = "Took no part"
+C5_NO_TOTAL = "No total in this dataset"
+C5_BASIS = (
+    "The total popular vote is all the votes for President, for every candidate, "
+    "including candidates who are not in this dataset, as the popular-vote source "
+    "reports them."
+)
+C5_ALL_STATES = (
+    "With all states, each bar is the national total: every state's total, added up."
+)
+C5_BEFORE_NOTE = (
+    "The shaded years come before {pv_year_min}, when this dataset's popular-vote "
+    "figures begin. Shading means this dataset has no total for those years, not that "
+    "no popular vote was held."
+)
+C5_AFTER_NOTE = (
+    "Shaded years after {pv_year_max} have no popular-vote figures in this dataset yet."
+)
+C5_MARKER_NOTE = (
+    "A labeled marker in place of a bar means there is no total to draw for that "
+    "election, and its label says why. It is not a zero."
+)
+#: C5's marker label, looked up by the table's cell; a cell here with no label (the
+#: band's) draws no marker, and any cell in neither draws :data:`UNRECOGNIZED`.
+C5_MARKER_LABELS: dict[str, str] = {
+    LEGISLATURE_CHOSE: C5_LEGISLATURE,
+    TOOK_NO_PART: C5_TOOK_NO_PART,
+    NO_STATE_TOTAL: C5_NO_TOTAL,
+    NO_NATIONAL_TOTAL: C5_NO_TOTAL,
+    UNRECOGNIZED: UNRECOGNIZED,
+}
+#: The C4/C5 table's last note: the window, and that a missing total is never a zero.
+OVER_TIME_WINDOW_NOTE = (
+    "This dataset's popular-vote figures cover {pv_year_min}–{pv_year_max}. A total "
+    "this dataset does not have is never shown as a zero; its cell says why."
+)
+
+
+def national_total(value: object, year: int, coverage: dict[str, Any]) -> str:
+    """The nation's total popular vote cell (#436): the figure, or why there is none.
+
+    A null (or a blank) outside the popular-vote window reads :data:`NOT_APPLICABLE`,
+    inside it :data:`NO_NATIONAL_TOTAL`; it never takes a made-up ``pv_status``. Any
+    other value no figure can show reads :data:`UNRECOGNIZED`. The window comes from
+    ``coverage``, never a literal.
+    """
+    if not is_blank(value):
+        return number(value)
+    return NOT_APPLICABLE if not in_pv_window(year, coverage) else NO_NATIONAL_TOTAL
+
+
 def _ec_role_is_winner(determinative: object) -> bool:
     """The one test of whether the Electoral College's top candidate is its winner:
     only a true ``ec_determinative`` (a majority of electors appointed); otherwise it
@@ -701,11 +823,14 @@ def glossary(
     fields: Iterable[str],
     summary: str = "Column names",
     chosen: Mapping[str, str] | None = None,
+    ident: str | None = None,
 ) -> html.Details:
     """Each column's plain label beside the API field name it shows. A list that is no
     table (the election panel) names its ``summary`` otherwise, and a label that
-    depends on the data (``ec_winner``'s, #355) comes from ``chosen``."""
+    depends on the data (``ec_winner``'s, #355) comes from ``chosen``. ``ident`` is the
+    list's DOM id, where a page has several (#436)."""
     shown = {**LABELS, **(chosen or {})}
+    kwargs: dict[str, Any] = {} if ident is None else {"id": ident}
     return html.Details(
         [
             html.Summary(summary),
@@ -718,6 +843,7 @@ def glossary(
             ),
         ],
         className="glossary",
+        **kwargs,
     )
 
 
@@ -842,7 +968,11 @@ def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
 
 
 def popular_votes(
-    value: object, pv_status: object, year: int, coverage: dict[str, Any]
+    value: object,
+    pv_status: object,
+    year: int,
+    coverage: dict[str, Any],
+    no_figure: str = NO_FIGURE,
 ) -> str:
     """A state's popular-vote cell: the figure, or why there is none.
 
@@ -851,7 +981,8 @@ def popular_votes(
     the year lies before the dataset's popular-vote window, after it (a snapshot whose
     Electoral College data runs ahead of its popular vote), or inside it. An unknown
     status names no cause it cannot vouch for: see :func:`_unknown`. The window comes
-    from ``coverage``, never a literal.
+    from ``coverage``, never a literal. ``no_figure`` is the cell inside the window:
+    a candidate's by default, :data:`NO_STATE_TOTAL` for a state's total (#436).
     """
     if not is_blank(value):
         return number(value)
@@ -865,7 +996,7 @@ def popular_votes(
         return BEFORE_WINDOW.format(pv_year_min=coverage["pv_year_min"])
     if year > coverage["pv_year_max"]:
         return AFTER_WINDOW
-    return NO_FIGURE
+    return no_figure
 
 
 def pv_status(value: object) -> str:
