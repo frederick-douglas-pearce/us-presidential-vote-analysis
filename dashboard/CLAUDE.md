@@ -163,11 +163,13 @@ computed from the recorded responses; the tests read shared labels and constants
 browser test sees only the degraded state. CI runs the suite in `e2e.yml` on changes under
 `dashboard/` and the other paths D082 lists; it is advisory. CI never uses `--with-deps`
 (#486): it restores the headless shell from a cache keyed on the installed Playwright
-version and the runner image, downloads and saves it only on a miss, then installs
-Chromium's system libraries with `playwright install-deps` in a step of their own. Each
-install step and the tests carry a `timeout-minutes` that fires before the job's, so a
-stalled package mirror fails its own step rather than cancelling the job;
-`tests/unit/test_e2e_workflow.py` guards that shape. pytest-playwright deletes
+version and the runner image, downloads and saves it only on a miss (before the tests, so
+a failed run still fills the cache), then installs Chromium's system libraries with
+`playwright install-deps` in a step of their own. Every step from the cache restore on
+carries a `timeout-minutes`, and those caps stay under the job's, so a stalled package
+mirror fails its own step rather than canceling the job; the setup steps before the
+restore have no cap of their own. `tests/unit/test_e2e_workflow.py` checks the step order,
+the caps, the cache conditions and key, and the permissions. pytest-playwright deletes
 `./test-results/` (traces, kept by `--tracing retain-on-failure`) at the start of every pytest
 session, the default unit run included, so copy a local trace out before running pytest
 again; CI uploads them in the same job.

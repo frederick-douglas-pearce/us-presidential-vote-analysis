@@ -11,14 +11,18 @@ name: Dashboard e2e
 # block a merge (#260).
 #
 # The browser install is split so a slow package mirror cannot stall the job (#486). The
-# headless shell comes from a cache keyed on the installed Playwright version, so a
-# version bump in uv.lock changes the key with nothing else to update. It is saved right
-# after a download, before the tests, so a failed or cancelled test run still fills it.
-# Chromium's system libraries come from apt in a step of their own, after the download,
-# bounded by the runner image's apt retry settings and the step's own time cap. Each
-# install step and the tests carry a cap, and the caps fire before the job's, so a hang
-# fails the step that hung rather than cancelling the job. tests/unit/test_e2e_workflow.py
-# guards these properties.
+# headless shell comes from a cache keyed on the installed Playwright version and the
+# runner image, so a version bump in uv.lock changes the key with nothing else to update.
+# It is saved right after a download, before the tests, so a failed or canceled test run
+# still fills it. Chromium's system libraries come from apt in a step of their own, after
+# the download, under the step's own time cap; the runner image also bounds each apt
+# fetch (its /etc/apt/apt.conf.d/zz-retries, written by actions/runner-images'
+# configure-apt.sh). Every step from the cache restore on carries a timeout-minutes, and
+# those caps plus a margin for the uncapped setup steps before them stay under the job's,
+# so a hang in any of them fails that step rather than canceling the job. The setup steps
+# (checkout, uv, Python, uv sync, the version read) carry no cap of their own.
+# tests/unit/test_e2e_workflow.py checks the step order, the caps, the cache conditions
+# and key, and the permissions.
 
 on:
   pull_request:
@@ -57,7 +61,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     # A backstop only: the capped steps below fire first.
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -86,6 +90,7 @@ jobs:
       - name: Restore the cached headless shell
         id: chromium-cache
         uses: actions/cache/restore@v4
+        timeout-minutes: 2
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}-chromium-headless-shell
@@ -98,9 +103,11 @@ jobs:
       - name: Save the headless shell
         if: steps.chromium-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
+        timeout-minutes: 2
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}-chromium-headless-shell
+          # The key the restore step resolved, so the two cannot drift apart.
+          key: ${{ steps.chromium-cache.outputs.cache-primary-key }}
 
       # On every run: the cache holds the browser, not the system packages.
       - name: Install Chromium's system libraries
@@ -113,6 +120,7 @@ jobs:
 
       - name: Upload traces (on failure)
         if: ${{ failure() }}
+        timeout-minutes: 2
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-results
