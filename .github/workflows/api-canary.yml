@@ -37,8 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     # Worst cases: each expect_status is 3 tries × 20 s + 2 × 10 s of sleeps (80 s). The
     # API checks through Cloudflare and direct are 5 of them (400 s). The dashboard path
-    # is its own expect_status (80 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s
-    # redirect (1000 s). Total ≈ 1400 s ≈ 23.3 min, under 30. Add a check's 80 s when
+    # is two expect_status calls (160 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s
+    # redirect (1080 s). Total ≈ 1480 s ≈ 24.7 min, under 30. Add a check's 80 s when
     # adding one, and keep the total under the limit.
     timeout-minutes: 30
     # Never checks out, never calls the API — no token needed at all.
@@ -65,14 +65,18 @@ jobs:
 
           fail() { echo "::error::$1"; FAILURES=$((FAILURES + 1)); }
 
-          # expect_status <label> <url> <want> — retries, then leaves the last response in
-          # $HDR/$BODY for follow-up assertions. Retried because this notifies a human, so
-          # one transient blip must not; collected rather than fail-fast, so a single run
-          # reports everything that is wrong instead of only the first thing.
+          # expect_status <label> <url> <want> [curl option...] — retries, then leaves the
+          # last response in $HDR/$BODY for follow-up assertions. Retried because this
+          # notifies a human, so one transient blip must not; collected rather than
+          # fail-fast, so a single run reports everything that is wrong instead of only the
+          # first thing. GitHub runs this step under `bash -e`, so a call outside an `if`
+          # ends in `|| true`: a bare failing call would end the step there, before the
+          # checks after it report.
           expect_status() {
             local label="$1" url="$2" want="$3" code=""
+            local extra=("${@:4}")
             for i in 1 2 3; do
-              code=$(curl -sS -o "$BODY" -D "$HDR" -w '%{http_code}' --max-time 20 "$url") || code=000
+              code=$(curl -sS -o "$BODY" -D "$HDR" -w '%{http_code}' --max-time 20 "${extra[@]}" "$url") || code=000
               if [ "$code" = "$want" ]; then echo "  ✓ ${label}: ${code}"; return 0; fi
               [ "$i" -lt 3 ] && sleep 10
             done
@@ -168,7 +172,7 @@ jobs:
 
           if [ -n "${RAW_ORIGIN_URL}" ]; then
             echo "=== direct to the origin (no Cloudflare) ==="
-            expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403
+            expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403 || true
           else
             # Not a failure (a fork has no origin to check), but not silent either:
             # /health's `origin_guard` is the service reporting the guard is ARMED, which
@@ -188,6 +192,17 @@ jobs:
               grep -q "rel=\"canonical\" href=\"https://${EXPLORE_HOST}/\"" "$BODY" \
                 || fail "dashboard / has no canonical link to https://${EXPLORE_HOST}/"
             fi
+
+            # No local plotly.js (#430). The app registers plotly.js by its CDN address
+            # only, so this path answers 404. A 200 means the running version registers
+            # Dash's bundled copy again: a 4.8 MB response anyone can ask for, the largest
+            # the site can be made to send. A rollback to a ref before #430 does this
+            # without any deploy-time check (docs/deploy-dashboard.md §10), which is why it
+            # is checked here, from main, every day. HEAD, so a regressed 200 does not
+            # download the file on every try.
+            expect_status "dashboard plotly.js (#430)" \
+              "https://${EXPLORE_HOST}/_dash-component-suites/plotly/package_data/plotly.min.js" \
+              404 --head || true
 
             # The page content, fetched the way a browser renders it (the Dash Pages
             # routing callback). A 200 alone proves nothing: the degraded page ("the
