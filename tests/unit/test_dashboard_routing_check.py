@@ -139,6 +139,23 @@ def test_a_404_without_noindex_fails(tmp_path: Path) -> None:
     assert _urls(calls).count(ESCAPED) == 1
 
 
+def test_only_the_robots_tag_counts_as_noindex(tmp_path: Path) -> None:
+    """The word alone is not the app's tag: a 404 page in front of the app that says
+    noindex anywhere but ``content="noindex"`` is still a 404 without it."""
+    routes = _routes()
+    routes[1] = Route(
+        ESCAPED, "404", '<meta name="robots" content="none"><p>noindex</p>'
+    )
+    result, calls = _check(tmp_path, routes)
+    assert result.returncode == 1
+    assert (
+        "  ✗ decoded once: /election/%2531824 got 404, noindex: no; want 404 with "
+        "noindex" in result.stdout.splitlines()
+    )
+    assert _failed(result) == "decoded once"
+    assert _urls(calls) == [CACHE, ESCAPED, CONTROL, PLOTLY]
+
+
 def test_a_failing_control_fails(tmp_path: Path) -> None:
     result, calls = _check(tmp_path, _routes(control="404"))
     assert result.returncode == 1
