@@ -846,11 +846,12 @@ def _suite_view(*args: Any, **kwargs: Any) -> Any:
     ``dash-renderer/build/dash_renderer.min.js.map`` and ``dcc/async-mathjax.js.map``).
     Such a path passes the registered-path check that :func:`_unregistered_suite_path`
     covers, and then Dash's read (``pkgutil.get_data``) raises ``FileNotFoundError``,
-    which would answer 500 and log a traceback. Only that read is wrapped: the error
-    from anywhere else, a request hook included, stays a logged 500, and so does any
-    other error from the read. The refusal logs one warning naming the package and
-    path, with no traceback, so a used bundle missing from an install still shows in
-    the log. The body is Flask's default 404 body, as above.
+    which would answer 500 and log a traceback. Dash's whole view is wrapped, and on
+    4.5.0 that read is the only call in it that raises ``FileNotFoundError``. The
+    error from outside the view, a request hook included, stays a logged 500, and so
+    does any other error from the view. The refusal logs one warning naming the
+    package and path, with no traceback, so a used bundle missing from an install
+    still shows in the log. The body is Flask's default 404 body, as above.
     """
     try:
         return _dash_suite_view(*args, **kwargs)
