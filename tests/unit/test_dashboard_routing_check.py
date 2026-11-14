@@ -230,6 +230,23 @@ def test_a_cache_that_fills_on_a_retry_passes(tmp_path: Path) -> None:
     assert _urls(calls) == [CACHE, CACHE, ESCAPED, CONTROL, PLOTLY]
 
 
+def test_no_answer_on_the_cache_path_is_retried(tmp_path: Path) -> None:
+    result, calls = _check(tmp_path, _routes(cache="fail,404"))
+    assert result.returncode == 0, result.stdout
+    assert _urls(calls) == [CACHE, CACHE, ESCAPED, CONTROL, PLOTLY]
+
+
+def test_no_answer_on_the_cache_path_fails_after_three_tries(tmp_path: Path) -> None:
+    result, calls = _check(tmp_path, _routes(cache="fail"))
+    assert result.returncode == 1
+    assert _failed(result) == "cache filled"
+    assert (
+        "  ✗ cache filled: /election/1825 got 000, noindex: unfetched; want 404 with "
+        "noindex" in result.stdout.splitlines()
+    )
+    assert _urls(calls) == [CACHE, CACHE, CACHE, ESCAPED, CONTROL, PLOTLY]
+
+
 def test_response_bytes_never_reach_the_log(tmp_path: Path) -> None:
     """Only codes and noindex results (yes, no, unfetched) are printed, so a body cannot
     carry a workflow command."""
