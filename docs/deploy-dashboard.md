@@ -424,8 +424,8 @@ never registered. Pointing graphs at the CDN is #432's. The record, from
 | Before (2026-11-05) | `HTTP/2 200` | `content-length: 4815814`; 1,472,154 bytes with `Accept-Encoding: gzip` |
 | After (2026-11-05, deploy run 42028422287 of 62155d2) | `HTTP/2 404` | `content-length: 207`, Flask's default 404 body |
 
-Other component-suite files over 500 KB, none used by any page, are still served: in
-the 30 days to 2026-11-13, four of the six got no request and two got four each (#439).
+The six component-suite files over 500 KB that #439 listed, none used by any page, are
+still served: in the 30 days to 2026-11-13, four got no request and two got four each.
 A component-suite file Dash registers but did not install answers 404 since #439. Files
 that load on pages not using them are #524. A standing canary check for the 404 is #440.
 

@@ -2204,7 +2204,7 @@ class TestMissingSuiteFile:
     def test_a_missing_file_in_a_request_hook_stays_a_logged_500(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Only Dash's read is wrapped: a ``FileNotFoundError`` raised before the
+        """Only Dash's view is wrapped: a ``FileNotFoundError`` raised before the
         view runs, on a suite request, stays a 500 with its traceback logged."""
 
         def raise_missing() -> None:

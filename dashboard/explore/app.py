@@ -848,8 +848,10 @@ def _suite_view(*args: Any, **kwargs: Any) -> Any:
     covers, and then Dash's read (``pkgutil.get_data``) raises ``FileNotFoundError``,
     which would answer 500 and log a traceback. Dash's whole view is wrapped, and on
     4.5.0 that read is the only call in it that raises ``FileNotFoundError``. The
-    error from outside the view, a request hook included, stays a logged 500, and so
-    does any other error from the view. The refusal logs one warning naming the
+    wrapper refuses only that error. Any other error from the view passes through
+    unchanged (a ``DependencyException`` to the 404 handler above, anything else to
+    a logged 500), and so does a ``FileNotFoundError`` raised outside the view, a
+    request hook included. The refusal logs one warning naming the
     package and path, with no traceback, so a used bundle missing from an install
     still shows in the log. The body is Flask's default 404 body, as above.
     """
