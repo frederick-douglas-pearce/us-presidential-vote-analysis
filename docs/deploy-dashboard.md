@@ -389,8 +389,10 @@ The daily [API canary](../.github/workflows/api-canary.yml) probes the dashboard
   (5 min each) before failing, so an API deploy during the run is not a false alarm;
 - with `EXPLORE_APP_HOSTNAME` set, the `appspot.com` host 301s to `explore.`;
 - a `HEAD` of the bundled plotly.js script path is 404 (**No local plotly.js**, below;
-  #440). A 200 means the running version serves the 4.8 MB file again, which a rollback
-  to a ref before #430 would do with no deploy-time check (§10).
+  #440). A 200 means the running version serves the 4.8 MB file again. No deploy runs this
+  check automatically (#526 will add it to the deploy workflow), and a rollback deploys an
+  older ref with that ref's own workflow (§10); the canary runs from `main`, so it sees the
+  regression whichever ref deployed.
 
 **Declined: the browser-side `Origin` check.** #277's AC asks the canary to send
 `Origin: https://explore.…` and assert `Access-Control-Allow-Origin` *for a browser-side

@@ -13,7 +13,7 @@
 # 200" is also exactly what a lock that has fallen open looks like — the pair is the
 # evidence, never either half.
 #
-# Read-only: GETs against the public API, plus the dashboard's page shell and the Dash
+# Read-only: GET and HEAD requests against the public API and the dashboard, plus the Dash
 # routing callback (a POST that renders the page and changes nothing). No secrets, no GCP
 # auth, no deploy.
 name: API canary (public surface)
@@ -38,8 +38,9 @@ jobs:
     # Worst cases: each expect_status is 3 tries × 20 s + 2 × 10 s of sleeps (80 s). The
     # API checks through Cloudflare and direct are 5 of them (400 s). The dashboard path
     # is two expect_status calls (160 s) + 12 content tries × 20 s + 11 × 60 s + the 20 s
-    # redirect (1080 s). Total ≈ 1480 s ≈ 24.7 min, under 30. Add a check's 80 s when
-    # adding one, and keep the total under the limit.
+    # redirect (1080 s). Total ≈ 1480 s ≈ 24.7 min; the dead-man's-switch step adds at
+    # most ≈ 87 s (4 tries × 20 s + 7 s of retry backoff), ≈ 26 min in all, under 30. Add
+    # a check's 80 s when adding one, and keep the total under the limit.
     timeout-minutes: 30
     # Never checks out, never calls the API — no token needed at all.
     permissions: {}
@@ -59,6 +60,11 @@ jobs:
           EXPLORE_APP_HOST: ${{ vars.EXPLORE_APP_HOSTNAME }}
         run: |
           set -uo pipefail
+          # GitHub runs this step under `bash -e`, which ends it at the first failing
+          # command. The checks below are collected instead (fail() counts, the tally at
+          # the end decides the exit), so -e is switched off for the whole step. `set -u`
+          # still ends it on an unbound variable, and the dead-man's switch reports that.
+          set +e
           FAILURES=0
           HDR=$(mktemp); BODY=$(mktemp)
           origin_version=""
@@ -66,12 +72,10 @@ jobs:
           fail() { echo "::error::$1"; FAILURES=$((FAILURES + 1)); }
 
           # expect_status <label> <url> <want> [curl option...] — retries, then leaves the
-          # last response in $HDR/$BODY for follow-up assertions. Retried because this
-          # notifies a human, so one transient blip must not; collected rather than
-          # fail-fast, so a single run reports everything that is wrong instead of only the
-          # first thing. GitHub runs this step under `bash -e`, so a call outside an `if`
-          # ends in `|| true`: a bare failing call would end the step there, before the
-          # checks after it report.
+          # last response in $HDR/$BODY for follow-up assertions (with --head, $BODY holds
+          # the headers too). Retried because this notifies a human, so one transient blip
+          # must not; collected rather than fail-fast, so a single run reports everything
+          # that is wrong instead of only the first thing.
           expect_status() {
             local label="$1" url="$2" want="$3" code=""
             local extra=("${@:4}")
@@ -172,7 +176,7 @@ jobs:
 
           if [ -n "${RAW_ORIGIN_URL}" ]; then
             echo "=== direct to the origin (no Cloudflare) ==="
-            expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403 || true
+            expect_status "raw /v1 origin-lock" "${RAW_ORIGIN_URL}/v1/meta" 403
           else
             # Not a failure (a fork has no origin to check), but not silent either:
             # /health's `origin_guard` is the service reporting the guard is ARMED, which
@@ -196,13 +200,14 @@ jobs:
             # No local plotly.js (#430). The app registers plotly.js by its CDN address
             # only, so this path answers 404. A 200 means the running version registers
             # Dash's bundled copy again: a 4.8 MB response anyone can ask for, the largest
-            # the site can be made to send. A rollback to a ref before #430 does this
-            # without any deploy-time check (docs/deploy-dashboard.md §10), which is why it
-            # is checked here, from main, every day. HEAD, so a regressed 200 does not
-            # download the file on every try.
+            # the site can be made to send. No deploy runs this check automatically (#526
+            # will add it to the deploy workflow), and a rollback deploys an older ref with
+            # that ref's own workflow (docs/deploy-dashboard.md §10). This canary runs from
+            # main, so it sees the regression whichever ref deployed. HEAD, so a regressed
+            # 200 does not download the file on every try.
             expect_status "dashboard plotly.js (#430)" \
               "https://${EXPLORE_HOST}/_dash-component-suites/plotly/package_data/plotly.min.js" \
-              404 --head || true
+              404 --head
 
             # The page content, fetched the way a browser renders it (the Dash Pages
             # routing callback). A 200 alone proves nothing: the degraded page ("the
@@ -266,7 +271,7 @@ jobs:
       #
       # `always()` on purpose, and it is the point rather than a convenience: it fires
       # even when the step above died for a reason that is not an API failure at all —
-      # a missing `jq`, a runner image change, an unbound variable — which converts
+      # a runner image change, an unbound variable — which converts
       # "the canary quietly broke" into an immediate, specific alert.
       - name: Ping the dead-man's switch
         if: always()
