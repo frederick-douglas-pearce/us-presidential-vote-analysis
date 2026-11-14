@@ -49,12 +49,13 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash
 #: ``curl`` answers by URL (its last argument): the dashboard page shell with its
 #: canonical link, the routing callback with a snapshot version, the plotly.js path with
 #: ``$PLOTLY_CODE`` and the raw origin with ``$ORIGIN_CODE``. A code of ``fail`` is a
-#: connection error (exit 7, ``%{http_code}`` = 000). Each call's arguments go to
-#: ``$CURL_LOG``, one call per line.
+#: connection error (exit 7, ``%{http_code}`` = 000). Each call goes to ``$CURL_LOG`` as one
+#: line, every argument ended by a unit separator (0x1f), so an empty argument shows as
+#: one: joining them with spaces would hide it.
 _STUBS = """\
 sleep() { :; }
 curl() {
-  printf '%s\\n' "$*" >> "$CURL_LOG"
+  { printf '%s\\x1f' "$@"; printf '\\n'; } >> "$CURL_LOG"
   local url="${@: -1}" out="" hdr="" fmt="" code=200 body=""
   while [ $# -gt 0 ]; do
     case "$1" in -o) out="$2"; shift;; -D) hdr="$2"; shift;; -w) fmt="$2"; shift;; esac
@@ -136,7 +137,9 @@ def _run(
         timeout=60,
         check=False,
     )
-    calls = [line.split() for line in log.read_text(encoding="utf-8").splitlines()]
+    calls = [
+        line.split("\x1f")[:-1] for line in log.read_text(encoding="utf-8").splitlines()
+    ]
     return result, calls
 
 
