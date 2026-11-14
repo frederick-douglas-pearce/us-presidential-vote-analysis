@@ -6864,3 +6864,30 @@ switching by the rows, and a view URL that names a key its table does not read b
 **Residuals.** The `/elections#c4` fragment does not land on the chart after Dash renders, so
 #436's optional link from C3 to C4 does not ship (#496, a strict xfail in the e2e suite). N1's
 `elections` items do not carry `national_pv_denominator`, so C5 reads N1's candidate rows (#495).
+
+## D101: A state name with no text refuses N2
+
+**Date:** 2026-11-14
+**Amends:** D100(c) (the rules `n2_rows` checks) · **Builds on:** D100(e) · **Decided by:** the owner, at #498's plan gate ("option R")
+
+**Context.** #498's cr.5 asked that the state control on `/elections` never offer a state as
+"None" or a blank option. The API's `ElectionStateRow.state` is `str`
+(`src/usvote/api/models.py`), so a null or non-text name cannot be served by a validated
+response, and a blank one, which the type admits, has nothing to show. The plan step's
+alternative listed such a state by its USPS code (a `ba` label spec, `STATE_NO_NAME`). The owner
+chose not to: a state with no name points to a fault further up, in the snapshot or the API,
+and a fallback label would hide it.
+
+**Decision.** D100(c)'s list of what `n2_rows` checks gains one rule: every row's `state` passes
+`labels.has_text` (text with something in it, #367). A row that fails it (null, blank, or not
+text) raises `TypeError`, so N2 is malformed and D100(e) applies unchanged: the all-states charts
+and table stay, the state control is hidden with no options and no value, and
+`OVER_TIME_NO_STATES` shows. No new reader-facing string ships.
+
+**Rationale.** Refusing surfaces an upstream fault on the page instead of papering over it, and
+reuses the one degraded state the section already has, so it needs no new wording.
+
+**Residuals.** `has_text` uses `str.strip()`, so a name of zero-width characters only still
+passes (#532). `OVER_TIME_NO_STATES` promises a retry "in a minute", which is false for a
+fault that lasts the snapshot's life (#533, with the page's other section sentences). The
+other pages' state cells and dropdowns take the name as served (#530).

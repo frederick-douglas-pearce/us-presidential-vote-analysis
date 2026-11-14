@@ -805,7 +805,8 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
     Pure; raises ``KeyError`` for a missing key and ``TypeError`` for a body whose rows
     are not a non-empty list, a row that is not an object, a year
     :func:`explore.election_view.row_year` refuses or that is not served, a USPS code
-    :data:`explore.query.USPS_RE` refuses, two rows for one year and state, two names
+    :data:`explore.query.USPS_RE` refuses, a name that is not text with something in
+    it (:func:`explore.labels.has_text`), two rows for one year and state, two names
     for one code, or a gap: a served year after a state's first with no row for it.
     Every row must carry ``state_electoral_votes``, ``state_popular_total`` and
     ``pv_status`` (``KeyError``), so the result does not depend on the state chosen.
@@ -834,6 +835,13 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
         for field in ("state_electoral_votes", "state_popular_total", "pv_status"):
             row[field]
         name = row["state"]
+        # A name failing ``labels.has_text`` refuses N2 (the all-states view stays)
+        # rather than reaching the state control as "None", a blank option or a number
+        # (#498, owner; D101). The API's ``ElectionStateRow.state`` is ``str``, so a
+        # null or non-text name is an upstream fault; a blank one, which that type
+        # admits, has nothing to show.
+        if not labels.has_text(name):
+            raise TypeError(f"{api.ELECTION_STATES_PATH} names {usps} with no text")
         if not _same(names.setdefault(usps, name), name):
             raise TypeError(f"{api.ELECTION_STATES_PATH} names {usps} two ways")
         state_years = by_state.setdefault(usps, {})

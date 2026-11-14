@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import math
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -2342,6 +2343,54 @@ class TestC4:
         }
         assert charts.figure_problems(figure) == []
 
+    def test_a_zero_allotment_with_no_cause_reads_no_electors(self) -> None:
+        """D100(d)'s other zero (#498): an N1 item's ``electoral_denominator`` 0, and a
+        legislature-chosen N2 row's 0, are "No electors appointed", never "took no
+        part", which only ``not_participating`` earns."""
+        summary = copy.deepcopy(SUMMARY)
+        year = summary["elections"][0]["year"]
+        summary["elections"][0]["electoral_denominator"] = 0
+        tree = render_over_time(summary=summary)
+        figure = chart_figure(tree, C4)
+        assert year_points(figure, labels.C4_NO_ELECTORS) == {
+            year: (0, labels.C4_NO_ELECTORS)
+        }
+        assert year not in year_points(figure, labels.LABELS["electoral_denominator"])
+        assert labels.C4_ZERO_NOTE in caption(tree, C4)
+
+        states = copy.deepcopy(N2)
+        (row,) = [
+            r for r in states["data"] if (r["state_usps"], r["year"]) == ("SC", 1824)
+        ]
+        assert row["pv_status"] == "legislature_chosen"  # the premise
+        row["state_electoral_votes"] = 0
+        tree = render_over_time({"state": "SC"}, states=states)
+        figure = chart_figure(tree, C4)
+        zeros = year_points(figure, labels.C4_NO_ELECTORS)
+        # 1864 is South Carolina's recorded zero, taking no part; 1824 is not.
+        assert zeros[1824] == (0, labels.C4_NO_ELECTORS)
+        assert zeros[1864] == (0, labels.C4_NO_ELECTORS_TOOK_NO_PART)
+        assert 1824 not in year_points(figure, labels.LABELS["state_electoral_votes"])
+        assert labels.C4_ZERO_NOTE in caption(tree, C4)
+
+    def test_its_marker_symbols_are_pinned_and_distinct(self) -> None:
+        """Each C4 marker series has its own symbol (#498), so no two differ by color
+        alone."""
+        summary = copy.deepcopy(SUMMARY)
+        summary["elections"][0]["electoral_denominator"] = 0
+        summary["elections"][1]["electoral_denominator"] = None
+        figure = chart_figure(render_over_time(summary=summary), C4)
+        symbols = {
+            t["name"]: t["marker"]["symbol"]
+            for t in figure["data"]
+            if t["type"] == "scatter"
+        }
+        assert symbols == {
+            labels.C4_NO_ELECTORS: "x",
+            labels.C4_NO_FIGURE_SERIES: "circle-open",
+        }
+        assert len(set(symbols.values())) == len(symbols)
+
 
 class TestC5:
     def test_all_states_equals_n1_s_national_total(self) -> None:
@@ -2429,6 +2478,92 @@ class TestC5:
         assert set(labels.C5_MARKER_LABELS.values()) | {labels.UNRECOGNIZED} <= set(
             symbols
         )
+
+    def test_a_repeated_nan_total_is_one_unrecognized_value(self) -> None:
+        """D100(c) (#498): every 2016 row's total NaN is one value, though NaN is
+        unequal to itself, and C5 marks it unrecognized rather than degrading."""
+        summary = copy.deepcopy(SUMMARY)
+        for row in summary["data"]:
+            if row["year"] == 2016:
+                row["national_pv_denominator"] = float("nan")
+        assert math.isnan(MOD["national_pv"](summary, YEARS)[2016])
+        tree = render_over_time(summary=summary)
+        assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is None
+        figure = chart_figure(tree, C5)
+        assert year_points(figure, labels.UNRECOGNIZED) == {
+            2016: (0, labels.UNRECOGNIZED)
+        }
+        # The cell, not only the marker's label, reads unrecognized, and its hover
+        # carries the note (the marker's label is the series', whatever the cell).
+        by_year = {int(r[0]): r for r in over_time_rows(tree)}
+        assert by_year[2016][2] == labels.UNRECOGNIZED
+        marker = trace(figure, labels.UNRECOGNIZED)
+        assert marker is not None
+        (hover,) = marker["hovertext"]
+        assert labels.UNRECOGNIZED_NOTE in hover
+
+    def test_an_in_window_national_null_is_no_total(self) -> None:
+        """All states (#498): a null national total inside the window is a marker
+        naming it, as a state's is."""
+        summary = copy.deepcopy(SUMMARY)
+        for row in summary["data"]:
+            if row["year"] == 2016:
+                row["national_pv_denominator"] = None
+        figure = chart_figure(render_over_time(summary=summary), C5)
+        assert year_points(figure, labels.C5_NO_TOTAL) == {
+            2016: (0, labels.C5_NO_TOTAL)
+        }
+
+    def test_a_year_after_the_window_is_banded_for_one_state(self) -> None:
+        """State mode (#498): a held popular vote after a moved ``pv_year_max``, its
+        total null, is banded and never marked."""
+        moved, summary = after_2016()
+        states = copy.deepcopy(N2)
+        for row in states["data"]:
+            if row["state_usps"] == "GA" and row["year"] > 2016:
+                assert row["pv_status"] == "popular_vote"  # the premise
+                row["state_popular_total"] = None
+        tree = render_over_time(
+            {"state": "GA"}, index=moved, summary=summary, states=states
+        )
+        # The premise: Georgia's one-state view, not the all-states fallback, whose
+        # national totals after 2016 are null too.
+        assert find(tree, MOD["OVER_TIME_NO_STATES_ID"]) is None
+        title = labels.C5_TITLE_STATE.format(state=state_name("GA"))
+        assert title in texts(tree)
+        figure = chart_figure(tree, C5)
+        assert trace(figure, labels.LABELS["state_popular_total"]) is not None
+        assert len(figure["layout"]["shapes"]) == 2
+        notes = [a["text"] for a in figure["layout"]["annotations"]]
+        assert labels.C5_AFTER_BAND.format(pv_year_max=2016) in notes
+        marked = {y for t in figure["data"] for y in year_points(figure, t["name"])}
+        assert not marked & {2020, 2024}
+        assert labels.C5_AFTER_NOTE.format(pv_year_max=2016) in caption(tree, C5)
+
+    def test_its_marker_symbols_are_pinned_and_distinct(self) -> None:
+        """Each C5 marker label's symbol (#498), distinct, and each drawn marker
+        series carries its own label's."""
+        symbols = MOD["_C5_SYMBOLS"]
+        assert symbols == {
+            labels.C5_LEGISLATURE: "diamond",
+            labels.C5_TOOK_NO_PART: "x",
+            labels.C5_NO_TOTAL: "circle-open",
+            labels.UNRECOGNIZED: "square-open",
+        }
+        assert len(set(symbols.values())) == len(symbols)
+        states = copy.deepcopy(N2)
+        for row in states["data"]:
+            if (row["state_usps"], row["year"]) == ("SC", 2016):
+                row["state_popular_total"] = None
+            if (row["state_usps"], row["year"]) == ("SC", 2020):
+                row["state_popular_total"] = "x"
+        figure = chart_figure(render_over_time({"state": "SC"}, states=states), C5)
+        drawn = {
+            t["name"]: t["marker"]["symbol"]
+            for t in figure["data"]
+            if t["type"] == "scatter"
+        }
+        assert drawn == symbols  # the premise: every series drawn
 
     @pytest.mark.parametrize("query", [{}, {"state": "GA"}, {"state": "AK"}])
     def test_both_charts_share_one_year_axis(self, query: dict[str, Any]) -> None:
@@ -2631,6 +2766,41 @@ class TestOverTimeValidation:
             )
         )
 
+    def test_same_is_one_type_and_equal_or_a_repeated_nan(self) -> None:
+        """D100(c), the type check (#498): a value of another type is another value,
+        however Python compares them; NaN with NaN is one."""
+        same = MOD["_same"]
+        assert not same(1, 1.0) and not same(1.0, 1)
+        assert not same(True, 1) and not same(1, True)
+        assert not same(None, 0)
+        assert same(1, 1) and same(None, None) and same("GA", "GA")
+        assert same(float("nan"), float("nan"))
+        assert not same(float("nan"), 1.0)
+
+    def test_national_pv_counts_an_equal_float_as_a_second_total(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        rows = [r for r in summary["data"] if r["year"] == 2016]
+        assert len(rows) > 1 and isinstance(rows[0]["national_pv_denominator"], int)
+        rows[-1]["national_pv_denominator"] = float(rows[0]["national_pv_denominator"])
+        with pytest.raises(TypeError, match="two national totals"):
+            MOD["national_pv"](summary, YEARS)
+
+    @pytest.mark.parametrize("name", [None, "", "  ", 7])
+    def test_a_state_with_no_name_to_show(self, name: Any) -> None:
+        """Option R (#498, owner; D101): a state whose every row's name fails
+        ``labels.has_text`` (null, blank, or not text) refuses N2, rather than reaching
+        the state control as "None", a blank option or a number. The API's
+        ``ElectionStateRow.state`` is ``str``, so null or non-text is an upstream
+        fault; a blank name, which that type admits, has nothing to show. Every row,
+        so the two-names rule is not what refuses it."""
+
+        def nameless(body: dict[str, Any]) -> None:
+            for row in body["data"]:
+                if row["state_usps"] == "AL":
+                    row["state"] = name
+
+        self.refuses(nameless)
+
     def test_a_missing_key(self) -> None:
         self.refuses(lambda b: b["data"][0].pop("state"))
         self.refuses(lambda b: b.pop("data"))
@@ -2705,6 +2875,14 @@ class TestOverTimeDegraded:
             # (#436's review): the all-states view stays.
             {"data": copy.deepcopy(N2["data"])},
             {"data": copy.deepcopy(N2["data"]), "meta": {"provenance": {}}},
+            # A state whose every row names it with nothing (#498, option R).
+            {
+                **copy.deepcopy(N2),
+                "data": [
+                    {**r, "state": None} if r["state_usps"] == "GA" else r
+                    for r in N2["data"]
+                ],
+            },
             # One row of the chosen state lacks a field the one-state view reads.
             {
                 **copy.deepcopy(N2),
@@ -2837,20 +3015,27 @@ class TestOverTimeCaptions:
         assert (labels.C4_ZERO_NOTE in c4) is zeros
         assert labels.C5_MARKER_NOTE in c5 if usps != "AK" else True
 
+    @pytest.mark.parametrize("name", ["<b>Alaska</b>", "var(--x) Alaska"])
     def test_a_name_that_is_not_plain_text_uses_the_selected_state_forms(
-        self,
+        self, name: str
     ) -> None:
+        """Each of ``_plain``'s refusals on its own (#498): markup, and a token with no
+        ``<``. Alaska's first election comes after the dataset's, so both captions
+        carry the first-election sentence, in its selected form, never the name."""
         states = copy.deepcopy(N2)
         for row in states["data"]:
             if row["state_usps"] == "AK":
-                row["state"] = "<b>Alaska</b>"
+                row["state"] = name
         tree = render_over_time({"state": "AK"}, states=states)
         texts_ = texts(tree)
         assert labels.C4_TITLE_SELECTED in texts_ and labels.C5_TITLE_SELECTED in texts_
-        assert labels.FIRST_ELECTION_NOTE_SELECTED.format(year=1960) in caption(tree, C4)
+        note = labels.FIRST_ELECTION_NOTE_SELECTED.format(year=1960)
+        for dom in (C4, C5):
+            assert note in caption(tree, dom), dom
+            assert "Alaska" not in caption(tree, dom), dom
         assert labels.C4_ALL_STATES not in caption(tree, C4)
         hovers = chart_figure(tree, C4)["data"][0]["hovertext"]
-        assert all("&lt;b&gt;Alaska&lt;/b&gt;" in h for h in hovers)
+        assert all(charts.escaped(name) in h for h in hovers)
 
 
 def state_name(usps: str) -> str:

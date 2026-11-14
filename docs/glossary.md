@@ -517,7 +517,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   elections shown and the rest of the page still show. The over-time section's own states:
   `OVER_TIME_UNAVAILABLE` (`pages/elections.py`) when `/v1/elections/summary` cannot be read,
   with the rest of the page still shown; and `OVER_TIME_NO_STATES` when `/v1/elections/states`
-  cannot be read, with the all-states charts and their table still shown.
+  cannot be read or is malformed, with the all-states charts and their table still shown.
 - **Status:** settled
 
 ### Election pages (overview, results by state, people per electoral vote)
