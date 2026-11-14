@@ -338,7 +338,7 @@ curl -sI https://explore.us-presidential-election-center.org/_dash-component-sui
 ```
 
 A **200** with `content-length: 4815814` means the deployed version still registers the
-file.
+file. The daily canary repeats this check (§11).
 
 `app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
 gunicorn worker (one process, so one cache) as `explore-run`, and carries no
@@ -387,7 +387,12 @@ The daily [API canary](../.github/workflows/api-canary.yml) probes the dashboard
 - the page content (the Dash routing callback) is not the degraded message and carries the
   snapshot version the API's `/health` reports. It retries past two refresh intervals
   (5 min each) before failing, so an API deploy during the run is not a false alarm;
-- with `EXPLORE_APP_HOSTNAME` set, the `appspot.com` host 301s to `explore.`.
+- with `EXPLORE_APP_HOSTNAME` set, the `appspot.com` host 301s to `explore.`;
+- a `HEAD` of the bundled plotly.js script path is 404 (**No local plotly.js**, below;
+  #440). A 200 means the running version serves the 4.8 MB file again. No deploy runs this
+  check automatically (#526 will add it to the deploy workflow), and a rollback deploys an
+  older ref with that ref's own workflow (§10); the canary runs from `main`, so it sees the
+  regression whichever ref deployed.
 
 **Declined: the browser-side `Origin` check.** #277's AC asks the canary to send
 `Origin: https://explore.…` and assert `Access-Control-Allow-Origin` *for a browser-side
@@ -427,7 +432,8 @@ never registered. Pointing graphs at the CDN is #432's. The record, from
 The six component-suite files over 500 KB that #439 listed, none used by any page, are
 still served: in the 30 days to 2026-11-13, four got no request and two got four each.
 A component-suite file Dash registers but did not install answers 404 since #439. Files
-that load on pages not using them are #524. A standing canary check for the 404 is #440.
+that load on pages not using them are #524. The daily canary checks the plotly.js 404
+(#440, above).
 
 **The keep-warm ping (D076).** The refresher GETs the API's `/health` once per refresh
 interval (5 min), so the API origin does not scale to zero while the dashboard runs. That is
