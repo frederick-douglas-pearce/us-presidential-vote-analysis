@@ -824,6 +824,31 @@ def _unregistered_suite_path(_error: Exception) -> werkzeug.exceptions.NotFound:
     return werkzeug.exceptions.NotFound()
 
 
+#: The Flask endpoint Dash serves component-suite files through: its URL rule, which
+#: Dash's Flask backend registers as the endpoint name. Pinned in ``TestDashPrivates``.
+SUITE_ENDPOINT = (
+    app.config.routes_pathname_prefix
+    + "_dash-component-suites/<string:package_name>/<path:fingerprinted_path>"
+)
+
+
+@server.errorhandler(FileNotFoundError)
+def _missing_suite_file(error: FileNotFoundError) -> werkzeug.exceptions.NotFound:
+    """A component-suite file Dash registered but did not install answers 404 (#439).
+
+    Dash registers some files its package does not contain (on 4.5.0,
+    ``dash-renderer/build/dash_renderer.min.js.map`` and ``dcc/async-mathjax.js.map``).
+    Such a path passes the registered-path check that :func:`_unregistered_suite_path`
+    covers, and then ``pkgutil.get_data`` raises ``FileNotFoundError``, which would
+    answer 500 and log a traceback. Only the component-suite endpoint is answered
+    here. On any other endpoint the error is raised again, so Flask logs it and
+    answers 500 as before. The body is Flask's default 404 body, as above.
+    """
+    if flask.request.endpoint != SUITE_ENDPOINT:
+        raise error
+    return werkzeug.exceptions.NotFound()
+
+
 #: The custom-404 page, found as Dash's router finds it: its not-found state is the
 #: title of every 404 that is not a page's own.
 NOT_FOUND_PAGE: dict[str, Any] = next(
