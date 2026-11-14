@@ -8,9 +8,8 @@ instance's cache is filled so a cold cache is never read as a double decode.
 These tests run the script itself, by its own ``#!`` line, with the shared fake ``curl``
 and a no-op ``sleep`` first on ``PATH`` (``tests/workflow_steps.py``). Every test that
 runs the script asserts the calls the fake received, so a fake that was bypassed fails the
-test. The last tests
-pin the step in ``deploy-dashboard.yml`` that runs it: its position inside the rollback
-window is what makes a failure roll back.
+test. The last tests pin the step in ``deploy-dashboard.yml`` that runs it: its position
+inside the rollback window is what makes a failure roll back.
 """
 
 from __future__ import annotations

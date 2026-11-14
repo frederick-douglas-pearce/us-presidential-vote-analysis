@@ -327,9 +327,16 @@ def test_a_meta_body_that_is_not_an_object_fails_once(
         assert message not in result.stdout
 
 
-def test_a_body_that_is_not_an_object_is_dumped_defused(tmp_path: Path) -> None:
+@pytest.mark.parametrize("path", ["/health", "/v1/meta"])
+def test_a_body_that_is_not_an_object_is_dumped_defused(
+    tmp_path: Path, path: str
+) -> None:
     """The body's first bytes reach the log, but never as a workflow command."""
-    result = _run_json(tmp_path, health="::error::x ##[error]y")
+    planted = "::error::x ##[error]y"
+    if path == "/health":
+        result = _run_json(tmp_path, health=planted)
+    else:
+        result = _run_json(tmp_path, meta=planted)
     assert result.returncode == 1
     assert "    | ::error::x # [error]y" in result.stdout.splitlines()
     assert "##[" not in result.stdout
@@ -337,7 +344,7 @@ def test_a_body_that_is_not_an_object_is_dumped_defused(tmp_path: Path) -> None:
         line for line in result.stdout.splitlines() if line.lstrip().startswith("::")
     ]
     assert commands == [
-        "::error::/health answered 200 but the body is not a JSON object",
+        f"::error::{path} answered 200 but the body is not a JSON object",
         f"::error::API canary: 1 check(s) failed against https://{_CF_HOST}",
     ]
 

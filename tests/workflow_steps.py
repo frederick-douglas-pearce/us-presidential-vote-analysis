@@ -25,8 +25,8 @@ and then recover. A code of ``fail`` is a connection error: exit 7, with
 body to ``-o``, ``HTTP/2 <code>`` and the route's header lines to ``-D``, and the code to
 ``-w``. A code may carry a mode after ``@``: ``404@keep`` answers 404 but leaves the ``-o``
 file as it was, and ``200@28`` answers 200 and then exits 28, as curl does when a
-transfer times out after the status arrived. Every call goes to ``$CURL_LOG`` as one line, each argument ended by a unit
-separator (0x1f), so an empty argument shows as one.
+transfer times out after the status arrived. Every call goes to ``$CURL_LOG`` as one
+line, each argument ended by a unit separator (0x1f), so an empty argument shows as one.
 """
 
 from __future__ import annotations

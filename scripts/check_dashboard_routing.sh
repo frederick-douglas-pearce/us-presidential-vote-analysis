@@ -10,7 +10,8 @@
 # - cache filled: GET /election/1825 answers 404 with the app's noindex tag. 1825 is never
 #   an election year, but before the instance holds the year list the index answers 200
 #   for any year, and that 200 would read as a double decode below. The precondition, so it
-#   is retried on any other answer: a request wakes the refresher.
+#   is retried on anything but that, no answer (000) included: a request wakes the
+#   refresher.
 # - decoded once (D089): GET /election/%2531824 answers 404 with noindex. Decoded once it is
 #   the year "%31824", which the page refuses; a 200 means something in front of the app
 #   decoded the path first. Not judged while the cache is not filled.

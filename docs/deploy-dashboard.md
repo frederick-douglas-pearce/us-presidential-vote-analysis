@@ -318,8 +318,8 @@ judged like any other.
 **The routing check** (step 4) prints one line per check, with the status the server
 answered and, for `/election/1825` and `/election/%2531824`, whether the body carries the
 index's `noindex` tag (`yes`, `no`, or `unfetched` when no answer arrived); a failed run ends
-with one `::error::` line naming every check that failed. The cache check is retried on any
-answer but a 404 with `noindex` (below); the other three are retried only when no answer
+with one `::error::` line naming every check that failed. The cache check is retried on
+anything but a 404 with `noindex`, no answer (000) included (below); the other three are retried only when no answer
 arrived (curl exited nonzero, reported as 000) or the answer was a 5xx, and any other answer
 is final. It never prints response bytes. What each check is for:
 
@@ -342,8 +342,8 @@ is final. It never prints response bytes. What each check is for:
   before this. A 404 *without* the tag on `/election/1825` is not a cold cache: it came from
   something in front of the app, or the app's 404 lost its tag, and it fails the same way.
 - **No local plotly.js** (#430, §11). A `HEAD` of
-  `/_dash-component-suites/plotly/package_data/plotly.min.js` must answer 404. A **200** with `content-length: 4815814` means the deployed version still
-  registers the file. The daily canary repeats this check against `explore.` (§11), which
+  `/_dash-component-suites/plotly/package_data/plotly.min.js` must answer 404. A **200**
+  with `content-length: 4815814` means the deployed version still registers the file. The daily canary repeats this check against `explore.` (§11), which
   also covers a rollback to a ref older than #526, whose workflow has no routing check.
 
 To repeat a check by hand against the public host:
