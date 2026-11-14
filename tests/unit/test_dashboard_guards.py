@@ -95,6 +95,7 @@ TESTS = REPO / "tests"
 FIXTURES = TESTS / "fixtures" / "dashboard"
 WORKFLOW = REPO / ".github" / "workflows" / "deploy-dashboard.yml"
 PROBE = REPO / "scripts" / "probe_dashboard.sh"
+ROUTING_CHECK = REPO / "scripts" / "check_dashboard_routing.sh"
 #: Contributor guidance (#298), never uploaded: `.gcloudignore` is an allow-list that
 #: does not name it, which `test_gcloudignore_uploads_only_the_runtime` pins. Its prose
 #: says the runtime names no `run.app` URL, so the text scan below skips this one path.
@@ -1190,13 +1191,13 @@ def test_the_lint_rules_flag_what_they_should(
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
     offenders = [
         str(p.relative_to(REPO))
-        for p in [*DASHBOARD.rglob("*"), WORKFLOW, PROBE]
+        for p in [*DASHBOARD.rglob("*"), WORKFLOW, PROBE, ROUTING_CHECK]
         if p.is_file()
         and "__pycache__" not in p.parts
         and p != GUIDANCE
         and "run.app" in p.read_text(encoding="utf-8", errors="replace")
     ]
-    assert WORKFLOW.is_file() and PROBE.is_file()
+    assert WORKFLOW.is_file() and PROBE.is_file() and ROUTING_CHECK.is_file()
     assert offenders == []
 
 

@@ -128,15 +128,26 @@ jobs:
           fi
           no_origin_leak "/"
 
+          # A 200 whose body is not a JSON object (a Cloudflare challenge page, say) is
+          # reported as that, once, and its field checks are skipped: read anyway, they
+          # would each name a wrong cause (#526, from #440's review). One parse decides
+          # whether the fields are read at all.
           if expect_status "/health" "https://${CF_HOST}/health" 200; then
-            guard=$(jq -r '.origin_guard // "missing"' "$BODY")
-            [ "$guard" = "enforced" ] \
-              || fail "origin_guard is '${guard}', want 'enforced' — the /v1 origin lock is open"
-            loaded=$(jq -r '.snapshot_loaded // false' "$BODY")
-            [ "$loaded" = "true" ] \
-              || fail "snapshot_loaded=${loaded} — the service is up but holds no data"
-            # /health is `no-store`, so this is always the ORIGIN's answer, never the edge's.
-            origin_version=$(jq -r '.snapshot_version // ""' "$BODY")
+            if ! jq -e 'type == "object"' "$BODY" >/dev/null 2>&1; then
+              fail "/health answered 200 but the body is not a JSON object"
+              # Untrusted bytes, dumped through defuse_dump: a challenge page served to
+              # this client (the #148 client) is rarely reproducible from elsewhere.
+              head -c 600 "$BODY" | defuse_dump; echo
+            else
+              guard=$(jq -r '.origin_guard // "missing"' "$BODY")
+              [ "$guard" = "enforced" ] \
+                || fail "origin_guard is '${guard}', want 'enforced' — the /v1 origin lock is open"
+              loaded=$(jq -r '.snapshot_loaded // false' "$BODY")
+              [ "$loaded" = "true" ] \
+                || fail "snapshot_loaded=${loaded} — the service is up but holds no data"
+              # /health is `no-store`, so this is always the ORIGIN's answer, never the edge's.
+              origin_version=$(jq -r '.snapshot_version // ""' "$BODY")
+            fi
           fi
           no_origin_leak "/health"
 
@@ -144,23 +155,33 @@ jobs:
           if expect_status "/v1/meta" "https://${CF_HOST}/v1/meta" 200; then
             grep -qi '^server: cloudflare' "$HDR" \
               || fail "/v1/meta did not traverse Cloudflare (no 'server: cloudflare' header) — DNS or the Worker route may have moved"
-            rows=$(jq -r '.row_count // 0' "$BODY")
-            [ "$rows" -gt 0 ] 2>/dev/null || fail "row_count=${rows} — the served snapshot is empty"
+            # Headers, so read whatever the body is: a challenge page passes it truthfully.
+            # The snapshot comparison below reads the ETag, which a challenge page does not
+            # carry, so it sits with the field checks.
+            if ! jq -e 'type == "object"' "$BODY" >/dev/null 2>&1; then
+              fail "/v1/meta answered 200 but the body is not a JSON object"
+              # Untrusted bytes, dumped through defuse_dump: a challenge page served to
+              # this client (the #148 client) is rarely reproducible from elsewhere.
+              head -c 600 "$BODY" | defuse_dump; echo
+            else
+              rows=$(jq -r '.row_count // 0' "$BODY")
+              [ "$rows" -gt 0 ] 2>/dev/null || fail "row_count=${rows} — the served snapshot is empty"
 
-            # The two ends must agree on which snapshot is live. /v1/meta is edge-cached
-            # and its ETag *is* the snapshot content hash, so a mismatch against /health
-            # above means the edge holds a version the origin has moved off — a purge
-            # that failed, or failed at this colo. The deploy gate checks the purge at
-            # cutover (#148) and nothing checks it afterwards, while the edge hold is
-            # `s-maxage` 30 days. Deliberately oracle-free: the canary has no expected
-            # version, only the requirement that the two ends agree.
-            # Strip a weak-validator prefix: Cloudflare rewrites the strong tag to
-            # W/"…" whenever it compresses. The value identifies the snapshot; the
-            # validator strength does not, and treating W/hash as a mismatch would go
-            # red on a healthy API — #148's pathology, rebuilt.
-            edge_version=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
-            if [ -n "$origin_version" ] && [ "$edge_version" != "$origin_version" ]; then
-              fail "the edge is serving snapshot '${edge_version:-none}' but the origin has '${origin_version}' — stale edge cache"
+              # The two ends must agree on which snapshot is live. /v1/meta is edge-cached
+              # and its ETag *is* the snapshot content hash, so a mismatch against /health
+              # above means the edge holds a version the origin has moved off — a purge
+              # that failed, or failed at this colo. The deploy gate checks the purge at
+              # cutover (#148) and nothing checks it afterwards, while the edge hold is
+              # `s-maxage` 30 days. Deliberately oracle-free: the canary has no expected
+              # version, only the requirement that the two ends agree.
+              # Strip a weak-validator prefix: Cloudflare rewrites the strong tag to
+              # W/"…" whenever it compresses. The value identifies the snapshot; the
+              # validator strength does not, and treating W/hash as a mismatch would go
+              # red on a healthy API — #148's pathology, rebuilt.
+              edge_version=$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="etag:"{gsub(/"/,"",$2); sub(/^W\//,"",$2); print $2}')
+              if [ -n "$origin_version" ] && [ "$edge_version" != "$origin_version" ]; then
+                fail "the edge is serving snapshot '${edge_version:-none}' but the origin has '${origin_version}' — stale edge cache"
+              fi
             fi
           fi
           no_origin_leak "/v1/meta"
@@ -200,8 +221,8 @@ jobs:
             # No local plotly.js (#430). The app registers plotly.js by its CDN address
             # only, so this path answers 404. A 200 means the running version registers
             # Dash's bundled copy again: a 4.8 MB response anyone can ask for, the largest
-            # the site can be made to send. No deploy runs this check automatically (#526
-            # will add it to the deploy workflow), and a rollback deploys an older ref with
+            # the site can be made to send. The deploy workflow checks it before traffic
+            # moves (#526), but only from #526 on: a rollback deploys an older ref with
             # that ref's own workflow (docs/deploy-dashboard.md §10). This canary runs from
             # main, so it sees the regression whichever ref deployed. HEAD, so a regressed
             # 200 does not download the file on every try.
