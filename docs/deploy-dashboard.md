@@ -448,9 +448,16 @@ never registered. Pointing graphs at the CDN is #432's. The record, from
 
 The six component-suite files over 500 KB that #439 listed, none used by any page, are
 still served: in the 30 days to 2026-11-13, four got no request and two got four each.
-A component-suite file Dash registers but did not install answers 404 since #439. Files
-that load on pages not using them are #524. The daily canary checks the plotly.js 404
-(#440, above).
+A component-suite file Dash registers but did not install answers 404 since #439. Of the
+two files #439's logs showed loading on pages that use neither (#524), dash_table's
+`bundle.js` (33,445 bytes) no longer loads on any page: Dash adds it to every index, no page
+renders a DataTable, and `app.defer_dash_table_bundle` marks it dynamic, so the path stays
+served (200) for a page cached before the change but no page requests it. dcc's
+`async-datepicker.js` (213,571 bytes) still loads on every page with a dropdown, a slider or
+a chart: despite its name it is a split chunk dcc's own Graph, Dropdown and Slider loaders
+require, so it cannot be refused without patching Dash; the home page and the not-found
+page load no dcc chunk (`test_dashboard_e2e_suites.py`). The daily canary checks the plotly.js 404 (#440,
+above).
 
 **The keep-warm ping (D076).** The refresher GETs the API's `/health` once per refresh
 interval (5 min), so the API origin does not scale to zero while the dashboard runs. That is

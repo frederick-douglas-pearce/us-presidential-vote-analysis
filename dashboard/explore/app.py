@@ -689,6 +689,43 @@ class ExploreDash(dash.Dash):
         )
 
 
+#: dash_table's one shell bundle, as ``dash.dash_table._js_dist`` names it (#524).
+DASH_TABLE_BUNDLE = "dash_table/bundle.js"
+
+
+def defer_dash_table_bundle(dist: list[dict[str, Any]]) -> None:
+    """Mark dash_table's shell bundle ``dynamic`` in ``dist``: no page loads it (#524).
+
+    ``Dash._generate_scripts_html`` adds ``dash_table._js_dist`` to every index's
+    scripts, whether or not a layout holds a DataTable, and no page does. Dash's script
+    filter carries ``dynamic`` through, and Dash registers a dynamic resource's path
+    without writing a script tag for it, so the bundle stays served (a shell cached
+    before the change still gets it) and no page requests it. Called once at import,
+    before the app is built: Dash builds an index's scripts on each request, and no
+    Dash method touches this list. The entry is matched by its exact path and the
+    ``dash`` namespace (the source map is already dynamic), and the import fails unless
+    there is exactly one with no ``async`` key, since Dash refuses a resource both
+    ``dynamic`` and ``async`` only while building an index, which would fail every
+    page. One already ``dynamic`` is left as it is. Dash privates, pinned in
+    ``TestDashPrivates``. Accepted residual: the list is module-global, so any Dash app
+    built in this process loses the tag too, which matters only to an app that renders
+    a DataTable; none does, and a lint in ``test_dashboard_guards.py`` keeps DataTable
+    out of the runtime modules.
+    """
+    entries = [
+        entry
+        for entry in dist
+        if entry.get("relative_package_path") == DASH_TABLE_BUNDLE
+        and entry.get("namespace") == "dash"
+    ]
+    if len(entries) != 1 or "async" in entries[0]:
+        raise RuntimeError(f"unexpected dash_table bundle entries: {entries!r}")
+    entries[0]["dynamic"] = True
+
+
+# dash_table builds _js_dist at import, which mypy cannot see (Dash ignores it too).
+defer_dash_table_bundle(dash.dash_table._js_dist)  # type: ignore[attr-defined]
+
 app = ExploreDash(
     __name__,
     use_pages=True,

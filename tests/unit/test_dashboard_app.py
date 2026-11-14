@@ -1508,6 +1508,10 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
 PLOTLYJS_PACKAGE_PATH = "package_data/plotly.min.js"
 PLOTLYJS_SUITE_PATH = f"/_dash-component-suites/plotly/{PLOTLYJS_PACKAGE_PATH}"
 
+#: dash_table's shell bundle, as ``dash.dash_table._js_dist`` names it (#524). Written
+#: out rather than imported from ``explore.app``, as above.
+DASH_TABLE_BUNDLE = "dash_table/bundle.js"
+
 #: The installed Dash bundles whose plotly.js loading #432 relies on.
 RENDERER_BUILD = Path(dash.__file__).parent / "dash-renderer" / "build"
 DCC_JS = Path(dash.__file__).parent / "dcc" / "dash_core_components.js"
@@ -1911,6 +1915,49 @@ class TestDashPrivates:
             }
         ]
 
+    def test_dynamic_keeps_the_package_path_and_drops_the_tag(self) -> None:
+        """#524: the app's script filter carries ``dynamic`` through on an entry with
+        no ``async``, keeping its package path, which registers the file; and Dash
+        writes no script tag for a dynamic resource while still registering it."""
+        (entry,) = [
+            e
+            for e in dash.dash_table._js_dist  # type: ignore[attr-defined]
+            if e.get("relative_package_path") == DASH_TABLE_BUNDLE
+        ]
+        get("/")
+        resources = appmod.app.scripts._resources
+        flagged: Any = dict(entry, dynamic=True)
+        assert resources._filter_resources([flagged]) == [
+            {
+                "relative_package_path": DASH_TABLE_BUNDLE,
+                "dynamic": True,
+                "namespace": "dash",
+            }
+        ]
+        # The control: without the flag, the filter keeps no ``dynamic`` key, so
+        # Dash writes the tag.
+        plain: Any = {k: v for k, v in entry.items() if k != "dynamic"}
+        assert resources._filter_resources([plain]) == [
+            {"relative_package_path": DASH_TABLE_BUNDLE, "namespace": "dash"}
+        ]
+        with appmod.server.test_request_context():
+            assert appmod.app._collect_and_register_resources(
+                [{"relative_package_path": DASH_TABLE_BUNDLE, "namespace": "dash"}]
+            ) != []
+            assert (
+                appmod.app._collect_and_register_resources(
+                    [
+                        {
+                            "relative_package_path": DASH_TABLE_BUNDLE,
+                            "namespace": "dash",
+                            "dynamic": True,
+                        }
+                    ]
+                )
+                == []
+            )
+        assert DASH_TABLE_BUNDLE in appmod.app.registered_paths["dash"]
+
     def test_the_suite_route_s_endpoint_is_its_url_rule(self) -> None:
         """#439: app.py wraps the view registered under the component-suite route's
         endpoint, which Dash's Flask backend names after the route's URL rule."""
@@ -1994,6 +2041,88 @@ class TestPlotlyjsOverride:
         with pytest.raises(RuntimeError, match="unexpected plotly.js entries"):
             self.run_override(monkeypatch, added)
         assert not any("external_only" in entry for entry in dash.dcc._js_dist)
+
+
+#: dash_table's bundle entry as Dash 4.5.0 writes it, for the override's tests (#524).
+DASH_TABLE_ENTRY: dict[str, Any] = {
+    "relative_package_path": DASH_TABLE_BUNDLE,
+    "external_url": "https://unpkg.com/dash-table@0.0.0/dash_table/bundle.js",
+    "namespace": "dash",
+}
+#: Its source map, which Dash already marks dynamic.
+DASH_TABLE_MAP_ENTRY: dict[str, Any] = {
+    "relative_package_path": f"{DASH_TABLE_BUNDLE}.map",
+    "external_url": "https://unpkg.com/dash-table@0.0.0/dash_table/bundle.js.map",
+    "namespace": "dash",
+    "dynamic": True,
+}
+
+
+class TestDashTableBundle:
+    """#524: no page loads dash_table's bundle, which Dash adds to every index; the
+    path stays registered."""
+
+    def test_the_override_marks_the_one_bundle_entry_and_nothing_else(self) -> None:
+        dist: list[dict[str, Any]] = [
+            copy.deepcopy(DASH_TABLE_ENTRY),
+            copy.deepcopy(DASH_TABLE_MAP_ENTRY),
+        ]
+        appmod.defer_dash_table_bundle(dist)
+        assert dist == [{**DASH_TABLE_ENTRY, "dynamic": True}, DASH_TABLE_MAP_ENTRY]
+
+    def test_an_already_dynamic_entry_is_left_as_it_is(self) -> None:
+        """Running it twice, as a re-import would, changes nothing."""
+        dist = [{**DASH_TABLE_ENTRY, "dynamic": True}]
+        appmod.defer_dash_table_bundle(dist)
+        assert dist == [{**DASH_TABLE_ENTRY, "dynamic": True}]
+
+    @pytest.mark.parametrize(
+        "dist",
+        [
+            [],
+            [DASH_TABLE_MAP_ENTRY],
+            [DASH_TABLE_ENTRY, DASH_TABLE_ENTRY],
+            [{**DASH_TABLE_ENTRY, "async": True}],
+            [{**DASH_TABLE_ENTRY, "namespace": "dash_table"}],
+        ],
+        ids=["none", "map-only", "two", "async", "other-namespace"],
+    )
+    def test_any_other_shape_fails_and_marks_nothing(
+        self, dist: list[dict[str, Any]]
+    ) -> None:
+        dist = copy.deepcopy(dist)
+        before = copy.deepcopy(dist)
+        with pytest.raises(RuntimeError, match="unexpected dash_table bundle entries"):
+            appmod.defer_dash_table_bundle(dist)
+        assert dist == before
+
+    def test_the_index_loads_no_dash_table_file_and_the_path_stays_registered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A flip control on the live entry, since Dash rebuilds an index's scripts
+        on each request: with the flag removed the index names dash_table's bundle,
+        and with it in place the index names no dash_table file at all; in both,
+        the bundle's path is registered and dcc's and html's bundles still load."""
+        (entry,) = [
+            e
+            for e in dash.dash_table._js_dist  # type: ignore[attr-defined]
+            if e.get("relative_package_path") == DASH_TABLE_BUNDLE
+        ]
+        assert entry.get("dynamic") is True
+        for flagged in (False, True):
+            if not flagged:
+                monkeypatch.delitem(entry, "dynamic")
+            else:
+                monkeypatch.undo()
+            status, _, body = get("/")
+            assert status == 200
+            if flagged:
+                assert "/dash_table/" not in body
+            else:
+                assert "/_dash-component-suites/dash/dash_table/bundle." in body
+            assert "/_dash-component-suites/dash/dcc/dash_core_components." in body
+            assert "/_dash-component-suites/dash/html/dash_html_components." in body
+            assert DASH_TABLE_BUNDLE in appmod.app.registered_paths["dash"]
 
 
 class TestPlotlyjsNotServed:
@@ -2157,11 +2286,18 @@ class TestMissingSuiteFile:
 
     @pytest.mark.parametrize(
         "path",
-        ["dcc/dash_core_components.js", "dcc/async-mathjax.js", "dcc/async-graph.js"],
+        [
+            "dcc/dash_core_components.js",
+            "dcc/async-mathjax.js",
+            "dcc/async-graph.js",
+            DASH_TABLE_BUNDLE,
+        ],
     )
     def test_an_installed_file_is_still_served(self, path: str) -> None:
         """The control: a bundle a page uses, the chunk a chart loads, and the math
-        chunk a later ``dcc.Markdown`` page would need all still answer 200."""
+        chunk a later ``dcc.Markdown`` page would need all still answer 200; and so
+        does dash_table's bundle, which no page loads but which stays registered for a
+        shell cached before #524."""
         assert ("dash", path) in registered_suite_paths()
         response = suite_get("dash", path)
         assert response.status_code == 200
