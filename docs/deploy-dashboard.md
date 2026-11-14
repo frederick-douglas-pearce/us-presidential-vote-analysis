@@ -277,20 +277,25 @@ reviewer, like the API's deploy. What it does, in the order that makes rollback 
    [`scripts/probe_dashboard.sh`](../scripts/probe_dashboard.sh): the page shell is 200 and
    names the canonical host, and the page content carries the snapshot version the API is
    serving (the degraded page is a 200 too, so a status code alone proves nothing);
-4. moves all traffic to it and probes `explore.` the same way, then checks that the
+4. checks its routing on the same host with
+   [`scripts/check_dashboard_routing.sh`](../scripts/check_dashboard_routing.sh) (#526):
+   that the instance's cache is filled, that the path is decoded once, by the app, and
+   that the app serves no copy of plotly.js (both explained below);
+5. moves all traffic to it and probes `explore.` the same way, then checks that the
    `appspot.com` host 301s to `explore.`;
-5. only then deletes every other version, and asserts exactly one remains. `min_instances`
+6. only then deletes every other version, and asserts exactly one remains. `min_instances`
    and `max_instances` are per-version settings, so a leftover version would keep its own
    pinned instance running.
 
 If anything from the deploy through the redirect check fails, times out or is cancelled,
 the **Roll back** step moves traffic back to the previous version and deletes the new
-one, and the site keeps serving what it served before. Each probe has its own 8-minute
-step timeout, so a hung probe fails its step (and rolls back) well inside the job's
-40 minutes. The step says plainly when it could not roll back ("ROLLBACK FAILED"), or had
-nothing to restore (a first deploy), and then fails the job; see §10. If step 5 fails,
-the new version is serving and an old one is left behind: the job fails with a message
-naming the cleanup to do by hand.
+one, and the site keeps serving what it served before. A routing check that fails rolls
+back before any traffic has moved. Each probe and check has its own step timeout (8
+minutes for each probe, 6 for the routing check, 2 for the redirect check), so a hung one
+fails its step (and rolls back) well inside the job's 40 minutes. The step says plainly
+when it could not roll back ("ROLLBACK FAILED"), or had nothing to restore (a first
+deploy), and then fails the job; see §10. If step 6 fails, the new version is serving and
+an old one is left behind: the job fails with a message naming the cleanup to do by hand.
 
 #294 drilled Roll back against production, on both of its triggers, after a deploy that
 succeeded and before traffic moved: a version-host probe that failed, and a run
@@ -310,35 +315,43 @@ timeout, a refused connection, DNS) reports `unfetched` for its check, and a fai
 shell request's status shows as 000; an HTTP error response that arrives whole is
 judged like any other.
 
-**After a deploy, check by hand that the path is decoded once, by the app** (D089, which
-replaces D073's raw-target check). Dash's router decodes the browser's pathname once, and the
-index matches `request.path`, which gunicorn has decoded once; they agree only if nothing in
-front of the app (App Engine's front end) decodes the path first. The workflow's probes request
-no percent-escaped path, so they cannot tell:
+**The routing check** (step 4) prints one line per check, with the status the server
+answered and, for the two election paths, whether the body carries the index's `noindex`
+tag (`yes`, `no`, or `unfetched` when no answer arrived); a failed run ends with one
+`::error::` line naming every check that failed. A check is retried only when no answer
+arrived or the answer was a 5xx; any other answer is final. It never prints response
+bytes. What each check is for:
+
+- **The path is decoded once, by the app** (D089, which replaced D073's raw-target check).
+  Dash's router decodes the browser's pathname once, and the index matches `request.path`,
+  which gunicorn has decoded once; they agree only if nothing in front of the app (App
+  Engine's front end) decodes the path first. `/election/%2531824` must answer **404** with
+  the `noindex` tag. Decoded once, it is the year `%31824`, which the page refuses: a
+  **200** there means the path was decoded twice (`%25` became `%` in front of the app,
+  then the app read 1824), and an escaped link could open a page its own URL does not name.
+  The `noindex` tag is what shows the 404 is the app's own (only its index emits it): a 404
+  without it came from somewhere in front of the app. `/election/%31824` is the control:
+  decoded once, it is 1824, and must answer 200.
+- **The cache is filled first.** Before the instance holds the year list, the index
+  answers 200 for any year, so a 200 on `/election/%2531824` would read as a double decode.
+  So the check first asks for `/election/1825` (never an election year), which must answer
+  404 with `noindex`, retried a few seconds apart since a request wakes the refresher. If
+  it never does, the run fails naming the cache, and the `%2531824` result is reported as
+  not judged. The probe in step 3 normally fills the one instance's cache before this.
+- **No local plotly.js** (#430, §11). A `HEAD` of
+  `/_dash-component-suites/plotly/package_data/plotly.min.js` must answer 404 (Flask's
+  default body). A **200** with `content-length: 4815814` means the deployed version still
+  registers the file. The daily canary repeats this check against `explore.` (§11), which
+  also covers a rollback to a ref older than #526, whose workflow has no routing check.
+
+To repeat a check by hand against the public host:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/election/%2531824  # 404
 curl -s https://explore.us-presidential-election-center.org/election/%2531824 | grep -c 'content="noindex"'    # 1
 curl -s -o /dev/null -w '%{http_code}\n' https://explore.us-presidential-election-center.org/election/%31824    # 200
-```
-
-Decoded once, `/election/%2531824` is the year `%31824`, which the page refuses: a **200**
-there means the path was decoded twice (`%25` became `%` in front of the app, then the app read
-1824), and an escaped link could open a page its own URL does not name. The third request is the
-control: decoded once, `%31824` is 1824. The `noindex` tag is what shows the 404 is the app's
-own (only its index emits it): a 404 without it came from somewhere in front of the app. Run it
-after the instance has filled its cache (the probes above), since before that a year counts as
-matched.
-
-**After a deploy, check that the app serves no copy of plotly.js** (#430, §11). The script
-path answers 404 (Flask's default body):
-
-```bash
 curl -sI https://explore.us-presidential-election-center.org/_dash-component-suites/plotly/package_data/plotly.min.js | head -1  # HTTP/2 404
 ```
-
-A **200** with `content-length: 4815814` means the deployed version still registers the
-file. The daily canary repeats this check (§11).
 
 `app.yaml` pins one F1 instance (`min_instances: 1`, `max_instances: 1`, warmup), runs one
 gunicorn worker (one process, so one cache) as `explore-run`, and carries no

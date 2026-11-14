@@ -8,16 +8,18 @@
 # The order is the rollback story, so keep it:
 #   1. deploy the new version WITHOUT promoting it;
 #   2. probe it on its own version host (<version>-dot-<app host>);
-#   3. move all traffic to it;
-#   4. probe the public hostname;
-#   5. only then delete every other version (min_instances and max_instances are
+#   3. check its routing there (#526): the path is decoded once, by the app (D089), and
+#      no local plotly.js is served (#430);
+#   4. move all traffic to it;
+#   5. probe the public hostname, and that the vendor host redirects to it;
+#   6. only then delete every other version (min_instances and max_instances are
 #      per-version settings, so a leftover version keeps a pinned instance running) and
 #      assert exactly one version remains.
-# A failure or cancellation in 2-4 moves traffic back to the previous version and deletes
-# the new one, so a bad deploy costs a failed run, not an outage. Each probe carries its
-# own step timeout, so a hung probe fails its step (and rolls back) well inside the job's
-# timeout rather than being cancelled with it. A failure in 5 leaves the new version
-# serving and an old one behind; the job fails and says which versions to delete.
+# A failure or cancellation in 2-5 moves traffic back to the previous version and deletes
+# the new one, so a bad deploy costs a failed run, not an outage. Each probe and check
+# carries its own step timeout, so a hung one fails its step (and rolls back) well inside
+# the job's timeout rather than being cancelled with it. A failure in 6 leaves the new
+# version serving and an old one behind; the job fails and says which versions to delete.
 #
 # Environment-specific values come from repo Variables (runbook: docs/deploy-dashboard.md):
 #   EXPLORE_GCP_PROJECT_ID, EXPLORE_WIF_PROVIDER, EXPLORE_DEPLOY_SA, EXPLORE_HOSTNAME
@@ -45,7 +47,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Build (≈6 min measured) + two probes (≤ 8 min each, their step timeouts) + the rest.
+    # Build (≈6 min measured) + two probes (≤ 8 min each, their step timeouts) + the
+    # routing check (≤ 6 min) + the redirect probe (≤ 2 min) + the rest: ≈ 32 min worst case.
     timeout-minutes: 40
     environment: production
     env:
@@ -121,6 +124,18 @@ jobs:
           VERSION: ${{ steps.before.outputs.version }}
           APP_HOST: ${{ steps.before.outputs.app_host }}
         run: scripts/probe_dashboard.sh "https://${VERSION}-dot-${APP_HOST}" "$EXPLORE_HOST"
+
+      # scripts/check_dashboard_routing.sh: the path is decoded once, by the app (D089), and
+      # no local plotly.js is served (#430). After the probe above, which fills the one
+      # instance's cache, and before traffic moves, so a failure rolls back. Worst case,
+      # every request hanging: 4 checks × (3 × 20 s + 2 × 5 s) = 280 s, under 6 minutes.
+      - name: Check routing on the new version
+        id: probe_routing
+        timeout-minutes: 6
+        env:
+          VERSION: ${{ steps.before.outputs.version }}
+          APP_HOST: ${{ steps.before.outputs.app_host }}
+        run: scripts/check_dashboard_routing.sh "https://${VERSION}-dot-${APP_HOST}"
 
       - name: Move all traffic to the new version
         id: traffic

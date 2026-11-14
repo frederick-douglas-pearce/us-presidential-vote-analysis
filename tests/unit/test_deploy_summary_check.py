@@ -22,7 +22,8 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
+
+from tests.workflow_steps import CURL_STUB, Route, line_start, run_bash, step_run
 
 _WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "deploy.yml"
 _FUNCTION_START = "probe_json() {"
@@ -38,67 +39,40 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash
 
 
 def _smoke_script() -> str:
-    workflow = yaml.safe_load(_WORKFLOW.read_text())
-    steps = [s for job in workflow["jobs"].values() for s in job["steps"]]
-    (step,) = [s for s in steps if s.get("name") == "Post-deploy smoke test"]
-    assert "shell" not in step, "the block is tested under bash -e, GitHub's default"
-    run: str = step["run"]
-    return run
-
-
-def _line_start(text: str, marker: str) -> int:
-    return text.rindex("\n", 0, text.index(marker)) + 1
+    return step_run(_WORKFLOW, "Post-deploy smoke test")
 
 
 def _probe_block(route: str = "summary") -> tuple[str, str]:
     """The step's ``safe()`` line, and ``probe_json`` plus one route's section."""
     run = _smoke_script()
     safe_line = next(line for line in run.splitlines() if line.strip().startswith("safe()"))
-    start = _line_start(run, _FUNCTION_START)
+    start = line_start(run, _FUNCTION_START)
     lines = run[start:].splitlines(keepends=True)
     indent = len(lines[0]) - len(lines[0].lstrip())
     close = next(
         i for i, line in enumerate(lines) if i and line.rstrip() == " " * indent + "}"
     )
     function = "".join(lines[: close + 1])
-    section_start = _line_start(run, _SECTIONS[route])
+    section_start = line_start(run, _SECTIONS[route])
     section_lines = run[section_start:].splitlines(keepends=True)
     end = next(i for i, line in enumerate(section_lines) if "|| exit 1" in line)
     return safe_line.strip(), function + "".join(section_lines[: end + 1])
 
 
-_STUBS = """\
-python() { "$PY" "$@"; }
-sleep() { :; }
-curl() {
-  local out="" hdr=""
-  while [ $# -gt 0 ]; do
-    case "$1" in -o) out="$2"; shift;; -D) hdr="$2"; shift;; esac
-    shift
-  done
-  cp "$BODY" "$out"
-  printf 'HTTP/2 %s\\r\\netag: W/"%s"\\r\\n' "$CODE" "$ETAG" > "$hdr"
-  printf '%s' "$CODE"
-}
-"""
-
-
-#: ``curl`` failing outright, as on a connection error: exit 7, ``%{http_code}`` = 000.
-_FAILING_CURL = _STUBS.replace(
-    "curl() {\n", 'curl() {\n  if [ "$CODE" = fail ]; then printf 000; return 7; fi\n'
-)
-
-#: The header name in HTTP/1.1 casing, which a fallback from HTTP/2 would send.
-_TITLE_CASE_ETAG = _STUBS.replace("\\r\\netag:", "\\r\\nETag:")
+#: ``python`` runs the checker with the test's own interpreter.
+_PYTHON = 'python() { "$PY" "$@"; }\n'
 
 #: A ``python`` that runs the checker only in isolated mode (``-I``). The response body
 #: comes from the edge, and the checker file sits in a temp dir that ``python`` would
 #: otherwise put first on ``sys.path`` (#428 review), so a checker run without ``-I``
 #: exits 3 here, which the probe reports as unparseable.
-_ISOLATED_PYTHON = _STUBS.replace(
-    'python() { "$PY" "$@"; }',
-    'python() { [ "$1" = -I ] || return 3; "$PY" "$@"; }',
-)
+_ISOLATED_PYTHON = 'python() { [ "$1" = -I ] || return 3; "$PY" "$@"; }\n'
+
+
+def _headers(etag: str, name: str = "etag") -> str:
+    """The response's ETag header, always weak, as Cloudflare serves it compressed.
+    ``name`` in HTTP/1.1 casing (``ETag``) is what a fallback from HTTP/2 would send."""
+    return f'{name}: W/"{etag}"\r\n'
 
 
 def _run(
@@ -107,34 +81,26 @@ def _run(
     *,
     etag: str = _VERSION,
     code: str = "200",
-    stubs: str = _STUBS,
+    etag_name: str = "etag",
+    python: str = _PYTHON,
     route: str = "summary",
 ) -> subprocess.CompletedProcess[str]:
+    """Run one route's probe; a ``code`` of ``fail`` is ``curl`` failing outright, as
+    on a connection error: exit 7, ``%{http_code}`` = 000."""
     safe, block = _probe_block(route)
     script = tmp_path / "smoke.sh"
     script.write_text(
-        f"{stubs}{safe}\nset -uo pipefail\n{block}echo 'END REACHED'\n",
+        f"{python}{CURL_STUB}{safe}\nset -uo pipefail\n{block}echo 'END REACHED'\n",
         encoding="utf-8",
     )
-    body_file = tmp_path / "body.json"
-    body_file.write_text(body, encoding="utf-8")
     env = {
-        "PATH": "/usr/bin:/bin",
         "PY": sys.executable,
-        "BODY": str(body_file),
-        "CODE": code,
-        "ETAG": etag,
         "CF_HOST": "api.example.test",
         "SNAPSHOT_VERSION": _VERSION,
     }
-    return subprocess.run(
-        ["bash", "-e", str(script)],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=60,
-        check=False,
-    )
+    routes = [Route("*", code, body, _headers(etag, etag_name))]
+    result, _ = run_bash(["bash", "-e", str(script)], tmp_path, routes, env)
+    return result
 
 
 def _body(years_in_data: list[int], years_in_elections: list[int]) -> str:
@@ -238,15 +204,15 @@ def test_a_long_etag_is_cut_to_200_characters(tmp_path: Path) -> None:
 
 
 def test_a_title_case_etag_header_is_read(tmp_path: Path) -> None:
-    assert "ETag:" in _TITLE_CASE_ETAG
-    result = _run(tmp_path, _body([2016], [2016]), stubs=_TITLE_CASE_ETAG)
+    assert _headers(_VERSION, "ETag").startswith("ETag:")
+    result = _run(tmp_path, _body([2016], [2016]), etag_name="ETag")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_a_failing_curl_is_retried_not_fatal(tmp_path: Path) -> None:
     """Under ``bash -e``, a curl error must fall back to 000 and retry, never end the
     step silently."""
-    result = _run(tmp_path, _body([2016], [2016]), code="fail", stubs=_FAILING_CURL)
+    result = _run(tmp_path, _body([2016], [2016]), code="fail")
     assert result.returncode == 1
     assert result.stdout.count("HTTP 000, ETag 'none', want 200") == 5
     assert result.stdout.count("retrying") == 5
@@ -259,7 +225,7 @@ def test_the_checker_runs_in_isolated_mode(tmp_path: Path, route: str) -> None:
     body = (
         _body([2016], [2016]) if route == "summary" else _states_body([(2016, "Texas")])
     )
-    result = _run(tmp_path, body, stubs=_ISOLATED_PYTHON, route=route)
+    result = _run(tmp_path, body, python=_ISOLATED_PYTHON, route=route)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "unparseable" not in result.stdout
 
