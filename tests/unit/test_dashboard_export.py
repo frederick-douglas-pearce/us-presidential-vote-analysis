@@ -2193,9 +2193,10 @@ def _over_time(body: dict[str, Any]) -> None:
             row["national_pv_denominator"] = SENTINEL
 
 
-#: The state the one-state entry chooses: N2's first recorded row's, derived from the
-#: recording (#436).
-DOCTORED_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
+#: The state every one-state render here chooses (#436): N2's first recorded row's,
+#: derived from the recording, never a hard-coded code. ``DOCTORED`` and
+#: ``SERVED_ROWS`` both read it (#498: one definition).
+N2_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
 
 #: Each doctored render, by page key and, after a ``?``, the query it renders under
 #: (#436: ``/elections`` renders all states and one state).
@@ -2207,7 +2208,7 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
             "/v1/elections/summary": _over_time,
         },
     ),
-    f"/elections?state={DOCTORED_STATE}": (
+    f"/elections?state={N2_STATE}": (
         {},
         {
             "/v1/elections/states": _row(
@@ -2256,7 +2257,7 @@ UNRECOGNIZED_CELLS = {
         "elections-over-time-table": 2,
     },
     # One state (#436): its first row's allotment, total and status.
-    f"/elections?state={DOCTORED_STATE}": {
+    f"/elections?state={N2_STATE}": {
         "elections-table": 0,
         "elections-leader-table": 0,
         "elections-metrics": 0,
@@ -2530,13 +2531,15 @@ class TestNoRawValues:
 
 class Served(NamedTuple):
     """One served source of a chart's figure (#484; a list per chart since #436): the
-    page's path values and query, the path, and the rows of its body to doctor (each
-    field is doctored in every one of them at once)."""
+    page's path values and query, the path, the rows of its body to doctor (each
+    field is doctored in every one of them at once), and the fields whose doctored text
+    must reach the one-state figure rather than refuse the body (#498)."""
 
     values: dict[str, str]
     query: str
     path: str
     rows: Callable[[dict[str, Any]], list[dict[str, Any]]]
+    reaches: frozenset[str] = frozenset()
 
 
 def _first(key: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
@@ -2550,14 +2553,18 @@ def _year_rows(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     return lambda body: [row for row in body["data"] if row["year"] == year]
 
 
-#: N2's first recorded row's state, so its doctored row is the one the chart draws
-#: under ``?state=`` (derived from the recording, never a hard-coded code).
-N2_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
+def _state_rows(usps: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """Every N2 ``data`` row of one state (#498): its name is on each, so doctoring one
+    row would name the state two ways and refuse N2, and the doctored name would never
+    reach the one-state titles, captions and hovers."""
+    return lambda body: [row for row in body["data"] if row["state_usps"] == usps]
 
 #: Per live chart (#484): the page it renders on with its path values and query, and
 #: the served rows its figure is built from. Every live ``CHARTS`` row has an entry
 #: (``test_every_live_chart_has_its_served_rows``). C4 and C5 read N1 with all states
-#: and N2 with one (#436); C5's N1 rows are every row of one year inside the window.
+#: and N2 with one (#436); C5's N1 rows are every row of one year inside the window, and
+#: their N2 rows every row of the chosen state, so a doctored name reaches the one-state
+#: titles, captions and hovers (#498).
 SERVED_ROWS: dict[str, list[Served]] = {
     "C1": [Served({"year": "2016"}, "", "/v1/elections/2016", _first("summary"))],
     "C2": [Served({}, "", "/v1/elections/summary", _first("data"))],
@@ -2566,11 +2573,23 @@ SERVED_ROWS: dict[str, list[Served]] = {
     ],
     "C4": [
         Served({}, "", api.SUMMARY_PATH, _first("elections")),
-        Served({}, f"state={N2_STATE}", api.ELECTION_STATES_PATH, _first("data")),
+        Served(
+            {},
+            f"state={N2_STATE}",
+            api.ELECTION_STATES_PATH,
+            _state_rows(N2_STATE),
+            frozenset({"state"}),
+        ),
     ],
     "C5": [
         Served({}, "", api.SUMMARY_PATH, _year_rows(2016)),
-        Served({}, f"state={N2_STATE}", api.ELECTION_STATES_PATH, _first("data")),
+        Served(
+            {},
+            f"state={N2_STATE}",
+            api.ELECTION_STATES_PATH,
+            _state_rows(N2_STATE),
+            frozenset({"state"}),
+        ),
     ],
 }
 
@@ -2625,7 +2644,7 @@ class TestServedValuesReachNoFigureUntyped:
         self, chart_id: str, entry: int, kind: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         row = charts.CHARTS[chart_id]
-        values, search, path, rows = SERVED_ROWS[chart_id][entry]
+        values, search, path, rows, reaches = SERVED_ROWS[chart_id][entry]
         success = page_of(row.page)["success"]
         dom = charts.dom_id(chart_id)
         targets = rows(RECORDED[path])
@@ -2662,6 +2681,14 @@ class TestServedValuesReachNoFigureUntyped:
             built = built_figure(tree)
             if built is not None and built != plain:
                 changed.append(field)
+            if field in reaches and labels.has_text(SERVED_KINDS[kind]):
+                # Text reaches the one-state figure's hovers, escaped; any change is
+                # not enough, since a refused body's all-states fallback changes the
+                # figure too (#498).
+                assert built is not None, field
+                name = charts.escaped(SERVED_KINDS[kind])
+                hovers = [h for t in built["data"] for h in t.get("hovertext", [])]
+                assert hovers and all(name in h for h in hovers), field
             if figures and mount_points(figures[0]):
                 outcome = "drawn"
             elif figures:
