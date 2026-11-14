@@ -671,8 +671,9 @@ linking to the matching "Counted, Not Assumed" post.
 > summarize).
 
 A front door that summarizes each tab in a sentence and a thumbnail, and is the URL most
-worth sharing. Open at shaping time: whether the apex domain should serve or redirect to
-it.
+worth sharing. The apex redirects to the dashboard for now (E15, #510: a temporary 302
+that keeps the path). The owner plans the apex as a general project intro page later, so
+shaping S8 decides whether that intro page *is* S8 or links to it.
 
 ### E9-S9: One party per candidate per election in T2–T5
 
@@ -693,7 +694,7 @@ what is shown or where it comes from.
 | Layout and responsive behavior: widths, breakpoints, page arrangement | Pages, routes, data reads, the cache, the API contract, new data shapes (D070(c)) |
 | Theming: System / Light / Dark, color tokens, `dcc` control theming | Table contents: columns, filters, URL state, CSV export (D075), null labeling |
 | Visual design: typography, palette, spacing, table styling | Reader-facing wording: `labels.py`, `docs/glossary.md` (#352) |
-| Accessibility: contrast, keyboard, focus, screen readers | Open Graph tags, canonical links, 404s (D071(a), D073) |
+| Accessibility fixes: contrast, keyboard, focus, screen readers (audits, tooling and the public statement: E16, #501) | Open Graph tags, canonical links, 404s (D071(a), D073) |
 | Chart presentation foundation: Plotly templates for both themes, the categorical/party palette, chart accessibility and interaction conventions | Deploy, the structural guards, the canary; every individual chart (E9-S6) |
 
 An E14 story that needs a guard's allow-list widened (a `.js` asset under
