@@ -2065,6 +2065,10 @@ MISSING_SUITE_FILES = (
 #: The suite view's warning for a registered file it did not install (#439).
 MISSING_FILE_WARNING = "component-suite file registered but not installed"
 
+#: Flask's default 404 body (Werkzeug's ``NotFound``), which #430's handler and the
+#: suite view's refusal both answer with.
+NOT_FOUND_BODY = werkzeug.exceptions.NotFound().get_response().get_data()
+
 #: A path no Dash release ships, and not a source map: registered by a test to show
 #: the 404 follows the read's error, not a list of file names.
 SYNTHETIC_MISSING_FILE = ("dash", "dcc/no-such-chunk.js")
@@ -2126,7 +2130,8 @@ class TestMissingSuiteFile:
         with caplog.at_level(logging.DEBUG):
             response = suite_get(namespace, path)
         assert response.status_code == 404
-        assert len(response.data) < 1000
+        assert response.data == NOT_FOUND_BODY
+        assert response.mimetype == "text/html"
         assert error_records(caplog) == []
         (warning,) = missing_file_warnings(caplog)
         assert repr(namespace) in warning and repr(path) in warning
@@ -2145,6 +2150,7 @@ class TestMissingSuiteFile:
         with caplog.at_level(logging.DEBUG):
             response = suite_get(namespace, path)
         assert response.status_code == 404
+        assert response.data == NOT_FOUND_BODY
         assert error_records(caplog) == []
         (warning,) = missing_file_warnings(caplog)
         assert repr(path) in warning
