@@ -835,9 +835,11 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
         for field in ("state_electoral_votes", "state_popular_total", "pv_status"):
             row[field]
         name = row["state"]
-        # The API types a state's name as required text, so a name with nothing in it
-        # is an upstream fault: refuse N2 (the all-states view stays) rather than offer
-        # the state as "None" or a blank option (#498, owner).
+        # A name failing ``labels.has_text`` refuses N2 (the all-states view stays)
+        # rather than reaching the state control as "None", a blank option or a number
+        # (#498, owner; D101). The API's ``ElectionStateRow.state`` is ``str``, so a
+        # null or non-text name is an upstream fault; a blank one, which that type
+        # admits, has nothing to show.
         if not labels.has_text(name):
             raise TypeError(f"{api.ELECTION_STATES_PATH} names {usps} with no text")
         if not _same(names.setdefault(usps, name), name):

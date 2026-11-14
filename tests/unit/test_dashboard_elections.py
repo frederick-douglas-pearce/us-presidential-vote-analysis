@@ -2343,7 +2343,6 @@ class TestC4:
         }
         assert charts.figure_problems(figure) == []
 
-
     def test_a_zero_allotment_with_no_cause_reads_no_electors(self) -> None:
         """D100(d)'s other zero (#498): an N1 item's ``electoral_denominator`` 0, and a
         legislature-chosen N2 row's 0, are "No electors appointed", never "took no
@@ -2480,7 +2479,6 @@ class TestC5:
             symbols
         )
 
-
     def test_a_repeated_nan_total_is_one_unrecognized_value(self) -> None:
         """D100(c) (#498): every 2016 row's total NaN is one value, though NaN is
         unequal to itself, and C5 marks it unrecognized rather than degrading."""
@@ -2495,6 +2493,14 @@ class TestC5:
         assert year_points(figure, labels.UNRECOGNIZED) == {
             2016: (0, labels.UNRECOGNIZED)
         }
+        # The cell, not only the marker's label, reads unrecognized, and its hover
+        # carries the note (the marker's label is the series', whatever the cell).
+        by_year = {int(r[0]): r for r in over_time_rows(tree)}
+        assert by_year[2016][2] == labels.UNRECOGNIZED
+        marker = trace(figure, labels.UNRECOGNIZED)
+        assert marker is not None
+        (hover,) = marker["hovertext"]
+        assert labels.UNRECOGNIZED_NOTE in hover
 
     def test_an_in_window_national_null_is_no_total(self) -> None:
         """All states (#498): a null national total inside the window is a marker
@@ -2520,7 +2526,13 @@ class TestC5:
         tree = render_over_time(
             {"state": "GA"}, index=moved, summary=summary, states=states
         )
+        # The premise: Georgia's one-state view, not the all-states fallback, whose
+        # national totals after 2016 are null too.
+        assert find(tree, MOD["OVER_TIME_NO_STATES_ID"]) is None
+        title = labels.C5_TITLE_STATE.format(state=state_name("GA"))
+        assert title in texts(tree)
         figure = chart_figure(tree, C5)
+        assert trace(figure, labels.LABELS["state_popular_total"]) is not None
         assert len(figure["layout"]["shapes"]) == 2
         notes = [a["text"] for a in figure["layout"]["annotations"]]
         assert labels.C5_AFTER_BAND.format(pv_year_max=2016) in notes
@@ -2754,7 +2766,6 @@ class TestOverTimeValidation:
             )
         )
 
-
     def test_same_is_one_type_and_equal_or_a_repeated_nan(self) -> None:
         """D100(c), the type check (#498): a value of another type is another value,
         however Python compares them; NaN with NaN is one."""
@@ -2771,15 +2782,17 @@ class TestOverTimeValidation:
         rows = [r for r in summary["data"] if r["year"] == 2016]
         assert len(rows) > 1 and isinstance(rows[0]["national_pv_denominator"], int)
         rows[-1]["national_pv_denominator"] = float(rows[0]["national_pv_denominator"])
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="two national totals"):
             MOD["national_pv"](summary, YEARS)
 
     @pytest.mark.parametrize("name", [None, "", "  ", 7])
     def test_a_state_with_no_name_to_show(self, name: Any) -> None:
-        """Option R (#498, owner): the API types a name as required text, so a state
-        whose every row names it with nothing refuses N2, rather than reaching the
-        state control as "None" or a blank option. Every row, so the two-names rule
-        is not what refuses it."""
+        """Option R (#498, owner; D101): a state whose every row's name fails
+        ``labels.has_text`` (null, blank, or not text) refuses N2, rather than reaching
+        the state control as "None", a blank option or a number. The API's
+        ``ElectionStateRow.state`` is ``str``, so null or non-text is an upstream
+        fault; a blank name, which that type admits, has nothing to show. Every row,
+        so the two-names rule is not what refuses it."""
 
         def nameless(body: dict[str, Any]) -> None:
             for row in body["data"]:
@@ -3002,20 +3015,27 @@ class TestOverTimeCaptions:
         assert (labels.C4_ZERO_NOTE in c4) is zeros
         assert labels.C5_MARKER_NOTE in c5 if usps != "AK" else True
 
+    @pytest.mark.parametrize("name", ["<b>Alaska</b>", "var(--x) Alaska"])
     def test_a_name_that_is_not_plain_text_uses_the_selected_state_forms(
-        self,
+        self, name: str
     ) -> None:
+        """Each of ``_plain``'s refusals on its own (#498): markup, and a token with no
+        ``<``. Alaska's first election comes after the dataset's, so both captions
+        carry the first-election sentence, in its selected form, never the name."""
         states = copy.deepcopy(N2)
         for row in states["data"]:
             if row["state_usps"] == "AK":
-                row["state"] = "<b>Alaska</b>"
+                row["state"] = name
         tree = render_over_time({"state": "AK"}, states=states)
         texts_ = texts(tree)
         assert labels.C4_TITLE_SELECTED in texts_ and labels.C5_TITLE_SELECTED in texts_
-        assert labels.FIRST_ELECTION_NOTE_SELECTED.format(year=1960) in caption(tree, C4)
+        note = labels.FIRST_ELECTION_NOTE_SELECTED.format(year=1960)
+        for dom in (C4, C5):
+            assert note in caption(tree, dom), dom
+            assert "Alaska" not in caption(tree, dom), dom
         assert labels.C4_ALL_STATES not in caption(tree, C4)
         hovers = chart_figure(tree, C4)["data"][0]["hovertext"]
-        assert all("&lt;b&gt;Alaska&lt;/b&gt;" in h for h in hovers)
+        assert all(charts.escaped(name) in h for h in hovers)
 
 
 def state_name(usps: str) -> str:
