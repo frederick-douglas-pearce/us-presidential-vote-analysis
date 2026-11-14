@@ -269,7 +269,13 @@ def _run_json(
 
 
 def _error_lines(result: CompletedProcess[str]) -> list[str]:
-    return [line for line in result.stdout.splitlines() if "::error::" in line]
+    """The lines the runner reads as error commands: ``::error::`` after leading
+    whitespace, which it trims."""
+    return [
+        line.lstrip()
+        for line in result.stdout.splitlines()
+        if line.lstrip().startswith("::error::")
+    ]
 
 
 def test_json_objects_pass(tmp_path: Path) -> None:
@@ -319,3 +325,56 @@ def test_a_meta_body_that_is_not_an_object_fails_once(
     ]
     for message in _FIELD_MESSAGES:
         assert message not in result.stdout
+
+
+def test_a_body_that_is_not_an_object_is_dumped_defused(tmp_path: Path) -> None:
+    """The body's first bytes reach the log, but never as a workflow command."""
+    result = _run_json(tmp_path, health="::error::x ##[error]y")
+    assert result.returncode == 1
+    assert "    | ::error::x # [error]y" in result.stdout.splitlines()
+    assert "##[" not in result.stdout
+    commands = [
+        line for line in result.stdout.splitlines() if line.lstrip().startswith("::")
+    ]
+    assert commands == [
+        "::error::/health answered 200 but the body is not a JSON object",
+        f"::error::API canary: 1 check(s) failed against https://{_CF_HOST}",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("health", "meta", "etag", "message"),
+    [
+        (
+            _HEALTH_BODY.replace('"snapshot_loaded": true', '"snapshot_loaded": false'),
+            _META_BODY,
+            _SNAPSHOT,
+            "::error::snapshot_loaded=false — the service is up but holds no data",
+        ),
+        (
+            _HEALTH_BODY,
+            '{"row_count": 0}',
+            _SNAPSHOT,
+            "::error::row_count=0 — the served snapshot is empty",
+        ),
+        (
+            _HEALTH_BODY,
+            _META_BODY,
+            "b" * 64,
+            f"::error::the edge is serving snapshot '{'b' * 64}' but the origin has "
+            f"'{_SNAPSHOT}' — stale edge cache",
+        ),
+    ],
+    ids=["snapshot-not-loaded", "empty-snapshot", "stale-edge"],
+)
+def test_the_field_checks_run_on_a_json_object(
+    tmp_path: Path, health: str, meta: str, etag: str, message: str
+) -> None:
+    """Behind the gate, each field check still runs: the stale-edge case also shows the
+    origin's version is still read from /health."""
+    result = _run_json(tmp_path, health=health, meta=meta, etag=etag)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert _error_lines(result) == [
+        message,
+        f"::error::API canary: 1 check(s) failed against https://{_CF_HOST}",
+    ]

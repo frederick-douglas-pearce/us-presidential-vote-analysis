@@ -20,9 +20,10 @@
 #
 # The last three are retried only when no answer arrived (curl's 000) or the answer was a
 # 5xx, which none of the failures they look for is; any other answer is final, since a
-# double decode is deterministic. Prints status codes and yes/no only, never response
-# bytes. Worst case, every request hanging: 4 checks × (3 tries × 20 s + 2 × 5 s) = 280 s,
-# under the workflow step's 6-minute timeout.
+# double decode is deterministic. Prints status codes and noindex results (yes, no,
+# unfetched) only, never response bytes. A curl that exits nonzero counts as no answer
+# (000), whatever code it printed. Worst case, every request hanging:
+# 4 checks × (3 tries × 20 s + 2 × 5 s) = 280 s, under the workflow step's 6-minute timeout.
 set -uo pipefail
 
 BASE="${1:?base url}"
@@ -35,8 +36,9 @@ NOINDEX=""
 # fetch [curl option...] <url>: sets CODE, and NOINDEX to whether the body carries the
 # index's noindex tag (unfetched when no answer arrived).
 fetch() {
-  # Truncate first: a curl that fails before any body arrives leaves its -o file as it
-  # was, and no check may read an earlier check's body as its own.
+  # Each check reads only its own answer's body. Truncate first: if curl ever left the -o
+  # file as it was after an answer arrived (an empty body, say, on some curl version),
+  # the previous check's noindex body would make a tagless 404 on %2531824 pass.
   : > "$BODY"
   CODE=$(curl -sS -o "$BODY" -w '%{http_code}' --max-time 20 "$@") || CODE=000
   if [ "$CODE" = 000 ]; then
@@ -82,7 +84,7 @@ fi
 
 fetch_retrying transient "${BASE}/election/%2531824"
 if [ "$cache" = cold ]; then
-  echo "  - decoded once: /election/%2531824 got ${CODE}, noindex: ${NOINDEX}; not judged, the cache is not filled"
+  echo "  - decoded once: /election/%2531824 got ${CODE}, noindex: ${NOINDEX}; not judged, the cache check did not pass"
 elif not_found_page; then
   pass "decoded once: /election/%2531824 got 404, noindex: yes"
 else

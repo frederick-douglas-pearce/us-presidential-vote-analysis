@@ -23,7 +23,9 @@ that URL, the next for the second, the last repeating, so a test can make a requ
 and then recover. A code of ``fail`` is a connection error: exit 7, with
 ``%{http_code}`` written as 000 and no file touched. Otherwise the fake writes the route's
 body to ``-o``, ``HTTP/2 <code>`` and the route's header lines to ``-D``, and the code to
-``-w``. Every call goes to ``$CURL_LOG`` as one line, each argument ended by a unit
+``-w``. A code may carry a mode after ``@``: ``404@keep`` answers 404 but leaves the ``-o``
+file as it was, and ``200@28`` answers 200 and then exits 28, as curl does when a
+transfer times out after the status arrived. Every call goes to ``$CURL_LOG`` as one line, each argument ended by a unit
 separator (0x1f), so an empty argument shows as one.
 """
 
@@ -43,7 +45,7 @@ sleep() { :; }
 curl() {
   { printf '%s\\x1f' "$@"; printf '\\n'; } >> "$CURL_LOG"
   local url="${@: -1}" out="" hdr="" fmt="" codes="599" body="-" head="-"
-  local r_url r_codes r_body r_head n code
+  local r_url r_codes r_body r_head n code mode
   while [ $# -gt 0 ]; do
     case "$1" in -o) out="$2"; shift;; -D) hdr="$2"; shift;; -w) fmt="$2"; shift;; esac
     shift
@@ -60,14 +62,17 @@ curl() {
   IFS=, read -r -a codes <<< "$codes"
   [ "$n" -gt "${#codes[@]}" ] && n=${#codes[@]}
   code="${codes[$((n - 1))]}"
+  mode=""
+  case "$code" in *@*) mode="${code#*@}"; code="${code%@*}";; esac
   if [ "$code" = fail ]; then [ -n "$fmt" ] && printf 000; return 7; fi
-  if [ -n "$out" ]; then
+  if [ -n "$out" ] && [ "$mode" != keep ]; then
     if [ "$body" = - ]; then : > "$out"; else cat "$body" > "$out"; fi
   fi
   if [ -n "$hdr" ]; then
     { printf 'HTTP/2 %s\\r\\n' "$code"; [ "$head" = - ] || cat "$head"; } > "$hdr"
   fi
   [ -n "$fmt" ] && printf '%s' "$code"
+  if [ -n "$mode" ] && [ "$mode" != keep ]; then return "$mode"; fi
   return 0
 }
 """

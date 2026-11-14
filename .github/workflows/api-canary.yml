@@ -135,6 +135,9 @@ jobs:
           if expect_status "/health" "https://${CF_HOST}/health" 200; then
             if ! jq -e 'type == "object"' "$BODY" >/dev/null 2>&1; then
               fail "/health answered 200 but the body is not a JSON object"
+              # Untrusted bytes, dumped through defuse_dump: a challenge page served to
+              # this client (the #148 client) is rarely reproducible from elsewhere.
+              head -c 600 "$BODY" | defuse_dump; echo
             else
               guard=$(jq -r '.origin_guard // "missing"' "$BODY")
               [ "$guard" = "enforced" ] \
@@ -157,6 +160,9 @@ jobs:
             # carry, so it sits with the field checks.
             if ! jq -e 'type == "object"' "$BODY" >/dev/null 2>&1; then
               fail "/v1/meta answered 200 but the body is not a JSON object"
+              # Untrusted bytes, dumped through defuse_dump: a challenge page served to
+              # this client (the #148 client) is rarely reproducible from elsewhere.
+              head -c 600 "$BODY" | defuse_dump; echo
             else
               rows=$(jq -r '.row_count // 0' "$BODY")
               [ "$rows" -gt 0 ] 2>/dev/null || fail "row_count=${rows} — the served snapshot is empty"

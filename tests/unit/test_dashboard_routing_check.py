@@ -6,8 +6,9 @@ a failure rolls the deploy back. It checks that the path is decoded once, by the
 instance's cache is filled so a cold cache is never read as a double decode.
 
 These tests run the script itself, by its own ``#!`` line, with the shared fake ``curl``
-and a no-op ``sleep`` first on ``PATH`` (``tests/workflow_steps.py``). Every test asserts
-the calls the fake received, so a fake that was bypassed fails the test. The last tests
+and a no-op ``sleep`` first on ``PATH`` (``tests/workflow_steps.py``). Every test that
+runs the script asserts the calls the fake received, so a fake that was bypassed fails the
+test. The last tests
 pin the step in ``deploy-dashboard.yml`` that runs it: its position inside the rollback
 window is what makes a failure roll back.
 """
@@ -219,7 +220,7 @@ def test_a_cold_cache_fails_and_the_escaped_path_is_not_judged(tmp_path: Path) -
     )
     assert (
         "  - decoded once: /election/%2531824 got 200, noindex: yes; not judged, the "
-        "cache is not filled" in result.stdout.splitlines()
+        "cache check did not pass" in result.stdout.splitlines()
     )
     assert _urls(calls) == [CACHE, CACHE, CACHE, ESCAPED, CONTROL, PLOTLY]
 
@@ -231,12 +232,64 @@ def test_a_cache_that_fills_on_a_retry_passes(tmp_path: Path) -> None:
 
 
 def test_response_bytes_never_reach_the_log(tmp_path: Path) -> None:
-    """Only codes and yes/no are printed, so a body cannot carry a workflow command."""
+    """Only codes and noindex results (yes, no, unfetched) are printed, so a body cannot
+    carry a workflow command."""
     routes = _routes(escaped="200")
     routes[1] = Route(ESCAPED, "200", "::error::planted ##[error]planted")
-    result, _ = _check(tmp_path, routes)
+    result, calls = _check(tmp_path, routes)
     assert result.returncode == 1
+    assert _urls(calls) == [CACHE, ESCAPED, CONTROL, PLOTLY]
+    assert (
+        "  ✗ decoded once: /election/%2531824 got 200, noindex: no; want 404 with "
+        "noindex" in result.stdout.splitlines()
+    )
     assert "planted" not in result.stdout + result.stderr
+
+
+def test_a_404_without_noindex_on_the_cache_path_fails(tmp_path: Path) -> None:
+    """A tagless 404 on /election/1825 is not the app's own: it is retried, then fails
+    the cache check, and the escaped path is not judged."""
+    routes = _routes()
+    routes[0] = Route(CACHE, "404", "<h1>Not Found</h1>")
+    result, calls = _check(tmp_path, routes)
+    assert result.returncode == 1
+    assert _failed(result) == "cache filled"
+    assert (
+        "  ✗ cache filled: /election/1825 got 404, noindex: no; want 404 with noindex"
+        in result.stdout.splitlines()
+    )
+    assert (
+        "  - decoded once: /election/%2531824 got 404, noindex: yes; not judged, the "
+        "cache check did not pass" in result.stdout.splitlines()
+    )
+    assert _urls(calls) == [CACHE, CACHE, CACHE, ESCAPED, CONTROL, PLOTLY]
+
+
+def test_a_check_never_reads_an_earlier_checks_body(tmp_path: Path) -> None:
+    """If curl left the body file as it was after an answer arrived, the cache check's
+    noindex body would make a tagless 404 on %2531824 pass; the script empties it first."""
+    result, calls = _check(tmp_path, _routes(escaped="404@keep"))
+    assert result.returncode == 1
+    assert (
+        "  ✗ decoded once: /election/%2531824 got 404, noindex: no; want 404 with "
+        "noindex" in result.stdout.splitlines()
+    )
+    assert _failed(result) == "decoded once"
+    assert _urls(calls) == [CACHE, ESCAPED, CONTROL, PLOTLY]
+
+
+def test_a_curl_error_after_the_status_arrived_counts_as_no_answer(
+    tmp_path: Path,
+) -> None:
+    """curl can print a real code and still exit nonzero (28: the transfer timed out
+    after the status arrived). That is no answer: retried, and reported as 000."""
+    result, calls = _check(tmp_path, _routes(control="200@28"))
+    assert result.returncode == 1
+    assert "  ✗ decoded-once control: /election/%31824 got 000; want 200" in (
+        result.stdout.splitlines()
+    )
+    assert _failed(result) == "decoded-once control"
+    assert _urls(calls).count(CONTROL) == 3
 
 
 # --- The workflow step ------------------------------------------------------------
@@ -276,5 +329,9 @@ def test_the_step_runs_the_script_on_the_version_host_with_a_timeout() -> None:
 
 
 def test_roll_back_still_runs_on_a_failure_before_the_redirect_probe() -> None:
-    (step,) = [s for s in _steps() if s.get("name") == "Roll back"]
+    steps = _steps()
+    (step,) = [s for s in steps if s.get("name") == "Roll back"]
     assert step["if"] == _ROLLBACK_IF
+    # After the routing check, so a failure there reaches it.
+    ids = [s.get("id") for s in steps]
+    assert steps.index(step) > ids.index("probe_routing")
