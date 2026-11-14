@@ -19,7 +19,9 @@ import http.client
 import http.server
 import json
 import logging
+import pkgutil
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -1909,6 +1911,29 @@ class TestDashPrivates:
             }
         ]
 
+    def test_the_suite_route_s_endpoint_is_its_url_rule(self) -> None:
+        """#439: app.py wraps the view registered under the component-suite route's
+        endpoint, which Dash's Flask backend names after the route's URL rule."""
+        (rule,) = [
+            r
+            for r in appmod.server.url_map.iter_rules()
+            if r.rule.startswith("/_dash-component-suites/")
+        ]
+        assert rule.endpoint == SUITE_ENDPOINT
+        assert rule.endpoint == appmod.SUITE_ENDPOINT
+
+    def test_a_registered_missing_file_raises_file_not_found(self) -> None:
+        """#439: the component-suite route reads a registered file with
+        ``pkgutil.get_data``, which raises ``FileNotFoundError`` for one the package
+        does not contain; app.py's wrapper keys on that exception."""
+        namespace, path = MISSING_SUITE_FILES[0]
+        assert (namespace, path) in registered_suite_paths()
+        view = appmod.server.view_functions[SUITE_ENDPOINT]
+        assert view is appmod._suite_view
+        dash_view = view.__wrapped__  # Dash's own view, which app.py wraps
+        with appmod.server.test_request_context(), pytest.raises(FileNotFoundError):
+            dash_view(package_name=namespace, fingerprinted_path=path)
+
     def test_an_unregistered_suite_path_raises_dependency_exception(self) -> None:
         """#430: app.py's 404 handler keys on the exception Dash's component-suite
         route raises for a path it never registered."""
@@ -2022,6 +2047,202 @@ class TestPlotlyjsNotServed:
         assert sent["serve_locally"] is False
         assert sent["plotlyjs_url"] == appmod.app._plotlyjs_url
         assert body.count("cdn.plot.ly") == 1
+
+
+#: The component-suite route's Flask endpoint, as Dash's Flask backend names it (its
+#: URL rule). Written out rather than imported, as :data:`PLOTLYJS_PACKAGE_PATH` is.
+SUITE_ENDPOINT = (
+    "/_dash-component-suites/<string:package_name>/<path:fingerprinted_path>"
+)
+
+#: The files Dash 4.5.0 registers but does not install (#439), as (namespace, path).
+MISSING_SUITE_FILES = (
+    ("dash", "dash-renderer/build/dash_renderer.min.js.map"),
+    ("dash", "dcc/async-mathjax.js.map"),
+)
+
+
+#: The suite view's warning for a registered file it did not install (#439).
+MISSING_FILE_WARNING = "component-suite file registered but not installed"
+
+#: Flask's default 404 body (Werkzeug's ``NotFound``), which #430's handler and the
+#: suite view's refusal both answer with.
+NOT_FOUND_BODY = werkzeug.exceptions.NotFound().get_response().get_data()
+
+#: A path no Dash release ships, and not a source map: registered by a test to show
+#: the 404 follows the read's error, not a list of file names.
+SYNTHETIC_MISSING_FILE = ("dash", "dcc/no-such-chunk.js")
+
+
+def suite_file(namespace: str, path: str) -> Path:
+    """Where Dash's component-suite route reads ``path`` from: the directory of the
+    package module itself, as ``pkgutil.get_data`` resolves it."""
+    module_file = sys.modules[namespace].__file__
+    assert module_file is not None
+    return Path(module_file).parent / path
+
+
+def registered_suite_paths() -> list[tuple[str, str]]:
+    """Every component-suite path the app has registered, after an index render
+    (Dash registers its resources while building the index's script tags)."""
+    get("/")
+    return sorted(
+        (namespace, path)
+        for namespace, paths in appmod.app.registered_paths.items()
+        for path in paths
+    )
+
+
+def suite_get(namespace: str, path: str) -> Any:
+    return appmod.server.test_client().get(
+        f"/_dash-component-suites/{namespace}/{path}"
+    )
+
+
+def error_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """Records at error level or above, and any record carrying a traceback."""
+    return [
+        r for r in caplog.records if r.levelno >= logging.ERROR or r.exc_info
+    ]
+
+
+def missing_file_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and MISSING_FILE_WARNING in r.getMessage()
+    ]
+
+
+class TestMissingSuiteFile:
+    """#439: a component-suite file Dash registers but did not install answers 404
+    and one warning, not 500 with a logged traceback."""
+
+    @pytest.mark.parametrize(("namespace", "path"), MISSING_SUITE_FILES)
+    def test_a_registered_missing_file_answers_404_and_warns_once(
+        self, caplog: pytest.LogCaptureFixture, namespace: str, path: str
+    ) -> None:
+        # Its premises: Dash registers the path, so #430's unregistered-path handler
+        # does not answer it, and the installed package lacks the file.
+        assert (namespace, path) in registered_suite_paths()
+        assert not suite_file(namespace, path).exists()
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            response = suite_get(namespace, path)
+        assert response.status_code == 404
+        assert response.data == NOT_FOUND_BODY
+        assert response.mimetype == "text/html"
+        assert error_records(caplog) == []
+        (warning,) = missing_file_warnings(caplog)
+        assert repr(namespace) in warning and repr(path) in warning
+
+    def test_the_404_follows_the_read_s_error_not_a_list_of_names(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A registered path no release ships, and not a source map, is answered
+        the same way: the refusal keys on the error, not on the two names."""
+        namespace, path = SYNTHETIC_MISSING_FILE
+        registered_suite_paths()
+        paths = appmod.app.registered_paths[namespace]
+        monkeypatch.setitem(appmod.app.registered_paths, namespace, {*paths, path})
+        assert not suite_file(namespace, path).exists()
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            response = suite_get(namespace, path)
+        assert response.status_code == 404
+        assert response.data == NOT_FOUND_BODY
+        assert error_records(caplog) == []
+        (warning,) = missing_file_warnings(caplog)
+        assert repr(path) in warning
+
+    @pytest.mark.parametrize(
+        "path",
+        ["dcc/dash_core_components.js", "dcc/async-mathjax.js", "dcc/async-graph.js"],
+    )
+    def test_an_installed_file_is_still_served(self, path: str) -> None:
+        """The control: a bundle a page uses, the chunk a chart loads, and the math
+        chunk a later ``dcc.Markdown`` page would need all still answer 200."""
+        assert ("dash", path) in registered_suite_paths()
+        response = suite_get("dash", path)
+        assert response.status_code == 200
+        assert response.data == suite_file("dash", path).read_bytes()
+
+    def test_no_registered_suite_path_answers_5xx(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Every registered path answers 200 when its file is installed, and 404
+        when it is not; and the files that are not are exactly the known two, so a
+        Dash upgrade that changes that list fails here until the list is updated."""
+        paths = registered_suite_paths()
+        assert len(paths) >= 20  # Dash, dcc, html and dash_table's files
+        missing = []
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            for namespace, path in paths:
+                status = suite_get(namespace, path).status_code
+                installed = suite_file(namespace, path).exists()
+                assert status == (200 if installed else 404), (namespace, path, status)
+                if not installed:
+                    missing.append((namespace, path))
+        assert error_records(caplog) == []
+        assert set(missing) == set(MISSING_SUITE_FILES)
+        assert len(missing_file_warnings(caplog)) == len(missing)
+
+    def test_another_error_from_the_read_stays_a_logged_500(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Only ``FileNotFoundError`` is refused: any other error reading an
+        installed file stays a 500 with its traceback logged."""
+
+        def refuse(package: str, resource: str) -> bytes:
+            raise PermissionError(resource)
+
+        monkeypatch.setattr(pkgutil, "get_data", refuse)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            response = suite_get("dash", "dcc/dash_core_components.js")
+        assert response.status_code == 500
+        (record,) = error_records(caplog)
+        assert record.exc_info is not None
+        assert record.exc_info[0] is PermissionError
+        assert missing_file_warnings(caplog) == []
+
+    def test_a_missing_file_in_a_request_hook_stays_a_logged_500(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Only Dash's view is wrapped: a ``FileNotFoundError`` raised before the
+        view runs, on a suite request, stays a 500 with its traceback logged."""
+
+        def raise_missing() -> None:
+            raise FileNotFoundError("no such file")
+
+        monkeypatch.setattr(api.CLIENT, "ensure_refresher", raise_missing)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            response = suite_get("dash", "dcc/dash_core_components.js")
+        assert response.status_code == 500
+        (record,) = error_records(caplog)
+        assert record.exc_info is not None
+        assert record.exc_info[0] is FileNotFoundError
+        assert missing_file_warnings(caplog) == []
+
+    def test_a_missing_file_elsewhere_still_answers_500_and_is_logged(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The refusal is the component-suite route's only: a
+        ``FileNotFoundError`` on any other route stays a logged 500."""
+
+        def raise_missing() -> None:
+            raise FileNotFoundError("no such file")
+
+        monkeypatch.setitem(appmod.server.view_functions, "_warmup", raise_missing)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            response = appmod.server.test_client().get("/_ah/warmup")
+        assert response.status_code == 500
+        (record,) = error_records(caplog)
+        assert record.exc_info is not None
+        assert record.exc_info[0] is FileNotFoundError
 
 
 # --- every templated page validates what its layout receives (#312, item 6) ----------
