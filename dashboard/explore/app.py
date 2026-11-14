@@ -72,6 +72,7 @@ in the browser, the theme choice and the site navigation's current-page marker:
 from __future__ import annotations
 
 import enum
+import functools
 import html as html_escaping
 import json
 import logging
@@ -832,21 +833,37 @@ SUITE_ENDPOINT = (
 )
 
 
-@server.errorhandler(FileNotFoundError)
-def _missing_suite_file(error: FileNotFoundError) -> werkzeug.exceptions.NotFound:
-    """A component-suite file Dash registered but did not install answers 404 (#439).
+#: Dash's own view for that endpoint, registered when the app was built.
+_dash_suite_view = server.view_functions[SUITE_ENDPOINT]
+
+
+@functools.wraps(_dash_suite_view)
+def _suite_view(*args: Any, **kwargs: Any) -> Any:
+    """Dash's component-suite view, with a registered file it did not install
+    answering 404 (#439).
 
     Dash registers some files its package does not contain (on 4.5.0,
     ``dash-renderer/build/dash_renderer.min.js.map`` and ``dcc/async-mathjax.js.map``).
     Such a path passes the registered-path check that :func:`_unregistered_suite_path`
-    covers, and then ``pkgutil.get_data`` raises ``FileNotFoundError``, which would
-    answer 500 and log a traceback. Only the component-suite endpoint is answered
-    here. On any other endpoint the error is raised again, so Flask logs it and
-    answers 500 as before. The body is Flask's default 404 body, as above.
+    covers, and then Dash's read (``pkgutil.get_data``) raises ``FileNotFoundError``,
+    which would answer 500 and log a traceback. Only that read is wrapped: the error
+    from anywhere else, a request hook included, stays a logged 500, and so does any
+    other error from the read. The refusal logs one warning naming the package and
+    path, with no traceback, so a used bundle missing from an install still shows in
+    the log. The body is Flask's default 404 body, as above.
     """
-    if flask.request.endpoint != SUITE_ENDPOINT:
-        raise error
-    return werkzeug.exceptions.NotFound()
+    try:
+        return _dash_suite_view(*args, **kwargs)
+    except FileNotFoundError:
+        log.warning(
+            "component-suite file registered but not installed: %r %r",
+            kwargs.get("package_name"),
+            kwargs.get("fingerprinted_path"),
+        )
+        raise werkzeug.exceptions.NotFound() from None
+
+
+server.view_functions[SUITE_ENDPOINT] = _suite_view
 
 
 #: The custom-404 page, found as Dash's router finds it: its not-found state is the
