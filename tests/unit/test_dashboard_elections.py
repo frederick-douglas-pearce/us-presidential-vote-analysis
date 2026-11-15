@@ -1135,6 +1135,24 @@ class TestHasTextClass:
         assert {"Cn", "Co", "Cs", "Lo", "Mn", "So"} <= set(others)
         assert {cat: c for cat, c in others.items() if not labels.has_text(c)} == {}
 
+    # The residuals ``labels.has_text``'s docstring names: characters that render as
+    # nothing but sit outside Cc and Cf, so they still count as text (#532's acceptance
+    # gate, Class B: no test held them). Change this together with the docstring, if
+    # the class ever widens to take them in.
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "\u3164",  # Hangul filler (Lo)
+            "\u115f",  # Hangul choseong filler (Lo)
+            "\uffa0",  # halfwidth Hangul filler (Lo)
+            "\u2800",  # blank braille pattern (So)
+            "\u0301",  # a lone combining acute accent (Mn)
+        ],
+        ids=repr,
+    )
+    def test_the_documented_residuals_still_count_as_text(self, value: str) -> None:
+        assert labels.has_text(value) is True
+
 
 class TestIsBlankKeepsWhitespaceOnly:
     """The fork #532's plan gate settled (owner, fork A; architect): ``labels.is_blank``
