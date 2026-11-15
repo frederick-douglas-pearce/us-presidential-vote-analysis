@@ -1039,9 +1039,10 @@ def dropdown_uses(source: str) -> list[str]:
     """Where ``source`` builds a dropdown itself (#475), each reported as the top-level
     definition or assignment it sits in (an import by line): any name, attribute or
     import of ``Dropdown`` (``dcc.Dropdown``, ``dash.dcc.Dropdown``, an imported or
-    aliased ``Dropdown``), and any string ``"Dropdown"`` (``getattr(dcc, "Dropdown")``,
-    or a dropdown returned as component JSON). Bare string statements (docstrings) are
-    not code and are skipped. It reads source, so a page changing the helper's result
+    aliased ``Dropdown``), and any string containing ``Dropdown`` (``getattr(dcc,
+    "Dropdown")``, a dropdown returned as component JSON, or one a clientside
+    callback's JS builds). Bare string statements (docstrings) are not code and are
+    skipped. It reads source, so a page changing the helper's result
     after the call, ``exec`` or ``eval``, and a type name built at runtime are not
     seen."""
     tree = ast.parse(source)
@@ -1072,7 +1073,8 @@ def dropdown_uses(source: str) -> list[str]:
                 or (isinstance(node, ast.Attribute) and node.attr == "Dropdown")
                 or (
                     isinstance(node, ast.Constant)
-                    and node.value == "Dropdown"
+                    and isinstance(node.value, str)
+                    and "Dropdown" in node.value
                     and id(node) not in docstrings
                 )
             )
@@ -1160,9 +1162,11 @@ class TestDropdownFilter:
             ("from dash import dcc as c\ndef f():\n    c.Dropdown()\n", ["f"]),
             ("from dash import dcc\ndef f():\n    getattr(dcc, 'Dropdown')()\n", ["f"]),
             ("X = {'type': 'Dropdown', 'namespace': 'dash_core_components'}\n", ["X"]),
+            ("CB = \"return {type: 'Dropdown', namespace: NS};\"\n", ["CB"]),
             ("from explore import components\ncomponents.dropdown_filter()\n", []),
-            # A docstring of exactly "Dropdown": caught but for the docstring skip.
+            # Docstrings naming Dropdown: caught but for the docstring skip.
             ('"""Dropdown"""\n', []),
+            ('"""Builds no dcc.Dropdown."""\n', []),
             ('def f():\n    """Dropdown"""\n', []),
             ("from dash import dcc\ndcc.RadioItems(id='r')\n", []),
         ],
