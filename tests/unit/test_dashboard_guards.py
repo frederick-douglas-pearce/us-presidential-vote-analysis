@@ -1188,6 +1188,107 @@ def test_the_lint_rules_flag_what_they_should(
     assert bool(_violations(ast.parse(source), path)) is flagged
 
 
+def dash_table_uses(source: str) -> list[str]:
+    """The listed ways ``source`` reaches dash_table to render one (#524). No page
+    loads dash_table's bundle (``app.defer_dash_table_bundle``), so a DataTable in a
+    layout would fail in the browser. Flags an import naming ``dash_table`` or
+    ``DataTable``; any use of the name or attribute ``dash_table`` other than as the
+    base of a ``._js_dist`` access (any number, in any module: this lint keeps
+    DataTable out, and does not guard the override, whose undo at import fails the
+    live-entry premise in ``TestDashTableBundle``); any use of ``DataTable``; and,
+    outside bare string statements (docstrings among them), a string that is the
+    namespace ``"dash_table"`` or contains ``"DataTable"`` (``getattr(...,
+    "DataTable")``, or a table returned as component JSON). The bundle's path,
+    ``"dash_table/bundle.js"``, is not the namespace and is not flagged. It reads
+    source: a dynamic import is the data-path lint's above."""
+    tree = ast.parse(source)
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    found = []
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in node.names]
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names.append(node.module)
+            if any("dash_table" in n or "DataTable" in n for n in names):
+                found.append(f"line {line}: imports {', '.join(names)}")
+        elif (isinstance(node, ast.Name) and node.id == "dash_table") or (
+            isinstance(node, ast.Attribute) and node.attr == "dash_table"
+        ):
+            parent = parents.get(node)
+            if not (
+                isinstance(parent, ast.Attribute)
+                and parent.value is node
+                and parent.attr == "_js_dist"
+            ):
+                found.append(f"line {line}: {ast.unparse(node)}")
+        elif (isinstance(node, ast.Name) and node.id == "DataTable") or (
+            isinstance(node, ast.Attribute) and node.attr == "DataTable"
+        ):
+            found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and (node.value == "dash_table" or "DataTable" in node.value)
+            and id(node) not in docstrings
+        ):
+            found.append(f"line {line}: {node.value!r}")
+    return found
+
+
+def test_no_runtime_module_reaches_dash_table() -> None:
+    assert RUNTIME_MODULES, "no runtime modules found"
+    found = {
+        str(path): uses
+        for path in RUNTIME_MODULES
+        if (uses := dash_table_uses(path.read_text(encoding="utf-8")))
+    }
+    assert found == {}
+
+
+@pytest.mark.parametrize(
+    ("source", "caught"),
+    [
+        ("from dash import dash_table\ndash_table.DataTable()\n", True),
+        ("from dash import dash_table as t\nt.DataTable()\n", True),
+        ("from dash.dash_table import DataTable\nDataTable()\n", True),
+        ("import dash.dash_table\n", True),
+        ("import dash\ndash.dash_table.DataTable(id='t')\n", True),
+        ("import dash\nmake = dash.dash_table\n", True),
+        ("import dash\ngetattr(dash.dash_table, 'DataTable')\n", True),
+        ("import dash\ngetattr(dash, 'dash_table')\n", True),
+        ("x = {'type': 'DataTable', 'namespace': 'dash_table'}\n", True),
+        # #534's review: one case each that only the DataTable name/attribute rule,
+        # or only the "DataTable" string rule, catches.
+        ("import sys\nsys.modules['dash.dash_table'].DataTable()\n", True),
+        ("x = {'type': 'DataTable'}\n", True),
+        # #524's mutation pass: one case each that only one rule half catches (an
+        # imported DataTable under an alias, a module named dash_table, a bare
+        # dash_table name, an attribute of dash_table other than _js_dist, a bare
+        # DataTable name, and a string that contains DataTable without being it).
+        ("from x import DataTable as T\nT()\n", True),
+        ("from dash.dash_table import Format\n", True),
+        ("dash_table = None\n", True),
+        ("import dash\ndash.dash_table.Format\n", True),
+        ("DataTable()\n", True),
+        ("x = 'dash_table.DataTable'\n", True),
+        ("import dash\nd = dash.dash_table._js_dist\n", False),
+        ("PATH = 'dash_table/bundle.js'\n", False),
+        ('"""A docstring naming dash_table and DataTable."""\n', False),
+        ("from dash import dcc\ndcc.Dropdown(id='d')\n", False),
+    ],
+)
+def test_the_dash_table_lint_catches_the_listed_ways(source: str, caught: bool) -> None:
+    assert bool(dash_table_uses(source)) is caught
+
+
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
     offenders = [
         str(p.relative_to(REPO))

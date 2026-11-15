@@ -1,7 +1,8 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds nine things: seven host-level, and two that live
-in the browser, the theme choice and the site navigation's current-page marker:
+Beyond Dash itself this module adds what follows: host-level behaviors first, then the
+two that live in the browser, the theme choice and the site navigation's current-page
+marker:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -41,6 +42,11 @@ in the browser, the theme choice and the site navigation's current-page marker:
   content-encoded callback request, whose body the strip cannot read, and the app
   turns Dash's MCP server off (``enable_mcp=False``), which would run callbacks through
   a route of its own.
+- **Old filtered links move** (#465, D092). A page whose filters moved to another page
+  declares ``moved=``, which :func:`page_move` checks at import; the index answers a
+  document request whose query names a moved key with a 302 to the page that now holds
+  those filters (:func:`moved_location`), built only from the path variables the
+  snapshot accepted and the target's own query parser.
 - **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
   thread, and only then starts the refresher, so the instance takes traffic with a
   filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
@@ -54,6 +60,12 @@ in the browser, the theme choice and the site navigation's current-page marker:
   plotly.js by its CDN address only, so the app never serves the 4.8 MB file, which
   no page uses yet; and a component-suite path Dash never registered answers 404
   (Flask's default body) rather than 500.
+- **A registered file Dash did not install answers 404** (#439). :func:`_suite_view`
+  wraps Dash's component-suite view and answers Flask's default 404, with one warning,
+  where Dash's read of a registered path raises ``FileNotFoundError``.
+- **No page loads dash_table's bundle** (#524). Dash adds it to every index, and no
+  page renders a DataTable, so :func:`defer_dash_table_bundle` marks it ``dynamic`` at
+  import: the path stays served, but no page requests it.
 - **The theme choice** (#359, #447). A head script applies a saved Dark or Light
   choice to ``<html>`` before first paint, so a reload never flashes the other
   palette; the shared layout carries the toggle
@@ -688,6 +700,43 @@ class ExploreDash(dash.Dash):
             renderer=renderer,
         )
 
+
+#: dash_table's one shell bundle, as ``dash.dash_table._js_dist`` names it (#524).
+DASH_TABLE_BUNDLE = "dash_table/bundle.js"
+
+
+def defer_dash_table_bundle(dist: list[dict[str, Any]]) -> None:
+    """Mark dash_table's shell bundle ``dynamic`` in ``dist``: no page loads it (#524).
+
+    ``Dash._generate_scripts_html`` adds ``dash_table._js_dist`` to every index's
+    scripts, whether or not a layout holds a DataTable, and no page does. Dash's script
+    filter carries ``dynamic`` through, and Dash registers a dynamic resource's path
+    without writing a script tag for it, so the bundle stays served (a shell cached
+    before the change still gets it) and no page requests it. Called once at import,
+    before the app is built: Dash builds an index's scripts on each request, and no
+    Dash method touches this list. The entry is matched by its exact path and the
+    ``dash`` namespace (the source map is already dynamic), and the import fails unless
+    there is exactly one with no ``async`` key, since Dash refuses a resource both
+    ``dynamic`` and ``async`` only while building an index, which would fail every
+    page. One already ``dynamic`` is left as it is. Dash privates, pinned in
+    ``TestDashPrivates``. Accepted residual: the list is module-global, so any Dash app
+    built in this process loses the tag too, which matters only to an app that renders
+    a DataTable; none does, and ``test_no_runtime_module_reaches_dash_table``
+    (``test_dashboard_guards.py``) keeps DataTable out of the runtime modules.
+    """
+    entries = [
+        entry
+        for entry in dist
+        if entry.get("relative_package_path") == DASH_TABLE_BUNDLE
+        and entry.get("namespace") == "dash"
+    ]
+    if len(entries) != 1 or "async" in entries[0]:
+        raise RuntimeError(f"unexpected dash_table bundle entries: {entries!r}")
+    entries[0]["dynamic"] = True
+
+
+# dash_table builds _js_dist at import, which mypy cannot see (Dash ignores it too).
+defer_dash_table_bundle(dash.dash_table._js_dist)  # type: ignore[attr-defined]
 
 app = ExploreDash(
     __name__,

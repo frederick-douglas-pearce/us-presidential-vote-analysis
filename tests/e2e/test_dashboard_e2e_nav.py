@@ -28,6 +28,8 @@ from tests.e2e.dashboard_pages import (
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     LOWER_THUMB,
+    NOT_FOUND_ERROR,
+    PAGE_NOT_FOUND,
     ROUTER_OUTPUT,
     UNAVAILABLE,
     UPDATE_PATH,
@@ -38,9 +40,6 @@ from tests.nav_marks import MARKS
 
 pytestmark = pytest.mark.e2e
 
-NOT_FOUND_ERROR = (
-    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
-)
 NAV = f"#{components.SITE_NAV_ID}"
 LINK_IDS = components.NAV_LINK_IDS
 
@@ -74,7 +73,7 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     "/state/GA": ("#state", ("states", "true")),
     "/state/TX": (UNAVAILABLE, ("states", "true")),
     "/candidate/andrew-jackson": ("#candidate", None),
-    "/no-such-page": ("#page-not-found", None),
+    "/no-such-page": (PAGE_NOT_FOUND, None),
 }
 
 #: The templates whose document answers 404, which logs one console error.

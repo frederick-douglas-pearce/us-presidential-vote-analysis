@@ -157,6 +157,15 @@ CHUNK_ERROR_PREFIX = "ChunkLoadError: Loading chunk"
 #: (an aborted plotly.js load, #452, or an aborted chunk, #456).
 RESOURCE_ERROR = "Failed to load resource: net::ERR_FAILED"
 
+#: Chromium's console error for a document that answers 404, logged once per such load
+#: (a not-found render, #325).
+NOT_FOUND_ERROR = (
+    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
+)
+
+#: The custom-404 page's id (pages/not_found_404.py), for a path no page matches.
+PAGE_NOT_FOUND = "#page-not-found"
+
 #: How long a failed chunk must log nothing new to count as stopped (#456). Dash
 #: 4.4.1's loop logged about 25 a second (D088), so it cannot hide in this window; a
 #: loop slower than one line per window is out of this test's reach (D089).

@@ -31,6 +31,7 @@ from tests.e2e.dashboard_pages import (
     ELECTIONS,
     FIRST,
     LAST,
+    NOT_FOUND_ERROR,
     PER_CAPITA_SUCCESS,
     RESOURCE_ERROR,
     SECTIONS,
@@ -193,9 +194,7 @@ def test_an_old_filtered_overview_link_lands_on_the_states_page(page: Page) -> N
 
 
 @pytest.mark.plotlyjs_fetches(0)  # a not-found render mounts no chart (#433)
-@pytest.mark.expected_console_error(
-    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
-)
+@pytest.mark.expected_console_error(NOT_FOUND_ERROR)
 def test_an_unserved_year_reads_as_not_found_on_the_states_page(page: Page) -> None:
     not_found = dash.page_registry["pages.election_states"]["not_found"]
     response = page.goto("/election/1825/states")
@@ -207,9 +206,7 @@ def test_an_unserved_year_reads_as_not_found_on_the_states_page(page: Page) -> N
 
 
 @pytest.mark.plotlyjs_fetches(0)  # a not-found render mounts no chart (#433)
-@pytest.mark.expected_console_error(
-    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
-)
+@pytest.mark.expected_console_error(NOT_FOUND_ERROR)
 def test_an_unserved_year_loads_as_a_404_with_its_not_found_heading(page: Page) -> None:
     """#325: a shared link to an unserved year, opened directly. The document's own 404
     is the one console error, and the guard requires it exactly once. The title here
