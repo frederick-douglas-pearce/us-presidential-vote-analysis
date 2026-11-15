@@ -1033,6 +1033,12 @@ class TestNullCells:
             row(1872, 7, "c", "M."),  # a name that is not text
             row(1872, None, "n", "O."),  # no name
             row(1872, "  ", "s", "S."),  # a blank name
+            # Nothing to read (#532): a name of format or control characters that are
+            # not whitespace is unrecognized, one of whitespace controls is blank, and a
+            # note of format characters is none.
+            row(1872, "\u200b", "w", "W."),
+            row(1872, "\x1f", "u", "U."),
+            row(1872, "K", "k", "\u200b"),
             row(1880, "G", None, "P."),  # two candidates with no slug never merge
             row(1880, "H", None, "Q."),
             row(1884, "J", "j-1", "R."),  # one name, two slugs: two candidates
@@ -1048,6 +1054,8 @@ class TestNullCells:
             f"{labels.UNRECOGNIZED}, 1872: M.",
             f"{labels.NOT_IN_DATASET}, 1872: O.",
             f"{labels.NOT_IN_DATASET}, 1872: S.",
+            f"{labels.UNRECOGNIZED}, 1872: W.",
+            f"{labels.NOT_IN_DATASET}, 1872: U.",
             "G, 1880: P.",
             "H, 1880: Q.",
             "J, 1884: R.",

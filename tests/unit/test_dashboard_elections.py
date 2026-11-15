@@ -1037,18 +1037,22 @@ class TestHasText:
     @pytest.mark.parametrize(
         "value",
         [
-            "​",  # zero-width space (Cf)
-            "﻿",  # byte-order mark (Cf)
-            "​﻿",
-            " ​\t",  # whitespace and Cf together
-            "⁠",  # word joiner (Cf)
-            "­",  # soft hyphen (Cf)
-            "᠎",  # Mongolian vowel separator (Cf, whitespace before Unicode 6.3)
-            "؜",  # Arabic letter mark (Cf)
+            "\u200b",  # zero-width space (Cf)
+            "\ufeff",  # byte-order mark (Cf)
+            "\u200b\ufeff",
+            " \u200b\t",  # whitespace and Cf together
+            "\u2060",  # word joiner (Cf)
+            "\u00ad",  # soft hyphen (Cf)
+            "\u180e",  # Mongolian vowel separator (Cf, whitespace before Unicode 6.3)
+            "\u061c",  # Arabic letter mark (Cf)
             "\U000e0001",  # language tag, outside the BMP (Cf)
             "\x01",  # a control that is not whitespace (Cc)
             "\x7f\x1b",  # delete and escape (Cc)
             "\x00",  # NUL (Cc)
+            # Whitespace between them, not only around them: a rule that strips the
+            # ends and then checks what is left calls these text (#532's review, F8).
+            "\u200b \u200b",
+            "\x01\t\x01",
         ],
         ids=repr,
     )
@@ -1058,7 +1062,7 @@ class TestHasText:
     # Those characters never erase real text beside them.
     @pytest.mark.parametrize(
         "value",
-        ["﻿Andrew Jackson", "Andrew​Jackson", "Andrew Jackson\x01", "​x"],
+        ["\ufeffAndrew Jackson", "Andrew\u200bJackson", "Andrew Jackson\x01", "\u200bx"],
         ids=repr,
     )
     def test_real_text_carrying_them_is_text(self, value: str) -> None:
@@ -1069,7 +1073,8 @@ class TestHasText:
 def _code_points_by_category() -> dict[str, list[str]]:
     """Every code point of the running interpreter's Unicode version, by general
     category: what the class sweep below reads its expectations from, so it holds on any
-    supported Python (CI's 3.11 floor is Unicode 14.0; App Engine's 3.14 is 16.0)."""
+    supported Python (the ``requires-python`` floor, 3.11, is Unicode 14.0; CI and App
+    Engine run 3.14, Unicode 16.0)."""
     found: dict[str, list[str]] = {}
     for point in range(sys.maxunicode + 1):
         char = chr(point)
@@ -1109,16 +1114,17 @@ class TestHasTextClass:
     def test_every_whitespace_character_alone_is_no_text(self) -> None:
         by_category = _code_points_by_category()
         spaces = [c for chars in by_category.values() for c in chars if c.isspace()]
-        assert " " in spaces and "　" in spaces  # not only ASCII whitespace
+        assert "\u00a0" in spaces and "\u3000" in spaces  # not only ASCII whitespace
         assert [c for c in spaces if labels.has_text(c)] == []
         # What ``str.strip`` removes, so ordinary whitespace behaves as before (AC3).
         assert all(not c.strip() for c in spaces)
 
     def test_every_other_category_counts_as_text(self) -> None:
         """One character of every other category counts as text, unassigned, private
-        use and surrogate code points included, so the class is exactly Cc and Cf and
-        never every ``C*`` category. The first character of each that is not
-        whitespace."""
+        use and surrogate code points included, so no other category is wholly nothing
+        to read (one character per category, not every one: the documented residuals,
+        such as U+3164, are not pinned here), and the class is never every ``C*``
+        category. The first character of each that is not whitespace."""
         by_category = _code_points_by_category()
         others = {
             category: next(c for c in chars if not c.isspace())
@@ -1132,21 +1138,32 @@ class TestHasTextClass:
 
 class TestIsBlankKeepsWhitespaceOnly:
     """The fork #532's plan gate settled (owner, fork A; architect): ``labels.is_blank``
-    keeps ``str.strip``, so text made only of format or control characters is neither
-    blank nor text. A cell then reads it as unrecognized (``labels._unknown``), never as
-    the null wording, which would claim the dataset holds nothing here when it holds a
-    value (D101's reasoning: a fallback that hides an upstream fault is refused). Widening
-    ``is_blank`` to match ``has_text`` is a decision, not a consistency fix."""
+    keeps ``str.strip``, so text made only of format or control characters that are not
+    whitespace is neither blank nor text, while text of whitespace controls (U+001F,
+    U+0085) stays blank. A cell falling back through ``labels._unknown`` reads the
+    first as unrecognized, never as the null wording, which would claim the dataset
+    holds nothing here when it holds a value (D101's reasoning: a fallback that hides an
+    upstream fault is refused). Widening ``is_blank`` to match ``has_text`` is a
+    decision, not a consistency fix."""
 
-    @pytest.mark.parametrize("value", ["​", "﻿", "\x01", " ​ "], ids=repr)
+    @pytest.mark.parametrize("value", ["\u200b", "\ufeff", "\x01", " \u200b "], ids=repr)
     def test_format_or_control_text_is_not_blank(self, value: str) -> None:
         assert labels.is_blank(value) is False
         assert labels.has_text(value) is False
 
-    @pytest.mark.parametrize("value", ["​", "\x01"], ids=repr)
+    @pytest.mark.parametrize("value", ["\u200b", "\x01"], ids=repr)
     def test_a_winner_made_of_them_reads_unrecognized(self, value: str) -> None:
         assert labels.winner(value, True) == labels.UNRECOGNIZED
         assert labels.winner(value, False) == labels.UNRECOGNIZED
+
+    # The boundary (#532's review, D2, owner option A): a control character that is
+    # also whitespace makes a value blank, as ``str.strip`` always has, so it names no
+    # cause; ``has_text`` still refuses it.
+    @pytest.mark.parametrize("value", ["\x1f", "\x85", "\x1c\x1d"], ids=repr)
+    def test_whitespace_controls_stay_blank(self, value: str) -> None:
+        assert labels.is_blank(value) is True
+        assert labels.has_text(value) is False
+        assert labels.winner(value, True) == labels.NOT_IN_DATASET
 
     @pytest.mark.parametrize("value", [None, "", "  "], ids=repr)
     def test_a_null_or_blank_winner_still_names_no_cause(self, value: object) -> None:
