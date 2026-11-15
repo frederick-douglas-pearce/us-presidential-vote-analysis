@@ -211,8 +211,9 @@ NOT_IN_DATASET = "Not in this dataset"
 #: A value this module has no wording for (#355): an unknown closed-vocabulary code, a
 #: value of the wrong type, a non-finite number, one too large to show as a share,
 #: margin or ratio, or a winner's or Party notes name made only of format or control
-#: characters that are not whitespace, which carries nothing to read (#532; a value
-#: of only whitespace, such as U+001F, is blank instead). Never the raw value, and
+#: characters that are not whitespace, with or without whitespace beside them, which
+#: carries nothing to read (#532; a value of only whitespace, such as U+001F, is blank
+#: instead). Never the raw value, and
 #: never :data:`NOT_IN_DATASET`, which means the dataset holds nothing here. A download
 #: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
@@ -973,7 +974,8 @@ def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
     when there is none, so a page splices it in place (``*party_notes(rows)``).
     The candidate's name is shown as served; a null or blank one reads
     :data:`NOT_IN_DATASET`, and one that is not text, or is made only of format or
-    control characters that are not whitespace (#532), reads :data:`UNRECOGNIZED`
+    control characters that are not whitespace, with or without whitespace beside them
+    (#532), reads :data:`UNRECOGNIZED`
     (:func:`_unknown`), never the raw value."""
     items: list[str] = []
     seen: set[tuple[str, str, str]] = set()
@@ -1202,7 +1204,8 @@ def winner(value: object, applicable: bool) -> str:
     Electoral College, inside the popular-vote window for the other two. A name is
     shown whatever the year, as :func:`popular_votes` shows a figure; a blank is no
     name, and a value that is not text, or is made only of format or control
-    characters that are not whitespace (#532), reads :data:`UNRECOGNIZED`.
+    characters that are not whitespace, with or without whitespace beside them (#532),
+    reads :data:`UNRECOGNIZED`.
     """
     if has_text(value):
         return value

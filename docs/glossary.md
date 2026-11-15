@@ -238,8 +238,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   that page's `FILTER_SENTENCE` in `pages/election_states.py`) and `/state/<usps>`; the name, as served, as
   the link to the candidate history page `/candidate/<slug>` in T2, T3 and T4, and as that page's
   heading (`pages/candidate.py`), or `HEADING` there until a name is read or when that name has
-  nothing to read (it is not text, is blank, or is made only of formatting or control characters
-  such as a zero-width space; #532); `HEADING` is also the page's title (`title`) on any link that is not
+  nothing to read (it is not text, is blank, or is made only of whitespace, formatting or control
+  characters, such as a zero-width space; #532); `HEADING` is also the page's title (`title`) on any link that is not
   refused; on a refused link, `NOT_FOUND_HEADING`
   there, as heading and title (*Not-found state*); and in `pages/candidate.py`, the page's
   link-preview `description` and its download name; on the API's `/docs` page, the
@@ -459,8 +459,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   counted. National totals rows are never flagged (D044).
 - **Shown as:** `LABELS["electoral_count_status"]`, `LABELS["electoral_count_status_reason"]`;
   values `labels.COUNT_STATUS`; the cell `labels.count_status`, which shows the reason verbatim
-  only when it has something to read (it is text, not blank, and not made only of formatting or
-  control characters such as a zero-width space; #532), and leaves it out otherwise (the download keeps it
+  only when it has something to read (it is text, not blank, and not made only of whitespace,
+  formatting or control characters, such as a zero-width space; #532), and leaves it out otherwise (the download keeps it
   as served; #355); the count-status filter on `/election/<year>/states` (named "count status" by
   that page's `FILTER_SENTENCE` in `pages/election_states.py`).
 - **Source:** `src/usvote/count_status.py`, `COUNT_STATUS_VALUES` and the comment on each value;
@@ -1060,8 +1060,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   the dashboard: the party cell's help text where a row has a note (on a `no_nomination` row, after
   `labels.NO_NOMINATION_NOTE`), and once per candidate and election in the Party notes list under
   T2–T5 (`labels.PARTY_NOTES_HEADING`, `labels.PARTY_NOTE_ITEM`), shown as served, and not shown
-  when it has nothing to read (it is not text, is blank, or is made only of formatting or control
-  characters such as a zero-width space; #532);
+  when it has nothing to read (it is not text, is blank, or is made only of whitespace, formatting
+  or control characters, such as a zero-width space; #532);
   `LABELS["nominating_party_note"]` in their column-name lists; `nominating_party_note` in their
   downloads.
 - **Source:** D077, "The row note"; D079 (the `no_nomination` notes); research doc §2.4, §16;

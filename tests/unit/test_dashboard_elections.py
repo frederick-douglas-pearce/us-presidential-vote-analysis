@@ -2929,8 +2929,8 @@ class TestOverTimeValidation:
     @pytest.mark.parametrize("name", [None, "", "  ", 7, "\u200b", "\x01"])
     def test_a_state_with_no_name_to_show(self, name: Any) -> None:
         """Option R (#498, owner; D101): a state whose every row's name fails
-        ``labels.has_text`` (null, blank, not text, or only format or control characters,
-        #532) refuses N2, rather than reaching
+        ``labels.has_text`` (null, blank, not text, or only whitespace, format or control
+        characters, #532) refuses N2, rather than reaching
         the state control as "None", a blank option or a number. The API's
         ``ElectionStateRow.state`` is ``str``, so null or non-text is an upstream
         fault; a blank name, which that type admits, has nothing to show. Every row,
