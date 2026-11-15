@@ -6,8 +6,9 @@ dcc's ``async-datepicker`` chunk is not the date picker alone: it is a split chu
 own Graph, Dropdown and Slider loaders require, so a page with any of them still loads
 it. The index's scripts do not depend on the page, so the home page and the not-found
 page stand for every shell, and load none of dcc's lazily loaded chunks; ``/elections``,
-with dropdowns, a slider and charts, is the control that the used chunk still loads. Each test prints the suite files it saw (run
-with ``-s``), the browser network log #524's acceptance asks for.
+with dropdowns, a slider and charts, is the control that the used chunk still loads.
+Each test prints the suite files it saw (run with ``-s``), the browser network log
+#524's acceptance asks for.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ pytestmark = pytest.mark.e2e
 SUITES = "/_dash-component-suites/"
 
 #: How long a page must request nothing new before a check that a request is absent
-#: (as the other e2e modules wait).
+#: (the charts, election and nav modules wait as long).
 SETTLE_MS = 500
 
 

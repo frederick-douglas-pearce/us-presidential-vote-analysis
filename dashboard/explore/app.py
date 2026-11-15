@@ -42,6 +42,11 @@ marker:
   content-encoded callback request, whose body the strip cannot read, and the app
   turns Dash's MCP server off (``enable_mcp=False``), which would run callbacks through
   a route of its own.
+- **Old filtered links move** (#465, D092). A page whose filters moved to another page
+  declares ``moved=``, which :func:`page_move` checks at import; the index answers a
+  document request whose query names a moved key with a 302 to the page that now holds
+  those filters (:func:`moved_location`), built only from the path variables the
+  snapshot accepted and the target's own query parser.
 - **The refresher.** ``/_ah/warmup`` refreshes the cache synchronously, on the request
   thread, and only then starts the refresher, so the instance takes traffic with a
   filled cache and one ``/v1/meta`` call. Every other request makes sure the refresher
