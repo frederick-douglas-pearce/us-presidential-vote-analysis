@@ -5,8 +5,8 @@ Dash adds dash_table's bundle to every index, and no page renders a DataTable, s
 dcc's ``async-datepicker`` chunk is not the date picker alone: it is a split chunk dcc's
 own Graph, Dropdown and Slider loaders require, so a page with any of them still loads
 it. The index's scripts do not depend on the page, so the home page and the not-found
-page stand for every shell; ``/elections``, with dropdowns, a slider and charts, is the
-control that the used chunk still loads. Each test prints the suite files it saw (run
+page stand for every shell, and load none of dcc's lazily loaded chunks; ``/elections``,
+with dropdowns, a slider and charts, is the control that the used chunk still loads. Each test prints the suite files it saw (run
 with ``-s``), the browser network log #524's acceptance asks for.
 """
 
@@ -18,16 +18,21 @@ import pytest
 from playwright.sync_api import Page, Request
 
 from tests.e2e.conftest import is_chunk
-from tests.e2e.dashboard_pages import ELECTIONS_SUCCESS, HOME_SUCCESS, assert_rendered
+from tests.e2e.dashboard_pages import (
+    ELECTIONS_SUCCESS,
+    HOME_SUCCESS,
+    NOT_FOUND_ERROR,
+    PAGE_NOT_FOUND,
+    assert_rendered,
+)
 
 pytestmark = pytest.mark.e2e
 
 SUITES = "/_dash-component-suites/"
 
-#: A document that answers 404 logs one console error (as test_dashboard_e2e_nav.py).
-NOT_FOUND_ERROR = (
-    "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
-)
+#: How long a page must request nothing new before a check that a request is absent
+#: (as the other e2e modules wait).
+SETTLE_MS = 500
 
 
 def watch(page: Page) -> list[str]:
@@ -52,21 +57,30 @@ def assert_shell_without_dash_table(path: str, seen: list[str]) -> None:
     assert any(s.startswith("dash/html/dash_html_components.") for s in seen), seen
 
 
-@pytest.mark.plotlyjs_fetches(0)
+def assert_no_lazy_dcc_chunk(page: Page, seen: list[str]) -> None:
+    """A page with no Dropdown, Slider or Graph loads none of dcc's lazily loaded
+    chunks (``dcc/async-*``), the date-picker chunk among them; dcc's two shell
+    bundles load on every page by script tag. It waits long enough for a late chunk
+    request to have gone out."""
+    page.wait_for_timeout(SETTLE_MS)
+    assert not [s for s in seen if s.startswith("dash/dcc/async-")], seen
+
+
 def test_the_home_page_loads_no_dash_table_file(page: Page) -> None:
     seen = watch(page)
     page.goto("/")
     assert_rendered(page, HOME_SUCCESS)
     assert_shell_without_dash_table("/", seen)
+    assert_no_lazy_dcc_chunk(page, seen)
 
 
-@pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.expected_console_error(NOT_FOUND_ERROR)
 def test_the_not_found_page_loads_no_dash_table_file(page: Page) -> None:
     seen = watch(page)
     page.goto("/no-such-page")
-    page.locator("#page-not-found").wait_for()
+    page.locator(PAGE_NOT_FOUND).wait_for()
     assert_shell_without_dash_table("/no-such-page", seen)
+    assert_no_lazy_dcc_chunk(page, seen)
 
 
 def test_a_page_with_dropdowns_still_loads_the_shared_chunk(page: Page) -> None:
@@ -77,4 +91,3 @@ def test_a_page_with_dropdowns_still_loads_the_shared_chunk(page: Page) -> None:
         page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     assert_shell_without_dash_table("/elections", seen)
-    assert any(s.startswith("dash/dcc/async-dropdown") for s in seen), seen

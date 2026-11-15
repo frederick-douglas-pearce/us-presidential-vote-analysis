@@ -456,7 +456,7 @@ served (200) for a page cached before the change but no page requests it. dcc's
 `async-datepicker.js` (213,571 bytes) still loads on every page with a dropdown, a slider or
 a chart: despite its name it is a split chunk dcc's own Graph, Dropdown and Slider loaders
 require, so it cannot be refused without patching Dash; the home page and the not-found
-page load no dcc chunk (`test_dashboard_e2e_suites.py`). The daily canary checks the plotly.js 404 (#440,
+page load no lazily loaded dcc chunk (`test_dashboard_e2e_suites.py`). The daily canary checks the plotly.js 404 (#440,
 above).
 
 **The keep-warm ping (D076).** The refresher GETs the API's `/health` once per refresh

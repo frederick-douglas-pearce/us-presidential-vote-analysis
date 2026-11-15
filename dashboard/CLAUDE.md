@@ -120,7 +120,7 @@ two charts on one page sharing one load (on the two-chart test page below), a re
 chart page drawing it in a theme chosen away, and the registered mount function (including
 that a plotly.js which lands after a failed load serves the next mount); and a blocked CDN
 leaving the page, the chart's title, caption and pointer and its table, with one console error
-and no loop, for one chart or two, and no second fetch on a return to the page (#452, D088); and a same-page re-render keeping the chart drawn, and a failed graph chunk (and on `/elections` the year slider's, `test_dashboard_e2e_elections.py`) logging a bounded number of errors and stopping (#456, D089). The suite files a page loads (#524, `test_dashboard_e2e_suites.py`): no dash_table file on the home page or the not-found page, with the shell's dcc and html bundles seen, and on `/elections` the shared `async-datepicker` chunk still loaded.
+and no loop, for one chart or two, and no second fetch on a return to the page (#452, D088); and a same-page re-render keeping the chart drawn, and a failed graph chunk (and on `/elections` the year slider's, `test_dashboard_e2e_elections.py`) logging a bounded number of errors and stopping (#456, D089). The suite files a page loads (#524, `test_dashboard_e2e_suites.py`): no dash_table file and no lazily loaded dcc chunk on the home page or the not-found page, with the shell's dcc and html bundles seen, and on `/elections` the shared `async-datepicker` chunk still loaded.
 A test that asserts something did not happen waits for the event that could have caused it
 (the choice's callback, or a real `change` event of the device's setting), then makes a
 countable change as a barrier.

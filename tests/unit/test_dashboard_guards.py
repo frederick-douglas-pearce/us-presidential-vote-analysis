@@ -1192,12 +1192,15 @@ def dash_table_uses(source: str) -> list[str]:
     """The listed ways ``source`` reaches dash_table to render one (#524). No page
     loads dash_table's bundle (``app.defer_dash_table_bundle``), so a DataTable in a
     layout would fail in the browser. Flags an import naming ``dash_table`` or
-    ``DataTable``; a load of the name or attribute ``dash_table`` other than as the base
-    of a ``._js_dist`` read (the override's one read); any load of ``DataTable``; and,
-    outside docstrings, a string that is the namespace ``"dash_table"`` or contains
-    ``"DataTable"`` (``getattr(..., "DataTable")``, or a table returned as component
-    JSON). The bundle's path, ``"dash_table/bundle.js"``, is not the namespace and is
-    not flagged. It reads source: a dynamic import is the data-path lint's above."""
+    ``DataTable``; any use of the name or attribute ``dash_table`` other than as the
+    base of a ``._js_dist`` access (any number, in any module: this lint keeps
+    DataTable out, and does not guard the override, whose undo at import fails the
+    live-entry premise in ``TestDashTableBundle``); any use of ``DataTable``; and,
+    outside bare string statements (docstrings among them), a string that is the
+    namespace ``"dash_table"`` or contains ``"DataTable"`` (``getattr(...,
+    "DataTable")``, or a table returned as component JSON). The bundle's path,
+    ``"dash_table/bundle.js"``, is not the namespace and is not flagged. It reads
+    source: a dynamic import is the data-path lint's above."""
     tree = ast.parse(source)
     parents = {
         child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
@@ -1262,6 +1265,10 @@ def test_no_runtime_module_reaches_dash_table() -> None:
         ("import dash\ngetattr(dash.dash_table, 'DataTable')\n", True),
         ("import dash\ngetattr(dash, 'dash_table')\n", True),
         ("x = {'type': 'DataTable', 'namespace': 'dash_table'}\n", True),
+        # #534's review: one case each that only the DataTable name/attribute rule,
+        # or only the "DataTable" string rule, catches.
+        ("import sys\nsys.modules['dash.dash_table'].DataTable()\n", True),
+        ("x = {'type': 'DataTable'}\n", True),
         ("import dash\nd = dash.dash_table._js_dist\n", False),
         ("PATH = 'dash_table/bundle.js'\n", False),
         ('"""A docstring naming dash_table and DataTable."""\n', False),

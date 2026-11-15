@@ -1,7 +1,8 @@
 """The Dash app and its WSGI entry point (``explore.app:server``, per ``app.yaml``).
 
-Beyond Dash itself this module adds nine things: seven host-level, and two that live
-in the browser, the theme choice and the site navigation's current-page marker:
+Beyond Dash itself this module adds what follows: host-level behaviors first, then the
+two that live in the browser, the theme choice and the site navigation's current-page
+marker:
 
 - **The canonical host.** A request to the App Engine default host (``*.appspot.com``)
   301s to :data:`~explore.config.CANONICAL_HOST`, so the vendor domain never stays in
@@ -54,6 +55,12 @@ in the browser, the theme choice and the site navigation's current-page marker:
   plotly.js by its CDN address only, so the app never serves the 4.8 MB file, which
   no page uses yet; and a component-suite path Dash never registered answers 404
   (Flask's default body) rather than 500.
+- **A registered file Dash did not install answers 404** (#439). :func:`_suite_view`
+  wraps Dash's component-suite view and answers Flask's default 404, with one warning,
+  where Dash's read of a registered path raises ``FileNotFoundError``.
+- **No page loads dash_table's bundle** (#524). Dash adds it to every index, and no
+  page renders a DataTable, so :func:`defer_dash_table_bundle` marks it ``dynamic`` at
+  import: the path stays served, but no page requests it.
 - **The theme choice** (#359, #447). A head script applies a saved Dark or Light
   choice to ``<html>`` before first paint, so a reload never flashes the other
   palette; the shared layout carries the toggle
@@ -709,8 +716,8 @@ def defer_dash_table_bundle(dist: list[dict[str, Any]]) -> None:
     page. One already ``dynamic`` is left as it is. Dash privates, pinned in
     ``TestDashPrivates``. Accepted residual: the list is module-global, so any Dash app
     built in this process loses the tag too, which matters only to an app that renders
-    a DataTable; none does, and a lint in ``test_dashboard_guards.py`` keeps DataTable
-    out of the runtime modules.
+    a DataTable; none does, and ``test_no_runtime_module_reaches_dash_table``
+    (``test_dashboard_guards.py``) keeps DataTable out of the runtime modules.
     """
     entries = [
         entry
