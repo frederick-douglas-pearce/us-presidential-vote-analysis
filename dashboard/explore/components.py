@@ -212,7 +212,7 @@ def dropdown_filter(
             html.Label(label, htmlFor=control_id, className="label"),
             dcc.Dropdown(
                 id=control_id,
-                options=list(options),
+                options=options,
                 value=value,
                 placeholder=placeholder,
                 clearable=True,

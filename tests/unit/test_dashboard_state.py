@@ -977,3 +977,32 @@ def test_the_footer_names_the_census_bureau() -> None:
     provenance = ga_per_capita()["meta"]["provenance"]
     (footer,) = of_type(render(), "Footer")
     assert f"{provenance['census_source_name']} (" in texts(footer)
+
+
+# --- the dropdown filters (#475) ------------------------------------------------------
+
+
+def _by_label(pairs: set[tuple[str, str]]) -> list[dict[str, str]]:
+    """``{"label", "value"}`` options sorted by label, written out here rather than
+    taken from the page."""
+    return [
+        {"label": label, "value": value}
+        for value, label in sorted(pairs, key=lambda pair: pair[1])
+    ]
+
+
+def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -> None:
+    """The two dropdown filters #475 moved onto ``components.dropdown_filter``, which
+    no test named before: present by id, unset by default, set by their query keys,
+    and their options GA's own candidates by name and every popular-vote status."""
+    candidates = {(r["candidate_slug"], str(r["candidate"])) for r in ga_body()["data"]}
+    tree = render()
+    candidate = find(tree, "state-candidate")
+    pv_status = find(tree, "state-pv-status")
+    assert candidate is not None and pv_status is not None
+    assert (candidate.value, pv_status.value) == (None, None)
+    assert candidate.options == _by_label(candidates)
+    assert [o["value"] for o in pv_status.options] == list(labels.PV_STATUS)
+    filtered = render("candidate=abraham-lincoln&pv_status=popular_vote")
+    assert find(filtered, "state-candidate").value == "abraham-lincoln"
+    assert find(filtered, "state-pv-status").value == "popular_vote"

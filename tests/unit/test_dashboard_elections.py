@@ -46,6 +46,7 @@ from tests.unit.test_dashboard_app import (
     routed_ids,
     texts,
 )
+from tests.unit.test_dashboard_guards import RUNTIME_MODULES
 
 PAGE: dict[str, Any] = dash.page_registry["pages.elections"]
 #: The page module's namespace. Dash loads a page by path, as ``pages.elections``, so
@@ -1035,40 +1036,56 @@ def as_json(component: Component) -> str:
 
 
 def dropdown_uses(source: str) -> list[str]:
-    """Where ``source`` builds a dropdown itself (#475): any name, attribute or import
-    of ``Dropdown`` (``dcc.Dropdown``, ``dash.dcc.Dropdown``, an imported or aliased
-    ``Dropdown``), and any string ``"Dropdown"`` (``getattr(dcc, "Dropdown")``, or a
-    dropdown returned as component JSON). Bare string statements (docstrings) are
-    not code and are skipped."""
+    """Where ``source`` builds a dropdown itself (#475), each reported as the top-level
+    definition or assignment it sits in (an import by line): any name, attribute or
+    import of ``Dropdown`` (``dcc.Dropdown``, ``dash.dcc.Dropdown``, an imported or
+    aliased ``Dropdown``), and any string ``"Dropdown"`` (``getattr(dcc, "Dropdown")``,
+    or a dropdown returned as component JSON). Bare string statements (docstrings) are
+    not code and are skipped. It reads source, so a page changing the helper's result
+    after the call, ``exec`` or ``eval``, and a type name built at runtime are not
+    seen."""
     tree = ast.parse(source)
     docstrings = {
         id(node.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
     }
-    found = []
-    for node in ast.walk(tree):
-        line = getattr(node, "lineno", 0)
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            names = [n for a in node.names for n in (a.name, a.asname or "")]
-            if any("Dropdown" in n for n in names):
-                found.append(f"line {line}: imports {', '.join(filter(None, names))}")
-        elif (isinstance(node, ast.Name) and node.id == "Dropdown") or (
-            isinstance(node, ast.Attribute) and node.attr == "Dropdown"
-        ):
-            found.append(f"line {line}: {ast.unparse(node)}")
-        elif (
-            isinstance(node, ast.Constant)
-            and node.value == "Dropdown"
-            and id(node) not in docstrings
-        ):
-            found.append(f"line {line}: {node.value!r}")
+    found: list[str] = []
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            where = stmt.name
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
+            where = stmt.targets[0].id
+        else:
+            where = f"line {stmt.lineno}"
+        for node in ast.walk(stmt):
+            hit = (
+                (
+                    isinstance(node, (ast.Import, ast.ImportFrom))
+                    and any(
+                        "Dropdown" in name
+                        for a in node.names
+                        for name in (a.name, a.asname or "")
+                    )
+                )
+                or (isinstance(node, ast.Name) and node.id == "Dropdown")
+                or (isinstance(node, ast.Attribute) and node.attr == "Dropdown")
+                or (
+                    isinstance(node, ast.Constant)
+                    and node.value == "Dropdown"
+                    and id(node) not in docstrings
+                )
+            )
+            if hit and where not in found:
+                found.append(where)
     return found
 
 
 class TestDropdownFilter:
     """``components.dropdown_filter`` (#475): every dashboard dropdown filter is built
-    through it, so a fix to its markup is made once."""
+    through it, so a fix to its markup is made once.
+    ``test_only_the_helper_builds_a_dropdown`` checks that no other runtime module
+    names ``Dropdown``."""
 
     OPTIONS = [{"label": "Alabama", "value": "AL"}, {"label": "Alaska", "value": "AK"}]
 
@@ -1121,38 +1138,39 @@ class TestDropdownFilter:
             "clearable": True,
         }
 
-    @pytest.mark.parametrize(
-        "path",
-        sorted((PACKAGE / "pages").glob("*.py")),
-        ids=lambda p: p.name,
-    )
-    def test_no_page_builds_a_dropdown_itself(self, path: Path) -> None:
-        assert dropdown_uses(path.read_text(encoding="utf-8")) == []
+    def test_only_the_helper_builds_a_dropdown(self) -> None:
+        """No runtime module but ``components.dropdown_filter`` names ``Dropdown``, so
+        every dropdown a page shows comes from the helper (residuals:
+        :func:`dropdown_uses`)."""
+        assert RUNTIME_MODULES, "no runtime modules found"
+        found = {
+            str(path.relative_to(PACKAGE)): refs
+            for path in RUNTIME_MODULES
+            if (refs := dropdown_uses(path.read_text(encoding="utf-8")))
+        }
+        assert found == {"components.py": ["dropdown_filter"]}
 
-    def test_the_helper_is_the_one_place_a_dropdown_is_built(self) -> None:
-        """The scan sees the real call: it finds the helper's one ``dcc.Dropdown``."""
-        source = (PACKAGE / "components.py").read_text(encoding="utf-8")
-        assert len(dropdown_uses(source)) == 1
-
     @pytest.mark.parametrize(
-        ("source", "caught"),
+        ("source", "found"),
         [
-            ("from dash import dcc\ndcc.Dropdown(id='d')\n", True),
-            ("import dash\ndash.dcc.Dropdown(id='d')\n", True),
-            ("from dash.dcc import Dropdown\nDropdown(id='d')\n", True),
-            ("from dash.dcc import Dropdown as D\nD(id='d')\n", True),
-            ("from dash import dcc as c\nc.Dropdown()\n", True),
-            ("from dash import dcc\ngetattr(dcc, 'Dropdown')()\n", True),
-            ("x = {'type': 'Dropdown', 'namespace': 'dash_core_components'}\n", True),
-            ("from explore import components\ncomponents.dropdown_filter()\n", False),
-            ('"""A docstring naming dcc.Dropdown."""\n', False),
-            ("from dash import dcc\ndcc.RadioItems(id='r')\n", False),
+            ("from dash import dcc\ndef f():\n    dcc.Dropdown(id='d')\n", ["f"]),
+            ("import dash\nD = dash.dcc.Dropdown(id='d')\n", ["D"]),
+            ("from dash.dcc import Dropdown\n", ["line 1"]),
+            ("from dash.dcc import Dropdown as D\n", ["line 1"]),
+            ("from dash import dcc as c\ndef f():\n    c.Dropdown()\n", ["f"]),
+            ("from dash import dcc\ndef f():\n    getattr(dcc, 'Dropdown')()\n", ["f"]),
+            ("X = {'type': 'Dropdown', 'namespace': 'dash_core_components'}\n", ["X"]),
+            ("from explore import components\ncomponents.dropdown_filter()\n", []),
+            # A docstring of exactly "Dropdown": caught but for the docstring skip.
+            ('"""Dropdown"""\n', []),
+            ('def f():\n    """Dropdown"""\n', []),
+            ("from dash import dcc\ndcc.RadioItems(id='r')\n", []),
         ],
     )
     def test_the_dropdown_scan_catches_the_listed_ways(
-        self, source: str, caught: bool
+        self, source: str, found: list[str]
     ) -> None:
-        assert bool(dropdown_uses(source)) is caught
+        assert dropdown_uses(source) == found
 
 
 class TestHasText:
