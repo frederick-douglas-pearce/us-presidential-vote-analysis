@@ -1,6 +1,7 @@
 """View pieces every page shares: the provenance footer, the degraded state (#306), the
 year-range slider every year-filtered table uses (#279), the candidate history's
-single-choice year control (#331), the linked state and candidate cells (#279, #331),
+single-choice year control (#331), the dropdown filter every page's dropdown is built
+through (#475), the linked state and candidate cells (#279, #331),
 the table itself with its CSV download (#309), the theme control and the id of the
 store holding the theme in effect (#359), which charts read (#432), the site
 navigation (#448), and the chart builder (#432).
@@ -187,6 +188,37 @@ def year_buttons(
         ],
         className="filter",
         hidden=hidden,
+    )
+
+
+def dropdown_filter(
+    control_id: str,
+    label: str,
+    options: Sequence[dict[str, Any]],
+    value: str | None,
+    placeholder: str,
+) -> html.Div:
+    """A dropdown filter (#475): ``label`` above a clearable single-choice dropdown,
+    in one ``filter`` box. Every dashboard dropdown filter is built here, so a fix to
+    its markup is made once.
+
+    The caller passes every string a reader sees (the label, the placeholder and the
+    options' labels), so this function holds no wording of its own. ``value`` is the
+    option applied, or ``None`` for none. No ``persistence``: it would override the
+    URL, which is where the value lives.
+    """
+    return html.Div(
+        [
+            html.Label(label, htmlFor=control_id, className="label"),
+            dcc.Dropdown(
+                id=control_id,
+                options=list(options),
+                value=value,
+                placeholder=placeholder,
+                clearable=True,
+            ),
+        ],
+        className="filter",
     )
 
 

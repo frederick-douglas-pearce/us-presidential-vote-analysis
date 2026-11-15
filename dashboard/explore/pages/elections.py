@@ -1300,20 +1300,8 @@ def _state_control(
     )
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Label(
-                        labels.LABELS[STATE], htmlFor=STATE_ID, className="label"
-                    ),
-                    dcc.Dropdown(
-                        id=STATE_ID,
-                        options=options,
-                        value=value,
-                        placeholder=ALL_STATES,
-                        clearable=True,
-                    ),
-                ],
-                className="filter",
+            components.dropdown_filter(
+                STATE_ID, labels.LABELS[STATE], options, value, ALL_STATES
             )
         ],
         className="filters",

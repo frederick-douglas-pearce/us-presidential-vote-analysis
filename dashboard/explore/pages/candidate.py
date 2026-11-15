@@ -320,25 +320,15 @@ def _controls(
                 chosen.year,
                 hidden=not several,
             ),
-            html.Div(
+            components.dropdown_filter(
+                STATE_ID,
+                labels.LABELS[STATE],
                 [
-                    html.Label(
-                        labels.LABELS[STATE], htmlFor=STATE_ID, className="label"
-                    ),
-                    dcc.Dropdown(
-                        id=STATE_ID,
-                        options=[
-                            {"label": label, "value": value}
-                            for value, label in sorted(
-                                states.items(), key=lambda kv: kv[1]
-                            )
-                        ],
-                        value=chosen.state,
-                        placeholder=STATE_PLACEHOLDER,
-                        clearable=True,
-                    ),
+                    {"label": label, "value": value}
+                    for value, label in sorted(states.items(), key=lambda kv: kv[1])
                 ],
-                className="filter",
+                chosen.state,
+                STATE_PLACEHOLDER,
             ),
         ],
         className="filters",

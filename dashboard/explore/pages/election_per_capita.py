@@ -158,22 +158,12 @@ def _control(rows: list[dict[str, Any]], chosen: str | None) -> html.Div:
     ]
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Label(
-                        labels.LABELS[election_view.STATE],
-                        htmlFor=STATE_ID,
-                        className="label",
-                    ),
-                    dcc.Dropdown(
-                        id=STATE_ID,
-                        options=options,
-                        value=chosen,
-                        placeholder="All states",
-                        clearable=True,
-                    ),
-                ],
-                className="filter",
+            components.dropdown_filter(
+                STATE_ID,
+                labels.LABELS[election_view.STATE],
+                options,
+                chosen,
+                "All states",
             )
         ],
         className="filters",

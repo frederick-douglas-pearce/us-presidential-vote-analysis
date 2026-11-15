@@ -354,18 +354,8 @@ def _controls(
                 className="filter",
             ),
             *(
-                html.Div(
-                    [
-                        html.Label(label, htmlFor=control_id, className="label"),
-                        dcc.Dropdown(
-                            id=control_id,
-                            options=options,
-                            value=value,
-                            placeholder=placeholder,
-                            clearable=True,
-                        ),
-                    ],
-                    className="filter",
+                components.dropdown_filter(
+                    control_id, label, options, value, placeholder
                 )
                 for control_id, label, options, value, placeholder in dropdowns
             ),

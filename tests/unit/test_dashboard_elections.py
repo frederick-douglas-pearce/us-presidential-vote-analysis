@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import copy
 import functools
+import json
 import math
 import sys
 import unicodedata
@@ -1016,6 +1017,142 @@ class TestSharedPieces:
         tree = PAGE["layout"]()
         assert components.UNAVAILABLE_MESSAGE in texts(tree)
         assert PAGE_ID not in component_ids(tree)
+
+
+def as_json(component: Component) -> str:
+    """A component tree as JSON, children and props included, keys sorted: two trees
+    with the same text render the same markup."""
+    def plain(node: Any) -> Any:
+        if isinstance(node, Component):
+            return plain(node.to_plotly_json())
+        if isinstance(node, dict):
+            return {key: plain(value) for key, value in node.items()}
+        if isinstance(node, (list, tuple)):
+            return [plain(item) for item in node]
+        return node
+
+    return json.dumps(plain(component), sort_keys=True)
+
+
+def dropdown_uses(source: str) -> list[str]:
+    """Where ``source`` builds a dropdown itself (#475): any name, attribute or import
+    of ``Dropdown`` (``dcc.Dropdown``, ``dash.dcc.Dropdown``, an imported or aliased
+    ``Dropdown``), and any string ``"Dropdown"`` (``getattr(dcc, "Dropdown")``, or a
+    dropdown returned as component JSON). Bare string statements (docstrings) are
+    not code and are skipped."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    found = []
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [n for a in node.names for n in (a.name, a.asname or "")]
+            if any("Dropdown" in n for n in names):
+                found.append(f"line {line}: imports {', '.join(filter(None, names))}")
+        elif (isinstance(node, ast.Name) and node.id == "Dropdown") or (
+            isinstance(node, ast.Attribute) and node.attr == "Dropdown"
+        ):
+            found.append(f"line {line}: {ast.unparse(node)}")
+        elif (
+            isinstance(node, ast.Constant)
+            and node.value == "Dropdown"
+            and id(node) not in docstrings
+        ):
+            found.append(f"line {line}: {node.value!r}")
+    return found
+
+
+class TestDropdownFilter:
+    """``components.dropdown_filter`` (#475): every dashboard dropdown filter is built
+    through it, so a fix to its markup is made once."""
+
+    OPTIONS = [{"label": "Alabama", "value": "AL"}, {"label": "Alaska", "value": "AK"}]
+
+    @pytest.mark.parametrize("value", ["AK", None])
+    def test_it_builds_the_markup_the_pages_built_by_hand(
+        self, value: str | None
+    ) -> None:
+        """The tree each page built before #475, verbatim: same ids, classes, props
+        and children."""
+        by_hand = dash.html.Div(
+            [
+                dash.html.Label("State", htmlFor="some-id", className="label"),
+                dash.dcc.Dropdown(
+                    id="some-id",
+                    options=self.OPTIONS,
+                    value=value,
+                    placeholder="All states",
+                    clearable=True,
+                ),
+            ],
+            className="filter",
+        )
+        built = components.dropdown_filter(
+            "some-id", "State", self.OPTIONS, value, "All states"
+        )
+        assert as_json(built) == as_json(by_hand)
+
+    def test_each_argument_lands_on_its_prop(self) -> None:
+        built = components.dropdown_filter(
+            "the-id", "The label", self.OPTIONS, "AL", "The placeholder"
+        )
+        assert built.to_plotly_json()["props"]["className"] == "filter"
+        label, dropdown = built.children
+        assert isinstance(label, dash.html.Label)
+        assert isinstance(dropdown, dash.dcc.Dropdown)
+        label_props = label.to_plotly_json()["props"]
+        props = dropdown.to_plotly_json()["props"]
+        assert label_props == {
+            "children": "The label",
+            "htmlFor": "the-id",
+            "className": "label",
+        }
+        # Exactly these props: none added (``persistence`` would override the URL,
+        # which holds the value), none dropped.
+        assert props == {
+            "id": "the-id",
+            "options": self.OPTIONS,
+            "value": "AL",
+            "placeholder": "The placeholder",
+            "clearable": True,
+        }
+
+    @pytest.mark.parametrize(
+        "path",
+        sorted((PACKAGE / "pages").glob("*.py")),
+        ids=lambda p: p.name,
+    )
+    def test_no_page_builds_a_dropdown_itself(self, path: Path) -> None:
+        assert dropdown_uses(path.read_text(encoding="utf-8")) == []
+
+    def test_the_helper_is_the_one_place_a_dropdown_is_built(self) -> None:
+        """The scan sees the real call: it finds the helper's one ``dcc.Dropdown``."""
+        source = (PACKAGE / "components.py").read_text(encoding="utf-8")
+        assert len(dropdown_uses(source)) == 1
+
+    @pytest.mark.parametrize(
+        ("source", "caught"),
+        [
+            ("from dash import dcc\ndcc.Dropdown(id='d')\n", True),
+            ("import dash\ndash.dcc.Dropdown(id='d')\n", True),
+            ("from dash.dcc import Dropdown\nDropdown(id='d')\n", True),
+            ("from dash.dcc import Dropdown as D\nD(id='d')\n", True),
+            ("from dash import dcc as c\nc.Dropdown()\n", True),
+            ("from dash import dcc\ngetattr(dcc, 'Dropdown')()\n", True),
+            ("x = {'type': 'Dropdown', 'namespace': 'dash_core_components'}\n", True),
+            ("from explore import components\ncomponents.dropdown_filter()\n", False),
+            ('"""A docstring naming dcc.Dropdown."""\n', False),
+            ("from dash import dcc\ndcc.RadioItems(id='r')\n", False),
+        ],
+    )
+    def test_the_dropdown_scan_catches_the_listed_ways(
+        self, source: str, caught: bool
+    ) -> None:
+        assert bool(dropdown_uses(source)) is caught
 
 
 class TestHasText:
