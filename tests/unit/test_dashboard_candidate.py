@@ -516,6 +516,8 @@ def test_t4_links_each_candidate_to_their_history() -> None:
         {"candidate_slug": 7},
         {"candidate": ""},
         {"candidate": "  "},
+        # Nothing to read (#532): no link, though the cell shows the name as served.
+        {"candidate": "\u200b"},
         {"candidate": None},
         # Not text, so not a name to link (PR #390, cr.6; #367's labels.has_text).
         {"candidate": 5},

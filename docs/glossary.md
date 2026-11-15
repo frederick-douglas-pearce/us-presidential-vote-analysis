@@ -237,8 +237,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["candidate"]`; the candidate filter on `/election/<year>/states` (named by
   that page's `FILTER_SENTENCE` in `pages/election_states.py`) and `/state/<usps>`; the name, as served, as
   the link to the candidate history page `/candidate/<slug>` in T2, T3 and T4, and as that page's
-  heading (`pages/candidate.py`), or `HEADING` there until a name is read, which is also the
-  page's title (`title`) on any link that is not refused; on a refused link, `NOT_FOUND_HEADING`
+  heading (`pages/candidate.py`), or `HEADING` there until a name is read or when that name has
+  nothing to read (it is not text, is blank, or is made only of whitespace, formatting or control
+  characters, such as a zero-width space; #532); `HEADING` is also the page's title (`title`) on any link that is not
+  refused; on a refused link, `NOT_FOUND_HEADING`
   there, as heading and title (*Not-found state*); and in `pages/candidate.py`, the page's
   link-preview `description` and its download name; on the API's `/docs` page, the
   `CandidateListItem.candidate` and `CandidateListItem.candidate_slug` field descriptions in
@@ -457,7 +459,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   counted. National totals rows are never flagged (D044).
 - **Shown as:** `LABELS["electoral_count_status"]`, `LABELS["electoral_count_status_reason"]`;
   values `labels.COUNT_STATUS`; the cell `labels.count_status`, which shows the reason verbatim
-  only when it is text with something in it, and leaves it out otherwise (the download keeps it
+  only when it has something to read (it is text, not blank, and not made only of whitespace,
+  formatting or control characters, such as a zero-width space; #532), and leaves it out otherwise (the download keeps it
   as served; #355); the count-status filter on `/election/<year>/states` (named "count status" by
   that page's `FILTER_SENTENCE` in `pages/election_states.py`).
 - **Source:** `src/usvote/count_status.py`, `COUNT_STATUS_VALUES` and the comment on each value;
@@ -1056,7 +1059,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `NationalSummaryRow.nominating_party_note` field descriptions in `src/usvote/api/models.py`. On
   the dashboard: the party cell's help text where a row has a note (on a `no_nomination` row, after
   `labels.NO_NOMINATION_NOTE`), and once per candidate and election in the Party notes list under
-  T2–T5 (`labels.PARTY_NOTES_HEADING`, `labels.PARTY_NOTE_ITEM`), shown as served;
+  T2–T5 (`labels.PARTY_NOTES_HEADING`, `labels.PARTY_NOTE_ITEM`), shown as served, and not shown
+  when it has nothing to read (it is not text, is blank, or is made only of whitespace, formatting
+  or control characters, such as a zero-width space; #532);
   `LABELS["nominating_party_note"]` in their column-name lists; `nominating_party_note` in their
   downloads.
 - **Source:** D077, "The row note"; D079 (the `no_nomination` notes); research doc §2.4, §16;
@@ -1705,16 +1710,22 @@ articles and announcements). Every rule binds all three unless the rule states a
   closed-vocabulary code outside the known set (popular vote in this state, count status, borders
   used, census figure, party); a value of the wrong type in a yes-or-no cell (popular vote in this
   dataset, took office, flip, Electoral College majority); a winner's name on the election panel
-  that is not text; a number of the wrong type, or a non-finite one, in a count, share, margin,
+  that is not text, or that is text made only of formatting or control characters that are not
+  whitespace, with or without whitespace beside them, which carry nothing to read (a zero-width
+  space, or a control code such as U+0001; Unicode categories Cf and Cc, except the control codes
+  that count as whitespace, which make a value blank); a number of the wrong type, or a non-finite one, in a count, share, margin,
   population, people-per-electoral-vote or census-year cell; and a number too large to show as a
   share, margin or people-per-electoral-vote figure (a count, population or census year shows any integer); and a people-per-electoral-vote figure of zero or less, which no state's population divided by its electors appointed can be. It is also the cell for a null figure whose cause field holds an unrecognized code: a
   popular-vote cell whose `pv_status` is unrecognized, a population cell whose `coverage` is, and a
   people-per-electoral-vote cell whose `coverage` is and whose allotment is not zero (a zero
   allotment explains the null first). Candidate and state names are an open vocabulary: candidate
   and state names in the tables, as link text, and as the heading of a state or candidate history
-  page are shown as served (#367). In the Party notes list under a table, a candidate name that is
-  not text reads this, while the table's cell shows that name as served. A null or blank text is
-  not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
+  page are shown as served (#367), except that a candidate name with nothing to read heads the
+  candidate history page with that page's general heading (*Candidate*). In the Party notes list
+  under a table, a candidate name that is not text, or is made only of formatting or control
+  characters that are not whitespace, with or without whitespace beside them, reads this, while
+  the table's cell shows that name as served. A null or blank text
+  (empty, or only whitespace: spaces, tabs, line breaks, and the few other control codes that count as whitespace, such as U+001F) is not this: it names no cause (*Not in this dataset*), or the cause its row or year gives. No
   served year reaches this cell; it is defensive. On `/elections`, an average margin reads it too
   when a margin among the years shown is of the wrong type or not finite, or when the average is a
   number no margin cell could show; it then names no number of elections or years (*Average
@@ -1747,7 +1758,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   gate, 2026-10-13; help text on every such cell: owner decision, 2026-10-13, #355 (its wording:
   owner decision at the #354 plan gate, 2026-10-15); a party code with no letter or digit: owner
   decision, 2026-10-13, #355 (code review) (the party rules from #355 were replaced at #389: the
-  party is a closed vocabulary); the comment on `UNRECOGNIZED` and the `labels.py` module docstring.
+  party is a closed vocabulary); a winner's or Party notes name made only of formatting or control
+  characters that are not whitespace reads this: owner decision at the #532 plan gate, 2026-11-15 ("better to know there is
+  a problem"); the comment on `UNRECOGNIZED` and the `labels.py` module docstring.
 - **Not:** *Not in this dataset*, which means the dataset holds nothing here. Not a claim that the
   value is wrong, or about any source: only that this page has no wording for it. Not *disputed*,
   which is a recorded fact (see Count status).

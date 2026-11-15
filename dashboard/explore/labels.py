@@ -39,6 +39,7 @@ from :data:`NOMINATING_PARTY`, never word-cased from the code.
 from __future__ import annotations
 
 import math
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TypeGuard
 
@@ -208,8 +209,11 @@ PARTY_NOTE_ITEM = "{candidate}, {year}: {note}"
 NOT_IN_DATASET = "Not in this dataset"
 
 #: A value this module has no wording for (#355): an unknown closed-vocabulary code, a
-#: value of the wrong type, a non-finite number, or one too large to show as a share,
-#: margin or ratio. Never the raw value, and
+#: value of the wrong type, a non-finite number, one too large to show as a share,
+#: margin or ratio, or a winner's or Party notes name made only of format or control
+#: characters that are not whitespace, with or without whitespace beside them, which
+#: carries nothing to read (#532; a value of only whitespace, such as U+001F, is blank
+#: instead). Never the raw value, and
 #: never :data:`NOT_IN_DATASET`, which means the dataset holds nothing here. A download
 #: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
@@ -774,16 +778,46 @@ def ec_winner_label(determinative: object) -> str:
 
 def is_blank(value: object) -> bool:
     """A null or blank text: no value, so a cell names no cause for it, or the cause
-    its row gives (#355). Every other value is a value."""
+    its row gives (#355). Every other value is a value.
+
+    "Blank" means empty or only whitespace (``str.isspace``, which includes the ten
+    control characters tab, line feed, U+000B, U+000C, carriage return, U+001C–U+001F
+    and U+0085). Text made only of format or control characters that are not
+    whitespace (U+200B, U+0001) is not blank (#532): it is a served value with nothing
+    to read, so :func:`has_text` refuses it, and a cell that falls back through
+    :func:`_unknown` reads it as :data:`UNRECOGNIZED`, never as the null wording. Kept
+    apart on purpose (owner, #532's plan gate)."""
     return value is None or (isinstance(value, str) and not value.strip())
+
+
+#: The Unicode general categories whose characters carry nothing to read (#532):
+#: format (``Cf``: U+200B zero-width space, U+FEFF, the bidirectional marks, the tag
+#: characters) and control (``Cc``, such as U+0001; ten of them, tab, the line breaks
+#: and U+001C–U+001F among them, are also whitespace). Whitespace is ``str.isspace``,
+#: exactly what ``str.strip`` removes.
+NOTHING_TO_READ_CATEGORIES = frozenset({"Cc", "Cf"})
+
+
+def _nothing_to_read(char: str) -> bool:
+    """Whether one character carries nothing to read: whitespace, or a character of
+    :data:`NOTHING_TO_READ_CATEGORIES`."""
+    return char.isspace() or unicodedata.category(char) in NOTHING_TO_READ_CATEGORIES
 
 
 def has_text(value: object) -> TypeGuard[str]:
     """Text with something in it (#367): the shared predicate wherever a page decides
     whether text is shown, such as a candidate link, a heading, a winner, a note or a
     reason. Never a bare ``not is_blank(value)``, which is true of a value that is not
-    text, such as ``5``."""
-    return isinstance(value, str) and not is_blank(value)
+    text, such as ``5``.
+
+    Text has something in it when one character is neither whitespace nor a format or
+    control character (:func:`_nothing_to_read`, #532), so a value of only zero-width
+    spaces is no text, and a name carrying one beside its letters still is. A string can
+    fail this and still not be blank (:func:`is_blank`): route its fallback through
+    :func:`_unknown`, never straight to the null wording. Known residuals, which still
+    count as text: Hangul fillers (U+3164 and its kin, category ``Lo``), the blank
+    braille pattern U+2800 (``So``) and lone combining marks (``Mn``)."""
+    return isinstance(value, str) and any(not _nothing_to_read(ch) for ch in value)
 
 
 def finite(value: object) -> float | None:
@@ -939,7 +973,9 @@ def party_notes(rows: Iterable[Mapping[str, Any]]) -> list[html.Div]:
     and the name, so two candidates whose slug is missing never merge). A list, empty
     when there is none, so a page splices it in place (``*party_notes(rows)``).
     The candidate's name is shown as served; a null or blank one reads
-    :data:`NOT_IN_DATASET` and one that is not text reads :data:`UNRECOGNIZED`
+    :data:`NOT_IN_DATASET`, and one that is not text, or is made only of format or
+    control characters that are not whitespace, with or without whitespace beside them
+    (#532), reads :data:`UNRECOGNIZED`
     (:func:`_unknown`), never the raw value."""
     items: list[str] = []
     seen: set[tuple[str, str, str]] = set()
@@ -1167,7 +1203,9 @@ def winner(value: object, applicable: bool) -> str:
     ``applicable`` is whether the method has a winner this year: always for the
     Electoral College, inside the popular-vote window for the other two. A name is
     shown whatever the year, as :func:`popular_votes` shows a figure; a blank is no
-    name, and a value that is not text reads :data:`UNRECOGNIZED`.
+    name, and a value that is not text, or is made only of format or control
+    characters that are not whitespace, with or without whitespace beside them (#532),
+    reads :data:`UNRECOGNIZED`.
     """
     if has_text(value):
         return value
