@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import ast
 import copy
+import functools
 import math
+import sys
+import unicodedata
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -1028,6 +1031,127 @@ class TestHasText:
     @pytest.mark.parametrize("value", [None, "", "  ", "\t\n", 5, True, 0.0, ["x"]])
     def test_anything_else(self, value: object) -> None:
         assert labels.has_text(value) is False
+
+    # A format or control character carries nothing to read (#532): alone, mixed with
+    # whitespace, or several together, it is no text.
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "​",  # zero-width space (Cf)
+            "﻿",  # byte-order mark (Cf)
+            "​﻿",
+            " ​\t",  # whitespace and Cf together
+            "⁠",  # word joiner (Cf)
+            "­",  # soft hyphen (Cf)
+            "᠎",  # Mongolian vowel separator (Cf, whitespace before Unicode 6.3)
+            "؜",  # Arabic letter mark (Cf)
+            "\U000e0001",  # language tag, outside the BMP (Cf)
+            "\x01",  # a control that is not whitespace (Cc)
+            "\x7f\x1b",  # delete and escape (Cc)
+            "\x00",  # NUL (Cc)
+        ],
+        ids=repr,
+    )
+    def test_format_or_control_characters_only(self, value: str) -> None:
+        assert labels.has_text(value) is False
+
+    # Those characters never erase real text beside them.
+    @pytest.mark.parametrize(
+        "value",
+        ["﻿Andrew Jackson", "Andrew​Jackson", "Andrew Jackson\x01", "​x"],
+        ids=repr,
+    )
+    def test_real_text_carrying_them_is_text(self, value: str) -> None:
+        assert labels.has_text(value) is True
+
+
+@functools.cache
+def _code_points_by_category() -> dict[str, list[str]]:
+    """Every code point of the running interpreter's Unicode version, by general
+    category: what the class sweep below reads its expectations from, so it holds on any
+    supported Python (CI's 3.11 floor is Unicode 14.0; App Engine's 3.14 is 16.0)."""
+    found: dict[str, list[str]] = {}
+    for point in range(sys.maxunicode + 1):
+        char = chr(point)
+        found.setdefault(unicodedata.category(char), []).append(char)
+    return found
+
+
+class TestHasTextClass:
+    """The class ``labels.has_text`` treats as nothing to read, pinned over every code
+    point rather than a hand-picked list (#532; architect, I2): whitespace (exactly what
+    ``str.strip`` removes, so ordinary whitespace behaves as before), and the general
+    categories Cf (format) and Cc (control, the owner's addition at the plan gate). A
+    table holding only the sample characters, or a rule keyed on another category,
+    fails here."""
+
+    #: The categories, written out here rather than read from ``labels``, so a change to
+    #: the module's set is a change to this literal too.
+    NOTHING_TO_READ = frozenset({"Cc", "Cf"})
+
+    def nothing_to_read(self) -> list[str]:
+        by_category = _code_points_by_category()
+        return [c for category in self.NOTHING_TO_READ for c in by_category[category]]
+
+    def test_the_module_names_the_same_categories(self) -> None:
+        assert labels.NOTHING_TO_READ_CATEGORIES == self.NOTHING_TO_READ
+
+    def test_every_format_or_control_character_alone_is_no_text(self) -> None:
+        chars = self.nothing_to_read()
+        assert len(chars) > 200  # 170 Cf + 65 Cc on Unicode 16.0
+        assert [c for c in chars if labels.has_text(c)] == []
+
+    def test_every_one_of_them_leaves_real_text_text(self) -> None:
+        chars = self.nothing_to_read()
+        assert [c for c in chars if not labels.has_text(f"a{c}")] == []
+        assert [c for c in chars if not labels.has_text(f"{c}a")] == []
+
+    def test_every_whitespace_character_alone_is_no_text(self) -> None:
+        by_category = _code_points_by_category()
+        spaces = [c for chars in by_category.values() for c in chars if c.isspace()]
+        assert " " in spaces and "　" in spaces  # not only ASCII whitespace
+        assert [c for c in spaces if labels.has_text(c)] == []
+        # What ``str.strip`` removes, so ordinary whitespace behaves as before (AC3).
+        assert all(not c.strip() for c in spaces)
+
+    def test_every_other_category_counts_as_text(self) -> None:
+        """One character of every other category counts as text, unassigned, private
+        use and surrogate code points included, so the class is exactly Cc and Cf and
+        never every ``C*`` category. The first character of each that is not
+        whitespace."""
+        by_category = _code_points_by_category()
+        others = {
+            category: next(c for c in chars if not c.isspace())
+            for category, chars in by_category.items()
+            if category not in self.NOTHING_TO_READ
+            and any(not c.isspace() for c in chars)
+        }
+        assert {"Cn", "Co", "Cs", "Lo", "Mn", "So"} <= set(others)
+        assert {cat: c for cat, c in others.items() if not labels.has_text(c)} == {}
+
+
+class TestIsBlankKeepsWhitespaceOnly:
+    """The fork #532's plan gate settled (owner, fork A; architect): ``labels.is_blank``
+    keeps ``str.strip``, so text made only of format or control characters is neither
+    blank nor text. A cell then reads it as unrecognized (``labels._unknown``), never as
+    the null wording, which would claim the dataset holds nothing here when it holds a
+    value (D101's reasoning: a fallback that hides an upstream fault is refused). Widening
+    ``is_blank`` to match ``has_text`` is a decision, not a consistency fix."""
+
+    @pytest.mark.parametrize("value", ["​", "﻿", "\x01", " ​ "], ids=repr)
+    def test_format_or_control_text_is_not_blank(self, value: str) -> None:
+        assert labels.is_blank(value) is False
+        assert labels.has_text(value) is False
+
+    @pytest.mark.parametrize("value", ["​", "\x01"], ids=repr)
+    def test_a_winner_made_of_them_reads_unrecognized(self, value: str) -> None:
+        assert labels.winner(value, True) == labels.UNRECOGNIZED
+        assert labels.winner(value, False) == labels.UNRECOGNIZED
+
+    @pytest.mark.parametrize("value", [None, "", "  "], ids=repr)
+    def test_a_null_or_blank_winner_still_names_no_cause(self, value: object) -> None:
+        assert labels.winner(value, True) == labels.NOT_IN_DATASET
+        assert labels.winner(value, False) == labels.NOT_APPLICABLE
 
 
 def test_the_page_is_registered_as_planned() -> None:
@@ -2785,10 +2909,11 @@ class TestOverTimeValidation:
         with pytest.raises(TypeError, match="two national totals"):
             MOD["national_pv"](summary, YEARS)
 
-    @pytest.mark.parametrize("name", [None, "", "  ", 7])
+    @pytest.mark.parametrize("name", [None, "", "  ", 7, "\u200b", "\x01"])
     def test_a_state_with_no_name_to_show(self, name: Any) -> None:
         """Option R (#498, owner; D101): a state whose every row's name fails
-        ``labels.has_text`` (null, blank, or not text) refuses N2, rather than reaching
+        ``labels.has_text`` (null, blank, not text, or only format or control characters,
+        #532) refuses N2, rather than reaching
         the state control as "None", a blank option or a number. The API's
         ``ElectionStateRow.state`` is ``str``, so null or non-text is an upstream
         fault; a blank name, which that type admits, has nothing to show. Every row,
