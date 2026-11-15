@@ -2089,9 +2089,12 @@ class TestDashTableBundle:
             [DASH_TABLE_MAP_ENTRY],
             [DASH_TABLE_ENTRY, DASH_TABLE_ENTRY],
             [{**DASH_TABLE_ENTRY, "async": True}],
+            # Dash refuses a dynamic resource that has an async key at all, so a
+            # falsy value fails too (#524's mutation pass).
+            [{**DASH_TABLE_ENTRY, "async": False}],
             [{**DASH_TABLE_ENTRY, "namespace": "dash_table"}],
         ],
-        ids=["none", "map-only", "two", "async", "other-namespace"],
+        ids=["none", "map-only", "two", "async", "async-false", "other-namespace"],
     )
     def test_any_other_shape_fails_and_marks_nothing(
         self, dist: list[dict[str, Any]]

@@ -1269,6 +1269,16 @@ def test_no_runtime_module_reaches_dash_table() -> None:
         # or only the "DataTable" string rule, catches.
         ("import sys\nsys.modules['dash.dash_table'].DataTable()\n", True),
         ("x = {'type': 'DataTable'}\n", True),
+        # #524's mutation pass: one case each that only one rule half catches (an
+        # imported DataTable under an alias, a module named dash_table, a bare
+        # dash_table name, an attribute of dash_table other than _js_dist, a bare
+        # DataTable name, and a string that contains DataTable without being it).
+        ("from x import DataTable as T\nT()\n", True),
+        ("from dash.dash_table import Format\n", True),
+        ("dash_table = None\n", True),
+        ("import dash\ndash.dash_table.Format\n", True),
+        ("DataTable()\n", True),
+        ("x = 'dash_table.DataTable'\n", True),
         ("import dash\nd = dash.dash_table._js_dist\n", False),
         ("PATH = 'dash_table/bundle.js'\n", False),
         ('"""A docstring naming dash_table and DataTable."""\n', False),
