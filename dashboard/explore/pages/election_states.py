@@ -253,19 +253,7 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     )
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Label(label, htmlFor=control_id, className="label"),
-                    dcc.Dropdown(
-                        id=control_id,
-                        options=options,
-                        value=value,
-                        placeholder=placeholder,
-                        clearable=True,
-                    ),
-                ],
-                className="filter",
-            )
+            components.dropdown_filter(control_id, label, options, value, placeholder)
             for control_id, label, options, value, placeholder in dropdowns
         ],
         className="filters",

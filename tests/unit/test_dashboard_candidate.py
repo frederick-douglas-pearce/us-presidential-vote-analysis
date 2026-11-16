@@ -750,3 +750,32 @@ class TestIndex:
 @pytest.mark.parametrize("slug", [SLUG, "Andrew-Jackson", None, ["x"], "<script>", ""])
 def test_the_title_is_total_and_names_no_candidate(slug: Any) -> None:
     assert MOD["title"](slug=slug) == f"{MOD['HEADING']} — {MOD['SITE_TITLE']}"
+
+
+# --- the dropdown filter (#475) -------------------------------------------------------
+
+
+def test_the_state_filter_shows_its_options_and_value() -> None:
+    """The dropdown filter #475 moved onto ``components.dropdown_filter``, which no test
+    named before: present by id, unset by default, set by ``state``, and its options
+    the candidate's own states by name (written out here, not taken from the page)."""
+    pairs = {(r["state_usps"], str(r["state"])) for r in jackson()["data"]}
+    expected = [
+        {"label": label, "value": value}
+        for value, label in sorted(pairs, key=lambda pair: pair[1])
+    ]
+    dropdown = find(render(), "candidate-state")
+    assert dropdown is not None
+    assert dropdown.value is None
+    assert dropdown.options == expected
+    assert find(render("state=GA"), "candidate-state").value == "GA"
+    # The label names the field and the placeholder is the page's own: the page passes
+    # them to the helper in that order (#475's acceptance gate).
+    (label,) = [
+        label
+        for label in of_type(render(), "Label")
+        if label.htmlFor == "candidate-state"
+    ]
+    assert label.children == labels.LABELS["state"]
+    assert dropdown.placeholder == MOD["STATE_PLACEHOLDER"]
+    assert dropdown.placeholder != label.children
