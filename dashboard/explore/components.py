@@ -195,10 +195,14 @@ def label_sorted_options(labels_by_value: Mapping[str, str]) -> list[dict[str, s
     """The options of a dropdown that lists names (#540): one ``{"label", "value"}``
     per entry of ``labels_by_value``, sorted by label. Every dropdown filter whose
     choices are names (a state, a candidate) takes its options from here, so a change
-    to their shape or order is made once; ``TestLabelSortedOptions`` (in
-    ``test_dashboard_elections.py``) checks that no other runtime module sorts options
-    itself. A closed vocabulary (popular-vote status, count status) is not sorted: its
-    page lists it in its ``labels`` table's order.
+    to their shape or order is made once.
+    ``TestNameOptionsComeFromTheBuilder`` (in ``test_dashboard_export.py``) renders
+    every page and checks that each name dropdown's options are a list this function
+    returned; ``TestLabelSortedOptions.test_only_the_builder_sorts_options`` (in
+    ``test_dashboard_elections.py``) is a source tripwire for the copies #540 removed;
+    its scan, ``option_sorts``, lists what it does not see. A closed vocabulary
+    (popular-vote status, count status) is not sorted: its page lists it in its
+    ``labels`` table's order.
 
     The sort is on the label alone and stable, so two entries with one label keep the
     map's order. Labels are used as passed, never converted: a page that needs

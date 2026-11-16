@@ -1035,6 +1035,16 @@ def as_json(component: Component) -> str:
     return json.dumps(plain(component), sort_keys=True)
 
 
+def _where(stmt: ast.stmt) -> str:
+    """How the source scans name the top-level statement a hit sits in: its
+    definition's or assignment's name, else its line."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return stmt.name
+    if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
+        return stmt.targets[0].id
+    return f"line {stmt.lineno}"
+
+
 def dropdown_uses(source: str) -> list[str]:
     """Where ``source`` builds a dropdown itself (#475), each reported as the top-level
     definition or assignment it sits in (an import by line): any name, attribute or
@@ -1053,12 +1063,7 @@ def dropdown_uses(source: str) -> list[str]:
     }
     found: list[str] = []
     for stmt in tree.body:
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            where = stmt.name
-        elif isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
-            where = stmt.targets[0].id
-        else:
-            where = f"line {stmt.lineno}"
+        where = _where(stmt)
         for node in ast.walk(stmt):
             hit = (
                 (
@@ -1179,16 +1184,6 @@ class TestDropdownFilter:
         assert dropdown_uses(source) == found
 
 
-def _where(stmt: ast.stmt) -> str:
-    """The top-level definition or assignment ``stmt`` is, as :func:`dropdown_uses`
-    names it."""
-    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        return stmt.name
-    if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
-        return stmt.targets[0].id
-    return f"line {stmt.lineno}"
-
-
 def _is_option(node: ast.AST) -> bool:
     """A dict display whose keys are exactly ``"label"`` and ``"value"``."""
     return isinstance(node, ast.Dict) and {
@@ -1211,9 +1206,14 @@ def option_sorts(source: str) -> list[str]:
     """Where ``source`` sorts dropdown options itself (#540), each reported as the
     top-level definition or assignment it sits in: a comprehension building
     ``{"label", "value"}`` dicts that iterates a ``sorted(...)`` call, or a
-    ``sorted(...)`` call over such a comprehension. A comprehension over a closed
-    vocabulary's table, which is not sorted, is not reported. It reads source, so a
-    sort reached through another name is not seen."""
+    ``sorted(...)`` call over such a comprehension: the shapes #540 removed. A
+    comprehension over a closed vocabulary's table, which is not sorted, is not
+    reported. It is a tripwire for those shapes, not a proof that no page sorts
+    options: it does not see a ``.sort()`` call, a ``sorted(...)`` result bound to a
+    name before the comprehension reads it, a loop that appends, options built with
+    ``dict(label=..., value=...)``, a re-sort of the builder's result, or a sort reached
+    through another name. ``TestNameOptionsComeFromTheBuilder``
+    (``test_dashboard_export.py``) is what checks each page takes the builder's list."""
     found: list[str] = []
     for stmt in ast.parse(source).body:
         for node in ast.walk(stmt):
@@ -1245,9 +1245,12 @@ def _is_dropdown_filter_call(node: ast.AST) -> bool:
 
 def looped_dropdown_filters(source: str) -> list[str]:
     """Where ``source`` calls ``dropdown_filter`` from a loop (#540): inside a
-    comprehension, a generator expression or a ``for`` or ``while`` body, which is how
-    a tuple table of filters is spelled. Each is reported as its top-level definition
-    or assignment."""
+    comprehension, a generator expression or a ``for`` or ``while`` body, the two
+    tuple-table shapes #540 removed. Each is reported as its top-level definition or
+    assignment. It is a tripwire for those shapes, not a check that each filter has
+    its own call: it does not see ``dropdown_filter`` passed to ``map`` or
+    ``itertools.starmap``, called from a ``lambda``, through an alias or a wrapper
+    function, or with rows taken from a table by index (``dropdown_filter(*T[0])``)."""
     found: list[str] = []
     for stmt in ast.parse(source).body:
         loops = [
@@ -1346,8 +1349,9 @@ class TestLabelSortedOptions:
         assert option_sorts(source) == found
 
     def test_no_page_calls_dropdown_filter_from_a_loop(self) -> None:
-        """Each page calls ``components.dropdown_filter`` once per filter, with no
-        tuple table restating its signature (#540)."""
+        """No runtime module calls ``components.dropdown_filter`` from a loop, the
+        shape #540's tuple tables took; the scan's blind spots are in
+        :func:`looped_dropdown_filters`."""
         found = {
             str(path.relative_to(PACKAGE)): refs
             for path in RUNTIME_MODULES
@@ -3175,10 +3179,12 @@ class TestOverTimeFilter:
         """#540: every state N2 serves, sorted by name, written out here rather than
         taken from the page."""
         rows = RECORDED[api.ELECTION_STATES_PATH]["data"]
-        pairs = {(r["state_usps"], str(r["state"])) for r in rows}
+        # Served order, first appearance; the sort is on the label alone and stable,
+        # the builder's rule, so a tie would keep that order.
+        served = {r["state_usps"]: str(r["state"]) for r in rows}
         expected = [
             {"label": label, "value": value}
-            for value, label in sorted(pairs, key=lambda pair: (pair[1], pair[0]))
+            for value, label in sorted(served.items(), key=lambda kv: kv[1])
         ]
         assert find(render_over_time(), STATE_ID).options == expected
 

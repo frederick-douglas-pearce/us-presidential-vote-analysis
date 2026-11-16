@@ -1068,7 +1068,10 @@ def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -
     assert candidate is not None and pv_status is not None
     assert (candidate.value, pv_status.value) == (None, None)
     assert candidate.options == _by_label(candidates)
-    assert [o["value"] for o in pv_status.options] == list(labels.PV_STATUS)
+    # Labels and values, in the table's order (#540, AC3).
+    assert pv_status.options == [
+        {"label": labels.PV_STATUS[k], "value": k} for k in labels.PV_STATUS
+    ]
     filtered = render("candidate=abraham-lincoln&pv_status=popular_vote")
     assert find(filtered, "state-candidate").value == "abraham-lincoln"
     assert find(filtered, "state-pv-status").value == "popular_vote"

@@ -119,12 +119,17 @@ def render_page(
     return PC["render"](per_capita, index_row(year), pairs, around)
 
 
-def _by_label(pairs: set[tuple[str, str]]) -> list[dict[str, str]]:
-    """``{"label", "value"}`` options sorted by label, written out here rather than
-    taken from the page (#540)."""
+def _by_label(
+    rows: list[dict[str, Any]], value: str, label: str
+) -> list[dict[str, str]]:
+    """``{"label", "value"}`` options for the ``value`` and ``label`` fields of
+    ``rows``, written out here rather than taken from the page (#540): one per value,
+    in the rows' order of first appearance, then sorted on the label alone, stably,
+    which is the builder's rule, so a tie keeps that order."""
+    served = {r[value]: r[label] for r in rows}
     return [
-        {"label": label, "value": value}
-        for value, label in sorted(pairs, key=lambda pair: (pair[1], pair[0]))
+        {"label": name, "value": key}
+        for key, name in sorted(served.items(), key=lambda kv: kv[1])
     ]
 
 
@@ -1305,15 +1310,19 @@ class TestFilters:
         rows = year_body(1872)["data"]
         tree = render_page(ST, 1872)
         assert find(tree, MOD["STATE_ID"]).options == _by_label(
-            {(r["state_usps"], r["state"]) for r in rows}
+            rows, "state_usps", "state"
         )
         assert find(tree, MOD["CANDIDATE_ID"]).options == _by_label(
-            {(r["candidate_slug"], r["candidate"]) for r in rows}
+            rows, "candidate_slug", "candidate"
         )
-        pv = find(tree, MOD["PV_STATUS_ID"]).options
-        count = find(tree, MOD["COUNT_STATUS_ID"]).options
-        assert [o["value"] for o in pv] == list(labels.PV_STATUS)
-        assert [o["value"] for o in count] == list(labels.COUNT_STATUS)
+        # The closed vocabularies, labels and values, in their tables' order (AC3).
+        assert find(tree, MOD["PV_STATUS_ID"]).options == [
+            {"label": labels.PV_STATUS[k], "value": k} for k in labels.PV_STATUS
+        ]
+        assert find(tree, MOD["COUNT_STATUS_ID"]).options == [
+            {"label": labels.COUNT_STATUS[k][0], "value": k}
+            for k in labels.COUNT_STATUS
+        ]
 
 
 SHARED = (
@@ -2043,9 +2052,7 @@ class TestT6Filters:
         """#540: every state T6's rows name, sorted by name, written out here."""
         rows = per_capita_body(2024)["data"]
         control = find(render_page(PC, 2024), PC["STATE_ID"])
-        assert control.options == _by_label(
-            {(r["state_usps"], r["state"]) for r in rows}
-        )
+        assert control.options == _by_label(rows, "state_usps", "state")
 
     @pytest.mark.parametrize(
         "search",

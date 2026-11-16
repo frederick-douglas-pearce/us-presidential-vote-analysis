@@ -2728,3 +2728,55 @@ class TestServedValuesReachNoFigureUntyped:
         assert set(outcomes) <= {"drawn", "degraded"}, outcomes
         assert "drawn" in outcomes  # the premise: most fields leave the chart drawn
         assert changed, outcomes  # the premise: the doctored row reaches the figure
+
+
+#: Every dropdown that lists names, by DOM id (#540): its options must be a list
+#: ``components.label_sorted_options`` returned. Every other dropdown lists a closed
+#: vocabulary in its ``labels`` table's order and must not be.
+NAME_DROPDOWNS = {
+    "elections-state",  # the elections index's state control (N2's states)
+    "election-state",  # T2's state filter
+    "election-candidate",  # T2's candidate filter
+    "election-per-capita-state",  # T6's state filter
+    "state-candidate",  # T4's candidate filter
+    "candidate-state",  # T5's state filter
+}
+
+
+class TestNameOptionsComeFromTheBuilder:
+    """Each page takes a name dropdown's options from
+    ``components.label_sorted_options`` (#540, AC1), observed rather than inferred from
+    the order: the builder is replaced by one that records each list it returns, every
+    registered page is rendered from recorded responses, and each name dropdown's
+    ``options`` must be one of those lists, by identity. A page that builds its own list,
+    sorted or not and however it is spelled, fails. The recorded rows of several pages
+    already arrive in name order, so an order check alone would not see it."""
+
+    def test_every_name_dropdown_takes_the_builders_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        built: list[list[dict[str, str]]] = []
+        real = components.label_sorted_options
+
+        def recording(labels_by_value: Any) -> list[dict[str, str]]:
+            options = real(labels_by_value)
+            built.append(options)
+            return options
+
+        monkeypatch.setattr(components, "label_sorted_options", recording)
+        dropdowns = {
+            node.id: node
+            for tree in all_pages(monkeypatch).values()
+            for node in of_type(tree, "Dropdown")
+        }
+        missing = NAME_DROPDOWNS - set(dropdowns)
+        assert not missing, sorted(missing)
+        from_builder = {
+            control_id
+            for control_id, node in dropdowns.items()
+            if any(node.options is options for options in built)
+        }
+        assert from_builder == NAME_DROPDOWNS
+        # Each name dropdown has options to check: an empty list would match any
+        # empty list the builder returned.
+        assert all(dropdowns[i].options for i in NAME_DROPDOWNS)

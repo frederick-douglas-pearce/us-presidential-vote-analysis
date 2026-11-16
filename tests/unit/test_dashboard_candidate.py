@@ -546,9 +546,9 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
     if "candidate" in row and row["candidate"] is None:
-        # components.label_sorted_options (the candidate filter's options) sorts by
-        # name, which a null name breaks. No served page reaches that: the API types
-        # the name as required text (#367).
+        # election_states' candidate filter sorts the served names as passed (through
+        # components.label_sorted_options), which a null name breaks. No served page
+        # reaches that: the API types the name as required text (#367).
         return
 
     def doctor(body: dict[str, Any]) -> None:
