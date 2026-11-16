@@ -119,6 +119,15 @@ def render_page(
     return PC["render"](per_capita, index_row(year), pairs, around)
 
 
+def _by_label(pairs: set[tuple[str, str]]) -> list[dict[str, str]]:
+    """``{"label", "value"}`` options sorted by label, written out here rather than
+    taken from the page (#540)."""
+    return [
+        {"label": label, "value": value}
+        for value, label in sorted(pairs, key=lambda pair: (pair[1], pair[0]))
+    ]
+
+
 def table_rows(tree: Any, table_id: str) -> list[list[Any]]:
     """Each body row's cells (``Td`` components) of the table ``table_id``."""
     table = find(tree, table_id)
@@ -1289,6 +1298,23 @@ class TestFilters:
         for control in ("STATE_ID", "CANDIDATE_ID", "PV_STATUS_ID", "COUNT_STATUS_ID"):
             assert getattr(find(tree, MOD[control]), "persistence", None) is None
 
+    def test_the_state_and_candidate_options_are_the_year_s_own_by_name(self) -> None:
+        """T2's state and candidate options (#540): every state and candidate the
+        year's rows name, sorted by name, written out here rather than taken from the
+        page; the two closed vocabularies in their tables' order."""
+        rows = year_body(1872)["data"]
+        tree = render_page(ST, 1872)
+        assert find(tree, MOD["STATE_ID"]).options == _by_label(
+            {(r["state_usps"], r["state"]) for r in rows}
+        )
+        assert find(tree, MOD["CANDIDATE_ID"]).options == _by_label(
+            {(r["candidate_slug"], r["candidate"]) for r in rows}
+        )
+        pv = find(tree, MOD["PV_STATUS_ID"]).options
+        count = find(tree, MOD["COUNT_STATUS_ID"]).options
+        assert [o["value"] for o in pv] == list(labels.PV_STATUS)
+        assert [o["value"] for o in count] == list(labels.COUNT_STATUS)
+
 
 SHARED = (
     "state=GA&junk=x&candidate=horace-greeley&state=GA",
@@ -2012,6 +2038,14 @@ class TestT6Filters:
         assert "GA" not in {o["value"] for o in control.options}
         # A state T6 names narrows it to that state.
         assert list(per_capita_rows(render_page(PC, 1872, "state=GA"))) == ["Georgia"]
+
+    def test_t6_s_state_options_are_its_own_rows_by_name(self) -> None:
+        """#540: every state T6's rows name, sorted by name, written out here."""
+        rows = per_capita_body(2024)["data"]
+        control = find(render_page(PC, 2024), PC["STATE_ID"])
+        assert control.options == _by_label(
+            {(r["state_usps"], r["state"]) for r in rows}
+        )
 
     @pytest.mark.parametrize(
         "search",

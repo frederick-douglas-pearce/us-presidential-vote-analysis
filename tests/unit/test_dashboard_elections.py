@@ -20,7 +20,7 @@ import sys
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import dash
 import pytest
@@ -1177,6 +1177,212 @@ class TestDropdownFilter:
         self, source: str, found: list[str]
     ) -> None:
         assert dropdown_uses(source) == found
+
+
+def _where(stmt: ast.stmt) -> str:
+    """The top-level definition or assignment ``stmt`` is, as :func:`dropdown_uses`
+    names it."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return stmt.name
+    if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
+        return stmt.targets[0].id
+    return f"line {stmt.lineno}"
+
+
+def _is_option(node: ast.AST) -> bool:
+    """A dict display whose keys are exactly ``"label"`` and ``"value"``."""
+    return isinstance(node, ast.Dict) and {
+        k.value for k in node.keys if isinstance(k, ast.Constant)
+    } == {"label", "value"}
+
+
+def _is_sorted(node: ast.AST) -> TypeGuard[ast.Call]:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "sorted"
+    )
+
+
+_COMPREHENSIONS = (ast.ListComp, ast.GeneratorExp, ast.SetComp)
+
+
+def option_sorts(source: str) -> list[str]:
+    """Where ``source`` sorts dropdown options itself (#540), each reported as the
+    top-level definition or assignment it sits in: a comprehension building
+    ``{"label", "value"}`` dicts that iterates a ``sorted(...)`` call, or a
+    ``sorted(...)`` call over such a comprehension. A comprehension over a closed
+    vocabulary's table, which is not sorted, is not reported. It reads source, so a
+    sort reached through another name is not seen."""
+    found: list[str] = []
+    for stmt in ast.parse(source).body:
+        for node in ast.walk(stmt):
+            hit = (
+                isinstance(node, _COMPREHENSIONS)
+                and _is_option(node.elt)
+                and any(_is_sorted(g.iter) for g in node.generators)
+            ) or (
+                _is_sorted(node)
+                and any(
+                    isinstance(a, _COMPREHENSIONS) and _is_option(a.elt)
+                    for a in node.args
+                )
+            )
+            if hit:
+                found.append(_where(stmt))
+                break
+    return found
+
+
+def _is_dropdown_filter_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (isinstance(func, ast.Attribute) and func.attr == "dropdown_filter") or (
+        isinstance(func, ast.Name) and func.id == "dropdown_filter"
+    )
+
+
+def looped_dropdown_filters(source: str) -> list[str]:
+    """Where ``source`` calls ``dropdown_filter`` from a loop (#540): inside a
+    comprehension, a generator expression or a ``for`` or ``while`` body, which is how
+    a tuple table of filters is spelled. Each is reported as its top-level definition
+    or assignment."""
+    found: list[str] = []
+    for stmt in ast.parse(source).body:
+        loops = [
+            n
+            for n in ast.walk(stmt)
+            if isinstance(n, (*_COMPREHENSIONS, ast.DictComp, ast.For, ast.While))
+        ]
+        if any(
+            _is_dropdown_filter_call(inner) for loop in loops for inner in ast.walk(loop)
+        ):
+            found.append(_where(stmt))
+    return found
+
+
+class TestLabelSortedOptions:
+    """``components.label_sorted_options`` (#540): every dropdown filter whose choices
+    are names takes its options from it, so their shape and order are set once."""
+
+    def test_it_sorts_by_label_not_by_value(self) -> None:
+        # Value order (AK, AL, AZ) and label order (Alabama, Alaska, Arizona) differ.
+        built = components.label_sorted_options(
+            {"AZ": "Arizona", "AK": "Alaska", "AL": "Alabama"}
+        )
+        assert built == [
+            {"label": "Alabama", "value": "AL"},
+            {"label": "Alaska", "value": "AK"},
+            {"label": "Arizona", "value": "AZ"},
+        ]
+
+    def test_equal_labels_keep_the_maps_order(self) -> None:
+        """Two candidates of one name keep the order the page read them in: the sort
+        is on the label alone, never the label then the value."""
+        built = components.label_sorted_options(
+            {"z-smith": "Smith", "a-jones": "Jones", "b-smith": "Smith"}
+        )
+        assert [o["value"] for o in built] == ["a-jones", "z-smith", "b-smith"]
+
+    def test_each_option_is_exactly_a_label_and_a_value(self) -> None:
+        built = components.label_sorted_options({"GA": "Georgia"})
+        assert built == [{"label": "Georgia", "value": "GA"}]
+        assert list(built[0]) == ["label", "value"]
+
+    def test_no_entries_give_no_options(self) -> None:
+        assert components.label_sorted_options({}) == []
+
+    def test_labels_are_used_as_passed(self) -> None:
+        """No conversion: a page that needs ``str()`` applies it to its map."""
+
+        class Name(str):
+            pass
+
+        label = Name("Georgia")
+        (option,) = components.label_sorted_options({"GA": label})
+        assert option["label"] is label
+
+    def test_only_the_builder_sorts_options(self) -> None:
+        assert RUNTIME_MODULES, "no runtime modules found"
+        found = {
+            str(path.relative_to(PACKAGE)): refs
+            for path in RUNTIME_MODULES
+            if (refs := option_sorts(path.read_text(encoding="utf-8")))
+        }
+        assert found == {"components.py": ["label_sorted_options"]}
+
+    @pytest.mark.parametrize(
+        ("source", "found"),
+        [
+            # The five shapes #540 removed.
+            (
+                "def _options(pairs):\n    return [\n"
+                "        {'label': label, 'value': value}\n"
+                "        for value, label in sorted(pairs.items(), key=k)\n    ]\n",
+                ["_options"],
+            ),
+            (
+                "def f(states):\n    x = [{'label': n, 'value': u}\n"
+                "        for u, n in sorted(states.items(), key=k)]\n",
+                ["f"],
+            ),
+            (
+                "def f(s):\n    return [{'label': str(r[0]), 'value': u}\n"
+                "        for u, r in sorted((s or {}).items(), key=k)]\n",
+                ["f"],
+            ),
+            ("X = ({'label': a, 'value': b} for a, b in sorted(p))\n", ["X"]),
+            ("X = sorted([{'label': a, 'value': b} for a, b in p], key=k)\n", ["X"]),
+            # A closed vocabulary in its table's order is not a sort.
+            ("X = [{'label': v, 'value': k} for k, v in T.items()]\n", []),
+            ("X = sorted(p)\n", []),
+            ("X = [{'label': a} for a in sorted(p)]\n", []),
+        ],
+    )
+    def test_the_sort_scan_catches_the_listed_ways(
+        self, source: str, found: list[str]
+    ) -> None:
+        assert option_sorts(source) == found
+
+    def test_no_page_calls_dropdown_filter_from_a_loop(self) -> None:
+        """Each page calls ``components.dropdown_filter`` once per filter, with no
+        tuple table restating its signature (#540)."""
+        found = {
+            str(path.relative_to(PACKAGE)): refs
+            for path in RUNTIME_MODULES
+            if (refs := looped_dropdown_filters(path.read_text(encoding="utf-8")))
+        }
+        assert found == {}
+
+    @pytest.mark.parametrize(
+        ("source", "found"),
+        [
+            # The two tuple-table shapes #540 removed.
+            (
+                "def f(t):\n    return [components.dropdown_filter(a, b, c, d, e)\n"
+                "        for a, b, c, d, e in t]\n",
+                ["f"],
+            ),
+            (
+                "def f(t):\n    return [*(components.dropdown_filter(*r)"
+                " for r in t)]\n",
+                ["f"],
+            ),
+            ("def f(t):\n    for r in t:\n        dropdown_filter(*r)\n", ["f"]),
+            ("def f(t):\n    while t:\n        dropdown_filter(t.pop())\n", ["f"]),
+            ("def f():\n    return [components.dropdown_filter(1, 2, 3, 4, 5)]\n", []),
+            (
+                "def f(t):\n    x = [o for o in t]\n"
+                "    return components.dropdown_filter(1, 2, x, 4, 5)\n",
+                [],
+            ),
+        ],
+    )
+    def test_the_loop_scan_catches_the_listed_ways(
+        self, source: str, found: list[str]
+    ) -> None:
+        assert looped_dropdown_filters(source) == found
 
 
 class TestHasText:
@@ -2964,6 +3170,17 @@ class TestOverTimeFilter:
             values = [option["value"] for option in control.options]
             assert control.value is None or control.value in values, (query, n2)
         assert find(render_over_time({"state": "GA"}), STATE_ID).value == "GA"
+
+    def test_the_state_options_are_n2_s_states_by_name(self) -> None:
+        """#540: every state N2 serves, sorted by name, written out here rather than
+        taken from the page."""
+        rows = RECORDED[api.ELECTION_STATES_PATH]["data"]
+        pairs = {(r["state_usps"], str(r["state"])) for r in rows}
+        expected = [
+            {"label": label, "value": value}
+            for value, label in sorted(pairs, key=lambda pair: (pair[1], pair[0]))
+        ]
+        assert find(render_over_time(), STATE_ID).options == expected
 
 
 class TestOverTimeTable:

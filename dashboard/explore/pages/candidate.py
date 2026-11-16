@@ -323,10 +323,7 @@ def _controls(
             components.dropdown_filter(
                 STATE_ID,
                 labels.LABELS[STATE],
-                [
-                    {"label": label, "value": value}
-                    for value, label in sorted(states.items(), key=lambda kv: kv[1])
-                ],
+                components.label_sorted_options(states),
                 chosen.state,
                 STATE_PLACEHOLDER,
             ),

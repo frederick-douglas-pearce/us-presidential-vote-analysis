@@ -1288,12 +1288,9 @@ def _state_control(
     render, so the filter callback's inputs always exist: with N2 unavailable
     (``series`` is ``None``) it is hidden, with no options and no value. Its value is
     always ``None`` or one of its options."""
-    options = [
-        {"label": str(rows[0]["state"]), "value": usps}
-        for usps, rows in sorted(
-            (series or {}).items(), key=lambda kv: str(kv[1][0]["state"])
-        )
-    ]
+    options = components.label_sorted_options(
+        {usps: str(rows[0]["state"]) for usps, rows in (series or {}).items()}
+    )
     value = chosen if any(option["value"] == chosen for option in options) else None
     hidden: dict[str, Any] = (
         {} if series is not None else {"style": {"display": "none"}}

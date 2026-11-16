@@ -211,50 +211,39 @@ def on_filter_change(
     return no_update if search == (current or "") else search
 
 
-def _options(pairs: dict[str, str]) -> list[dict[str, str]]:
-    return [
-        {"label": label, "value": value}
-        for value, label in sorted(pairs.items(), key=lambda kv: kv[1])
-    ]
-
-
 def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
     states = {r["state_usps"]: r["state"] for r in rows}
     candidates = {r["candidate_slug"]: r["candidate"] for r in rows}
-    dropdowns = (
-        (
-            STATE_ID,
-            labels.LABELS[election_view.STATE],
-            _options(states),
-            chosen.state,
-            "All states",
-        ),
-        (
-            CANDIDATE_ID,
-            labels.LABELS[election_view.CANDIDATE],
-            _options(candidates),
-            chosen.candidate,
-            "All candidates",
-        ),
-        (
-            PV_STATUS_ID,
-            labels.LABELS["pv_status"],
-            [{"label": v, "value": k} for k, v in labels.PV_STATUS.items()],
-            chosen.pv_status,
-            "Any",
-        ),
-        (
-            COUNT_STATUS_ID,
-            labels.LABELS["electoral_count_status"],
-            [{"label": v[0], "value": k} for k, v in labels.COUNT_STATUS.items()],
-            chosen.count_status,
-            "Any",
-        ),
-    )
     return html.Div(
         [
-            components.dropdown_filter(control_id, label, options, value, placeholder)
-            for control_id, label, options, value, placeholder in dropdowns
+            components.dropdown_filter(
+                STATE_ID,
+                labels.LABELS[election_view.STATE],
+                components.label_sorted_options(states),
+                chosen.state,
+                "All states",
+            ),
+            components.dropdown_filter(
+                CANDIDATE_ID,
+                labels.LABELS[election_view.CANDIDATE],
+                components.label_sorted_options(candidates),
+                chosen.candidate,
+                "All candidates",
+            ),
+            components.dropdown_filter(
+                PV_STATUS_ID,
+                labels.LABELS["pv_status"],
+                [{"label": v, "value": k} for k, v in labels.PV_STATUS.items()],
+                chosen.pv_status,
+                "Any",
+            ),
+            components.dropdown_filter(
+                COUNT_STATUS_ID,
+                labels.LABELS["electoral_count_status"],
+                [{"label": v[0], "value": k} for k, v in labels.COUNT_STATUS.items()],
+                chosen.count_status,
+                "Any",
+            ),
         ],
         className="filters",
     )

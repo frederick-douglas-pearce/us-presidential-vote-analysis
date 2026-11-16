@@ -313,13 +313,6 @@ def _rows(
     return sorted(rows, key=lambda r: (r["year"], str(r.get("candidate", ""))))
 
 
-def _options(pairs: dict[str, str]) -> list[dict[str, str]]:
-    return [
-        {"label": label, "value": value}
-        for value, label in sorted(pairs.items(), key=lambda kv: kv[1])
-    ]
-
-
 def _controls(
     rows: list[dict[str, Any]], chosen: Filters, span: tuple[int, int]
 ) -> html.Div:
@@ -327,22 +320,6 @@ def _controls(
     # so the callback never writes back a bound the reader did not move.
     first, last = span
     candidates = {r["candidate_slug"]: str(r["candidate"]) for r in rows}
-    dropdowns = (
-        (
-            CANDIDATE_ID,
-            labels.LABELS[CANDIDATE],
-            _options(candidates),
-            chosen.candidate,
-            "All candidates",
-        ),
-        (
-            PV_STATUS_ID,
-            labels.LABELS["pv_status"],
-            [{"label": v, "value": k} for k, v in labels.PV_STATUS.items()],
-            chosen.pv_status,
-            "Any",
-        ),
-    )
     return html.Div(
         [
             html.Div(
@@ -354,11 +331,19 @@ def _controls(
                 ],
                 className="filter",
             ),
-            *(
-                components.dropdown_filter(
-                    control_id, label, options, value, placeholder
-                )
-                for control_id, label, options, value, placeholder in dropdowns
+            components.dropdown_filter(
+                CANDIDATE_ID,
+                labels.LABELS[CANDIDATE],
+                components.label_sorted_options(candidates),
+                chosen.candidate,
+                "All candidates",
+            ),
+            components.dropdown_filter(
+                PV_STATUS_ID,
+                labels.LABELS["pv_status"],
+                [{"label": v, "value": k} for k, v in labels.PV_STATUS.items()],
+                chosen.pv_status,
+                "Any",
             ),
         ],
         className="filters",

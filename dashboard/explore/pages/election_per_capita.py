@@ -152,16 +152,12 @@ def _per_capita_rows(value: Any, year: int) -> list[dict[str, Any]]:
 def _control(rows: list[dict[str, Any]], chosen: str | None) -> html.Div:
     """The state control, its options T6's own rows."""
     states = {r["state_usps"]: r["state"] for r in rows}
-    options = [
-        {"label": name, "value": usps}
-        for usps, name in sorted(states.items(), key=lambda kv: kv[1])
-    ]
     return html.Div(
         [
             components.dropdown_filter(
                 STATE_ID,
                 labels.LABELS[election_view.STATE],
-                options,
+                components.label_sorted_options(states),
                 chosen,
                 "All states",
             )
