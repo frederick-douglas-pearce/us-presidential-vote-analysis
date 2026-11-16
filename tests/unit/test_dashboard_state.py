@@ -685,7 +685,12 @@ class TestLede:
     shows neither (#325)."""
 
     def test_the_two_sentences_are_todays_lede(self) -> None:
-        # The split changed no word: success reads exactly as the one-piece lede did.
+        # The split falls at the sentence boundary, so the degraded state offers no part
+        # of the filter sentence...
+        assert MOD["FILTER_SENTENCE"] == (
+            "Narrow the rows by year, candidate or popular-vote status."
+        )
+        # ...and changed no word: success reads exactly as the one-piece lede did.
         assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
             "This state's electoral votes for each candidate in every election this "
             "dataset holds for it, with the popular vote where the dataset has it, and "
@@ -701,6 +706,8 @@ class TestLede:
         assert PAGE_ID in routed_ids(response)
         body = response.get_data(as_text=True)
         assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" in body
+        # Once, and only in the lede.
+        assert body.count(MOD["FILTER_SENTENCE"]) == 1
 
     def test_the_degraded_state_shows_the_lede_and_offers_no_filter(
         self, monkeypatch: pytest.MonkeyPatch
