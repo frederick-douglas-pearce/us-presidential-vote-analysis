@@ -1209,7 +1209,7 @@ def option_sorts(source: str) -> list[str]:
     ``sorted(...)`` call over such a comprehension: the shapes #540 removed. A
     comprehension over a closed vocabulary's table, which is not sorted, is not
     reported. It is a tripwire for those shapes, not a proof that no page sorts
-    options: it does not see a ``.sort()`` call, a ``sorted(...)`` result bound to a
+    options: among the shapes it does not see are a ``.sort()`` call, a ``sorted(...)`` result bound to a
     name before the comprehension reads it, a loop that appends, options built with
     ``dict(label=..., value=...)``, a re-sort of the builder's result, or a sort reached
     through another name. ``TestNameOptionsComeFromTheBuilder``
@@ -1248,9 +1248,10 @@ def looped_dropdown_filters(source: str) -> list[str]:
     comprehension, a generator expression or a ``for`` or ``while`` body, the two
     tuple-table shapes #540 removed. Each is reported as its top-level definition or
     assignment. It is a tripwire for those shapes, not a check that each filter has
-    its own call: it does not see ``dropdown_filter`` passed to ``map`` or
-    ``itertools.starmap``, called from a ``lambda``, through an alias or a wrapper
-    function, or with rows taken from a table by index (``dropdown_filter(*T[0])``)."""
+    its own call: among the shapes it does not see are ``dropdown_filter`` passed to
+    ``map`` or ``itertools.starmap``, called from a ``lambda`` outside a loop (one
+    passed to ``map``, say), through an alias or a wrapper function, or with rows taken
+    from a table by index (``dropdown_filter(*T[0])``)."""
     found: list[str] = []
     for stmt in ast.parse(source).body:
         loops = [
@@ -1350,8 +1351,8 @@ class TestLabelSortedOptions:
 
     def test_no_page_calls_dropdown_filter_from_a_loop(self) -> None:
         """No runtime module calls ``components.dropdown_filter`` from a loop, the
-        shape #540's tuple tables took; the scan's blind spots are in
-        :func:`looped_dropdown_filters`."""
+        shape #540's tuple tables took; :func:`looped_dropdown_filters` names some
+        shapes the scan does not see."""
         found = {
             str(path.relative_to(PACKAGE)): refs
             for path in RUNTIME_MODULES

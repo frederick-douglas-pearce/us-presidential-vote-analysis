@@ -200,7 +200,7 @@ def label_sorted_options(labels_by_value: Mapping[str, str]) -> list[dict[str, s
     every page and checks that each name dropdown's options are a list this function
     returned; ``TestLabelSortedOptions.test_only_the_builder_sorts_options`` (in
     ``test_dashboard_elections.py``) is a source tripwire for the copies #540 removed;
-    its scan, ``option_sorts``, lists what it does not see. A closed vocabulary
+    its scan, ``option_sorts``, names some shapes it does not see. A closed vocabulary
     (popular-vote status, count status) is not sorted: its page lists it in its
     ``labels`` table's order.
 
