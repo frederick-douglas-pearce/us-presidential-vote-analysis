@@ -96,14 +96,15 @@ NOT_FOUND_HEADING = "State not found"
 NOT_FOUND_SENTENCE = "This dataset has no state with that code."
 NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
 
-#: The lede, shown above the history and on the degraded state, never on the not-found
-#: state (#325).
+#: The lede, then, on a successful render only, the sentence naming the filters it
+#: offers (#392): the degraded state shows the lede alone, the not-found state none
+#: (#325).
 LEDE = (
     "This state's electoral votes for each candidate in every election this dataset "
     "holds for it, with the popular vote where the dataset has it, and how many people "
-    "its electoral votes stood for. Narrow the rows by year, candidate or popular-vote "
-    "status."
+    "its electoral votes stood for."
 )
+FILTER_SENTENCE = "Narrow the rows by year, candidate or popular-vote status."
 
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
@@ -513,6 +514,8 @@ def not_found() -> html.Div:
 
 def layout(usps: Any = None, **params: Any) -> html.Div:
     heading = "State history"
+    # The filter sentence only above the filters: not on the not-found or degraded
+    # state, which show none. The not-found state shows no lede at all (#325).
     lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
@@ -526,6 +529,7 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
                 content, heading = render(
                     body, index, usps, parse_filters(params), per_capita
                 )
+                lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     lead = [] if lede is None else [html.P(lede, className="lede")]
