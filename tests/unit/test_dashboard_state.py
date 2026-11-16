@@ -1006,3 +1006,16 @@ def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -
     filtered = render("candidate=abraham-lincoln&pv_status=popular_vote")
     assert find(filtered, "state-candidate").value == "abraham-lincoln"
     assert find(filtered, "state-pv-status").value == "popular_vote"
+    # Each label names its field, and the placeholder is another string: the page
+    # passes them to the helper in that order (#475's acceptance gate).
+    shown = {
+        label.htmlFor: label.children
+        for label in of_type(tree, "Label")
+        if label.htmlFor in ("state-candidate", "state-pv-status")
+    }
+    assert shown == {
+        "state-candidate": labels.LABELS["candidate"],
+        "state-pv-status": labels.LABELS["pv_status"],
+    }
+    assert candidate.placeholder != shown["state-candidate"]
+    assert pv_status.placeholder != shown["state-pv-status"]

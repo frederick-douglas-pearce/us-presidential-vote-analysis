@@ -1159,6 +1159,8 @@ class TestDropdownFilter:
             ("import dash\nD = dash.dcc.Dropdown(id='d')\n", ["D"]),
             ("from dash.dcc import Dropdown\n", ["line 1"]),
             ("from dash.dcc import Dropdown as D\n", ["line 1"]),
+            # Only the name rule sees a star-imported Dropdown.
+            ("from dash.dcc import *\ndef f():\n    Dropdown(id='d')\n", ["f"]),
             ("from dash import dcc as c\ndef f():\n    c.Dropdown()\n", ["f"]),
             ("from dash import dcc\ndef f():\n    getattr(dcc, 'Dropdown')()\n", ["f"]),
             ("X = {'type': 'Dropdown', 'namespace': 'dash_core_components'}\n", ["X"]),

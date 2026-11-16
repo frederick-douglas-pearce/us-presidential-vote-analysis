@@ -769,3 +769,13 @@ def test_the_state_filter_shows_its_options_and_value() -> None:
     assert dropdown.value is None
     assert dropdown.options == expected
     assert find(render("state=GA"), "candidate-state").value == "GA"
+    # The label names the field and the placeholder is the page's own: the page passes
+    # them to the helper in that order (#475's acceptance gate).
+    (label,) = [
+        label
+        for label in of_type(render(), "Label")
+        if label.htmlFor == "candidate-state"
+    ]
+    assert label.children == labels.LABELS["state"]
+    assert dropdown.placeholder == MOD["STATE_PLACEHOLDER"]
+    assert dropdown.placeholder != label.children
