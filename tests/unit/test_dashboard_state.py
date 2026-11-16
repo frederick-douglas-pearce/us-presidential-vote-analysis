@@ -29,6 +29,7 @@ from tests.unit.test_dashboard_app import (
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     cached_client,
     component_ids,
+    failing_fetch,
     fake_fetch,
     get,
     offline_client,
@@ -676,6 +677,64 @@ class TestMalformedBodies:
         self.client_with(monkeypatch, ROSTER_PATH)
         ids = routed_ids(route("/states"))
         assert "unavailable" in ids and PICKER["success"] not in ids
+
+
+class TestLede:
+    """The lede shows on success and on the degraded state, and the sentence naming
+    the filters only on success, where the filters show (#392); the not-found state
+    shows neither (#325)."""
+
+    def test_the_two_sentences_are_todays_lede(self) -> None:
+        # The split changed no word: success reads exactly as the one-piece lede did.
+        assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
+            "This state's electoral votes for each candidate in every election this "
+            "dataset holds for it, with the popular vote where the dataset has it, and "
+            "how many people its electoral votes stood for. Narrow the rows by year, "
+            "candidate or popular-vote status."
+        )
+
+    def test_success_shows_the_lede_then_the_filter_sentence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        response = route("/state/GA")
+        assert PAGE_ID in routed_ids(response)
+        body = response.get_data(as_text=True)
+        assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" in body
+
+    def test_the_degraded_state_shows_the_lede_and_offers_no_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A malformed state body: render raises after validation, so the page degrades.
+        TestMalformedBodies.client_with(monkeypatch, GA_PATH)
+        response = route("/state/GA")
+        ids = routed_ids(response)
+        assert "unavailable" in ids and PAGE_ID not in ids
+        body = response.get_data(as_text=True)
+        assert MOD["LEDE"] in body
+        assert MOD["FILTER_SENTENCE"] not in body
+
+    def test_the_unreachable_api_shows_the_lede_and_offers_no_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = offline_client(failing_fetch, prefetch_paths=lambda: [])
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setattr(api, "CLIENT", client)
+        response = route("/state/GA")
+        assert "unavailable" in routed_ids(response)
+        body = response.get_data(as_text=True)
+        assert MOD["LEDE"] in body
+        assert MOD["FILTER_SENTENCE"] not in body
+
+    def test_the_not_found_state_shows_neither(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        response = route("/state/ZZ")
+        assert MOD["NOT_FOUND_ID"] in routed_ids(response)
+        body = response.get_data(as_text=True)
+        assert MOD["LEDE"] not in body
+        assert MOD["FILTER_SENTENCE"] not in body
 
 
 @pytest.mark.parametrize(
