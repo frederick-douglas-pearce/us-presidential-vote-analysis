@@ -63,7 +63,18 @@
    sheet; color-scheme, which browsers read from the root element, gives the page
    scrollbar and the native checkboxes and radios their form. TestDarkThemeVariables
    (tests/unit/test_dashboard_theme.py) fails if Dash renames a variable the dark
-   blocks set. */
+   blocks set.
+
+   Layout (#360, #544, D102), detailed at the body rule and at the 76rem block: the
+   page is one column up to 72rem wide, running text keeps the 42rem measure, and the
+   side padding grows from 64rem. One wide breakpoint, at 76rem (about 1216 px, where
+   the page reaches its full 72rem), adds two shared pieces a page opts into by class:
+   .filter-row lays a page's dropdown filters side by side, wrapping, and .pair sets two
+   sections in two equal columns. Below it every page is the one column it always was.
+   Nothing reorders: no rule sets order or places a grid item, so the left column is
+   always the earlier element and reading and tab order follow the eye at every width.
+   A table never goes in a pair (.table-scroll's 36rem minimum is wider than a
+   column): a chart in a pair has its table full width below it. */
 :root {
   color-scheme: light;
   /* Not colors: the readable measure (#360), and the font stack the page and every
@@ -171,12 +182,13 @@
   --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
 }
 
-/* Two layouts (#360). The page is up to 72rem wide at any width, but running text, the
-   panel, the filters and the short lists keep a readable measure (--measure) and only
-   tables use the rest. A phone is narrower than the measure, so it sees one column and
-   scrolls sideways only inside a table. From 64rem up the side padding grows and the
-   States list goes to three columns; the widest tables fit without scrolling from about
-   1280px. */
+/* Three widths (#360, #544). The page is up to 72rem wide at any width, but running
+   text, the panel, the filters and the short lists keep a readable measure (--measure)
+   and only tables use the rest. A phone is narrower than the measure, so it sees one
+   column and scrolls sideways only inside a table. From 64rem up the side padding grows
+   and the States list goes to three columns; the widest tables fit without scrolling
+   from about 1280px. From 76rem up a page's filter row and pairs take effect (the
+   media block after the 64rem one). */
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -521,6 +533,20 @@ fieldset.filter legend { padding: 0; }
   .states { columns: 3; column-gap: 2rem; }
   /* Padding, not margin: a margin at the top of a column is dropped, so the columns would not line up. */
   .states li { margin: 0; padding: 0.125rem 0; break-inside: avoid; }
+}
+/* The wide layout (#544, D102), from 76rem: where the 72rem page reaches its full width,
+   so every wider screen gets one layout. Two pieces, each a class a page opts into, and
+   nothing here reorders.
+   .filter-row is a second class on a page's .filters box: its dropdown filters sit side
+   by side, each 14rem to 20rem, and wrap to fewer per row when they do not fit. It lifts
+   the measure .filters carries, since controls are not running text.
+   .pair is two equal columns, each holding one section, in source order. minmax(0, …),
+   not 1fr: plotly writes a pixel width on its drawing, and a 1fr track's min-content
+   would stop a chart from shrinking when the window narrows. */
+@media (min-width: 76rem) {
+  .filter-row { display: flex; flex-wrap: wrap; gap: 0 1rem; max-width: none; }
+  .filter-row .filter { flex: 1 1 14rem; max-width: 20rem; }
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; align-items: start; }
 }
 
 /* A chart (#432): the figure element keeps no browser margin, so the drawing takes the

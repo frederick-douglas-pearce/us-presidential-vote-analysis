@@ -40,6 +40,10 @@ NOT_FOUND_ID = "election-not-found"
 NATION_TABLE_ID = "election-nation"
 NO_PV_ID = "election-no-pv"
 PANEL_ID = "election-panel"
+#: The overview's top pair (#544, D102): the panel's section in the left column and
+#: National results' heading and C1 in the right, from 76rem; one column below it.
+#: T3 follows the pair at full width, since a table never goes in a pair.
+PAIR_ID = "election-top"
 #: The panel's place when the API serves ``election: null`` (a build gap).
 PANEL_UNAVAILABLE_ID = "election-panel-unavailable"
 
@@ -565,9 +569,9 @@ def render(
     summary = election_view.rows(body["summary"], year, "candidates", source)
     block = _election(body["election"], year)
     has_popular_vote = index_row["has_popular_vote"] is True
-    nation: list[Any] = [html.H2("National results")]
+    top: list[Any] = [html.H2("National results")]
     if not has_popular_vote:
-        nation.append(
+        top.append(
             html.P(
                 NO_PV_SENTENCE.format(year=year, **_pv_window(coverage)),
                 id=NO_PV_ID,
@@ -577,13 +581,15 @@ def render(
     cells = [_nation_cells(row, has_popular_vote) for row in summary]
     by_row = {id(row): row_cells for row, row_cells in zip(summary, cells, strict=True)}
     figure, no_figure = _c1_figure(summary, cells, has_popular_vote, year)
-    nation += [
+    top.append(
         components.chart(
             C1_ID,
             figure,
             NATION_TABLE_ID,
             _c1_caption(has_popular_vote, no_figure, year, coverage),
-        ),
+        )
+    )
+    rest = [
         *components.table(
             summary,
             lambda r: _nation_row(r, by_row[id(r)]),
@@ -606,8 +612,14 @@ def render(
             html.H1(HEADING.format(year=year)),
             html.P(LEDE, className="lede"),
             election_view.section_nav(year, election_view.OVERVIEW),
-            *_panel(block, year, coverage),
-            *nation,
+            # Source order is reading order at every width: the panel's section is the
+            # pair's left column, National results' heading and C1 its right (#544).
+            html.Div(
+                [html.Div(_panel(block, year, coverage)), html.Div(top)],
+                id=PAIR_ID,
+                className="pair",
+            ),
+            *rest,
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

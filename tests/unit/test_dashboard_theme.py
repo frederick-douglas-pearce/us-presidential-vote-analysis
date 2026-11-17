@@ -1692,3 +1692,70 @@ class TestThemeSelected:
             assert ".site-nav" not in prelude, prelude
             assert not re.search(r"(^|[\s>+~,])header\b", prelude), prelude
             assert not re.search(r"(^|[\s>+~,])nav\b", prelude), prelude
+
+
+WIDE = "@media (min-width: 76rem)"
+
+
+class TestLayoutRules:
+    """The wide layout's rules in ``style.css`` (#544, D102): one breakpoint at 76rem,
+    the filter row and the pair inside it, and nothing anywhere that reorders what a
+    reader sees against the source, which is what keeps reading and tab order with the
+    eye. The pages' markup is pinned in ``TestWideLayout``
+    (``test_dashboard_election.py``), and the drawn layout in the e2e suite."""
+
+    def test_one_wide_breakpoint_holds_the_shared_pieces(self) -> None:
+        wide = [(p, b) for at, p, b in shipped_rules() if at and "76rem" in at]
+        assert {" ".join(p.split()) for p, _ in wide} == {
+            ".filter-row",
+            ".filter-row .filter",
+            ".pair",
+        }
+        assert {at for at, _, _ in shipped_rules() if at and "76rem" in at} == {WIDE}
+
+    def test_the_filter_row_wraps_and_lifts_the_measure(self) -> None:
+        row = toggle_rule(".filter-row", WIDE)
+        assert row["display"] == "flex"
+        assert row["flex-wrap"] == "wrap"
+        assert row["max-width"] == "none"
+        each = toggle_rule(".filter-row .filter", WIDE)
+        assert each == {"flex": "1 1 14rem", "max-width": "20rem"}
+
+    def test_the_pair_is_two_equal_columns_that_can_shrink(self) -> None:
+        pair = toggle_rule(".pair", WIDE)
+        assert pair["display"] == "grid"
+        # minmax(0, 1fr), not 1fr: a chart's pixel width must not hold its column open.
+        assert pair["grid-template-columns"] == "repeat(2, minmax(0, 1fr))"
+        assert pair["align-items"] == "start"
+
+    def test_neither_piece_applies_below_the_breakpoint(self) -> None:
+        for at, prelude, _ in shipped_rules():
+            names = re.findall(r"\.(filter-row|pair)\b", prelude)
+            assert not names or at == WIDE, (at, prelude)
+
+    def test_nothing_reorders_the_source(self) -> None:
+        # No property that moves a box away from its source position: a flex or grid
+        # item's order or placement, a reversed flex direction, or a dense grid fill.
+        placement = {
+            "order",
+            "grid-area",
+            "grid-row",
+            "grid-row-start",
+            "grid-row-end",
+            "grid-column",
+            "grid-column-start",
+            "grid-column-end",
+            "direction",
+        }
+        for at, prelude, body in shipped_rules():
+            for name, value in declarations(body):
+                where = (at, prelude, name, value)
+                assert name not in placement, where
+                assert not (name == "flex-direction" and "reverse" in value), where
+                assert not (name == "grid-auto-flow" and "dense" in value), where
+
+    def test_the_header_comment_describes_the_layout(self) -> None:
+        css = STYLESHEET.read_text(encoding="utf-8")
+        header = " ".join(css[: css.index("*/")].split())
+        for piece in ("76rem", ".filter-row", ".pair", "42rem", "D102"):
+            assert piece in header, piece

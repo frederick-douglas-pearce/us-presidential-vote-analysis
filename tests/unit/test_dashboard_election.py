@@ -42,7 +42,13 @@ from tests.unit.test_dashboard_app import (
     texts,
     url,
 )
-from tests.unit.test_dashboard_elections import find, json_node, of_type, parse
+from tests.unit.test_dashboard_elections import (
+    find,
+    in_order,
+    json_node,
+    of_type,
+    parse,
+)
 from usvote.count_status import COUNT_STATUS_VALUES
 from usvote.pv.status import PV_STATUS_VALUES
 from usvote.snapshot_schema import (
@@ -1577,7 +1583,8 @@ class TestNeighbourLinks:
         assert not any(getattr(link, "refresh", False) for link in of_type(nav, "Link"))
 
     def test_the_nav_comes_before_the_panel(self) -> None:
-        ids = [getattr(child, "id", None) for child in render_page(OV, 1868).children]
+        # In document order: the panel sits inside the overview's pair (#544).
+        ids = ids_in_order(render_page(OV, 1868))
         assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
 
     def test_the_first_and_last_years_link_one_way(self) -> None:
@@ -1706,7 +1713,7 @@ class TestNeighborBar:
         assert lede_.className == "lede"
         assert lede_.children == OV["LEDE"]
         assert sections.id == election_view.SECTIONS_ID
-        ids = [getattr(child, "id", None) for child in body.children]
+        ids = ids_in_order(body)
         assert ids.index(MOD["NAV_ID"]) < ids.index(MOD["PANEL_ID"])
         assert [h.children for h in of_type(body, "H1")] == ["The 1868 election"]
         for page, heading_text in (
@@ -2546,15 +2553,16 @@ class TestPanel:
     def test_the_panel_follows_the_links_inside_the_success_marker(self) -> None:
         order = ids_in_order(render_page(OV, 2016))
         # The success marker, the earlier and later links (#324), the section links
-        # (#465), then the panel, ahead of every table.
-        assert order[:5] == [
+        # (#465), then the top pair (#544) opening on the panel, ahead of every table.
+        assert order[:7] == [
             PAGE_ID,
             MOD["NAV_ID"],
             MOD["EARLIER_ID"],
             MOD["LATER_ID"],
             election_view.SECTIONS_ID,
+            MOD["PAIR_ID"],
+            PANEL,
         ]
-        assert order[5] == PANEL
         # National results: C1, then T3 (owner, #433). T2 and T6 are pages of their
         # own since #465.
         assert order.index(PANEL) < order.index("c1") < order.index(NATION)
@@ -3307,15 +3315,21 @@ class TestC1:
         # The overview's last section: T2 and T6 are pages of their own (#465).
         headings = [h.children for h in of_type(tree, "H2")]
         assert headings[-2:] == ["National results", "Where the data comes from"]
-        # The chart comes after its section's heading and before T3's own pieces.
-        section = tree.children
+        # The chart comes after its section's heading and before T3's own pieces, in
+        # document order: since #544 both sit in the overview pair's right column.
+        section = in_order(tree)
         h2 = next(
             i
             for i, child in enumerate(section)
             if getattr(child, "children", None) == "National results"
         )
         chart = next(i for i, child in enumerate(section) if child is c1(tree))
-        assert h2 < chart
+        t3 = next(
+            i
+            for i, child in enumerate(section)
+            if getattr(child, "id", None) == NATION
+        )
+        assert h2 < chart < t3
         assert type(c1(tree)).__name__ == "Figure"
         # Never the success marker (#432): the chart holds no page id.
         assert PAGE_ID not in ids_in_order(c1(tree))
@@ -4441,3 +4455,94 @@ class TestC3:
 
     def test_the_footer_still_credits_the_census_bureau(self) -> None:
         assert any("Census Bureau" in t for t in texts(section(2024)))
+
+
+class TestWideLayout:
+    """The election pages' wide layout (#544, D102): the overview's top pair and the
+    filter row. The stylesheet's rules are pinned in ``TestLayoutRules``
+    (``test_dashboard_theme.py``); what a browser draws, at which width, is the e2e
+    suite's (``test_dashboard_e2e_election.py``)."""
+
+    @staticmethod
+    def pair(tree: Any) -> Any:
+        node = find(tree, MOD["PAIR_ID"])
+        assert node is not None and node.className == "pair"
+        return node
+
+    @pytest.mark.parametrize("year", [1824, 1860, 2016])
+    def test_the_pair_holds_the_panel_left_and_national_results_right(
+        self, year: int
+    ) -> None:
+        tree = render_page(OV, year)
+        pair = self.pair(tree)
+        # A direct child of the success marker, after the section links.
+        kids = list(tree.children)
+        assert pair in kids
+        assert kids.index(pair) == kids.index(
+            find(tree, election_view.SECTIONS_ID)
+        ) + 1
+        left, right = pair.children
+        assert [h.children for h in of_type(left, "H2")] == ["Under each method"]
+        assert find(left, PANEL) is not None
+        assert of_type(right, "H2")[0].children == "National results"
+        assert right.children[0].children == "National results"
+        assert find(right, C1) is not None and find(left, C1) is None
+        # The no-popular-vote sentence sits in National results' column when shown.
+        has_pv = index_row(year)["has_popular_vote"] is True
+        assert (find(right, MOD["NO_PV_ID"]) is None) == has_pv
+
+    @pytest.mark.parametrize("year", [1824, 2016])
+    def test_t3_follows_the_pair_and_no_table_is_in_it(self, year: int) -> None:
+        tree = render_page(OV, year)
+        pair = self.pair(tree)
+        assert of_type(pair, "Table") == []
+        assert find(pair, NATION) is None
+        order = ids_in_order(tree)
+        assert order.index(C1) < order.index(NATION)
+        # T3's own scroll box is a later sibling of the pair.
+        kids = list(tree.children)
+        after = kids[kids.index(pair) + 1 :]
+        assert any(find(kid, NATION) is not None for kid in after)
+
+    def test_the_pair_holds_when_the_panel_is_unavailable(self) -> None:
+        body = year_body(1872)
+        body["election"] = None
+        left, right = self.pair(render_page(OV, 1872, body=body)).children
+        assert find(left, MOD["PANEL_UNAVAILABLE_ID"]) is not None
+        assert find(left, PANEL) is None
+        assert find(right, C1) is not None
+
+    @pytest.mark.parametrize(
+        ("page", "ids"),
+        [
+            (
+                ST,
+                ("STATE_ID", "CANDIDATE_ID", "PV_STATUS_ID", "COUNT_STATUS_ID"),
+            ),
+            (PC, ("STATE_ID",)),
+        ],
+    )
+    def test_the_filters_box_is_a_filter_row(
+        self, page: dict[str, Any], ids: tuple[str, ...]
+    ) -> None:
+        tree = render_page(page, 2016)
+        controls = [page[name] for name in ids]
+        boxes = [
+            node
+            for node in in_order(tree)
+            if (getattr(node, "className", None) or "").split()[:1] == ["filters"]
+        ]
+        assert len(boxes) == 1
+        (box,) = boxes
+        assert box.className.split() == ["filters", "filter-row"]
+        # Each filter in the row in source order, each label tied to its control.
+        labels_ = of_type(box, "Label")
+        assert [label.htmlFor for label in labels_] == controls
+        assert [d.id for d in of_type(box, "Dropdown")] == controls
+
+    def test_the_overview_has_no_filter_row(self) -> None:
+        tree = render_page(OV, 2016)
+        assert not any(
+            "filter-row" in (getattr(node, "className", None) or "").split()
+            for node in in_order(tree)
+        )

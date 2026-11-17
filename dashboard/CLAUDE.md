@@ -17,15 +17,16 @@ index and the shared table conventions, #306, chart C2, #434, in `TestC2`, `Test
 `TestOverTimeFilter`, `TestOverTimeTable`, `TestOverTimeValidation`, `TestOverTimeDegraded`, `TestOverTimeCaptions` and,
 for its N2 recording, `TestN2Fixture`), `tests/unit/test_dashboard_election.py`
 (the election pages, #307 and #465, the overview's panel, #308, chart C1, #433, in `TestC1`, chart C3, #435, in `TestC3`, the
-earlier-and-later bar's structure, #464, in `TestNeighborBar`, and the section links in
-`TestSectionLinks`), `tests/unit/test_dashboard_state.py`
+earlier-and-later bar's structure, #464, in `TestNeighborBar`, the section links in
+`TestSectionLinks`, and the wide layout's markup, #544, in `TestWideLayout`), `tests/unit/test_dashboard_state.py`
 (the state history and the state picker, #279), `tests/unit/test_dashboard_candidate.py`
 (the candidate history and the candidate links, #331), `tests/unit/test_dashboard_export.py`
 (every table's CSV download, #309), `tests/unit/test_dashboard_theme.py` (the theme
 choice's color tokens, contrast, head script, toggle, icons and store, #359, #447, and the
 site navigation's contrast and focus-ring gaps, #448, the chart tokens' contrast and
 color-vision separation, #432, and the earlier-and-later bar's contrast, premises,
-chevrons and pinned declarations, #464), `tests/unit/test_dashboard_nav.py`
+chevrons and pinned declarations, #464, and the wide layout's rules, #544, in
+`TestLayoutRules`), `tests/unit/test_dashboard_nav.py`
 (the site navigation's structure, wording, current-page table and callback, #448),
 `tests/unit/test_dashboard_charts.py` (the chart registry, `components.chart`, the figure
 rules, the template, the config and the chart callback, #432, the not-drawn log check, #467, and the check's totality, #484, in `TestTotality`, `TestSlotKinds`, `TestTotalityGuards` and `TestPlaceholderScan`) and
@@ -92,7 +93,12 @@ title inside 390 px with none over another, each bar centered on its row name an
 name, the present-day bars striped in the page color in both themes; the selected state's mark over no drawn text
 (2024 California and Wyoming, 1848 Texas) with T6 narrowed to one row; a theme switch redrawing it
 with no request; a blocked CDN leaving its title, caption, pointer and T6; and no chart on the
-not-found or degraded per-capita page; and the
+not-found or degraded per-capita page; the election pages' wide layout (#544, D102): at
+1280 and 1850 px the overview's panel and C1 side by side with T3 below both, C1 filling its
+column across a resize over the 76rem breakpoint, the states page's four filters in one row
+above T2 and the per-capita page's filter in the same row rule, all stacking as before at
+1100 and 390 px, and on every election page at every width no reordered box or positive tab
+index, running text within 42rem, and no sideways scroll (tables included from 1280 px); and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
 across a client-side navigation and a reload, no flash of the other palette (checked at
 the moment `<body>` is inserted and in the frame before first paint) nor of the toggle's
