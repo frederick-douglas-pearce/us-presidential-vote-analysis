@@ -269,8 +269,11 @@ def composited(color: str, backdrop: str) -> str:
 
 # --- the wide layout (#544, #545, D102) ------------------------------------------------
 
-#: A width below the 76rem breakpoint (1216 px) and wider than the 64rem step, where
-#: every page is still its one column.
+#: The wide breakpoint, 76rem at the default 16 px root size (D102(a)): from this
+#: width a filter row and a pair take effect.
+WIDE_BREAKPOINT_PX = 76 * 16
+#: A width below the 76rem breakpoint and wider than the 64rem step, where every page
+#: is still its one column.
 NARROW_DESKTOP = 1100
 WIDE_WIDTHS = [1280, 1850]
 #: The measure, 42rem at the default 16 px root size.

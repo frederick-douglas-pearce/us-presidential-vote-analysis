@@ -45,6 +45,7 @@ from tests.e2e.dashboard_pages import (
     STATE_CONTROL,
     UNAVAILABLE,
     UPDATE_PATH,
+    WIDE_BREAKPOINT_PX,
     WIDE_WIDTHS,
     YEARS,
     assert_chunk_failure_stops,
@@ -609,6 +610,14 @@ def test_wide_the_list_s_filters_sit_beside_the_count_and_averages(
         box = rect(page, held)
         assert column["left"] - 0.5 <= box["left"], (held, box, column)
         assert box["right"] <= column["right"] + 0.5, (held, box, column)
+    # Each column's first child starts at the column's top, so the filters and the
+    # count line start level: the margin reset reaches them (#553's review, r1.cr.1).
+    firsts = rects(page, f"{LIST_COLUMNS} > :first-child")
+    for first, column in zip(firsts, (left, right), strict=True):
+        assert abs(first["top"] - column["top"]) <= 0.5, (first, column)
+    # The visible content itself, whatever wraps it: the "Years" label and the count.
+    label, count = rect(page, f"{LIST_PAIR} .filters .label"), rect(page, ".count")
+    assert abs(label["top"] - count["top"]) <= 0.5, (label, count)
     # T1 below both columns.
     t1 = rect(page, ".table-scroll:has(#elections-table)")
     assert t1["top"] >= max(left["bottom"], right["bottom"]), (t1, left, right)
@@ -679,8 +688,11 @@ def test_c4_and_c5_fill_their_columns_after_a_resize_across_the_breakpoint(
         page.set_viewport_size({"width": width, "height": 900})
         wait_charts_fill(page)
         left, right = rects(page, OVER_TIME_COLUMNS)
-        if width >= 1216:
-            assert abs(left["width"] - right["width"]) <= 1, (width, left, right)
+        # Side by side from the breakpoint, stacked below it, after every crossing.
+        if width >= WIDE_BREAKPOINT_PX:
+            side_by_side(left, right)
+        else:
+            assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 

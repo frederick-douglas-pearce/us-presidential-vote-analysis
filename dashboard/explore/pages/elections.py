@@ -1534,26 +1534,23 @@ def render(
             *_leader_section(body, summary),
             html.H2(LIST_HEADING),
             # Source order is reading order at every width: the filters are the pair's
-            # left column and the count and averages they narrow its right (#553).
+            # left column and the count and averages they narrow its right, which is
+            # METRICS_ID itself, so the pair's margin reset reaches the count (#553).
             components.pair(
                 [controls],
                 [
-                    html.Div(
-                        [
-                            html.P(
-                                labels.METRIC_LABELS["elections_shown"].format(
-                                    shown=metrics.count(shown),
-                                    total=metrics.count(elections),
-                                ),
-                                id=METRIC_IDS["elections_shown"],
-                                className="count",
-                            ),
-                            *_averages(body, summary, shown, chosen.pv_only),
-                        ],
-                        id=METRICS_ID,
-                    )
+                    html.P(
+                        labels.METRIC_LABELS["elections_shown"].format(
+                            shown=metrics.count(shown),
+                            total=metrics.count(elections),
+                        ),
+                        id=METRIC_IDS["elections_shown"],
+                        className="count",
+                    ),
+                    *_averages(body, summary, shown, chosen.pv_only),
                 ],
                 LIST_PAIR_ID,
+                right_id=METRICS_ID,
             ),
             *components.table(
                 shown,

@@ -3668,6 +3668,16 @@ class TestPair:
         first, second = built.children
         assert type(first).__name__ == type(second).__name__ == "Div"
         assert first.children == [left] and second.children == [right]
+        # A column has no id unless the page names one.
+        assert "id" not in first.to_plotly_json()["props"]
+        assert "id" not in second.to_plotly_json()["props"]
+
+    def test_a_column_id_names_the_column_itself(self) -> None:
+        held = html.P("x", id="x")
+        built: Any = components.pair([held], [held], "p", left_id="a", right_id="b")
+        first, second = built.children
+        assert (first.id, second.id) == ("a", "b")
+        assert first.children == [held] and second.children == [held]
 
     def test_it_accepts_a_chart(self) -> None:
         # Imported here: test_dashboard_export imports from this module.
@@ -3717,8 +3727,12 @@ class TestWideLayout:
         assert heading.children == MOD["LIST_HEADING"]
         left, right = pair.children
         assert find(left, YEARS_ID) is not None and find(left, PV_ID) is not None
-        assert find(right, MOD["METRICS_ID"]) is not None
         assert find(left, MOD["METRICS_ID"]) is None and find(right, YEARS_ID) is None
+        # The right column is the metrics block itself, with no wrapper of its own,
+        # so the pair's margin reset reaches the count line (#553's review, r1.cr.1).
+        assert right.id == MOD["METRICS_ID"]
+        assert right.children[0].className == "count"
+        assert left.children[0].className == "filters"
 
     def test_t1_follows_the_list_pair_and_is_not_in_it(self) -> None:
         tree = render_over_time()

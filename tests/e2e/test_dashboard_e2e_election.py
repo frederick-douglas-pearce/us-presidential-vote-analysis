@@ -40,6 +40,7 @@ from tests.e2e.dashboard_pages import (
     SECTIONS,
     STATES_NOT_FOUND,
     STATES_SUCCESS,
+    WIDE_BREAKPOINT_PX,
     WIDE_WIDTHS,
     assert_layout_holds,
     assert_rendered,
@@ -1136,7 +1137,7 @@ def test_c1_fills_its_column_after_a_resize_across_the_breakpoint(page: Page) ->
         left, right = rects(page, PAIR_COLUMNS)
         graph = rect(page, f"{C1} .chart-graph")
         assert abs(graph["width"] - right["width"]) <= 1, (width, graph, right)
-        if width >= 1216:
+        if width >= WIDE_BREAKPOINT_PX:
             assert abs(left["width"] - right["width"]) <= 1, (width, left, right)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 

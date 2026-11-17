@@ -1313,9 +1313,32 @@ def _class_values(tree: ast.AST) -> list[ast.AST]:
 
 def pair_class_uses(source: str) -> list[str]:
     """Each place ``source`` sets the ``pair`` class (#553, D103), as
-    ``"<function>: line <n>"``: a string in a class expression whose words include
-    ``pair``, literal, in a multi-class string, an f-string or a join."""
+    ``"<function>: line <n>"`` (the line where the class expression names it): a
+    string in a class expression whose words include ``pair``, literal, in a
+    multi-class string, an f-string or a join, or a module-level name bound once to
+    such a string. It reads source, so a class passed through a local variable, a
+    function's return value or a parameter, ``setattr``, ``exec`` or ``eval``, and a
+    class built at runtime are not seen."""
     tree = ast.parse(source)
+    # A module-level name bound once to a string reads as that string in a class
+    # expression, so ``PAIR = "pair"`` then ``className=PAIR`` is caught.
+    constants: dict[str, ast.Constant] = {}
+    for stmt in tree.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+            and isinstance(stmt.value, ast.Constant)
+            and isinstance(stmt.value.value, str)
+        ):
+            constants[stmt.targets[0].id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and isinstance(stmt.value, ast.Constant)
+            and isinstance(stmt.value.value, str)
+        ):
+            constants[stmt.target.id] = stmt.value
     owner: dict[int, str] = {}
     for fn in ast.walk(tree):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1323,13 +1346,18 @@ def pair_class_uses(source: str) -> list[str]:
                 owner[id(inner)] = fn.name
     found: list[str] = []
     for value in _class_values(tree):
-        for node in ast.walk(value):
+        for found_node in ast.walk(value):
+            node = (
+                constants.get(found_node.id, found_node)
+                if isinstance(found_node, ast.Name)
+                else found_node
+            )
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
                 and "pair" in node.value.split()
             ):
-                where = owner.get(id(node), "<module>")
+                where = owner.get(id(found_node), "<module>")
                 found.append(f"{where}: line {node.lineno}")
     return found
 
@@ -1360,6 +1388,10 @@ def test_only_components_builds_a_pair() -> None:
         ("html.Div([], className='pair' if x else 'b')\n", True),
         ("html.Div([], **{'className': 'pair'})\n", True),
         ("d = html.Div([])\nd.className = 'pair'\n", True),
+        ("PAIR = 'pair'\nhtml.Div([], className=PAIR)\n", True),
+        ("PAIR: str = 'note pair'\nhtml.Div([], className=f'{PAIR} x')\n", True),
+        ("PAIR = 'pairs'\nhtml.Div([], className=PAIR)\n", False),
+        ("NAME = 'pair'\nhtml.Div([], id=NAME)\n", False),
         ('"""A docstring about a pair."""\n', False),
         ("html.Div([], className='pairs pair-col')\n", False),
         ("html.Div([], id='pair')\n", False),
