@@ -26,6 +26,7 @@ from playwright.sync_api import Locator, Page, expect
 from explore import app as appmod
 from explore import components, labels
 from tests.e2e.dashboard_pages import (
+    CANDIDATE_SUCCESS,
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     PV,
@@ -44,7 +45,6 @@ KEY = appmod.THEME_STORAGE_KEY
 PROBE = f"#{THEME_PROBE_ID}"
 CONTROL = f"#{components.THEME_CONTROL_ID}"
 AUTO = labels.THEME_AUTO
-CANDIDATE_SUCCESS = "#candidate"
 DARK_QUERY = "(prefers-color-scheme: dark)"
 
 

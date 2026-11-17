@@ -29,18 +29,26 @@ from tests.e2e.dashboard_pages import (
     ELECTION_LATER,
     ELECTION_SUCCESS,
     ELECTIONS,
+    FILTER_MAX_PX,
+    FILTER_MIN_PX,
     FIRST,
     LAST,
+    MEASURE_PX,
+    NARROW_DESKTOP,
     NOT_FOUND_ERROR,
     PER_CAPITA_SUCCESS,
     RESOURCE_ERROR,
     SECTIONS,
     STATES_NOT_FOUND,
     STATES_SUCCESS,
+    WIDE_WIDTHS,
     assert_rendered,
+    boxes,
     composited,
     contrast_ratio,
     recorded,
+    rect,
+    rects,
     step_years,
 )
 
@@ -277,18 +285,6 @@ def open_c1(page: Page, year: int) -> None:
     page.goto(f"/election/{year}")
     assert_rendered(page, ELECTION_SUCCESS)
     page.locator(EC_BARS).first.wait_for()
-
-
-def boxes(page: Page, selector: str) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = page.eval_on_selector_all(
-        selector,
-        """els => els.map(el => {
-            const r = el.getBoundingClientRect();
-            return {x: r.x, y: r.y, w: r.width, h: r.height,
-                    text: el.textContent};
-        })""",
-    )
-    return found
 
 
 def overlaps(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -1023,10 +1019,6 @@ def test_a_degraded_per_capita_page_shows_no_chart(page: Page) -> None:
 #: The overview's top pair and its two columns, in source order.
 PAIR = "#election-top"
 PAIR_COLUMNS = f"{PAIR} > div"
-#: A width below the 76rem breakpoint (1216 px) and wider than the 64rem step, where
-#: every page is still its one column.
-NARROW_DESKTOP = 1100
-WIDE_WIDTHS = [1280, 1850]
 #: Every year the recorded responses serve all three election pages for, the contested
 #: 1868 and 1872 among them (1872 also has party notes): the years the wide layout is
 #: checked on.
@@ -1042,33 +1034,10 @@ PAGE_TABLES = {
     election_view.STATES: "#election-states",
     election_view.PER_CAPITA: "#election-per-capita",
 }
-#: The measure, 42rem at the default 16 px root size.
-MEASURE_PX = 42 * 16
-FILTER_MIN_PX, FILTER_MAX_PX = 14 * 16, 20 * 16
 
 
 def test_the_layout_years_are_the_seven_recorded() -> None:
     assert LAYOUT_YEARS == [1824, 1860, 1868, 1872, 1896, 2016, 2024]
-
-
-def rects(page: Page, selector: str) -> list[dict[str, float]]:
-    """Each match's box as edges, from :func:`boxes`."""
-    return [
-        {
-            "left": b["x"],
-            "right": b["x"] + b["w"],
-            "top": b["y"],
-            "bottom": b["y"] + b["h"],
-            "width": b["w"],
-        }
-        for b in boxes(page, selector)
-    ]
-
-
-def rect(page: Page, selector: str) -> dict[str, float]:
-    """The one match's box; a selector matching none or several fails."""
-    (found,) = rects(page, selector)
-    return found
 
 
 def wait_c1_fills(page: Page) -> None:

@@ -69,8 +69,10 @@
    page is one column up to 72rem wide, running text keeps the 42rem measure, and the
    side padding grows from 64rem. One wide breakpoint, at 76rem (about 1216 px, where
    the page reaches its full 72rem), adds two shared pieces a page opts into by class:
-   .filter-row lays a page's dropdown filters side by side, wrapping, and .pair sets two
-   sections in two equal columns. Below it every page is the one column it always was.
+   .filter-row lays a page's dropdown filters side by side, wrapping, with
+   .filter-own-row keeping a year control (a slider or year pills) on a row of its own
+   at the 42rem measure (#545), and .pair sets two sections in two equal columns.
+   Below it every page is the one column it always was.
    Nothing reorders: no rule sets order or places a grid item, so the left column is
    always the earlier element and reading and tab order follow the eye at every width.
    A table never goes in a pair (a table's 36rem minimum, .table-scroll table, is
@@ -541,6 +543,12 @@ fieldset.filter legend { padding: 0; }
    .filter-row is a second class on a page's .filters box: its dropdown filters sit side
    by side, each 14rem to 20rem, and wrap to fewer per row when they do not fit. It lifts
    the measure .filters carries, since controls are not running text.
+   .filter-own-row is a second class on one .filter in a filter row, a year slider's or
+   year pills' box (#545): the box takes the whole row, so the dropdowns after it share
+   the next row, and what it holds keeps the measure (a slider as wide as the page is
+   hard to set precisely). The cap is on the children, not the box: a box capped at the
+   measure would leave room on its line, and the first dropdown would sit beside it. It
+   follows .filter-row .filter, whose specificity it shares, so its basis and cap win.
    .pair is two equal columns, each holding one section, in source order. minmax(0, …),
    not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a
    child that cannot shrink (a chart given a fixed width, a long unbreakable token)
@@ -554,6 +562,8 @@ fieldset.filter legend { padding: 0; }
 @media (min-width: 76rem) {
   .filter-row { display: flex; flex-wrap: wrap; gap: 0 1rem; max-width: none; }
   .filter-row .filter { flex: 1 1 14rem; max-width: 20rem; }
+  .filter-row .filter-own-row { flex-basis: 100%; max-width: none; }
+  .filter-row .filter-own-row > * { max-width: var(--measure); }
   .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; align-items: start; margin-block: 1.75rem; }
   .pair > * > :first-child { margin-top: 0; }
   .pair > * > :last-child { margin-bottom: 0; }

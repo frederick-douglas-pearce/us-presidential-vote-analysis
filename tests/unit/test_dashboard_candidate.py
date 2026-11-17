@@ -428,6 +428,9 @@ class TestFilters:
         (fieldset,) = of_type(tree, "Fieldset")
         assert find(fieldset, MOD["YEAR_ID"]) is not None
         assert fieldset.hidden is (not shown)
+        # Hidden or not, the pills' box keeps its own-row class (#545); no rule sets
+        # its display, so ``hidden`` still hides it in the filter row.
+        assert fieldset.className.split() == ["filter", "filter-own-row"]
 
     def test_the_year_control_is_named_by_its_legend(self) -> None:
         (fieldset,) = of_type(render(), "Fieldset")
@@ -779,3 +782,38 @@ def test_the_state_filter_shows_its_options_and_value() -> None:
     assert label.children == labels.LABELS["state"]
     assert dropdown.placeholder == MOD["STATE_PLACEHOLDER"]
     assert dropdown.placeholder != label.children
+
+
+# --- the wide layout (#545, D102) -------------------------------------------------------
+
+
+class TestWideLayout:
+    """The candidate page's filters at desktop width (#545, the ``/candidate`` fold-in of
+    #543): one ``.filters`` box that is a filter row, the year pills first on a row of
+    their own, then the state dropdown. Nothing else on the page changes."""
+
+    def test_the_pills_have_their_own_row_and_the_state_follows(self) -> None:
+        tree = render()
+        boxes = [
+            node
+            for node in of_type(tree, "Div")
+            if (getattr(node, "className", None) or "").split()[:1] == ["filters"]
+        ]
+        assert len(boxes) == 1
+        (box,) = boxes
+        assert box.className.split() == ["filters", "filter-row"]
+        pills, state = box.children
+        assert type(pills).__name__ == "Fieldset"
+        assert pills.className.split() == ["filter", "filter-own-row"]
+        assert find(pills, MOD["YEAR_ID"]) is not None
+        assert state.className.split() == ["filter"]
+        assert [d.id for d in of_type(state, "Dropdown")] == [MOD["STATE_ID"]]
+
+    def test_year_buttons_take_the_own_row_class_only_when_asked(self) -> None:
+        def built(**kw: Any) -> list[str]:
+            pills: Any = components.year_buttons("y", "Year", "All", [1824], None, **kw)
+            return list(pills.className.split())
+
+        assert built() == ["filter"]
+        assert built(own_row=False) == ["filter"]
+        assert built(own_row=True) == ["filter", "filter-own-row"]

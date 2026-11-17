@@ -50,6 +50,9 @@ STATE_CONTROL = "#elections-state"
 # Ids of the state history (pages/state.py).
 STATE_SUCCESS = "#state"
 
+# Ids of the candidate history (pages/candidate.py).
+CANDIDATE_SUCCESS = "#candidate"
+
 # Ids of the one-election view (pages/election.py).
 ELECTION_SUCCESS = "#election"
 ELECTION_EARLIER = "#election-earlier"
@@ -262,3 +265,48 @@ def composited(color: str, backdrop: str) -> str:
     assert under[3] == 1, backdrop
     mixed = (round(alpha * c + (1 - alpha) * u) for c, u in zip((r, g, b), under[:3], strict=True))
     return "rgb({}, {}, {})".format(*mixed)
+
+
+# --- the wide layout (#544, #545, D102) ------------------------------------------------
+
+#: A width below the 76rem breakpoint (1216 px) and wider than the 64rem step, where
+#: every page is still its one column.
+NARROW_DESKTOP = 1100
+WIDE_WIDTHS = [1280, 1850]
+#: The measure, 42rem at the default 16 px root size.
+MEASURE_PX = 42 * 16
+#: A filter row's filter is 14rem to 20rem wide.
+FILTER_MIN_PX, FILTER_MAX_PX = 14 * 16, 20 * 16
+
+
+def boxes(page: Page, selector: str) -> list[dict[str, Any]]:
+    """Each match's bounding box and text, in document order."""
+    found: list[dict[str, Any]] = page.eval_on_selector_all(
+        selector,
+        """els => els.map(el => {
+            const r = el.getBoundingClientRect();
+            return {x: r.x, y: r.y, w: r.width, h: r.height,
+                    text: el.textContent};
+        })""",
+    )
+    return found
+
+
+def rects(page: Page, selector: str) -> list[dict[str, float]]:
+    """Each match's box as edges, from :func:`boxes`."""
+    return [
+        {
+            "left": b["x"],
+            "right": b["x"] + b["w"],
+            "top": b["y"],
+            "bottom": b["y"] + b["h"],
+            "width": b["w"],
+        }
+        for b in boxes(page, selector)
+    ]
+
+
+def rect(page: Page, selector: str) -> dict[str, float]:
+    """The one match's box; a selector matching none or several fails."""
+    (found,) = rects(page, selector)
+    return found

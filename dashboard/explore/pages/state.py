@@ -329,7 +329,8 @@ def _controls(
                         YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
                     ),
                 ],
-                className="filter",
+                # The slider keeps a row of its own, at the measure, from 76rem (#545).
+                className="filter filter-own-row",
             ),
             components.dropdown_filter(
                 CANDIDATE_ID,
@@ -346,7 +347,8 @@ def _controls(
                 "Any",
             ),
         ],
-        className="filters",
+        # A filter row from 76rem (#545, D102): the two dropdowns side by side under it.
+        className="filters filter-row",
     )
 
 
