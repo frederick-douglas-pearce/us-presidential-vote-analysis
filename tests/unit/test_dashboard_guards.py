@@ -1315,30 +1315,35 @@ def pair_class_uses(source: str) -> list[str]:
     """Each place ``source`` sets the ``pair`` class (#553, D103), as
     ``"<function>: line <n>"`` (the line where the class expression names it): a
     string in a class expression whose words include ``pair``, literal, in a
-    multi-class string, an f-string or a join, or a module-level name bound once to
-    such a string. It reads source, so a class passed through a local variable, a
-    function's return value or a parameter, ``setattr``, ``exec`` or ``eval``, and a
-    class built at runtime are not seen."""
+    multi-class string, an f-string or a join, or a module-level name a plain,
+    chained, tuple or annotated assignment binds to such a string. It reads source,
+    so a class passed through a local variable, a function's return value or a
+    parameter, ``setattr``, ``exec`` or ``eval``, and a class built at runtime are
+    not seen."""
     tree = ast.parse(source)
-    # A module-level name bound once to a string reads as that string in a class
-    # expression, so ``PAIR = "pair"`` then ``className=PAIR`` is caught.
+    # A module-level name bound to a string reads as that string in a class
+    # expression, so ``PAIR = "pair"`` then ``className=PAIR`` is caught, as are a
+    # chained (``A = B = "pair"``), tuple (``A, B = "pair", "x"``) or annotated one.
     constants: dict[str, ast.Constant] = {}
-    for stmt in tree.body:
-        if (
-            isinstance(stmt, ast.Assign)
-            and len(stmt.targets) == 1
-            and isinstance(stmt.targets[0], ast.Name)
-            and isinstance(stmt.value, ast.Constant)
-            and isinstance(stmt.value.value, str)
-        ):
-            constants[stmt.targets[0].id] = stmt.value
+
+    def bind(target: ast.AST, value: ast.AST | None) -> None:
+        if isinstance(target, ast.Name):
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                constants[target.id] = value
         elif (
-            isinstance(stmt, ast.AnnAssign)
-            and isinstance(stmt.target, ast.Name)
-            and isinstance(stmt.value, ast.Constant)
-            and isinstance(stmt.value.value, str)
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(value, (ast.Tuple, ast.List))
+            and len(target.elts) == len(value.elts)
         ):
-            constants[stmt.target.id] = stmt.value
+            for inner, held in zip(target.elts, value.elts, strict=True):
+                bind(inner, held)
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                bind(target, stmt.value)
+        elif isinstance(stmt, ast.AnnAssign):
+            bind(stmt.target, stmt.value)
     owner: dict[int, str] = {}
     for fn in ast.walk(tree):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1358,7 +1363,8 @@ def pair_class_uses(source: str) -> list[str]:
                 and "pair" in node.value.split()
             ):
                 where = owner.get(id(found_node), "<module>")
-                found.append(f"{where}: line {node.lineno}")
+                line = getattr(found_node, "lineno", 0)
+                found.append(f"{where}: line {line}")
     return found
 
 
@@ -1390,6 +1396,10 @@ def test_only_components_builds_a_pair() -> None:
         ("d = html.Div([])\nd.className = 'pair'\n", True),
         ("PAIR = 'pair'\nhtml.Div([], className=PAIR)\n", True),
         ("PAIR: str = 'note pair'\nhtml.Div([], className=f'{PAIR} x')\n", True),
+        ("A = B = 'pair'\nhtml.Div([], className=A)\n", True),
+        ("A, B = 'x', 'pair'\nhtml.Div([], className=B)\n", True),
+        ("[A, (B, C)] = ['x', ('y', 'pair')]\nhtml.Div([], className=C)\n", True),
+        ("A, B = 'pair', 'x'\nhtml.Div([], className=B)\n", False),
         ("PAIR = 'pairs'\nhtml.Div([], className=PAIR)\n", False),
         ("NAME = 'pair'\nhtml.Div([], id=NAME)\n", False),
         ('"""A docstring about a pair."""\n', False),
@@ -1400,6 +1410,12 @@ def test_only_components_builds_a_pair() -> None:
 )
 def test_the_pair_lint_catches_the_listed_ways(source: str, caught: bool) -> None:
     assert bool(pair_class_uses(source)) is caught
+
+
+def test_the_pair_lint_names_where_the_class_is_set() -> None:
+    """A resolved constant is reported at the class expression, not its definition."""
+    source = "PAIR = 'pair'\n\n\ndef build():\n    return html.Div([], className=PAIR)\n"
+    assert pair_class_uses(source) == ["build: line 5"]
 
 
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:

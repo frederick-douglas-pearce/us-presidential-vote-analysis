@@ -6982,7 +6982,7 @@ down).
 `dashboard/explore/` and fails any place outside `components.pair` that sets the `pair` class:
 a `className=` argument, a `"className"` dict entry or an assignment to `.className`, written
 as a literal, inside a multi-class string, in an f-string, in a join, or as a module-level name
-bound once to such a string. `test_the_pair_lint_catches_the_listed_ways` pins what it
+a plain, chained, tuple or annotated assignment binds to such a string. `test_the_pair_lint_catches_the_listed_ways` pins what it
 catches. It reads source, so a class passed through a local variable, a return value or a
 parameter, `setattr`, `exec` or `eval` is not seen. The overview's pair (#544) moved onto the
 builder with its markup unchanged.
@@ -6993,7 +6993,8 @@ from 0.875rem (the note's 1em) to 1.75rem. The owner accepted that at #553's pla
 than adding a second rule.
 (d) **Residual, accepted by the owner as meeting the criterion (#553's code review).** A table
 placed in a pair only on a render branch no test renders, or written into a pair's column by a
-callback output, is not caught. No callback writes into a pair's column today. A later pair
+callback output, is not caught. No callback writes a pair's column, or anything inside one but a
+chart's graph (the chart mount and draw callbacks), today. A later pair
 (#546) should have its page's tests render the pair's degraded and empty branches, and a pair
 whose column becomes a callback's output target is outside this check.
 
