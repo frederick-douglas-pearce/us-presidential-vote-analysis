@@ -162,7 +162,8 @@ def _control(rows: list[dict[str, Any]], chosen: str | None) -> html.Div:
                 "All states",
             )
         ],
-        className="filters",
+        # The filter row's rule from 76rem (#544, D102), as on the states page.
+        className="filters filter-row",
     )
 
 

@@ -245,7 +245,8 @@ def _controls(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
                 "Any",
             ),
         ],
-        className="filters",
+        # A filter row from 76rem (#544, D102): the four sit side by side above T2.
+        className="filters filter-row",
     )
 
 

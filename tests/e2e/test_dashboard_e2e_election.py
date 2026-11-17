@@ -374,14 +374,7 @@ def test_c1_on_2016_is_readable_at_390_px(page: Page) -> None:
     # The drawing fills its box, now and after a resize (#433's responsive check).
     for width in (390, 340):
         page.set_viewport_size({"width": width, "height": 844})
-        page.wait_for_function(
-            f"""() => {{
-                const svg = document.querySelector("{C1} .main-svg");
-                const box = document.querySelector("{C1} .chart-graph");
-                return svg && Math.abs(svg.getBoundingClientRect().width
-                    - box.getBoundingClientRect().width) < 1;
-            }}"""
-        )
+        wait_c1_fills(page)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
@@ -1023,3 +1016,270 @@ def test_a_degraded_per_capita_page_shows_no_chart(page: Page) -> None:
     page.goto(f"/election/{year}/per-capita")
     expect(page.get_by_text(components.UNAVAILABLE_MESSAGE)).to_be_visible()
     expect(page.locator(C3)).to_have_count(0)
+
+
+# --- the wide layout (#544, D102) ------------------------------------------------------
+
+#: The overview's top pair and its two columns, in source order.
+PAIR = "#election-top"
+PAIR_COLUMNS = f"{PAIR} > div"
+#: A width below the 76rem breakpoint (1216 px) and wider than the 64rem step, where
+#: every page is still its one column.
+NARROW_DESKTOP = 1100
+WIDE_WIDTHS = [1280, 1850]
+#: Every year the recorded responses serve all three election pages for, the contested
+#: 1868 and 1872 among them (1872 also has party notes): the years the wide layout is
+#: checked on.
+LAYOUT_YEARS = sorted(
+    year
+    for year in (int(row["year"]) for row in ELECTIONS["data"])
+    if f"/v1/elections/{year}" in RECORDED_FILES
+    and f"/v1/elections/{year}/per-capita" in RECORDED_FILES
+)
+#: Each election page's table, which must be on it before its scroll is checked.
+PAGE_TABLES = {
+    election_view.OVERVIEW: "#election-nation",
+    election_view.STATES: "#election-states",
+    election_view.PER_CAPITA: "#election-per-capita",
+}
+#: The measure, 42rem at the default 16 px root size.
+MEASURE_PX = 42 * 16
+FILTER_MIN_PX, FILTER_MAX_PX = 14 * 16, 20 * 16
+
+
+def test_the_layout_years_are_the_seven_recorded() -> None:
+    assert LAYOUT_YEARS == [1824, 1860, 1868, 1872, 1896, 2016, 2024]
+
+
+def rects(page: Page, selector: str) -> list[dict[str, float]]:
+    """Each match's box as edges, from :func:`boxes`."""
+    return [
+        {
+            "left": b["x"],
+            "right": b["x"] + b["w"],
+            "top": b["y"],
+            "bottom": b["y"] + b["h"],
+            "width": b["w"],
+        }
+        for b in boxes(page, selector)
+    ]
+
+
+def rect(page: Page, selector: str) -> dict[str, float]:
+    """The one match's box; a selector matching none or several fails."""
+    (found,) = rects(page, selector)
+    return found
+
+
+def wait_c1_fills(page: Page) -> None:
+    """C1's drawing as wide as its box (#433's responsive check)."""
+    page.wait_for_function(
+        f"""() => {{
+            const svg = document.querySelector("{C1} .main-svg");
+            const box = document.querySelector("{C1} .chart-graph");
+            return svg && Math.abs(svg.getBoundingClientRect().width
+                - box.getBoundingClientRect().width) < 1;
+        }}"""
+    )
+
+
+def heading_gap(page: Page) -> float:
+    """The space between the section links and the first heading after them."""
+    sections = rect(page, f"#{election_view.SECTIONS_ID}")
+    first = rect(page, f"{PAIR_COLUMNS}:first-child > h2")
+    return first["top"] - sections["bottom"]
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+@pytest.mark.parametrize("year", LAYOUT_YEARS)
+def test_wide_the_overview_sets_the_panel_beside_national_results(
+    page: Page, year: int, width: int
+) -> None:
+    open_year(page, year, "light", width)
+    page.locator(EC_BARS).first.wait_for()
+    wait_c1_fills(page)
+    left, right = rects(page, PAIR_COLUMNS)
+    # Two columns side by side, apart, tops aligned, equal widths.
+    assert left["right"] < right["left"], (left, right)
+    assert abs(left["top"] - right["top"]) <= 1, (left, right)
+    assert abs(left["width"] - right["width"]) <= 1, (left, right)
+    # The left column opens on its heading, then the panel (or its sentence); the
+    # right on National results' heading, with C1 in it.
+    first = page.eval_on_selector(
+        f"{PAIR_COLUMNS}:first-child > :first-child",
+        "el => [el.tagName, el.textContent]",
+    )
+    assert first == ["H2", "Under each method"]
+    panel = rect(page, f"{PAIR_COLUMNS}:first-child .panel")
+    assert left["left"] - 0.5 <= panel["left"] and panel["right"] <= left["right"] + 0.5
+    chart = rect(page, f"{PAIR_COLUMNS}:last-child {C1}")
+    assert right["left"] - 0.5 <= chart["left"]
+    assert chart["right"] <= right["right"] + 0.5
+    graph = rect(page, f"{C1} .chart-graph")
+    assert abs(graph["width"] - right["width"]) <= 1, (graph, right)
+    # T3 below both, across both, a heading's gap under the taller column.
+    t3 = rect(page, ".table-scroll:has(#election-nation)")
+    gap = page.evaluate(
+        "parseFloat(getComputedStyle(document.querySelector('h2')).marginTop)"
+    )
+    assert t3["top"] - max(left["bottom"], right["bottom"]) >= gap - 1, (t3, gap)
+    assert abs(t3["left"] - left["left"]) <= 1 and abs(t3["right"] - right["right"]) <= 1
+    print(
+        f"#544 overview {year} at {width} px: panel column"
+        f" {left['bottom'] - left['top']:.0f} px, C1 column"
+        f" {right['bottom'] - right['top']:.0f} px tall"
+    )
+
+
+@pytest.mark.parametrize("year", LAYOUT_YEARS)
+def test_the_pair_keeps_the_one_column_space_above_it(page: Page, year: int) -> None:
+    open_year(page, year, "light", NARROW_DESKTOP)
+    narrow = heading_gap(page)
+    for width in WIDE_WIDTHS:
+        page.set_viewport_size({"width": width, "height": 900})
+        page.wait_for_function(
+            f"getComputedStyle(document.querySelector('{PAIR}')).display === 'grid'"
+        )
+        assert abs(heading_gap(page) - narrow) <= 1, (width, narrow)
+
+
+@pytest.mark.parametrize("year", LAYOUT_YEARS)
+def test_narrow_the_overview_stacks_as_before(page: Page, year: int) -> None:
+    for width in (390, NARROW_DESKTOP):
+        open_year(page, year, "light", width)
+        left, right = rects(page, PAIR_COLUMNS)
+        assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
+        assert abs(left["left"] - right["left"]) <= 0.5, (width, left, right)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c1_fills_its_column_after_a_resize_across_the_breakpoint(page: Page) -> None:
+    open_year(page, 2016, "light", 1280)
+    page.locator(EC_BARS).first.wait_for()
+    # Out of the grid and back, then wider and narrower inside it: C1 follows its
+    # column and the columns stay equal. (Today's responsive charts hold no column
+    # open, so this cannot tell 1fr from minmax(0, 1fr);
+    # test_a_wide_child_cannot_hold_its_column_open does.)
+    for width in (1280, NARROW_DESKTOP, 1280, 1850, 1280):
+        page.set_viewport_size({"width": width, "height": 900})
+        wait_c1_fills(page)
+        left, right = rects(page, PAIR_COLUMNS)
+        graph = rect(page, f"{C1} .chart-graph")
+        assert abs(graph["width"] - right["width"]) <= 1, (width, graph, right)
+        if width >= 1216:
+            assert abs(left["width"] - right["width"]) <= 1, (width, left, right)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+def filter_rects(page: Page, success: str) -> list[dict[str, float]]:
+    return rects(page, f"{success} .filter-row > .filter")
+
+
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+def test_wide_the_states_filters_share_one_row(page: Page, width: int) -> None:
+    open_year(page, 2016, "light", width, election_view.STATES)
+    found = filter_rects(page, STATES_SUCCESS)
+    assert len(found) == 4
+    assert {round(f["top"]) for f in found} == {round(found[0]["top"])}, found
+    for a, b in zip(found, found[1:], strict=False):
+        assert a["right"] < b["left"], found  # in source order, left to right
+    for f in found:
+        assert FILTER_MIN_PX - 0.5 <= f["width"] <= FILTER_MAX_PX + 0.5, found
+    t2 = rect(page, ".table-scroll:has(#election-states)")
+    assert t2["top"] >= max(f["bottom"] for f in found)
+
+
+@pytest.mark.parametrize("width", [390, NARROW_DESKTOP])
+def test_narrow_the_states_filters_stack_as_before(page: Page, width: int) -> None:
+    open_year(page, 2016, "light", width, election_view.STATES)
+    found = filter_rects(page, STATES_SUCCESS)
+    assert len(found) == 4
+    for a, b in zip(found, found[1:], strict=False):
+        assert b["top"] >= a["bottom"] - 0.5, (width, found)
+        assert abs(a["left"] - b["left"]) <= 0.5, (width, found)
+
+
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+def test_wide_the_per_capita_filter_follows_the_filter_row(
+    page: Page, width: int
+) -> None:
+    open_year(page, 2016, "light", width, election_view.PER_CAPITA)
+    found = rect(page, f"{PER_CAPITA_SUCCESS} .filter-row > .filter")
+    assert FILTER_MIN_PX - 0.5 <= found["width"] <= FILTER_MAX_PX + 0.5, found
+
+
+@pytest.mark.parametrize("width", [390, NARROW_DESKTOP])
+def test_narrow_the_per_capita_filter_fills_its_box_as_before(
+    page: Page, width: int
+) -> None:
+    open_year(page, 2016, "light", width, election_view.PER_CAPITA)
+    box = rect(page, f"{PER_CAPITA_SUCCESS} .filters")
+    found = rect(page, f"{PER_CAPITA_SUCCESS} .filters > .filter")
+    assert abs(found["width"] - box["width"]) <= 0.5, (width, found, box)
+    assert found["width"] > FILTER_MAX_PX, (width, found)
+
+
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("section", election_view.SECTIONS)
+@pytest.mark.parametrize("year", LAYOUT_YEARS)
+def test_every_width_keeps_order_measure_and_tables(
+    page: Page, year: int, section: str, width: int
+) -> None:
+    """At every width: no box is reordered and none has a positive tab index; every
+    paragraph, chart caption and party-notes item is within the 42rem measure; the
+    page never scrolls sideways; and from about 1280 px the page's table does not
+    either."""
+    open_year(page, year, "light", width, section)
+    found = page.evaluate(
+        f"""() => {{
+            const root = document.querySelector("{PAGES[section]}");
+            const all = [...root.querySelectorAll("*")];
+            const reordered = all.filter(el => {{
+                const s = getComputedStyle(el);
+                return s.order !== "0" || /reverse/.test(s.flexDirection)
+                    || s.gridRowStart !== "auto" || s.gridColumnStart !== "auto";
+            }}).map(el => el.id || el.className || el.tagName);
+            const tabbed = all.filter(el => el.tabIndex > 0)
+                .map(el => el.id || el.tagName);
+            const text = [...root.querySelectorAll("p, figcaption, .party-notes li")];
+            const wide = text
+                .filter(el => el.getBoundingClientRect().width > {MEASURE_PX} + 0.5)
+                .map(el => el.tagName + ": " + el.textContent.slice(0, 40));
+            const table = root.querySelector(".table-scroll:has({PAGE_TABLES[section]})");
+            return {{reordered, tabbed, wide, texts: text.length,
+                     table: table && table.scrollWidth <= table.clientWidth + 1,
+                     page: document.documentElement.scrollWidth <= innerWidth}};
+        }}"""
+    )
+    assert found["reordered"] == [], found
+    assert found["tabbed"] == [], found
+    assert found["texts"] > 0 and found["wide"] == [], found
+    assert found["page"], found
+    assert found["table"] is not None, found  # the page's table is there
+    if width >= 1280:
+        assert found["table"], found
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_a_wide_child_cannot_hold_its_column_open(page: Page) -> None:
+    """The pair's minmax(0, …) tracks (D102(b)): a child that cannot shrink, put in
+    the right column at 1280 px, overflows its column instead of widening it, so the
+    two columns stay equal (a 1fr track would grow to the child's min-content).
+    Today's charts are responsive, so this inserts such a child rather than waiting
+    for one."""
+    open_year(page, 2016, "light", 1280)
+    page.locator(EC_BARS).first.wait_for()
+    page.eval_on_selector(
+        f"{PAIR_COLUMNS}:last-child",
+        """col => { const wide = document.createElement("div");
+                    wide.style.width = "900px"; wide.style.height = "1px";
+                    col.appendChild(wide); }""",
+    )
+    left, right = rects(page, PAIR_COLUMNS)
+    # The child is still there, at its width, wider than the column it overflows.
+    child = rect(page, f"{PAIR_COLUMNS}:last-child > div:last-child")
+    assert abs(child["width"] - 900) <= 0.5, child
+    assert abs(left["width"] - right["width"]) <= 1, (left, right)
+    assert left["right"] < right["left"], (left, right)
+    assert right["width"] < child["width"] - 1, (right, child)  # it did not grow
