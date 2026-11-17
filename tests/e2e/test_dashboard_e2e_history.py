@@ -80,8 +80,8 @@ def test_wide_the_year_control_has_its_own_row_and_the_dropdowns_follow(
     assert abs(own["width"] - box["width"]) <= 0.5, (own, box)
     held = rects(page, f"{success} .filters > .filter-own-row > *")
     assert held and all(h["width"] <= MEASURE_PX + 0.5 for h in held), held
-    # The control itself (not its label, which is a block and always the measure
-    # wide) reaches the measure.
+    # The control itself reaches the measure; its label would not prove it, since the
+    # state page's label is a block and always the measure wide.
     control = rect(page, f"{success} .filter-own-row {CONTROLS[path]}")
     assert abs(control["width"] - MEASURE_PX) <= 0.5, control
     found = dropdown_filters(page, path)
