@@ -894,7 +894,10 @@ class TestThemeContrast:
         assert "text-decoration" not in link  # the links keep their underline
         assert toggle_rule(".neighbor-nav .neighbor-later") == {"margin-left": "auto"}
         measure = [
-            p for _, p, b in shipped_rules() if "max-width: var(--measure)" in b
+            p
+            for at, p, b in shipped_rules()
+            # The page-wide measure rule: only the 76rem year control's is exempt (#545).
+            if "max-width: var(--measure)" in b and not own_row_measure(at, p)
         ]
         assert len(measure) == 1 and ".neighbor-nav" in measure[0].split(", ")
 
@@ -1695,6 +1698,14 @@ class TestThemeSelected:
 
 
 WIDE = "@media (min-width: 76rem)"
+#: The one measure rule besides the page-wide one: what a year control's own row
+#: holds, from 76rem (#545). Pinned in TestLayoutRules.test_a_year_control_keeps_a_row_of_its_own_at_the_measure.
+OWN_ROW_HELD = (WIDE, ".filter-row .filter-own-row > *")
+
+
+def own_row_measure(at: str | None, prelude: str) -> bool:
+    """Whether a rule is exactly the year control's measure rule (#545)."""
+    return (at, " ".join(prelude.split())) == OWN_ROW_HELD
 
 
 class TestLayoutRules:
@@ -1709,6 +1720,8 @@ class TestLayoutRules:
         assert {" ".join(p.split()) for p, _ in wide} == {
             ".filter-row",
             ".filter-row .filter",
+            ".filter-row .filter-own-row",
+            ".filter-row .filter-own-row > *",
             ".pair",
             ".pair > * > :first-child",
             ".pair > * > :last-child",
@@ -1724,6 +1737,35 @@ class TestLayoutRules:
         assert row["gap"] == "0 1rem"
         each = toggle_rule(".filter-row .filter", WIDE)
         assert each == {"flex": "1 1 14rem", "max-width": "20rem"}
+
+    def test_a_year_control_keeps_a_row_of_its_own_at_the_measure(self) -> None:
+        # #545: the box takes the whole row, so the dropdowns wrap below it, and what
+        # it holds keeps the measure. A capped box would leave room on its line.
+        own = toggle_rule(".filter-row .filter-own-row", WIDE)
+        assert own == {"flex-basis": "100%", "max-width": "none"}
+        held = toggle_rule(".filter-row .filter-own-row > *", WIDE)
+        assert held == {"max-width": "var(--measure)"}
+        # Equal specificity to .filter-row .filter, so it must come later to win.
+        wide = [" ".join(p.split()) for at, p, _ in shipped_rules() if at == WIDE]
+        assert wide.index(".filter-row .filter-own-row") > wide.index(
+            ".filter-row .filter"
+        )
+
+    def test_the_measure_exemption_names_a_shipped_rule(self) -> None:
+        # The two measure guards exempt exactly this rule; it must exist, so the
+        # exemption cannot go stale and hide another.
+        assert [r for r in shipped_rules() if own_row_measure(r[0], r[1])], OWN_ROW_HELD
+
+    def test_no_rule_sets_a_filters_display(self) -> None:
+        # A filter's box keeps the browser's own display, so a hidden one (the
+        # candidate page's pills for a one-election candidate) stays hidden in a filter
+        # row: an author display would beat [hidden] (#545's review). The word
+        # boundary keeps .filter-row's own display: flex out of it.
+        whole = re.compile(r"\.(filter|filter-own-row)(?![-\w])")
+        for at, prelude, body in shipped_rules():
+            if whole.search(prelude):
+                names = {name for name, _ in declarations(body)}
+                assert "display" not in names, (at, prelude)
 
     def test_the_pair_is_two_equal_columns_that_can_shrink(self) -> None:
         pair = toggle_rule(".pair", WIDE)
@@ -1747,8 +1789,9 @@ class TestLayoutRules:
     def test_running_text_beyond_paragraphs_keeps_the_measure(self) -> None:
         measure = [
             p.split(", ")
-            for _, p, b in shipped_rules()
-            if "max-width: var(--measure)" in b
+            for at, p, b in shipped_rules()
+            # The page-wide measure rule: only the 76rem year control's is exempt (#545).
+            if "max-width: var(--measure)" in b and not own_row_measure(at, p)
         ]
         (selectors,) = measure
         selectors = [" ".join(s.split()) for s in selectors]
@@ -1757,7 +1800,7 @@ class TestLayoutRules:
 
     def test_neither_piece_applies_below_the_breakpoint(self) -> None:
         for at, prelude, _ in shipped_rules():
-            names = re.findall(r"\.(filter-row|pair)\b", prelude)
+            names = re.findall(r"\.(filter-row|filter-own-row|pair)\b", prelude)
             assert not names or at == WIDE, (at, prelude)
 
     def test_nothing_reorders_the_source(self) -> None:
@@ -1787,5 +1830,6 @@ class TestLayoutRules:
     def test_the_header_comment_describes_the_layout(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")
         header = " ".join(css[: css.index("*/")].split())
-        for piece in ("76rem", ".filter-row", ".pair", "42rem", "D102"):
+        pieces = ("76rem", ".filter-row", ".filter-own-row", ".pair", "42rem", "D102")
+        for piece in pieces:
             assert piece in header, piece

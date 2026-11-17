@@ -38,7 +38,7 @@ from tests.unit.test_dashboard_app import (
     texts,
     url,
 )
-from tests.unit.test_dashboard_elections import find, of_type, parse
+from tests.unit.test_dashboard_elections import classed, find, of_type, parse
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -1088,3 +1088,53 @@ def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -
     }
     assert candidate.placeholder != shown["state-candidate"]
     assert pv_status.placeholder != shown["state-pv-status"]
+
+
+# --- the wide layout (#545, D102) -------------------------------------------------------
+
+
+class TestWideLayout:
+    """The state history's filters at desktop width (#545): one ``.filters`` box that
+    is a filter row, the slider's box first on a row of its own, then the two dropdown
+    filters in source order. The rules are pinned in ``TestLayoutRules``
+    (``test_dashboard_theme.py``) and what a browser draws in
+    ``tests/e2e/test_dashboard_e2e_history.py``."""
+
+    @pytest.mark.parametrize("query", ["", "candidate=abraham-lincoln&year_from=1860"])
+    def test_the_slider_has_its_own_row_and_the_dropdowns_share_one(
+        self, query: str
+    ) -> None:
+        tree = render(query)
+        (box,) = classed(tree, "filters")
+        assert box.className.split() == ["filters", "filter-row"]
+        kids = list(box.children)
+        assert [k.className.split() for k in kids] == [
+            ["filter", "filter-own-row"],
+            ["filter"],
+            ["filter"],
+        ]
+        assert find(kids[0], MOD["YEARS_ID"]) is not None
+        assert [d.id for d in of_type(kids[1:], "Dropdown")] == [
+            MOD["CANDIDATE_ID"],
+            MOD["PV_STATUS_ID"],
+        ]
+        # Only the slider's box keeps its own row.
+        assert classed(tree, "filter-own-row") == [kids[0]]
+
+    def test_no_slot_is_built_after_the_lede(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The future chart slot after the lede is a placement only (#543 §6). The lede
+        # is added by layout(), so the whole page is checked there: the heading, the
+        # lede and the page body, nothing between; in the body, the filters straight
+        # after the page's Location; and no chart anywhere.
+        cached_client(monkeypatch)
+        page = MOD["layout"](usps="GA")
+        heading, lede, content = page.children
+        assert type(heading).__name__ == "H1"
+        assert type(lede).__name__ == "P" and lede.className == "lede"
+        assert getattr(content, "id", None) == PAGE_ID
+        kids = list(content.children)
+        assert type(kids[0]).__name__ == "Location"
+        assert kids[1].className.split()[:1] == ["filters"]
+        assert of_type(page, "Figure") == []

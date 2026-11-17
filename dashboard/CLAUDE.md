@@ -19,13 +19,13 @@ for its N2 recording, `TestN2Fixture`), `tests/unit/test_dashboard_election.py`
 (the election pages, #307 and #465, the overview's panel, #308, chart C1, #433, in `TestC1`, chart C3, #435, in `TestC3`, the
 earlier-and-later bar's structure, #464, in `TestNeighborBar`, the section links in
 `TestSectionLinks`, and the wide layout's markup, #544, in `TestWideLayout`), `tests/unit/test_dashboard_state.py`
-(the state history and the state picker, #279), `tests/unit/test_dashboard_candidate.py`
-(the candidate history and the candidate links, #331), `tests/unit/test_dashboard_export.py`
+(the state history and the state picker, #279, and its wide layout's markup, #545, in `TestWideLayout`), `tests/unit/test_dashboard_candidate.py`
+(the candidate history and the candidate links, #331, and its wide layout's markup, #545, in `TestWideLayout`), `tests/unit/test_dashboard_export.py`
 (every table's CSV download, #309), `tests/unit/test_dashboard_theme.py` (the theme
 choice's color tokens, contrast, head script, toggle, icons and store, #359, #447, and the
 site navigation's contrast and focus-ring gaps, #448, the chart tokens' contrast and
 color-vision separation, #432, and the earlier-and-later bar's contrast, premises,
-chevrons and pinned declarations, #464, and the wide layout's rules, #544, in
+chevrons and pinned declarations, #464, and the wide layout's rules, #544 and #545, in
 `TestLayoutRules`), `tests/unit/test_dashboard_nav.py`
 (the site navigation's structure, wording, current-page table and callback, #448),
 `tests/unit/test_dashboard_charts.py` (the chart registry, `components.chart`, the figure
@@ -104,7 +104,14 @@ C1 filling its column and the columns staying equal across resizes over and with
 76rem breakpoint, a 900 px child that cannot shrink overflowing its column rather than
 widening it (`minmax(0, …)`), the states page's four filters in one row above T2 and the per-capita
 page's filter in the same 14–20rem row rule, both pages' filters stacking as before at 1100
-and 390 px; and the
+and 390 px; the state history's and candidate page's wide layout (#545,
+`test_dashboard_e2e_history.py`, on `/state/GA` and `/candidate/andrew-jackson`): at 1280
+and 1850 px the year control's box taking its own row with what it holds at the 42rem
+measure, the dropdown filters in one row below it, each 14–20rem, above the first table;
+the filters stacking as before at 1100 and 390 px; and at every width no reordered box or
+positive tab index, every paragraph, chart caption and party-notes item within 42rem,
+no sideways scroll, and from 1280 px none
+in T4, T7 or T5; and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
 across a client-side navigation and a reload, no flash of the other palette (checked at
 the moment `<body>` is inserted and in the frame before first paint) nor of the toggle's

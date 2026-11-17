@@ -163,14 +163,16 @@ def year_buttons(
     chosen: int | None,
     *,
     hidden: bool = False,
+    own_row: bool = False,
 ) -> html.Fieldset:
     """A single-choice year control (#331): ``all_label`` first, then one button per
     year, as an inline radio group named by ``legend``.
 
     ``chosen`` is the one year applied, or ``None`` for every year. With ``hidden`` the
     group is still rendered, so a page's one filter callback keeps all its inputs, but
-    not shown. No ``persistence``: it would override the URL, which is where the year
-    lives.
+    not shown. With ``own_row`` the group's box also takes ``filter-own-row``, which in
+    a ``filter-row`` keeps it on a row of its own from 76rem (#545). No
+    ``persistence``: it would override the URL, which is where the year lives.
     """
     return html.Fieldset(
         [
@@ -186,7 +188,7 @@ def year_buttons(
                 className="year-buttons",
             ),
         ],
-        className="filter",
+        className="filter filter-own-row" if own_row else "filter",
         hidden=hidden,
     )
 

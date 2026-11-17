@@ -319,6 +319,7 @@ def _controls(
                 years,
                 chosen.year,
                 hidden=not several,
+                own_row=True,
             ),
             components.dropdown_filter(
                 STATE_ID,
@@ -328,7 +329,9 @@ def _controls(
                 STATE_PLACEHOLDER,
             ),
         ],
-        className="filters",
+        # A filter row from 76rem (#545, D102): the pills on their own row, the state
+        # dropdown under them.
+        className="filters filter-row",
     )
 
 
