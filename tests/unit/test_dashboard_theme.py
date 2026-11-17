@@ -1710,6 +1710,8 @@ class TestLayoutRules:
             ".filter-row",
             ".filter-row .filter",
             ".pair",
+            ".pair > * > :first-child",
+            ".pair > * > :last-child",
         }
         assert {at for at, _, _ in shipped_rules() if at and "76rem" in at} == {WIDE}
 
@@ -1727,6 +1729,27 @@ class TestLayoutRules:
         # minmax(0, 1fr), not 1fr: a chart's pixel width must not hold its column open.
         assert pair["grid-template-columns"] == "repeat(2, minmax(0, 1fr))"
         assert pair["align-items"] == "start"
+
+    def test_the_pair_spaces_like_a_section_heading(self) -> None:
+        # A grid item's margins stay inside it, so each column drops its outer
+        # margins and the pair takes a section heading's top margin, which collapses
+        # with its neighbors' as the heading's did on the one-column page (#544's
+        # review). The e2e suite measures the result against 1100 px.
+        h2_top = toggle_rule("h2")["margin"].split()[0]
+        assert toggle_rule(".pair", WIDE)["margin-block"] == h2_top
+        assert toggle_rule(".pair > * > :first-child", WIDE) == {"margin-top": "0"}
+        assert toggle_rule(".pair > * > :last-child", WIDE) == {"margin-bottom": "0"}
+
+    def test_running_text_beyond_paragraphs_keeps_the_measure(self) -> None:
+        measure = [
+            p.split(", ")
+            for _, p, b in shipped_rules()
+            if "max-width: var(--measure)" in b
+        ]
+        (selectors,) = measure
+        selectors = [" ".join(s.split()) for s in selectors]
+        for wanted in ("figcaption", ".party-notes", ".explore p"):
+            assert wanted in selectors, wanted
 
     def test_neither_piece_applies_below_the_breakpoint(self) -> None:
         for at, prelude, _ in shipped_rules():
@@ -1751,8 +1774,11 @@ class TestLayoutRules:
             for name, value in declarations(body):
                 where = (at, prelude, name, value)
                 assert name not in placement, where
-                assert not (name == "flex-direction" and "reverse" in value), where
-                assert not (name == "grid-auto-flow" and "dense" in value), where
+                # Longhand or shorthand: a reversed flex line, or a dense grid fill.
+                flex = name in {"flex-direction", "flex-flow"}
+                assert not (flex and "reverse" in value), where
+                grid = name in {"grid-auto-flow", "grid"}
+                assert not (grid and "dense" in value), where
 
     def test_the_header_comment_describes_the_layout(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")

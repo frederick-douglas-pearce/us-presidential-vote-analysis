@@ -93,12 +93,16 @@ title inside 390 px with none over another, each bar centered on its row name an
 name, the present-day bars striped in the page color in both themes; the selected state's mark over no drawn text
 (2024 California and Wyoming, 1848 Texas) with T6 narrowed to one row; a theme switch redrawing it
 with no request; a blocked CDN leaving its title, caption, pointer and T6; and no chart on the
-not-found or degraded per-capita page; the election pages' wide layout (#544, D102): at
-1280 and 1850 px the overview's panel and C1 side by side with T3 below both, C1 filling its
-column across a resize over the 76rem breakpoint, the states page's four filters in one row
-above T2 and the per-capita page's filter in the same row rule, all stacking as before at
-1100 and 390 px, and on every election page at every width no reordered box or positive tab
-index, running text within 42rem, and no sideways scroll (tables included from 1280 px); and the
+not-found or degraded per-capita page; the election pages' wide layout (#544, D102), on
+each of the seven recorded years: at 1280 and 1850 px the overview's panel and C1 side by
+side in equal columns, the left one opening on its heading, with T3 below both a heading's
+gap under the taller column and the space above the pair what 1100 px shows, C1 filling its
+column and the columns staying equal across resizes over and within the 76rem breakpoint,
+the states page's four filters in one row above T2 and the per-capita page's filter in the
+same 14–20rem row rule, the overview's columns and both pages' filters stacking as before at
+1100 and 390 px; and on every election page at every width no reordered box or positive tab
+index, every paragraph, chart caption and party-notes item within 42rem, no sideways scroll,
+and from 1280 px none in the page's table; and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
 across a client-side navigation and a reload, no flash of the other palette (checked at
 the moment `<body>` is inserted and in the frame before first paint) nor of the toggle's

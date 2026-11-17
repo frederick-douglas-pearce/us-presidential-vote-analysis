@@ -73,8 +73,8 @@
    sections in two equal columns. Below it every page is the one column it always was.
    Nothing reorders: no rule sets order or places a grid item, so the left column is
    always the earlier element and reading and tab order follow the eye at every width.
-   A table never goes in a pair (.table-scroll's 36rem minimum is wider than a
-   column): a chart in a pair has its table full width below it. */
+   A table never goes in a pair (a table's 36rem minimum, .table-scroll table, is
+   wider than a column): a chart in a pair has its table full width below it. */
 :root {
   color-scheme: light;
   /* Not colors: the readable measure (#360), and the font stack the page and every
@@ -522,9 +522,10 @@ fieldset.filter legend { padding: 0; }
 .metrics dd { margin: 0; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
 /* The readable measure. T1 and the States list are here too: at full width their few
-   short columns would spread thin. */
+   short columns would spread thin. A chart's caption and a table's party notes are
+   running text, so they keep it too (#544). */
 .explore p, .glossary, .panel, .metrics, .filters, .unavailable, .states, .provenance-footer ul,
-.table-scroll #elections-table, .neighbor-nav, .election-sections {
+.table-scroll #elections-table, .neighbor-nav, .election-sections, figcaption, .party-notes {
   max-width: var(--measure);
 }
 @media (min-width: 64rem) {
@@ -542,11 +543,18 @@ fieldset.filter legend { padding: 0; }
    the measure .filters carries, since controls are not running text.
    .pair is two equal columns, each holding one section, in source order. minmax(0, …),
    not 1fr: plotly writes a pixel width on its drawing, and a 1fr track's min-content
-   would stop a chart from shrinking when the window narrows. */
+   would stop a chart from shrinking when the window narrows. A grid's items keep their
+   own margins, so each column's first and last child drop their outer margin and the
+   pair takes a section heading's margin instead: the space above the pair matches the
+   one-column page's, and the table after it gets a heading's gap, not none.
+   .filter-row's row gap is zero because each .filter keeps its 0.5rem bottom margin,
+   which spaces wrapped rows; a row gap would double it. */
 @media (min-width: 76rem) {
   .filter-row { display: flex; flex-wrap: wrap; gap: 0 1rem; max-width: none; }
   .filter-row .filter { flex: 1 1 14rem; max-width: 20rem; }
-  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; align-items: start; }
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; align-items: start; margin-block: 1.75rem; }
+  .pair > * > :first-child { margin-top: 0; }
+  .pair > * > :last-child { margin-bottom: 0; }
 }
 
 /* A chart (#432): the figure element keeps no browser margin, so the drawing takes the

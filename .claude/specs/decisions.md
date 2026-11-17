@@ -6910,12 +6910,26 @@ breakpoint every page is the one column it was.
 (b) **Two shared pieces, each a class a page opts into, styled only inside that breakpoint:**
 `.filter-row`, a second class on a page's `.filters` box, sets its dropdown filters side by
 side (each 14rem to 20rem), wrapping, and lifts the measure `.filters` carries; and `.pair`,
-two equal columns (`repeat(2, minmax(0, 1fr))`) each holding one section.
+two equal columns (`repeat(2, minmax(0, 1fr))`) each holding one section. The filter row's
+row gap is zero, a departure from #543's "gap 1rem" the owner accepted at #544's review:
+each `.filter` keeps its 0.5rem bottom margin, which spaces wrapped rows, and a row gap
+would double it. With four filters the row never wraps in the wide range (4 × 14rem + 3rem
+< 72rem), so `flex-wrap` is pinned for later pages rather than observed. A grid item keeps
+its own margins, so each column's first and last child drop their outer margin and the pair
+takes a section heading's top margin (1.75rem) above and below: the space above the pair
+matches the one-column page, and the table after it gets a heading's gap.
 (c) **Source order is visual order.** No rule sets `order` or places a grid item; the left
 column is always the earlier element in the DOM, so reading and tab order follow the eye at
 every width.
 (d) **Never a table in a pair:** `.table-scroll table`'s 36rem minimum is wider than a column.
-A chart in a pair has its table full width below the pair.
+A chart in a pair has its table full width below the pair. Today only the overview's unit
+test (`TestWideLayout`) checks it; #545, which adds the next pairs, either adds a
+`components.pair()` builder that refuses a table or extends that check to every page
+(deferred there by the owner at #544's review: one pair has no second caller).
+(f) **Running text includes a chart's caption and a table's party notes:** `figcaption` and
+`.party-notes` join the measure list at every width (owner-approved at #544's review, which
+found them running to the full 72rem). This narrows the captions of C2, C4 and C5 on
+`/elections` and the party notes on `/state` and `/candidate` too, above 42rem only.
 (e) **#544 applies it to the election pages:** the overview's pair holds the "Under each
 method" section (left) and National results' heading, its no-popular-vote note and C1
 (right), with T3 full width below; results by state and people per electoral vote take
@@ -6932,5 +6946,6 @@ technology in step with the eye (#543 found two surveyed sites that reorder with
 **Residuals.** At wide width T3 runs under both columns while its heading sits in the right
 column above C1, so it reads a little unheaded (accepted in #543; a heading of its own would
 change the phone page and need a `ba` spec). The two columns' heights differ by up to about
-220 px across the recorded years (measured in #544's e2e test), leaving some space under the
-shorter one.
+220 px across the seven recorded years (217 px at most, measured by #544's review; the e2e
+test `test_wide_the_overview_sets_the_panel_beside_national_results` prints them), leaving
+some space under the shorter one.
