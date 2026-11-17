@@ -6926,16 +6926,16 @@ A chart in a pair has its table full width below the pair. Today only the overvi
 test (`TestWideLayout`) checks it; #545, which adds the next pairs, either adds a
 `components.pair()` builder that refuses a table or extends that check to every page
 (deferred there by the owner at #544's review: one pair has no second caller).
-(f) **Running text includes a chart's caption and a table's party notes:** `figcaption` and
-`.party-notes` join the measure list at every width (owner-approved at #544's review, which
-found them running to the full 72rem). This narrows the captions of C2, C4 and C5 on
-`/elections` and the party notes on `/state` and `/candidate` too, above 42rem only.
 (e) **#544 applies it to the election pages:** the overview's pair holds the "Under each
 method" section (left) and National results' heading, its no-popular-vote note and C1
 (right), with T3 full width below; results by state and people per electoral vote take
 `.filter-row`. #545 and #546 apply it to the other pages; `.filter-own-row` (a year control
 kept on its own row inside a filter row, from #543's sketch) lands with its first user in
 #545.
+(f) **Running text includes a chart's caption and a table's party notes:** `figcaption` and
+`.party-notes` join the measure list at every width (owner-approved at #544's review, which
+found them running to the full 72rem). This narrows the captions of C2, C4 and C5 on
+`/elections` and the party notes on `/state` and `/candidate` too, above 42rem only.
 
 **Rationale.** One breakpoint keeps one wide layout to test and reason about; the surveyed
 sites' wider boxes would only spread our few-column tables thin, and the measure already does
