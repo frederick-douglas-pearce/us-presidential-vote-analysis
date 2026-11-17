@@ -542,8 +542,10 @@ fieldset.filter legend { padding: 0; }
    by side, each 14rem to 20rem, and wrap to fewer per row when they do not fit. It lifts
    the measure .filters carries, since controls are not running text.
    .pair is two equal columns, each holding one section, in source order. minmax(0, …),
-   not 1fr: plotly writes a pixel width on its drawing, and a 1fr track's min-content
-   would stop a chart from shrinking when the window narrows. A grid's items keep their
+   not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a
+   child that cannot shrink (a chart given a fixed width, a long unbreakable token)
+   would hold its column open and the two would no longer be equal. Today's charts are
+   responsive (their in-flow box is 100% wide), so nothing does yet. A grid's items keep their
    own margins, so each column's first and last child drop their outer margin and the
    pair takes a section heading's margin instead: the space above the pair matches the
    one-column page's, and the table after it gets a heading's gap, not none.

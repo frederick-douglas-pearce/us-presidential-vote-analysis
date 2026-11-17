@@ -1257,3 +1257,24 @@ def test_every_width_keeps_order_measure_and_tables(
     assert found["table"] is not None, found  # the page's table is there
     if width >= 1280:
         assert found["table"], found
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_a_wide_child_cannot_hold_its_column_open(page: Page) -> None:
+    """The pair's minmax(0, …) tracks (D102(b)): a child that cannot shrink, put in
+    the right column at 1280 px, overflows its column instead of widening it, so the
+    two columns stay equal (a 1fr track would grow to the child's min-content).
+    Today's charts are responsive, so this inserts such a child rather than waiting
+    for one."""
+    open_year(page, 2016, "light", 1280)
+    page.locator(EC_BARS).first.wait_for()
+    page.eval_on_selector(
+        f"{PAIR_COLUMNS}:last-child",
+        """col => { const wide = document.createElement("div");
+                    wide.style.width = "900px"; wide.style.height = "1px";
+                    col.appendChild(wide); }""",
+    )
+    left, right = rects(page, PAIR_COLUMNS)
+    assert abs(left["width"] - right["width"]) <= 1, (left, right)
+    assert left["right"] < right["left"], (left, right)
+    assert right["width"] < 900 - 1, right  # the column did not grow to the child

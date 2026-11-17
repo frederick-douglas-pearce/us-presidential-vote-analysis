@@ -1720,14 +1720,18 @@ class TestLayoutRules:
         assert row["display"] == "flex"
         assert row["flex-wrap"] == "wrap"
         assert row["max-width"] == "none"
+        # No row gap: each .filter's own bottom margin spaces wrapped rows (D102(b)).
+        assert row["gap"] == "0 1rem"
         each = toggle_rule(".filter-row .filter", WIDE)
         assert each == {"flex": "1 1 14rem", "max-width": "20rem"}
 
     def test_the_pair_is_two_equal_columns_that_can_shrink(self) -> None:
         pair = toggle_rule(".pair", WIDE)
         assert pair["display"] == "grid"
-        # minmax(0, 1fr), not 1fr: a chart's pixel width must not hold its column open.
+        # minmax(0, 1fr), not 1fr: a wide child must not hold its column open (the
+        # e2e test_a_wide_child_cannot_hold_its_column_open observes it).
         assert pair["grid-template-columns"] == "repeat(2, minmax(0, 1fr))"
+        assert pair["gap"] == "2rem"
         assert pair["align-items"] == "start"
 
     def test_the_pair_spaces_like_a_section_heading(self) -> None:

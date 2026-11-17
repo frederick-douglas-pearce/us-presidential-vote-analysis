@@ -6910,7 +6910,10 @@ breakpoint every page is the one column it was.
 (b) **Two shared pieces, each a class a page opts into, styled only inside that breakpoint:**
 `.filter-row`, a second class on a page's `.filters` box, sets its dropdown filters side by
 side (each 14rem to 20rem), wrapping, and lifts the measure `.filters` carries; and `.pair`,
-two equal columns (`repeat(2, minmax(0, 1fr))`) each holding one section. The filter row's
+two equal columns (`repeat(2, minmax(0, 1fr))`) each holding one section; `minmax(0, …)` is
+defensive, so a child that cannot shrink (a fixed-width chart, an unbreakable token) cannot
+hold a column open, since today's responsive charts size their in-flow box at 100% and
+nothing does yet (#544's acceptance gate found `1fr` lays out identically now). The filter row's
 row gap is zero, a departure from #543's "gap 1rem" the owner accepted at #544's review:
 each `.filter` keeps its 0.5rem bottom margin, which spaces wrapped rows, and a row gap
 would double it. With four filters the row never wraps in the wide range (4 × 14rem + 3rem

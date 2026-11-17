@@ -101,7 +101,8 @@ stacking as before at 1100 and 390 px, and on every election page at every width
 reordered box or positive tab index, every paragraph, chart caption and party-notes item
 within 42rem, no sideways scroll, and from 1280 px none in the page's table; and on 2016,
 C1 filling its column and the columns staying equal across resizes over and within the
-76rem breakpoint, the states page's four filters in one row above T2 and the per-capita
+76rem breakpoint, a 900 px child that cannot shrink overflowing its column rather than
+widening it (`minmax(0, …)`), the states page's four filters in one row above T2 and the per-capita
 page's filter in the same 14–20rem row rule, both pages' filters stacking as before at 1100
 and 390 px; and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
