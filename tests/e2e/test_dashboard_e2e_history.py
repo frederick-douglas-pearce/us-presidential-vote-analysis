@@ -21,6 +21,7 @@ from tests.e2e.dashboard_pages import (
     STATE_SUCCESS,
     UNAVAILABLE,
     WIDE_WIDTHS,
+    assert_layout_holds,
     rect,
     rects,
 )
@@ -124,35 +125,4 @@ def test_every_width_keeps_order_measure_and_tables(
     paragraph, chart caption and party-notes item is within the 42rem measure; the
     page never scrolls sideways; and from about 1280 px no table does either."""
     success = open_at(page, path, width)
-    tables = PAGES[path][1]
-    found = page.evaluate(
-        f"""() => {{
-            const root = document.querySelector("{success}");
-            const all = [...root.querySelectorAll("*")];
-            const reordered = all.filter(el => {{
-                const s = getComputedStyle(el);
-                return s.order !== "0" || /reverse/.test(s.flexDirection)
-                    || s.gridRowStart !== "auto" || s.gridColumnStart !== "auto";
-            }}).map(el => el.id || el.className || el.tagName);
-            const tabbed = all.filter(el => el.tabIndex > 0)
-                .map(el => el.id || el.tagName);
-            const text = [...document.querySelectorAll(
-                "main p, main figcaption, main .party-notes li")];
-            const wide = text
-                .filter(el => el.getBoundingClientRect().width > {MEASURE_PX} + 0.5)
-                .map(el => el.tagName + ": " + el.textContent.slice(0, 40));
-            const tables = {list(tables)!r}.map(id => {{
-                const box = document.querySelector(`.table-scroll:has(${{id}})`);
-                return box && box.scrollWidth <= box.clientWidth + 1;
-            }});
-            return {{reordered, tabbed, wide, texts: text.length, tables,
-                     page: document.documentElement.scrollWidth <= innerWidth}};
-        }}"""
-    )
-    assert found["reordered"] == [], found
-    assert found["tabbed"] == [], found
-    assert found["texts"] > 0 and found["wide"] == [], found
-    assert found["page"], found
-    assert None not in found["tables"], found  # every table is there
-    if width >= 1280:
-        assert all(found["tables"]), found
+    assert_layout_holds(page, success, PAGES[path][1], width)

@@ -310,3 +310,45 @@ def rect(page: Page, selector: str) -> dict[str, float]:
     """The one match's box; a selector matching none or several fails."""
     (found,) = rects(page, selector)
     return found
+
+
+def assert_layout_holds(
+    page: Page, success: str, tables: tuple[str, ...], width: int
+) -> None:
+    """The checks every layout story inherits (#364, #543), at ``width``: no box under
+    the page ``success`` marks is reordered (``order``, a reversed flex direction or a
+    placed grid item) and none has a positive tab index; every paragraph, chart caption
+    and party-notes item in ``main`` is within the 42rem measure; the page never
+    scrolls sideways; each of ``tables`` (table ids) is there, and from about 1280 px
+    none scrolls."""
+    found = page.evaluate(
+        f"""() => {{
+            const root = document.querySelector("{success}");
+            const all = [...root.querySelectorAll("*")];
+            const reordered = all.filter(el => {{
+                const s = getComputedStyle(el);
+                return s.order !== "0" || /reverse/.test(s.flexDirection)
+                    || s.gridRowStart !== "auto" || s.gridColumnStart !== "auto";
+            }}).map(el => el.id || el.className || el.tagName);
+            const tabbed = all.filter(el => el.tabIndex > 0)
+                .map(el => el.id || el.tagName);
+            const text = [...document.querySelectorAll(
+                "main p, main figcaption, main .party-notes li")];
+            const wide = text
+                .filter(el => el.getBoundingClientRect().width > {MEASURE_PX} + 0.5)
+                .map(el => el.tagName + ": " + el.textContent.slice(0, 40));
+            const tables = {list(tables)!r}.map(id => {{
+                const box = root.querySelector(`.table-scroll:has(${{id}})`);
+                return box && box.scrollWidth <= box.clientWidth + 1;
+            }});
+            return {{reordered, tabbed, wide, texts: text.length, tables,
+                     page: document.documentElement.scrollWidth <= innerWidth}};
+        }}"""
+    )
+    assert found["reordered"] == [], found
+    assert found["tabbed"] == [], found
+    assert found["texts"] > 0 and found["wide"] == [], found
+    assert found["page"], found
+    assert tables and None not in found["tables"], found  # every table is there
+    if width >= 1280:
+        assert all(found["tables"]), found

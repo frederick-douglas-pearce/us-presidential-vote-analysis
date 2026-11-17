@@ -6952,3 +6952,40 @@ change the phone page and need a `ba` spec). The two columns' heights differ by 
 220 px across the seven recorded years (217 px at most, measured by #544's review; the e2e
 test `test_wide_the_overview_sets_the_panel_beside_national_results` prints them), leaving
 some space under the shorter one.
+
+## D103: Every pair is built by `components.pair`, which refuses a table
+
+**Date:** 2026-11-18
+**Builds on:** D102 (the wide layout) · **Decided by:** the owner, approving #553's plan
+
+**Context.** D102(d) puts no table in a `.pair` (a table's 36rem minimum is wider than a
+column), and until #553 only the overview's unit test checked it, for its one pair. #553 adds
+two pairs on `/elections` (the list's filters beside the count and averages, and C4 beside
+C5), and its acceptance criteria ask for a test that fails if a table is placed in any pair on
+any registered page. They left the mechanism open: a builder that refuses a table, or the
+overview's check extended to every page.
+
+**Decision.**
+(a) **`components.pair(left, right, ident)` is the one way to build a pair**, as
+`components.table` is for tables and `components.chart` for charts. It returns the two column
+`div`s in source order under one `div` with class `pair`, and raises `ValueError` when either
+column holds an `html.Table` or a component whose class list includes `table-scroll`. Only a
+code change reaches that, so it fails every render of that page in the unit suite
+(`TestPair` in `tests/unit/test_dashboard_elections.py`).
+(b) **A lint keeps every page on the builder.** `test_only_components_builds_a_pair`
+(`tests/unit/test_dashboard_guards.py`) parses every runtime module under
+`dashboard/explore/` and fails any place outside `components.pair` that sets the `pair` class:
+a `className=` argument, a `"className"` dict entry or an assignment to `.className`, written
+as a literal, inside a multi-class string, in an f-string or in a join.
+`test_the_pair_lint_catches_the_listed_ways` pins what it catches. The overview's pair (#544)
+moved onto the builder with its markup unchanged.
+(c) **The pair keeps D102(b)'s margins on every page.** Neither of `/elections`' pairs opens
+with a heading (the list's pair follows the list's heading, C4 and C5's a note), so from 76rem
+the space above each grows from 1rem to the pair's 1.75rem. The owner accepted that at #553's
+plan gate rather than adding a second rule.
+
+**Rationale.** The alternative, rendering every registered page and searching each tree for a
+table inside a pair, checks only the states its fixtures reach. A degraded or empty render
+that put a table in a pair would go unseen. The builder refuses on every render path, and the
+lint stops a page from building a pair without it. Together they satisfy the criterion: a
+table placed in any pair fails a test, whichever page and render state places it.

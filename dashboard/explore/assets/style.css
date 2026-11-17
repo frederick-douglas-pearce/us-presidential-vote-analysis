@@ -76,7 +76,10 @@
    Nothing reorders: no rule sets order or places a grid item, so the left column is
    always the earlier element and reading and tab order follow the eye at every width.
    A table never goes in a pair (a table's 36rem minimum, .table-scroll table, is
-   wider than a column): a chart in a pair has its table full width below it. */
+   wider than a column): a chart in a pair has its table full width below it. Every
+   pair is built by components.pair (D103), which refuses a table, and
+   test_only_components_builds_a_pair (tests/unit/test_dashboard_guards.py) fails a
+   page that sets the class itself. */
 :root {
   color-scheme: light;
   /* Not colors: the readable measure (#360), and the font stack the page and every
@@ -550,7 +553,9 @@ fieldset.filter legend { padding: 0; }
    measure would leave room on its line, and the first dropdown would sit beside it. It
    follows .filter-row .filter, whose specificity it shares, so its basis and its lifted
    cap (max-width: none) win.
-   .pair is two equal columns, each holding one section, in source order. minmax(0, …),
+   .pair is two equal columns, each holding one section, in source order, built only by
+   components.pair (#553, D103): the overview's panel beside C1, and on /elections the
+   list's filters beside the count and averages, and C4 beside C5. minmax(0, …),
    not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a
    child that cannot shrink (a chart given a fixed width, a long unbreakable token)
    would hold its column open and the two would no longer be equal. Today's charts are

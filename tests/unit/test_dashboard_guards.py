@@ -1289,6 +1289,87 @@ def test_the_dash_table_lint_catches_the_listed_ways(source: str, caught: bool) 
     assert bool(dash_table_uses(source)) is caught
 
 
+def _class_values(tree: ast.AST) -> list[ast.AST]:
+    """Every expression a module gives as a component's class: a ``className=``
+    argument, a ``"className"`` dict entry, or an assignment to ``.className``."""
+    values: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "className":
+            values.append(node.value)
+        elif isinstance(node, ast.Dict):
+            values += [
+                v
+                for k, v in zip(node.keys, node.values, strict=True)
+                if isinstance(k, ast.Constant) and k.value == "className"
+            ]
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if node.value is not None and any(
+                isinstance(t, ast.Attribute) and t.attr == "className" for t in targets
+            ):
+                values.append(node.value)
+    return values
+
+
+def pair_class_uses(source: str) -> list[str]:
+    """Each place ``source`` sets the ``pair`` class (#553, D103), as
+    ``"<function>: line <n>"``: a string in a class expression whose words include
+    ``pair``, literal, in a multi-class string, an f-string or a join."""
+    tree = ast.parse(source)
+    owner: dict[int, str] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(fn):
+                owner[id(inner)] = fn.name
+    found: list[str] = []
+    for value in _class_values(tree):
+        for node in ast.walk(value):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and "pair" in node.value.split()
+            ):
+                where = owner.get(id(node), "<module>")
+                found.append(f"{where}: line {node.lineno}")
+    return found
+
+
+def test_only_components_builds_a_pair() -> None:
+    """D103: a ``.pair`` is built only by ``components.pair``, which refuses a table
+    (``TestPair`` in ``test_dashboard_elections.py``), so no page can put a table in
+    one. Any other module setting the class fails here."""
+    assert RUNTIME_MODULES, "no runtime modules found"
+    found = {
+        str(path.relative_to(PACKAGE)): uses
+        for path in RUNTIME_MODULES
+        if (uses := pair_class_uses(path.read_text(encoding="utf-8")))
+    }
+    # The builder sets it once, in its own body.
+    owners = [use.split(":")[0] for use in found.pop("components.py", [])]
+    assert owners == ["pair"]
+    assert found == {}
+
+
+@pytest.mark.parametrize(
+    ("source", "caught"),
+    [
+        ("html.Div([], className='pair')\n", True),
+        ("html.Div([], className='note pair')\n", True),
+        ("html.Div([], className=f'{x} pair')\n", True),
+        ("html.Div([], className=' '.join(['a', 'pair']))\n", True),
+        ("html.Div([], className='pair' if x else 'b')\n", True),
+        ("html.Div([], **{'className': 'pair'})\n", True),
+        ("d = html.Div([])\nd.className = 'pair'\n", True),
+        ('"""A docstring about a pair."""\n', False),
+        ("html.Div([], className='pairs pair-col')\n", False),
+        ("html.Div([], id='pair')\n", False),
+        ("x = 'pair'\n", False),
+    ],
+)
+def test_the_pair_lint_catches_the_listed_ways(source: str, caught: bool) -> None:
+    assert bool(pair_class_uses(source)) is caught
+
+
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
     offenders = [
         str(p.relative_to(REPO))

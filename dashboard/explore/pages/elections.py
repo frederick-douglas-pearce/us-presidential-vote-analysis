@@ -63,6 +63,8 @@ PV_ID = "elections-pv"
 URL_ID = "elections-url"
 #: T1's column-name list: the page has three since #436.
 GLOSSARY_ID = "elections-glossary"
+#: The list's pair (#553, D102): its filters left, the count and averages right.
+LIST_PAIR_ID = "elections-list-pair"
 
 #: T1's columns, in display order, by public field name.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
@@ -141,6 +143,8 @@ OVER_TIME_NO_STATES_ID = "elections-over-time-no-states"
 STATE_ID = "elections-state"
 #: The state control's wrapper, hidden while N1 or N2 cannot be read.
 STATE_CONTROL_ID = "elections-state-control"
+#: C4 and C5's pair (#553, D102): C4 left, C5 right, their table full width below.
+OVER_TIME_PAIR_ID = "elections-over-time-pair"
 #: The companion table's columns, in display order, by public field name: all states
 #: (N1), and one state (N2's rows for it), whose download adds the state's code.
 OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
@@ -1301,7 +1305,7 @@ def _state_control(
                 STATE_ID, labels.LABELS[STATE], options, value, ALL_STATES
             )
         ],
-        className="filters",
+        className="filters filter-row",
         id=STATE_CONTROL_ID,
         **hidden,
     )
@@ -1458,8 +1462,11 @@ def _over_time_section(
         heading,
         *choice,
         html.P(OVER_TIME_LIST_FILTERS, className="note"),
-        components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, c4_caption),
-        components.chart(C5_ID, c5.figure, OVER_TIME_TABLE_ID, c5_caption),
+        components.pair(
+            [components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, c4_caption)],
+            [components.chart(C5_ID, c5.figure, OVER_TIME_TABLE_ID, c5_caption)],
+            OVER_TIME_PAIR_ID,
+        ),
         html.H2(OVER_TIME_TABLE_HEADING),
         *table,
         labels.glossary(fields),
@@ -1526,20 +1533,27 @@ def render(
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             *_leader_section(body, summary),
             html.H2(LIST_HEADING),
-            controls,
-            html.Div(
+            # Source order is reading order at every width: the filters are the pair's
+            # left column and the count and averages they narrow its right (#553).
+            components.pair(
+                [controls],
                 [
-                    html.P(
-                        labels.METRIC_LABELS["elections_shown"].format(
-                            shown=metrics.count(shown),
-                            total=metrics.count(elections),
-                        ),
-                        id=METRIC_IDS["elections_shown"],
-                        className="count",
-                    ),
-                    *_averages(body, summary, shown, chosen.pv_only),
+                    html.Div(
+                        [
+                            html.P(
+                                labels.METRIC_LABELS["elections_shown"].format(
+                                    shown=metrics.count(shown),
+                                    total=metrics.count(elections),
+                                ),
+                                id=METRIC_IDS["elections_shown"],
+                                className="count",
+                            ),
+                            *_averages(body, summary, shown, chosen.pv_only),
+                        ],
+                        id=METRICS_ID,
+                    )
                 ],
-                id=METRICS_ID,
+                LIST_PAIR_ID,
             ),
             *components.table(
                 shown,
