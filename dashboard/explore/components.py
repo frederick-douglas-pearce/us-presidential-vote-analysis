@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from dash import dcc, html
@@ -191,6 +191,29 @@ def year_buttons(
     )
 
 
+def label_sorted_options(labels_by_value: Mapping[str, str]) -> list[dict[str, str]]:
+    """The options of a dropdown that lists names (#540): one ``{"label", "value"}``
+    per entry of ``labels_by_value``, sorted by label. Every dropdown filter whose
+    choices are names (a state, a candidate) takes its options from here, so a change
+    to their shape or order is made once.
+    ``TestNameOptionsComeFromTheBuilder`` (in ``test_dashboard_export.py``) renders
+    every page and checks that each name dropdown's options are a list this function
+    returned; ``TestLabelSortedOptions.test_only_the_builder_sorts_options`` (in
+    ``test_dashboard_elections.py``) is a source tripwire for the copies #540 removed;
+    its scan, ``option_sorts``, names some shapes it does not see. A closed vocabulary
+    (popular-vote status, count status) is not sorted: its page lists it in its
+    ``labels`` table's order.
+
+    The sort is on the label alone and stable, so two entries with one label keep the
+    map's order. Labels are used as passed, never converted: a page that needs
+    ``str()`` applies it when building the map.
+    """
+    return [
+        {"label": label, "value": value}
+        for value, label in sorted(labels_by_value.items(), key=lambda kv: kv[1])
+    ]
+
+
 def dropdown_filter(
     control_id: str,
     label: str,
@@ -206,9 +229,10 @@ def dropdown_filter(
     ``dropdown_uses`` names.
 
     The caller passes every string a reader sees (the label, the placeholder and the
-    options' labels), so this function holds no wording of its own. ``value`` is the
-    option applied, or ``None`` for none. No ``persistence``: it would override the
-    URL, which is where the value lives.
+    options' labels; a list of names takes its options from
+    :func:`label_sorted_options`), so this function holds no wording of its own.
+    ``value`` is the option applied, or ``None`` for none. No ``persistence``: it would
+    override the URL, which is where the value lives.
     """
     return html.Div(
         [
