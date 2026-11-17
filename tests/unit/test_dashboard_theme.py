@@ -896,8 +896,8 @@ class TestThemeContrast:
         measure = [
             p
             for at, p, b in shipped_rules()
-            # The page-wide measure rule, not the 76rem year control's (#545).
-            if "max-width: var(--measure)" in b and not at
+            # The page-wide measure rule: only the 76rem year control's is exempt (#545).
+            if "max-width: var(--measure)" in b and not own_row_measure(at, p)
         ]
         assert len(measure) == 1 and ".neighbor-nav" in measure[0].split(", ")
 
@@ -1698,6 +1698,14 @@ class TestThemeSelected:
 
 
 WIDE = "@media (min-width: 76rem)"
+#: The one measure rule besides the page-wide one: what a year control's own row
+#: holds, from 76rem (#545). Pinned in TestLayoutRules.test_a_year_control_keeps_a_row_of_its_own_at_the_measure.
+OWN_ROW_HELD = (WIDE, ".filter-row .filter-own-row > *")
+
+
+def own_row_measure(at: str | None, prelude: str) -> bool:
+    """Whether a rule is exactly the year control's measure rule (#545)."""
+    return (at, " ".join(prelude.split())) == OWN_ROW_HELD
 
 
 class TestLayoutRules:
@@ -1743,6 +1751,22 @@ class TestLayoutRules:
             ".filter-row .filter"
         )
 
+    def test_the_measure_exemption_names_a_shipped_rule(self) -> None:
+        # The two measure guards exempt exactly this rule; it must exist, so the
+        # exemption cannot go stale and hide another.
+        assert [r for r in shipped_rules() if own_row_measure(r[0], r[1])], OWN_ROW_HELD
+
+    def test_no_rule_sets_a_filters_display(self) -> None:
+        # A filter's box keeps the browser's own display, so a hidden one (the
+        # candidate page's pills for a one-election candidate) stays hidden in a filter
+        # row: an author display would beat [hidden] (#545's review). The word
+        # boundary keeps .filter-row's own display: flex out of it.
+        whole = re.compile(r"\.(filter|filter-own-row)(?![-\w])")
+        for at, prelude, body in shipped_rules():
+            if whole.search(prelude):
+                names = {name for name, _ in declarations(body)}
+                assert "display" not in names, (at, prelude)
+
     def test_the_pair_is_two_equal_columns_that_can_shrink(self) -> None:
         pair = toggle_rule(".pair", WIDE)
         assert pair["display"] == "grid"
@@ -1766,8 +1790,8 @@ class TestLayoutRules:
         measure = [
             p.split(", ")
             for at, p, b in shipped_rules()
-            # The page-wide measure rule, not the 76rem year control's (#545).
-            if "max-width: var(--measure)" in b and not at
+            # The page-wide measure rule: only the 76rem year control's is exempt (#545).
+            if "max-width: var(--measure)" in b and not own_row_measure(at, p)
         ]
         (selectors,) = measure
         selectors = [" ".join(s.split()) for s in selectors]

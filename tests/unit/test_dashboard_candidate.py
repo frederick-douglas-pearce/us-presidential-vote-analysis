@@ -34,7 +34,7 @@ from tests.unit.test_dashboard_app import (
     texts,
     url,
 )
-from tests.unit.test_dashboard_elections import find, of_type, parse
+from tests.unit.test_dashboard_elections import classed, find, of_type, parse
 
 PAGE: dict[str, Any] = dash.page_registry["pages.candidate"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -428,8 +428,9 @@ class TestFilters:
         (fieldset,) = of_type(tree, "Fieldset")
         assert find(fieldset, MOD["YEAR_ID"]) is not None
         assert fieldset.hidden is (not shown)
-        # Hidden or not, the pills' box keeps its own-row class (#545); no rule sets
-        # its display, so ``hidden`` still hides it in the filter row.
+        # Hidden or not, the pills' box keeps its own-row class (#545). That no rule
+        # sets a filter's display, so ``hidden`` still hides it in the filter row, is
+        # TestLayoutRules.test_no_rule_sets_a_filters_display (test_dashboard_theme.py).
         assert fieldset.className.split() == ["filter", "filter-own-row"]
 
     def test_the_year_control_is_named_by_its_legend(self) -> None:
@@ -794,13 +795,7 @@ class TestWideLayout:
 
     def test_the_pills_have_their_own_row_and_the_state_follows(self) -> None:
         tree = render()
-        boxes = [
-            node
-            for node in of_type(tree, "Div")
-            if (getattr(node, "className", None) or "").split()[:1] == ["filters"]
-        ]
-        assert len(boxes) == 1
-        (box,) = boxes
+        (box,) = classed(tree, "filters")
         assert box.className.split() == ["filters", "filter-row"]
         pills, state = box.children
         assert type(pills).__name__ == "Fieldset"

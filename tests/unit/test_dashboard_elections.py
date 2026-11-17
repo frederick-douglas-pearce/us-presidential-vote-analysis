@@ -103,6 +103,18 @@ def of_type(node: Any, name: str) -> list[Any]:
     return []
 
 
+def classed(node: Any, wanted: str) -> list[Any]:
+    """Every component in a rendered tree whose class list holds ``wanted``,
+    depth-first, as :func:`of_type` walks it."""
+    if isinstance(node, (list, tuple)):
+        return [c for child in node for c in classed(child, wanted)]
+    if isinstance(node, Component):
+        names = (getattr(node, "className", None) or "").split()
+        own = [node] if wanted in names else []
+        return own + classed(getattr(node, "children", None), wanted)
+    return []
+
+
 def render(query: dict[str, Any] | None = None, body: Any = None) -> Any:
     """The page body for ``query``, as the layout builds it from a response."""
     body = copy.deepcopy(BODY if body is None else body)

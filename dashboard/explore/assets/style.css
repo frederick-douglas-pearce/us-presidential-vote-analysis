@@ -548,7 +548,8 @@ fieldset.filter legend { padding: 0; }
    the next row, and what it holds keeps the measure (a slider as wide as the page is
    hard to set precisely). The cap is on the children, not the box: a box capped at the
    measure would leave room on its line, and the first dropdown would sit beside it. It
-   follows .filter-row .filter, whose specificity it shares, so its basis and cap win.
+   follows .filter-row .filter, whose specificity it shares, so its basis and its lifted
+   cap (max-width: none) win.
    .pair is two equal columns, each holding one section, in source order. minmax(0, …),
    not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a
    child that cannot shrink (a chart given a fixed width, a long unbreakable token)

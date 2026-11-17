@@ -109,7 +109,8 @@ and 390 px; the state history's and candidate page's wide layout (#545,
 and 1850 px the year control's box taking its own row with what it holds at the 42rem
 measure, the dropdown filters in one row below it, each 14–20rem, above the first table;
 the filters stacking as before at 1100 and 390 px; and at every width no reordered box or
-positive tab index, running text within 42rem, no sideways scroll, and from 1280 px none
+positive tab index, every paragraph, chart caption and party-notes item within 42rem,
+no sideways scroll, and from 1280 px none
 in T4, T7 or T5; and the
 theme choice (#359, #447): following the device with no saved choice, a choice persisting
 across a client-side navigation and a reload, no flash of the other palette (checked at

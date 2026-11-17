@@ -38,7 +38,7 @@ from tests.unit.test_dashboard_app import (
     texts,
     url,
 )
-from tests.unit.test_dashboard_elections import find, of_type, parse
+from tests.unit.test_dashboard_elections import classed, find, of_type, parse
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -1093,16 +1093,6 @@ def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -
 # --- the wide layout (#545, D102) -------------------------------------------------------
 
 
-def classed(tree: Any, wanted: str) -> list[Any]:
-    """Every component in ``tree`` whose class list holds ``wanted``, depth-first."""
-    if isinstance(tree, (list, tuple)):
-        return [c for child in tree for c in classed(child, wanted)]
-    if not hasattr(tree, "children"):
-        return []
-    own = [tree] if wanted in (getattr(tree, "className", None) or "").split() else []
-    return own + classed(tree.children, wanted)
-
-
 class TestWideLayout:
     """The state history's filters at desktop width (#545): one ``.filters`` box that
     is a filter row, the slider's box first on a row of its own, then the two dropdown
@@ -1131,10 +1121,20 @@ class TestWideLayout:
         # Only the slider's box keeps its own row.
         assert classed(tree, "filter-own-row") == [kids[0]]
 
-    def test_no_slot_is_built_before_the_filters(self) -> None:
-        # The future chart slot after the lede is a placement only (#543 §6): the
-        # filters come straight after the page's Location, and no chart renders.
-        kids = list(render().children)
+    def test_no_slot_is_built_after_the_lede(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The future chart slot after the lede is a placement only (#543 §6). The lede
+        # is added by layout(), so the whole page is checked there: the heading, the
+        # lede and the page body, nothing between; in the body, the filters straight
+        # after the page's Location; and no chart anywhere.
+        cached_client(monkeypatch)
+        page = MOD["layout"](usps="GA")
+        heading, lede, content = page.children
+        assert type(heading).__name__ == "H1"
+        assert type(lede).__name__ == "P" and lede.className == "lede"
+        assert getattr(content, "id", None) == PAGE_ID
+        kids = list(content.children)
         assert type(kids[0]).__name__ == "Location"
         assert kids[1].className.split()[:1] == ["filters"]
-        assert of_type(render(), "Figure") == []
+        assert of_type(page, "Figure") == []

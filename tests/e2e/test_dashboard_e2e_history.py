@@ -35,6 +35,8 @@ PAGES = {
     STATE_PATH: (STATE_SUCCESS, ("#state-history", "#state-per-capita")),
     CANDIDATE_PATH: (CANDIDATE_SUCCESS, ("#candidate-history",)),
 }
+#: Each page's year control itself: the slider by its id, the pills' radio group.
+CONTROLS = {STATE_PATH: "#state-years", CANDIDATE_PATH: "#candidate-year"}
 #: Each page's dropdown filters, in source order.
 DROPDOWNS = {
     STATE_PATH: ("#state-candidate", "#state-pv-status"),
@@ -74,12 +76,14 @@ def test_wide_the_year_control_has_its_own_row_and_the_dropdowns_follow(
     success = open_at(page, path, width)
     own = own_row(page, success)
     box = rect(page, f"{success} .filters")
-    # The box takes the whole row; what it holds keeps the measure, and the control
-    # itself (the slider's track, the pills' group) reaches it on these pages.
+    # The box takes the whole row, and everything it holds keeps the measure.
     assert abs(own["width"] - box["width"]) <= 0.5, (own, box)
     held = rects(page, f"{success} .filters > .filter-own-row > *")
     assert held and all(h["width"] <= MEASURE_PX + 0.5 for h in held), held
-    assert max(h["width"] for h in held) >= MEASURE_PX - 0.5, held
+    # The control itself (not its label, which is a block and always the measure
+    # wide) reaches the measure.
+    control = rect(page, f"{success} .filter-own-row {CONTROLS[path]}")
+    assert abs(control["width"] - MEASURE_PX) <= 0.5, control
     found = dropdown_filters(page, path)
     # One row below the year control, left to right in source order.
     assert {round(f["top"]) for f in found} == {round(found[0]["top"])}, found
