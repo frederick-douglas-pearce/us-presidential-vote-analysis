@@ -1157,8 +1157,10 @@ def test_narrow_the_overview_stacks_as_before(page: Page, year: int) -> None:
 def test_c1_fills_its_column_after_a_resize_across_the_breakpoint(page: Page) -> None:
     open_year(page, 2016, "light", 1280)
     page.locator(EC_BARS).first.wait_for()
-    # Out of the grid and back, then wider and narrower inside it: a column that
-    # held its width open (a 1fr track) leaves the two columns unequal.
+    # Out of the grid and back, then wider and narrower inside it: C1 follows its
+    # column and the columns stay equal. (Today's responsive charts hold no column
+    # open, so this cannot tell 1fr from minmax(0, 1fr);
+    # test_a_wide_child_cannot_hold_its_column_open does.)
     for width in (1280, NARROW_DESKTOP, 1280, 1850, 1280):
         page.set_viewport_size({"width": width, "height": 900})
         wait_c1_fills(page)
@@ -1275,6 +1277,9 @@ def test_a_wide_child_cannot_hold_its_column_open(page: Page) -> None:
                     col.appendChild(wide); }""",
     )
     left, right = rects(page, PAIR_COLUMNS)
+    # The child is still there, at its width, wider than the column it overflows.
+    child = rect(page, f"{PAIR_COLUMNS}:last-child > div:last-child")
+    assert abs(child["width"] - 900) <= 0.5, child
     assert abs(left["width"] - right["width"]) <= 1, (left, right)
     assert left["right"] < right["left"], (left, right)
-    assert right["width"] < 900 - 1, right  # the column did not grow to the child
+    assert right["width"] < child["width"] - 1, (right, child)  # it did not grow
