@@ -836,13 +836,10 @@ def n2_rows(body: Any, served: Iterable[int]) -> dict[str, list[dict[str, Any]]]
         if year in state_years:
             raise TypeError(f"{api.ELECTION_STATES_PATH} repeats {usps} in {year}")
         state_years[year] = row
-    series: dict[str, list[dict[str, Any]]] = {}
-    for usps, state_years in by_state.items():
-        expected = [year for year in years if year >= min(state_years)]
-        if sorted(state_years) != expected:
-            raise TypeError(f"{api.ELECTION_STATES_PATH} skips a year for {usps}")
-        series[usps] = [state_years[year] for year in expected]
-    return series
+    return {
+        usps: over_time.state_series(state_years, years, api.ELECTION_STATES_PATH, usps)
+        for usps, state_years in by_state.items()
+    }
 
 
 def chosen_state(

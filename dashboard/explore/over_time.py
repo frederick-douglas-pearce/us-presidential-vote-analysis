@@ -10,7 +10,8 @@ argument. C5's figure, its band and the N1/N2 readers stay with their page.
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from collections.abc import Iterable, Mapping
+from typing import Any, NamedTuple, TypeVar
 
 from explore import charts, components, labels
 
@@ -54,9 +55,10 @@ def plain(name: Any) -> str | None:
 
 
 class Point(NamedTuple):
-    """One row of C4 and C5 (#436): its year, the served appointed allotment and total
-    popular vote, and the companion table's cells for them (and, for one state, for
-    its ``pv_status``)."""
+    """One row of C4, C5 and C7 (#436, #560): its year, the served appointed allotment
+    and total popular vote, and the companion table's cells for them (and, for one
+    state, for its ``pv_status``). C7 draws no total: :func:`appointed_points` leaves
+    ``total`` ``None`` and ``total_cell`` empty, which only C5 reads."""
 
     year: int
     appointed: Any
@@ -237,3 +239,45 @@ def c4_figure(
     )
     missing = bool(marks.keys() & {labels.NOT_IN_DATASET, labels.UNRECOGNIZED})
     return OverTime({"data": data, "layout": layout}, zeros, missing, False, False)
+
+
+_Row = TypeVar("_Row")
+
+
+def state_series(
+    by_year: Mapping[int, _Row], served: Iterable[int], source: str, usps: str
+) -> list[_Row]:
+    """One state's rows in year order from its first served election (#436, D100(c);
+    #560): the rule C4's one-state series (``n2_rows``) and C7 share. ``by_year`` maps
+    each served year the state has a row in to that row.
+
+    Pure; raises ``TypeError`` for a state with no row, or a gap: a served year after
+    its first with no row for it. ``source`` is the API path its rows came from, and
+    reaches the message only (a shared module reads no API).
+    """
+    if not by_year:
+        raise TypeError(f"{source} has no row for {usps}")
+    years = sorted(set(served))
+    expected = [year for year in years if year >= min(by_year)]
+    if sorted(by_year) != expected:
+        raise TypeError(f"{source} skips a year for {usps}")
+    return [by_year[year] for year in expected]
+
+
+def appointed_points(rows: Iterable[Mapping[str, Any]]) -> list[Point]:
+    """One state's electors appointed, a point per row (#560, C7): each row's
+    ``year``, ``state_electoral_votes`` and ``pv_status``, worded once as the companion
+    table writes them. Carries no total (C5's), so ``total`` is ``None`` and
+    ``total_cell`` empty; :func:`c4_figure` never reads them."""
+    return [
+        Point(
+            year=row["year"],
+            appointed=row["state_electoral_votes"],
+            appointed_cell=labels.number(row["state_electoral_votes"]),
+            total=None,
+            total_cell="",
+            status=row["pv_status"],
+            status_cell=labels.pv_status(row["pv_status"]),
+        )
+        for row in rows
+    ]

@@ -1,9 +1,11 @@
-"""One state's history (#279): T4, its rows in every election this dataset holds for it.
+"""One state's history (#279): chart C7, its electors appointed in each election (#560),
+and T4, its rows in every election this dataset holds for it.
 
 Its people per electoral vote (T7, #280) is a page of its own since #559,
 ``pages/state_per_capita.py``; what the two share is in :mod:`explore.state_view`,
-and the section links join them (D105). T4 comes from one response,
-``/v1/states/{usps}``, filled on a miss. The state is the path (``/state/<usps>``, an
+and the section links join them (D105). T4 and C7 come from one response,
+``/v1/states/{usps}``, filled on a miss; C7 collapses its rows, one per candidate, to
+one per election (D106). The state is the path (``/state/<usps>``, an
 item singular as ``/states`` is plural), in upper case as the API writes a USPS code.
 It is validated against the state roster before it is formatted into an API path: the
 latest election's rows (``/v1/elections/{year_max}``, :data:`explore.api.ROSTER_PATH`),
@@ -34,7 +36,16 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query, state_view
+from explore import (
+    api,
+    charts,
+    components,
+    export,
+    labels,
+    over_time,
+    query,
+    state_view,
+)
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in T4.
@@ -47,6 +58,18 @@ URL_ID = "state-url"
 YEARS_ID = "state-years"
 CANDIDATE_ID = "state-candidate"
 PV_STATUS_ID = "state-pv-status"
+
+#: Chart C7 (#560, D106): the state's electors appointed in each election, before the
+#: filters, with its own companion table, which no filter reaches (D093(a)).
+C7_ID = "C7"
+ELECTORS_TABLE_ID = "state-electors"
+ELECTORS_GLOSSARY_ID = "state-electors-glossary"
+#: The degraded section's sentence (D096(d)'s rule): C7's section alone, when the
+#: rows T4 shows cannot be read as one allotment per election.
+C7_UNAVAILABLE_ID = "state-electors-unavailable"
+#: The companion table's columns, by public field name, and what its CSV adds.
+ELECTORS_FIELDS = ("year", "state_electoral_votes", "pv_status")
+ELECTORS_EXTRA = ("state_usps",)
 
 #: T4's columns, in display order, by public field name.
 FIELDS = (
@@ -89,10 +112,23 @@ NOT_FOUND = api.NotFound(
 #: (#325). People per electoral vote left it with T7 (#559; ba spec, approved at its
 #: plan gate, 2026-11-18).
 LEDE = (
-    "This state's electoral votes for each candidate in every election this dataset "
-    "holds for it, with the popular vote where the dataset has it."
+    "This state's electors appointed and its electoral votes for each candidate in "
+    "every election this dataset holds for it, with the popular vote where the dataset "
+    "has it."
 )
-FILTER_SENTENCE = "Narrow the rows by year, candidate or popular-vote status."
+FILTER_SENTENCE = (
+    "Narrow the table of each candidate's electoral votes by year, candidate or "
+    "popular-vote status."
+)
+#: The page's two sections' headings (#560; ba spec, approved at its plan gate,
+#: 2026-11-18): C7 and its table, then T4, which its filters belong to.
+C7_HEADING = "Electors appointed over time"
+C7_TABLE_HEADING = "This state's electors appointed in each election"
+HISTORY_TABLE_HEADING = "Each candidate's electoral votes in each election"
+C7_UNAVAILABLE = (
+    "The chart and table of this state's electors appointed in each election can't "
+    "be shown right now. Please try again in a minute."
+)
 
 
 def parse_filters(params: Any) -> list[tuple[str, str]]:
@@ -307,6 +343,130 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
     )
 
 
+def electors(
+    rows: list[dict[str, Any]], served: set[int], usps: str, source: str
+) -> list[dict[str, Any]]:
+    """C7's rows (#560, D106): the state's appointed allotment and popular-vote status,
+    one per election from its first, collapsed from ``rows`` (T4's, one per candidate,
+    already checked by :func:`explore.state_view.rows`).
+
+    Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
+    rows that disagree on either value (a null beside a figure is two values, D077,
+    D098) or a gap after the state's first election
+    (:func:`explore.over_time.state_series`, the rule C4's one-state series reads), so
+    C7 draws one value per election or nothing.
+    """
+    by_year: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        year = query.checked_year(row["year"])
+        if year is None:
+            raise TypeError(f"{source} names a year that is not one")
+        record = {
+            "year": year,
+            "state_usps": usps,
+            "state_electoral_votes": row["state_electoral_votes"],
+            "pv_status": row["pv_status"],
+        }
+        kept = by_year.setdefault(year, record)
+        for field in ("state_electoral_votes", "pv_status"):
+            if not over_time.same(kept[field], record[field]):
+                raise TypeError(f"{source} has two values of {field} in {year}")
+    return over_time.state_series(by_year, served, source, usps)
+
+
+def _electors_row(point: over_time.Point) -> html.Tr:
+    """A row of C7's companion table: the year, linked to its election, and the cells
+    C7's hover writes."""
+    return html.Tr(
+        [
+            html.Td(dcc.Link(str(point.year), href=f"/election/{point.year}")),
+            labels.cell(point.appointed_cell),
+            labels.cell(point.status_cell or labels.UNRECOGNIZED),
+        ]
+    )
+
+
+def _electors_caption(
+    c7: over_time.OverTime, plain: str | None, first: int | None
+) -> str:
+    """C7's caption: what electors appointed is, what each marker means where one is
+    drawn, the state's first election where it comes after the dataset's first, and
+    that the page's filters do not reach it (D093(a)); ``components.chart`` adds the
+    table pointer. Names the state only in plain text (``plain``, else "this
+    state")."""
+    parts = [labels.C4_BASIS]
+    if c7.zeros:
+        parts.append(labels.C4_ZERO_NOTE)
+    if c7.missing:
+        parts.append(labels.C4_NO_FIGURE_NOTE)
+    if first is not None:
+        parts.append(
+            labels.FIRST_ELECTION_NOTE_THIS_STATE.format(year=first)
+            if plain is None
+            else labels.FIRST_ELECTION_NOTE.format(state=plain, year=first)
+        )
+    parts.append(labels.C7_FILTERS_NOTE)
+    return " ".join(parts)
+
+
+def _electors_section(
+    rows: list[dict[str, Any]],
+    served: set[int],
+    usps: str,
+    body: dict[str, Any],
+) -> list[Any]:
+    """C7's section (#560, D106): its heading, the chart, its heading-led companion
+    table and that table's column-name list. Rows T4 shows that cannot be read as one
+    allotment per election show the heading and :data:`C7_UNAVAILABLE` only, with no
+    chart (D096(d)'s rule), while T4 and the page stay. The ``try`` covers everything
+    built from the rows, never ``components.chart`` (D095(f))."""
+    heading = html.H2(C7_HEADING)
+    source = f"/v1/states/{usps}"
+    try:
+        records = electors(rows, served, usps, source)
+        points = over_time.appointed_points(records)
+        years = sorted(served)
+        name = rows[0]["state"]
+        plain = over_time.plain(name)
+        title = (
+            labels.C7_TITLE_THIS_STATE
+            if plain is None
+            else labels.C4_TITLE_STATE.format(state=plain)
+        )
+        c7 = over_time.c4_figure(points, years, title, charts.escaped(str(name)))
+        first = points[0].year if points[0].year > years[0] else None
+        caption = _electors_caption(c7, plain, first)
+        by_row = {id(r): p for r, p in zip(records, points, strict=True)}
+        table = components.table(
+            records,
+            lambda r: _electors_row(by_row[id(r)]),
+            ELECTORS_FIELDS,
+            ELECTORS_TABLE_ID,
+            export.Download(
+                filename=f"state-{usps}-electors.csv",
+                name="this state's electors appointed in each election",
+                provenance=body["meta"]["provenance"],
+                view_url=export.view_url(
+                    CANONICAL_HOST, state_view.path(usps, state_view.HISTORY), ""
+                ),
+            ),
+            extra=ELECTORS_EXTRA,
+            notes=(labels.C4_BASIS,),
+        )
+    except (KeyError, TypeError):
+        return [
+            heading,
+            html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"),
+        ]
+    return [
+        heading,
+        components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, caption),
+        html.H2(C7_TABLE_HEADING),
+        *table,
+        labels.glossary(ELECTORS_FIELDS, ident=ELECTORS_GLOSSARY_ID),
+    ]
+
+
 def _download(
     usps: str, body: dict[str, Any], chosen: Filters, span: tuple[int, int]
 ) -> export.Download:
@@ -333,12 +493,15 @@ def render(
     """The page body and the state's name as served (the layout checks it has text),
     for one ``/v1/states/{usps}`` response and
     the ``/v1/elections`` index (read through the same view), and this page's filter
-    pairs. The section links come first, carrying the year range applied (#559)."""
+    pairs. The section links come first, carrying the year range applied (#559), then
+    C7's section, then T4's, under its own heading, with the filters that narrow it
+    (#560, D106)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
     source = f"/v1/states/{usps}"
-    rows = state_view.rows(body, usps, state_view.served_years(index), source)
+    served = state_view.served_years(index)
+    rows = state_view.rows(body, usps, served, source)
     chosen = filters(pairs, rows, span)
     shown = select(rows, chosen)
     content = html.Div(
@@ -348,6 +511,8 @@ def render(
                 state_view.HISTORY,
                 state_view.year_search(chosen.year_from, chosen.year_to, span),
             ),
+            *_electors_section(rows, served, usps, body),
+            html.H2(HISTORY_TABLE_HEADING),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             _controls(rows, chosen, span),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),

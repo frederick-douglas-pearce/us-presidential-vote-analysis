@@ -7156,3 +7156,63 @@ client-side chain carrying the range, the not-found renders, and each page's wid
 on a phone is T4. Carrying the range keeps a reader's chosen years across the one filter both
 pages share, without inventing a filter for a page that has none. Moving `roster` keeps one
 reading of the roster for every page that uses it.
+
+## D106: C7 draws a state's electors appointed on its history page, from the response T4 reads, through C4's shared figure path
+
+**Date:** 2026-11-18
+**Builds on:** D070, D091, D093, D095, D096, D100, D102, D104, D105 · **Decided by:** the owner, approving #560's plan (architect-reviewed)
+
+**Context.** A reader who wanted one state's electors appointed over time had to open
+`/elections` and choose the state in C4's filter (D100). #560 puts that series on the state's
+own page as chart C7, built from C4's one-state rules so the two agree, ahead of #562, which
+removes C4's state filter. Five things needed ruling: which response C7 reads, where the code
+it shares with C4 lives, which table is its companion, where it sits on the page, and what
+#560's "a failed read degrades only C7's section" means when C7 reads no response of its own.
+
+**Decision.**
+- **(a) C7 reads `/v1/states/{usps}`, which T4 already reads,** not N2: no new fill and no
+  ~680 KB cold read on 51 pages (D100(e)'s cost). That response has one row per candidate per
+  election, so C7 collapses T4's checked rows (`state_view.rows`) to one record per election
+  (`year`, `state_electoral_votes`, `pv_status`) and refuses a year whose rows disagree on
+  either value, by D077/D098's one-value rule (a null beside a figure, and `True` beside `1`,
+  are two values). Its order and gap rule is C4's own, `over_time.state_series`, which `n2_rows`
+  also calls; past the collapse C7's points and figure are C4's one-state ones by construction.
+- **(b) The shared pieces are a shared module, `explore/over_time.py`:** C4's figure, moved
+  whole and unchanged in behavior (its traces, layout, symbols, hover and one-value rule),
+  the gap rule, and `appointed_points`, which builds one state's points from collapsed records
+  (no total: C5's). C5's figure, its band and the N1/N2 readers stay on `/elections`. A shared
+  module reads no API, so a source path reaches an error message only as an argument.
+- **(c) C7 has its own companion table, `state-electors`, which no filter reaches.** T4 cannot
+  be its companion: an honestly empty T4 (a year range before the state's first election) has
+  no table for the chart's pointer to name, and T4 repeats the allotment on every candidate's
+  row, so its cells cannot be the chart's one for one (D091). The table's CSV and view URL are
+  unfiltered, so the whole file is the same under every query (D093(a), D100(b)).
+- **(d) Placement.** After the section links (D105), C7's section (its heading, the chart full
+  width with no `.pair`, then its table's heading and the table), then T4's section under a
+  heading of its own, with the page's `Location`, the filters that narrow T4, its count and
+  T4. The lede describes both; its filter sentence names the table the filters narrow.
+- **(e) What "degrades only C7's section" means.** C7 reads the page's only response, so a
+  failed fetch still degrades the whole page, as before #560. C7's section degrades alone when
+  a body T4 accepts cannot be read as one allotment per election (a year's rows disagreeing,
+  a gap): its heading and `C7_UNAVAILABLE` only, with no chart, no `c7` id and no table,
+  while T4, its filters and the page's success marker stay. A fault in what T4 shows is never
+  swallowed by C7's section: the `try` covers C7's build alone, never `components.chart`
+  (D095(f)).
+- **(f) No selection trace.** D093(b)'s second trace marks the filter's chosen item; C7's
+  points are not the filters' items, so the filters change nothing on it, and its caption says
+  so.
+- **(g) D071(g)'s re-measure on `/state/<usps>`** runs after deploy, as #558's did (D100(i)).
+- **(h) C7's reconciliation is pinned against the recorded N2 rows directly,** never through
+  C4's render, so #562 can retire C4's one-state mode without touching C7. TX's recorded
+  history waits for the next re-recording of the fixtures from one snapshot (#575).
+
+**Guards.** `TestC7`, `TestC7Degraded`, `TestStateSeries` and the page-order test
+(`test_dashboard_state.py`); `CHART_QUERIES`, `FILTERED_TABLES`, `ROW_AXES`, `SERVED_ROWS`,
+`SECTION_UNAVAILABLE`, `DOCTORED` and `UNRECOGNIZED_CELLS` (`test_dashboard_export.py`);
+`ISSUED`; `SHARED_MODULES`; the guard's `DOWNLOAD_IDS_BY_PAGE`; and C7's browser tests in
+`tests/e2e/test_dashboard_e2e_history.py`. C2, C4 and C5's suites, unchanged by the move, are
+its regression guard.
+
+**Rationale.** The reader gets the trend where the state is, at no extra cost to the page. One
+figure path for C4 and C7 keeps "same series, same drawing" a property of the code rather than
+of two copies, and an unfiltered companion table is the one design D093 and D091 both hold for.

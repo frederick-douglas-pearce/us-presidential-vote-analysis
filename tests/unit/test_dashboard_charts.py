@@ -43,13 +43,14 @@ from tests.unit.test_dashboard_theme import (
 #: table, retired): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
 #: registers it: C1 by #433 and C3 by #435; C2, C4 and C5 are assigned to #434 and
-#: #436 by their issues.
+#: #436 by their issues, and C7 to #560 by its own (C6, #550's, is not yet registered).
 ISSUED: dict[str, tuple[str, str, bool]] = {
     "C1": ("/election/<year>", "election-nation", False),
     "C3": ("/election/<year>/per-capita", "election-per-capita", False),
     "C2": ("/elections", "elections-leader-table", False),
     "C4": ("/elections", "elections-over-time-table", False),
     "C5": ("/elections", "elections-over-time-table", False),
+    "C7": ("/state/<usps>", "state-electors", False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.

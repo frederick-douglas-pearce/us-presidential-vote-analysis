@@ -778,6 +778,7 @@ SHARED_MODULES = (
     "export.py",
     "labels.py",
     "metrics.py",  # the dashboard's own summaries (#437, D097)
+    "over_time.py",  # the election-year time series' pieces, C4's and C7's (#560)
     "query.py",
     "state_view.py",  # the state pages' shared pieces (#559)
 )

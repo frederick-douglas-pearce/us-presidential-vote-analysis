@@ -25,7 +25,17 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, election_view, export, labels, query, state_view
+from explore import (
+    api,
+    charts,
+    components,
+    election_view,
+    export,
+    labels,
+    over_time,
+    query,
+    state_view,
+)
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -43,7 +53,7 @@ from tests.unit.test_dashboard_app import (
     url,
 )
 from tests.unit.test_dashboard_elections import classed, find, of_type, parse
-from tests.unit.test_dashboard_export import download
+from tests.unit.test_dashboard_export import body_rows, download
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -839,14 +849,18 @@ class TestLede:
 
     def test_the_two_sentences_are_todays_lede(self) -> None:
         # The split falls at the sentence boundary, so the degraded state offers no part
-        # of the filter sentence; people per electoral vote left the lede with T7 (#559).
+        # of the filter sentence; people per electoral vote left the lede with T7
+        # (#559), and the electors appointed came in with C7, which the filters do not
+        # reach, so the filter sentence names the table they narrow (#560).
         assert MOD["FILTER_SENTENCE"] == (
-            "Narrow the rows by year, candidate or popular-vote status."
+            "Narrow the table of each candidate's electoral votes by year, candidate "
+            "or popular-vote status."
         )
         assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
-            "This state's electoral votes for each candidate in every election this "
-            "dataset holds for it, with the popular vote where the dataset has it. "
-            "Narrow the rows by year, candidate or popular-vote status."
+            "This state's electors appointed and its electoral votes for each "
+            "candidate in every election this dataset holds for it, with the popular "
+            "vote where the dataset has it. Narrow the table of each candidate's "
+            "electoral votes by year, candidate or popular-vote status."
         )
 
     def test_success_shows_the_lede_then_the_filter_sentence(
@@ -1553,13 +1567,15 @@ class TestWideLayout:
         # Only the slider's box keeps its own row.
         assert classed(tree, "filter-own-row") == [kids[0]]
 
-    def test_no_slot_is_built_after_the_lede(
+    def test_c7_s_section_comes_after_the_section_links_and_before_t4_s(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The future chart slot after the lede is a placement only (#543 §6). The lede
-        # is added by layout(), so the whole page is checked there: the heading, the
-        # lede and the page body, nothing between; in the body, the filters straight
-        # after the page's Location; and no chart anywhere.
+        # #560, D106: the lede is added by layout(), so the whole page is checked there:
+        # the heading, the lede and the page body, nothing between. In the body, the
+        # section links first (#559, D105); then C7's section (its heading, the chart,
+        # its table's heading, the table in its scroll box, its download, its notes and
+        # its column-name list); then T4's, under its own heading, with the page's
+        # Location and the filters that narrow it. One chart, and it is C7.
         cached_client(monkeypatch)
         page = MOD["layout"](usps="GA")
         heading, lede, content = page.children
@@ -1567,11 +1583,28 @@ class TestWideLayout:
         assert type(lede).__name__ == "P" and lede.className == "lede"
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
-        # The section links first (#559), then the page's Location and the filters.
         assert kids[0].id == state_view.SECTIONS_ID
-        assert type(kids[1]).__name__ == "Location"
-        assert kids[2].className.split()[:1] == ["filters"]
-        assert of_type(page, "Figure") == []
+        assert type(kids[1]).__name__ == "H2"
+        assert kids[1].children == MOD["C7_HEADING"]
+        assert type(kids[2]).__name__ == "Figure"
+        assert kids[2].id == charts.dom_id(MOD["C7_ID"])
+        assert type(kids[3]).__name__ == "H2"
+        assert kids[3].children == MOD["C7_TABLE_HEADING"]
+        t4 = [
+            i
+            for i, k in enumerate(kids)
+            if type(k).__name__ == "H2" and k.children == MOD["HISTORY_TABLE_HEADING"]
+        ]
+        assert len(t4) == 1
+        (at,) = t4
+        # C7's table and its column-name list sit between its heading and T4's.
+        between = kids[4:at]
+        assert find(between, MOD["ELECTORS_TABLE_ID"]) is not None
+        assert find(between, MOD["ELECTORS_GLOSSARY_ID"]) is not None
+        assert find(between, MOD["TABLE_ID"]) is None
+        assert type(kids[at + 1]).__name__ == "Location"
+        assert kids[at + 2].className.split()[:1] == ["filters"]
+        assert [f.id for f in of_type(page, "Figure")] == [charts.dom_id("C7")]
 
     def test_the_per_capita_page_s_slider_has_its_own_row_and_no_slot(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1593,3 +1626,350 @@ class TestWideLayout:
         assert own.className.split() == ["filter", "filter-own-row"]
         assert find(own, PC_MOD["YEARS_ID"]) is not None
         assert of_type(page, "Figure") == []
+
+
+# --- chart C7: the state's electors appointed in each election (#560, D106) ----------
+
+C7_DOM = charts.dom_id("C7")
+ELECTORS = MOD["ELECTORS_TABLE_ID"]
+N2: dict[str, Any] = RECORDED[api.ELECTION_STATES_PATH]
+SERVED = sorted(state_view.served_years(INDEX))
+
+
+#: C4's page module, whose one-state points C7's are checked against (#560).
+ELECTIONS_MOD: dict[str, Any] = dash.page_registry["pages.elections"][
+    "layout"
+].__globals__
+INDEX_COVERAGE: dict[str, Any] = INDEX["meta"]["provenance"]["coverage"]
+
+
+def body_cells(tree: Any) -> list[tuple[str, str, str]]:
+    """C7's companion table's body: each row's year, allotment and status texts."""
+    return [
+        tuple(" ".join(texts(cell)) for cell in tr.children)  # type: ignore[misc]
+        for tr in body_rows(tree, ELECTORS)
+    ]
+
+
+def c7_figure(tree: Any) -> Any:
+    """C7's unresolved figure in a rendered tree, or ``None`` where it is not built."""
+    source = repr(charts.source_id(C7_DOM))
+    stores = [
+        s for s in of_type(tree, "Store") if repr(getattr(s, "id", None)) == source
+    ]
+    return stores[0].data if stores else None
+
+
+def c7_title(tree: Any) -> str:
+    """C7's title, as page text (``components.chart`` lifts it out of the figure)."""
+    (title,) = [p for p in of_type(tree, "P") if getattr(p, "id", None) == "c7-title"]
+    return str(title.children)
+
+
+def c7_caption(tree: Any) -> str:
+    (figure,) = [f for f in of_type(tree, "Figure") if f.id == C7_DOM]
+    (caption,) = of_type(figure, "Figcaption")
+    return " ".join(texts(caption))
+
+
+def n2_state(usps: str) -> list[dict[str, Any]]:
+    """The recorded N2 rows of one state, in year order: C4's one-state source."""
+    return sorted(
+        (r for r in N2["data"] if r["state_usps"] == usps), key=lambda r: r["year"]
+    )
+
+
+def traces(figure: dict[str, Any]) -> dict[str, list[int]]:
+    """Each trace's years, by its name: the bar's and each marker series'."""
+    return {t["name"]: list(t["x"]) for t in figure["data"]}
+
+
+def with_year(body: dict[str, Any], year: int, **fields: Any) -> dict[str, Any]:
+    """``body`` with ``fields`` set on every candidate row of ``year``."""
+    for row in body["data"]:
+        if row["year"] == year:
+            row.update(copy.deepcopy(fields))
+    return body
+
+
+class TestC7:
+    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+        assert charts.CHARTS["C7"] == charts.Chart("/state/<usps>", ELECTORS)
+        tree = render()
+        (figure,) = of_type(tree, "Figure")
+        assert figure.id == C7_DOM == "c7"
+        assert find(tree, ELECTORS) is not None
+        csv = download(tree, ELECTORS)
+        assert csv.header == [
+            "year",
+            "state_electoral_votes",
+            "pv_status",
+            "state_usps",
+        ]
+        assert {r["state_usps"] for r in csv.rows} == {"GA"}
+
+    def test_its_points_are_n2_s_one_state_series_for_georgia(self) -> None:
+        # AC2 against the recorded N2 rows directly, never C4's render (D106(h)), so it
+        # survives #562; and the history and N2 agree on every year both hold.
+        records = MOD["electors"](
+            state_view.rows(ga_body(), "GA", set(SERVED), GA_PATH),
+            set(SERVED),
+            "GA",
+            GA_PATH,
+        )
+        n2 = n2_state("GA")
+        assert [
+            (r["year"], r["state_electoral_votes"], r["pv_status"]) for r in records
+        ] == [(r["year"], r["state_electoral_votes"], r["pv_status"]) for r in n2]
+        tree = render()
+        figure = c7_figure(tree)
+        expected = over_time.c4_figure(
+            over_time.appointed_points(n2),
+            SERVED,
+            labels.C4_TITLE_STATE.format(state="Georgia"),
+            "Georgia",
+        ).figure
+        # ``components.chart`` takes the title out of the figure into page text.
+        title = expected["layout"].pop("title")["text"]
+        assert figure == expected
+        assert c7_title(tree) == title
+
+    def test_every_n2_state_s_series_reads_the_same_through_c7(self) -> None:
+        # AC2 on the recorded N2 fixture (TX's history is #575's): each state's N2 rows,
+        # one per election, pass C7's collapse unchanged, and its points and figure are
+        # C4's one-state ones.
+        states = {r["state_usps"] for r in N2["data"]}
+        assert len(states) == 51
+        for usps in sorted(states):
+            n2 = n2_state(usps)
+            records = MOD["electors"](n2, set(SERVED), usps, "N2")
+            assert [r["year"] for r in records] == [r["year"] for r in n2], usps
+            mine = over_time.appointed_points(records)
+            theirs = ELECTIONS_MOD["_state_points"](n2, INDEX_COVERAGE)
+            assert [
+                (p.year, p.appointed, p.appointed_cell, p.status_cell) for p in mine
+            ] == [
+                (p.year, p.appointed, p.appointed_cell, p.status_cell) for p in theirs
+            ], usps
+            assert (
+                over_time.c4_figure(mine, SERVED, "t", usps).figure
+                == over_time.c4_figure(theirs, SERVED, "t", usps).figure
+            ), usps
+
+    def test_the_chart_equals_its_table_s_cells(self) -> None:
+        tree = render()
+        figure = c7_figure(tree)
+        rows = download(tree, ELECTORS).rows
+        (bars,) = [t for t in figure["data"] if t["type"] == "bar"]
+        drawn = dict(zip(bars["x"], bars["y"], strict=True))
+        cells = {int(r["year"]): r for r in rows}
+        assert set(cells) == set(range(1824, 2025, 4))
+        for year, value in drawn.items():
+            assert cells[year]["state_electoral_votes"] == str(value), year
+        markers = {y for t in figure["data"] if t["type"] != "bar" for y in t["x"]}
+        assert markers == {1864}
+        assert cells[1864]["state_electoral_votes"] == "0"
+        # Each hover writes the table's cells (D091).
+        hovers = [h for t in figure["data"] for h in t["hovertext"]]
+        assert len(hovers) == len(rows)
+        body = body_cells(tree)
+        for hover, (year, appointed, status) in zip(
+            sorted(hovers, key=lambda h: int(h[:4])), body, strict=True
+        ):
+            assert hover == labels.C4_STATE_HOVER.format(
+                year=year, state="Georgia", appointed=appointed, pv_status=status
+            )
+
+    def test_a_zero_allotment_is_a_marker_by_its_cause(self) -> None:
+        # Georgia took no part in 1864 (recorded); Texas's 1864 and 1868 zeros through
+        # the recorded N2 rows (#575 records its history).
+        figure = c7_figure(render())
+        assert traces(figure)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == [1864]
+        assert 1864 not in traces(figure)[labels.LABELS["state_electoral_votes"]]
+        assert labels.C4_ZERO_NOTE in c7_caption(render())
+        tx = over_time.c4_figure(
+            over_time.appointed_points(
+                MOD["electors"](n2_state("TX"), set(SERVED), "TX", "N2")
+            ),
+            SERVED,
+            "t",
+            "Texas",
+        ).figure
+        zeros = traces(tx).get(labels.C4_NO_ELECTORS_TOOK_NO_PART, []) + traces(tx).get(
+            labels.C4_NO_ELECTORS, []
+        )
+        assert sorted(zeros) == [1864, 1868]
+
+    @pytest.mark.parametrize(
+        ("value", "label"),
+        [
+            (None, labels.NOT_IN_DATASET),
+            (-1, labels.UNRECOGNIZED),
+            (True, labels.UNRECOGNIZED),
+            (float("nan"), labels.UNRECOGNIZED),
+            ("12", labels.UNRECOGNIZED),
+        ],
+    )
+    def test_a_null_or_an_unrecognized_allotment_is_its_own_marker(
+        self, value: Any, label: str
+    ) -> None:
+        # Set on every candidate row of the year, so C7 draws the marker rather than
+        # refusing the year as two values (#560's architect review, C6).
+        tree = render(body=with_year(ga_body(), 1900, state_electoral_votes=value))
+        figure = c7_figure(tree)
+        assert figure is not None
+        assert traces(figure)[label] == [1900]
+        assert 1900 not in traces(figure)[labels.LABELS["state_electoral_votes"]]
+        assert labels.C4_NO_FIGURE_NOTE in c7_caption(tree)
+        # The table's cell is the hover's (D091).
+        (cell,) = [c for y, c, _ in body_cells(tree) if y == "1900"]
+        assert cell == labels.number(value)
+        hovers = [
+            h for t in figure["data"] if t["name"] == label for h in t["hovertext"]
+        ]
+        assert hovers and cell in hovers[0]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "",
+            "year_from=1900",
+            "year_to=1900",
+            "candidate=andrew-jackson",
+            "pv_status=not_participating",
+            "year_from=1700&year_to=1800",
+        ],
+    )
+    def test_no_filter_changes_the_chart_or_its_table(self, query: str) -> None:
+        plain = render()
+        tree = render(query)
+        assert c7_figure(tree) == c7_figure(plain)
+        assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
+        assert c7_caption(tree) == c7_caption(plain)
+
+    def test_the_caption_describes_the_series(self) -> None:
+        caption = c7_caption(render())
+        assert caption.startswith(labels.C4_BASIS)
+        assert labels.C7_FILTERS_NOTE in caption
+        # Georgia's first election is the dataset's, so no first-election sentence.
+        assert "The first election in this dataset" not in caption
+        assert labels.C4_NO_FIGURE_NOTE not in caption
+
+    def test_a_later_first_election_is_named_and_the_axis_keeps_the_dataset_s(
+        self,
+    ) -> None:
+        body = ga_body()
+        body["data"] = [r for r in body["data"] if r["year"] >= 1832]
+        tree = render(body=body)
+        assert labels.FIRST_ELECTION_NOTE.format(state="Georgia", year=1832) in (
+            c7_caption(tree)
+        )
+        figure = c7_figure(tree)
+        assert figure["layout"]["xaxis"] == components.year_axis(SERVED)
+
+    def test_a_name_that_is_not_plain_text_takes_this_state_s_forms(self) -> None:
+        body = ga_body()
+        body["data"] = [r for r in body["data"] if r["year"] >= 1832]
+        for row in body["data"]:
+            row["state"] = "<b>Georgia"
+        tree = render(body=body)
+        figure = c7_figure(tree)
+        assert c7_title(tree) == labels.C7_TITLE_THIS_STATE
+        assert labels.FIRST_ELECTION_NOTE_THIS_STATE.format(year=1832) in (
+            c7_caption(tree)
+        )
+        hovers = [h for t in figure["data"] for h in t["hovertext"]]
+        assert all(charts.escaped("<b>Georgia") in h for h in hovers)
+
+
+class TestC7Degraded:
+    """A body T4 accepts that C7 cannot read as one allotment per election degrades
+    C7's section alone (D096(d)'s rule, #560's AC5 as D106(e) reads it): its heading
+    and :data:`C7_UNAVAILABLE`, no chart and no ``c7`` id, while T4, its filters and the
+    page's success marker stay."""
+
+    def assert_degraded(self, body: dict[str, Any]) -> None:
+        tree = render(body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert of_type(tree, "Figure") == []
+        assert c7_figure(tree) is None
+        assert find(tree, ELECTORS) is None
+        assert find(tree, TABLE) is not None
+        assert find(tree, MOD["YEARS_ID"]) is not None
+        headings = [h.children for h in of_type(tree, "H2")]
+        assert headings[:2] == [MOD["C7_HEADING"], MOD["HISTORY_TABLE_HEADING"]]
+        assert MOD["C7_TABLE_HEADING"] not in headings
+
+    def test_two_allotments_in_one_election(self) -> None:
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["state_electoral_votes"] = 99
+        self.assert_degraded(body)
+
+    def test_a_figure_beside_a_null_or_true_beside_one(self) -> None:
+        for value in (None, True):
+            body = with_year(ga_body(), 1900, state_electoral_votes=1)
+            (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+            first["state_electoral_votes"] = value
+            self.assert_degraded(body)
+
+    def test_two_statuses_in_one_election(self) -> None:
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        self.assert_degraded(body)
+
+    def test_a_gap_after_the_first_election(self) -> None:
+        body = ga_body()
+        body["data"] = [r for r in body["data"] if r["year"] != 1900]
+        self.assert_degraded(body)
+
+    def test_a_row_without_the_allotment(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            if row["year"] == 1900:
+                del row["state_electoral_votes"]
+        # T4 reads the field too, so this degrades the page rather than C7 alone: a
+        # fault in what T4 shows is never swallowed by C7's section.
+        with pytest.raises(KeyError):
+            render(body=body)
+
+    def test_the_page_s_degraded_layout_keeps_its_success_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["state_electoral_votes"] = 99
+        fetch, _ = fake_fetch({**RECORDED, GA_PATH: body})
+        client = offline_client(
+            fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, ROSTER_PATH]
+        )
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        page = MOD["layout"](usps="GA")
+        _, lede, content = page.children
+        assert content.id == PAGE_ID
+        assert lede.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert find(content, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert find(content, C7_DOM) is None
+        assert find(content, TABLE) is not None
+
+
+class TestStateSeries:
+    """The one-state ordering and gap rule C4's ``n2_rows`` and C7 share (#560)."""
+
+    def test_rows_in_year_order_from_the_first(self) -> None:
+        got = over_time.state_series(
+            {1832: "b", 1828: "a", 1836: "c"}, [1824, 1828, 1832, 1836], "src", "GA"
+        )
+        assert got == ["a", "b", "c"]
+
+    def test_a_gap_or_no_row_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="skips a year for GA"):
+            over_time.state_series(
+                {1824: "a", 1832: "c"}, [1824, 1828, 1832], "s", "GA"
+            )
+        with pytest.raises(TypeError, match="has no row for GA"):
+            over_time.state_series({}, [1824], "s", "GA")

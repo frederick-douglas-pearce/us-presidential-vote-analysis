@@ -47,6 +47,8 @@ TABLES = {
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
     "state-history": "/state/<usps>",
+    # Chart C7's companion table (#560).
+    "state-electors": "/state/<usps>",
     # T7 has a page of its own since #559.
     "state-per-capita": "/state/<usps>/per-capita",
     "candidate-history": "/candidate/<slug>",
@@ -478,6 +480,18 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({}, "pv=1", "filtered"),
         ({}, "state=GA&pv=1", "filtered"),
     ],
+    # #560, D106: the state page's filters narrow T4 only, never C7 or its companion
+    # table. Georgia from 1824, with 1864's zero allotment.
+    "/state/<usps>": [
+        ({"usps": "GA"}, "year_from=1900", "filtered"),
+        ({"usps": "GA"}, "year_to=1900", "filtered"),
+        ({"usps": "GA"}, "candidate=andrew-jackson", "filtered"),
+        ({"usps": "GA"}, "pv_status=not_participating", "filtered"),
+        ({"usps": "GA"}, "year_from=1900&candidate=jimmy-carter", "filtered"),
+        # A slug Georgia's rows do not hold falls back to every candidate.
+        ({"usps": "GA"}, "candidate=no-such-candidate", "absent"),
+        ({"usps": "GA"}, "year_from=1700", "absent"),
+    ],
 }
 
 #: The tables each chart page's filters reach, and the query keys that reach each
@@ -494,6 +508,11 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/elections": {
         "elections-table": ("year_from", "year_to", "pv"),
         "elections-over-time-table": ("state",),
+    },
+    # #560: T4 alone; C7's companion table is unlisted, so it equals the unfiltered
+    # render under every query.
+    "/state/<usps>": {
+        "state-history": ("year_from", "year_to", "candidate", "pv_status"),
     },
 }
 
@@ -523,6 +542,7 @@ ROW_AXES: dict[str, str] = {
     charts.dom_id("C3"): "yaxis",
     charts.dom_id("C4"): "xaxis",
     charts.dom_id("C5"): "xaxis",
+    charts.dom_id("C7"): "xaxis",
 }
 
 
@@ -1451,6 +1471,7 @@ class TestExactlyTheView:
             "election-nation-csv": "election-1824-national.csv",
             "election-per-capita-csv": "election-1824-per-capita.csv",
             "state-history-csv": "state-GA-history.csv",
+            "state-electors-csv": "state-GA-electors.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
             "candidate-history-csv": "candidate-andrew-jackson-history.csv",
         }
@@ -2194,6 +2215,18 @@ def _election(body: dict[str, Any]) -> None:
     )
 
 
+def _state_history(body: dict[str, Any]) -> None:
+    """A state's history (#560): T4's first row doctored, and the allotment and status
+    it carries set alike on every row of its election, so C7 collapses them to one
+    point rather than refusing the year, and its companion table words both cells."""
+    _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE)(body)
+    first = body["data"][0]
+    for row in body["data"]:
+        if row["year"] == first["year"]:
+            row["state_electoral_votes"] = first["state_electoral_votes"]
+            row["pv_status"] = first["pv_status"]
+
+
 #: Per page: the responses to doctor, each with every field a ``labels`` function
 #: words in one row of each table (and the panel) set to a value no cell has wording
 #: for, so every such cell is exercised.
@@ -2237,6 +2270,14 @@ def _over_time(body: dict[str, Any]) -> None:
 #: definition (#498); ``CHART_QUERIES`` names its own states.
 N2_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
 
+#: How many candidate rows Georgia's first recorded election has (#560), derived from
+#: the recording.
+GA_FIRST_ROWS = sum(
+    1
+    for row in RECORDED["/v1/states/GA"]["data"]
+    if row["year"] == RECORDED["/v1/states/GA"]["data"][0]["year"]
+)
+
 #: Each doctored render, by page key and, after a ``?``, the query it renders under
 #: (#436: ``/elections`` renders all states and one state).
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
@@ -2261,14 +2302,7 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"year": "2016"},
         {"/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
-    "/state/<usps>": (
-        {"usps": "GA"},
-        {
-            "/v1/states/GA": _row(
-                *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
-            ),
-        },
-    ),
+    "/state/<usps>": ({"usps": "GA"}, {"/v1/states/GA": _state_history}),
     "/state/<usps>/per-capita": (
         {"usps": "GA"},
         {"/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
@@ -2315,7 +2349,13 @@ UNRECOGNIZED_CELLS = {
     "/election/<year>/per-capita": {
         "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
-    "/state/<usps>": {"state-history": len(STATE_ROW_FIELDS) + 1},
+    # T4's other rows of the doctored election carry its allotment and status too
+    # (#560), each with the popular-vote cell the status words, and C7's companion
+    # table words the allotment and status once.
+    "/state/<usps>": {
+        "state-history": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
+        "state-electors": 2,
+    },
     "/state/<usps>/per-capita": {"state-per-capita": len(PER_CAPITA_ROW_FIELDS)},
     "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
 }
@@ -2589,8 +2629,9 @@ def _first(key: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
 
 
 def _year_rows(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
-    """Every ``data`` row of one year: N1 repeats a year's national total on each, so
-    doctoring one row would make two values and degrade the section (#436)."""
+    """Every ``data`` row of one year: N1 repeats a year's national total on each, and a
+    state's history its allotment on each candidate's row, so doctoring one row would
+    make two values and degrade the section (#436, #560)."""
     return lambda body: [row for row in body["data"] if row["year"] == year]
 
 
@@ -2634,14 +2675,20 @@ SERVED_ROWS: dict[str, list[Served]] = {
             frozenset({"state"}),
         ),
     ],
+    # #560: every candidate row of one election, since C7 collapses them to one point
+    # and refuses a year whose rows disagree: doctoring one row would degrade the
+    # section instead of reaching the point.
+    "C7": [Served({"usps": "GA"}, "", "/v1/states/GA", _year_rows(2016))],
 }
 
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
-#: and C4 and C5's (#436).
+#: C4 and C5's (#436), and C7's, when T4's rows cannot be read as one allotment per
+#: election (#560).
 SECTION_UNAVAILABLE = {
     "C2": "elections-leader-unavailable",
     "C4": "elections-over-time-unavailable",
     "C5": "elections-over-time-unavailable",
+    "C7": "state-electors-unavailable",
 }
 
 #: C4 and C5's titles for a chosen state whose name is not plain text (#498).

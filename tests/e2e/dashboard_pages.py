@@ -9,11 +9,12 @@ responses at import, as ``test_dashboard_app.py`` does.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from typing import Any
 
-from playwright.sync_api import Locator, Page
+from playwright.sync_api import Locator, Page, expect
 
 from explore import components, query
 from tests.dashboard_fixtures import FIXTURE_DIR, RECORDED_FILES
@@ -148,7 +149,7 @@ def lower_thumb(page: Page) -> Locator:
 def assert_rendered(page: Page, success: str, *, width: int = 390) -> None:
     """The page rendered from data at the phone's width: its success marker is there,
     the degraded state is not. ``width`` is the viewport width the calling test set
-    itself (``PHONE_WIDTHS`` in ``test_dashboard_e2e_elections.py``, #558); only the
+    itself (:data:`PHONE_WIDTHS`, #558); only the
     default, 390, is the suite's pinned phone."""
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
@@ -359,3 +360,42 @@ def assert_layout_holds(
     assert tables and None not in found["tables"], found  # every table is there
     if width >= 1280:
         assert all(found["tables"]), found
+
+
+# --- the time series (#558, D104) ------------------------------------------------
+
+#: The phone widths every time-series chart is checked at (#558; shared since #560, when
+#: C7 joined C2, C4 and C5): the suite's 390 px
+#: viewport and a narrower 360 px one.
+PHONE_WIDTHS = (390, 360)
+#: The least gap between two neighboring year ticks, so a wider font still fits.
+TICK_GAP_PX = 6
+
+
+def served_years() -> list[str]:
+    return [str(row["year"]) for row in recorded("/v1/elections")["data"]]
+
+
+def year_ticks() -> list[str]:
+    """The year axis's tick text for the served years (#558, D104)."""
+    axis = components.year_axis([int(year) for year in served_years()])
+    return list(axis["ticktext"])
+
+
+def assert_year_ticks_apart(page: Page, chart: str) -> None:
+    """The year ticks along ``chart``'s bottom, as the axis names them, each at least
+    :data:`TICK_GAP_PX` clear of the next."""
+    ticks = boxes(page, f"{chart} .xtick text")
+    assert [b["text"] for b in ticks] == year_ticks(), chart
+    ordered = sorted(ticks, key=lambda b: b["x"])
+    for a, b in itertools.pairwise(ordered):
+        assert b["x"] - (a["x"] + a["w"]) >= TICK_GAP_PX, (chart, a, b)
+
+
+def assert_hover_names_year(page: Page, chart: str, selector: str, year: str) -> None:
+    """Hovering the drawn point ``selector`` shows a hover naming ``year``."""
+    page.locator(selector).scroll_into_view_if_needed()
+    box = page.locator(selector).bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    expect(page.locator(f"{chart} .hoverlayer .hovertext")).to_contain_text(year)
