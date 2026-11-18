@@ -174,10 +174,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   C2, the hover line "Electors appointed" (`labels.C2_HOVER`), the line label
   `labels.C2_MAJORITY_LINE`, and the caption sentences `labels.C1_EC_BASIS` and
   `labels.C2_MAJORITY_NOTE`. `LABELS["electoral_denominator"]` (the C4/C5 table with all
-  states); in C4: the bars, `labels.C4_X_AXIS`, the hover line "Electors appointed",
-  `labels.C4_TITLE`, `labels.C4_TITLE_STATE`, `labels.C4_TITLE_SELECTED`,
-  `labels.C4_NO_ELECTORS_TOOK_NO_PART`, `labels.C4_NO_ELECTORS`, `labels.C4_BASIS`,
-  `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`.
+  states); in C4: the bars, the value-axis title `labels.C4_VALUE_AXIS`, the hover line
+  "Electors appointed", `labels.C4_TITLE`, `labels.C4_TITLE_STATE`, `labels.C4_TITLE_SELECTED`,
+  the key entries `labels.C4_NO_ELECTORS_TOOK_NO_PART` and `labels.C4_NO_ELECTORS`,
+  `labels.C4_BASIS`, `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
   `ElectionSummary.electoral_denominator`;
@@ -603,7 +603,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral vote), read from that index and never computed as four years before or after; a year
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
-- **Shown as:** `LABELS["year"]`; the year-range slider (`/elections`, `/state/<usps>`), which on
+- **Shown as:** `LABELS["year"]`; the year axis of C2, C4 and C5 on `/elections`, a numeric axis
+  with a tick every 40 years; the year-range slider (`/elections`, `/state/<usps>`), which on
   `/state/<usps>` is labeled "Years" (a literal in `_controls` in `pages/state.py`) and offered by
   that page's `FILTER_SENTENCE`; the label of the year control on `/candidate/<slug>`, and the lede
   sentence that offers it (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages'
@@ -687,10 +688,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Electoral College leader's share chart (C2)
-- **Plain:** A chart on the Elections page with a row for each election in this dataset, oldest at
-  the top. Each row has one point: the electoral share of that election's Electoral College leader,
-  the candidate with the most electoral votes counted, labeled with its number as the table on the
-  same page writes it. A dashed line marks half of each election's electors appointed. A leader
+- **Plain:** A chart on the Elections page with election years running left to right, oldest at
+  the left. Each election has one point: the electoral share of that election's Electoral College
+  leader, the candidate with the most electoral votes counted. Hovering over or tapping a point
+  shows its number as the table on the same page writes it. A dashed line across the chart marks
+  half of each election's electors appointed. A leader
   whose share is more than half had a majority of them. With half or less, no candidate had a
   majority, and the election went to the House of Representatives. The leader did not always take
   office: in 1824 the House chose John Quincy Adams. Its table also says whether each leader took
@@ -710,14 +712,15 @@ articles and announcements). Every rule binds all three unless the rule states a
     from that year's single `data` row with `electoral_rank` 1: its served `ec_share_full`, with
     that year's `elections` item's `ec_determinative`. A body with a year missing, a second rank-1
     row or an unserved year shows the section's unavailable state.
-  - It derives nothing. Each point's text is `labels.share_cell`. The hover writes the companion
-    table's cells: votes counted and electors appointed, never votes cast (1868: 214 and 294; 1872:
-    286 and 366; 2016: 304 and 538).
-  - The share axis runs 0–100%. The line stands at 0.5 and the test is strict, so a point on the
-    line is not a majority.
-  - A share that is not a finite number draws a marker at zero, labeled `labels.C1_NO_SHARE` or
-    `labels.UNRECOGNIZED`. That marker trace is `labels.C2_NO_SHARE_SERIES`, never shown. A year is
-    never dropped.
+  - It derives nothing. No point carries a text label; the hover writes the companion table's
+    cells, the share among them (`labels.share_cell`): votes counted and electors appointed, never
+    votes cast (1868: 214 and 294; 1872: 286 and 366; 2016: 304 and 538).
+  - Election year runs along the bottom as a number, so a gap between served elections is drawn at
+    its true width, with a tick every 40 years. The share axis runs up the side, 0–100%. The line is
+    horizontal at 0.5 and the test is strict, so a point on the line is not a majority.
+  - A share that is not a finite number draws a marker at zero with no text label, in a series
+    named by its label (`labels.C1_NO_SHARE` or `labels.UNRECOGNIZED`), which the chart's key
+    shows, and the caption adds `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
   - No popular-vote figure or hybrid score is drawn.
   - Neither the chart nor its companion table is narrowed by a filter (D093(a); fork B, D096,
     amending D093(c)).
@@ -725,12 +728,13 @@ articles and announcements). Every rule binds all three unless the rule states a
     table, and T1 still renders.
 - **Shown as:**
   - Placed by `pages/elections.py` through `components.chart`.
-  - Chart text in `labels.py`: `labels.C2_TITLE`; the axis `labels.C2_X_AXIS`
-    (`LABELS["ec_share_full"]`); the line label `labels.C2_MAJORITY_LINE`; the hover
-    `labels.C2_HOVER`; the marker labels `labels.C1_NO_SHARE` and `labels.UNRECOGNIZED`; the caption
-    `labels.C2_LEADER_POINT`, `labels.C1_EC_BASIS`, `labels.C2_MAJORITY_NOTE` and
-    `labels.C2_TOOK_OFFICE`, then `labels.CHART_TABLE_POINTER`; the trace names
-    `LABELS["ec_share_full"]` and `labels.C2_NO_SHARE_SERIES` (never shown).
+  - Chart text in `labels.py`: `labels.C2_TITLE`; the axes `LABELS["year"]` and
+    `labels.C2_VALUE_AXIS`; the line label `labels.C2_MAJORITY_LINE`; the hover `labels.C2_HOVER`;
+    the key entries `labels.C1_NO_SHARE` and `labels.UNRECOGNIZED`, shown only when such a marker
+    is drawn; the caption `labels.C2_LEADER_POINT`, `labels.C1_EC_BASIS`,
+    `labels.C2_MAJORITY_NOTE`, `labels.C2_TOOK_OFFICE` and, only when a marker is drawn,
+    `labels.C2_NO_SHARE_NOTE`, then `labels.CHART_TABLE_POINTER`; the point series' name
+    `LABELS["ec_share_full"]`, kept off the key.
   - In `pages/elections.py`: `C2_HEADING`, `C2_TABLE_HEADING`, the companion table's columns
     (existing `LABELS` keys, `took_office` last), the table notes `labels.C2_LEADER_ROW` and
     `labels.C2_TOOK_OFFICE`, the download "the Electoral College leaders"
@@ -742,6 +746,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `NationalSummaryRow.ec_share_full`, `electoral_rank`, `national_electoral_votes_counted` and
   `national_electoral_denominator`, `ElectionSummary.ec_determinative` and
   `AllElectionsSummaryResponse` in `src/usvote/api/models.py`; D041; D046 §4; D091; D093; D096;
+  #558; D104;
   `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99 of 261, 37.9 percent; the House
   chose John Quincy Adams); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it
   happened"; reader wording: `ba` spec for #434, approved at its plan gate (2026-11-11), with its
@@ -797,9 +802,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY` and
   `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's cell for the same value.
   `ec_share_hybrid` is on no dashboard page and in no download since #358; the API serves it. In C2,
-  the title `labels.C2_TITLE`, the axis `labels.C2_X_AXIS`, each point's text (`labels.share_cell`),
-  the hover `labels.C2_HOVER`, the marker label `labels.C1_NO_SHARE` and the caption sentence
-  `labels.C1_EC_BASIS`.
+  the title `labels.C2_TITLE`, the value axis `labels.C2_VALUE_AXIS`, the hover `labels.C2_HOVER`
+  (its share line is `labels.share_cell`; no point carries text), the key entry
+  `labels.C1_NO_SHARE` and the caption sentences `labels.C1_EC_BASIS` and, when a marker is drawn,
+  `labels.C2_NO_SHARE_NOTE`.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
   2026-11-02, #358.
@@ -897,16 +903,17 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Electors appointed and total popular vote over time (charts C4 and C5)
-- **Plain:** Two charts on the Elections page with a row for each election in this dataset,
-  oldest at the top. The first shows the electors appointed in each election and the second the
-  total popular vote. With All states they show the national figures. With one state chosen they
-  show that state's own figures, starting at its first election in this dataset. Where there is
-  nothing to draw, a row shows a labeled marker, never a bar of zero length; a state that
-  appointed no electors (its allotment was 0) is marked that way too. In the second chart, the
-  shaded years are those before this dataset's popular-vote figures begin; shading does not mean
-  no popular vote was held. One table on the page holds both charts' numbers. The state choice
-  changes only these two charts and their table, and the list's year and popular-vote filters do
-  not change them.
+- **Plain:** Two charts on the Elections page with election years running left to right, oldest
+  at the left; each bar is one election. The first shows the electors appointed in each election
+  and the second the total popular vote. With All states they show the national figures. With one
+  state chosen they show that state's own figures, starting at its first election in this dataset.
+  Where there is nothing to draw, a marker stands in the bar's place, never a bar of zero length,
+  and the chart's key says what each kind of marker means; a state that appointed no electors (its
+  allotment was 0) is marked that way too. In the second chart, the shaded years are those before
+  this dataset's popular-vote figures begin; shading does not mean no popular vote was held.
+  Hovering over or tapping a bar or marker shows its numbers, and one table on the page holds both
+  charts' numbers. The state choice changes only these two charts and their table, and the list's
+  year and popular-vote filters do not change them.
 - **Precise:**
   - C4 and C5 are in `CHARTS` on `/elections`, ids `c4` and `c5`, sharing one companion table.
     The section follows T1's column-name list and comes before the footer, under
@@ -921,11 +928,16 @@ articles and announcements). Every rule binds all three unless the rule states a
     All states. It switches the series rather than marking a second trace (D100, amending D093(a),
     D093(c) and D096(b)).
   - A bar is drawn where the cell is a figure and, in C4, above zero. A zero allotment is a marker
-    (the D091 exception, D100). Every other value is a marker at zero, one series per cause, each
-    with its own symbol. In C5 the band alone marks a `popular_vote` row outside the popular-vote
-    window, which gets no marker; every other cause gets a labeled marker wherever it falls, inside
-    the band included.
-  - The band's bounds come from `meta.provenance.coverage`. Hover and bar text are the table's
+    (the D091 exception, D100). Every other value is a marker at zero. There is one series per
+    label, each with its own symbol and named in the chart's key; no bar or marker carries a text
+    label (D104). In C5 the band alone marks a `popular_vote` row outside the popular-vote window,
+    which gets no marker; every other cause gets a marker wherever it falls, inside the band
+    included.
+  - Both charts put election year on one numeric axis along the bottom, the same in every mode
+    (D100(a) as amended by D104), with a tick every 40 years. The value axis runs up the side with
+    full-number ticks. C5's band is vertical, spanning the years outside the window, and its label
+    sits above the plot, beginning "Shaded:".
+  - The band's bounds come from `meta.provenance.coverage`. Hover text is the table's
     cells. A title or caption that would name a state that fails the plain-text check uses its
     "selected state" form.
   - If `/v1/elections/summary` cannot be read or is malformed, the section shows
@@ -938,11 +950,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   and the downloads "electors appointed and the total popular vote, all states"
   (`elections-electors-and-popular-vote-all-states.csv`) and "electors appointed and the total
   popular vote for this state" (`elections-electors-and-popular-vote-<usps>.csv`) in
-  `pages/elections.py`; `C4_*`, `C5_*`, `FIRST_ELECTION_NOTE` and `FIRST_ELECTION_NOTE_SELECTED`, `NO_STATE_TOTAL` and `NO_NATIONAL_TOTAL` in `labels.py`; then
+  `pages/elections.py`; `C4_*`, `C5_*`, `FIRST_ELECTION_NOTE` and `FIRST_ELECTION_NOTE_SELECTED`, `NO_STATE_TOTAL` and `NO_NATIONAL_TOTAL` in `labels.py`; `LABELS["year"]` (the year axis); then
   `labels.CHART_TABLE_POINTER`.
 - **Source:**
   - #436 ACs (owner, 2026-11-05);
   - decisions D091, D093, D096 and D100;
+  - #558; D104;
   - `ElectionSummary.electoral_denominator`, `NationalSummaryRow.national_pv_denominator` and
     `ElectionStateRow`;
   - posts 2026-08-18 (messy), 2026-08-25 (270 of what) and 2026-08-06 (222 votes away);
@@ -1170,9 +1183,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE`). In `labels.C3_BAR_HOVER`, each of the row's
   other T6 cells (population, electors appointed, census used, borders used) as T6 shows it; for the
   borders cell the caption adds `labels.C3_PLAIN_MIXED`. In C4,
-  `labels.NOT_IN_DATASET` labels the marker drawn in place of a bar for a null allotment, in the
-  series `labels.C4_NO_FIGURE_SERIES` (never shown), with `labels.C4_NO_FIGURE_NOTE` in the
-  caption; its hover (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell.
+  `labels.NOT_IN_DATASET` names, in the chart's key, the series of markers drawn in place of a bar
+  for a null allotment, with `labels.C4_NO_FIGURE_NOTE` in the caption; its hover
+  (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1232,8 +1245,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `pages/election.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
   popular-vote bar is drawn, the title `labels.C1_TITLE_NO_PV` and the caption sentence
   `labels.C1_NO_PV_CAPTION`; `labels.NOT_APPLICABLE` as the national total's cell outside the
-  window (the C4/C5 table); C5's band, `labels.C5_BEFORE_BAND`, `labels.C5_AFTER_BAND`,
-  `labels.C5_BEFORE_NOTE` and `labels.C5_AFTER_NOTE`.
+  window (the C4/C5 table); C5's band (vertical, over the years outside the window) and its labels
+  `labels.C5_BEFORE_BAND` and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE`
+  and `labels.C5_AFTER_NOTE`.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
 - **Not:** "No" (a false flip). A null inside the window, which names no cause.
@@ -1820,8 +1834,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`). In C4 and C5, `labels.UNRECOGNIZED` labels
-  the marker drawn in place of a bar for such a value (C5 through `labels.C5_MARKER_LABELS`), and
+  value's help text (set by `labels.cell`). In C2, C4 and C5, `labels.UNRECOGNIZED`
+  names, in the chart's key, the series of markers drawn in place of a point or bar for such a
+  value (C5 through `labels.C5_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C5_STATE_HOVER` write
   it with `labels.UNRECOGNIZED_NOTE`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,

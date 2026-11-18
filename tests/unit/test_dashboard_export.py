@@ -504,6 +504,18 @@ SERIES_KEYS: dict[str, tuple[str, ...]] = {
 #: selection adds its row.
 SELECTION_TRACES: dict[str, str] = {charts.dom_id("C3"): labels.C3_SELECTED}
 
+#: Each chart's category or year axis, by its DOM id (#558, D104): the axis whose ticks
+#: name the rows or years, which no filter may change (D093(c), D096(b), D100(b)).
+#: Hand-written: a time series puts year on x (D104), a ranked chart its rows on y; a
+#: chart story adds its row, and a chart with none fails the check below.
+ROW_AXES: dict[str, str] = {
+    charts.dom_id("C1"): "yaxis",
+    charts.dom_id("C2"): "xaxis",
+    charts.dom_id("C3"): "yaxis",
+    charts.dom_id("C4"): "xaxis",
+    charts.dom_id("C5"): "xaxis",
+}
+
 
 def chart_figures(tree: Any) -> dict[str, dict[str, Any]]:
     """Each chart's unresolved figure in ``tree``, by the chart's DOM id (its source
@@ -636,9 +648,18 @@ class TestEveryChart:
             ]
             assert kept == reduced["data"], (key, query, dom)
             assert not [t for t in default["data"] if t.get("name") == name]
-            assert figure["layout"]["yaxis"].get("ticktext") == default["layout"][
-                "yaxis"
-            ].get("ticktext"), (key, query, dom)
+            # The rows or years axis is the unfiltered render's, ticks and all; never
+            # vacuous, since every such axis names its ticks (#558, architect I-3).
+            axis = ROW_AXES[dom]
+            shown_axis = figure["layout"][axis]
+            assert shown_axis.get("ticktext"), (key, query, dom)
+            for part in ("ticktext", "tickvals", "range", "type"):
+                assert shown_axis.get(part) == default["layout"][axis].get(part), (
+                    key,
+                    query,
+                    dom,
+                    part,
+                )
             if selects and name is not None:
                 assert len(marks) == 1 and len(marks[0]["x"]) == 1, (key, query, dom)
             else:

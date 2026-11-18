@@ -16,6 +16,7 @@ import copy
 import functools
 import json
 import math
+import re
 import sys
 import unicodedata
 import urllib.parse
@@ -1617,14 +1618,31 @@ def c2_figure(tree: Any) -> dict[str, Any]:
     return figure
 
 
+#: The hover's share line, whose cell is what a point's text label carried before
+#: #558 (D104): the companion table's cell for the share.
+C2_SHARE_LINE = re.compile(r"<br>Electoral share \(counted ÷ appointed\): (.*?)<br>")
+
+
+def hover_share(hover: str) -> str:
+    """The share cell a C2 hover writes (:data:`C2_SHARE_LINE`), its note dropped."""
+    match = C2_SHARE_LINE.search(hover)
+    assert match is not None, hover
+    return match.group(1).split("<br>")[0]
+
+
 def points(tree: Any) -> dict[str, tuple[Any, str, str]]:
-    """Each year's main point: its x, text and hover, by the year (the trace's ids)."""
+    """Each year's main point: its share (y), the share cell its hover writes, and the
+    hover, by the year (the trace's ids). Each point sits at its year (x), which the
+    ids repeat as text (#558, D104)."""
     trace = c2_figure(tree)["data"][0]
     assert trace["name"] == labels.LABELS["ec_share_full"]
+    assert "text" not in trace and trace["mode"] == "markers"
+    assert trace["ids"] == [str(x) for x in trace["x"]]
+    assert all(type(x) is int for x in trace["x"])
     return {
-        year: (x, text, hover)
-        for year, x, text, hover in zip(
-            trace["ids"], trace["x"], trace["text"], trace["hovertext"], strict=True
+        year: (y, hover_share(hover), hover)
+        for year, y, hover in zip(
+            trace["ids"], trace["y"], trace["hovertext"], strict=True
         )
     }
 
@@ -1697,11 +1715,11 @@ class TestC2:
         tree = render_c2()
         figure = c2_figure(tree)
         assert [str(y) for y in YEARS] == figure["data"][0]["ids"]
-        assert figure["layout"]["yaxis"]["ticktext"] == [str(y) for y in YEARS]
-        # Oldest on top: rows 0…n−1 on a reversed axis.
-        assert figure["data"][0]["y"] == list(range(len(YEARS)))
-        assert figure["layout"]["yaxis"]["tickvals"] == list(range(len(YEARS)))
-        assert figure["layout"]["yaxis"]["autorange"] == "reversed"
+        # Each point at its year on the numeric year axis along the bottom (#558, D104),
+        # oldest at the left.
+        assert figure["data"][0]["x"] == list(YEARS)
+        assert figure["layout"]["xaxis"] == components.year_axis(YEARS)
+        assert figure["layout"]["xaxis"]["type"] == "linear"
         assert (YEARS[0], YEARS[-1]) == (FIRST, LAST)  # the span is coverage's
         assert len(figure["data"]) == 1  # no marker: every leader has a share
         assert charts.figure_problems(figure) == []
@@ -1719,7 +1737,7 @@ class TestC2:
 
     @pytest.mark.parametrize("year", RECONCILED)
     def test_each_recorded_year_reconciles_with_t3_s_leader(self, year: int) -> None:
-        x, text, hover = points(render_c2())[str(year)]
+        x, text, hover = points(render_c2())[str(year)]  # x: the share, up the side
         row = rank1(year)
         has_pv = (
             year
@@ -1821,25 +1839,46 @@ class TestC2:
         row["ec_share_full"] = value
         tree = render_c2(summary)
         figure = c2_figure(tree)
-        x, text, _ = points(tree)["1860"]
-        assert x is None and text == ""
+        assert "1860" not in points(tree)
         (marks,) = figure["data"][1:]
-        assert marks["name"] == labels.C2_NO_SHARE_SERIES
-        assert marks["ids"] == ["1860"] and marks["x"] == [0]
-        assert marks["text"] == [label] and marks["marker"]["symbol"] == "x"
+        # Labeled by the chart's key, one series per label (#558, D104), never a text.
+        assert marks["name"] == label and marks["showlegend"] is True
+        assert "text" not in marks and marks["mode"] == "markers"
+        assert marks["ids"] == ["1860"] and marks["x"] == [1860] and marks["y"] == [0]
+        assert marks["marker"]["symbol"] == MOD["_C2_SYMBOLS"][label]
+        assert figure["layout"]["showlegend"] is True
+        assert figure["layout"]["legend"] == components.TIME_SERIES_LEGEND
+        (caption,) = of_type(find(tree, C2), "Figcaption")
+        assert caption.children[0].endswith(labels.C2_NO_SHARE_NOTE)
         if label == labels.UNRECOGNIZED:
             note = f"{labels.UNRECOGNIZED}<br>{labels.UNRECOGNIZED_NOTE}"
             assert note in marks["hovertext"][0]
         assert charts.figure_problems(figure) == []
 
+    def test_the_marker_note_shows_only_with_a_marker(self) -> None:
+        """The caption names the marker only when one is drawn (#558, D104): with every
+        leader's share served, there is no marker, no key and no note (Class B
+        survivor: the note added unconditionally)."""
+        tree = render_c2()
+        (caption,) = of_type(find(tree, C2), "Figcaption")
+        assert labels.C2_NO_SHARE_NOTE not in caption.children[0]
+        assert caption.children[0].endswith(labels.C2_TOOK_OFFICE)
+        assert len(c2_figure(tree)["data"]) == 1  # the premise: no marker drawn
+
     def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
         layout = c2_figure(render_c2())["layout"]
         (line,) = layout["shapes"]
-        assert (line["x0"], line["x1"], line["line"]["dash"]) == (0.5, 0.5, "dash")
-        assert [a["text"] for a in layout["annotations"]] == [
-            labels.C2_MAJORITY_LINE
-        ] * 2
-        assert layout["xaxis"]["range"] == [0, 1]
+        # Horizontal across the plot at half (#558, D104).
+        assert (line["yref"], line["y0"], line["y1"]) == ("y", 0.5, 0.5)
+        assert (line["xref"], line["x0"], line["x1"]) == ("paper", 0, 1)
+        assert line["line"]["dash"] == "dash"
+        # One label, just below the line at the right (owner, #558's plan gate).
+        (note,) = layout["annotations"]
+        assert note["text"] == labels.C2_MAJORITY_LINE
+        assert (note["xref"], note["x"], note["xanchor"]) == ("paper", 1, "right")
+        assert (note["yref"], note["y"], note["yanchor"]) == ("y", 0.5, "top")
+        assert layout["yaxis"]["range"] == [0, 1]
+        assert layout["showlegend"] is False  # no marker, so no key
 
     def test_the_title_is_page_text(self) -> None:
         assert find(render_c2(), f"{C2}-title").children == labels.C2_TITLE
@@ -1851,8 +1890,14 @@ class TestC2:
         assert [r[0] for r in rows] == [str(y) for y in YEARS]
         for row in rows:
             year, candidate, counted, appointed, share, majority, took = row
-            _, text, hover = shown[year]
+            if year not in shown:
+                # A marker, at zero, exactly where the table shows no share (#558, I-5).
+                assert share in (labels.NOT_IN_DATASET, labels.UNRECOGNIZED), year
+                continue
+            y, text, hover = shown[year]
             assert share == text
+            # Drawn where its cell says, now that no text sits beside it (I-5).
+            assert labels.share(y) == share, year
             assert hover == labels.C2_HOVER.format(
                 year=year,
                 candidate=candidate,
@@ -2762,16 +2807,32 @@ def trace(figure: dict[str, Any], name: str) -> dict[str, Any] | None:
     return found[0] if found else None
 
 
+#: The hover line carrying a C4 or C5 bar's table cell, which the bar's text label
+#: carried before #558 (D104).
+OVER_TIME_CELL_LINE = re.compile(
+    r"<br>(?:Electors appointed|Total popular vote): (.*?)(?:<br>|$)"
+)
+
+
 def year_points(figure: dict[str, Any], name: str) -> dict[int, Any]:
-    """A trace's points by year: ``{year: (x, text)}``."""
+    """A trace's points by year (its x, on the numeric year axis, #558, D104):
+    ``{year: (value, label)}``, the value up the side and, for a bar, the table cell
+    its hover writes, or for a marker the series' name, which the chart's key shows
+    (no point carries text)."""
     t = trace(figure, name)
     if t is None:
         return {}
-    years = figure["layout"]["yaxis"]["ticktext"]
-    return {
-        int(years[y]): (x, text)
-        for y, x, text in zip(t["y"], t["x"], t["text"], strict=True)
-    }
+    assert "text" not in t
+    assert t["ids"] == [str(x) for x in t["x"]]
+    assert all(type(x) is int for x in t["x"])
+    if t["type"] == "bar":
+        found = [OVER_TIME_CELL_LINE.search(hover) for hover in t["hovertext"]]
+        assert all(found), t["hovertext"]
+        cells = [match.group(1) for match in found if match]
+    else:
+        assert t["showlegend"] is True and set(t["y"]) == {0}
+        cells = [t["name"]] * len(t["x"])
+    return dict(zip(t["x"], zip(t["y"], cells, strict=True), strict=True))
 
 
 def state_rows(usps: str) -> list[dict[str, Any]]:
@@ -2825,7 +2886,9 @@ class TestC4:
     def test_one_state_equals_n2_and_the_state_history(self) -> None:
         figure = chart_figure(render_over_time({"state": "GA"}), C4)
         drawn = year_points(figure, labels.LABELS["state_electoral_votes"])
-        zeros = year_points(figure, labels.C4_NO_ELECTORS)
+        zeros = year_points(figure, labels.C4_NO_ELECTORS) | year_points(
+            figure, labels.C4_NO_ELECTORS_TOOK_NO_PART
+        )
         n2 = {row["year"]: row["state_electoral_votes"] for row in state_rows("GA")}
         history = {
             row["year"]: row["state_electoral_votes"]
@@ -2844,10 +2907,12 @@ class TestC4:
         self, usps: str, year: int
     ) -> None:
         figure = chart_figure(render_over_time({"state": usps}), C4)
-        zeros = year_points(figure, labels.C4_NO_ELECTORS)
+        # Its own series, named in the chart's key (#558, D104).
+        zeros = year_points(figure, labels.C4_NO_ELECTORS_TOOK_NO_PART)
         assert zeros[year] == (0, labels.C4_NO_ELECTORS_TOOK_NO_PART)
+        assert year not in year_points(figure, labels.C4_NO_ELECTORS)
         assert year not in year_points(figure, labels.LABELS["state_electoral_votes"])
-        zero_trace = trace(figure, labels.C4_NO_ELECTORS)
+        zero_trace = trace(figure, labels.C4_NO_ELECTORS_TOOK_NO_PART)
         assert zero_trace is not None and zero_trace["type"] == "scatter"
 
     def test_a_legislature_chosen_state_draws_its_bar(self) -> None:
@@ -2859,18 +2924,15 @@ class TestC4:
         tree = render_over_time({"state": "AK"})
         for dom in (C4, C5):
             figure = chart_figure(tree, dom)
-            years = [
-                int(figure["layout"]["yaxis"]["ticktext"][y])
-                for t in figure["data"]
-                for y in t["y"]
-            ]
+            years = [year for t in figure["data"] for year in t["x"]]
             # C5 bands Alaska's years before the window, so its first mark may be
             # later; neither chart marks a year before 1960.
             assert min(years) >= 1960, dom
             if dom == C4:
                 assert min(years) == 1960
-            # Every served year keeps its row, empty before 1960.
-            assert figure["layout"]["yaxis"]["ticktext"] == [str(y) for y in YEARS]
+            # Every served year keeps its place, empty before 1960: the served years'
+            # axis, never Alaska's (#558, D104).
+            assert figure["layout"]["xaxis"] == components.year_axis(YEARS)
         note = labels.FIRST_ELECTION_NOTE.format(state="Alaska", year=1960)
         assert any(note in text for text in texts(tree))
 
@@ -2879,10 +2941,11 @@ class TestC4:
         summary["elections"][0]["electoral_denominator"] = None
         summary["elections"][1]["electoral_denominator"] = "x"
         figure = chart_figure(render_over_time(summary=summary), C4)
-        missing = year_points(figure, labels.C4_NO_FIGURE_SERIES)
-        assert missing == {
-            YEARS[0]: (0, labels.NOT_IN_DATASET),
-            YEARS[1]: (0, labels.UNRECOGNIZED),
+        assert year_points(figure, labels.NOT_IN_DATASET) == {
+            YEARS[0]: (0, labels.NOT_IN_DATASET)
+        }
+        assert year_points(figure, labels.UNRECOGNIZED) == {
+            YEARS[1]: (0, labels.UNRECOGNIZED)
         }
         assert charts.figure_problems(figure) == []
 
@@ -2909,30 +2972,43 @@ class TestC4:
         row["state_electoral_votes"] = 0
         tree = render_over_time({"state": "SC"}, states=states)
         figure = chart_figure(tree, C4)
-        zeros = year_points(figure, labels.C4_NO_ELECTORS)
         # 1864 is South Carolina's recorded zero, taking no part; 1824 is not.
-        assert zeros[1824] == (0, labels.C4_NO_ELECTORS)
-        assert zeros[1864] == (0, labels.C4_NO_ELECTORS_TOOK_NO_PART)
+        assert year_points(figure, labels.C4_NO_ELECTORS) == {
+            1824: (0, labels.C4_NO_ELECTORS)
+        }
+        took_no_part = year_points(figure, labels.C4_NO_ELECTORS_TOOK_NO_PART)
+        assert took_no_part[1864] == (0, labels.C4_NO_ELECTORS_TOOK_NO_PART)
         assert 1824 not in year_points(figure, labels.LABELS["state_electoral_votes"])
         assert labels.C4_ZERO_NOTE in caption(tree, C4)
 
     def test_its_marker_symbols_are_pinned_and_distinct(self) -> None:
-        """Each C4 marker series has its own symbol (#498), so no two differ by color
-        alone."""
-        summary = copy.deepcopy(SUMMARY)
-        summary["elections"][0]["electoral_denominator"] = 0
-        summary["elections"][1]["electoral_denominator"] = None
-        figure = chart_figure(render_over_time(summary=summary), C4)
+        """Each C4 marker series has its own symbol (#498), one series per label
+        (#558, D104), so no two differ by color alone; every series is drawn here."""
+        states = copy.deepcopy(N2)
+        rows = [r for r in states["data"] if r["state_usps"] == "SC"]
+        assert rows[0]["year"] == 1824 and rows[0]["pv_status"] == "legislature_chosen"
+        rows[0]["state_electoral_votes"] = 0  # no electors appointed, no cause
+        rows[1]["state_electoral_votes"] = None  # not in this dataset
+        rows[2]["state_electoral_votes"] = "x"  # unrecognized
+        figure = chart_figure(render_over_time({"state": "SC"}, states=states), C4)
         symbols = {
             t["name"]: t["marker"]["symbol"]
             for t in figure["data"]
             if t["type"] == "scatter"
         }
+        # One symbol per meaning across C2, C4 and C5 (#558): "took no part" is C5's
+        # "x", no figure in this dataset C5's open circle.
         assert symbols == {
-            labels.C4_NO_ELECTORS: "x",
-            labels.C4_NO_FIGURE_SERIES: "circle-open",
+            labels.C4_NO_ELECTORS: "triangle-up-open",
+            labels.C4_NO_ELECTORS_TOOK_NO_PART: "x",
+            labels.NOT_IN_DATASET: "circle-open",
+            labels.UNRECOGNIZED: "square-open",
         }
+        assert symbols[labels.C4_NO_ELECTORS_TOOK_NO_PART] == MOD["_C5_SYMBOLS"][
+            labels.C5_TOOK_NO_PART
+        ]
         assert len(set(symbols.values())) == len(symbols)
+        assert charts.figure_problems(figure) == []
 
 
 class TestC5:
@@ -2963,15 +3039,23 @@ class TestC5:
         def band(index: Any) -> tuple[float, float]:
             figure = chart_figure(render_over_time(index=index), C5)
             (shape,) = figure["layout"]["shapes"]
-            return shape["y0"], shape["y1"]
+            # Vertical, the whole height of the plot (#558, D104).
+            assert (shape["xref"], shape["yref"]) == ("x", "paper")
+            assert (shape["y0"], shape["y1"]) == (0, 1)
+            return shape["x0"], shape["x1"]
 
-        assert band(BODY) == (-0.5, YEARS.index(PV_MIN) - 0.5)
+        pad = components.YEAR_PAD
+        before = YEARS[YEARS.index(PV_MIN) - 1]
+        assert band(BODY) == (FIRST - pad, (before + PV_MIN) / 2)
         moved = copy.deepcopy(BODY)
         moved["meta"]["provenance"]["coverage"]["pv_year_min"] = 1980
-        assert band(moved) == (-0.5, YEARS.index(1980) - 0.5)
+        assert band(moved) == (FIRST - pad, (1976 + 1980) / 2)
         figure = chart_figure(render_over_time(index=moved), C5)
-        notes = [a["text"] for a in figure["layout"]["annotations"]]
-        assert notes == [labels.C5_BEFORE_BAND.format(pv_year_min=1980)] * 2
+        # One label, above the plot at the band's left edge, never inside the band.
+        (note,) = figure["layout"]["annotations"]
+        assert note["text"] == labels.C5_BEFORE_BAND.format(pv_year_min=1980)
+        assert (note["xref"], note["x"], note["xanchor"]) == ("x", FIRST - pad, "left")
+        assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "bottom")
 
     def test_a_year_after_the_window_is_banded_too(self) -> None:
         moved, summary = after_2016()
@@ -3112,8 +3196,11 @@ class TestC5:
     def test_both_charts_share_one_year_axis(self, query: dict[str, Any]) -> None:
         tree = render_over_time(query)
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
-        assert c4["layout"]["yaxis"] == c5["layout"]["yaxis"]
-        assert c4["layout"]["yaxis"]["ticktext"] == [str(y) for y in YEARS]
+        # One year axis, the served years' in every mode (D100(a), #558, D104): the
+        # whole axis, so a state's own span (Alaska's from 1960) cannot narrow it.
+        assert c4["layout"]["xaxis"] == c5["layout"]["xaxis"]
+        assert c4["layout"]["xaxis"] == components.year_axis(YEARS)
+        assert c4["layout"]["xaxis"]["range"][0] < FIRST
 
 
 class TestOverTimeFilter:
@@ -3275,8 +3362,12 @@ class TestOverTimeTable:
             for t in figure["data"]:
                 if t["type"] != "bar":
                     continue
-                for year, (_, text) in year_points(figure, t["name"]).items():
+                for year, (value, text) in year_points(figure, t["name"]).items():
                     assert table[year][column] == text, (dom, year)
+                    # The bar's height is the number its row writes (#558, I-5): with
+                    # no text beside it, nothing else ties where it is drawn to the
+                    # table.
+                    assert labels.number(value) == text, (dom, year)
 
 
 N1_TOTALS = {row["year"]: row["national_pv_denominator"] for row in SUMMARY["data"]}
@@ -3500,7 +3591,7 @@ class TestOverTimeMechanisms:
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
         assert 2016 not in year_points(c4, labels.LABELS["state_electoral_votes"])
         assert 2016 not in year_points(c5, labels.LABELS["state_popular_total"])
-        assert year_points(c4, labels.C4_NO_FIGURE_SERIES)[2016] == (
+        assert year_points(c4, labels.UNRECOGNIZED)[2016] == (
             0,
             labels.UNRECOGNIZED,
         )
@@ -3510,14 +3601,15 @@ class TestOverTimeMechanisms:
     def test_every_served_year_keeps_its_row_by_an_explicit_range(
         self, query: dict[str, Any]
     ) -> None:
-        """Plotly's autorange would fit the drawn points, so Alaska's empty rows before
+        """Plotly's autorange would fit the drawn points, so Alaska's empty years before
         1960 would vanish: each chart fixes the year axis's range to every served
-        year, oldest on top (D100(a))."""
+        year, oldest at the left (D100(a), #558, D104)."""
         tree = render_over_time(query)
+        pad = components.YEAR_PAD
         for dom in (C4, C5):
-            yaxis = chart_figure(tree, dom)["layout"]["yaxis"]
-            assert yaxis["range"] == [len(YEARS) - 0.5, -0.5], dom
-            assert yaxis["autorange"] is False, dom
+            xaxis = chart_figure(tree, dom)["layout"]["xaxis"]
+            assert xaxis["range"] == [FIRST - pad, LAST + pad], dom
+            assert xaxis.get("autorange") in (None, False), dom
 
     def test_an_unavailable_n2_in_the_layout_keeps_the_page_and_all_states(
         self, monkeypatch: pytest.MonkeyPatch
@@ -3654,6 +3746,173 @@ class TestN2Fixture:
 
 
 # --- the wide layout (#553, D102, D103) ----------------------------------------------
+
+
+class TestTimeSeriesAxis:
+    """The year axis every time-series chart shares (#558, D104): numeric, at the
+    years themselves, with sparse, plain ticks, one axis in every mode; and each chart's
+    points named by their year and carrying no text."""
+
+    def test_the_ticks_are_every_40_years_written_plainly(self) -> None:
+        axis = components.year_axis(YEARS)
+        assert axis["type"] == "linear"
+        assert axis["tickvals"] == [1840, 1880, 1920, 1960, 2000]
+        assert axis["ticktext"] == ["1840", "1880", "1920", "1960", "2000"]
+        assert axis["range"] == [FIRST - components.YEAR_PAD, LAST + components.YEAR_PAD]
+        assert axis["title"] == {"text": labels.LABELS["year"]}
+        assert components.YEAR_TICK_STEP == 40
+        assert axis["tickfont"] == {"size": components.YEAR_TICK_FONT_PX} == {"size": 12}
+        assert "tickformat" not in axis and "dtick" not in axis
+
+    @pytest.mark.parametrize(
+        ("years", "ticks"),
+        [
+            ([1964, 1968, 2000, 2024], [1964, 2024]),  # one multiple: both ends
+            ([2000, 2004], [2000, 2004]),
+            ([1960, 2000], [1960, 2000]),
+            ([2024], [2024]),
+        ],
+    )
+    def test_a_short_span_still_names_its_ends(
+        self, years: list[int], ticks: list[int]
+    ) -> None:
+        axis = components.year_axis(years)
+        assert axis["tickvals"] == ticks
+        assert axis["ticktext"] == [str(t) for t in ticks]
+
+    def test_a_gap_between_elections_is_drawn_at_its_true_width(self) -> None:
+        """No even spacing: a figure built on served years 1824, 1828 and 1900 puts
+        each point at its year, so the 72-year gap is 18 times the 4-year one."""
+        years = [1824, 1828, 1900]
+        axis = components.year_axis(years)
+        assert axis["range"] == [1822, 1902]
+        assert components.year_edges(years, 1828, 1828) == (1826, 1864)
+        assert components.year_edges(years, 1824, 1828) == (1822, 1864)
+        assert components.year_edges(years, 1900, 1900) == (1864, 1902)
+        index = copy.deepcopy(BODY)
+        index["data"] = [r for r in index["data"] if r["year"] in years]
+        cov = index["meta"]["provenance"]["coverage"]
+        cov["year_min"], cov["year_max"] = 1824, 1900
+        summary = copy.deepcopy(SUMMARY)
+        for key in ("data", "elections"):
+            summary[key] = [r for r in summary[key] if r["year"] in years]
+        figure = c2_figure(render_c2(summary, index))
+        assert figure["data"][0]["x"] == years
+        assert figure["layout"]["xaxis"] == components.year_axis(years)
+
+    @pytest.mark.parametrize("query", [{}, {"state": "GA"}, {"state": "SC"}])
+    def test_every_hover_names_its_year_on_x(self, query: dict[str, Any]) -> None:
+        """AC: the hover on every point names its year, the year it is drawn at."""
+        tree = render_over_time(query)
+        figures = [chart_figure(tree, C4), chart_figure(tree, C5)]
+        figures.append(c2_figure(render_c2()))
+        for figure in figures:
+            for t in figure["data"]:
+                assert len(t["x"]) == len(t["hovertext"]) > 0
+                for x, hover in zip(t["x"], t["hovertext"], strict=True):
+                    assert hover.startswith(str(x)), (t["name"], x)
+
+    @pytest.mark.parametrize("query", [{}, {"state": "GA"}, {"state": "SC"}])
+    def test_no_point_bar_or_marker_carries_text(self, query: dict[str, Any]) -> None:
+        """C2's points and C4 and C5's bars and markers draw no text (#558, D104):
+        the hover and the chart's key carry it."""
+        tree = render_over_time(query)
+        for figure in (
+            c2_figure(render_c2()),
+            chart_figure(tree, C4),
+            chart_figure(tree, C5),
+        ):
+            for t in figure["data"]:
+                assert not {"text", "texttemplate", "textposition"} & set(t)
+                assert "text" not in t.get("mode", "")
+
+    def test_c2_s_marker_symbols_are_pinned_and_distinct(self) -> None:
+        """Both C2 marker series drawn at once (#558, guard-efficacy F1): each its own
+        symbol, written out, so neither differs from the other by color alone."""
+        summary = copy.deepcopy(SUMMARY)
+        leaders_ = [r for r in summary["data"] if r["electoral_rank"] == 1]
+        leaders_[1]["ec_share_full"] = None
+        leaders_[2]["ec_share_full"] = "zz"
+        figure = c2_figure(render_c2(summary))
+        symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
+        assert symbols == {
+            labels.C1_NO_SHARE: "circle-open",
+            labels.UNRECOGNIZED: "square-open",
+        }
+        assert charts.figure_problems(figure) == []
+        # Every hover, the markers' too, names the year it is drawn at (F5).
+        for t in figure["data"]:
+            for x, hover in zip(t["x"], t["hovertext"], strict=True):
+                assert hover.startswith(f"{x}: "), (t["name"], x)
+        assert [t["x"] for t in figure["data"][1:]] == [
+            [leaders_[1]["year"]],
+            [leaders_[2]["year"]],
+        ]
+
+    def test_points_and_markers_at_the_plot_s_edge_are_drawn_whole(self) -> None:
+        """A marker at zero and a share near 100% sit on the plot's edge, where
+        plotly's default would clip half of each (#558, review cr.1)."""
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"][0]["ec_share_full"] = None
+        figures = [c2_figure(render_c2(summary))]
+        tree = render_over_time({"state": "SC"})
+        figures += [chart_figure(tree, C4), chart_figure(tree, C5)]
+        for figure in figures:
+            for t in figure["data"]:
+                if t["type"] == "scatter":
+                    assert t["cliponaxis"] is False, t["name"]
+
+    def test_the_pair_s_plots_start_at_one_height(self) -> None:
+        """C4 takes C5's top margin, the room C5's band labels need (#558, cr.6)."""
+        for query in ({}, {"state": "AK"}):
+            tree = render_over_time(query)
+            c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
+            assert c4["layout"]["margin"] == c5["layout"]["margin"]
+            assert c5["layout"]["margin"]["t"] == (
+                MOD["_OVER_TIME_TOP_PX"] + MOD["_BAND_LABEL_PX"]
+            )
+
+    def test_no_years_is_a_type_error(self) -> None:
+        """Caught by a page's degraded state, never a 500 (#558, cr.10)."""
+        with pytest.raises(TypeError):
+            components.year_axis([])
+
+    def test_only_marker_series_join_the_key(self) -> None:
+        figure = chart_figure(render_over_time({"state": "SC"}), C5)
+        shown = {t["name"] for t in figure["data"] if t["showlegend"]}
+        assert shown == {labels.C5_LEGISLATURE, labels.C5_TOOK_NO_PART}
+        assert figure["layout"]["showlegend"] is True
+        assert figure["layout"]["legend"] == components.TIME_SERIES_LEGEND
+        assert chart_figure(render_over_time(), C4)["layout"]["showlegend"] is False
+
+    def test_both_band_labels_sit_above_the_plot_never_in_a_band(self) -> None:
+        """An after-band can be one election wide, so no band label is inside one
+        (#558, architect I-2): each is above the plot, the before label at its band's
+        left edge and raised over the after label, at its band's right edge."""
+        moved, summary = after_2016()
+        moved["meta"]["provenance"]["coverage"]["pv_year_max"] = 2020
+        for row in summary["data"]:
+            if row["year"] == 2020:
+                (n1,) = [r for r in SUMMARY["data"] if r["year"] == 2020][:1]
+                row["national_pv_denominator"] = n1["national_pv_denominator"]
+        figure = chart_figure(render_over_time(index=moved, summary=summary), C5)
+        before, after = figure["layout"]["shapes"]
+        assert (after["x0"], after["x1"]) == (2022, LAST + components.YEAR_PAD)
+        first_note, last_note = figure["layout"]["annotations"]
+        for note in (first_note, last_note):
+            assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "bottom")
+        assert (first_note["x"], first_note["xanchor"]) == (before["x0"], "left")
+        assert (last_note["x"], last_note["xanchor"]) == (after["x1"], "right")
+        # The before label is raised by one label's room over the after label: two lines
+        # of 12 px text at plotly's 1.3 line height, plus a gap, so the two never touch
+        # (#558, guard-efficacy F2).
+        assert first_note["yshift"] == MOD["_BAND_LABEL_PX"] and last_note["yshift"] == 0
+        assert first_note["font"]["size"] == last_note["font"]["size"] == 12
+        assert MOD["_BAND_LABEL_PX"] >= 2 * math.ceil(12 * 1.3) + 4
+        assert figure["layout"]["margin"]["t"] == (
+            MOD["_OVER_TIME_TOP_PX"] + 2 * MOD["_BAND_LABEL_PX"]
+        )
+        assert charts.figure_problems(figure) == []
 
 
 class TestPair:
