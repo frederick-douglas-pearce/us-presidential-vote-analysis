@@ -338,7 +338,8 @@ SECTION_PER_CAPITA = "People per electoral vote"
 #: 2026-11-18), in page order, and their landmark's accessible name, on the election
 #: pages' pattern: the state history, then its people per electoral vote, whose link
 #: text is :data:`SECTION_PER_CAPITA`, the same measure as on an election's pages.
-#: "State history" is already the history page's name in its title and its download.
+#: "State history" is already the history page's heading on the degraded state and its
+#: title before a code is checked (``title()`` in ``pages/state.py``).
 STATE_SECTIONS_LABEL = "Pages for this state"
 SECTION_STATE_HISTORY = "State history"
 

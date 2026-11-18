@@ -15,7 +15,9 @@ These tests cover what is particular to the three pages.
 
 from __future__ import annotations
 
+import ast
 import copy
+import inspect
 import random
 from typing import Any
 
@@ -23,7 +25,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, election_view, labels, query, state_view
+from explore import api, election_view, export, labels, query, state_view
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -41,6 +43,7 @@ from tests.unit.test_dashboard_app import (
     url,
 )
 from tests.unit.test_dashboard_elections import classed, find, of_type, parse
+from tests.unit.test_dashboard_export import download
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -171,6 +174,19 @@ def test_the_picker_is_registered_as_planned() -> None:
     assert PICKER["success"] == PICKER_MOD["PAGE_ID"]
 
 
+def test_the_picker_reads_the_roster_through_state_view() -> None:
+    """One reading of the roster (#279, moved by #559): the picker calls
+    ``state_view.roster`` and parses no row of its own."""
+    assert PICKER_MOD["state_view"] is state_view
+    assert "roster" not in vars(api)
+    tree = ast.parse(inspect.getsource(PICKER_MOD["roster"]))
+    calls = {
+        ast.unparse(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)
+    }
+    assert "state_view.roster" in calls
+    assert not [n for n in ast.walk(tree) if isinstance(n, (ast.For, ast.comprehension))]
+
+
 def test_the_roster_is_the_latest_served_election() -> None:
     # Resolved from the index (never a literal), and every state and DC takes part.
     assert api.ROSTER_PATH.format(**api.coverage_vars(INDEX)) == ROSTER_PATH
@@ -207,7 +223,8 @@ class TestOnRoster:
     def test_a_roster_the_picker_would_refuse_names_no_state(
         self, position: int, change: dict[str, Any]
     ) -> None:
-        # One reading of the roster for every page (state_view.roster): a row of another
+        # Both refuse alike (one reading, state_view.roster, which
+        # test_the_picker_reads_the_roster_through_state_view pins): a row of another
         # year, a malformed code or a missing name refuses every code, GA included.
         body = copy.deepcopy(ROSTER)
         body["data"][position].update(change)
@@ -969,9 +986,10 @@ class TestIndex:
         assert head.canonical == url("/state/GA")
         response = route("/state/GA", search)
         assert PAGE_ID in routed_ids(response)
-        tree = render(search[1:])
+        # Through the layout, as the router calls it, so the query reaches the render.
+        tree = MOD["layout"](usps="GA", **parse(search[1:]))
         assert years_shown(tree) == [1868]
-        shown = years_shown(render("year_from=1860&year_to=1872"))
+        shown = years_shown(MOD["layout"](usps="GA", year_from="1860", year_to="1872"))
         assert set(shown) == {1860, 1864, 1868, 1872}
 
     def test_with_the_roster_cold_the_index_counts_it_matched_and_reads_nothing(
@@ -1151,6 +1169,24 @@ class TestGeorgiaPerCapita:
         _, name = PC_MOD["render"](ga_per_capita(), copy.deepcopy(INDEX), "GA", [])
         assert name == "Georgia"
 
+    @pytest.mark.parametrize("name", ["", "  ", "\u200b"], ids=repr)
+    def test_a_name_with_nothing_in_it_gets_the_generic_heading(
+        self, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        body = ga_per_capita()
+        for row in body["data"]:
+            row["state"] = name
+        fetch, _ = fake_fetch({**RECORDED, GA_PER_CAPITA_PATH: body})
+        client = offline_client(
+            fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, ROSTER_PATH]
+        )
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        heading, _, content = PC_MOD["layout"](usps="GA").children
+        assert heading.children == PC_MOD["PER_CAPITA_GENERIC_HEADING"]
+        assert content.id == PC_PAGE_ID
+
 
 def test_texas_1848_has_no_census_figure_and_1864_1868_no_votes() -> None:
     rows = per_capita_rows(pc_render(usps="TX"))
@@ -1204,12 +1240,16 @@ class TestT7Filters:
         assert PC_MOD["on_filter_change"](years, 1824, 2024, current) == expected
 
     def test_the_download_names_the_page_and_the_range_applied(self) -> None:
+        # Read off the rendered link, so the search the render passes is what is
+        # checked: the range applied, and never the history page's keys.
         tree = pc_render("year_from=1860&candidate=horatio-seymour")
-        download = PC_MOD["_download"]("GA", ga_per_capita(), "?year_from=1860")
-        assert download.filename == "state-GA-per-capita.csv"
-        assert download.name == "people per electoral vote"
-        assert download.view_url.endswith("/state/GA/per-capita?year_from=1860")
-        assert find(tree, PER_CAPITA) is not None
+        file = download(tree, PER_CAPITA)
+        assert find(tree, export.link_id(PER_CAPITA)).download == (
+            "state-GA-per-capita.csv"
+        )
+        (view,) = [line for line in file.lines if line.startswith("View: ")]
+        assert view.endswith("/state/GA/per-capita?year_from=1860")
+        assert [r["year"] for r in file.rows][0] == "1860"
 
 
 class TestT7Bodies:

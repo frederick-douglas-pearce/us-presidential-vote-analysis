@@ -535,8 +535,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** `dashboard/explore/components.py`; `dashboard/CLAUDE.md`, `components.py`.
 - **Not:** A not-found state (*Not-found state*): a link whose year, state code or candidate slug
   the dataset does not serve, or whose election section the site does not have
-  (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, and `NOT_FOUND_SENTENCE` in
-  `pages/state.py` and `pages/candidate.py`). An empty filter result (`components.NO_ROWS`). The
+  (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, `labels.STATE_NOT_FOUND_SENTENCE`
+  for the two state pages, and `NOT_FOUND_SENTENCE` in `pages/candidate.py`). An empty filter result (`components.NO_ROWS`). The
   panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is not drawn (*Chart*): its page
   still shows, with its tables. A chart section's own unavailable state (`C2_UNAVAILABLE` in
   `pages/elections.py`, id `elections-leader-unavailable`): the rest of the page still shows. The
@@ -1631,8 +1631,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   row labels, the
   selected-state series `labels.C3_SELECTED` and the caption sentence `labels.C3_SELECTED_NOTE`.
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
-  two-tier"; the state history page: #279 (T4), #280 (T7), and its lede in `pages/state.py`, whose
-  filter sentence shows only on a successful render (#392); the subpage: #559.
+  two-tier"; the state history page: #279 (T4), and its lede in `pages/state.py`, whose filter
+  sentence shows only on a successful render (#392); the per-capita page: #280 (T7), #559.
 - **Not:** —
 - **Status:** settled
 

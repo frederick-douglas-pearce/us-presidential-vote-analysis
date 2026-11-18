@@ -68,8 +68,8 @@ def roster(body: Any) -> tuple[int, dict[str, str]]:
     capitals) with a state name. Each caller also requires that year to be the latest
     election. Moved here from ``api`` by #559, since a shared module reads no ``api``.
     """
-    rows = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(rows, list) or not rows:
+    rows = rows_of(body)
+    if not rows:
         raise TypeError("the roster carries no list of state rows")
     years: set[int | None] = set()
     states: dict[str, str] = {}

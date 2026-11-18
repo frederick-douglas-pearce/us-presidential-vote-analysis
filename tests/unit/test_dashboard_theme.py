@@ -535,11 +535,12 @@ NEIGHBOR_PAINT = (
     (".neighbor-nav", "border", 3.0),
 )
 
-#: The section links' marker rule (#465): the election page being read, as text.
+#: The section links' marker rule (#465, #559): the page being read, as text, on an
+#: election's or a state's pages.
 SECTIONS_MARKED = '.section-links [aria-current="page"]'
 
 #: What the section links paint (#465), as NEIGHBOR_PAINT: no fill, so every pair sits
-#: on the page. The other two pages' links are text (AA, the global `a` rule's color);
+#: on the page. The other pages' links are text (AA, the global `a` rule's color);
 #: the current page's underline and the focus ring are graphics (3:1). The current
 #: page's text inherits the page's text color, held by the page's own pair.
 SECTIONS_PAINT = (

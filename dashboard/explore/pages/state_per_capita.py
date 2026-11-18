@@ -106,7 +106,10 @@ dash.register_page(
 
 def search_for(years: Any, first: Any, last: Any) -> str:
     """The query string for the year control's value, in the normal form ``og:url``
-    uses (``""`` or ``?…``). A bound at its end of the span is omitted."""
+    uses (``""`` or ``?…``). A bound at its end of the span is omitted. Unlike
+    :func:`explore.state_view.year_search`, which encodes bounds a render already
+    checked, this reads the control's raw values, so it passes them through the page's
+    parser (an inverted pair is dropped there)."""
     return query.encode_search(
         parse_filters(query.year_range_search(years, first, last))
     )
@@ -180,11 +183,12 @@ def render(
     index: dict[str, Any],
     usps: str,
     pairs: list[tuple[str, str]],
-) -> tuple[html.Div, str]:
-    """The page body and the state's name, for one ``/v1/states/{usps}/per-capita``
-    response and the ``/v1/elections`` index (read through the same view), and this
-    page's filter pairs: the section links, carrying the year range applied, the year
-    control, T7 and the footer, from the per-capita response's own provenance."""
+) -> tuple[html.Div, Any]:
+    """The page body and the state's name as served (the layout checks it has text),
+    for one ``/v1/states/{usps}/per-capita`` response and the ``/v1/elections`` index
+    (read through the same view), and this page's filter pairs: the section links,
+    carrying the year range applied, the year control, T7 and the footer, from the
+    per-capita response's own provenance."""
     provenance = per_capita["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
@@ -213,7 +217,7 @@ def render(
         ],
         id=PAGE_ID,
     )
-    return content, str(rows[0]["state"])
+    return content, rows[0]["state"]
 
 
 def layout(usps: Any = None, **params: Any) -> html.Div:
@@ -233,7 +237,9 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
                 content, state = render(
                     per_capita, index, usps, parse_filters(params)
                 )
-                heading = PER_CAPITA_HEADING.format(state=state)
+                # A served name with nothing in it names no state (#532's rule).
+                if labels.has_text(state):
+                    heading = PER_CAPITA_HEADING.format(state=state)
                 lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()

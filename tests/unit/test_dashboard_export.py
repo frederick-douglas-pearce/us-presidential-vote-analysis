@@ -1539,6 +1539,8 @@ class TestNulls:
         lines = download(tree, "state-per-capita").lines
         assert labels.GOVERNING_CENSUS_NOTE in lines
         assert labels.BOUNDARY_NOTE in lines
+        # Its one filter is the year range (#559): no line names another filter.
+        assert not [line for line in lines if "candidate" in line or "popular-vote" in line]
         # Each per-capita page has one filter, its own (#465, #559), so no note says
         # which apply.
         for key in ("/state/<usps>/per-capita", "/state/<usps>"):
