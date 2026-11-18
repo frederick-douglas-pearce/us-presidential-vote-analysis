@@ -536,15 +536,16 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** A not-found state (*Not-found state*): a link whose year, state code or candidate slug
   the dataset does not serve, or whose election section the site does not have
   (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, `labels.STATE_NOT_FOUND_SENTENCE`
-  for the two state pages, and `NOT_FOUND_SENTENCE` in `pages/candidate.py`). An empty filter result (`components.NO_ROWS`). The
-  panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is not drawn (*Chart*): its page
-  still shows, with its tables. A chart section's own unavailable state (`C2_UNAVAILABLE` in
-  `pages/elections.py`, id `elections-leader-unavailable`): the rest of the page still shows. The
-  averages' own unavailable state (`METRICS_UNAVAILABLE` in `pages/elections.py`): the count of
-  elections shown and the rest of the page still show. The over-time section's own states:
-  `OVER_TIME_UNAVAILABLE` (`pages/elections.py`) when `/v1/elections/summary` cannot be read,
-  with the rest of the page still shown; and `OVER_TIME_NO_STATES` when `/v1/elections/states`
-  cannot be read or is malformed, with the all-states charts and their table still shown.
+  for the two state pages, and `NOT_FOUND_SENTENCE` in `pages/candidate.py`). An empty filter result
+  (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is
+  not drawn (*Chart*): its page still shows, with its tables. A chart section's own unavailable
+  state (`C2_UNAVAILABLE` in `pages/elections.py`, id `elections-leader-unavailable`): the rest of
+  the page still shows. The averages' own unavailable state (`METRICS_UNAVAILABLE` in
+  `pages/elections.py`): the count of elections shown and the rest of the page still show. The
+  over-time section's own states: `OVER_TIME_UNAVAILABLE` (`pages/elections.py`) when
+  `/v1/elections/summary` cannot be read, with the rest of the page still shown; and
+  `OVER_TIME_NO_STATES` when `/v1/elections/states` cannot be read or is malformed, with the
+  all-states charts and their table still shown.
 - **Status:** settled
 
 ### Election pages (overview, results by state, people per electoral vote)
@@ -1572,11 +1573,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #448 (owner decisions fixed in the issue and the owner's comment, 2026-11-06);
   D086; reader wording: owner decision at #448's plan gate, 2026-11-06.
 - **Not:** The earlier and later links on the election pages and their landmarks
-  (`labels.ELECTION_NAV_LABEL`, `labels.ELECTION_NAV_SECTION_LABEL`; *Election year*), and the
-  links between an election's three pages (`labels.ELECTION_SECTIONS_LABEL`; *Election pages*)
-  and between a state's two pages (`labels.STATE_SECTIONS_LABEL`; *State pages*). The in-body "Browse…" links on the home page and the
-  not-found states, which stay. A menu: the bar has at most four entries at the right, the
-  toggle counted, and never collapses.
+  (`labels.ELECTION_NAV_LABEL`, `labels.ELECTION_NAV_SECTION_LABEL`; *Election year*), and the links
+  between an election's three pages (`labels.ELECTION_SECTIONS_LABEL`; *Election pages*) and between
+  a state's two pages (`labels.STATE_SECTIONS_LABEL`; *State pages*). The in-body "Browse…" links on
+  the home page and the not-found states, which stay. A menu: the bar has at most four entries at
+  the right, the toggle counted, and never collapses.
 - **Status:** settled
 
 ### Sources
@@ -1624,12 +1625,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   in `pages/election_states.py` and in `_control` in `pages/election_per_capita.py`), and on
   `/candidate/<slug>`, with `STATE_PLACEHOLDER` and named by the lede's `FILTER_SENTENCE` or
   `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`; `/states`; the name, as served, as the link to
-  the state history page `/state/<usps>` in T2, T5 and T6 (`components.state_cell`), and the
-  heading of the state history page; the state pages' own wording is under *State pages*. The home page's lede and its "Browse by
-  state" link (`pages/home.py`). The site navigation's States link, `labels.NAV_STATES`, goes to
-  `/states` and is marked on `/states`, `/state/<usps>` and `/state/<usps>/per-capita`. In C3, the
-  row labels, the
-  selected-state series `labels.C3_SELECTED` and the caption sentence `labels.C3_SELECTED_NOTE`.
+  the state history page `/state/<usps>` in T2, T5 and T6 (`components.state_cell`), and the heading
+  of the state history page; the state pages' own wording is under *State pages*. The home page's
+  lede and its "Browse by state" link (`pages/home.py`). The site navigation's States link,
+  `labels.NAV_STATES`, goes to `/states` and is marked on `/states`, `/state/<usps>` and
+  `/state/<usps>/per-capita`. In C3, the row labels, the selected-state series `labels.C3_SELECTED`
+  and the caption sentence `labels.C3_SELECTED_NOTE`.
 - **Source:** `EcPvRow.state`, `state_usps`; D006; `docs/canonical-keys.md`, "The two keys are
   two-tier"; the state history page: #279 (T4), and its lede in `pages/state.py`, whose filter
   sentence shows only on a successful render (#392); the per-capita page: #280 (T7), #559.
