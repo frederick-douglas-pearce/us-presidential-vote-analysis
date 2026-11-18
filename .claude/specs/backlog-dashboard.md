@@ -711,20 +711,30 @@ E9's. Phone-width legibility (E9-S2) is a floor every E14 story keeps.
   `components.chart` builder and chart-ID registry, light and dark templates read from #359's CSS
   tokens, contrast and WCAG 1.4.1 tests, plotly.js from its CDN, and figure text under the wording
   scan. After #359 (which now also exposes the resolved theme to Dash) and #430; before C1 (#433).
-- **E14-S4** — #364: use the desktop width at the top of each page (a two-column top on the
-  one-election page, filter dropdowns in a row, and the landing, elections-index and
-  state-history pages). **Gated on a design research pass** (the `dataviz` skill plus
-  comparable public data explorers), whose per-page wireframes are agreed on the issue
-  before layout code merges. It leaves a slot for charts rather than waiting for them; a
-  chart it calls for, such as a landing graphic, is a separate E9 story that depends on
-  E14-S3. Independent of #359 (whichever lands second rebases); it adds no new color
-  values.
+- **E14-S4** — #364, closed 2026-11-16 and split by pm (owner-approved) into the stories
+  below. Its design research pass (#543) agreed per-page wireframes before layout code merged.
+  - **E14-S4a** — #543: design research, wide-screen wireframes for each page. Done (no PR).
+    Split from #364.
+  - **E14-S4b** — #544: the election pages at desktop width (D102). After #543 and #540. Done
+    (PR #552). Split from #364.
+  - **E14-S4c** — #545: the state history and candidate pages at desktop width. After #543,
+    #544 and #540. Done (PR #554). Split from #364.
+  - **E14-S4d** — #546: the landing page at desktop width. After #543 and #544; gated on E9-S8
+    being scoped and on the landing chart #550. Split from #364.
+  - **E14-S4e** — #553: the elections index at desktop width (D103). After #543 and #544. Done
+    (PR #557). Split from #545.
 - **E14-S5** — #409 (`bug`, filed 2026-10-26): make the `dcc` dropdowns, year slider and
   checklist readable in dark mode under today's `prefers-color-scheme` behavior (selected
   values rendered light on white), plus the candidate page's year-button border. Confirms
   in a browser the gap #359 predicted and fixes it in CSS, preferring named color values
   E14-S2 can reuse; no toggle, script or `localStorage`. Lands before #359; independent of
   #364.
+- **E14-S6** — #558 (`priority:high`, filed 2026-11-17 from the owner's dashboard review): election
+  year on the x-axis of every time-series chart; flips C2, C4 and C5, and ranked charts (C3) stay
+  horizontal. Needs a decision amending D096(a) and D100(a). Lands before the time-series charts
+  #560, #561, #563 and #564.
+- **E14-S7** — #567 (filed 2026-11-17): each page section rendered as one card, with a new border
+  token in both palettes; a chart-and-table pair shares one card (D103). Best after #562.
 
 ---
 
