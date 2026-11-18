@@ -779,6 +779,7 @@ SHARED_MODULES = (
     "labels.py",
     "metrics.py",  # the dashboard's own summaries (#437, D097)
     "query.py",
+    "state_view.py",  # the state pages' shared pieces (#559)
 )
 
 #: The shared modules by import name: the only ``explore`` modules a shared module may
@@ -916,6 +917,8 @@ class TestSharedPieces:
         assert graph["charts"] == set()  # the chart rules import nothing from explore
         # The election pages' shared pieces build on labels and query only (#465).
         assert graph["election_view"] == {"labels", "query"}
+        # And the state pages' (#559), which therefore own the roster reading.
+        assert graph["state_view"] == {"labels", "query"}
         # The summaries share the cells' rule of what is a figure (#437, D097(f)).
         assert graph["metrics"] == {"labels"}
         assert in_cycles(graph) == []

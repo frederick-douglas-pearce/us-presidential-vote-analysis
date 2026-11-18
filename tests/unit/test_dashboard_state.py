@@ -1,14 +1,16 @@
-"""The state history, T4, and the state picker (#279), and T7, the state's persons per
-electoral vote (#280).
+"""The state history, T4, and the state picker (#279), and the state's people per
+electoral vote page, T7 (#280; its own page since #559), with the section links
+between a state's two pages (#559, D105).
 
 Offline, against the recorded ``/v1/states/GA`` and the roster ``/v1/elections/2024``,
 and ``/v1/states/GA/per-capita`` and ``/v1/states/TX/per-capita``
 (the same snapshot as every other fixture, ``test_every_recorded_response_is_one_
 snapshot``), through the helpers and the autouse offline process client of
-``test_dashboard_app.py``. The registry-wide checks there pick both pages up
+``test_dashboard_app.py``. The registry-wide checks there pick the pages up
 (``TestRegistryCoverage``, ``TestValidateBeforeFill`` with ``ZZ`` as the unserved code,
-``TestRegistryContracts``), and the D070(b) guard renders ``/state/GA``, ``/states`` and
-``/state/ZZ``. These tests cover what is particular to the two pages.
+``TestRegistryContracts``), and the D070(b) guard renders ``/state/GA``,
+``/state/GA/per-capita``, ``/states``, ``/state/ZZ`` and ``/state/ZZ/per-capita``.
+These tests cover what is particular to the three pages.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import dash
 import pytest
 from dash import no_update
 
-from explore import api, election_view, labels, query
+from explore import api, election_view, labels, query, state_view
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -45,6 +47,8 @@ PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 MOD: dict[str, Any] = PAGE["layout"].__globals__
 PICKER: dict[str, Any] = dash.page_registry["pages.states"]
 PICKER_MOD: dict[str, Any] = PICKER["layout"].__globals__
+PC_PAGE: dict[str, Any] = dash.page_registry["pages.state_per_capita"]
+PC_MOD: dict[str, Any] = PC_PAGE["layout"].__globals__
 
 INDEX: dict[str, Any] = RECORDED[api.ELECTIONS_PATH]
 ROSTER_PATH = "/v1/elections/2024"
@@ -53,6 +57,8 @@ GA_PATH = "/v1/states/GA"
 GA_PER_CAPITA_PATH = "/v1/states/GA/per-capita"
 PAGE_ID = MOD["PAGE_ID"]
 TABLE = MOD["TABLE_ID"]
+PC_PAGE_ID = PC_MOD["PAGE_ID"]
+PER_CAPITA = PC_MOD["PER_CAPITA_TABLE_ID"]
 
 
 def ga_body() -> dict[str, Any]:
@@ -63,16 +69,30 @@ def ga_per_capita() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[GA_PER_CAPITA_PATH])
 
 
-def render(
-    query: str = "", body: Any = None, index: Any = None, per_capita: Any = None
-) -> Any:
-    """The page body for ``query``, as the layout builds it."""
+def render(query: str = "", body: Any = None, index: Any = None) -> Any:
+    """The history page's body for ``query``, as the layout builds it."""
     content, _ = MOD["render"](
         ga_body() if body is None else body,
         copy.deepcopy(INDEX) if index is None else index,
         "GA",
         MOD["parse_filters"](parse(query)),
-        ga_per_capita() if per_capita is None else per_capita,
+    )
+    return content
+
+
+def pc_render(
+    query: str = "", per_capita: Any = None, index: Any = None, usps: str = "GA"
+) -> Any:
+    """The per-capita page's body for ``query``, as the layout builds it."""
+    content, _ = PC_MOD["render"](
+        (
+            copy.deepcopy(RECORDED[f"/v1/states/{usps}/per-capita"])
+            if per_capita is None
+            else per_capita
+        ),
+        copy.deepcopy(INDEX) if index is None else index,
+        usps,
+        PC_MOD["parse_filters"](parse(query)),
     )
     return content
 
@@ -98,17 +118,50 @@ def years_shown(tree: Any) -> list[int]:
 def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path_template"] == "/state/<usps>"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PAGE["on_miss"] == (
-        api.ROSTER_PATH,
-        "/v1/states/{usps}",
-        "/v1/states/{usps}/per-capita",
-    )
+    # The history page no longer fills T7's path (#559).
+    assert PAGE["on_miss"] == (api.ROSTER_PATH, "/v1/states/{usps}")
     assert PAGE["success"] == PAGE_ID
     # The registered judge is the one the layout calls, so the index's 404 and the
     # page's not-found state decide alike.
     assert PAGE["validate"] is MOD["VALIDATE"]
-    assert PAGE["validate"] == (api.ROSTER_PATH, MOD["on_roster"])
+    assert PAGE["validate"] == (api.ROSTER_PATH, state_view.on_roster)
     assert PAGE["query"] is MOD["parse_filters"]
+    assert PAGE.get("order") is None
+
+
+def test_the_per_capita_page_is_registered_as_planned() -> None:
+    assert PC_PAGE["path_template"] == "/state/<usps>/per-capita"
+    # Ahead of the history page's greedy <usps> (#559, as D092 ordered the election
+    # subpages); test_every_page_s_path_routes_to_that_page checks the routing.
+    assert PC_PAGE["order"] == 0
+    assert PC_PAGE["prefetch"] == (api.ELECTIONS_PATH,)
+    assert PC_PAGE["on_miss"] == (api.ROSTER_PATH, "/v1/states/{usps}/per-capita")
+    assert PC_PAGE["success"] == PC_PAGE_ID
+    # The same judge as the history page, so both decide a code alike.
+    assert PC_PAGE["validate"] is PC_MOD["VALIDATE"]
+    assert PC_PAGE["validate"] == PAGE["validate"]
+    assert PC_PAGE["query"] is PC_MOD["parse_filters"]
+    assert PC_PAGE["nav"] == PAGE["nav"] == "states"
+    assert PC_MOD["NOT_FOUND"] == MOD["NOT_FOUND"]
+    # Its own ids: Dash keys callbacks by output, app-wide.
+    assert PC_MOD["URL_ID"] != MOD["URL_ID"]
+    assert PC_MOD["YEARS_ID"] != MOD["YEARS_ID"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"candidate": "abraham-lincoln", "pv_status": "popular_vote"},
+        {"usps": "TX", "state": "TX", "junk": "1"},
+    ],
+    ids=repr,
+)
+def test_the_per_capita_parser_keeps_only_the_year_range(
+    params: dict[str, str],
+) -> None:
+    assert PC_MOD["parse_filters"]({**params, "year_from": "1860"}) == [
+        ("year_from", "1860")
+    ]
 
 
 def test_the_picker_is_registered_as_planned() -> None:
@@ -126,7 +179,7 @@ def test_the_roster_is_the_latest_served_election() -> None:
 
 class TestOnRoster:
     def test_every_state_and_dc_in_the_roster_is_accepted(self) -> None:
-        judge = MOD["on_roster"]
+        judge = state_view.on_roster
         codes = {row["state_usps"] for row in ROSTER["data"]}
         assert "DC" in codes
         for usps in codes:
@@ -137,13 +190,13 @@ class TestOnRoster:
         ["ZZ", "ga", "Ga", "GAA", "G", "", None, ["GA"], 1, "G1", "ＧＡ", " GA"],
     )
     def test_anything_else_is_refused(self, usps: Any) -> None:
-        assert MOD["on_roster"]({"usps": usps}, ROSTER) is False
+        assert state_view.on_roster({"usps": usps}, ROSTER) is False
 
     @pytest.mark.parametrize(
         "body", [{}, [], None, "GA", {"data": "GA"}, {"data": [1]}, {"data": []}]
     )
     def test_a_malformed_roster_names_no_state(self, body: Any) -> None:
-        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        assert state_view.on_roster({"usps": "GA"}, body) is False
 
     @pytest.mark.parametrize("position", [0, 50, -1])
     @pytest.mark.parametrize(
@@ -154,11 +207,11 @@ class TestOnRoster:
     def test_a_roster_the_picker_would_refuse_names_no_state(
         self, position: int, change: dict[str, Any]
     ) -> None:
-        # One reading of the roster for both pages (api.roster): a row of another
+        # One reading of the roster for every page (state_view.roster): a row of another
         # year, a malformed code or a missing name refuses every code, GA included.
         body = copy.deepcopy(ROSTER)
         body["data"][position].update(change)
-        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        assert state_view.on_roster({"usps": "GA"}, body) is False
         with pytest.raises(TypeError):
             PICKER_MOD["roster"](body, 2024)
 
@@ -166,13 +219,13 @@ class TestOnRoster:
     def test_a_roster_whose_rows_all_name_another_year_names_no_state(
         self, year: int
     ) -> None:
-        # Consistent rows, so api.roster reads it; but not the latest election, which
+        # Consistent rows, so state_view.roster reads it; but not the latest election, which
         # the judge checks against the roster's own coverage and the picker against
         # the year it read the roster for.
         body = copy.deepcopy(ROSTER)
         for row in body["data"]:
             row["year"] = year
-        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        assert state_view.on_roster({"usps": "GA"}, body) is False
         with pytest.raises(TypeError):
             PICKER_MOD["roster"](body, 2024)
 
@@ -182,7 +235,7 @@ class TestOnRoster:
     ) -> None:
         body = copy.deepcopy(ROSTER)
         body["meta"]["provenance"]["coverage"] = coverage
-        assert MOD["on_roster"]({"usps": "GA"}, body) is False
+        assert state_view.on_roster({"usps": "GA"}, body) is False
 
 
 # --- the Georgia acceptance criterion ------------------------------------------------
@@ -261,10 +314,15 @@ class TestGeorgia:
         ] in named
 
     def test_the_heading_names_the_state_from_the_rows(self) -> None:
-        _, name = MOD["render"](
-            ga_body(), copy.deepcopy(INDEX), "GA", [], ga_per_capita()
-        )
+        _, name = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA", [])
         assert name == "Georgia"
+
+    def test_the_history_page_shows_no_t7(self) -> None:
+        tree = render()
+        assert find(tree, PER_CAPITA) is None
+        assert "People per electoral vote" not in [
+            h.children for h in of_type(tree, "H2")
+        ]
 
 
 # --- malformed bodies degrade --------------------------------------------------------
@@ -532,16 +590,62 @@ def test_a_state_code_that_is_not_one_is_text_not_a_link(usps: Any) -> None:
 
 
 class TestRoster:
-    def test_a_served_state_renders_with_two_requests(
+    def test_a_served_state_renders_with_one_request(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The state's rows, then its per-capita table (#280)."""
+        """The state's rows only: T7's path is the per-capita page's (#559)."""
         _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
         assert PAGE_ID in routed_ids(route("/state/GA"))
-        assert calls == [GA_PATH, GA_PER_CAPITA_PATH]
-        assert len(bucket.waits) == 2
+        assert calls == [GA_PATH]
+        assert len(bucket.waits) == 1
         calls.clear()
         assert PAGE_ID in routed_ids(route("/state/GA"))  # cached: none
+        assert calls == []
+
+    def test_the_per_capita_page_renders_with_one_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T7's rows only, never the history's (#559)."""
+        _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route("/state/GA/per-capita"))
+        assert PC_PAGE_ID in ids and PER_CAPITA in ids
+        assert PAGE_ID not in ids and TABLE not in ids
+        assert calls == [GA_PER_CAPITA_PATH]
+        assert len(bucket.waits) == 1
+        calls.clear()
+        assert PC_PAGE_ID in routed_ids(route("/state/GA/per-capita"))
+        assert calls == []
+
+    def test_the_per_capita_page_s_filter_changes_make_no_api_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        route("/state/GA/per-capita")
+        calls.clear()
+        for search in ("?year_from=1860", "?year_to=1900", ""):
+            assert PC_PAGE_ID in routed_ids(route("/state/GA/per-capita", search))
+        PC_MOD["on_filter_change"]([1860, 2024], 1824, 2024, "")
+        assert calls == []
+
+    @pytest.mark.parametrize("path", ["/state/ZZ/per-capita", "/state/QQ/per-capita"])
+    def test_an_unserved_code_on_the_per_capita_page_is_not_found_and_fills_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route(path))
+        assert PC_MOD["NOT_FOUND_ID"] in ids
+        assert PC_PAGE_ID not in ids and "unavailable" not in ids
+        assert calls == [] and bucket.waits == []
+
+    @pytest.mark.parametrize("path", ["/state/GA/x", "/state/GA/per-capita/x"])
+    def test_an_unknown_section_reaches_the_history_page_and_is_not_found(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        # The history page's greedy <usps> takes "GA/x", which is no USPS code.
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route(path))
+        assert MOD["NOT_FOUND_ID"] in ids
+        assert PAGE_ID not in ids and PC_PAGE_ID not in ids
         assert calls == []
 
     def test_filter_changes_make_no_api_request(
@@ -581,7 +685,14 @@ class TestRoster:
     ) -> None:
         _, calls, _ = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/state/GA"))
-        assert calls == [ROSTER_PATH, GA_PATH, GA_PER_CAPITA_PATH]
+        assert calls == [ROSTER_PATH, GA_PATH]
+
+    def test_cold_the_per_capita_page_fills_the_roster_then_its_rows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch)
+        assert PC_PAGE_ID in routed_ids(route("/state/GA/per-capita"))
+        assert calls == [ROSTER_PATH, GA_PER_CAPITA_PATH]
 
     def test_a_cold_second_fill_is_refused_when_too_little_time_is_left(
         self, monkeypatch: pytest.MonkeyPatch
@@ -622,7 +733,7 @@ class TestRoster:
         _, calls, _ = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/state/GA", search))
         assert PICKER["success"] in routed_ids(route("/states", search))
-        assert calls == [ROSTER_PATH, GA_PATH, GA_PER_CAPITA_PATH]
+        assert calls == [ROSTER_PATH, GA_PATH]
 
     @pytest.mark.parametrize(
         "coverage",
@@ -686,16 +797,14 @@ class TestLede:
 
     def test_the_two_sentences_are_todays_lede(self) -> None:
         # The split falls at the sentence boundary, so the degraded state offers no part
-        # of the filter sentence...
+        # of the filter sentence; people per electoral vote left the lede with T7 (#559).
         assert MOD["FILTER_SENTENCE"] == (
             "Narrow the rows by year, candidate or popular-vote status."
         )
-        # ...and changed no word: success reads exactly as the one-piece lede did.
         assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
             "This state's electoral votes for each candidate in every election this "
-            "dataset holds for it, with the popular vote where the dataset has it, and "
-            "how many people its electoral votes stood for. Narrow the rows by year, "
-            "candidate or popular-vote status."
+            "dataset holds for it, with the popular vote where the dataset has it. "
+            "Narrow the rows by year, candidate or popular-vote status."
         )
 
     def test_success_shows_the_lede_then_the_filter_sentence(
@@ -744,6 +853,56 @@ class TestLede:
         assert MOD["FILTER_SENTENCE"] not in body
 
 
+class TestPerCapitaLede:
+    """The per-capita page's heading, lede and filter sentence, on the history page's
+    rules (#392, #325), worded by #559's ba spec."""
+
+    def test_the_wording_is_the_spec_s(self) -> None:
+        assert PC_MOD["PER_CAPITA_HEADING"] == "{state}: people per electoral vote"
+        assert PC_MOD["PER_CAPITA_GENERIC_HEADING"] == (
+            "State: people per electoral vote"
+        )
+        assert f"{PC_MOD['LEDE']} {PC_MOD['FILTER_SENTENCE']}" == (
+            "How many people this state's electoral votes stood for in every election "
+            "this dataset holds for it: the state's population divided by its electors "
+            "appointed. Narrow the table to a range of years."
+        )
+
+    def test_success_names_the_state_then_the_lede_and_its_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        page = PC_MOD["layout"](usps="GA")
+        heading, lede, content = page.children
+        assert heading.children == "Georgia: people per electoral vote"
+        assert lede.children == f"{PC_MOD['LEDE']} {PC_MOD['FILTER_SENTENCE']}"
+        assert content.id == PC_PAGE_ID
+
+    def test_the_degraded_state_shows_the_generic_heading_and_no_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestMalformedBodies.client_with(monkeypatch, GA_PER_CAPITA_PATH)
+        response = route("/state/GA/per-capita")
+        ids = routed_ids(response)
+        assert "unavailable" in ids and PC_PAGE_ID not in ids
+        body = response.get_data(as_text=True)
+        assert PC_MOD["PER_CAPITA_GENERIC_HEADING"] in body
+        assert PC_MOD["LEDE"] in body
+        assert PC_MOD["FILTER_SENTENCE"] not in body
+
+    def test_the_not_found_state_shows_the_state_heading_and_no_lede(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        page = PC_MOD["layout"](usps="ZZ")
+        heading, content = page.children
+        assert heading.children == labels.STATE_NOT_FOUND_HEADING
+        assert content.id == PC_MOD["NOT_FOUND_ID"]
+        assert labels.STATE_NOT_FOUND_SENTENCE in texts(content)
+        (link,) = of_type(content, "Link")
+        assert (link.children, link.href) == (labels.STATE_NOT_FOUND_LINK, "/states")
+
+
 @pytest.mark.parametrize(
     ("value", "year"),
     [(1000, 1000), (9999, 9999), (999, None), (10000, None), (True, None)],
@@ -773,6 +932,47 @@ class TestIndex:
         assert status == 404
         assert head.noindex and head.canonical is None
         assert calls == []
+
+    def test_the_per_capita_page_s_canonical_url_drops_the_query_and_og_url_keeps_the_range(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        status, head, _ = get(
+            "/state/GA/per-capita?year_from=1860&candidate=abraham-lincoln"
+            "&pv_status=popular_vote&usps=TX"
+        )
+        assert status == 200
+        assert head.canonical == url("/state/GA/per-capita")
+        assert head.og_url == url("/state/GA/per-capita?year_from=1860")
+
+    @pytest.mark.parametrize(
+        "path", ["/state/ZZ/per-capita", "/state/ga/per-capita", "/state/GA/x"]
+    )
+    def test_with_the_roster_cached_an_unserved_state_or_section_is_a_404(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        status, head, _ = get(path)
+        assert status == 404
+        assert head.noindex and head.canonical is None
+        assert calls == []
+
+    def test_an_old_filtered_link_still_lands_on_the_history_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No query key reached T7 alone, so an old link is not redirected (D105): it
+        answers 200 on the history page, with its year range applied to T4."""
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        search = "?year_from=1860&year_to=1872&candidate=horatio-seymour"
+        status, head, _ = get(f"/state/GA{search}")
+        assert status == 200
+        assert head.canonical == url("/state/GA")
+        response = route("/state/GA", search)
+        assert PAGE_ID in routed_ids(response)
+        tree = render(search[1:])
+        assert years_shown(tree) == [1868]
+        shown = years_shown(render("year_from=1860&year_to=1872"))
+        assert set(shown) == {1860, 1864, 1868, 1872}
 
     def test_with_the_roster_cold_the_index_counts_it_matched_and_reads_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -805,6 +1005,20 @@ def test_the_title_is_total_and_names_only_a_usps_code(usps: Any, named: bool) -
     assert isinstance(title, str)
     assert (f"{usps} — state history" in title) is named
     assert "<" not in title
+
+
+@pytest.mark.parametrize(
+    ("usps", "named"),
+    [("GA", True), ("ZZ", True), ("ga", False), (None, False), ("GA/x", False)],
+)
+def test_the_per_capita_title_is_total_names_only_a_code_and_differs(
+    usps: Any, named: bool
+) -> None:
+    title = PC_MOD["title"](usps=usps)
+    assert isinstance(title, str)
+    assert (f"{usps} — people per electoral vote" in title) is named
+    assert title.startswith(PC_MOD["PER_CAPITA_GENERIC_HEADING"]) is not named
+    assert title != MOD["title"](usps=usps)
 
 
 # --- the picker -----------------------------------------------------------------------
@@ -848,14 +1062,14 @@ class TestPicker:
         assert PICKER["success"] in routed_ids(route("/states"))
         assert calls == [ROSTER_PATH]
         calls.clear()
-        # The state page reads the same roster: no second fill of it.
+        # The state pages read the same roster: no second fill of it.
         assert PAGE_ID in routed_ids(route("/state/GA"))
+        assert PC_PAGE_ID in routed_ids(route("/state/GA/per-capita"))
         assert calls == [GA_PATH, GA_PER_CAPITA_PATH]
 
 
-# --- the per-capita table, T7 (#280) --------------------------------------------------
+# --- the per-capita page, T7 (#280, #559) --------------------------------------------
 
-PER_CAPITA = MOD["PER_CAPITA_TABLE_ID"]
 NO_FIGURE = "No census figure for this state at this election"
 NO_VOTES = "No electoral votes this election"
 
@@ -864,7 +1078,7 @@ def per_capita_rows(tree: Any) -> dict[int, dict[str, str]]:
     """T7's rows as ``{year: {field: cell text}}``."""
     table = find(tree, PER_CAPITA)
     rows = [] if table is None else of_type(of_type(table, "Tbody"), "Tr")
-    fields = MOD["PER_CAPITA_FIELDS"]
+    fields = PC_MOD["PER_CAPITA_FIELDS"]
     shown = [
         dict(zip(fields, (" ".join(texts(td)) for td in tr.children), strict=True))
         for tr in rows
@@ -872,20 +1086,10 @@ def per_capita_rows(tree: Any) -> dict[int, dict[str, str]]:
     return {int(row["year"]): row for row in shown}
 
 
-def texas_section(query: str = "") -> Any:
-    """T7 alone for Texas, whose state rows are not recorded."""
-    body = copy.deepcopy(RECORDED["/v1/states/TX/per-capita"])
-    rows = MOD["_rows"](body, "TX", MOD["_served_years"](INDEX), "x")
-    span = (1824, 2024)
-    chosen = MOD["filters"](MOD["parse_filters"](parse(query)), [], span)
-    download = MOD["_download"]("TX", "per-capita", "x", body, chosen, span)
-    return MOD["_per_capita_section"](rows, chosen, download)
-
-
 class TestGeorgiaPerCapita:
     def test_every_served_year_is_shown_in_order(self) -> None:
         body = ga_per_capita()
-        rows = per_capita_rows(render())
+        rows = per_capita_rows(pc_render())
         assert list(rows) == sorted(r["year"] for r in body["data"])
 
     def test_rows_are_sorted_by_the_page_not_trusted_in_api_order(self) -> None:
@@ -894,37 +1098,62 @@ class TestGeorgiaPerCapita:
         assert [r["year"] for r in body["data"]] != sorted(
             r["year"] for r in body["data"]
         )
-        rows = per_capita_rows(render(per_capita=body))
+        rows = per_capita_rows(pc_render(per_capita=body))
         assert list(rows) == sorted(r["year"] for r in body["data"])
 
     def test_the_governing_census_is_the_apportionment_s_not_the_nearest(self) -> None:
-        rows = per_capita_rows(render())
+        rows = per_capita_rows(pc_render())
         assert rows[2020]["governing_census_year"] == "2010"
         assert rows[2024]["governing_census_year"] == "2020"
         assert rows[1924]["governing_census_year"] == "1910"
         assert rows[1928]["governing_census_year"] == "1910"
-        assert labels.GOVERNING_CENSUS_NOTE in texts(render())
+        assert labels.GOVERNING_CENSUS_NOTE in texts(pc_render())
 
     def test_1864_says_georgia_had_no_electoral_votes(self) -> None:
-        rows = per_capita_rows(render())
+        rows = per_capita_rows(pc_render())
         assert rows[1864]["persons_per_electoral_vote"] == NO_VOTES
         assert rows[1864]["state_electoral_votes"] == "0"
 
     def test_each_year_links_to_its_election(self) -> None:
-        table = find(render(), PER_CAPITA)
+        table = find(pc_render(), PER_CAPITA)
         links = of_type(table, "Link")
         assert links and all(a.href == f"/election/{a.children}" for a in links)
 
     def test_each_header_is_its_label_with_the_raw_field_name(self) -> None:
-        headers = of_type(find(render(), PER_CAPITA), "Th")
+        headers = of_type(find(pc_render(), PER_CAPITA), "Th")
         assert [(h.children, h.title) for h in headers] == [
-            (labels.LABELS[f], f) for f in MOD["PER_CAPITA_FIELDS"]
+            (labels.LABELS[f], f) for f in PC_MOD["PER_CAPITA_FIELDS"]
         ]
-        assert set(MOD["PER_CAPITA_FIELDS"]) <= set(ga_per_capita()["data"][0])
+        assert set(PC_MOD["PER_CAPITA_FIELDS"]) <= set(ga_per_capita()["data"][0])
+
+    def test_the_notes_are_t6_s_and_name_no_other_filter(self) -> None:
+        tree = pc_render()
+        shown = texts(tree)
+        assert labels.GOVERNING_CENSUS_NOTE in shown
+        assert labels.BOUNDARY_NOTE in shown
+        # The year range is the page's only filter, so no note names another (#559).
+        assert not any("candidate" in t for t in shown if isinstance(t, str))
+        # T7's own heading is dropped: the H1 names the table (#559's ba spec).
+        assert labels.SECTION_PER_CAPITA not in [h.children for h in of_type(tree, "H2")]
+
+    def test_the_column_name_list_and_the_footer_follow_the_table(self) -> None:
+        tree = pc_render()
+        named = [
+            [c.children for c in of_type(g, "Code")]
+            for g in of_type(tree, "Details")
+        ]
+        assert list(PC_MOD["PER_CAPITA_FIELDS"]) in named
+        provenance = ga_per_capita()["meta"]["provenance"]
+        (footer,) = of_type(tree, "Footer")
+        assert f"{provenance['census_source_name']} (" in texts(footer)
+
+    def test_the_heading_names_the_state_from_t7_s_rows(self) -> None:
+        _, name = PC_MOD["render"](ga_per_capita(), copy.deepcopy(INDEX), "GA", [])
+        assert name == "Georgia"
 
 
 def test_texas_1848_has_no_census_figure_and_1864_1868_no_votes() -> None:
-    rows = per_capita_rows(texas_section())
+    rows = per_capita_rows(pc_render(usps="TX"))
     assert rows[1848]["population"] == NO_FIGURE
     assert rows[1848]["persons_per_electoral_vote"] == NO_FIGURE
     assert rows[1864]["persons_per_electoral_vote"] == NO_VOTES
@@ -933,25 +1162,54 @@ def test_texas_1848_has_no_census_figure_and_1864_1868_no_votes() -> None:
 
 class TestT7Filters:
     def test_the_year_range_narrows_t7(self) -> None:
-        rows = per_capita_rows(render("year_from=1860&year_to=1872"))
+        rows = per_capita_rows(pc_render("year_from=1860&year_to=1872"))
         assert list(rows) == [1860, 1864, 1868, 1872]
 
     @pytest.mark.parametrize(
         "search", ["candidate=horatio-seymour", "pv_status=not_participating"]
     )
-    def test_the_other_filters_do_not_narrow_t7(self, search: str) -> None:
-        assert len(per_capita_rows(render(search))) == len(ga_per_capita()["data"])
+    def test_the_history_page_s_filters_do_not_reach_t7(self, search: str) -> None:
+        assert len(per_capita_rows(pc_render(search))) == len(ga_per_capita()["data"])
 
-    def test_t7_says_which_filter_applies_and_counts_its_rows(self) -> None:
-        tree = render("year_from=1860&year_to=1872")
+    def test_t7_counts_its_rows(self) -> None:
+        tree = pc_render("year_from=1860&year_to=1872")
         total = len(ga_per_capita()["data"])
-        assert MOD["PER_CAPITA_FILTER_NOTE"] in texts(tree)
         assert f"Showing 4 of {total} rows" in texts(tree)
 
     def test_a_range_before_the_state_s_first_election_is_empty(self) -> None:
-        tree = texas_section("year_from=1824&year_to=1840")
+        tree = pc_render("year_from=1824&year_to=1840", usps="TX")
         assert per_capita_rows(tree) == {}
         assert "No rows match these filters." in texts(tree)
+
+    def test_the_year_control_is_the_only_control(self) -> None:
+        tree = pc_render("year_from=1860")
+        (slider,) = of_type(tree, "RangeSlider")
+        assert slider.id == PC_MOD["YEARS_ID"]
+        assert slider.value == [1860, 2024]
+        assert of_type(tree, "Dropdown") == []
+
+    @pytest.mark.parametrize(
+        ("years", "current", "expected"),
+        [
+            ([1860, 2024], "", "?year_from=1860"),
+            ([1824, 1900], "", "?year_to=1900"),
+            ([1824, 2024], "?year_from=1860", ""),
+            ([1860, 2024], "?year_from=1860", no_update),
+        ],
+        ids=repr,
+    )
+    def test_a_year_change_writes_only_the_range(
+        self, years: list[int], current: str, expected: Any
+    ) -> None:
+        assert PC_MOD["on_filter_change"](years, 1824, 2024, current) == expected
+
+    def test_the_download_names_the_page_and_the_range_applied(self) -> None:
+        tree = pc_render("year_from=1860&candidate=horatio-seymour")
+        download = PC_MOD["_download"]("GA", ga_per_capita(), "?year_from=1860")
+        assert download.filename == "state-GA-per-capita.csv"
+        assert download.name == "people per electoral vote"
+        assert download.view_url.endswith("/state/GA/per-capita?year_from=1860")
+        assert find(tree, PER_CAPITA) is not None
 
 
 class TestT7Bodies:
@@ -965,16 +1223,16 @@ class TestT7Bodies:
         body = ga_per_capita()
         body["data"][5].update(change)
         with pytest.raises(TypeError, match="/v1/states/GA/per-capita"):
-            render(per_capita=body)
+            pc_render(per_capita=body)
 
     @pytest.mark.parametrize("data", [[], None, "rows"])
     def test_a_body_with_no_rows_is_malformed(self, data: Any) -> None:
         body = ga_per_capita()
         body["data"] = data
         with pytest.raises(TypeError):
-            render(per_capita=body)
+            pc_render(per_capita=body)
 
-    def test_a_malformed_body_degrades_the_whole_page(
+    def test_a_malformed_body_degrades_only_the_per_capita_page(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         body = ga_per_capita()
@@ -986,9 +1244,10 @@ class TestT7Bodies:
         client.ensure_refresher = lambda: None  # type: ignore[method-assign]
         client.refresh()
         monkeypatch.setattr(api, "CLIENT", client)
-        ids = routed_ids(route("/state/GA"))
+        ids = routed_ids(route("/state/GA/per-capita"))
         assert "unavailable" in ids
-        assert PAGE_ID not in ids
+        assert PC_PAGE_ID not in ids
+        assert PAGE_ID in routed_ids(route("/state/GA"))
 
 
 @pytest.mark.parametrize(
@@ -1004,12 +1263,12 @@ class TestT7Bodies:
     ],
     ids=["unavailable", "another-version"],
 )
-def test_a_failed_per_capita_read_degrades_the_whole_page(
+def test_a_failed_per_capita_read_degrades_only_its_own_page(
     monkeypatch: pytest.MonkeyPatch, answer: api.Response | Exception
 ) -> None:
-    """The read itself failing, not only a malformed body: the page's success marker
-    covers T7, so T4 does not render without it, and a response of another snapshot
-    is never mixed into the render."""
+    """The read itself failing, not only a malformed body: the per-capita page
+    degrades, a response of another snapshot is never mixed into the render, and the
+    history page, which never reads T7's path (#559), still renders."""
     recorded, _ = fake_fetch(RECORDED)
     calls: list[str] = []
 
@@ -1028,21 +1287,115 @@ def test_a_failed_per_capita_read_degrades_the_whole_page(
     client.ensure_refresher = lambda: None  # type: ignore[method-assign]
     client.refresh()
     monkeypatch.setattr(api, "CLIENT", client)
-    ids = routed_ids(route("/state/GA"))
+    ids = routed_ids(route("/state/GA/per-capita"))
     assert "unavailable" in ids
-    assert PAGE_ID not in ids and TABLE not in ids
+    assert PC_PAGE_ID not in ids and PER_CAPITA not in ids
     assert GA_PER_CAPITA_PATH in calls
+    calls.clear()
+    assert PAGE_ID in routed_ids(route("/state/GA"))
+    assert GA_PER_CAPITA_PATH not in calls
 
 
-def test_the_routed_page_shows_t7(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_routed_per_capita_page_shows_t7_and_the_history_page_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cached_client(monkeypatch, source=api.ROSTER_PATH)
-    assert {PAGE_ID, PER_CAPITA} <= routed_ids(route("/state/GA"))
+    assert {PC_PAGE_ID, PER_CAPITA} <= routed_ids(route("/state/GA/per-capita"))
+    history = routed_ids(route("/state/GA"))
+    assert PAGE_ID in history and PER_CAPITA not in history
 
 
-def test_the_footer_names_the_census_bureau() -> None:
-    provenance = ga_per_capita()["meta"]["provenance"]
-    (footer,) = of_type(render(), "Footer")
-    assert f"{provenance['census_source_name']} (" in texts(footer)
+# --- the section links (#559, D105) ----------------------------------------------------
+
+
+def section_entries(tree: Any) -> list[Any]:
+    (nav,) = [n for n in of_type(tree, "Nav") if n.id == state_view.SECTIONS_ID]
+    return list(nav.children)
+
+
+class TestSectionLinks:
+    """A state's two pages link each other on success only, in page order: the page
+    being read is text with ``aria-current="page"``, the other a link carrying the year
+    range the render applied and nothing else (#559, D105; the election pages' links
+    carry no filter, D092)."""
+
+    def test_the_landmark_is_named_and_drawn_as_the_election_pages_are(self) -> None:
+        (nav,) = [n for n in of_type(render(), "Nav") if n.id == state_view.SECTIONS_ID]
+        assert getattr(nav, "aria-label") == labels.STATE_SECTIONS_LABEL
+        assert nav.className == election_view.SECTIONS_CLASS == "section-links"
+
+    def test_on_the_history_page_the_history_is_marked(self) -> None:
+        current, other = section_entries(render())
+        assert type(current).__name__ == "Span"
+        assert current.children == labels.SECTION_STATE_HISTORY
+        assert getattr(current, "aria-current") == "page"
+        assert type(other).__name__ == "Link"
+        assert other.children == labels.SECTION_PER_CAPITA
+        assert other.href == "/state/GA/per-capita"
+
+    def test_on_the_per_capita_page_t7_is_marked(self) -> None:
+        other, current = section_entries(pc_render())
+        assert type(current).__name__ == "Span"
+        assert current.children == labels.SECTION_PER_CAPITA
+        assert getattr(current, "aria-current") == "page"
+        assert type(other).__name__ == "Link"
+        assert other.children == labels.SECTION_STATE_HISTORY
+        assert other.href == "/state/GA"
+
+    @pytest.mark.parametrize(
+        ("query", "carried"),
+        [
+            ("year_from=1860&year_to=1900", "?year_from=1860&year_to=1900"),
+            ("year_to=1900&candidate=horatio-seymour&pv_status=popular_vote",
+             "?year_to=1900"),
+            ("candidate=horatio-seymour", ""),
+            # A bound outside the span falls back, so it is not carried.
+            ("year_from=1700&year_to=1900", "?year_to=1900"),
+            ("year_from=1824&year_to=2024", ""),
+        ],
+    )
+    def test_the_history_link_carries_the_range_applied_only(
+        self, query: str, carried: str
+    ) -> None:
+        _, link = section_entries(render(query))
+        assert link.href == f"/state/GA/per-capita{carried}"
+
+    @pytest.mark.parametrize(
+        ("query", "carried"),
+        [
+            ("year_from=1860&year_to=1900", "?year_from=1860&year_to=1900"),
+            ("year_from=1700", ""),
+            ("", ""),
+        ],
+    )
+    def test_the_per_capita_link_carries_the_range_applied(
+        self, query: str, carried: str
+    ) -> None:
+        link, _ = section_entries(pc_render(query))
+        assert link.href == f"/state/GA{carried}"
+
+    def test_the_links_come_first_in_each_page_s_body(self) -> None:
+        for tree in (render(), pc_render()):
+            assert tree.children[0].id == state_view.SECTIONS_ID
+
+    @pytest.mark.parametrize("path", ["/state/ZZ", "/state/ZZ/per-capita"])
+    def test_the_not_found_state_has_no_section_links(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        assert state_view.SECTIONS_ID not in routed_ids(route(path))
+
+    @pytest.mark.parametrize(
+        ("path", "broken"),
+        [("/state/GA", GA_PATH), ("/state/GA/per-capita", GA_PER_CAPITA_PATH)],
+    )
+    def test_the_degraded_state_has_no_section_links(
+        self, monkeypatch: pytest.MonkeyPatch, path: str, broken: str
+    ) -> None:
+        TestMalformedBodies.client_with(monkeypatch, broken)
+        ids = routed_ids(route(path))
+        assert "unavailable" in ids
+        assert state_view.SECTIONS_ID not in ids
 
 
 # --- the dropdown filters (#475) ------------------------------------------------------
@@ -1135,6 +1488,29 @@ class TestWideLayout:
         assert type(lede).__name__ == "P" and lede.className == "lede"
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
-        assert type(kids[0]).__name__ == "Location"
-        assert kids[1].className.split()[:1] == ["filters"]
+        # The section links first (#559), then the page's Location and the filters.
+        assert kids[0].id == state_view.SECTIONS_ID
+        assert type(kids[1]).__name__ == "Location"
+        assert kids[2].className.split()[:1] == ["filters"]
+        assert of_type(page, "Figure") == []
+
+    def test_the_per_capita_page_s_slider_has_its_own_row_and_no_slot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The year range alone, in the history page's filter row (#545, D102), and no
+        # chart slot until C8 (#561) lands (#545's rule).
+        cached_client(monkeypatch)
+        page = PC_MOD["layout"](usps="GA")
+        heading, lede, content = page.children
+        assert type(heading).__name__ == "H1"
+        assert lede.className == "lede"
+        kids = list(content.children)
+        assert kids[0].id == state_view.SECTIONS_ID
+        assert type(kids[1]).__name__ == "Location"
+        (box,) = classed(content, "filters")
+        assert kids[2] is box
+        assert box.className.split() == ["filters", "filter-row"]
+        (own,) = box.children
+        assert own.className.split() == ["filter", "filter-own-row"]
+        assert find(own, PC_MOD["YEARS_ID"]) is not None
         assert of_type(page, "Figure") == []

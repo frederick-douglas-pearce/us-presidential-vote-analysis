@@ -47,8 +47,10 @@ C5 = "#c5"
 OVER_TIME_ROWS = "#elections-over-time-table tbody tr"
 STATE_CONTROL = "#elections-state"
 
-# Ids of the state history (pages/state.py).
+# Ids of the state history (pages/state.py) and its people per electoral vote
+# (pages/state_per_capita.py, #559).
 STATE_SUCCESS = "#state"
+STATE_PER_CAPITA_SUCCESS = "#state-per-capita-page"
 
 # Ids of the candidate history (pages/candidate.py).
 CANDIDATE_SUCCESS = "#candidate"

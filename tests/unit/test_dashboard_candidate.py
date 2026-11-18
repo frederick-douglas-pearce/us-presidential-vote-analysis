@@ -504,7 +504,6 @@ def test_t4_links_each_candidate_to_their_history() -> None:
         copy.deepcopy(INDEX),
         "GA",
         [],
-        copy.deepcopy(RECORDED["/v1/states/GA/per-capita"]),
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == {
         f"/candidate/{r['candidate_slug']}" for r in body["data"]
@@ -546,7 +545,6 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
         copy.deepcopy(INDEX),
         "GA",
         [],
-        copy.deepcopy(RECORDED["/v1/states/GA/per-capita"]),
     )
     assert _candidate_links(find(tree, state["TABLE_ID"])) == set()
     if "candidate" in row and row["candidate"] is None:

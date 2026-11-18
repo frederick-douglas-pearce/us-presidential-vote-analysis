@@ -72,6 +72,8 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     "/states": ("#states", ("states", "page")),
     "/state/GA": ("#state", ("states", "true")),
     "/state/TX": (UNAVAILABLE, ("states", "true")),
+    # A state's people per electoral vote (#559).
+    "/state/GA/per-capita": ("#state-per-capita-page", ("states", "true")),
     "/candidate/andrew-jackson": ("#candidate", None),
     "/no-such-page": (PAGE_NOT_FOUND, None),
 }
@@ -257,6 +259,9 @@ def test_a_navigation_to_a_page_with_no_mark_clears_it(page: Page, path: str) ->
     [
         ("/election/1824/x", ("elections", "true")),
         ("/state/ZZ", ("states", "true")),
+        # An unserved state on its per-capita page, and an unknown section (#559).
+        ("/state/ZZ/per-capita", ("states", "true")),
+        ("/state/GA/x", ("states", "true")),
         ("/", ("home", "page")),
     ],
 )

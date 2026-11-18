@@ -128,8 +128,8 @@ def listed(body: Any) -> set[str]:
 
     One item that is not an object whose ``candidate_slug`` is a slug
     (:func:`explore.query.is_slug`) makes the index name no slug, as
-    :func:`explore.api.roster` refuses a roster with one bad row: a listed value is
-    formatted into an API path, so it is checked as a path variable is.
+    :func:`explore.state_view.roster` refuses a roster with one bad row: a listed value
+    is formatted into an API path, so it is checked as a path variable is.
     """
     items = _rows_of(body)
     if not items or not all(

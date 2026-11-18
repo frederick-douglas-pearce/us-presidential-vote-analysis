@@ -5,7 +5,8 @@ The roster comes from the latest election's rows, ``/v1/elections/{year_max}``
 no second copy of it (D006). ``year_max`` is read from the prefetched ``/v1/elections``
 and checked to be the latest year it serves (:func:`explore.api.coverage_vars`), never
 from the request. The roster is filled on a miss and shared with every
-``/state/<usps>`` page, which validates its code against it.
+``/state/<usps>`` page and its ``/per-capita`` page, which validate the code against
+it.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any
 import dash
 from dash import dcc, html
 
-from explore import api, components
+from explore import api, components, state_view
 from explore.config import SITE_TITLE
 
 #: The wrapper every successful render carries: the list of states.
@@ -43,10 +44,10 @@ def roster(body: Any, year: int) -> list[tuple[str, str]]:
     """``(usps, name)`` for each state the roster names, sorted by name, or
     ``TypeError``.
 
-    Read by :func:`explore.api.roster`, the reading the state page judges from too, and
-    the rows must name the year the roster was read for.
+    Read by :func:`explore.state_view.roster`, the reading the state pages judge from
+    too, and the rows must name the year the roster was read for.
     """
-    named, states = api.roster(body)
+    named, states = state_view.roster(body)
     if named != year:
         raise TypeError(f"/v1/elections/{year} carries rows of {named}")
     return sorted(states.items(), key=lambda kv: kv[1])

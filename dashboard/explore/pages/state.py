@@ -1,13 +1,13 @@
-"""One state's history (#279): T4, its rows in every election this dataset holds for it,
-and T7, its persons per electoral vote in each of them (#280).
+"""One state's history (#279): T4, its rows in every election this dataset holds for it.
 
-T4 comes from one response, ``/v1/states/{usps}``, and T7 from a second,
-``/v1/states/{usps}/per-capita``; both are filled on a miss, in the same render, so the
-page's success marker renders only when both tables did. The state is
-the path (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case
-as the API writes a USPS code. It is validated against the state roster before it is
-formatted into an API path: the latest election's rows (``/v1/elections/{year_max}``,
-:data:`explore.api.ROSTER_PATH`), since every state and DC takes part in it. That
+Its people per electoral vote (T7, #280) is a page of its own since #559,
+``pages/state_per_capita.py``; what the two share is in :mod:`explore.state_view`,
+and the section links join them (D105). T4 comes from one response,
+``/v1/states/{usps}``, filled on a miss. The state is the path (``/state/<usps>``, an
+item singular as ``/states`` is plural), in upper case as the API writes a USPS code.
+It is validated against the state roster before it is formatted into an API path: the
+latest election's rows (``/v1/elections/{year_max}``, :data:`explore.api.ROSTER_PATH`),
+since every state and DC takes part in it (:func:`explore.state_view.on_roster`). That
 source is declared in ``on_miss`` and built from the index's coverage, never from the
 path, so a code the dataset does not serve never fills a path built from it: the most it
 costs is a fill of the shared roster, once per render until one succeeds, and it 404s
@@ -17,12 +17,14 @@ It follows the one-election view's conventions (``pages/election.py``): labels a
 null cells from :mod:`explore.labels`, filters only in the query string through the
 page's one parser, a filter change written to a page-local ``dcc.Location`` and
 re-rendered from the cache, the provenance footer from the response's own
-``meta.provenance``, and both tables through :func:`explore.components.table`, which
-offers its rows as a CSV (#309) built from the same list as its body. The filters are
-the shared year range (``year_from`` / ``year_to``, judged against the dataset's span
-as on ``/elections``, so a range before the state's first election is an honest empty
-result), ``candidate`` (a slug) and ``pv_status``. T7 is narrowed by the year range
-only. Each candidate links to their history (``pages/candidate.py``, #331).
+``meta.provenance``, and T4 through :func:`explore.components.table`, which offers its
+rows as a CSV (#309) built from the same list as its body. The filters are the shared
+year range (``year_from`` / ``year_to``, judged against the dataset's span as on
+``/elections``, so a range before the state's first election is an honest empty
+result), ``candidate`` (a slug) and ``pv_status``; the section link to the per-capita
+page carries the year range only. No query key reaches T7 alone, so an old link to
+this page needs no redirect (D105). Each candidate links to their history
+(``pages/candidate.py``, #331).
 """
 
 from __future__ import annotations
@@ -32,19 +34,19 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query
+from explore import api, components, export, labels, query, state_view
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in T4.
 PAGE_ID = "state"
-#: The wrapper of the not-found state: a code the dataset does not serve.
+#: The wrapper of the not-found state: a code the dataset does not serve, or a section
+#: the site does not have (``/state/GA/x``).
 NOT_FOUND_ID = "state-not-found"
 TABLE_ID = "state-history"
 URL_ID = "state-url"
 YEARS_ID = "state-years"
 CANDIDATE_ID = "state-candidate"
 PV_STATUS_ID = "state-pv-status"
-PER_CAPITA_TABLE_ID = "state-per-capita"
 
 #: T4's columns, in display order, by public field name.
 FIELDS = (
@@ -72,37 +74,23 @@ EXTRA = (
     "state_usps",
 )
 
-#: T7's columns, in display order, by public field name (#280).
-PER_CAPITA_FIELDS = ("year", *labels.PER_CAPITA_FIELDS)
-#: What T7's CSV adds after its columns (#309): the state's key.
-PER_CAPITA_EXTRA = ("state_usps",)
-
-#: Which of the page's filters T7 follows: the year range, and not the others.
-PER_CAPITA_FILTER_NOTE = (
-    "Only the year range applies to this table; the candidate and popular-vote "
-    "filters do not."
-)
-
 #: The query keys this page reads besides the shared year range: the API's filter name
 #: for a candidate, and the field name of the closed popular-vote vocabulary.
 CANDIDATE = "candidate"
 PV_STATUS = "pv_status"
 
-#: The not-found state's heading and sentence (#325). The heading also leads the
-#: page's title on a not-found link (``api.NotFound.title``, D083). "Not found" is about
-#: the link: ``/state/ga`` is refused though Georgia is served. The raw path value is
-#: never echoed.
-NOT_FOUND_HEADING = "State not found"
-NOT_FOUND_SENTENCE = "This dataset has no state with that code."
-NOT_FOUND = api.NotFound(NOT_FOUND_HEADING, NOT_FOUND_SENTENCE)
+#: The not-found state (#325), shared by the two state pages (#559).
+NOT_FOUND = api.NotFound(
+    labels.STATE_NOT_FOUND_HEADING, labels.STATE_NOT_FOUND_SENTENCE
+)
 
 #: The lede, then, on a successful render only, the sentence naming the filters it
 #: offers (#392): the degraded state shows the lede alone, the not-found state none
-#: (#325).
+#: (#325). People per electoral vote left it with T7 (#559; ba spec, approved at its
+#: plan gate, 2026-11-18).
 LEDE = (
     "This state's electoral votes for each candidate in every election this dataset "
-    "holds for it, with the popular vote where the dataset has it, and how many people "
-    "its electoral votes stood for."
+    "holds for it, with the popular vote where the dataset has it."
 )
 FILTER_SENTENCE = "Narrow the rows by year, candidate or popular-vote status."
 
@@ -129,32 +117,7 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
     return sorted(kept.items())
 
 
-def _rows_of(body: Any) -> list[Any]:
-    data = body.get("data") if isinstance(body, dict) else None
-    return data if isinstance(data, list) else []
-
-
-def on_roster(path_vars: dict[str, Any], body: Any) -> bool:
-    """Whether ``path_vars["usps"]`` is a state the roster names.
-
-    Pure and total: a USPS code (two ASCII capitals) among the states
-    :func:`explore.api.roster` reads, never a literal. A malformed roster names no
-    state, and neither does one whose rows name another year than its own
-    ``coverage.year_max``: the judge has only the roster's body, so that is the latest
-    election it can check against (the picker checks the index's, the same snapshot).
-    """
-    usps = path_vars.get("usps")
-    if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
-        return False
-    try:
-        named, states = api.roster(body)
-        latest = query.checked_year(body["meta"]["provenance"]["coverage"]["year_max"])
-    except (KeyError, TypeError):
-        return False
-    return named == latest and usps in states
-
-
-VALIDATE: api.Validate = (api.ROSTER_PATH, on_roster)
+VALIDATE: api.Validate = (api.ROSTER_PATH, state_view.on_roster)
 
 
 def title(usps: Any = None, **_vars: Any) -> str:
@@ -168,14 +131,14 @@ def title(usps: Any = None, **_vars: Any) -> str:
 
 dash.register_page(
     __name__,
-    path_template="/state/<usps>",
+    path_template=state_view.template(state_view.HISTORY),
     title=title,
     # No names: the index HTML never waits on the API, so this cannot read the state.
     description=(
         "One US state's electoral votes in every presidential election in this dataset."
     ),
     prefetch=(api.ELECTIONS_PATH,),
-    on_miss=(api.ROSTER_PATH, "/v1/states/{usps}", "/v1/states/{usps}/per-capita"),
+    on_miss=(api.ROSTER_PATH, "/v1/states/{usps}"),
     success=PAGE_ID,
     validate=VALIDATE,
     not_found=NOT_FOUND,
@@ -278,41 +241,6 @@ def on_filter_change(
     return no_update if search == (current or "") else search
 
 
-def _served_years(index: Any) -> set[int]:
-    years = {
-        year
-        for row in _rows_of(index)
-        if isinstance(row, dict) and (year := query.checked_year(row.get("year")))
-    }
-    if not years:
-        raise TypeError("/v1/elections serves no year")
-    return years
-
-
-def _rows(
-    body: Any, usps: str, served: set[int], path: str | None = None
-) -> list[dict[str, Any]]:
-    """The state's rows from ``path`` (``/v1/states/{usps}`` by default), sorted by
-    year then candidate, or ``TypeError``.
-
-    A served state always has rows, so an empty list is a malformed body: rendering it
-    would show the success marker over an empty table. Each row must name this state
-    and a year the index serves (checked by :func:`explore.query.checked_year`), so no
-    row of another state, or of a year the dataset does not hold, is shown. The same
-    rule reads T7's ``/per-capita`` rows (#280), which name no candidate.
-    """
-    path = path or f"/v1/states/{usps}"
-    rows = _rows_of(body)
-    if not rows:
-        raise TypeError(f"{path} carries no list of rows")
-    for row in rows:
-        if not isinstance(row, dict) or row.get("state_usps") != usps:
-            raise TypeError(f"{path} carries a row of another state")
-        if query.checked_year(row.get("year")) not in served:
-            raise TypeError(f"{path} carries a row of no served year")
-    return sorted(rows, key=lambda r: (r["year"], str(r.get("candidate", ""))))
-
-
 def _controls(
     rows: list[dict[str, Any]], chosen: Filters, span: tuple[int, int]
 ) -> html.Div:
@@ -379,59 +307,21 @@ def _row(row: dict[str, Any], coverage: dict[str, Any]) -> html.Tr:
     )
 
 
-def _per_capita_row(row: dict[str, Any]) -> html.Tr:
-    year = row["year"]
-    # A year links to its one-election view (#307), as in T4.
-    return html.Tr(
-        [
-            html.Td(dcc.Link(str(year), href=f"/election/{year}")),
-            *labels.per_capita_cells(row),
-        ]
-    )
-
-
 def _download(
-    usps: str,
-    table: str,
-    name: str,
-    body: dict[str, Any],
-    chosen: Filters,
-    span: tuple[int, int],
+    usps: str, body: dict[str, Any], chosen: Filters, span: tuple[int, int]
 ) -> export.Download:
-    """A table's download: the file named for the view and the table, the provenance of
-    the response its rows come from, and the view's URL with the filters applied."""
-    search = applied_search(chosen, span)
+    """T4's download: the file named for the view and the table, the provenance of the
+    response its rows come from, and the view's URL with the filters applied."""
     return export.Download(
-        filename=f"state-{usps}-{table}.csv",
-        name=name,
+        filename=f"state-{usps}-history.csv",
+        name="this state's history",
         provenance=body["meta"]["provenance"],
-        view_url=export.view_url(CANONICAL_HOST, f"/state/{usps}", search),
-    )
-
-
-def _per_capita_section(
-    rows: list[dict[str, Any]], chosen: Filters, download: export.Download
-) -> list[Any]:
-    """T7: the state's persons per electoral vote, narrowed by the year range only."""
-    shown = [r for r in rows if chosen.year_from <= r["year"] <= chosen.year_to]
-    return [
-        html.H2("People per electoral vote"),
-        html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-        *components.table(
-            shown,
-            _per_capita_row,
-            PER_CAPITA_FIELDS,
-            PER_CAPITA_TABLE_ID,
-            download,
-            extra=PER_CAPITA_EXTRA,
-            notes=(
-                PER_CAPITA_FILTER_NOTE,
-                labels.GOVERNING_CENSUS_NOTE,
-                labels.BOUNDARY_NOTE,
-            ),
+        view_url=export.view_url(
+            CANONICAL_HOST,
+            state_view.path(usps, state_view.HISTORY),
+            applied_search(chosen, span),
         ),
-        labels.glossary(PER_CAPITA_FIELDS),
-    ]
+    )
 
 
 def render(
@@ -439,21 +329,24 @@ def render(
     index: dict[str, Any],
     usps: str,
     pairs: list[tuple[str, str]],
-    per_capita: dict[str, Any],
 ) -> tuple[html.Div, str]:
-    """The page body and the state's name, for one ``/v1/states/{usps}`` response, the
-    ``/v1/elections`` index and the state's ``/per-capita`` response (all read through
-    the same view), and this page's filter pairs."""
+    """The page body and the state's name, for one ``/v1/states/{usps}`` response and
+    the ``/v1/elections`` index (read through the same view), and this page's filter
+    pairs. The section links come first, carrying the year range applied (#559)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
-    served = _served_years(index)
-    rows = _rows(body, usps, served)
-    per_capita_rows = _rows(per_capita, usps, served, f"/v1/states/{usps}/per-capita")
+    source = f"/v1/states/{usps}"
+    rows = state_view.rows(body, usps, state_view.served_years(index), source)
     chosen = filters(pairs, rows, span)
     shown = select(rows, chosen)
     content = html.Div(
         [
+            state_view.section_nav(
+                usps,
+                state_view.HISTORY,
+                state_view.year_search(chosen.year_from, chosen.year_to, span),
+            ),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             _controls(rows, chosen, span),
             html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
@@ -462,41 +355,17 @@ def render(
                 lambda r: _row(r, coverage),
                 FIELDS,
                 TABLE_ID,
-                _download(usps, "history", "this state's history", body, chosen, span),
+                _download(usps, body, chosen, span),
                 extra=EXTRA,
                 notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
             ),
             *labels.party_notes(shown),
             labels.glossary(GLOSSARY),
-            *_per_capita_section(
-                per_capita_rows,
-                chosen,
-                _download(
-                    usps,
-                    "per-capita",
-                    "people per electoral vote",
-                    per_capita,
-                    chosen,
-                    span,
-                ),
-            ),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
     )
     return content, str(rows[0]["state"])
-
-
-def not_found() -> html.Div:
-    """A code the dataset does not serve: said plainly, with the way back, under
-    :data:`NOT_FOUND_HEADING` and no lede (#325)."""
-    return html.Div(
-        [
-            html.P(NOT_FOUND_SENTENCE),
-            dcc.Link("Browse every state in the dataset", href="/states"),
-        ],
-        id=NOT_FOUND_ID,
-    )
 
 
 def layout(usps: Any = None, **params: Any) -> html.Div:
@@ -508,14 +377,12 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
         with api.CLIENT.view() as view:
             # Validated from the roster before it is formatted (#279, D074).
             if not api.accepted(view.get, VALIDATE, {"usps": usps}):
-                heading, lede, content = NOT_FOUND_HEADING, None, not_found()
+                heading, lede = labels.STATE_NOT_FOUND_HEADING, None
+                content = state_view.not_found(NOT_FOUND_ID)
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/states/{usps}")
-                per_capita = view.get(f"/v1/states/{usps}/per-capita")
-                content, heading = render(
-                    body, index, usps, parse_filters(params), per_capita
-                )
+                content, heading = render(body, index, usps, parse_filters(params))
                 lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()

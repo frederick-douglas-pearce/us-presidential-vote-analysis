@@ -50,7 +50,8 @@ first, so its render makes the success run's first fills on a miss,
 election pages (#307, #465) make the next ones, :data:`ELECTION_MISSES`, rendered at
 1824: the overview, ``/election/<year>``, reads :data:`MISS_PATH` on a miss, the
 per-capita page its table (#280) and the states page nothing more, each render's own
-slice checked (:data:`ELECTION_PAGE_MISSES`), through the render-scoped view pages use;
+slice checked (:data:`ELECTION_PAGE_MISSES`, and the two state pages' likewise,
+:data:`STATE_PAGE_MISSES`, #559), through the render-scoped view pages use;
 the elections index then fills N1 for chart C2, :data:`ELECTIONS_MISSES` (#434); the run checks every named miss, in some registered page's ``on_miss`` and in
 the snapshot. It validates the year from the
 ``/v1/elections`` it prefetches before formatting it into a path (#312), and the
@@ -146,7 +147,8 @@ DOWNLOAD_IDS_BY_PAGE = {
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),
-    "/state/<usps>": ("state-history-csv", "state-per-capita-csv"),
+    "/state/<usps>": ("state-history-csv",),
+    "/state/<usps>/per-capita": ("state-per-capita-csv",),
     "/candidate/<slug>": ("candidate-history-csv",),
 }
 DOWNLOAD_IDS = tuple(i for ids in DOWNLOAD_IDS_BY_PAGE.values() for i in ids)
@@ -192,10 +194,19 @@ ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 ELECTIONS_MISSES = ["/v1/elections/summary", "/v1/elections/states"]
 
 #: The fills on a miss after :data:`ELECTIONS_MISSES`, in the order the success run
-#: renders the pages that make them: the state page's roster,
+#: renders the pages that make them: the state history's roster,
 #: ``/v1/elections/{year_max}`` resolved from the recorded index (shared with
-#: ``/states``), then its own rows, then its per-capita table (#280).
+#: ``/states``), then its own rows, then the per-capita page's table (#280, #559).
 STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA", "/v1/states/GA/per-capita"]
+#: The same fills by page (#559), each render's own slice of ``SERVED`` as
+#: :data:`ELECTION_PAGE_MISSES` is: the history page the roster and its rows and never
+#: T7's path, which the flat order above cannot show, since ``/state/GA`` sorts before
+#: ``/state/GA/per-capita`` either way; the per-capita page T7's rows alone, the roster
+#: already filled.
+STATE_PAGE_MISSES = {
+    "/state/<usps>": ["/v1/elections/2024", "/v1/states/GA"],
+    "/state/<usps>/per-capita": ["/v1/states/GA/per-capita"],
+}
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
@@ -560,8 +571,9 @@ for page in PAGES:
     by_page[key] = rendered_ids(text)
     if path == "/":
         assert _VERSION in text
-# Each election page made its own fill and no other's (#465).
-for key, misses in {ELECTION_PAGE_MISSES!r}.items():
+# Each election page made its own fill and no other's (#465), and so did each state
+# page (#559).
+for key, misses in {{**{ELECTION_PAGE_MISSES!r}, **{STATE_PAGE_MISSES!r}}}.items():
     assert served_by_page[key] == misses, (key, served_by_page[key], misses)
 # Every table's CSV (#309) is built in these renders, under this guard, on its own
 # page. That a download is its link's data: URL with no route or callback behind it
@@ -616,14 +628,23 @@ for section, marker, not_found in (
     assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
 # A code the roster does not name (#279): refused from the roster the /state/GA render
-# above filled, so nothing is requested, and never /v1/states/ZZ.
-text = route(client, "/state/ZZ")
-(state_page,) = [p for p in PAGES if p.get("path_template") == "/state/<usps>"]
-assert state_page["success"] == "state", state_page["success"]
-assert "state" not in rendered_ids(text)
-assert "state-not-found" in rendered_ids(text)
-assert "isn't responding" not in text
-assert REQUESTED == requested_before, (REQUESTED, requested_before)
+# above filled, so nothing is requested, and never /v1/states/ZZ. Each state page
+# renders its own not-found state (#559), so a page that captured the other's path
+# (the history page's greedy <usps>) fails here.
+for section, marker, not_found in (
+    ("", "state", "state-not-found"),
+    ("/per-capita", "state-per-capita-page", "state-per-capita-not-found"),
+):
+    text = route(client, "/state/ZZ" + section)
+    (state_page,) = [
+        p for p in PAGES if p.get("path_template") == "/state/<usps>" + section
+    ]
+    assert state_page["success"] == marker, state_page["success"]
+    ids = rendered_ids(text)
+    assert marker not in ids, section
+    assert not_found in ids, (section, ids)
+    assert "isn't responding" not in text
+    assert REQUESTED == requested_before, (REQUESTED, requested_before)
 
 # A slug the candidate index does not list (#331): refused from the index the
 # /candidate/andrew-jackson render above filled, so nothing is requested, and never

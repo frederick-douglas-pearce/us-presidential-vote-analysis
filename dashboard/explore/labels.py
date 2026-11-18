@@ -334,6 +334,28 @@ SECTION_OVERVIEW = "Overview"
 SECTION_STATES = "Results by state"
 SECTION_PER_CAPITA = "People per electoral vote"
 
+#: The links between a state's two pages (#559; ba spec, approved at #559's plan gate,
+#: 2026-11-18), in page order, and their landmark's accessible name, on the election
+#: pages' pattern: the state history, then its people per electoral vote, whose link
+#: text is :data:`SECTION_PER_CAPITA`, the same measure as on an election's pages.
+#: "State history" is already the history page's name in its title and its download.
+STATE_SECTIONS_LABEL = "Pages for this state"
+SECTION_STATE_HISTORY = "State history"
+
+#: The not-found state's heading, sentence and link, shared by a state's two pages
+#: (#325; moved here and the sentence reworded by #559, ba spec, approved at its plan
+#: gate, 2026-11-18): what is not found is the link, a code the dataset does not serve
+#: or a section the site does not have, which reaches the history page
+#: (``/state/GA/x``), so both pages say the same. "Not found" is about the link:
+#: ``/state/ga`` is refused though Georgia is served. The heading also leads the page's
+#: title on a not-found link (``api.NotFound.title``, D083). The raw path value is
+#: never echoed. The link leads back to the state picker.
+STATE_NOT_FOUND_HEADING = "State not found"
+STATE_NOT_FOUND_SENTENCE = (
+    "This link does not match any page for a state in this dataset."
+)
+STATE_NOT_FOUND_LINK = "Browse every state in the dataset"
+
 #: The link that ends every chart's caption (#432; ba spec, approved at #432's plan
 #: gate, 2026-11-06), to the chart's companion table on the same page.
 #: ``components.chart`` writes the closing period as plain text after the link. It

@@ -54,6 +54,11 @@ MARKS: dict[str, tuple[str, str] | None] = {
     "/state/GA": ("states", "true"),
     "/state/ga": ("states", "true"),
     "/state/ZZ": ("states", "true"),
+    # A state's people per electoral vote (#559), served or not, and a section the site
+    # does not have, which reaches the history page.
+    "/state/GA/per-capita": ("states", "true"),
+    "/state/ZZ/per-capita": ("states", "true"),
+    "/state/GA/x": ("states", "true"),
     "/candidate/andrew-jackson": None,
     "/not-found-404": None,
     "/no-such": None,

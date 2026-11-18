@@ -536,7 +536,7 @@ NEIGHBOR_PAINT = (
 )
 
 #: The section links' marker rule (#465): the election page being read, as text.
-SECTIONS_MARKED = '.election-sections [aria-current="page"]'
+SECTIONS_MARKED = '.section-links [aria-current="page"]'
 
 #: What the section links paint (#465), as NEIGHBOR_PAINT: no fill, so every pair sits
 #: on the page. The other two pages' links are text (AA, the global `a` rule's color);
@@ -545,7 +545,7 @@ SECTIONS_MARKED = '.election-sections [aria-current="page"]'
 SECTIONS_PAINT = (
     ("a", "color", 4.5),
     (SECTIONS_MARKED, "text-decoration-color", 3.0),
-    (".election-sections a:focus-visible", "outline", 3.0),
+    (".section-links a:focus-visible", "outline", 3.0),
 )
 
 #: The bar's selectors, by the classes ``explore.election_view`` names (#464, #465).
@@ -957,7 +957,7 @@ class TestThemeContrast:
         rules = [
             (at, " ".join(prelude.split()), dict(declarations(body)))
             for at, prelude, body in shipped_rules()
-            if re.search(r"\.election-sections\b", prelude)
+            if re.search(r"\.section-links\b", prelude)
         ]
         assert len(rules) >= 4
         for at, prelude, rule in rules:
@@ -990,7 +990,7 @@ class TestThemeContrast:
             (".site-header", ".site-nav a:focus-visible"),
             (".site-header", ".theme-control button:focus-visible"),
             (".neighbor-nav", ".neighbor-nav a:focus-visible"),
-            (".election-sections", ".election-sections a:focus-visible"),
+            (".section-links", ".section-links a:focus-visible"),
         ],
     )
     def test_each_gap_clears_the_focus_ring(

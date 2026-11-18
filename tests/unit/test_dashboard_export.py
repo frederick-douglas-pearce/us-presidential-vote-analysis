@@ -47,7 +47,8 @@ TABLES = {
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
     "state-history": "/state/<usps>",
-    "state-per-capita": "/state/<usps>",
+    # T7 has a page of its own since #559.
+    "state-per-capita": "/state/<usps>/per-capita",
     "candidate-history": "/candidate/<slug>",
 }
 
@@ -71,11 +72,18 @@ READS_BEFORE = {
         "/v1/elections/1824/per-capita",
         "/v1/elections",
     ],
+    # #559 split the state history's reads across its two pages: each fills one path
+    # (the history page no longer reads T7's), and none adds a read.
     "/state/<usps>": [
         "/v1/elections",
         "/v1/elections/2024",
         "/v1/elections",
         "/v1/states/GA",
+    ],
+    "/state/<usps>/per-capita": [
+        "/v1/elections",
+        "/v1/elections/2024",
+        "/v1/elections",
         "/v1/states/GA/per-capita",
     ],
     "/states": ["/v1/elections", "/v1/elections/2024"],
@@ -105,7 +113,7 @@ FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
 #: Every callback output once Dash has registered them all, before and after #309: the
 #: Pages router's two, each filtered page's URL (the election per-capita page's since
-#: #465), the theme callback's store and its
+#: #465, the state per-capita page's since #559), the theme callback's store and its
 #: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
 #: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
@@ -121,6 +129,7 @@ CALLBACK_OUTPUTS = {
     "election-url.search",
     "election-per-capita-url.search",
     "state-url.search",
+    "state-per-capita-url.search",
     "candidate-url.search",
 }
 
@@ -1182,6 +1191,9 @@ class TestExactlyTheView:
             (str(r["year"]), r["candidate_slug"]) for r in expected
         ]
         assert len(history.rows) == len(body_rows(tree, "state-history"))
+        tree, _ = render(
+            "/state/<usps>/per-capita", monkeypatch, "year_from=1976&year_to=1980"
+        )
         per_capita = download(tree, "state-per-capita")
         assert [r["year"] for r in per_capita.rows] == [
             str(r["year"])
@@ -1239,11 +1251,13 @@ class TestExactlyTheView:
                 "state-history",
                 "/state/GA?year_from=1976",
             ),
+            # The per-capita page reads the year range only (#559): the history
+            # page's keys are dropped, and a bound at the span's end is the default.
             (
-                "/state/<usps>",
-                "year_to=2024&pv_status=popular_vote",
+                "/state/<usps>/per-capita",
+                "year_from=1976&year_to=2024&pv_status=popular_vote&candidate=x",
                 "state-per-capita",
-                "/state/GA?pv_status=popular_vote",
+                "/state/GA/per-capita?year_from=1976",
             ),
             # Each status filter under its own key (closed values: kept even when no
             # row has them).
@@ -1370,7 +1384,7 @@ class TestExactlyTheView:
                 ),
             ),
             (
-                "/state/<usps>",
+                "/state/<usps>/per-capita",
                 "state-per-capita",
                 ("year", *labels.PER_CAPITA_FIELDS, "state_usps"),
             ),
@@ -1521,13 +1535,14 @@ class TestNulls:
     def test_the_per_capita_notes_explain_its_nulls(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/state/<usps>", monkeypatch)
+        tree, _ = render("/state/<usps>/per-capita", monkeypatch)
         lines = download(tree, "state-per-capita").lines
         assert labels.GOVERNING_CENSUS_NOTE in lines
         assert labels.BOUNDARY_NOTE in lines
-        state = page_of("/state/<usps>")["layout"].__globals__
-        assert state["PER_CAPITA_FILTER_NOTE"] in lines
-        # T6's page has one filter, its own (#465), so no note says which apply.
+        # Each per-capita page has one filter, its own (#465, #559), so no note says
+        # which apply.
+        for key in ("/state/<usps>/per-capita", "/state/<usps>"):
+            assert "PER_CAPITA_FILTER_NOTE" not in page_of(key)["layout"].__globals__
         tree, _ = render("/election/<year>/per-capita", monkeypatch)
         lines = download(tree, "election-per-capita").lines
         assert labels.GOVERNING_CENSUS_NOTE in lines
@@ -1753,7 +1768,7 @@ class TestAttribution:
         ("key", "path", "table", "other"),
         [
             (
-                "/state/<usps>",
+                "/state/<usps>/per-capita",
                 "/v1/states/GA/per-capita",
                 "state-per-capita",
                 "state-history",
@@ -2250,8 +2265,11 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
             "/v1/states/GA": _row(
                 *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
             ),
-            "/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS),
         },
+    ),
+    "/state/<usps>/per-capita": (
+        {"usps": "GA"},
+        {"/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
     "/candidate/<slug>": (
         {"slug": "andrew-jackson"},
@@ -2295,10 +2313,8 @@ UNRECOGNIZED_CELLS = {
     "/election/<year>/per-capita": {
         "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
-    "/state/<usps>": {
-        "state-history": len(STATE_ROW_FIELDS) + 1,
-        "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
-    },
+    "/state/<usps>": {"state-history": len(STATE_ROW_FIELDS) + 1},
+    "/state/<usps>/per-capita": {"state-per-capita": len(PER_CAPITA_ROW_FIELDS)},
     "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
 }
 

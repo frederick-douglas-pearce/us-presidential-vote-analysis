@@ -355,36 +355,6 @@ def coverage_vars(index: Any) -> dict[str, str]:
     return {"year_max": str(year)}
 
 
-def roster(body: Any) -> tuple[int, dict[str, str]]:
-    """The year a roster response names and each state in it, ``{usps: name}``, or
-    ``TypeError``.
-
-    The one reading of :data:`ROSTER_PATH`'s body, shared by the state page's judge and
-    the picker, so a body this refuses both refuse (#279): a non-empty list of rows,
-    every one naming the same checked year and a USPS code (two ASCII capitals) with a
-    state name. Each caller also requires that year to be the latest election.
-    """
-    rows = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(rows, list) or not rows:
-        raise TypeError("the roster carries no list of state rows")
-    years: set[int | None] = set()
-    states: dict[str, str] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            raise TypeError("the roster carries a row that is not an object")
-        years.add(query.checked_year(row.get("year")))
-        usps, name = row.get("state_usps"), row.get("state")
-        if not isinstance(usps, str) or not query.USPS_RE.fullmatch(usps):
-            raise TypeError("the roster carries a malformed state code")
-        if not isinstance(name, str):
-            raise TypeError("the roster carries a malformed state name")
-        states[usps] = name
-    year = years.pop() if len(years) == 1 else None
-    if year is None:
-        raise TypeError("the roster's rows do not name one election year")
-    return year, states
-
-
 def source_path(source: str, get: Callable[[str], JsonObject]) -> str:
     """The concrete path a ``validate`` source names, reading the index only if the
     source is a template. ``TypeError`` from :func:`coverage_vars` propagates."""

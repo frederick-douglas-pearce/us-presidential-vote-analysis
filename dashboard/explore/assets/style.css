@@ -297,13 +297,13 @@ body {
 }
 .neighbor-earlier::before { transform: rotate(45deg); }
 .neighbor-later::after { transform: rotate(-135deg); }
-/* The links between an election's three pages (#465), after the lede: the overview,
-   results by state and people per electoral vote, in one row that wraps rather than
-   scrolling. No box, so it never reads as a second earlier-and-later bar. The page being
+/* The section links (#465, #559), after the lede: an election's three pages (the overview,
+   results by state and people per electoral vote) or a state's two (its history and its
+   people per electoral vote), in one row that wraps rather than scrolling. No box, so it never reads as a second earlier-and-later bar. The page being
    read is text, not a link, marked by weight and an underline drawn from its
    aria-current, never color alone: what is seen is what assistive technology hears, and
    forced colors keep both. Each entry is at least 24 px tall (WCAG 2.5.8). */
-.election-sections {
+.section-links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -311,14 +311,14 @@ body {
   margin: 0 0 1rem;
   font-size: 0.875rem;
 }
-.election-sections a,
-.election-sections [aria-current="page"] {
+.section-links a,
+.section-links [aria-current="page"] {
   display: inline-flex;
   align-items: center;
   min-height: 1.5rem;
 }
-.election-sections a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.election-sections [aria-current="page"] {
+.section-links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.section-links [aria-current="page"] {
   font-weight: 600;
   text-decoration-line: underline;
   text-decoration-thickness: 2px;
@@ -531,7 +531,7 @@ fieldset.filter legend { padding: 0; }
    short columns would spread thin. A chart's caption and a table's party notes are
    running text, so they keep it too (#544). */
 .explore p, .glossary, .panel, .metrics, .filters, .unavailable, .states, .provenance-footer ul,
-.table-scroll #elections-table, .neighbor-nav, .election-sections, figcaption, .party-notes {
+.table-scroll #elections-table, .neighbor-nav, .section-links, figcaption, .party-notes {
   max-width: var(--measure);
 }
 @media (min-width: 64rem) {

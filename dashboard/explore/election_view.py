@@ -214,9 +214,10 @@ def neighbor_nav(around: Neighbours, section: str) -> list[Any]:
     return [html.Nav(links, id=NAV_ID, className=NEIGHBOR_NAV_CLASS, **aria)]
 
 
-#: The section links' landmark (#465) and the class ``style.css`` draws it by.
+#: The section links' landmark (#465) and the class ``style.css`` draws it by, which
+#: the state pages' section links share (#559).
 SECTIONS_ID = "election-sections"
-SECTIONS_CLASS = "election-sections"
+SECTIONS_CLASS = "section-links"
 
 
 def section_nav(year: int, current: str) -> html.Nav:

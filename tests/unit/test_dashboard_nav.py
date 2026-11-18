@@ -242,6 +242,7 @@ class TestCurrentPage:
             "pages.election_per_capita": "elections",
             "pages.states": "states",
             "pages.state": "states",
+            "pages.state_per_capita": "states",
             "pages.candidate": None,
             "pages.not_found_404": None,
         }
