@@ -131,6 +131,63 @@ def year_marks(first: int, last: int) -> dict[int, str]:
     return {year: str(year) for year in sorted({first, last, *keep})}
 
 
+#: A time-series chart's year axis (#558, D104): years between its ticks. Fixed on the
+#: server, never plotly's ``dtick``, so the ticks are in the figure the tests compare
+#: (D093(c)); 40 keeps two four-digit ticks apart at 360 px, where 20 does not.
+YEAR_TICK_STEP = 40
+#: Years of room on each side of the first and last served year.
+YEAR_PAD = 2
+
+
+def year_axis(years: Sequence[int]) -> dict[str, Any]:
+    """A time-series chart's x-axis (#558, D104): numeric, so each point sits at its
+    year and a gap between served elections is drawn at its true width; its range the
+    served years' with :data:`YEAR_PAD` either side; its ticks every multiple of
+    :data:`YEAR_TICK_STEP` within them, written as plain years (the template's
+    thousands separator would write "1,840"), and the first and last years instead where
+    that gives fewer than two; and titled "Election year". One axis for every mode of a
+    chart: built from the served years, never from what a filter leaves."""
+    first, last = min(years), max(years)
+    start = -(-first // YEAR_TICK_STEP) * YEAR_TICK_STEP
+    ticks = list(range(start, last + 1, YEAR_TICK_STEP))
+    if len(ticks) < 2:
+        ticks = sorted({first, last})
+    return {
+        "type": "linear",
+        "range": [first - YEAR_PAD, last + YEAR_PAD],
+        "tickvals": ticks,
+        "ticktext": [str(year) for year in ticks],
+        "showgrid": False,
+        "zeroline": False,
+        "title": {"text": labels.LABELS["year"]},
+    }
+
+
+def year_edges(years: Sequence[int], first: int, last: int) -> tuple[float, float]:
+    """Where a band over the served years ``first`` to ``last`` starts and ends on
+    :func:`year_axis` (#558): halfway to the served year beside it, or the axis's own
+    edge (:data:`YEAR_PAD`) where none is."""
+    ordered = sorted(years)
+    i, j = ordered.index(first), ordered.index(last)
+    low = (ordered[i - 1] + first) / 2 if i > 0 else first - YEAR_PAD
+    high = (last + ordered[j + 1]) / 2 if j + 1 < len(ordered) else last + YEAR_PAD
+    return low, high
+
+
+#: Where a time-series chart's key sits (#558, D104): one row along the foot of the
+#: chart, below the year axis, as C1's sits along its head. It names only marker
+#: series (each missing-value cause, D091 as amended by D104); a bar or point series
+#: is kept off it.
+TIME_SERIES_LEGEND: dict[str, Any] = {
+    "orientation": "h",
+    "yref": "container",
+    "y": 0,
+    "yanchor": "bottom",
+    "x": 0,
+    "xanchor": "left",
+}
+
+
 def year_slider(
     slider_id: str, first: int, last: int, chosen: tuple[int, int]
 ) -> dcc.RangeSlider:

@@ -192,55 +192,101 @@ def test_a_failed_slider_chunk_stops_logging(page: Page) -> None:
 
 # --- chart C2 (#434, D096) ------------------------------------------------------------
 
-#: C2's drawn texts: each point's share and, outside the plot, its year ticks, the share
-#: axis's title and the majority line's two labels.
-C2_POINT_TEXTS = f"{C2} .scatterlayer .textpoint text"
+#: C2's drawn texts (#558, D104): its year ticks along the bottom, its share ticks, both
+#: axes' titles, the majority line's label and the key's entries; no point draws text.
 C2_CHART_TEXTS = ", ".join(
     f"{C2} {part}"
-    for part in (".ytick text", ".xtick text", ".g-xtitle text", ".annotation-text")
+    for part in (
+        ".xtick text",
+        ".ytick text",
+        ".g-xtitle text",
+        ".g-ytitle text",
+        ".annotation-text",
+        ".legendtext",
+    )
 )
 C2_POINTS = f"{C2} .scatterlayer .trace:first-child .points path"
+#: The phone widths every time-series chart is checked at (#558): the suite's 390 px
+#: viewport and a narrower 360 px one.
+PHONE_WIDTHS = (390, 360)
+#: The least gap between two neighboring year ticks, so a wider font still fits.
+TICK_GAP_PX = 6
 
 
-def open_c2(page: Page, query: str = "") -> None:
+def open_c2(page: Page, query: str = "", *, width: int = 390) -> None:
     page.goto(f"/elections{query}")
-    assert_rendered(page, ELECTIONS_SUCCESS)
+    assert_rendered(page, ELECTIONS_SUCCESS, width=width)
     page.locator(f"{C2} .main-svg").first.wait_for()
-    page.locator(f"{C2} .ytick text").first.wait_for()
+    page.locator(f"{C2} .xtick text").first.wait_for()
 
 
 def served_years() -> list[str]:
     return [str(row["year"]) for row in recorded("/v1/elections")["data"]]
 
 
+def year_ticks() -> list[str]:
+    """The year axis's tick text for the served years (#558, D104)."""
+    axis = components.year_axis([int(year) for year in served_years()])
+    return list(axis["ticktext"])
+
+
+def assert_year_ticks_apart(page: Page, chart: str) -> None:
+    """The year ticks along ``chart``'s bottom, as the axis names them, each at least
+    :data:`TICK_GAP_PX` clear of the next."""
+    ticks = boxes(page, f"{chart} .xtick text")
+    assert [b["text"] for b in ticks] == year_ticks(), chart
+    ordered = sorted(ticks, key=lambda b: b["x"])
+    for a, b in itertools.pairwise(ordered):
+        assert b["x"] - (a["x"] + a["w"]) >= TICK_GAP_PX, (chart, a, b)
+
+
+def assert_hover_names_year(page: Page, chart: str, selector: str, year: str) -> None:
+    """Hovering the drawn point ``selector`` shows a hover naming ``year``."""
+    page.locator(selector).scroll_into_view_if_needed()
+    box = page.locator(selector).bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    expect(page.locator(f"{chart} .hoverlayer .hovertext")).to_contain_text(year)
+
+
 @pytest.mark.plotlyjs_fetches(1)
-def test_c2_is_readable_at_390_px(page: Page) -> None:
-    """AC Phone width: every year's tick and every point's text inside 390 px, none over
-    another, and no sideways scroll; one point per served year."""
-    open_c2(page)
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
+    """AC Phone width (#558, D104): year along the bottom, its sparse ticks apart, every
+    text inside the width and none over another, the majority line's label over no
+    point, no sideways scroll; one point per served year, no point text, and a hover
+    naming its year."""
+    page.set_viewport_size({"width": width, "height": 844})
+    open_c2(page, width=width)
     expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    ticks = boxes(page, f"{C2} .ytick text")
-    assert [b["text"] for b in ticks] == served_years()
-    shares = boxes(page, C2_POINT_TEXTS)
-    assert len(shares) == len(ticks)
-    assert {"37.9%", "50.1%", "50.4%", "98.5%"} <= {b["text"] for b in shares}
-    expect(page.locator(C2_POINTS)).to_have_count(len(ticks))
-    others = boxes(page, C2_CHART_TEXTS)
-    assert sum(b["text"] == labels.C2_X_AXIS for b in others) == 1
-    labeled = [b for b in shares + others if b["w"] > 0]
-    for i, a in enumerate(labeled):
-        assert a["x"] >= 0 and a["x"] + a["w"] <= 390, a
-        for b in labeled[i + 1 :]:
+    assert_year_ticks_apart(page, C2)
+    expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
+    expect(page.locator(f"{C2} .textpoint")).to_have_count(0)
+    texts_ = [b for b in boxes(page, C2_CHART_TEXTS) if b["w"] > 0]
+    found = [b["text"] for b in texts_]
+    assert found.count(labels.C2_VALUE_AXIS.replace("<br>", "")) == 1
+    assert found.count(labels.LABELS["year"]) == 1
+    line = labels.C2_MAJORITY_LINE.replace("<br>", "")
+    assert found.count(line) == 1
+    for i, a in enumerate(texts_):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
+        for b in texts_[i + 1 :]:
             assert not overlaps(a, b), (a, b)
+    (label,) = [b for b in texts_ if b["text"] == line]
+    for point in boxes(page, C2_POINTS):
+        assert not overlaps(label, point), (label, point)
+    last = served_years()[-1]
+    assert_hover_names_year(page, C2, f"{C2_POINTS} >> nth=-1", last)
 
 
 @pytest.mark.plotlyjs_fetches(1)
 def test_c2_and_its_table_ignore_the_filters(page: Page) -> None:
     """D096: a filter narrows T1, never C2 or its companion table."""
     open_c2(page, "?year_from=1900")
-    ticks = [b["text"] for b in boxes(page, f"{C2} .ytick text")]
-    assert ticks == served_years()
+    ticks = [b["text"] for b in boxes(page, f"{C2} .xtick text")]
+    assert ticks == year_ticks()
+    expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
     expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
     assert row_years(page) == years_shown(year_from=1900)
 
@@ -367,23 +413,25 @@ def test_a_filter_change_updates_the_metrics(page: Page) -> None:
 
 # --- charts C4 and C5 (#436, D100) ---------------------------------------------------
 
-#: Every text C4 or C5 draws that a reader reads: year ticks, bar labels, marker
-#: labels, the band's labels and the value axis's title.
+#: Every text C4 or C5 draws that a reader reads (#558, D104): year ticks, value ticks,
+#: both axes' titles, the band's labels and the key's entries; no bar or marker draws
+#: text.
 OVER_TIME_TEXTS = (
+    ".xtick text",
     ".ytick text",
-    ".bartext",
-    ".scatterlayer .textpoint text",
     ".annotation-text",
     ".g-xtitle text",
+    ".g-ytitle text",
+    ".legendtext",
 )
 
 
-def open_over_time(page: Page, query: str = "") -> None:
+def open_over_time(page: Page, query: str = "", *, width: int = 390) -> None:
     page.goto(f"/elections{query}")
-    assert_rendered(page, ELECTIONS_SUCCESS)
+    assert_rendered(page, ELECTIONS_SUCCESS, width=width)
     for chart in (C4, C5):
         page.locator(f"{chart} .main-svg").first.wait_for()
-        page.locator(f"{chart} .ytick text").first.wait_for()
+        page.locator(f"{chart} .xtick text").first.wait_for()
 
 
 def state_name(usps: str) -> str:
@@ -411,26 +459,35 @@ def choose_state(page: Page, name: str) -> None:
 
 
 @pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
 @pytest.mark.parametrize("query", ["", "?state=GA", "?state=SC", "?state=AK"])
-def test_c4_and_c5_are_readable_at_390_px(page: Page, query: str) -> None:
-    """AC Phone width: every year's tick, bar label, marker label, band label and axis
-    title inside 390 px, none over another, and no sideways scroll."""
-    open_over_time(page, query)
+def test_c4_and_c5_are_readable_at_phone_width(
+    page: Page, query: str, width: int
+) -> None:
+    """AC Phone width (#558, D104): year along the bottom with its sparse ticks apart,
+    every tick, axis title, band label and key entry inside the width, none over
+    another, no bar or marker text, and no sideways scroll."""
+    page.set_viewport_size({"width": width, "height": 844})
+    open_over_time(page, query, width=width)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     for chart in (C4, C5):
-        ticks = boxes(page, f"{chart} .ytick text")
-        assert [b["text"] for b in ticks] == served_years(), chart
+        assert_year_ticks_apart(page, chart)
+        expect(page.locator(f"{chart} .bartext")).to_have_count(0)
+        expect(page.locator(f"{chart} .textpoint")).to_have_count(0)
         drawn = [
             b
             for part in OVER_TIME_TEXTS
             for b in boxes(page, f"{chart} {part}")
             if b["w"] > 0 and b["text"]
         ]
-        assert len(drawn) > len(ticks), chart  # bars and labels beside the ticks
+        # Value ticks and both titles beside the year ticks.
+        assert len(drawn) > len(year_ticks()) + 2, chart
         for i, a in enumerate(drawn):
-            assert a["x"] >= 0 and a["x"] + a["w"] <= 390, (chart, a)
+            assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
             for b in drawn[i + 1 :]:
                 assert not overlaps(a, b), (chart, a, b)
+    bar = f"{C4} .barlayer .point path >> nth=-1"
+    assert_hover_names_year(page, C4, bar, served_years()[-1])
 
 
 @pytest.mark.plotlyjs_fetches(1)
@@ -438,7 +495,11 @@ def test_c5_bands_the_years_before_the_window(page: Page) -> None:
     open_over_time(page)
     notes = [b["text"] for b in boxes(page, f"{C5} .annotation-text")]
     band = labels.C5_BEFORE_BAND.format(pv_year_min=PV_FIRST).replace("<br>", "")
-    assert notes == [band, band]
+    assert notes == [band]
+    # Above the plot (#558, D104), never inside the band.
+    (note,) = boxes(page, f"{C5} .annotation-text")
+    (plot,) = boxes(page, f"{C5} .draglayer .nsewdrag")
+    assert note["y"] + note["h"] <= plot["y"] + 1, (note, plot)
     expect(page.locator(f"{C5} .layer-below .shapelayer path")).to_have_count(1)
 
 
@@ -477,7 +538,7 @@ def test_a_pasted_state_and_year_url_narrows_t1_by_the_years_only(page: Page) ->
     expect(page.locator(f"{C4} .chart-title")).to_have_text(
         labels.C4_TITLE_STATE.format(state=state_name("GA"))
     )
-    assert [b["text"] for b in boxes(page, f"{C4} .ytick text")] == served_years()
+    assert [b["text"] for b in boxes(page, f"{C4} .xtick text")] == year_ticks()
     expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
 
 

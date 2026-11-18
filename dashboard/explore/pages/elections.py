@@ -125,13 +125,17 @@ METRICS_UNAVAILABLE = (
     "The average margins can't be shown right now. Please try again in a minute."
 )
 
-#: C2's pixels per row (one tick line, so every year's label shows at 390 px) and the
-#: margins around its plot: the top holds the majority line's label, the bottom the
-#: share axis and the label again, and the right the widest point label, "100.0%".
-_C2_ROW_PX = 24
+#: C2's height, the same for every number of served years now that years run along
+#: the bottom (#558, D104), and its top margin, which holds the title.
+_C2_HEIGHT_PX = 360
 _C2_TOP_PX = 56
-_C2_BOTTOM_PX = 112
-_C2_RIGHT_PX = 64
+#: How far below the majority line its label starts: more than C2's point radius.
+_C2_LINE_LABEL_SHIFT_PX = 6
+#: Each C2 marker series' symbol (#558, D104), so no two differ by color alone.
+_C2_SYMBOLS = {
+    labels.C1_NO_SHARE: "x",
+    labels.UNRECOGNIZED: "square-open",
+}
 
 #: Charts C4 and C5 (#436, D100), the companion table they share, and the state
 #: control that switches their series.
@@ -189,13 +193,20 @@ OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular 
 #: The state control's placeholder, which is "every state".
 ALL_STATES = "All states"
 
-#: C4 and C5's pixels per row (one tick line, so every year's label shows at 390 px),
-#: and the margins around their plots: the top holds C5's band label, the bottom the
-#: value axis's title, and the right the widest bar label.
-_OVER_TIME_ROW_PX = 24
+#: C4 and C5's height, the same in every mode now that years run along the bottom
+#: (#558, D104); their top margin, which holds the title and C5's band label; and the
+#: room each further band label above it takes (two lines).
+_OVER_TIME_HEIGHT_PX = 360
 _OVER_TIME_TOP_PX = 56
-_OVER_TIME_BOTTOM_PX = 48
-_OVER_TIME_RIGHT_PX = 88
+_BAND_LABEL_PX = 32
+#: C4's marker series' symbols (#558, D104): one series per label, so the chart's key
+#: names each cause; "took no part" shares C5's symbol for it.
+_C4_SYMBOLS = {
+    labels.C4_NO_ELECTORS: "x",
+    labels.C4_NO_ELECTORS_TOOK_NO_PART: "diamond-open",
+    labels.NOT_IN_DATASET: "circle-open",
+    labels.UNRECOGNIZED: "square-open",
+}
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
     labels.C5_LEGISLATURE: "diamond",
@@ -495,150 +506,150 @@ def _majority(cell: str) -> str:
 
 def _c2_figure(
     rows: list[dict[str, Any]], cells: list[dict[str, str]]
-) -> dict[str, Any]:
-    """C2's figure (#434, D096): one row per served year, oldest on top, each with one
-    point, the leader's served ``ec_share_full``, labeled with the table's cell for it,
-    against a dashed line at half of each election's electors appointed.
+) -> tuple[dict[str, Any], bool]:
+    """C2's figure (#434, D096, as amended by D104 for #558): election year along the
+    bottom (:func:`explore.components.year_axis`), one point per served year at the
+    leader's served ``ec_share_full``, against a dashed line at half of each election's
+    electors appointed; and whether a marker is drawn.
 
-    A share the table does not show as one is drawn as a labeled marker at zero
-    (:data:`explore.labels.C1_NO_SHARE` for a null or blank, else the table's cell),
-    never a dropped year. Every hover and text item is a string the page wrote.
+    No point carries text: its hover writes the table's cells, the share among them. A
+    share the table does not show as one is a marker at zero, never a dropped year, in
+    a series of its own per label (:data:`explore.labels.C1_NO_SHARE` for a null or
+    blank, else :data:`explore.labels.UNRECOGNIZED`), each with its own symbol and named
+    in the chart's key. Every hover item is a string the page wrote.
     """
-    n = len(rows)
-    positions = list(range(n))
-    years = [str(row["year"]) for row in rows]
-    xs: list[float | None] = []
-    texts: list[str] = []
+    years = [row["year"] for row in rows]
+    xs: list[int] = []
+    ys: list[float] = []
     hovers: list[str] = []
-    marks: list[tuple[int, str, str, str]] = []  # (y, label, hover, id)
-    for i, (row, cell) in enumerate(zip(rows, cells, strict=True)):
+    marks: dict[str, list[tuple[int, str]]] = {}  # label -> [(year, hover)]
+    for row, cell in zip(rows, cells, strict=True):
         shown = cell["ec_share_full"]
         number = labels.finite(row["ec_share_full"])
-        # A finite value whose cell is no share (one whose percentage overflows reads
-        # UNRECOGNIZED) is a marker too: the point stands only where the table shows it.
-        x = number if number is not None and shown != labels.UNRECOGNIZED else None
-        share = (
-            f"{shown}<br>{labels.UNRECOGNIZED_NOTE}"
-            if shown == labels.UNRECOGNIZED
-            else shown
-        )
         hover = labels.C2_HOVER.format(
-            year=years[i],
+            year=str(row["year"]),
             candidate=charts.escaped(str(row["candidate"])),
-            share=share,
+            share=_noted(shown),
             counted=cell["national_electoral_votes_counted"],
             appointed=cell["national_electoral_denominator"],
             majority=_majority(cell["ec_determinative"]),
         )
-        xs.append(x)
-        texts.append(shown if x is not None else "")
-        hovers.append(hover)
-        if x is None:
-            label = labels.C1_NO_SHARE if shown == labels.NOT_IN_DATASET else shown
-            marks.append((i, label, hover, years[i]))
+        # A finite value whose cell is no share (one whose percentage overflows reads
+        # UNRECOGNIZED) is a marker too: the point stands only where the table shows it.
+        if number is not None and shown != labels.UNRECOGNIZED:
+            xs.append(row["year"])
+            ys.append(number)
+            hovers.append(hover)
+        else:
+            label = (
+                labels.C1_NO_SHARE
+                if shown == labels.NOT_IN_DATASET
+                else labels.UNRECOGNIZED
+            )
+            marks.setdefault(label, []).append((row["year"], hover))
     data: list[dict[str, Any]] = [
         {
             "type": "scatter",
-            "mode": "markers+text",
+            "mode": "markers",
             "name": labels.LABELS["ec_share_full"],
             "showlegend": False,
-            "ids": years,
+            "ids": [str(year) for year in xs],
             "x": xs,
-            "y": positions,
-            "text": texts,
-            "textposition": "middle right",
-            "textfont": {"color": "var(--text)"},
-            "cliponaxis": False,
-            "marker": {"symbol": "circle", "size": 10, "color": "var(--chart-1)"},
+            "y": ys,
+            "marker": {"symbol": "circle", "size": 7, "color": "var(--chart-1)"},
             "hovertext": hovers,
             "hovertemplate": "%{hovertext}<extra></extra>",
         }
     ]
-    if marks:
-        data.append(
-            {
-                "type": "scatter",
-                "mode": "markers+text",
-                "name": labels.C2_NO_SHARE_SERIES,
-                "showlegend": False,
-                "ids": [mark[3] for mark in marks],
-                "x": [0] * len(marks),
-                "y": [mark[0] for mark in marks],
-                "text": [mark[1] for mark in marks],
-                "textposition": "middle right",
-                "textfont": {"color": "var(--text)"},
-                "cliponaxis": False,
-                "marker": {"symbol": "x", "size": 10, "color": "var(--text)"},
-                "hovertext": [mark[2] for mark in marks],
-                "hovertemplate": "%{hovertext}<extra></extra>",
-            }
-        )
-    line_label = {
-        "text": labels.C2_MAJORITY_LINE,
-        "xref": "x",
-        "x": 0.5,
-        "yref": "paper",
-        "showarrow": False,
-        "font": {"color": "var(--text)", "size": 12},
-    }
-    return {
-        "data": data,
-        "layout": {
-            "title": {"text": labels.C2_TITLE},
-            "height": _C2_ROW_PX * max(n, 1) + _C2_TOP_PX + _C2_BOTTOM_PX,
-            "margin": {"t": _C2_TOP_PX, "b": _C2_BOTTOM_PX, "r": _C2_RIGHT_PX},
-            "xaxis": {
-                "range": [0, 1],
-                "tickformat": ".0%",
-                "dtick": 0.25,
-                "title": {"text": labels.C2_X_AXIS},
-            },
-            "yaxis": {
-                "tickvals": positions,
-                "ticktext": years,
-                "autorange": "reversed",
-                "showgrid": False,
-                "zeroline": False,
-            },
-            "shapes": [
-                {
-                    "type": "line",
-                    "xref": "x",
-                    "x0": 0.5,
-                    "x1": 0.5,
-                    "yref": "paper",
-                    "y0": 0,
-                    "y1": 1,
-                    "layer": "below",
-                    "line": {
-                        "dash": "dash",
-                        "width": 2,
-                        "color": "var(--chart-reference)",
-                    },
-                }
-            ],
-            # The line's label above the plot and again below the share axis: the
-            # chart is tall, so the top one has scrolled away by the last rows.
-            "annotations": [
-                {**line_label, "y": 1, "yanchor": "bottom"},
-                {**line_label, "y": 0, "yanchor": "top", "yshift": -70},
-            ],
+    for label, symbol in _C2_SYMBOLS.items():
+        if label in marks:
+            data.append(_c2_marker_trace(label, symbol, marks[label]))
+    layout: dict[str, Any] = {
+        "title": {"text": labels.C2_TITLE},
+        "height": _C2_HEIGHT_PX,
+        "margin": {"t": _C2_TOP_PX},
+        "showlegend": bool(marks),
+        "xaxis": components.year_axis(years),
+        "yaxis": {
+            "range": [0, 1],
+            "tickformat": ".0%",
+            "dtick": 0.25,
+            "title": {"text": labels.C2_VALUE_AXIS},
         },
+        "shapes": [
+            {
+                "type": "line",
+                "xref": "paper",
+                "x0": 0,
+                "x1": 1,
+                "yref": "y",
+                "y0": 0.5,
+                "y1": 0.5,
+                "layer": "below",
+                "line": {
+                    "dash": "dash",
+                    "width": 2,
+                    "color": "var(--chart-reference)",
+                },
+            }
+        ],
+        # The line's label just below it at the right (owner, #558's plan gate): the
+        # leaders' shares sit above the line there, and the low ones are at the left.
+        # Shifted down by more than a marker's radius, so a point just above the line
+        # (2000's 50.4%) stays clear of it.
+        "annotations": [
+            {
+                "text": labels.C2_MAJORITY_LINE,
+                "xref": "paper",
+                "x": 1,
+                "xanchor": "right",
+                "yref": "y",
+                "y": 0.5,
+                "yanchor": "top",
+                "yshift": -_C2_LINE_LABEL_SHIFT_PX,
+                "align": "right",
+                "showarrow": False,
+                "font": {"color": "var(--text)", "size": 12},
+            }
+        ],
+    }
+    if marks:
+        layout["legend"] = components.TIME_SERIES_LEGEND
+    return {"data": data, "layout": layout}, bool(marks)
+
+
+def _c2_marker_trace(
+    label: str, symbol: str, marks: list[tuple[int, str]]
+) -> dict[str, Any]:
+    """One series of C2's markers at zero, named by ``label`` in the chart's key."""
+    return {
+        "type": "scatter",
+        "mode": "markers",
+        "name": label,
+        "showlegend": True,
+        "ids": [str(year) for year, _ in marks],
+        "x": [year for year, _ in marks],
+        "y": [0] * len(marks),
+        "marker": {"symbol": symbol, "size": 9, "color": "var(--text)"},
+        "hovertext": [hover for _, hover in marks],
+        "hovertemplate": "%{hovertext}<extra></extra>",
     }
 
 
-def _c2_caption() -> str:
+def _c2_caption(marked: bool) -> str:
     """C2's caption: which candidate each point is, what the share counts, what the
-    line marks and that the leader did not always take office. Constant, so it names
-    no served text (D095(a)); ``components.chart`` adds the table pointer."""
-    return " ".join(
-        (
-            labels.C2_LEADER_POINT,
-            labels.C1_EC_BASIS,
-            labels.C2_MAJORITY_NOTE,
-            labels.C2_TOOK_OFFICE,
-        )
-    )
+    line marks, that the leader did not always take office and, where a marker is
+    drawn (``marked``), what it means. It names no served text (D095(a));
+    ``components.chart`` adds the table pointer."""
+    parts = [
+        labels.C2_LEADER_POINT,
+        labels.C1_EC_BASIS,
+        labels.C2_MAJORITY_NOTE,
+        labels.C2_TOOK_OFFICE,
+    ]
+    if marked:
+        parts.append(labels.C2_NO_SHARE_NOTE)
+    return " ".join(parts)
 
 
 def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
@@ -654,7 +665,7 @@ def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
         rows = leaders(index, summary)
         cells = [_leader_cells(row) for row in rows]
-        figure = _c2_figure(rows, cells)
+        figure, marked = _c2_figure(rows, cells)
         download = export.Download(
             filename="elections-electoral-college-leaders.csv",
             name="the Electoral College leaders",
@@ -681,7 +692,7 @@ def _leader_section(index: dict[str, Any], summary: Any) -> list[Any]:
         ]
     return [
         heading,
-        components.chart(C2_ID, figure, LEADER_TABLE_ID, _c2_caption()),
+        components.chart(C2_ID, figure, LEADER_TABLE_ID, _c2_caption(marked)),
         html.H2(C2_TABLE_HEADING),
         *table,
         labels.glossary(LEADER_FIELDS),
@@ -984,22 +995,16 @@ def _hover(point: Point, state: str | None, *, total: bool) -> str:
     )
 
 
-def _bar_trace(
-    name: str, drawn: list[tuple[Point, int, str, str]], position: dict[int, int]
-) -> dict[str, Any]:
-    """A series of bars, one per drawn row, each labeled with its table cell."""
+def _bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str, Any]:
+    """A series of bars, one per drawn row at its year, kept off the chart's key; no
+    bar carries text, and its hover writes the table's cells (#558, D104)."""
     return {
         "type": "bar",
-        "orientation": "h",
         "name": name,
         "showlegend": False,
         "ids": [str(point.year) for point, _, _, _ in drawn],
-        "x": [value for _, value, _, _ in drawn],
-        "y": [position[point.year] for point, _, _, _ in drawn],
-        "text": [cell for _, _, cell, _ in drawn],
-        "textposition": "outside",
-        "textfont": {"color": "var(--text)"},
-        "cliponaxis": False,
+        "x": [point.year for point, _, _, _ in drawn],
+        "y": [value for _, value, _, _ in drawn],
         "marker": {"color": "var(--chart-1)"},
         "hovertext": [hover for _, _, _, hover in drawn],
         "hovertemplate": "%{hovertext}<extra></extra>",
@@ -1007,62 +1012,49 @@ def _bar_trace(
 
 
 def _marker_trace(
-    name: str,
-    symbol: str,
-    marks: list[tuple[Point, str, str]],
-    position: dict[int, int],
+    name: str, symbol: str, marks: list[tuple[Point, str, str]]
 ) -> dict[str, Any]:
-    """A series of labeled markers at zero, one per row with nothing to draw."""
+    """A series of markers at zero, one per row with nothing to draw, named by
+    ``name`` in the chart's key (#558, D104: the key labels the marker, not a text
+    beside each)."""
     return {
         "type": "scatter",
-        "mode": "markers+text",
+        "mode": "markers",
         "name": name,
-        "showlegend": False,
+        "showlegend": True,
         "ids": [str(point.year) for point, _, _ in marks],
-        "x": [0] * len(marks),
-        "y": [position[point.year] for point, _, _ in marks],
-        "text": [label for _, label, _ in marks],
-        "textposition": "middle right",
-        "textfont": {"color": "var(--text)"},
+        "x": [point.year for point, _, _ in marks],
+        "y": [0] * len(marks),
         "cliponaxis": False,
-        "marker": {"symbol": symbol, "size": 10, "color": "var(--text)"},
+        "marker": {"symbol": symbol, "size": 9, "color": "var(--text)"},
         "hovertext": [hover for _, _, hover in marks],
         "hovertemplate": "%{hovertext}<extra></extra>",
     }
 
 
 def _over_time_layout(
-    title: str, axis: str, years: list[int], longest: int
+    title: str, axis: str, years: list[int], longest: int, *, marked: bool
 ) -> dict[str, Any]:
-    """C4 and C5's shared layout: one row per served year, oldest on top, in every mode
-    (an explicit range, so a state's empty rows before its first election keep their
-    place), and value-axis ticks hidden, as C3's."""
-    n = len(years)
-    return {
+    """C4 and C5's shared layout (#558, D104): election year along the bottom, the
+    served years' axis in every mode (:func:`explore.components.year_axis`), so a
+    state's years before its first election keep their place; the value up the side
+    from zero, with a few full-number ticks; and the chart's key where a marker is
+    drawn (``marked``)."""
+    layout: dict[str, Any] = {
         "title": {"text": title},
-        "height": _OVER_TIME_ROW_PX * max(n, 1)
-        + _OVER_TIME_TOP_PX
-        + _OVER_TIME_BOTTOM_PX,
-        "margin": {
-            "t": _OVER_TIME_TOP_PX,
-            "b": _OVER_TIME_BOTTOM_PX,
-            "r": _OVER_TIME_RIGHT_PX,
-        },
-        "showlegend": False,
-        "xaxis": {
+        "height": _OVER_TIME_HEIGHT_PX,
+        "margin": {"t": _OVER_TIME_TOP_PX},
+        "showlegend": marked,
+        "xaxis": components.year_axis(years),
+        "yaxis": {
             "range": [0, max(longest, 1)],
-            "showticklabels": False,
+            "nticks": 4,
             "title": {"text": axis},
         },
-        "yaxis": {
-            "tickvals": list(range(n)),
-            "ticktext": [str(year) for year in years],
-            "range": [n - 0.5, -0.5],
-            "autorange": False,
-            "showgrid": False,
-            "zeroline": False,
-        },
     }
+    if marked:
+        layout["legend"] = components.TIME_SERIES_LEGEND
+    return layout
 
 
 class OverTime(NamedTuple):
@@ -1079,13 +1071,13 @@ def _c4_figure(
     points: list[Point], years: list[int], title: str, state: str | None
 ) -> OverTime:
     """C4's figure (#436, D100): the appointed allotment of each row with one, as a
-    bar labeled with its table cell; a zero allotment is a labeled marker by its cause
-    (the D091 exception), and a null or unknown one a marker in a series of its own.
+    bar at its year; a zero allotment is a marker by its cause (the D091 exception),
+    and a null or unknown one a marker, each label a series of its own named in the
+    chart's key (#558, D104).
     ``state`` is the escaped state name, or ``None`` for all states."""
-    position = {year: i for i, year in enumerate(years)}
     drawn: list[tuple[Point, int, str, str]] = []
-    zeros: list[tuple[Point, str, str]] = []
-    missing: list[tuple[Point, str, str]] = []
+    marks: dict[str, list[tuple[Point, str, str]]] = {}
+    zeros = missing = False
     for point in points:
         hover = _hover(point, state, total=False)
         value = _figure_value(point.appointed, zero=False)
@@ -1097,75 +1089,67 @@ def _c4_figure(
                 if point.status == "not_participating"
                 else labels.C4_NO_ELECTORS
             )
-            zeros.append((point, label, hover))
+            zeros = True
+            marks.setdefault(label, []).append((point, label, hover))
         else:
             label = (
                 labels.NOT_IN_DATASET
                 if point.appointed_cell == labels.NOT_IN_DATASET
                 else labels.UNRECOGNIZED
             )
-            missing.append((point, label, hover))
+            missing = True
+            marks.setdefault(label, []).append((point, label, hover))
     name = labels.LABELS[
         "electoral_denominator" if state is None else "state_electoral_votes"
     ]
     data: list[dict[str, Any]] = []
     if drawn:
-        data.append(_bar_trace(name, drawn, position))
-    if zeros:
-        data.append(_marker_trace(labels.C4_NO_ELECTORS, "x", zeros, position))
-    if missing:
-        data.append(
-            _marker_trace(labels.C4_NO_FIGURE_SERIES, "circle-open", missing, position)
-        )
+        data.append(_bar_trace(name, drawn))
+    for label, symbol in _C4_SYMBOLS.items():
+        if label in marks:
+            data.append(_marker_trace(label, symbol, marks[label]))
     longest = max((value for _, value, _, _ in drawn), default=1)
-    figure = {
-        "data": data,
-        "layout": _over_time_layout(title, labels.C4_X_AXIS, years, longest),
-    }
-    return OverTime(figure, bool(zeros), bool(missing), False, False)
+    layout = _over_time_layout(
+        title, labels.C4_VALUE_AXIS, years, longest, marked=bool(marks)
+    )
+    return OverTime({"data": data, "layout": layout}, zeros, missing, False, False)
 
 
 def _band(
-    rows: list[int], label: str, *, top: bool
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """A shaded band over ``rows`` (positions, consecutive) and its labels: at the
-    band's lower edge, inside it, and, for the band before the window (``top``), above
-    the plot too, since the chart is tall."""
-    first, last = rows[0], rows[-1]
+    years: list[int], first: int, last: int, label: str, *, after: bool, raised: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A shaded band over the served years ``first`` to ``last`` of ``years``
+    (:func:`explore.components.year_edges`), the whole height of the plot, and its
+    label above the plot (#558, D104), never inside the band, which can be one
+    election wide: the band before the window's at its left edge, after it (``after``)
+    at its right, ``raised`` pixels higher where another label sits below it."""
+    low, high = components.year_edges(years, first, last)
     shape = {
         "type": "rect",
-        "xref": "paper",
-        "x0": 0,
-        "x1": 1,
-        "yref": "y",
-        "y0": first - 0.5,
-        "y1": last + 0.5,
+        "xref": "x",
+        "x0": low,
+        "x1": high,
+        "yref": "paper",
+        "y0": 0,
+        "y1": 1,
         "layer": "below",
         "fillcolor": "var(--chart-grid)",
         "line": {"width": 1, "color": "var(--chart-reference)"},
     }
-    common = {
+    note = {
         "text": label,
         "showarrow": False,
         "font": {"color": "var(--text)", "size": 12},
+        "xref": "x",
+        "x": high if after else low,
+        "xanchor": "right" if after else "left",
+        "align": "right" if after else "left",
+        "yref": "paper",
+        "y": 1,
+        "yanchor": "bottom",
+        "yshift": raised,
     }
-    notes = [
-        {
-            **common,
-            "xref": "paper",
-            "x": 1,
-            "xanchor": "right",
-            "yref": "y",
-            "y": last + 0.5,
-            "yanchor": "bottom",
-        }
-    ]
-    if top:
-        notes.append(
-            {**common, "xref": "paper", "x": 0.5, "yref": "paper", "y": 1}
-            | {"yanchor": "bottom"}
-        )
-    return shape, notes
+    return shape, note
 
 
 def _c5_figure(
@@ -1176,12 +1160,12 @@ def _c5_figure(
     window: tuple[int, int],
 ) -> OverTime:
     """C5's figure (#436, D100): the total popular vote of each row with one, as a bar
-    labeled with its table cell. The years before and after the popular-vote window
-    (``window``, read from ``coverage``) are a labeled band, which alone marks a held
-    popular vote outside it; every other row with nothing to draw is a labeled marker,
-    one series per label (:data:`explore.labels.C5_MARKER_LABELS`), wherever it falls,
-    inside the band included. ``state`` is the escaped state name, or ``None``."""
-    position = {year: i for i, year in enumerate(years)}
+    at its year. The years before and after the popular-vote window (``window``, read
+    from ``coverage``) are a shaded band, labeled above the plot, which alone marks a
+    held popular vote outside it; every other row with nothing to draw is a marker, one
+    series per label (:data:`explore.labels.C5_MARKER_LABELS`), named in the chart's
+    key (#558, D104), wherever it falls, inside the band included. ``state`` is the
+    escaped state name, or ``None``."""
     pv_min, pv_max = window
     banded = {
         labels.NOT_APPLICABLE,
@@ -1206,31 +1190,46 @@ def _c5_figure(
     ]
     data: list[dict[str, Any]] = []
     if drawn:
-        data.append(_bar_trace(name, drawn, position))
+        data.append(_bar_trace(name, drawn))
     for label, symbol in _C5_SYMBOLS.items():
         if label in marks:
-            data.append(_marker_trace(label, symbol, marks[label], position))
+            data.append(_marker_trace(label, symbol, marks[label]))
     longest = max((value for _, value, _, _ in drawn), default=1)
-    layout = _over_time_layout(title, labels.C5_X_AXIS, years, longest)
+    layout = _over_time_layout(
+        title, labels.C5_VALUE_AXIS, years, longest, marked=bool(marks)
+    )
     shapes: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
-    before = [position[year] for year in years if year < pv_min]
-    after = [position[year] for year in years if year > pv_max]
+    before = [year for year in years if year < pv_min]
+    after = [year for year in years if year > pv_max]
+    # Both labels sit above the plot; with both drawn, the before label goes on top.
+    raised = _BAND_LABEL_PX if before and after else 0
     if before:
-        shape, notes = _band(
-            before, labels.C5_BEFORE_BAND.format(pv_year_min=pv_min), top=True
+        shape, note = _band(
+            years,
+            before[0],
+            before[-1],
+            labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
+            after=False,
+            raised=raised,
         )
         shapes.append(shape)
-        annotations += notes
+        annotations.append(note)
     if after:
-        shape, notes = _band(
-            after, labels.C5_AFTER_BAND.format(pv_year_max=pv_max), top=False
+        shape, note = _band(
+            years,
+            after[0],
+            after[-1],
+            labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
+            after=True,
+            raised=0,
         )
         shapes.append(shape)
-        annotations += notes
+        annotations.append(note)
     if shapes:
         layout["shapes"] = shapes
         layout["annotations"] = annotations
+        layout["margin"] = {"t": _OVER_TIME_TOP_PX + raised}
     return OverTime(
         {"data": data, "layout": layout}, False, bool(marks), bool(before), bool(after)
     )

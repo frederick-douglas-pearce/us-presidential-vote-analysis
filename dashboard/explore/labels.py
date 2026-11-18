@@ -408,16 +408,17 @@ C1_NO_PV_CAPTION = (
 #: Chart C2 (#434; ba spec, approved by the owner at #434's plan gate, 2026-11-11, with
 #: its historical claims): each election's Electoral College leader's electoral share
 #: against the majority line, on the elections index, beside its companion table. Not
-#: ``LABELS`` keys. The point series is named ``LABELS["ec_share_full"]``, the axis
-#: too, and each point's text is :func:`share_cell` of the served share, as T3 writes
-#: it. Its marker labels are :data:`C1_NO_SHARE` and :data:`UNRECOGNIZED`, reused.
+#: ``LABELS`` keys. The point series is named ``LABELS["ec_share_full"]`` and kept off
+#: the chart's key; no point carries text, and its hover writes :func:`share_cell` of
+#: the served share, as T3 writes it (#558, D104). Its marker series are named
+#: :data:`C1_NO_SHARE` and :data:`UNRECOGNIZED`, reused, each in the chart's key.
 C2_TITLE = "The Electoral College leader's electoral share in each election"
-C2_X_AXIS = LABELS["ec_share_full"]
+#: The share axis's title, up the side (#558, D104): ``LABELS["ec_share_full"]``'s words
+#: on two lines, which ``LABELS`` cannot hold (tables use it too).
+C2_VALUE_AXIS = "Electoral share<br>(counted ÷ appointed)"
 #: The dashed line's label: "each election's", since the number of electors appointed
 #: changes with the year (never a fixed number such as 270).
 C2_MAJORITY_LINE = "Majority line: half of each<br>election's electors appointed"
-#: The name of the marker series, kept off the legend and never shown.
-C2_NO_SHARE_SERIES = "No point for this value"
 #: A point's hover, filled with strings the page writes: the year as written, the
 #: name as served, the companion table's cells, and the majority line every year.
 C2_HOVER = (
@@ -439,6 +440,13 @@ C2_MAJORITY_NOTE = (
 C2_TOOK_OFFICE = (
     "The leader did not always take office: in 1824 the leader, Andrew Jackson, had "
     "no majority, and the House of Representatives chose John Quincy Adams."
+)
+#: The caption's last sentence, only when a marker is drawn (#558, D104): the marker
+#: sits at zero, and without a text label it would read as 0%.
+C2_NO_SHARE_NOTE = (
+    "A marker at the bottom of the chart in place of a point means this dataset has "
+    "no electoral share to draw for that election, and the chart's key says why. It "
+    "is not a zero."
 )
 #: The companion table's first note (with :data:`C2_TOOK_OFFICE`), under the table and
 #: in its CSV's preamble, which has no caption.
@@ -656,18 +664,17 @@ NOMINATING_PARTY: dict[str, str] = {
 C4_TITLE = "Electors appointed in each election, all states"
 C4_TITLE_STATE = "Electors appointed by {state} in each election"
 C4_TITLE_SELECTED = "Electors appointed by the selected state in each election"
-C4_X_AXIS = "Electors appointed"
+C4_VALUE_AXIS = "Electors appointed"
 C4_HOVER = "{year}, all states<br>Electors appointed: {appointed}"
 C4_STATE_HOVER = (
     "{year}: {state}<br>Electors appointed: {appointed}<br>"
     "Popular vote in this state: {pv_status}"
 )
-#: C4's marker labels: a zero allotment, by its cause, and the series that carries it;
-#: a null allotment reads :data:`NOT_IN_DATASET` and an unknown value
-#: :data:`UNRECOGNIZED`, in :data:`C4_NO_FIGURE_SERIES`.
+#: C4's marker series, each named in the chart's key (#558, D104): a zero allotment,
+#: by its cause; a null allotment is :data:`NOT_IN_DATASET`'s series and an unknown
+#: value :data:`UNRECOGNIZED`'s.
 C4_NO_ELECTORS_TOOK_NO_PART = "No electors: took no part"
 C4_NO_ELECTORS = "No electors appointed"
-C4_NO_FIGURE_SERIES = "No figure for this election"
 C4_BASIS = (
     "Electors appointed is a state's allotment of electoral votes: how many electors "
     "it was entitled to choose. It is not the electoral votes cast or counted, which "
@@ -678,36 +685,40 @@ C4_ALL_STATES = (
     "state's electors appointed, added up."
 )
 C4_ZERO_NOTE = (
-    "A labeled marker in place of a bar marks an election in which the state "
-    "appointed no electors, and its label says why. The table shows that allotment "
-    "as 0."
+    "A marker in place of a bar marks an election in which the state appointed no "
+    "electors, and the chart's key says why. The table shows that allotment as 0."
 )
 C4_NO_FIGURE_NOTE = (
-    "A labeled marker in place of a bar means this dataset has no number of electors "
-    "to draw for that election. It is not a zero."
+    "A marker in place of a bar means this dataset has no number of electors to draw "
+    "for that election, and the chart's key says why. It is not a zero."
 )
 FIRST_ELECTION_NOTE = (
-    "The first election in this dataset for {state} is {year}, so the rows before it "
-    "are empty."
+    "The first election in this dataset for {state} is {year}, so nothing is drawn "
+    "for the years before it."
 )
 FIRST_ELECTION_NOTE_SELECTED = (
-    "The first election in this dataset for the selected state is {year}, so the rows "
-    "before it are empty."
+    "The first election in this dataset for the selected state is {year}, so nothing "
+    "is drawn for the years before it."
 )
 
 C5_TITLE = "Total popular vote in each election, all states"
 C5_TITLE_STATE = "Total popular vote in {state} in each election"
 C5_TITLE_SELECTED = "Total popular vote in the selected state in each election"
-C5_X_AXIS = "Total popular vote"
+C5_VALUE_AXIS = "Total popular vote"
 C5_HOVER = "{year}, all states<br>Total popular vote: {total}"
 C5_STATE_HOVER = (
     "{year}: {state}<br>Total popular vote: {total}<br>"
     "Popular vote in this state: {pv_status}"
 )
-#: The band's labels: before the window (at its upper and lower edges) and after it.
-C5_BEFORE_BAND = "This dataset's popular-vote figures<br>begin in {pv_year_min}"
-C5_AFTER_BAND = "This dataset's popular-vote figures<br>run to {pv_year_max}"
-#: C5's marker labels, short enough for 390 px.
+#: The bands' labels, above the plot (#558, D104): before the window, at the band's
+#: left edge, and after it, at its right edge.
+C5_BEFORE_BAND = (
+    "Shaded: years before this dataset's<br>popular-vote figures begin in {pv_year_min}"
+)
+C5_AFTER_BAND = (
+    "Shaded: years after this dataset's<br>popular-vote figures run to {pv_year_max}"
+)
+#: C5's marker series, each named in the chart's key.
 C5_LEGISLATURE = "Legislature chose the electors"
 C5_TOOK_NO_PART = "Took no part"
 C5_NO_TOTAL = "No total in this dataset"
@@ -728,8 +739,8 @@ C5_AFTER_NOTE = (
     "Shaded years after {pv_year_max} have no popular-vote figures in this dataset yet."
 )
 C5_MARKER_NOTE = (
-    "A labeled marker in place of a bar means there is no total to draw for that "
-    "election, and its label says why. It is not a zero."
+    "A marker in place of a bar means there is no total to draw for that election, "
+    "and the chart's key says why. It is not a zero."
 )
 #: C5's marker label, looked up by the table's cell; a cell here with no label (the
 #: band's) draws no marker, and any cell in neither draws :data:`UNRECOGNIZED`.

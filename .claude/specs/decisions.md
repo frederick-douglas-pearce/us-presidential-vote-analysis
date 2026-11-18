@@ -7006,3 +7006,76 @@ set the class. Rendering every registered page instead would check only the view
 renders, which the existing every-page renders already cover, and it shares the residual in
 (d). The pattern is the one `components.table`, `components.chart` and
 `components.dropdown_filter` already follow.
+
+## D104: A time-series chart puts election year on a numeric x-axis; a ranked chart stays horizontal
+
+**Date:** 2026-11-18
+**Amends:** D096(a), D100(a), D100(d) and D091's labeled-marker rule, each for the charts named
+below · **Builds on:** D091, D093(c), D096, D100 · **Decided by:** the owner, approving #558's
+plan (E14-S6) with the architect's review and the `ba` label spec
+
+**Context.** C2 (D096(a)) and C4 and C5 (D100(a)) put each election on its own row, oldest on
+top, so a reader scrolled down 51 rows to follow a trend, and every point or bar carried its
+value as text. A reader expects time to run left to right. Four charts filed after the owner's
+2026-11-17 review (C7 #560, C8 #561, C9 #563, C2 extended #564) are time series too, so the
+convention is settled before they are built.
+
+**Decision.**
+(a) **A time-series chart puts election year on the x-axis.** The axis is numeric (`type:
+"linear"`) and each point or bar sits at its year, so a gap between served elections is drawn at
+its true width. It is one shared builder, `components.year_axis`: its range is the served
+years' with `YEAR_PAD` (2) years either side, built from the served years and never from what a
+filter leaves, so the axis is the same in every mode (D100(a)'s rule, kept). Its ticks are
+fixed on the server at every multiple of `YEAR_TICK_STEP` (40) within the span, written as
+plain years (the template's thousands separator would write "1,840"). Where that gives fewer
+than two ticks, the first and last served years are used instead. The step is fixed rather than plotly's `dtick` so the ticks
+are in the figure the D093(c)/D096(b)/D100(b) comparison reads; 40 keeps two four-digit ticks
+apart at 360 px, where 20 does not. The axis is titled "Election year" (`LABELS["year"]`), and
+every point's hover names its year.
+(b) **A ranked categorical chart stays horizontal.** C1 (candidates in one election, D091) and
+C3 (every state's people per electoral vote, D093(d)) keep their rows, since their row names
+are long labels that read best down the side.
+(c) **No point, bar or marker carries text** in a time-series chart: at about 51 points
+across a phone, labels cannot all be drawn legibly. The hover writes the companion table's
+cells (D091's rule, unchanged), and the companion table stays the accessible equivalent. C2's
+points, C4's and C5's bars, and every marker lose their text (amends D096(a) and D100(a)).
+(d) **A missing value is a marker labeled by its series' entry in the chart's key** (amends
+D091's "labeled marker" for these charts, and extends D100(d)'s one-series-per-label rule for
+C5 to C2 and C4). There is one series per label, each with its own symbol. C4's zero series splits by
+cause ("No electors appointed", "No electors: took no part"), and C2's and C4's other marker
+series are named by their labels (`C1_NO_SHARE` or `NOT_IN_DATASET`, and `UNRECOGNIZED`). The
+key (`components.TIME_SERIES_LEGEND`) sits along the foot of the chart and shows only when a
+marker is drawn. The hover names the cause per point, and the caption says the key does. A
+missing value is still a marker at zero, never a zero-length bar.
+(e) **C2's majority line is horizontal** at 0.5, its one label just below the line at the right
+(the owner's choice over the architect's above-the-plot placement), shifted down past a point's
+radius so a point just above the line (2000's 50.4%) stays clear of it. The value axis runs up
+the side, 0–100%, titled on two lines.
+(f) **C5's popular-vote band is vertical** (amends D100(d)'s orientation; its bounds still come
+from `meta.provenance.coverage`, never literals). It spans the served years outside the window,
+from `components.year_edges` (halfway to the neighboring served year, or the axis's own edge),
+the whole height of the plot. Its label sits **above the plot**, never inside the band, since a
+band after the window can be one election wide: the before-band's at its left edge, the
+after-band's at its right edge, and with both drawn the before label raised above the other.
+(g) **C4's and C5's value axes show ticks** (about four, full numbers per the template, never
+"80M"), since no bar carries its value any more.
+(h) **D071(g) is re-measured on `/elections` after deploy**, as D096(f) and D100(i) set out:
+the code PR is "Part of #558", and a docs PR records the measurement in the runbook §12 and
+closes the issue.
+
+**Guards.**
+- `TestTimeSeriesAxis` (`tests/unit/test_dashboard_elections.py`) pins (a): the ticks, the
+  short-span ends and the true-width gap. It pins (c): no text on any trace, and a hover that
+  names its x year. It pins (d)'s key, and (f)'s labels above the plot with both bands drawn.
+- The C2 and C4/C5 companion-table tests tie each point's or bar's position to its table cell.
+  With no text beside it, nothing else does.
+- `TestEveryChart` compares each chart's row or year axis (`ROW_AXES`: x for C2, C4 and C5, y
+  for C1 and C3) for tick text, tick values, range and type, and fails an empty tick text.
+- The e2e readability tests run at 390 and 360 px. They check ticks at least 6 px apart, no text
+  over another, no sideways scroll, C2's line label over no point, and a hover naming its year.
+
+**Rationale.** Year on x is the reading order a time series is expected in. A numeric axis is
+the only form that both draws gaps truthfully and keeps the ticks in the server's figure for
+the filter-invariance check. Labels by key keep each cause named (WCAG 1.4.1 is met by the
+symbols, and the key names what each means) where per-point text would collide at phone
+width.

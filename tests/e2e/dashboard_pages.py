@@ -143,14 +143,15 @@ def lower_thumb(page: Page) -> Locator:
     return page.locator(LOWER_THUMB)
 
 
-def assert_rendered(page: Page, success: str) -> None:
+def assert_rendered(page: Page, success: str, *, width: int = 390) -> None:
     """The page rendered from data at the phone's width: its success marker is there,
-    the degraded state is not."""
+    the degraded state is not. ``width`` is the narrower phone a test set itself
+    (#558's 360 px), named at its call."""
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
     # Written out, not read from VIEWPORT, so editing that constant cannot move the
     # width this suite claims to check: #306's phone, 390 px.
-    assert page.evaluate("innerWidth") == 390
+    assert page.evaluate("innerWidth") == width
 
 
 #: How a failed lazy chunk's console error starts (webpack's ``ChunkLoadError``, #456).
