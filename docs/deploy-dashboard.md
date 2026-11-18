@@ -1427,3 +1427,80 @@ begin in 1976"; Georgia's titles name it and its markers read "No electors: took
 (C4, 1864), "Legislature chose the electors" and "Took no part" (C5); Alaska's table has its
 17 rows from 1960. §9's checks: `/election/%2531824` is a 404 with `noindex`,
 `/election/%31824` a 200, and the plotly.js path a 404.
+
+### Year on the x-axis of C2, C4 and C5, measured after deploy (2026-11-18, #558)
+
+#558 (D104) put election year on a numeric x-axis for C2, C4 and C5 and moved C2's point
+labels to the hover. It changes no data read, so `/elections` still fills N1 and N2 on the
+first visit after a start; D104(h) asked for D071(g) re-measured on that page. The baseline
+is [C4 and C5's record](#charts-c4-and-c5-on-the-elections-index-measured-after-deploy-2026-11-13-436),
+the same page with the year axis down the side.
+
+Dashboard version `v-96c6a7758039-r31-a1` (deploy run 44291060865 of 96c6a77, the merge of
+#572, which shipped the change), snapshot `37af4064…`, API 0.9.0, with no API deploy since
+C4 and C5's record. The API origin was warm throughout, by the keep-warm ping (10:59:17Z,
+11:04:17Z, 11:04:57Z); it logged no `Starting new instance` in the window. Measured
+11:05–11:08Z, clear of the daily canary (its last run 2026-11-17 21:47Z, the next due
+13:17Z), by #277's method: `scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps /
+100 ms, a fresh browser context each run), with `--chart "#c5 .main-svg"`, as in the
+baseline. The chart column is the time until C5 is drawn, which is not a D071(g) measure.
+
+**Three instances**, one first visit each:
+
+- **A**, the deploy's new instance: a first visit, then six runs from the cache. The deploy's
+  probes request `/`, not `/elections`, so they fill neither path.
+- **B** and **C**, after [restarts](#restarting-the-instance-to-empty-its-cache) at
+  11:06:40Z and 11:07:13Z: one first visit each. Warmup ran on each as a loading request
+  (2.05 s and 2.43 s), and each was serving its snapshot (2 responses) 4–5 s after the
+  delete.
+
+Each first visit was a genuine miss on both paths: its `api fetch /v1/elections/summary` and
+`api fetch /v1/elections/states` lines were logged during that run (11:05:52Z, 11:06:59Z,
+11:07:32Z), and no earlier line names either path on that instance. On B and C, check 3 ran
+before the run. The API's request log shows no `/v1/` request in the window, so the edge
+answered all six fills.
+
+| Run | Instance | TTFB (s) | First data (s) | C5 drawn (s) |
+|---|---|---|---|---|
+| First visit | A | 0.13 | 1.50 | 3.99 |
+| First visit | B | 0.14 | 1.50 | 3.99 |
+| First visit | C | 0.15 | 1.17 | 3.97 |
+| From the cache (6 runs) | A | 0.09–0.16 | 0.99–1.20 | 3.77–4.24 |
+| `?state=GA`, from the cache | C | 0.10 | 1.06 | 3.71 |
+
+Every run reached data, with no degraded page, no section degraded and no state choice
+withheld.
+
+- **TTFB met D071(g) on 10 of 10 runs** (0.09–0.16 s, against ≤ 1 s).
+- **First data met it on 10 of 10** (1.17–1.50 s on a first visit, 0.99–1.20 s from the
+  cache, against ≤ 3 s), within the baseline (1.56–1.65 s and 1.05–1.59 s).
+- **The fills.** The routing callback that makes both fills took 0.28 s (A), 0.27 s (B) and
+  0.28 s (C) on the server, against 0.06–0.20 s for the same render from the cache, as in
+  the baseline (0.26–0.47 s). N2's fill started 0.07–0.09 s after N1's. Both were edge hits.
+- C5 is drawn 2.5–2.8 s after first data on a first visit and 2.6–3.2 s from the cache,
+  in line with the baseline (2.4–2.8 s); the flipped charts draw no slower.
+
+**Request budget held.** The new version logged 12 `api fetch` lines from A's start
+(11:04:57Z) to C's fills (11:07:32Z): each instance's two prefetched paths as it started,
+and one N1 and one N2 fill for each first visit. The runs from the cache, the one-state run and the checks below made none. The app
+logged no warnings and no 5xx.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes):
+
+- A: 139.4 MB (132.9 MiB), 36 % of the 384 MB D071 names for F1, after its seven runs
+  (140 requests), with N1 and N2 cached.
+- B: 126.0 MB (120.2 MiB), 33 %, after its first visit (19 requests).
+- C: 135.7 MB (129.4 MiB), 35 %, after its first visit, the one-state run and the checks
+  below (329 requests).
+
+The peak is below #470's 143.7 MB, so D071's F1 flip condition is not near.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, in light and dark, for all states, `?state=GA`, `?state=SC` and `?state=AK` (16
+renders): no sideways scroll; C2, C4 and C5 each draw the year ticks 1840, 1880, 1920, 1960
+and 2000 along the bottom, at least 6 px apart; no point or bar draws text; every tick,
+axis title, band label and key entry sits inside the width with none over another. C2
+draws 51 points, and the hover on the last reads "2024: Donald J. Trump" with its electoral
+share. C5's band reads "Shaded: years before this dataset's popular-vote figures begin in
+1976", and C4 and C5's titles name the chosen state. §9's checks: `/election/%2531824` is a
+404 with `noindex`, `/election/%31824` a 200, and the plotly.js path a 404.
