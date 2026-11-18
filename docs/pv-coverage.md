@@ -178,13 +178,13 @@ popular vote (C5) mark, on `/elections` with one state chosen, from the public
 `/v1/elections/states` rows (D100):
 
 - **The fourteen zero allotments** (1864's eleven states and 1868's Mississippi, Texas and
-  Virginia, every one `not_participating`) are C4's labeled markers in place of a bar, "No
-  electors: took no part"; the table beside the chart shows the allotment as 0. C5 marks the same
+  Virginia, every one `not_participating`) are C4's markers in place of a bar, named "No
+  electors: took no part" in the chart's key; the table beside the chart shows the allotment as 0. C5 marks the same
   rows "Took no part".
 - **The eighteen `legislature_chosen` rows** (1824's six states, 1828's Delaware and South
   Carolina, South Carolina from 1832 through 1860, Florida 1868 and Colorado 1876) keep their bar
-  in C4, since those states appointed electors, and are C5's labeled markers, "Legislature chose
-  the electors", inside the shaded years before the popular-vote window.
+  in C4, since those states appointed electors, and are C5's markers, named "Legislature chose
+  the electors" in the chart's key, inside the shaded years before the popular-vote window.
 
 Before #436 shipped, every `not_participating` and `legislature_chosen` row and every zero
 allotment in the recorded `/v1/elections/states` response (snapshot `0ad9ee52…`) and in the live

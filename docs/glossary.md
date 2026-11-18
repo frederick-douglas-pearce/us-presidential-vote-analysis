@@ -1834,8 +1834,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`). In C4 and C5, `labels.UNRECOGNIZED` labels
-  the marker drawn in place of a bar for such a value (C5 through `labels.C5_MARKER_LABELS`), and
+  value's help text (set by `labels.cell`). In C2, C4 and C5, `labels.UNRECOGNIZED`
+  names, in the chart's key, the series of markers drawn in place of a point or bar for such a
+  value (C5 through `labels.C5_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C5_STATE_HOVER` write
   it with `labels.UNRECOGNIZED_NOTE`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,

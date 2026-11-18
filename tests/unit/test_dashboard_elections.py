@@ -2986,12 +2986,17 @@ class TestC4:
             for t in figure["data"]
             if t["type"] == "scatter"
         }
+        # One symbol per meaning across C2, C4 and C5 (#558): "took no part" is C5's
+        # "x", no figure in this dataset C5's open circle.
         assert symbols == {
-            labels.C4_NO_ELECTORS: "x",
-            labels.C4_NO_ELECTORS_TOOK_NO_PART: "diamond-open",
+            labels.C4_NO_ELECTORS: "triangle-up-open",
+            labels.C4_NO_ELECTORS_TOOK_NO_PART: "x",
             labels.NOT_IN_DATASET: "circle-open",
             labels.UNRECOGNIZED: "square-open",
         }
+        assert symbols[labels.C4_NO_ELECTORS_TOOK_NO_PART] == MOD["_C5_SYMBOLS"][
+            labels.C5_TOOK_NO_PART
+        ]
         assert len(set(symbols.values())) == len(symbols)
         assert charts.figure_problems(figure) == []
 
@@ -3811,6 +3816,57 @@ class TestTimeSeriesAxis:
                 assert not {"text", "texttemplate", "textposition"} & set(t)
                 assert "text" not in t.get("mode", "")
 
+    def test_c2_s_marker_symbols_are_pinned_and_distinct(self) -> None:
+        """Both C2 marker series drawn at once (#558, guard-efficacy F1): each its own
+        symbol, written out, so neither differs from the other by color alone."""
+        summary = copy.deepcopy(SUMMARY)
+        leaders_ = [r for r in summary["data"] if r["electoral_rank"] == 1]
+        leaders_[1]["ec_share_full"] = None
+        leaders_[2]["ec_share_full"] = "zz"
+        figure = c2_figure(render_c2(summary))
+        symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
+        assert symbols == {
+            labels.C1_NO_SHARE: "circle-open",
+            labels.UNRECOGNIZED: "square-open",
+        }
+        assert charts.figure_problems(figure) == []
+        # Every hover, the markers' too, names the year it is drawn at (F5).
+        for t in figure["data"]:
+            for x, hover in zip(t["x"], t["hovertext"], strict=True):
+                assert hover.startswith(f"{x}: "), (t["name"], x)
+        assert [t["x"] for t in figure["data"][1:]] == [
+            [leaders_[1]["year"]],
+            [leaders_[2]["year"]],
+        ]
+
+    def test_points_and_markers_at_the_plot_s_edge_are_drawn_whole(self) -> None:
+        """A marker at zero and a share near 100% sit on the plot's edge, where
+        plotly's default would clip half of each (#558, review cr.1)."""
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"][0]["ec_share_full"] = None
+        figures = [c2_figure(render_c2(summary))]
+        tree = render_over_time({"state": "SC"})
+        figures += [chart_figure(tree, C4), chart_figure(tree, C5)]
+        for figure in figures:
+            for t in figure["data"]:
+                if t["type"] == "scatter":
+                    assert t["cliponaxis"] is False, t["name"]
+
+    def test_the_pair_s_plots_start_at_one_height(self) -> None:
+        """C4 takes C5's top margin, the room C5's band labels need (#558, cr.6)."""
+        for query in ({}, {"state": "AK"}):
+            tree = render_over_time(query)
+            c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
+            assert c4["layout"]["margin"] == c5["layout"]["margin"]
+            assert c5["layout"]["margin"]["t"] == (
+                MOD["_OVER_TIME_TOP_PX"] + MOD["_BAND_LABEL_PX"]
+            )
+
+    def test_no_years_is_a_type_error(self) -> None:
+        """Caught by a page's degraded state, never a 500 (#558, cr.10)."""
+        with pytest.raises(TypeError):
+            components.year_axis([])
+
     def test_only_marker_series_join_the_key(self) -> None:
         figure = chart_figure(render_over_time({"state": "SC"}), C5)
         shown = {t["name"] for t in figure["data"] if t["showlegend"]}
@@ -3837,8 +3893,15 @@ class TestTimeSeriesAxis:
             assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "bottom")
         assert (first_note["x"], first_note["xanchor"]) == (before["x0"], "left")
         assert (last_note["x"], last_note["xanchor"]) == (after["x1"], "right")
-        assert first_note["yshift"] > last_note["yshift"] == 0
-        assert figure["layout"]["margin"]["t"] > MOD["_OVER_TIME_TOP_PX"]
+        # The before label is raised by one label's room over the after label: two lines
+        # of 12 px text at plotly's 1.3 line height, plus a gap, so the two never touch
+        # (#558, guard-efficacy F2).
+        assert first_note["yshift"] == MOD["_BAND_LABEL_PX"] and last_note["yshift"] == 0
+        assert first_note["font"]["size"] == last_note["font"]["size"] == 12
+        assert MOD["_BAND_LABEL_PX"] >= 2 * math.ceil(12 * 1.3) + 4
+        assert figure["layout"]["margin"]["t"] == (
+            MOD["_OVER_TIME_TOP_PX"] + 2 * MOD["_BAND_LABEL_PX"]
+        )
         assert charts.figure_problems(figure) == []
 
 

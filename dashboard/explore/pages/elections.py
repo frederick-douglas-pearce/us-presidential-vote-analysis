@@ -126,14 +126,16 @@ METRICS_UNAVAILABLE = (
 )
 
 #: C2's height, the same for every number of served years now that years run along
-#: the bottom (#558, D104), and its top margin, which holds the title.
+#: the bottom (#558, D104). Its title is page text (``components.chart`` takes it out of
+#: the figure), so the template's top margin holds nothing above the plot.
 _C2_HEIGHT_PX = 360
-_C2_TOP_PX = 56
 #: How far below the majority line its label starts: more than C2's point radius.
 _C2_LINE_LABEL_SHIFT_PX = 6
-#: Each C2 marker series' symbol (#558, D104), so no two differ by color alone.
+#: Each C2 marker series' symbol (#558, D104), so no two differ by color alone; one
+#: symbol per meaning across C2, C4 and C5 (an open circle for no figure in this
+#: dataset, an open square for an unrecognized value).
 _C2_SYMBOLS = {
-    labels.C1_NO_SHARE: "x",
+    labels.C1_NO_SHARE: "circle-open",
     labels.UNRECOGNIZED: "square-open",
 }
 
@@ -194,16 +196,20 @@ OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular 
 ALL_STATES = "All states"
 
 #: C4 and C5's height, the same in every mode now that years run along the bottom
-#: (#558, D104); their top margin, which holds the title and C5's band label; and the
-#: room each further band label above it takes (two lines).
+#: (#558, D104). Their titles are page text (``components.chart`` takes them out of the
+#: figure), so the top margin is the template's, plus room for each of C5's band labels
+#: above the plot: two lines of 12 px text at plotly's 1.3 line height (2 × 16 px) and
+#: 8 px between labels. C4 takes C5's top margin, so the pair's plots line up.
 _OVER_TIME_HEIGHT_PX = 360
-_OVER_TIME_TOP_PX = 56
-_BAND_LABEL_PX = 32
+_OVER_TIME_TOP_PX = 16
+_BAND_LABEL_PX = 40
 #: C4's marker series' symbols (#558, D104): one series per label, so the chart's key
-#: names each cause; "took no part" shares C5's symbol for it.
+#: names each cause, and one symbol per meaning across C2, C4 and C5: "took no part" is
+#: C5's "x", no figure in this dataset C5's open circle, an unrecognized value the open
+#: square; "no electors appointed", C4's alone, is an open triangle.
 _C4_SYMBOLS = {
-    labels.C4_NO_ELECTORS: "x",
-    labels.C4_NO_ELECTORS_TOOK_NO_PART: "diamond-open",
+    labels.C4_NO_ELECTORS: "triangle-up-open",
+    labels.C4_NO_ELECTORS_TOOK_NO_PART: "x",
     labels.NOT_IN_DATASET: "circle-open",
     labels.UNRECOGNIZED: "square-open",
 }
@@ -556,6 +562,8 @@ def _c2_figure(
             "ids": [str(year) for year in xs],
             "x": xs,
             "y": ys,
+            # A share near 100% sits at the plot's top edge: drawn whole, not clipped.
+            "cliponaxis": False,
             "marker": {"symbol": "circle", "size": 7, "color": "var(--chart-1)"},
             "hovertext": hovers,
             "hovertemplate": "%{hovertext}<extra></extra>",
@@ -563,11 +571,11 @@ def _c2_figure(
     ]
     for label, symbol in _C2_SYMBOLS.items():
         if label in marks:
-            data.append(_c2_marker_trace(label, symbol, marks[label]))
+            years_, hovers_ = zip(*marks[label], strict=True)
+            data.append(_marker_trace(label, symbol, list(years_), list(hovers_)))
     layout: dict[str, Any] = {
         "title": {"text": labels.C2_TITLE},
         "height": _C2_HEIGHT_PX,
-        "margin": {"t": _C2_TOP_PX},
         "showlegend": bool(marks),
         "xaxis": components.year_axis(years),
         "yaxis": {
@@ -616,24 +624,6 @@ def _c2_figure(
     if marks:
         layout["legend"] = components.TIME_SERIES_LEGEND
     return {"data": data, "layout": layout}, bool(marks)
-
-
-def _c2_marker_trace(
-    label: str, symbol: str, marks: list[tuple[int, str]]
-) -> dict[str, Any]:
-    """One series of C2's markers at zero, named by ``label`` in the chart's key."""
-    return {
-        "type": "scatter",
-        "mode": "markers",
-        "name": label,
-        "showlegend": True,
-        "ids": [str(year) for year, _ in marks],
-        "x": [year for year, _ in marks],
-        "y": [0] * len(marks),
-        "marker": {"symbol": symbol, "size": 9, "color": "var(--text)"},
-        "hovertext": [hover for _, hover in marks],
-        "hovertemplate": "%{hovertext}<extra></extra>",
-    }
 
 
 def _c2_caption(marked: bool) -> str:
@@ -1012,24 +1002,40 @@ def _bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str,
 
 
 def _marker_trace(
-    name: str, symbol: str, marks: list[tuple[Point, str, str]]
+    name: str, symbol: str, years: list[int], hovers: list[str]
 ) -> dict[str, Any]:
-    """A series of markers at zero, one per row with nothing to draw, named by
-    ``name`` in the chart's key (#558, D104: the key labels the marker, not a text
-    beside each)."""
+    """A time-series chart's series of markers at zero (C2, C4 and C5), one per year
+    with nothing to draw, named by ``name`` in the chart's key (#558, D104: the key
+    labels the marker, not a text beside each), drawn whole at the plot's edge."""
     return {
         "type": "scatter",
         "mode": "markers",
         "name": name,
         "showlegend": True,
-        "ids": [str(point.year) for point, _, _ in marks],
-        "x": [point.year for point, _, _ in marks],
-        "y": [0] * len(marks),
+        "ids": [str(year) for year in years],
+        "x": list(years),
+        "y": [0] * len(years),
         "cliponaxis": False,
         "marker": {"symbol": symbol, "size": 9, "color": "var(--text)"},
-        "hovertext": [hover for _, _, hover in marks],
+        "hovertext": list(hovers),
         "hovertemplate": "%{hovertext}<extra></extra>",
     }
+
+
+def _series(
+    marks: dict[str, list[tuple[Point, str]]], symbols: dict[str, str]
+) -> list[dict[str, Any]]:
+    """C4's or C5's marker series, one per label in ``symbols``' order."""
+    return [
+        _marker_trace(
+            label,
+            symbol,
+            [point.year for point, _ in marks[label]],
+            [hover for _, hover in marks[label]],
+        )
+        for label, symbol in symbols.items()
+        if label in marks
+    ]
 
 
 def _over_time_layout(
@@ -1076,8 +1082,7 @@ def _c4_figure(
     chart's key (#558, D104).
     ``state`` is the escaped state name, or ``None`` for all states."""
     drawn: list[tuple[Point, int, str, str]] = []
-    marks: dict[str, list[tuple[Point, str, str]]] = {}
-    zeros = missing = False
+    marks: dict[str, list[tuple[Point, str]]] = {}
     for point in points:
         hover = _hover(point, state, total=False)
         value = _figure_value(point.appointed, zero=False)
@@ -1089,29 +1094,29 @@ def _c4_figure(
                 if point.status == "not_participating"
                 else labels.C4_NO_ELECTORS
             )
-            zeros = True
-            marks.setdefault(label, []).append((point, label, hover))
+            marks.setdefault(label, []).append((point, hover))
         else:
             label = (
                 labels.NOT_IN_DATASET
                 if point.appointed_cell == labels.NOT_IN_DATASET
                 else labels.UNRECOGNIZED
             )
-            missing = True
-            marks.setdefault(label, []).append((point, label, hover))
+            marks.setdefault(label, []).append((point, hover))
     name = labels.LABELS[
         "electoral_denominator" if state is None else "state_electoral_votes"
     ]
     data: list[dict[str, Any]] = []
     if drawn:
         data.append(_bar_trace(name, drawn))
-    for label, symbol in _C4_SYMBOLS.items():
-        if label in marks:
-            data.append(_marker_trace(label, symbol, marks[label]))
+    data += _series(marks, _C4_SYMBOLS)
     longest = max((value for _, value, _, _ in drawn), default=1)
     layout = _over_time_layout(
         title, labels.C4_VALUE_AXIS, years, longest, marked=bool(marks)
     )
+    zeros = bool(
+        marks.keys() & {labels.C4_NO_ELECTORS, labels.C4_NO_ELECTORS_TOOK_NO_PART}
+    )
+    missing = bool(marks.keys() & {labels.NOT_IN_DATASET, labels.UNRECOGNIZED})
     return OverTime({"data": data, "layout": layout}, zeros, missing, False, False)
 
 
@@ -1173,7 +1178,7 @@ def _c5_figure(
         labels.BEFORE_WINDOW.format(pv_year_min=pv_min),
     }
     drawn: list[tuple[Point, int, str, str]] = []
-    marks: dict[str, list[tuple[Point, str, str]]] = {}
+    marks: dict[str, list[tuple[Point, str]]] = {}
     for point in points:
         hover = _hover(point, state, total=True)
         value = _figure_value(point.total, zero=True)
@@ -1184,16 +1189,14 @@ def _c5_figure(
         if outside and point.total_cell in banded:
             continue
         label = labels.C5_MARKER_LABELS.get(point.total_cell, labels.UNRECOGNIZED)
-        marks.setdefault(label, []).append((point, label, hover))
+        marks.setdefault(label, []).append((point, hover))
     name = labels.LABELS[
         "national_pv_denominator" if state is None else "state_popular_total"
     ]
     data: list[dict[str, Any]] = []
     if drawn:
         data.append(_bar_trace(name, drawn))
-    for label, symbol in _C5_SYMBOLS.items():
-        if label in marks:
-            data.append(_marker_trace(label, symbol, marks[label]))
+    data += _series(marks, _C5_SYMBOLS)
     longest = max((value for _, value, _, _ in drawn), default=1)
     layout = _over_time_layout(
         title, labels.C5_VALUE_AXIS, years, longest, marked=bool(marks)
@@ -1229,7 +1232,7 @@ def _c5_figure(
     if shapes:
         layout["shapes"] = shapes
         layout["annotations"] = annotations
-        layout["margin"] = {"t": _OVER_TIME_TOP_PX + raised}
+        layout["margin"] = {"t": _OVER_TIME_TOP_PX + _BAND_LABEL_PX * len(annotations)}
     return OverTime(
         {"data": data, "layout": layout}, False, bool(marks), bool(before), bool(after)
     )
@@ -1419,6 +1422,9 @@ def _over_time_section(
             c5_title = labels.C5_TITLE_STATE.format(state=plain)
         c4 = _c4_figure(points, years, c4_title, state)
         c5 = _c5_figure(points, years, c5_title, state, window)
+        # The pair's plots line up (#553's pair, #558): C4 leaves room for C5's band
+        # labels.
+        c4.figure["layout"]["margin"] = dict(c5.figure["layout"]["margin"])
         c4_caption = _c4_caption(c4, all_states, plain, first)
         c5_caption = _c5_caption(c5, all_states, plain, first, window)
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}

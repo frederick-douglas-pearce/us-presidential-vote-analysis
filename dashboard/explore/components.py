@@ -132,8 +132,9 @@ def year_marks(first: int, last: int) -> dict[int, str]:
 
 
 #: A time-series chart's year axis (#558, D104): years between its ticks. Fixed on the
-#: server, never plotly's ``dtick``, so the ticks are in the figure the tests compare
-#: (D093(c)); 40 keeps two four-digit ticks apart at 360 px, where 20 does not.
+#: server, never plotly's ``dtick``, so the ticks are in the figure that
+#: ``TestEveryChart``'s ``ROW_AXES`` comparison reads (``test_dashboard_export.py``,
+#: D093(c)); 40 keeps two four-digit ticks apart at 360 px, where 20 does not.
 YEAR_TICK_STEP = 40
 #: Years of room on each side of the first and last served year.
 YEAR_PAD = 2
@@ -151,7 +152,10 @@ def year_axis(years: Sequence[int]) -> dict[str, Any]:
     thousands separator would write "1,840") at :data:`YEAR_TICK_FONT_PX`, and the first
     and last years instead where that gives fewer than two; and titled "Election year".
     One axis for every mode of a chart: built from the served years, never from what a
-    filter leaves."""
+    filter leaves. No years is a ``TypeError``, which a page's degraded state
+    catches."""
+    if not years:
+        raise TypeError("a year axis needs at least one served year")
     first, last = min(years), max(years)
     start = -(-first // YEAR_TICK_STEP) * YEAR_TICK_STEP
     ticks = list(range(start, last + 1, YEAR_TICK_STEP))

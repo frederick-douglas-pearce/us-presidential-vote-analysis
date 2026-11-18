@@ -7042,9 +7042,13 @@ cells (D091's rule, unchanged), and the companion table stays the accessible equ
 points, C4's and C5's bars, and every marker lose their text (amends D096(a) and D100(a)).
 (d) **A missing value is a marker labeled by its series' entry in the chart's key** (amends
 D091's "labeled marker" for these charts, and extends D100(d)'s one-series-per-label rule for
-C5 to C2 and C4). There is one series per label, each with its own symbol. C4's zero series splits by
-cause ("No electors appointed", "No electors: took no part"), and C2's and C4's other marker
-series are named by their labels (`C1_NO_SHARE` or `NOT_IN_DATASET`, and `UNRECOGNIZED`). The
+C5 to C2 and C4). There is one series per label, each with its own symbol, and one symbol per
+meaning across the three charts, since C4 and C5 sit side by side: "took no part" is an `x`, no
+figure in this dataset an open circle, an unrecognized value an open square, C5's "legislature
+chose the electors" a diamond, and C4's "no electors appointed" an open triangle. C4's zero
+series splits by cause ("No electors appointed", "No electors: took no part"), and C2's and
+C4's other marker series are named by their labels (`C1_NO_SHARE` or `NOT_IN_DATASET`, and
+`UNRECOGNIZED`). Every marker and point is drawn whole at the plot's edge (`cliponaxis` off). The
 key (`components.TIME_SERIES_LEGEND`) sits along the foot of the chart and shows only when a
 marker is drawn. The hover names the cause per point, and the caption says the key does. A
 missing value is still a marker at zero, never a zero-length bar.
@@ -7057,7 +7061,10 @@ from `meta.provenance.coverage`, never literals). It spans the served years outs
 from `components.year_edges` (halfway to the neighboring served year, or the axis's own edge),
 the whole height of the plot. Its label sits **above the plot**, never inside the band, since a
 band after the window can be one election wide: the before-band's at its left edge, the
-after-band's at its right edge, and with both drawn the before label raised above the other.
+after-band's at its right edge, and with both drawn the before label raised above the other by
+one label's room (`_BAND_LABEL_PX`, 40: two lines of 12 px text at plotly's 1.3 line height and
+a gap). A chart's title is page text, so the top margin is the template's plus that room for
+each band label, and C4 takes C5's top margin so the pair's plots line up.
 (g) **C4's and C5's value axes show ticks** (about four, full numbers per the template, never
 "80M"), since no bar carries its value any more.
 (h) **D071(g) is re-measured on `/elections` after deploy**, as D096(f) and D100(i) set out:
@@ -7066,14 +7073,22 @@ closes the issue.
 
 **Guards.**
 - `TestTimeSeriesAxis` (`tests/unit/test_dashboard_elections.py`) pins (a): the ticks, the
-  short-span ends and the true-width gap. It pins (c): no text on any trace, and a hover that
-  names its x year. It pins (d)'s key, and (f)'s labels above the plot with both bands drawn.
-- The C2 and C4/C5 companion-table tests tie each point's or bar's position to its table cell.
-  With no text beside it, nothing else does.
+  short-span ends, the true-width gap, and no years as a `TypeError`. It pins (c): no text on
+  any trace, and a hover that names its x year, markers' included. It pins (d): the key, C2's
+  symbols with both its series drawn, and markers drawn whole. It pins (f): the labels above
+  the plot with both bands drawn, the raise, and the pair's shared top margin. C4's symbols are
+  `TestC4.test_its_marker_symbols_are_pinned_and_distinct`.
+- `TestC2.test_the_companion_table_holds_the_points_values` and
+  `TestOverTimeTable.test_the_rows_are_the_charts_points` tie each point's or bar's position to
+  its table cell. With no text beside it, nothing else does.
 - `TestEveryChart` compares each chart's row or year axis (`ROW_AXES`: x for C2, C4 and C5, y
   for C1 and C3) for tick text, tick values, range and type, and fails an empty tick text.
-- The e2e readability tests run at 390 and 360 px. They check ticks at least 6 px apart, no text
-  over another, no sideways scroll, C2's line label over no point, and a hover naming its year.
+- The e2e readability tests (`test_c2_is_readable_at_phone_width`,
+  `test_c4_and_c5_are_readable_at_phone_width`) run at 390 and 360 px. They check ticks at least
+  6 px apart, no text over another, no sideways scroll, C2's line label over no point, and a
+  hover on C2, C4 and C5 naming its year. The recorded responses draw no C2 marker and no band
+  after the window, so C2's key and the two band labels together are checked by the unit tests
+  only.
 
 **Rationale.** Year on x is the reading order a time series is expected in. A numeric axis is
 the only form that both draws gaps truthfully and keeps the ticks in the server's figure for

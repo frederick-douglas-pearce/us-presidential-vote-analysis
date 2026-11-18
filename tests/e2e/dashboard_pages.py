@@ -145,12 +145,13 @@ def lower_thumb(page: Page) -> Locator:
 
 def assert_rendered(page: Page, success: str, *, width: int = 390) -> None:
     """The page rendered from data at the phone's width: its success marker is there,
-    the degraded state is not. ``width`` is the narrower phone a test set itself
-    (#558's 360 px), named at its call."""
+    the degraded state is not. ``width`` is the viewport width the calling test set
+    itself (``PHONE_WIDTHS`` in ``test_dashboard_e2e_elections.py``, #558); only the
+    default, 390, is the suite's pinned phone."""
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
-    # Written out, not read from VIEWPORT, so editing that constant cannot move the
-    # width this suite claims to check: #306's phone, 390 px.
+    # The default is written out, not read from VIEWPORT, so editing that constant
+    # cannot move the width this suite claims to check: #306's phone, 390 px.
     assert page.evaluate("innerWidth") == width
 
 

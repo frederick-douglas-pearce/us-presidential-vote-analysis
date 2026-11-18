@@ -486,8 +486,9 @@ def test_c4_and_c5_are_readable_at_phone_width(
             assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
             for b in drawn[i + 1 :]:
                 assert not overlaps(a, b), (chart, a, b)
-    bar = f"{C4} .barlayer .point path >> nth=-1"
-    assert_hover_names_year(page, C4, bar, served_years()[-1])
+    for chart in (C4, C5):
+        bar = f"{chart} .barlayer .point path >> nth=-1"
+        assert_hover_names_year(page, chart, bar, served_years()[-1])
 
 
 @pytest.mark.plotlyjs_fetches(1)
