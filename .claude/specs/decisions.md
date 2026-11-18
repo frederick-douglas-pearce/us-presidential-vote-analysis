@@ -7095,3 +7095,64 @@ the only form that both draws gaps truthfully and keeps the ticks in the server'
 the filter-invariance check. Labels by key keep each cause named (WCAG 1.4.1 is met by the
 symbols, and the key names what each means) where per-point text would collide at phone
 width.
+
+## D105: A state has a history page and a people per electoral vote page; their section links carry the year range, and old links need no redirect
+
+**Date:** 2026-11-18
+**Builds on:** D073, D074, D081, D083, D092, D102, D103 · **Decided by:** the owner, approving #559's plan (architect-reviewed)
+
+**Context.** `/state/<usps>` held T4 (the state's history, with the year range, `candidate`
+and `pv_status` filters) and, below it, T7 (people per electoral vote), which only the year
+range narrowed. The owner's dashboard review (2026-11-17) found T7 easy to miss and the filters
+beside it misleading, and agreed with D092's subpage pattern for it. Four things needed ruling:
+where the two pages' shared code lives, whether the section links carry a filter (D092's
+carry none), what an old link does, and where the roster reading goes once a shared module
+holds the judge built on it.
+
+**Decision.**
+- **Two pages, one fill each.** `/state/<usps>` is the history (T4, its three filters, the
+  party notes, the footer), filling `/v1/states/{usps}`. `/state/<usps>/per-capita` holds T7,
+  with the year range as its only filter, filling `/v1/states/{usps}/per-capita`; its heading
+  names the state from T7's own rows, and its span comes from that response's coverage
+  (provenance is one per snapshot, and the view pins one). Both validate the code against the
+  roster with the same judge before formatting it (D074). No new data shape or endpoint
+  (D070(c)). It holds no chart slot until C8 (#561) lands; C8's chart rules (`CHART_QUERIES`,
+  `FILTERED_TABLES`, and D093(a)'s rule that the range never narrows a chart) are #561's.
+- **Routing by `order=`, as D092.** The per-capita page registers `order=0`, so it sorts before
+  the history page's greedy `<usps>`. An unknown section (`/state/GA/x`) reaches the history
+  page with `usps="GA/x"`, which the judge refuses: 404 at the index once the roster is cached,
+  and the not-found state at render. Both pages share one not-found heading and sentence, the
+  sentence reworded so it is true of an unknown section too.
+- **The shared pieces are a shared module, `explore/state_view.py`,** on `election_view`'s
+  pattern, importing only `labels` and `query`: the section suffixes, the roster reading
+  (`roster`, moved out of `api`, since a shared module never imports `api`; the state picker
+  reads it from here too, so a body one refuses all refuse), the judge `on_roster`, the rows
+  check, the section links and the not-found state. Their wording is in `labels.py`.
+- **The section links carry the year range, and only it, in both directions.** This departs
+  from D092, whose links are unfiltered: an election's subpages share no filter, while a
+  state's two pages share the year range. The range carried is the one the render applied,
+  normalized against the span (a bound at its end, or outside it, is not carried), never the
+  request's. A candidate or popular-vote filter is dropped on the way to the per-capita page
+  and is not restored on the way back (accepted). The per-capita page's parser keeps the year
+  range alone, so `og:url` there never names another key (D081); the canonical link carries no
+  query (D073). Each page has its own `dcc.Location` and control ids, since Dash keys callbacks
+  by output. The landmark and its marked entry are drawn by the class the election pages'
+  section links use, renamed `section-links`.
+- **Old links: no redirect.** No query key on the history page reached T7 alone (the year range
+  is T4's too; `candidate` and `pv_status` are T4's only), so D092's `moved=` has nothing to
+  move: an old `/state/<usps>?…` link lands on the history page with its filters applied. The one
+  T7-only handle was the fragment `#state-per-capita`, which never reaches the server; such a
+  link lands on the history page's top. That residual is not new: fragments already do not land
+  after Dash renders (#496).
+
+**Guards.** `test_dashboard_state.py` (both pages, the section links, the old-link case, the
+routing and request budget); the D070(b) guard's per-render slice `STATE_PAGE_MISSES`, which
+alone shows the history page no longer fills T7's path, and its not-found renders of both pages;
+`READS_BEFORE`, `DOCTORED` and `UNRECOGNIZED_CELLS` per page (`test_dashboard_export.py`);
+`TestSharedPieces`; `tests/nav_marks.py`; and `tests/e2e/test_dashboard_e2e_history.py` (the
+client-side chain carrying the range, the not-found renders, and each page's wide layout).
+
+**Rationale.** A table no longer sits under filters that do not reach it, and the history page
+on a phone is T4. Carrying the range keeps a reader's chosen years across the one filter both
+pages share, without inventing a filter for a page that has none. Moving `roster` keeps one
+reading of the roster for every page that uses it.
