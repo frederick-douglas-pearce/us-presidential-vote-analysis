@@ -614,11 +614,7 @@ def render(
             election_view.section_nav(year, election_view.OVERVIEW),
             # Source order is reading order at every width: the panel's section is the
             # pair's left column, National results' heading and C1 its right (#544).
-            html.Div(
-                [html.Div(_panel(block, year, coverage)), html.Div(top)],
-                id=PAIR_ID,
-                className="pair",
-            ),
+            components.pair(_panel(block, year, coverage), top, PAIR_ID),
             *rest,
             components.provenance_footer(provenance),
         ],

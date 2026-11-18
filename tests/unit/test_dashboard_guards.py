@@ -1289,6 +1289,135 @@ def test_the_dash_table_lint_catches_the_listed_ways(source: str, caught: bool) 
     assert bool(dash_table_uses(source)) is caught
 
 
+def _class_values(tree: ast.AST) -> list[ast.AST]:
+    """Every expression a module gives as a component's class: a ``className=``
+    argument, a ``"className"`` dict entry, or an assignment to ``.className``."""
+    values: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "className":
+            values.append(node.value)
+        elif isinstance(node, ast.Dict):
+            values += [
+                v
+                for k, v in zip(node.keys, node.values, strict=True)
+                if isinstance(k, ast.Constant) and k.value == "className"
+            ]
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if node.value is not None and any(
+                isinstance(t, ast.Attribute) and t.attr == "className" for t in targets
+            ):
+                values.append(node.value)
+    return values
+
+
+def pair_class_uses(source: str) -> list[str]:
+    """Each place ``source`` sets the ``pair`` class (#553, D103), as
+    ``"<function>: line <n>"`` (the line where the class expression names it): a
+    string in a class expression whose words include ``pair``, literal, in a
+    multi-class string, an f-string or a join, or a module-level name a plain,
+    chained, tuple or annotated assignment binds to such a string. It reads source,
+    so a class passed through a local variable, a function's return value or a
+    parameter, ``setattr``, ``exec`` or ``eval``, and a class built at runtime are
+    not seen."""
+    tree = ast.parse(source)
+    # A module-level name bound to a string reads as that string in a class
+    # expression, so ``PAIR = "pair"`` then ``className=PAIR`` is caught, as are a
+    # chained (``A = B = "pair"``), tuple (``A, B = "pair", "x"``) or annotated one.
+    constants: dict[str, ast.Constant] = {}
+
+    def bind(target: ast.AST, value: ast.AST | None) -> None:
+        if isinstance(target, ast.Name):
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                constants[target.id] = value
+        elif (
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(value, (ast.Tuple, ast.List))
+            and len(target.elts) == len(value.elts)
+        ):
+            for inner, held in zip(target.elts, value.elts, strict=True):
+                bind(inner, held)
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                bind(target, stmt.value)
+        elif isinstance(stmt, ast.AnnAssign):
+            bind(stmt.target, stmt.value)
+    owner: dict[int, str] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(fn):
+                owner[id(inner)] = fn.name
+    found: list[str] = []
+    for value in _class_values(tree):
+        for found_node in ast.walk(value):
+            node = (
+                constants.get(found_node.id, found_node)
+                if isinstance(found_node, ast.Name)
+                else found_node
+            )
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and "pair" in node.value.split()
+            ):
+                where = owner.get(id(found_node), "<module>")
+                line = getattr(found_node, "lineno", 0)
+                found.append(f"{where}: line {line}")
+    return found
+
+
+def test_only_components_builds_a_pair() -> None:
+    """D103: a ``.pair`` is built only by ``components.pair``, which refuses a table
+    (``TestPair`` in ``test_dashboard_elections.py``), so no page can put a table in
+    one. Any other module setting the class fails here."""
+    assert RUNTIME_MODULES, "no runtime modules found"
+    found = {
+        str(path.relative_to(PACKAGE)): uses
+        for path in RUNTIME_MODULES
+        if (uses := pair_class_uses(path.read_text(encoding="utf-8")))
+    }
+    # The builder sets it once, in its own body.
+    owners = [use.split(":")[0] for use in found.pop("components.py", [])]
+    assert owners == ["pair"]
+    assert found == {}
+
+
+@pytest.mark.parametrize(
+    ("source", "caught"),
+    [
+        ("html.Div([], className='pair')\n", True),
+        ("html.Div([], className='note pair')\n", True),
+        ("html.Div([], className=f'{x} pair')\n", True),
+        ("html.Div([], className=' '.join(['a', 'pair']))\n", True),
+        ("html.Div([], className='pair' if x else 'b')\n", True),
+        ("html.Div([], **{'className': 'pair'})\n", True),
+        ("d = html.Div([])\nd.className = 'pair'\n", True),
+        ("PAIR = 'pair'\nhtml.Div([], className=PAIR)\n", True),
+        ("PAIR: str = 'note pair'\nhtml.Div([], className=f'{PAIR} x')\n", True),
+        ("A = B = 'pair'\nhtml.Div([], className=A)\n", True),
+        ("A, B = 'x', 'pair'\nhtml.Div([], className=B)\n", True),
+        ("[A, (B, C)] = ['x', ('y', 'pair')]\nhtml.Div([], className=C)\n", True),
+        ("A, B = 'pair', 'x'\nhtml.Div([], className=B)\n", False),
+        ("PAIR = 'pairs'\nhtml.Div([], className=PAIR)\n", False),
+        ("NAME = 'pair'\nhtml.Div([], id=NAME)\n", False),
+        ('"""A docstring about a pair."""\n', False),
+        ("html.Div([], className='pairs pair-col')\n", False),
+        ("html.Div([], id='pair')\n", False),
+        ("x = 'pair'\n", False),
+    ],
+)
+def test_the_pair_lint_catches_the_listed_ways(source: str, caught: bool) -> None:
+    assert bool(pair_class_uses(source)) is caught
+
+
+def test_the_pair_lint_names_where_the_class_is_set() -> None:
+    """A resolved constant is reported at the class expression, not its definition."""
+    source = "PAIR = 'pair'\n\n\ndef build():\n    return html.Div([], className=PAIR)\n"
+    assert pair_class_uses(source) == ["build: line 5"]
+
+
 def test_nothing_in_the_dashboard_or_its_deploy_names_run_app() -> None:
     offenders = [
         str(p.relative_to(REPO))

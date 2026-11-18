@@ -26,12 +26,15 @@ from tests.e2e.dashboard_pages import (
     ELECTIONS_ROWS,
     ELECTIONS_SUCCESS,
     FIELDS,
+    FILTER_MAX_PX,
+    FILTER_MIN_PX,
     FILTER_OUTPUT,
     FIRST,
     GLOSSARY,
     LAST,
     LEADER_ROWS,
     MARKS,
+    NARROW_DESKTOP,
     OVER_TIME_ROWS,
     PROVENANCE,
     PV,
@@ -40,11 +43,18 @@ from tests.e2e.dashboard_pages import (
     RESOURCE_ERROR,
     ROUTER_OUTPUT,
     STATE_CONTROL,
+    UNAVAILABLE,
     UPDATE_PATH,
+    WIDE_BREAKPOINT_PX,
+    WIDE_WIDTHS,
+    YEARS,
     assert_chunk_failure_stops,
+    assert_layout_holds,
     assert_rendered,
     lower_thumb,
     recorded,
+    rect,
+    rects,
     row_years,
     search,
     watch_chunk_errors,
@@ -543,3 +553,151 @@ def test_a_failed_dropdown_chunk_stops_logging(page: Page) -> None:
     assert_rendered(page, ELECTIONS_SUCCESS)
     assert_chunk_failure_stops(page, seen)
     expect(page.locator(OVER_TIME_ROWS)).to_have_count(len(served_years()))
+
+
+# --- the wide layout (#553, D102, D103) ----------------------------------------------
+
+LIST_PAIR = "#elections-list-pair"
+LIST_COLUMNS = f"{LIST_PAIR} > div"
+OVER_TIME_PAIR = "#elections-over-time-pair"
+OVER_TIME_COLUMNS = f"{OVER_TIME_PAIR} > div"
+#: The page's three tables: the leader table, T1 and C4 and C5's companion table.
+TABLES = ("#elections-leader-table", "#elections-table", "#elections-over-time-table")
+#: A section heading's top margin, 1.75rem: what a pair keeps above the next heading.
+HEADING_GAP_PX = 1.75 * 16
+
+
+def open_at(page: Page, width: int) -> None:
+    """``/elections`` at ``width``, with C4 and C5 drawn."""
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto("/elections")
+    page.locator(ELECTIONS_SUCCESS).wait_for()
+    assert page.locator(UNAVAILABLE).count() == 0
+    assert page.evaluate("innerWidth") == width
+    for chart in (C4, C5):
+        page.locator(f"{chart} .main-svg").first.wait_for()
+
+
+def wait_charts_fill(page: Page) -> None:
+    """C4's and C5's drawings each as wide as its box (#433's responsive check)."""
+    page.wait_for_function(
+        f"""() => [{C4!r}, {C5!r}].every(chart => {{
+            const svg = document.querySelector(chart + " .main-svg");
+            const box = document.querySelector(chart + " .chart-graph");
+            return svg && Math.abs(svg.getBoundingClientRect().width
+                - box.getBoundingClientRect().width) < 1;
+        }})"""
+    )
+
+
+def side_by_side(left: dict[str, float], right: dict[str, float]) -> None:
+    """Two equal columns, the first to the left of the second, their tops level."""
+    assert left["right"] < right["left"], (left, right)
+    assert abs(left["width"] - right["width"]) <= 1, (left, right)
+    assert abs(left["top"] - right["top"]) <= 1, (left, right)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+def test_wide_the_list_s_filters_sit_beside_the_count_and_averages(
+    page: Page, width: int
+) -> None:
+    open_at(page, width)
+    left, right = rects(page, LIST_COLUMNS)
+    side_by_side(left, right)
+    # The slider and the checkbox in the left column, the metrics in the right.
+    for held, column in ((YEARS, left), (PV, left), ("#elections-metrics", right)):
+        box = rect(page, held)
+        assert column["left"] - 0.5 <= box["left"], (held, box, column)
+        assert box["right"] <= column["right"] + 0.5, (held, box, column)
+    # Each column's first child starts at the column's top, so the filters and the
+    # count line start level: the margin reset reaches them (#553's review, r1.cr.1).
+    firsts = rects(page, f"{LIST_COLUMNS} > :first-child")
+    for first, column in zip(firsts, (left, right), strict=True):
+        assert abs(first["top"] - column["top"]) <= 0.5, (first, column)
+    # The visible content itself, whatever wraps it: the "Years" label and the count.
+    label, count = rect(page, f"{LIST_PAIR} .filters .label"), rect(page, ".count")
+    assert abs(label["top"] - count["top"]) <= 0.5, (label, count)
+    # T1 below both columns.
+    t1 = rect(page, ".table-scroll:has(#elections-table)")
+    assert t1["top"] >= max(left["bottom"], right["bottom"]), (t1, left, right)
+    assert abs(t1["left"] - left["left"]) <= 1, (t1, left)
+    print(
+        f"#553 list pair at {width} px: filters column"
+        f" {left['bottom'] - left['top']:.0f} px, metrics column"
+        f" {right['bottom'] - right['top']:.0f} px tall"
+    )
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+def test_wide_c4_sits_beside_c5_with_their_table_below(page: Page, width: int) -> None:
+    open_at(page, width)
+    wait_charts_fill(page)
+    left, right = rects(page, OVER_TIME_COLUMNS)
+    side_by_side(left, right)
+    for chart, column in ((C4, left), (C5, right)):
+        graph = rect(page, f"{chart} .chart-graph")
+        assert abs(graph["width"] - column["width"]) <= 1, (chart, graph, column)
+        assert abs(graph["left"] - column["left"]) <= 1, (chart, graph, column)
+    # The companion table's heading a section heading's gap below the taller column,
+    # and its table across both columns.
+    heading = rect(page, f"{OVER_TIME_PAIR} + h2")
+    taller = max(left["bottom"], right["bottom"])
+    assert heading["top"] - taller >= HEADING_GAP_PX - 1, (heading, taller)
+    table = rect(page, ".table-scroll:has(#elections-over-time-table)")
+    assert table["top"] > taller, (table, taller)
+    assert abs(table["left"] - left["left"]) <= 1, (table, left)
+    assert table["right"] >= right["right"] - 1, (table, right)
+    # The state filter, alone in its row, is a filter row's 14rem to 20rem.
+    state = rect(page, "#elections-state-control > .filter")
+    assert FILTER_MIN_PX - 0.5 <= state["width"] <= FILTER_MAX_PX + 0.5, state
+    assert state["bottom"] <= left["top"], (state, left)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", WIDE_WIDTHS)
+def test_wide_c2_s_section_stays_full_width_and_first(page: Page, width: int) -> None:
+    open_at(page, width)
+    page.locator(f"{C2} .main-svg").first.wait_for()
+    content = rect(page, ELECTIONS_SUCCESS)
+    c2 = rect(page, f"{C2} .chart-graph")
+    assert abs(c2["width"] - content["width"]) <= 1, (c2, content)
+    assert c2["bottom"] <= rect(page, LIST_PAIR)["top"], c2
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", [NARROW_DESKTOP, 390])
+def test_narrow_both_pairs_stack_as_before(page: Page, width: int) -> None:
+    open_at(page, width)
+    for columns in (LIST_COLUMNS, OVER_TIME_COLUMNS):
+        left, right = rects(page, columns)
+        assert right["top"] >= left["bottom"] - 0.5, (width, columns, left, right)
+        assert abs(left["left"] - right["left"]) <= 0.5, (width, columns, left, right)
+    # C4 above C5, and the filters above the count, as the one column always had.
+    assert rect(page, C4)["bottom"] <= rect(page, C5)["top"] + 0.5
+    assert rect(page, PV)["bottom"] <= rect(page, "#elections-metrics")["top"] + 0.5
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c4_and_c5_fill_their_columns_after_a_resize_across_the_breakpoint(
+    page: Page,
+) -> None:
+    open_at(page, 1280)
+    for width in (1280, NARROW_DESKTOP, 1280, 1850, 1280):
+        page.set_viewport_size({"width": width, "height": 900})
+        wait_charts_fill(page)
+        left, right = rects(page, OVER_TIME_COLUMNS)
+        # Side by side from the breakpoint, stacked below it, after every crossing.
+        if width >= WIDE_BREAKPOINT_PX:
+            side_by_side(left, right)
+        else:
+            assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
+    open_at(page, width)
+    assert_layout_holds(page, ELECTIONS_SUCCESS, TABLES, width)

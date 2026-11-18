@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from dash import dcc, html
+from dash.development.base_component import Component
 
 from explore import charts, export, labels, query
 
@@ -541,3 +542,53 @@ def chart(
         id=dom,
         className="chart",
     )
+
+
+def _within(children: Any) -> list[Any]:
+    """Every component in ``children`` and under it, depth first."""
+    found: list[Any] = []
+    stack = [children]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (list, tuple)):
+            stack.extend(reversed(node))
+        elif isinstance(node, Component):
+            found.append(node)
+            stack.append(node.to_plotly_json()["props"].get("children"))
+    return found
+
+
+def pair(
+    left: Sequence[Any],
+    right: Sequence[Any],
+    ident: str,
+    *,
+    left_id: str | None = None,
+    right_id: str | None = None,
+) -> html.Div:
+    """Two sections side by side from 76rem (#544, #553, D102, D103): the one way to
+    build a ``.pair``, as :func:`table` is for tables. ``left`` is the earlier section
+    in the page and ``right`` the later, each in a column ``div`` of its own; below
+    76rem the columns stack in that order. ``left_id`` and ``right_id`` name a column
+    itself, so a page never wraps a column's content in a ``div`` of its own: the
+    pair's margin reset (D102(b)) reaches only a column's own first and last child.
+
+    A table never goes in a pair: ``.table-scroll table``'s 36rem minimum is wider than
+    a column, so a chart in a pair has its table full width below it. Either column
+    holding a table, or a table's scroll box, raises ``ValueError``: only a code change
+    reaches that, so it is a page's bug, and it fails any render that reaches it, in
+    tests or in production. A table reached only through a prop other than
+    ``children`` (an option's label, say) is not seen, nor is one a callback writes
+    into a column later. ``test_only_components_builds_a_pair``
+    (``test_dashboard_guards.py``) fails a runtime module other than this one that
+    sets the ``pair`` class in the shapes it reads; D103 names what it does not.
+    """
+    for node in _within([*left, *right]):
+        classes = str(node.to_plotly_json()["props"].get("className") or "").split()
+        if isinstance(node, html.Table) or "table-scroll" in classes:
+            raise ValueError(f"pair {ident!r} holds a table")
+    columns = []
+    for held, column_id in ((left, left_id), (right, right_id)):
+        named: dict[str, Any] = {} if column_id is None else {"id": column_id}
+        columns.append(html.Div(list(held), **named))
+    return html.Div(columns, id=ident, className="pair")

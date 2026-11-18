@@ -6952,3 +6952,57 @@ change the phone page and need a `ba` spec). The two columns' heights differ by 
 220 px across the seven recorded years (217 px at most, measured by #544's review; the e2e
 test `test_wide_the_overview_sets_the_panel_beside_national_results` prints them), leaving
 some space under the shorter one.
+
+## D103: Every pair is built by `components.pair`, which refuses a table
+
+**Date:** 2026-11-17
+**Builds on:** D102 (the wide layout) · **Decided by:** the owner, approving #553's plan and,
+at its code review, the residual in (d)
+
+**Context.** D102(d) puts no table in a `.pair` (a table's 36rem minimum is wider than a
+column), and until #553 only the overview's unit test checked it, for its one pair. #553 adds
+two pairs on `/elections` (the list's filters beside the count and averages, and C4 beside
+C5), and its acceptance criteria ask for a test that fails if a table is placed in any pair on
+any registered page. They left the mechanism open: a builder that refuses a table, or the
+overview's check extended to every page.
+
+**Decision.**
+(a) **`components.pair(left, right, ident, *, left_id=None, right_id=None)` is the one way to
+build a pair**, as `components.table` is for tables and `components.chart` for charts. It
+returns the two column `div`s in source order under one `div` with class `pair`, and raises
+`ValueError` when either column holds an `html.Table` or a component whose class list includes
+`table-scroll`. Only a code change reaches that, so it fails any render that reaches it, in
+tests or in production (`TestPair` in `tests/unit/test_dashboard_elections.py`). It walks
+`children` only, as `TestEveryChart` does. `left_id` and `right_id` name a column itself, so a
+page never wraps a column's content in a `div` of its own: D102(b)'s margin reset reaches only a
+column's own first and last child (#553's review found a wrapper holding the count line 12 px
+down).
+(b) **A lint keeps pages on the builder.** `test_only_components_builds_a_pair`
+(`tests/unit/test_dashboard_guards.py`) parses every runtime module under
+`dashboard/explore/` and fails any place outside `components.pair` that sets the `pair` class:
+a `className=` argument, a `"className"` dict entry or an assignment to `.className`, written
+as a literal, inside a multi-class string, in an f-string, in a join, or as a module-level name
+a plain, chained, tuple or annotated assignment binds to such a string. `test_the_pair_lint_catches_the_listed_ways` pins what it
+catches. It reads source, so a class passed through a local variable, a return value or a
+parameter, `setattr`, `exec` or `eval` is not seen. The overview's pair (#544) moved onto the
+builder with its markup unchanged.
+(c) **The pair keeps D102(b)'s margins on every page.** Neither of `/elections`' pairs opens
+with a heading (the list's pair follows the list's heading, C4 and C5's a note), so from 76rem
+the space above the list's pair grows from 1rem to the pair's 1.75rem, and above C4 and C5's
+from 0.875rem (the note's 1em) to 1.75rem. The owner accepted that at #553's plan gate rather
+than adding a second rule.
+(d) **Residual, accepted by the owner as meeting the criterion (#553's code review).** A table
+placed in a pair only on a render branch no test renders, or written into a pair's column by a
+callback output, is not caught. No callback writes a pair's column, or anything inside one but a
+chart's graph (the chart mount and draw callbacks), today. A later pair
+(#546) should have its page's tests render the pair's degraded and empty branches, and a pair
+whose column becomes a callback's output target is outside this check.
+
+**Rationale.** The builder checks every pair on every render that reaches it, in any test or
+in production, so each page's existing tests, through whatever branch they render, and the
+every-page renders in `TestEveryChart` and `TestEveryTable` check the pairs they render, with
+no fixture list of its own. The lint makes the builder the only way, in the shapes it reads, to
+set the class. Rendering every registered page instead would check only the views that sweep
+renders, which the existing every-page renders already cover, and it shares the residual in
+(d). The pattern is the one `components.table`, `components.chart` and
+`components.dropdown_filter` already follow.

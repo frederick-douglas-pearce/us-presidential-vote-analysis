@@ -33,7 +33,6 @@ from tests.e2e.dashboard_pages import (
     FILTER_MIN_PX,
     FIRST,
     LAST,
-    MEASURE_PX,
     NARROW_DESKTOP,
     NOT_FOUND_ERROR,
     PER_CAPITA_SUCCESS,
@@ -41,7 +40,9 @@ from tests.e2e.dashboard_pages import (
     SECTIONS,
     STATES_NOT_FOUND,
     STATES_SUCCESS,
+    WIDE_BREAKPOINT_PX,
     WIDE_WIDTHS,
+    assert_layout_holds,
     assert_rendered,
     boxes,
     composited,
@@ -1136,7 +1137,7 @@ def test_c1_fills_its_column_after_a_resize_across_the_breakpoint(page: Page) ->
         left, right = rects(page, PAIR_COLUMNS)
         graph = rect(page, f"{C1} .chart-graph")
         assert abs(graph["width"] - right["width"]) <= 1, (width, graph, right)
-        if width >= 1216:
+        if width >= WIDE_BREAKPOINT_PX:
             assert abs(left["width"] - right["width"]) <= 1, (width, left, right)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
@@ -1200,34 +1201,7 @@ def test_every_width_keeps_order_measure_and_tables(
     page never scrolls sideways; and from about 1280 px the page's table does not
     either."""
     open_year(page, year, "light", width, section)
-    found = page.evaluate(
-        f"""() => {{
-            const root = document.querySelector("{PAGES[section]}");
-            const all = [...root.querySelectorAll("*")];
-            const reordered = all.filter(el => {{
-                const s = getComputedStyle(el);
-                return s.order !== "0" || /reverse/.test(s.flexDirection)
-                    || s.gridRowStart !== "auto" || s.gridColumnStart !== "auto";
-            }}).map(el => el.id || el.className || el.tagName);
-            const tabbed = all.filter(el => el.tabIndex > 0)
-                .map(el => el.id || el.tagName);
-            const text = [...root.querySelectorAll("p, figcaption, .party-notes li")];
-            const wide = text
-                .filter(el => el.getBoundingClientRect().width > {MEASURE_PX} + 0.5)
-                .map(el => el.tagName + ": " + el.textContent.slice(0, 40));
-            const table = root.querySelector(".table-scroll:has({PAGE_TABLES[section]})");
-            return {{reordered, tabbed, wide, texts: text.length,
-                     table: table && table.scrollWidth <= table.clientWidth + 1,
-                     page: document.documentElement.scrollWidth <= innerWidth}};
-        }}"""
-    )
-    assert found["reordered"] == [], found
-    assert found["tabbed"] == [], found
-    assert found["texts"] > 0 and found["wide"] == [], found
-    assert found["page"], found
-    assert found["table"] is not None, found  # the page's table is there
-    if width >= 1280:
-        assert found["table"], found
+    assert_layout_holds(page, PAGES[section], (PAGE_TABLES[section],), width)
 
 
 @pytest.mark.plotlyjs_fetches(1)

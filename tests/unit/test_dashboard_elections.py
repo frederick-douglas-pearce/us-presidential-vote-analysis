@@ -24,7 +24,7 @@ from typing import Any, TypeGuard
 
 import dash
 import pytest
-from dash import no_update
+from dash import html, no_update
 from dash.development.base_component import Component
 
 from explore import api, charts, components, labels, metrics
@@ -3651,3 +3651,146 @@ class TestN2Fixture:
                 assert sum(totals) == N1_TOTALS[year], year
             else:
                 assert set(totals) == {None}, year
+
+
+# --- the wide layout (#553, D102, D103) ----------------------------------------------
+
+
+class TestPair:
+    """``components.pair``, the one way to build a ``.pair`` (D103): two column divs in
+    source order, refusing a table. ``test_only_components_builds_a_pair``
+    (``test_dashboard_guards.py``) fails a module that sets the class itself."""
+
+    def test_it_builds_two_columns_in_source_order(self) -> None:
+        left, right = html.P("left", id="l"), html.P("right", id="r")
+        built: Any = components.pair([left], [right], "p")
+        assert built.id == "p" and built.className == "pair"
+        first, second = built.children
+        assert type(first).__name__ == type(second).__name__ == "Div"
+        assert first.children == [left] and second.children == [right]
+        # A column has no id unless the page names one.
+        assert "id" not in first.to_plotly_json()["props"]
+        assert "id" not in second.to_plotly_json()["props"]
+
+    def test_a_column_id_names_the_column_itself(self) -> None:
+        held = html.P("x", id="x")
+        built: Any = components.pair([held], [held], "p", left_id="a", right_id="b")
+        first, second = built.children
+        assert (first.id, second.id) == ("a", "b")
+        assert first.children == [held] and second.children == [held]
+
+    def test_it_accepts_a_chart(self) -> None:
+        # Imported here: test_dashboard_export imports from this module.
+        from tests.unit.test_dashboard_export import TEST_FIGURE
+
+        figure: Any = components.chart(
+            "C4", TEST_FIGURE, MOD["OVER_TIME_TABLE_ID"], "Caption"
+        )
+        assert find(components.pair([figure], [], "p"), figure.id) is figure
+
+    @pytest.mark.parametrize(
+        "column",
+        [
+            lambda: [html.Table([], id="t")],
+            lambda: [html.Div([html.P("x"), html.Div(html.Table([]))])],
+            lambda: [html.Div(html.P("x"), className="note table-scroll")],
+        ],
+        ids=["table", "nested-table", "scroll-box"],
+    )
+    @pytest.mark.parametrize("side", ["left", "right"])
+    def test_it_refuses_a_table_in_either_column(self, column: Any, side: str) -> None:
+        held = column()
+        left, right = (held, []) if side == "left" else ([], held)
+        with pytest.raises(ValueError, match="holds a table"):
+            components.pair(left, right, "p")
+
+
+class TestWideLayout:
+    """The elections index's wide layout (#553, D102): the list's pair, the state
+    filter's row and C4 and C5's pair. The stylesheet's rules are pinned in
+    ``TestLayoutRules`` (``test_dashboard_theme.py``); what a browser draws, at which
+    width, is the e2e suite's (``test_dashboard_e2e_elections.py``)."""
+
+    @staticmethod
+    def pair(tree: Any, key: str) -> Any:
+        node = find(tree, MOD[key])
+        assert node is not None and node.className == "pair"
+        return node
+
+    def test_the_list_pair_holds_the_filters_left_and_the_metrics_right(self) -> None:
+        tree = render_over_time()
+        pair = self.pair(tree, "LIST_PAIR_ID")
+        kids = list(tree.children)
+        # A direct child of the success marker, right after the list's heading.
+        heading = kids[kids.index(pair) - 1]
+        assert type(heading).__name__ == "H2"
+        assert heading.children == MOD["LIST_HEADING"]
+        left, right = pair.children
+        assert find(left, YEARS_ID) is not None and find(left, PV_ID) is not None
+        assert find(left, MOD["METRICS_ID"]) is None and find(right, YEARS_ID) is None
+        # The right column is the metrics block itself, with no wrapper of its own,
+        # so the pair's margin reset reaches the count line (#553's review, r1.cr.1).
+        assert right.id == MOD["METRICS_ID"]
+        assert right.children[0].className == "count"
+        assert left.children[0].className == "filters"
+
+    def test_t1_follows_the_list_pair_and_is_not_in_it(self) -> None:
+        tree = render_over_time()
+        pair = self.pair(tree, "LIST_PAIR_ID")
+        assert of_type(pair, "Table") == [] and find(pair, TABLE_ID) is None
+        kids = list(tree.children)
+        assert any(find(kid, TABLE_ID) is not None for kid in kids[kids.index(pair) :])
+
+    def test_the_over_time_pair_holds_c4_left_and_c5_right(self) -> None:
+        tree = render_over_time()
+        pair = self.pair(tree, "OVER_TIME_PAIR_ID")
+        left, right = pair.children
+        assert [f.id for f in of_type(left, "Figure")] == [C4]
+        assert [f.id for f in of_type(right, "Figure")] == [C5]
+        assert of_type(pair, "Table") == [] and find(pair, OVER_TIME) is None
+        order = ids_of(tree)
+        # The state filter comes before the pair; the companion table after it.
+        assert order.index(MOD["STATE_CONTROL_ID"]) < order.index(
+            MOD["OVER_TIME_PAIR_ID"]
+        )
+        assert order.index(C5) < order.index(OVER_TIME)
+
+    def test_c2_s_section_comes_first_in_no_pair(self) -> None:
+        tree = render_over_time()
+        kids = list(tree.children)
+        # The heading and the lede open the page; nothing is built beside the lede.
+        assert type(kids[0]).__name__ == "H1" and kids[1].className == "lede"
+        assert type(kids[2]).__name__ == "Location"
+        assert type(kids[3]).__name__ == "H2" and kids[3].children == MOD["C2_HEADING"]
+        c2 = charts.dom_id("C2")
+        for key in ("LIST_PAIR_ID", "OVER_TIME_PAIR_ID"):
+            pair = self.pair(tree, key)
+            assert find(pair, c2) is None and find(pair, MOD["LEADER_TABLE_ID"]) is None
+        order = ids_of(tree)
+        assert order.index(MOD["LEADER_TABLE_ID"]) < order.index(MOD["LIST_PAIR_ID"])
+
+    @pytest.mark.parametrize("n2", [True, False])
+    def test_the_state_filter_is_in_a_filter_row(self, n2: bool) -> None:
+        control = find(render_over_time(n2=n2), MOD["STATE_CONTROL_ID"])
+        assert control.className.split() == ["filters", "filter-row"]
+        # Hidden with N2 unavailable: the inline style wins over the row's display.
+        assert getattr(control, "style", None) == (None if n2 else {"display": "none"})
+
+    def test_an_unavailable_n1_builds_no_over_time_pair(self) -> None:
+        tree = MOD["render"](copy.deepcopy(BODY), [], None, copy.deepcopy(N2))
+        assert find(tree, MOD["OVER_TIME_PAIR_ID"]) is None
+        # The list pair stands, its right column holding the averages' sentence.
+        _, right = self.pair(tree, "LIST_PAIR_ID").children
+        assert find(right, MOD["METRICS_UNAVAILABLE_ID"]) is not None
+
+    def test_an_empty_list_keeps_the_pair_and_its_sentence_follows(self) -> None:
+        tree = render_over_time({"year_to": "1900", "pv": "1"})
+        assert shown_years(tree) == []
+        pair = self.pair(tree, "LIST_PAIR_ID")
+        assert classed(pair, "empty") == []
+        assert classed(tree, "empty") != []
+
+
+def ids_of(tree: Any) -> list[Any]:
+    """Every component id in a rendered tree, in document order."""
+    return [n.id for n in in_order(tree) if getattr(n, "id", None) is not None]
