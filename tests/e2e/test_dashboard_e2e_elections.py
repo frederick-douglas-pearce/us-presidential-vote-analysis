@@ -466,7 +466,8 @@ def test_c4_and_c5_are_readable_at_phone_width(
 ) -> None:
     """AC Phone width (#558, D104): year along the bottom with its sparse ticks apart,
     every tick, axis title, band label and key entry inside the width, none over
-    another, no bar or marker text, and no sideways scroll."""
+    another, no bar or marker text, and no sideways scroll, and a hover on each chart
+    naming its year."""
     page.set_viewport_size({"width": width, "height": 844})
     open_over_time(page, query, width=width)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
