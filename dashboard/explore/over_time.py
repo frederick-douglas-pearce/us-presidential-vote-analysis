@@ -15,17 +15,18 @@ from typing import Any, NamedTuple, TypeVar
 
 from explore import charts, components, labels
 
-#: C4 and C5's height, the same in every mode now that years run along the bottom
+#: C4, C5 and C7's height, the same in every mode now that years run along the bottom
 #: (#558, D104). Their titles are page text (``components.chart`` takes them out of the
 #: figure), so the top margin is the template's; C5 adds room above it for its band
 #: labels (``pages/elections.py``), and C4 beside it takes C5's margin, so the pair's
 #: plots line up.
 HEIGHT_PX = 360
 TOP_PX = 16
-#: C4's marker series' symbols (#558, D104): one series per label, so the chart's key
-#: names each cause, and one symbol per meaning across C2, C4 and C5: "took no part" is
-#: C5's "x", no figure in this dataset C5's open circle, an unrecognized value the open
-#: square; "no electors appointed", C4's alone, is an open triangle.
+#: C4's marker series' symbols (#558, D104), which C7 draws too (#560): one series per
+#: label, so the chart's key names each cause, and one symbol per meaning across C2, C4,
+#: C5 and C7: "took no part" is C5's "x", no figure in this dataset C5's open circle, an
+#: unrecognized value the open square; "no electors appointed", C4's and C7's alone, is
+#: an open triangle.
 C4_SYMBOLS = {
     labels.C4_NO_ELECTORS: "triangle-up-open",
     labels.C4_NO_ELECTORS_TOOK_NO_PART: "x",
@@ -125,7 +126,7 @@ def bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str, 
 def marker_trace(
     name: str, symbol: str, years: list[int], hovers: list[str]
 ) -> dict[str, Any]:
-    """A time-series chart's series of markers at zero (C2, C4 and C5), one per year
+    """A time-series chart's series of markers at zero (C2, C4, C5 and C7), one per year
     with nothing to draw, named by ``name`` in the chart's key (#558, D104: the key
     labels the marker, not a text beside each), drawn whole at the plot's edge."""
     return {
@@ -162,7 +163,7 @@ def series(
 def time_layout(
     title: str, axis: str, years: list[int], longest: int, *, marked: bool
 ) -> dict[str, Any]:
-    """C4 and C5's shared layout (#558, D104): election year along the bottom, the
+    """C4, C5 and C7's shared layout (#558, D104): election year along the bottom, the
     served years' axis in every mode (:func:`explore.components.year_axis`), so a
     state's years before its first election keep their place; the value up the side
     from zero, with a few full-number ticks; and the chart's key where a marker is
@@ -251,13 +252,16 @@ def state_series(
     #560): the rule C4's one-state series (``n2_rows``) and C7 share. ``by_year`` maps
     each served year the state has a row in to that row.
 
-    Pure; raises ``TypeError`` for a state with no row, or a gap: a served year after
-    its first with no row for it. ``source`` is the API path its rows came from, and
-    reaches the message only (a shared module reads no API).
+    Pure; raises ``TypeError`` for a state with no row, a row for a year not served,
+    or a gap: a served year after its first with no row for it. ``source`` is the API
+    path its rows came from, and reaches the message only (a shared module reads no
+    API).
     """
     if not by_year:
         raise TypeError(f"{source} has no row for {usps}")
     years = sorted(set(served))
+    if not set(by_year) <= set(years):
+        raise TypeError(f"{source} has a row for {usps} in a year not served")
     expected = [year for year in years if year >= min(by_year)]
     if sorted(by_year) != expected:
         raise TypeError(f"{source} skips a year for {usps}")

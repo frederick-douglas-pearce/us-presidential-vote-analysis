@@ -2639,7 +2639,8 @@ def _state_rows(usps: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     """Every N2 ``data`` row of one state (#498): its name is on each, so doctoring one
     row would name the state two ways and refuse N2, and a doctored name would never
     reach the one-state build: its hovers, which carry the name escaped, and its titles
-    and captions, which take their selected-state forms for a name ``_plain`` refuses."""
+    and captions, which take their selected-state forms for a name ``over_time.plain``
+    refuses."""
     return lambda body: [row for row in body["data"] if row["state_usps"] == usps]
 
 
@@ -2787,9 +2788,9 @@ class TestServedValuesReachNoFigureUntyped:
                 changed.append(field)
             if field in reaches and labels.has_text(SERVED_KINDS[kind]):
                 # Text reaches the one-state build: every hover carries it, escaped,
-                # and the title takes its selected-state form, since ``_plain`` refuses
-                # it. Any change is not enough: a refused body's all-states fallback
-                # changes the figure too (#498).
+                # and the title takes its selected-state form, since
+                # ``over_time.plain`` refuses it. Any change is not enough: a refused
+                # body's all-states fallback changes the figure too (#498).
                 assert built is not None, field
                 name = charts.escaped(SERVED_KINDS[kind])
                 hovers = [h for t in built["data"] for h in t.get("hovertext", [])]

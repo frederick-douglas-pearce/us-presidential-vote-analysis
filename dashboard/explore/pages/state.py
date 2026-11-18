@@ -348,7 +348,8 @@ def electors(
 ) -> list[dict[str, Any]]:
     """C7's rows (#560, D106): the state's appointed allotment and popular-vote status,
     one per election from its first, collapsed from ``rows`` (T4's, one per candidate,
-    already checked by :func:`explore.state_view.rows`).
+    already checked by :func:`explore.state_view.rows`, so each row's year is a served
+    year).
 
     Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
     rows that disagree on either value (a null beside a figure is two values, D077,
@@ -358,9 +359,7 @@ def electors(
     """
     by_year: dict[int, dict[str, Any]] = {}
     for row in rows:
-        year = query.checked_year(row["year"])
-        if year is None:
-            raise TypeError(f"{source} names a year that is not one")
+        year = row["year"]
         record = {
             "year": year,
             "state_usps": usps,
@@ -414,19 +413,24 @@ def _electors_section(
     served: set[int],
     usps: str,
     body: dict[str, Any],
+    source: str,
 ) -> list[Any]:
     """C7's section (#560, D106): its heading, the chart, its heading-led companion
-    table and that table's column-name list. Rows T4 shows that cannot be read as one
-    allotment per election show the heading and :data:`C7_UNAVAILABLE` only, with no
-    chart (D096(d)'s rule), while T4 and the page stay. The ``try`` covers everything
-    built from the rows, never ``components.chart`` (D095(f))."""
+    table and that table's column-name list, for the rows T4 shows from the API path
+    ``source``. Rows that cannot be read as one allotment per election, or a served
+    name with nothing in it (D101's rule, which C4's ``n2_rows`` applies), show the
+    heading and :data:`C7_UNAVAILABLE` only, with no chart (D096(d)'s rule), while T4
+    and the page stay. The ``try`` covers everything built from the rows, never
+    ``components.chart`` (D095(f))."""
     heading = html.H2(C7_HEADING)
-    source = f"/v1/states/{usps}"
     try:
         records = electors(rows, served, usps, source)
         points = over_time.appointed_points(records)
         years = sorted(served)
         name = rows[0]["state"]
+        # A name a hover would write as "None", a number or nothing names no state.
+        if not labels.has_text(name):
+            raise TypeError(f"{source} names {usps} with no text")
         plain = over_time.plain(name)
         title = (
             labels.C7_TITLE_THIS_STATE
@@ -511,7 +515,7 @@ def render(
                 state_view.HISTORY,
                 state_view.year_search(chosen.year_from, chosen.year_to, span),
             ),
-            *_electors_section(rows, served, usps, body),
+            *_electors_section(rows, served, usps, body, source),
             html.H2(HISTORY_TABLE_HEADING),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             _controls(rows, chosen, span),

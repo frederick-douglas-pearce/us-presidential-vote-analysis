@@ -7176,12 +7176,20 @@ it shares with C4 lives, which table is its companion, where it sits on the page
   (`year`, `state_electoral_votes`, `pv_status`) and refuses a year whose rows disagree on
   either value, by D077/D098's one-value rule (a null beside a figure, and `True` beside `1`,
   are two values). Its order and gap rule is C4's own, `over_time.state_series`, which `n2_rows`
-  also calls; past the collapse C7's points and figure are C4's one-state ones by construction.
+  also calls. Past the collapse, C7 draws through C4's figure builder, `over_time.c4_figure`;
+  its points come from `over_time.appointed_points`, which words the allotment and status
+  through the same `labels` functions as C4's `_state_points`. The two series' agreement is
+  pinned against the recorded N2 rows ((h)), not by construction. On `/elections` C4 also
+  takes C5's top margin so the pair lines up; C7, on its own, keeps the template's. A served
+  name with nothing in it degrades C7's section, D101's rule, as `n2_rows` refuses one.
 - **(b) The shared pieces are a shared module, `explore/over_time.py`:** C4's figure, moved
   whole and unchanged in behavior (its traces, layout, symbols, hover and one-value rule),
   the gap rule, and `appointed_points`, which builds one state's points from collapsed records
   (no total: C5's). C5's figure, its band and the N1/N2 readers stay on `/elections`. A shared
-  module reads no API, so a source path reaches an error message only as an argument.
+  module reads no API, so a source path reaches an error message only as an argument. Against
+  the approved plan, C4's caption helpers (`_c4_caption`, `_first_note`) stay on `/elections`
+  and C7 composes its own caption, with a "this state" first-election form; they fold
+  together once #562 leaves C7 the only user of the one-state forms.
 - **(c) C7 has its own companion table, `state-electors`, which no filter reaches.** T4 cannot
   be its companion: an honestly empty T4 (a year range before the state's first election) has
   no table for the chart's pointer to name, and T4 repeats the allotment on every candidate's
@@ -7214,5 +7222,6 @@ it shares with C4 lives, which table is its companion, where it sits on the page
 its regression guard.
 
 **Rationale.** The reader gets the trend where the state is, at no extra cost to the page. One
-figure path for C4 and C7 keeps "same series, same drawing" a property of the code rather than
-of two copies, and an unfiltered companion table is the one design D093 and D091 both hold for.
+figure builder for C4 and C7 keeps "same drawing" a property of the code rather than of two
+copies, a test against the recorded rows keeps "same series", and an unfiltered companion
+table is the one design D093 and D091 both hold for.

@@ -1636,13 +1636,6 @@ N2: dict[str, Any] = RECORDED[api.ELECTION_STATES_PATH]
 SERVED = sorted(state_view.served_years(INDEX))
 
 
-#: C4's page module, whose one-state points C7's are checked against (#560).
-ELECTIONS_MOD: dict[str, Any] = dash.page_registry["pages.elections"][
-    "layout"
-].__globals__
-INDEX_COVERAGE: dict[str, Any] = INDEX["meta"]["provenance"]["coverage"]
-
-
 def body_cells(tree: Any) -> list[tuple[str, str, str]]:
     """C7's companion table's body: each row's year, allotment and status texts."""
     return [
@@ -1735,26 +1728,35 @@ class TestC7:
         assert c7_title(tree) == title
 
     def test_every_n2_state_s_series_reads_the_same_through_c7(self) -> None:
-        # AC2 on the recorded N2 fixture (TX's history is #575's): each state's N2 rows,
-        # one per election, pass C7's collapse unchanged, and its points and figure are
-        # C4's one-state ones.
+        # AC2 on the recorded N2 fixture (TX's history is #575's), against N2's rows
+        # directly and never C4's builders, so #562 can retire C4's one-state mode
+        # (D106(h)): each state's rows, one per election, pass C7's collapse unchanged,
+        # and its points word exactly N2's allotment and status.
         states = {r["state_usps"] for r in N2["data"]}
         assert len(states) == 51
         for usps in sorted(states):
             n2 = n2_state(usps)
             records = MOD["electors"](n2, set(SERVED), usps, "N2")
-            assert [r["year"] for r in records] == [r["year"] for r in n2], usps
-            mine = over_time.appointed_points(records)
-            theirs = ELECTIONS_MOD["_state_points"](n2, INDEX_COVERAGE)
             assert [
-                (p.year, p.appointed, p.appointed_cell, p.status_cell) for p in mine
+                (r["year"], r["state_electoral_votes"], r["pv_status"])
+                for r in records
             ] == [
-                (p.year, p.appointed, p.appointed_cell, p.status_cell) for p in theirs
+                (r["year"], r["state_electoral_votes"], r["pv_status"]) for r in n2
             ], usps
-            assert (
-                over_time.c4_figure(mine, SERVED, "t", usps).figure
-                == over_time.c4_figure(theirs, SERVED, "t", usps).figure
-            ), usps
+            points = over_time.appointed_points(records)
+            assert [
+                (p.year, p.appointed, p.appointed_cell, p.status, p.status_cell)
+                for p in points
+            ] == [
+                (
+                    r["year"],
+                    r["state_electoral_votes"],
+                    labels.number(r["state_electoral_votes"]),
+                    r["pv_status"],
+                    labels.pv_status(r["pv_status"]),
+                )
+                for r in n2
+            ], usps
 
     def test_the_chart_equals_its_table_s_cells(self) -> None:
         tree = render()
@@ -1867,6 +1869,17 @@ class TestC7:
         figure = c7_figure(tree)
         assert figure["layout"]["xaxis"] == components.year_axis(SERVED)
 
+    def test_the_first_election_sentence_follows_the_served_years_not_coverage(
+        self,
+    ) -> None:
+        # The sentence compares the state's first election with the first served
+        # year (the index's, as C4 does), never the body's ``coverage.year_min``: with
+        # coverage starting before 1824, Georgia's 1824 is still the dataset's first.
+        body = ga_body()
+        body["meta"]["provenance"]["coverage"]["year_min"] = 1700
+        tree = render(body=body)
+        assert "The first election in this dataset" not in c7_caption(tree)
+
     def test_a_name_that_is_not_plain_text_takes_this_state_s_forms(self) -> None:
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] >= 1832]
@@ -1925,6 +1938,15 @@ class TestC7Degraded:
         body["data"] = [r for r in body["data"] if r["year"] != 1900]
         self.assert_degraded(body)
 
+    @pytest.mark.parametrize("name", [None, 7, "", "   "])
+    def test_a_served_name_with_nothing_in_it(self, name: Any) -> None:
+        # D101's rule, as C4's n2_rows applies it: a hover would write the name as
+        # "None", a number or nothing, so the section degrades.
+        body = ga_body()
+        for row in body["data"]:
+            row["state"] = name
+        self.assert_degraded(body)
+
     def test_a_row_without_the_allotment(self) -> None:
         body = ga_body()
         for row in body["data"]:
@@ -1971,5 +1993,7 @@ class TestStateSeries:
             over_time.state_series(
                 {1824: "a", 1832: "c"}, [1824, 1828, 1832], "s", "GA"
             )
+        with pytest.raises(TypeError, match="in a year not served"):
+            over_time.state_series({1824: "a", 1826: "b"}, [1824, 1828], "s", "GA")
         with pytest.raises(TypeError, match="has no row for GA"):
             over_time.state_series({}, [1824], "s", "GA")

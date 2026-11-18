@@ -725,9 +725,9 @@ FIRST_ELECTION_NOTE_SELECTED = (
 )
 
 #: Chart C7 (#560): one state's electors appointed, on its history page. Its title,
-#: axis, hover, key and most of its caption are C4's one-state wording; these are the
-#: forms for a state its page names by address, never by a choice (ba spec, approved at
-#: #560's plan gate, 2026-11-18).
+#: axis, hover, key and most of its caption are C4's one-state wording. Two of these are
+#: the forms for a state its page names by address, never by a choice; the third says
+#: what the page's filters reach (ba spec, approved at #560's plan gate, 2026-11-18).
 C7_TITLE_THIS_STATE = "Electors appointed by this state in each election"
 FIRST_ELECTION_NOTE_THIS_STATE = (
     "The first election in this dataset for this state is {year}, so nothing is drawn "
