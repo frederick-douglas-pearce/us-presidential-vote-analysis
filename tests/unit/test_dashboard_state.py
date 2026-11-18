@@ -334,6 +334,24 @@ class TestGeorgia:
         _, name = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA", [])
         assert name == "Georgia"
 
+    @pytest.mark.parametrize("name", ["", "  ", "\u200b"], ids=repr)
+    def test_a_name_with_nothing_in_it_keeps_the_generic_heading(
+        self, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            row["state"] = name
+        fetch, _ = fake_fetch({**RECORDED, GA_PATH: body})
+        client = offline_client(
+            fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, ROSTER_PATH]
+        )
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        monkeypatch.setattr(api, "CLIENT", client)
+        heading, _, content = MOD["layout"](usps="GA").children
+        assert heading.children == "State history"
+        assert content.id == PAGE_ID
+
     def test_the_history_page_shows_no_t7(self) -> None:
         tree = render()
         assert find(tree, PER_CAPITA) is None

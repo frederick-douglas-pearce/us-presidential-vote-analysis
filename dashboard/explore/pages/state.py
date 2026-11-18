@@ -329,8 +329,9 @@ def render(
     index: dict[str, Any],
     usps: str,
     pairs: list[tuple[str, str]],
-) -> tuple[html.Div, str]:
-    """The page body and the state's name, for one ``/v1/states/{usps}`` response and
+) -> tuple[html.Div, Any]:
+    """The page body and the state's name as served (the layout checks it has text),
+    for one ``/v1/states/{usps}`` response and
     the ``/v1/elections`` index (read through the same view), and this page's filter
     pairs. The section links come first, carrying the year range applied (#559)."""
     provenance = body["meta"]["provenance"]
@@ -365,7 +366,7 @@ def render(
         ],
         id=PAGE_ID,
     )
-    return content, str(rows[0]["state"])
+    return content, rows[0]["state"]
 
 
 def layout(usps: Any = None, **params: Any) -> html.Div:
@@ -382,7 +383,11 @@ def layout(usps: Any = None, **params: Any) -> html.Div:
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/states/{usps}")
-                content, heading = render(body, index, usps, parse_filters(params))
+                content, state = render(body, index, usps, parse_filters(params))
+                # A served name with nothing in it names no state (#532's rule), as on
+                # the per-capita page: the heading stays "State history".
+                if labels.has_text(state):
+                    heading = state
                 lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
