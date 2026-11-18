@@ -217,7 +217,14 @@ class TestOnRoster:
     @pytest.mark.parametrize("position", [0, 50, -1])
     @pytest.mark.parametrize(
         "change",
-        [{"year": 1824}, {"year": "2024"}, {"state_usps": "ga"}, {"state": None}],
+        [
+            {"year": 1824},
+            {"year": "2024"},
+            {"state_usps": "ga"},
+            # Too long: a prefix match would take it; the code must be the whole value.
+            {"state_usps": "GAA"},
+            {"state": None},
+        ],
         ids=repr,
     )
     def test_a_roster_the_picker_would_refuse_names_no_state(
@@ -1072,7 +1079,13 @@ class TestPicker:
 
     @pytest.mark.parametrize(
         "change",
-        [{"year": 2020}, {"year": "2024"}, {"state_usps": "ga"}, {"state_usps": None}],
+        [
+            {"year": 2020},
+            {"year": "2024"},
+            {"state_usps": "ga"},
+            {"state_usps": "GAA"},
+            {"state_usps": None},
+        ],
         ids=repr,
     )
     @pytest.mark.parametrize("position", [0, 50, -1])
@@ -1376,6 +1389,14 @@ class TestSectionLinks:
     being read is text with ``aria-current="page"``, the other a link carrying the year
     range the render applied and nothing else (#559, D105; the election pages' links
     carry no filter, D092)."""
+
+    def test_the_link_texts_are_the_spec_s_and_name_each_page_apart(self) -> None:
+        # ba's spec, approved at #559's plan gate: the two entries must differ, or a
+        # reader could not tell which page a link opens.
+        assert [state_view.SECTION_TEXT[s] for s in state_view.SECTIONS] == [
+            "State history",
+            "People per electoral vote",
+        ]
 
     def test_the_landmark_is_named_and_drawn_as_the_election_pages_are(self) -> None:
         (nav,) = [n for n in of_type(render(), "Nav") if n.id == state_view.SECTIONS_ID]
