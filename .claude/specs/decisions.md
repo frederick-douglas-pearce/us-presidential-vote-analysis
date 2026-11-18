@@ -7027,7 +7027,8 @@ its true width. It is one shared builder, `components.year_axis`: its range is t
 years' with `YEAR_PAD` (2) years either side, built from the served years and never from what a
 filter leaves, so the axis is the same in every mode (D100(a)'s rule, kept). Its ticks are
 fixed on the server at every multiple of `YEAR_TICK_STEP` (40) within the span, written as
-plain years (the template's thousands separator would write "1,840"). Where that gives fewer
+plain years (the template's thousands separator would write "1,840") at 12 px, the
+annotations' size (at 14 px, C5's ticks at 360 px sat 2 px apart in CI's browser font). Where that gives fewer
 than two ticks, the first and last served years are used instead. The step is fixed rather than plotly's `dtick` so the ticks
 are in the figure the D093(c)/D096(b)/D100(b) comparison reads; 40 keeps two four-digit ticks
 apart at 360 px, where 20 does not. The axis is titled "Election year" (`LABELS["year"]`), and

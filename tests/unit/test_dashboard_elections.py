@@ -3746,6 +3746,7 @@ class TestTimeSeriesAxis:
         assert axis["range"] == [FIRST - components.YEAR_PAD, LAST + components.YEAR_PAD]
         assert axis["title"] == {"text": labels.LABELS["year"]}
         assert components.YEAR_TICK_STEP == 40
+        assert axis["tickfont"] == {"size": components.YEAR_TICK_FONT_PX} == {"size": 12}
         assert "tickformat" not in axis and "dtick" not in axis
 
     @pytest.mark.parametrize(

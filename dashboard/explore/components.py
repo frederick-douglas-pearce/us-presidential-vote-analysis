@@ -137,6 +137,10 @@ def year_marks(first: int, last: int) -> dict[int, str]:
 YEAR_TICK_STEP = 40
 #: Years of room on each side of the first and last served year.
 YEAR_PAD = 2
+#: The year ticks' text size, the size the charts' annotations use: at 14 px, C5's
+#: ticks at 360 px sat only 2 px apart in CI's browser font, beside its wide value
+#: ticks.
+YEAR_TICK_FONT_PX = 12
 
 
 def year_axis(years: Sequence[int]) -> dict[str, Any]:
@@ -144,9 +148,10 @@ def year_axis(years: Sequence[int]) -> dict[str, Any]:
     year and a gap between served elections is drawn at its true width; its range the
     served years' with :data:`YEAR_PAD` either side; its ticks every multiple of
     :data:`YEAR_TICK_STEP` within them, written as plain years (the template's
-    thousands separator would write "1,840"), and the first and last years instead where
-    that gives fewer than two; and titled "Election year". One axis for every mode of a
-    chart: built from the served years, never from what a filter leaves."""
+    thousands separator would write "1,840") at :data:`YEAR_TICK_FONT_PX`, and the first
+    and last years instead where that gives fewer than two; and titled "Election year".
+    One axis for every mode of a chart: built from the served years, never from what a
+    filter leaves."""
     first, last = min(years), max(years)
     start = -(-first // YEAR_TICK_STEP) * YEAR_TICK_STEP
     ticks = list(range(start, last + 1, YEAR_TICK_STEP))
@@ -157,6 +162,7 @@ def year_axis(years: Sequence[int]) -> dict[str, Any]:
         "range": [first - YEAR_PAD, last + YEAR_PAD],
         "tickvals": ticks,
         "ticktext": [str(year) for year in ticks],
+        "tickfont": {"size": YEAR_TICK_FONT_PX},
         "showgrid": False,
         "zeroline": False,
         "title": {"text": labels.LABELS["year"]},
