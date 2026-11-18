@@ -1855,6 +1855,16 @@ class TestC2:
             assert note in marks["hovertext"][0]
         assert charts.figure_problems(figure) == []
 
+    def test_the_marker_note_shows_only_with_a_marker(self) -> None:
+        """The caption names the marker only when one is drawn (#558, D104): with every
+        leader's share served, there is no marker, no key and no note (Class B
+        survivor: the note added unconditionally)."""
+        tree = render_c2()
+        (caption,) = of_type(find(tree, C2), "Figcaption")
+        assert labels.C2_NO_SHARE_NOTE not in caption.children[0]
+        assert caption.children[0].endswith(labels.C2_TOOK_OFFICE)
+        assert len(c2_figure(tree)["data"]) == 1  # the premise: no marker drawn
+
     def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
         layout = c2_figure(render_c2())["layout"]
         (line,) = layout["shapes"]
