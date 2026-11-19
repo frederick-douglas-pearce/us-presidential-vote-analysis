@@ -39,8 +39,8 @@ from tests.unit.test_dashboard_guards import DOWNLOAD_IDS
 #: Every table's id (its link's is ``export.link_id(id)``), by the page that renders it.
 TABLES = {
     "elections-table": "/elections",
-    # Chart C2's companion table (#434).
-    "elections-leader-table": "/elections",
+    # Chart C2's companion table (#434), on its own page since #562.
+    "elections-leader-table": "/elections/majority",
     # Charts C4 and C5's companion table (#436).
     "elections-over-time-table": "/elections",
     "election-states": "/election/<year>/states",
@@ -65,6 +65,8 @@ READS_BEFORE = {
     # The index, then N1 for chart C2, then N2 for C4 and C5, in the same view (#434,
     # #436).
     "/elections": ["/v1/elections", "/v1/elections/summary", "/v1/elections/states"],
+    # Chart C2's page (#562): the index, then N1, in the same view.
+    "/elections/majority": ["/v1/elections", "/v1/elections/summary"],
     # #465 split the one-election view's reads across its three pages: each fills one
     # path (the per-capita page reads no /v1/elections/{year}), and none adds a read.
     "/election/<year>": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
@@ -479,6 +481,12 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         # The popular-vote filter reaches T1 only (#436's review).
         ({}, "pv=1", "filtered"),
         ({}, "state=GA&pv=1", "filtered"),
+    ],
+    # #562: C2's own page reads no filter (no ``query=``), so the list's old keys and
+    # the retired state key change nothing on it, as the overview's moved keys do.
+    "/elections/majority": [
+        ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
+        ({}, "state=GA", "filtered"),
     ],
     # #560, D106: the state page's filters narrow T4 only, never C7 or its companion
     # table. Georgia from 1824, with 1864's zero allotment.
@@ -2288,6 +2296,8 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
             "/v1/elections/summary": _over_time,
         },
     ),
+    # C2's leader table, on its own page since #562.
+    "/elections/majority": ({}, {"/v1/elections/summary": _over_time}),
     f"/elections?state={N2_STATE}": (
         {},
         {
@@ -2325,17 +2335,16 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 UNRECOGNIZED_CELLS = {
     "/elections": {
         "elections-table": 2,
-        # One per doctored field, ``ec_determinative`` from the year's item (#434).
-        "elections-leader-table": len(LEADER_ROW_FIELDS) + 1,
         # One per average whose field a doctored item holds (#437).
         "elections-metrics": len(AVERAGED_FIELDS),
         # The first year's allotment and 2016's national total (#436).
         "elections-over-time-table": 2,
     },
+    # One per doctored field, ``ec_determinative`` from the year's item (#434).
+    "/elections/majority": {"elections-leader-table": len(LEADER_ROW_FIELDS) + 1},
     # One state (#436): its first row's allotment, total and status.
     f"/elections?state={N2_STATE}": {
         "elections-table": 0,
-        "elections-leader-table": 0,
         "elections-metrics": 0,
         "elections-over-time-table": 3,
     },

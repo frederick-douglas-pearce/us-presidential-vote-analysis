@@ -139,11 +139,9 @@ FIXTURE_FILES = {
 #: success run at :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render,
 #: under the guard. Checked per page, so a link that moved to another page fails.
 DOWNLOAD_IDS_BY_PAGE = {
-    "/elections": (
-        "elections-leader-table-csv",
-        "elections-table-csv",
-        "elections-over-time-table-csv",
-    ),
+    "/elections": ("elections-table-csv", "elections-over-time-table-csv"),
+    # Chart C2's page since #562.
+    "/elections/majority": ("elections-leader-table-csv",),
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),

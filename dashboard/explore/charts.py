@@ -68,7 +68,7 @@ CHARTS: Mapping[str, Chart] = {
     # Each election's Electoral College leader's electoral share against the majority
     # line, never narrowed by the page's filters, on the elections index, beside its
     # own companion table (#434, D096).
-    "C2": Chart("/elections", "elections-leader-table"),
+    "C2": Chart("/elections/majority", "elections-leader-table"),
     # Electors appointed and the total popular vote in each election, all states or the
     # one state the page's state filter chooses, on the elections index, beside one
     # companion table they share (#436, D100).
