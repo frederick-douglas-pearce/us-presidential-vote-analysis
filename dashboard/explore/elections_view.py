@@ -5,7 +5,8 @@ elections.py``), the Electoral College majority at ``/elections/majority`` (``pa
 elections_majority.py``, chart C2) and the electors appointed and total popular vote at
 ``/elections/over-time`` (``pages/elections_over_time.py``, charts C4 and C5). A page
 module cannot import another (Dash executes it before it is in ``sys.modules``), so
-what they share lives here: the check of N1's ``elections`` items, which all three read.
+what they share lives here: the section paths, the section links, and the check of
+N1's ``elections`` items, which all three read.
 
 A shared module, like ``election_view``: pure functions of what a page already read,
 importing nothing from ``explore`` but the other shared modules, never ``api`` or
@@ -17,7 +18,44 @@ from __future__ import annotations
 
 from typing import Any
 
-from explore import election_view, query
+from dash import dcc, html
+
+from explore import election_view, labels, query
+
+#: The three pages' paths, in page order (#562): the one source for each page's
+#: registration, its download's view URL and the section links.
+LIST = "/elections"
+MAJORITY = "/elections/majority"
+OVER_TIME = "/elections/over-time"
+SECTIONS = (LIST, MAJORITY, OVER_TIME)
+SECTION_TEXT = {
+    LIST: labels.SECTION_ELECTIONS_LIST,
+    MAJORITY: labels.SECTION_MAJORITY,
+    OVER_TIME: labels.SECTION_OVER_TIME,
+}
+
+#: The section links' landmark, drawn by the class the election and state pages'
+#: section links share (``style.css``).
+SECTIONS_ID = "elections-sections"
+
+
+def section_nav(current: str) -> html.Nav:
+    """The links between the three elections pages (#562), in page order, on D092's
+    pattern: the page being read is text carrying ``aria-current="page"`` (a
+    ``dcc.Link`` renders no ``aria-*``), the other two client-side links, unfiltered.
+    Rendered on success only."""
+    aria_current: dict[str, Any] = {"aria-current": "page"}
+    entries = [
+        html.Span(SECTION_TEXT[section], **aria_current)
+        if section == current
+        else dcc.Link(SECTION_TEXT[section], href=section)
+        for section in SECTIONS
+    ]
+    aria: dict[str, Any] = {"aria-label": labels.ELECTIONS_SECTIONS_LABEL}
+    return html.Nav(
+        entries, id=SECTIONS_ID, className=election_view.SECTIONS_CLASS, **aria
+    )
+
 
 #: How N1 is named in the errors below: a shared module names no API path (it reads no
 #: ``api``), and the pages' ``try`` blocks turn every one into a section's own sentence.

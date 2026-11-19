@@ -119,7 +119,7 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
 
 dash.register_page(
     __name__,
-    path="/elections",
+    path=elections_view.LIST,
     title=f"Elections — {SITE_TITLE}",
     # No years: the index HTML never waits on the API, so this cannot read the span.
     description="Every US presidential election in the dataset, filterable by year.",
@@ -244,9 +244,7 @@ def next_search(
     State(URL_ID, "search"),
     prevent_initial_call=True,
 )
-def on_filter_change(
-    years: Any, pv: Any, first: Any, last: Any, current: Any
-) -> Any:
+def on_filter_change(years: Any, pv: Any, first: Any, last: Any, current: Any) -> Any:
     """A filter change becomes a URL change; the router re-renders from the cache.
 
     Reads no API. Only the changed control's keys change (:func:`next_search`).
@@ -264,7 +262,6 @@ def _row(election: dict[str, Any]) -> html.Tr:
             labels.cell(labels.has_popular_vote(election["has_popular_vote"])),
         ]
     )
-
 
 
 def _shown_year(row: Any) -> int:
@@ -389,7 +386,7 @@ def render(
         name="the elections",
         provenance=provenance,
         view_url=export.view_url(
-            CANONICAL_HOST, "/elections", applied_search(chosen, first, last)
+            CANONICAL_HOST, elections_view.LIST, applied_search(chosen, first, last)
         ),
     )
     return html.Div(
@@ -397,6 +394,7 @@ def render(
             html.H1("Elections"),
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
+            elections_view.section_nav(elections_view.LIST),
             html.H2(LIST_HEADING),
             # Source order is reading order at every width: the filters are the pair's
             # left column and the count and averages they narrow its right, which is

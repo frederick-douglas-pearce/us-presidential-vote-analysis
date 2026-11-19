@@ -908,7 +908,7 @@ class TestSharedPieces:
         # The election pages' shared pieces build on labels and query only (#465).
         assert graph["election_view"] == {"labels", "query"}
         # And the elections pages' (#562), which check a year as the election pages do.
-        assert graph["elections_view"] == {"election_view", "query"}
+        assert graph["elections_view"] == {"election_view", "labels", "query"}
         # And the state pages' (#559), which therefore own the roster reading.
         assert graph["state_view"] == {"labels", "query"}
         # The summaries share the cells' rule of what is a figure (#437, D097(f)).
@@ -2387,7 +2387,8 @@ class TestWideLayout:
         kids = list(tree.children)
         assert type(kids[0]).__name__ == "H1" and kids[1].className == "lede"
         assert type(kids[2]).__name__ == "Location"
-        assert type(kids[3]).__name__ == "H2" and kids[3].children == MOD["LIST_HEADING"]
+        assert kids[3].id == elections_view.SECTIONS_ID  # the section links (#562)
+        assert type(kids[4]).__name__ == "H2" and kids[4].children == MOD["LIST_HEADING"]
         assert find(tree, charts.dom_id("C2")) is None
 
     def test_an_unavailable_n1_keeps_the_list_pair(self) -> None:
@@ -2407,3 +2408,90 @@ class TestWideLayout:
 def ids_of(tree: Any) -> list[Any]:
     """Every component id in a rendered tree, in document order."""
     return [n.id for n in in_order(tree) if getattr(n, "id", None) is not None]
+
+
+# --- the section links between the three elections pages (#562, D092's pattern) ------
+
+ELECTIONS_PAGES = {
+    elections_view.LIST: "pages.elections",
+    elections_view.MAJORITY: "pages.elections_majority",
+    elections_view.OVER_TIME: "pages.elections_over_time",
+}
+
+
+class TestSectionLinks:
+    @staticmethod
+    def rendered(path: str, summary: Any = None) -> Any:
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        own = page["layout"].__globals__
+        index = copy.deepcopy(BODY)
+        n1 = copy.deepcopy(SUMMARY) if summary is None else summary
+        if path == elections_view.LIST:
+            return own["render"](index, [], n1)
+        return own["render"](index, n1)
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_each_page_marks_itself_and_links_the_other_two(self, path: str) -> None:
+        nav = find(self.rendered(path), elections_view.SECTIONS_ID)
+        assert type(nav).__name__ == "Nav"
+        assert getattr(nav, "aria-label") == labels.ELECTIONS_SECTIONS_LABEL
+        assert nav.className == "section-links"
+        texts_in_order = [entry.children for entry in nav.children]
+        assert texts_in_order == [
+            labels.SECTION_ELECTIONS_LIST,
+            labels.SECTION_MAJORITY,
+            labels.SECTION_OVER_TIME,
+        ]
+        for entry, section in zip(nav.children, elections_view.SECTIONS, strict=True):
+            if section == path:
+                assert type(entry).__name__ == "Span"
+                assert getattr(entry, "aria-current") == "page"
+            else:
+                # Client-side and unfiltered: the bare path, no query.
+                assert type(entry).__name__ == "Link" and entry.href == section
+
+    def test_the_index_s_links_carry_no_filter(self) -> None:
+        own = PAGE["layout"].__globals__
+        tree = own["render"](
+            copy.deepcopy(BODY),
+            own["parse_filters"]({"year_from": "1900", "pv": "1"}),
+            copy.deepcopy(SUMMARY),
+        )
+        nav = find(tree, elections_view.SECTIONS_ID)
+        hrefs = [e.href for e in nav.children if type(e).__name__ == "Link"]
+        assert hrefs == [elections_view.MAJORITY, elections_view.OVER_TIME]
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_a_failed_n1_keeps_the_links(self, path: str) -> None:
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        own = page["layout"].__globals__
+        if path == elections_view.LIST:
+            tree = own["render"](copy.deepcopy(BODY), [], None)
+        else:
+            tree = own["render"](copy.deepcopy(BODY), None)
+        assert find(tree, elections_view.SECTIONS_ID) is not None
+        assert tree.id == page["success"]
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_the_degraded_page_has_no_links(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        """On success only (D092): the index unreadable, no section links."""
+
+        class Down:
+            def view(self) -> Any:
+                raise api.ApiUnavailable("down")
+
+        monkeypatch.setattr(api, "CLIENT", Down())
+        tree = dash.page_registry[ELECTIONS_PAGES[path]]["layout"]()
+        assert find(tree, elections_view.SECTIONS_ID) is None
+        assert components.UNAVAILABLE_MESSAGE in texts(tree)
+
+    def test_the_links_route_client_side_to_each_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        for path, module in ELECTIONS_PAGES.items():
+            success = dash.page_registry[module]["success"]
+            ids = routed_ids(route(path))
+            assert success in ids and elections_view.SECTIONS_ID in ids, path

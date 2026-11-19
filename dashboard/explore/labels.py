@@ -103,7 +103,6 @@ LABELS: dict[str, str] = {
     # ``/v1/elections/states`` row's total popular vote.
     "electoral_denominator": "Electors appointed (nation)",
     "national_pv_denominator": "Total popular vote (nation)",
-    "state_popular_total": "Total popular vote (state)",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -167,7 +166,6 @@ NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this s
 NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
 #: A total popular vote with no figure inside the window (#436): a state's, in the
 #: C4/C5 table with one state chosen, and the nation's, with all states.
-NO_STATE_TOTAL = "No total popular vote in this dataset for this state"
 NO_NATIONAL_TOTAL = "No total popular vote in this dataset for this election"
 
 #: What the party column shows (#389): a table note under T2–T5 and in their
@@ -342,6 +340,15 @@ SECTION_PER_CAPITA = "People per electoral vote"
 #: title before a code is checked (``title()`` in ``pages/state.py``).
 STATE_SECTIONS_LABEL = "Pages for this state"
 SECTION_STATE_HISTORY = "State history"
+
+#: The links between the three elections pages (#562; ba spec, approved at #562's plan
+#: gate, 2026-11-19), in page order, and their landmark's accessible name, on the
+#: election and state pages' pattern: "all" where theirs say "this". "List of
+#: elections", never "Overview", which names an election's first page.
+ELECTIONS_SECTIONS_LABEL = "Pages for all elections"
+SECTION_ELECTIONS_LIST = "List of elections"
+SECTION_MAJORITY = "Electoral College majority"
+SECTION_OVER_TIME = "Electors appointed and total popular vote"
 
 #: The not-found state's heading, sentence and link, shared by a state's two pages
 #: (#325; moved here and the sentence reworded by #559, ba spec, approved at its plan
@@ -682,11 +689,10 @@ NOMINATING_PARTY: dict[str, str] = {
 
 # --- Charts C4 and C5 (#436, D100): ba spec, approved at #436's plan gate -------------
 
-#: C4's titles: all states, one state by name, and the form for a name that is not
-#: plain text (``components.chart`` refuses ``<`` in a title).
+#: C4's title, and the one-state form C7 shares (#560; C4 draws all states only since
+#: #562, D107).
 C4_TITLE = "Electors appointed in each election, all states"
 C4_TITLE_STATE = "Electors appointed by {state} in each election"
-C4_TITLE_SELECTED = "Electors appointed by the selected state in each election"
 C4_VALUE_AXIS = "Electors appointed"
 C4_HOVER = "{year}, all states<br>Electors appointed: {appointed}"
 C4_STATE_HOVER = (
@@ -703,9 +709,11 @@ C4_BASIS = (
     "it was entitled to choose. It is not the electoral votes cast or counted, which "
     "can be fewer."
 )
+#: Reworded at #562 (ba spec, approved at its plan gate, 2026-11-19): "With all
+#: states," contrasted with the one-state mode that retired.
 C4_ALL_STATES = (
-    "With all states, each bar is the whole Electoral College that year: every "
-    "state's electors appointed, added up."
+    "Each bar is the whole Electoral College that year: every state's electors "
+    "appointed, added up."
 )
 C4_ZERO_NOTE = (
     "A marker in place of a bar marks an election in which the state appointed no "
@@ -718,10 +726,6 @@ C4_NO_FIGURE_NOTE = (
 FIRST_ELECTION_NOTE = (
     "The first election in this dataset for {state} is {year}, so nothing is drawn "
     "for the years before it."
-)
-FIRST_ELECTION_NOTE_SELECTED = (
-    "The first election in this dataset for the selected state is {year}, so nothing "
-    "is drawn for the years before it."
 )
 
 #: Chart C7 (#560): one state's electors appointed, on its history page. Its title,
@@ -739,14 +743,8 @@ C7_FILTERS_NOTE = (
 )
 
 C5_TITLE = "Total popular vote in each election, all states"
-C5_TITLE_STATE = "Total popular vote in {state} in each election"
-C5_TITLE_SELECTED = "Total popular vote in the selected state in each election"
 C5_VALUE_AXIS = "Total popular vote"
 C5_HOVER = "{year}, all states<br>Total popular vote: {total}"
-C5_STATE_HOVER = (
-    "{year}: {state}<br>Total popular vote: {total}<br>"
-    "Popular vote in this state: {pv_status}"
-)
 #: The bands' labels, above the plot (#558, D104): before the window, at the band's
 #: left edge, and after it, at its right edge.
 C5_BEFORE_BAND = (
@@ -764,9 +762,8 @@ C5_BASIS = (
     "including candidates who are not in this dataset, as the popular-vote source "
     "reports them."
 )
-C5_ALL_STATES = (
-    "With all states, each bar is the national total: every state's total, added up."
-)
+#: Reworded at #562, as :data:`C4_ALL_STATES`.
+C5_ALL_STATES = "Each bar is the national total: every state's total, added up."
 C5_BEFORE_NOTE = (
     "The shaded years come before {pv_year_min}, when this dataset's popular-vote "
     "figures begin. Shading means this dataset has no total for those years, not that "
@@ -784,7 +781,6 @@ C5_MARKER_NOTE = (
 C5_MARKER_LABELS: dict[str, str] = {
     LEGISLATURE_CHOSE: C5_LEGISLATURE,
     TOOK_NO_PART: C5_TOOK_NO_PART,
-    NO_STATE_TOTAL: C5_NO_TOTAL,
     NO_NATIONAL_TOTAL: C5_NO_TOTAL,
     UNRECOGNIZED: UNRECOGNIZED,
 }
@@ -1069,7 +1065,7 @@ def popular_votes(
     Electoral College data runs ahead of its popular vote), or inside it. An unknown
     status names no cause it cannot vouch for: see :func:`_unknown`. The window comes
     from ``coverage``, never a literal. ``no_figure`` is the cell inside the window:
-    a candidate's by default, :data:`NO_STATE_TOTAL` for a state's total (#436).
+    a candidate's by default.
     """
     if not is_blank(value):
         return number(value)

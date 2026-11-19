@@ -87,18 +87,17 @@ def noted(cell: str) -> str:
 
 
 def point_hover(point: Point, state: str | None, *, total: bool) -> str:
-    """A row's hover in C4 (``total`` false) or C5: the table's cells. ``state`` is
-    the escaped state name, or ``None`` for all states."""
+    """A row's hover in C4 or C7 (``total`` false) or C5: the table's cells. ``state``
+    is the escaped state name, or ``None`` for all states. C5 has no one-state form
+    since #562 (D107): asking for one is a code error, never served data's."""
     year = str(point.year)
+    if total and state is not None:
+        raise ValueError("C5 draws all states only (#562)")
     if state is None:
         if total:
             return labels.C5_HOVER.format(year=year, total=noted(point.total_cell))
         return labels.C4_HOVER.format(year=year, appointed=noted(point.appointed_cell))
     status = noted(point.status_cell or labels.UNRECOGNIZED)
-    if total:
-        return labels.C5_STATE_HOVER.format(
-            year=year, state=state, total=noted(point.total_cell), pv_status=status
-        )
     return labels.C4_STATE_HOVER.format(
         year=year,
         state=state,

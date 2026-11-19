@@ -34,7 +34,7 @@ from explore.config import CANONICAL_HOST, SITE_TITLE
 #: The wrapper every successful render carries, whether or not N1 could be read.
 PAGE_ID = "elections-over-time"
 #: This page's own path, the view URL its download names.
-PATH = "/elections/over-time"
+PATH = elections_view.OVER_TIME
 
 #: Page-level wording (ba spec, approved by the owner at #562's plan gate, 2026-11-19).
 #: The heading was the section heading on ``/elections`` (#436's plan gate).
@@ -377,6 +377,7 @@ def render(index: dict[str, Any], summary: Any) -> html.Div:
         [
             html.H1(HEADING),
             html.P(LEDE, className="lede"),
+            elections_view.section_nav(elections_view.OVER_TIME),
             *_over_time_section(index, summary),
             components.provenance_footer(provenance),
         ],
