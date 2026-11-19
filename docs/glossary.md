@@ -126,7 +126,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows, never what it finds. Its caption may state a finding or carry narrative. A finding is a
   historical claim: it is checked before it is published and is never critical of a source
   (*Editorial guardrails*). An argument for the hybrid belongs only in its labeled opinion tab
-  (*Hybrid*). Every chart's text (chart title, axis titles, trace names, legend title, hover text,
+  (*Hybrid*). A chart that draws the hybrid calls it the project's proposal in its key, hover and
+  caption (D108); that label is not an argument. Every chart's text (chart title, axis titles, trace names, legend title, hover text,
   annotations, caption, and any text written in place of tick numbers) ships from `labels.py`
   under a `ba` spec. *Source:* owner decision, 2026-11-05, #432;
   `.claude/specs/backlog-dashboard.md`, E9-S6, "Conventions every chart follows".
@@ -695,39 +696,66 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Electoral College leader's share chart (C2)
 - **Plain:** A chart on the Electoral College majority page, one of the Elections pages, with
-  election years running left to right, oldest at the left. Each election has one point: the electoral share of that election's Electoral College
-  leader, the candidate with the most electoral votes counted. Hovering over or tapping a point
-  shows its number as the table on the same page writes it. A dashed line across the chart marks
-  half of each election's electors appointed. A leader
-  whose share is more than half had a majority of them. With half or less, no candidate had a
-  majority, and the election went to the House of Representatives. The leader did not always take
-  office: in 1824 the House chose John Quincy Adams. Its table also says whether each leader took
-  office. The chart and its table always show every election in this dataset; no filter reaches
-  them.
+  election years running left to right, oldest at the left. Each year's marks are for that
+  election's Electoral College leader, the candidate with the most electoral votes counted. A
+  circle is their electoral share. For the years this dataset has popular-vote figures, a solid
+  triangle is their popular-vote share, a thin line joins it to the circle, and a star is their
+  hybrid score, the project's own proposal and not an official measure. Marks along the top of
+  the chart show a year in which a different candidate won the popular vote (a hexagon) or had
+  the highest hybrid score (a pentagon). Years before (or after) the popular-vote figures are
+  shaded; shading does not mean no popular vote was held. Hovering over or tapping a mark shows
+  its number as the table on the same page writes it. A dashed line across the chart marks half
+  of each election's electors appointed; it applies to the electoral share only. A leader whose
+  share is more than half had a majority of them. With half or less, no candidate had a
+  majority, and the election went to the House of Representatives. A popular-vote share under
+  half is not unusual: a candidate can win the popular vote with less than half. The leader did
+  not always take office: in 1824 the House chose John Quincy Adams. Its table also says whether
+  each leader took office. The chart and its table always show every election in this dataset;
+  no filter reaches them.
 - **Precise:**
   - Chart ID C2 in `CHARTS` (`dashboard/explore/charts.py`), on `/elections/majority`, element
     id `c2`.
-  - Its *Companion table* is `elections-leader-table`, after the chart. Its columns, by public field name: `year`, `candidate`,
-    `national_electoral_votes_counted`, `national_electoral_denominator`, `ec_share_full`,
-    `ec_determinative` (`labels.ec_majority`), `took_office` (`labels.yes_no`). `took_office` is in
-    the table only, never drawn; it is there so `labels.C2_TOOK_OFFICE` can be checked.
+  - Its *Companion table* is `elections-leader-table`, after the chart. Its columns, by public
+    field name: `year`, `candidate`, `national_electoral_votes_counted`,
+    `national_electoral_denominator`, `ec_share_full`, `ec_determinative` (`labels.ec_majority`),
+    `took_office` (`labels.yes_no`), then, appended by #564 (D108(h)): `pv_share`,
+    `hybrid_score` (both on T3's year rule, `labels.national_pv`: `labels.NOT_APPLICABLE` where
+    the index row's `has_popular_vote` is false, `labels.NO_NATIONAL_FIGURE` for a null inside
+    it), `pv_winner`, `hybrid_winner` (`labels.winner` with the popular-vote window).
+    `took_office` is in the table only, never drawn; it is there so `labels.C2_TOOK_OFFICE` can be
+    checked.
   - It sits after the lede and the section links, under the page's heading (`HEADING` in
     `pages/elections_majority.py`).
   - Data: built from `/v1/elections/summary`, filled on first use (declared in `on_miss`, D074(ii))
-    and read in the same view as `/v1/elections`. Each year `/v1/elections` serves gets one point,
-    from that year's single `data` row with `electoral_rank` 1: its served `ec_share_full`, with
-    that year's `elections` item's `ec_determinative`. A body with a year missing, a second rank-1
-    row or an unserved year shows the section's unavailable state.
-  - It derives nothing. No point carries a text label; the hover writes the companion table's
-    cells, the share among them (`labels.share_cell`): votes counted and electors appointed, never
-    votes cast (1868: 214 and 294; 1872: 286 and 366; 2016: 304 and 538).
+    and read in the same view as `/v1/elections`. Each year `/v1/elections` serves gets the
+    marks of that year's single `data` row with `electoral_rank` 1 (its served `ec_share_full`,
+    `pv_share` and `hybrid_score`), with that year's `elections` item's `ec_determinative`,
+    `pv_winner`, `hybrid_winner`, `pv_flip` and `hybrid_flip`. A body with a year missing, a
+    second rank-1 row, an unserved year, a leader whose slug is not `ec_winner_slug`, a flip that
+    is not a flag, or a flip naming the leader shows the section's unavailable state.
+  - It derives nothing. No mark carries a text label; each hover writes the companion table's
+    cells: votes counted and electors appointed, never votes cast (1868: 214 and 294; 1872: 286
+    and 366; 2016: 304 and 538).
+  - The leader's `pv_share` (solid upward triangle, `triangle-up`) and `hybrid_score` (star) are
+    drawn wherever the cell is a share; a thin connector line joins the triangle to the circle,
+    with no hover and no key entry. Drawn in the order connector, triangles, stars, circles.
+  - A strip series per method, at a fixed height above 100%, drawn only where the served
+    `pv_flip` / `hybrid_flip` is true, never from a list of years: `hexagon` when the
+    popular-vote winner differs, `pentagon` when the hybrid winner differs, each named in the key.
+  - The solid upward triangle is C2's alone; C4's open upward triangle means no electors
+    appointed (D104(d) as D108 extends it).
+  - Bands over the years outside the popular-vote window, from the index's `coverage`
+    (`over_time.pv_bands`, shared with C5).
   - Election year runs along the bottom as a number, so a gap between served elections is drawn at
-    its true width, with a tick every 40 years. The share axis runs up the side, 0–100%. The line is
-    horizontal at 0.5 and the test is strict, so a point on the line is not a majority.
-  - A share that is not a finite number draws a marker at zero with no text label, in a series
-    named by its label (`labels.C1_NO_SHARE` or `labels.UNRECOGNIZED`), which the chart's key
-    shows, and the caption adds `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
-  - No popular-vote figure or hybrid score is drawn.
+    its true width, with a tick every 40 years. The value axis runs up the side, with ticks from 0
+    to 100% (it runs to 112% to hold the strip). The line is horizontal at 0.5 and the test is
+    strict, so a point on the line is not a majority. Its label sits just below the line at the
+    left, from the second served year (D104(e) as D108 amends it).
+  - A share or score that is not a finite number draws a marker at zero with no text label, in a
+    series named by its label (`labels.C2_NO_FIGURE` for no figure in this dataset, or
+    `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
+    `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
+  - The key is always shown.
   - Neither the chart nor its companion table is narrowed by a filter (D093(a); fork B, D096,
     amending D093(c)).
   - If the summary read fails, the section shows `C2_UNAVAILABLE`, with no chart and no companion
@@ -735,30 +763,40 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:**
   - Placed by `pages/elections_majority.py` through `components.chart`.
   - Chart text in `labels.py`: `labels.C2_TITLE`; the axes `LABELS["year"]` and
-    `labels.C2_VALUE_AXIS`; the line label `labels.C2_MAJORITY_LINE`; the hover `labels.C2_HOVER`;
-    the key entries `labels.C1_NO_SHARE` and `labels.UNRECOGNIZED`, shown only when such a marker
-    is drawn; the caption `labels.C2_LEADER_POINT`, `labels.C1_EC_BASIS`,
-    `labels.C2_MAJORITY_NOTE`, `labels.C2_TOOK_OFFICE` and, only when a marker is drawn,
-    `labels.C2_NO_SHARE_NOTE`, then `labels.CHART_TABLE_POINTER`; the point series' name
-    `LABELS["ec_share_full"]`, kept off the key.
+    `labels.C2_VALUE_AXIS`; the line label `labels.C2_MAJORITY_LINE`; the band labels
+    `labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`; the hovers `labels.C2_HOVER`,
+    `labels.C2_PV_HOVER`, `labels.C2_HYBRID_HOVER`, `labels.C2_PV_DIFFERENT_HOVER` and
+    `labels.C2_HYBRID_DIFFERENT_HOVER`; the key entries `LABELS["ec_share_full"]`,
+    `LABELS["pv_share"]`, `labels.C2_HYBRID_KEY`, `labels.C2_PV_DIFFERENT_KEY` and
+    `labels.C2_HYBRID_DIFFERENT_KEY` (each when drawn), and `labels.C2_NO_FIGURE` and
+    `labels.UNRECOGNIZED`, shown only when such a marker is drawn; the caption
+    `labels.C2_LEADER_POINT`, `labels.C2_EC_MARK`, `labels.C1_EC_BASIS`, `labels.C2_PV_MARK`,
+    `labels.C2_HYBRID_MARK`, `labels.C2_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY`,
+    `labels.C2_PLURALITY_NOTE`, `labels.C2_TOOK_OFFICE`, then, each only when drawn,
+    `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, `labels.C2_PV_DIFFERENT_NOTE`,
+    `labels.C2_HYBRID_DIFFERENT_NOTE` and `labels.C2_NO_SHARE_NOTE`, then
+    `labels.CHART_TABLE_POINTER`.
   - In `pages/elections_majority.py`: `HEADING` (the page's, formerly C2's section heading),
-    `C2_TABLE_HEADING`, the companion table's columns (existing `LABELS` keys, `took_office`
-    last), the table notes `labels.C2_LEADER_ROW` and `labels.C2_TOOK_OFFICE`, the download "the
-    Electoral College leaders" (`elections-electoral-college-leaders.csv`), and
-    `C2_UNAVAILABLE`.
-- **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); `CHARTS`;
-  `NationalSummaryRow.ec_share_full`, `electoral_rank`, `national_electoral_votes_counted` and
-  `national_electoral_denominator`, `ElectionSummary.ec_determinative` and
+    `LEDE`, `C2_TABLE_HEADING`, the companion table's columns (existing `LABELS` keys), the table
+    notes `labels.C2_LEADER_ROW`, `labels.C2_TOOK_OFFICE`, `labels.C2_TABLE_METHODS_NOTE`,
+    `labels.HYBRID_NOTE` and `labels.C2_HYBRID_TABLE_NOTE`, the download "the Electoral College
+    leaders" (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`.
+- **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); #564 acceptance
+  criteria; `CHARTS`; `NationalSummaryRow.ec_share_full`, `pv_share`, `hybrid_score`,
+  `electoral_rank`, `national_electoral_votes_counted` and `national_electoral_denominator`,
+  `ElectionSummary.ec_determinative`, `pv_winner`, `hybrid_winner`, `pv_flip`, `hybrid_flip` and
   `AllElectionsSummaryResponse` in `src/usvote/api/models.py`; D041; D046 §4; D091; D093; D096;
-  #558; D104; #562; D107;
-  `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99 of 261, 37.9 percent; the House
-  chose John Quincy Adams); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it
-  happened"; reader wording: `ba` spec for #434, approved at its plan gate (2026-11-11), with its
-  historical claims.
+  #558; D104; #562; D107; D108; `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99
+  of 261, 37.9 percent; the House chose John Quincy Adams);
+  `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it happened"; the 1992
+  example (William J. Clinton, 43.0%) checked against served N1; reader wording: `ba` spec for
+  #434, approved at its plan gate (2026-11-11), with its historical claims, and `ba` spec for
+  #564, approved at its plan gate (2026-11-19).
 - **Not:** A chart of winners: in 1824 the leader had no majority. The chart does not show who took
-  office (*Took office*); its companion table does, in its last column. Not votes cast. The line is
-  not a fixed number such as 270. Not the hybrid. Not a stand-in for its companion table. A marker
-  is not a zero.
+  office (*Took office*); its companion table does. Not votes cast. The line is not a fixed number
+  such as 270. The star is not an official measure. A strip mark is not a correction or recount:
+  it says only who came first under that method. Shading is not "no popular vote". Not a
+  stand-in for its companion table. A marker is not a zero.
 - **Status:** settled
 
 ### Electoral College majority
@@ -774,7 +812,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C2_MAJORITY_LINE`, the caption sentence `labels.C2_MAJORITY_NOTE`, the hover's last line
   (`labels.ec_majority`), the companion table's column, the Electoral College majority page's
   heading (`HEADING` in `pages/elections_majority.py`) and its section link
-  `labels.SECTION_MAJORITY`.
+  `labels.SECTION_MAJORITY`. `labels.C1_LINE_EC_ONLY` in C2's caption; C2's line label sits just below the line at the left (#564, D108).
 - **Source:** `ElectionSummary.ec_determinative`; D041; D046 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast".
 - **Not:** A majority of the votes cast or counted; the base is the electors appointed. A null,
@@ -811,7 +849,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   the title `labels.C2_TITLE`, the value axis `labels.C2_VALUE_AXIS`, the hover `labels.C2_HOVER`
   (its share line is `labels.share_cell`; no point carries text), the key entry
   `labels.C1_NO_SHARE` and the caption sentences `labels.C1_EC_BASIS` and, when a marker is drawn,
-  `labels.C2_NO_SHARE_NOTE`.
+  `labels.C2_NO_SHARE_NOTE`. In C2 (#564): the circle series, now in the key; `labels.C2_EC_MARK`; the value axis `labels.C2_VALUE_AXIS`.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
   2026-11-02, #358.
@@ -997,7 +1035,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   reader wording names the Electoral College side the same way `ec_winner` does.
 - **Shown as:** `LABELS["pv_flip"]`, `LABELS["hybrid_flip"]`; the cell `labels.flip`, given
   `ec_determinative`, which fills `labels.FLIP_YES` with the Electoral College's role by the same
-  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader).
+  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader). In C2 (#564), a strip series per method above the data, from the served flag: `hexagon`, `labels.C2_PV_DIFFERENT_KEY`; `pentagon`, `labels.C2_HYBRID_DIFFERENT_KEY`; their hovers and `labels.C2_PV_DIFFERENT_NOTE` / `labels.C2_HYBRID_DIFFERENT_NOTE`.
 - **Source:** `ElectionSummary.pv_flip`, `hybrid_flip` and the class docstring; owner decision,
   2026-10-10, #348 (consistency with `ec_winner`).
 - **Not:** "No", which is a recorded agreement. *Outside the popular-vote window*, which is no
@@ -1009,15 +1047,24 @@ articles and announcements). Every rule binds all three unless the rule states a
   and popular-vote share; the highest average wins.
 - **Precise:** `hybrid_score` = (`ec_share_hybrid` + `pv_share`) / 2; `hybrid_winner` has the
   highest score. Null outside the popular-vote window. The denominator policy is (b) (D038), and
-  `pv_coverage` flags a year whose popular vote covers only some states.
+  `pv_coverage` flags a year whose popular vote covers only some states. In reader text, "the
+  project" names who proposes the hybrid: the people behind this site, its dataset and the
+  "Counted, Not Assumed" series. It is the only reader-facing use of the word; any other use needs
+  a `ba` spec.
 - **Shown as:** `LABELS["hybrid_score"]`, `LABELS["hybrid_winner"]`, `LABELS["hybrid_margin"]`,
   `LABELS["hybrid_flip"]`; help text `labels.HYBRID_NOTE` (panel, and under T3 and in its
-  download's preamble).
+  download's preamble, and under C2's companion table); in C2 (#564), the star
+  (`labels.C2_HYBRID_KEY`, `labels.C2_HYBRID_HOVER`, `labels.C2_HYBRID_MARK`), its strip series
+  (`labels.C2_HYBRID_DIFFERENT_KEY`, `labels.C2_HYBRID_DIFFERENT_HOVER`,
+  `labels.C2_HYBRID_DIFFERENT_NOTE`), its table columns `hybrid_score` and `hybrid_winner`, and
+  `labels.C2_HYBRID_TABLE_NOTE`.
 - **Source:** `NationalSummaryRow.hybrid_score`; `ElectionSummary.hybrid_winner`; D037; D038;
-  `docs/pv-coverage.md`.
-- **Not:** A forecast or an endorsement. Help text says what it computes and nothing about its
-  merits (`labels.HYBRID_NOTE` comment); argument for it belongs only in a clearly labeled opinion
-  tab (#275, E9-S7).
+  D108; `docs/pv-coverage.md`; "the project's proposal": owner decision at #564's plan gate,
+  2026-11-19.
+- **Not:** A forecast, an endorsement or an official measure. Help text says what it computes and
+  nothing about its merits (`labels.HYBRID_NOTE` comment). Where a chart draws it (C2), its key,
+  hover and caption call it the project's proposal (D108). Argument for it belongs only in a
+  clearly labeled opinion tab (#275, E9-S7).
 - **Status:** settled
 
 ### Margin
@@ -1146,7 +1193,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   of C1's marker, `labels.C1_NO_FIGURE_HOVER`); in C1, the label of the marker drawn in place of a
   popular-vote bar, `labels.C1_NO_FIGURE`, and the caption sentence `labels.C1_NO_FIGURE_NOTE`,
   shown only when such a marker is drawn; `labels.NO_NATIONAL_TOTAL` and `labels.C5_NO_TOTAL`
-  (the C4/C5 table and C5).
+  (the C4/C5 table and C5). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and star's marker hovers.
 - **Source:** `EcPvRow` docstring and `pv_status` description; `NationalSummaryRow` docstring;
   `.claude/specs/backlog-dashboard.md`, E9-S3 null table;
   `posts/2026-08-18-presidential-elections-are-messy.md`, "One empty cell, five different
@@ -1179,7 +1226,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   borders cell the caption adds `labels.C3_PLAIN_MIXED`. In C4,
   `labels.NOT_IN_DATASET` names, in the chart's key, the series of markers drawn in place of a bar
   for a null allotment, with `labels.C4_NO_FIGURE_NOTE` in the caption; its hover
-  (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell.
+  (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell. In C2 (#564): `labels.C2_NO_FIGURE`, C2's one open-circle key entry for any missing share or score, and `labels.C2_NO_SHARE_NOTE`.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1240,14 +1287,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   popular-vote columns and hybrid score (`national_pv_votes`, `pv_share`, `hybrid_score`;
   owner decision, 2026-10-12, #352). A null party has nothing to do with the window: in any year
   it reads *Not in this dataset* with `labels.PARTY_NULL_NOTE`. T2 and T4 name the window's side
-  (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`).
-- **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 through `_national_pv` in
-  `pages/election.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
+  (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`). C2's leader table follows T3's rule (`has_popular_vote`, #564).
+- **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 and C2's leader table through
+  `labels.national_pv`, called from `pages/election.py` and `pages/elections_majority.py`; `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
   popular-vote bar is drawn, the title `labels.C1_TITLE_NO_PV` and the caption sentence
   `labels.C1_NO_PV_CAPTION`; `labels.NOT_APPLICABLE` as the national total's cell outside the
   window (the C4/C5 table); C5's band (vertical, over the years outside the window) and its labels
   `labels.C5_BEFORE_BAND` and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE`
-  and `labels.C5_AFTER_NOTE`.
+  and `labels.C5_AFTER_NOTE`. In C2 (#564): the bands (`labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`, reused), `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, and `labels.NOT_APPLICABLE` in its four appended columns.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
 - **Not:** "No" (a false flip). A null inside the window, which names no cause.
@@ -1279,7 +1326,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   election's Electoral College leader won more than half of the electors appointed; and the
   electors appointed and total popular vote page, two charts and a table of those totals in every
   election, for all states together. Links near the top of each page go between the three, and
-  the page being read is marked.
+  the page being read is marked. The majority page also shows, where this dataset has popular-vote figures, the leader's popular-vote share and the hybrid score the project proposes.
 - **Precise:** Three registered pages. `/elections` (`pages/elections.py`): T1, its year-range and
   popular-vote filters, the count of elections shown and the averages; it reads `/v1/elections`
   and N1. `/elections/majority` (`pages/elections_majority.py`): C2 and `elections-leader-table`;
@@ -1475,7 +1522,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["pv_share"]` (T3, and the name of C1's popular-vote series); in C1, the
   title `labels.C1_TITLE`, the hover text `labels.C1_PV_HOVER`, and the caption sentences
   `labels.C1_BASES` and `labels.C1_ROW_ORDER`; each popular-vote bar's text is T3's cell for the
-  same value.
+  same value. In C2 (#564): the solid triangle (`LABELS["pv_share"]` in the key, `labels.C2_PV_HOVER`, `labels.C2_PV_MARK`, `labels.C2_PLURALITY_NOTE`) and the companion table's `pv_share` column.
 - **Source:** `NationalSummaryRow.pv_share`.
 - **Not:** *Electoral share*.
 - **Status:** settled
@@ -1499,10 +1546,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** The candidate with the largest share of the national popular vote.
 - **Precise:** `pv_winner`: the largest national popular-vote share, a plurality rather than a
   majority. Null outside the popular-vote window.
-- **Shown as:** `LABELS["pv_winner"]`; `labels.winner`.
+- **Shown as:** `LABELS["pv_winner"]`; `labels.winner`. In C2 (#564): the companion table's `pv_winner` column, `labels.C2_PV_DIFFERENT_KEY`, `labels.C2_PV_DIFFERENT_HOVER`, `labels.C2_TABLE_METHODS_NOTE`.
 - **Source:** `ElectionSummary.pv_winner`; `posts/2026-08-06-222-votes-away.md` (led the national
   popular vote count).
-- **Not:** A majority winner.
+- **Not:** A majority winner. In C2 it may name a different candidate from the row's.
 - **Status:** settled
 
 ### Population
@@ -2037,6 +2084,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "leading candidate" or "winner" for every year's rank-1 candidate | Electoral College leader | `labels.C2_*`, `C2_TABLE_HEADING` and the download name (`pages/elections_majority.py`) | "Leading" alone can mean the popular vote's leader, and "winner" is false for 1824. |
 | "not applicable" for a year outside the popular-vote window | that this dataset has no popular-vote figures for the year | `labels.NOT_APPLICABLE`; `NO_PV_SENTENCE` in `pages/election.py` | "Not applicable" reads as a claim that the method had no result at the time. |
 | "no figure" without "in this dataset" | no figure in this dataset | `labels.NO_FIGURE`, `labels.NO_NATIONAL_FIGURE`, `labels.C1_NO_FIGURE` | Without it, a reader can take the cell as zero votes. |
+| "popular-vote leader" | Popular-vote winner | `LABELS["pv_winner"]`, `labels.C2_PV_DIFFERENT_KEY` | In this glossary "leader" means the Electoral College's rank-1 candidate. |
+| an unlabeled "hybrid score" in a chart, or "hybrid result" | Hybrid score (the project's proposal) | `labels.C2_HYBRID_KEY`, `labels.C2_HYBRID_HOVER` | It is not an official measure. |
 | a raw field name, a status code, or anything with an underscore | the plain label | `LABELS`; `labels.PV_STATUS`, `labels.COUNT_STATUS`, `labels.BOUNDARY_BASIS`, `labels.PER_CAPITA_COVERAGE` | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). In the API's published text a public `/v1` name is written as served, and an internal name never appears (owner decision, 2026-10-15, #374). |
 | "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. In the API's published text, null is the JSON value and is written "null", never "None" (owner decision, 2026-10-15, #374). |
 | "coverage" on its own | name which one: years covered; census figure; share of electors from popular-vote states | `LABELS["coverage"]`, `LABELS["pv_coverage"]`; years covered: the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`, `export.preamble` | The project uses the word for three different things. |

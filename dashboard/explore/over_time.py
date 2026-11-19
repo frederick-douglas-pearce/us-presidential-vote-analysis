@@ -5,7 +5,9 @@ the same one-state series (C7) without importing a page module, which Dash canno
 
 A shared module: it reads no API and imports only other shared modules (``charts``,
 ``components`` and ``labels``), so a source's path reaches an error message only as an
-argument. C5's figure, its band and the N1 reader stay with their page.
+argument. The bands over the years outside the popular-vote window (:func:`pv_bands`)
+are here too since #564, which C5 and C2 both draw; C5's figure and the N1 reader stay
+with their page.
 """
 
 from __future__ import annotations
@@ -183,6 +185,88 @@ def time_layout(
     if marked:
         layout["legend"] = components.TIME_SERIES_LEGEND
     return layout
+
+
+#: Room for each band label above the plot: two lines of 12 px text at plotly's 1.3
+#: line height (2 × 16 px) and 8 px between labels (#558, D104; shared since #564).
+BAND_LABEL_PX = 40
+
+
+def _band(
+    years: list[int], first: int, last: int, label: str, *, after: bool, raised: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A shaded band over the served years ``first`` to ``last`` of ``years``
+    (:func:`explore.components.year_edges`), the whole height of the plot, and its
+    label above the plot (#558, D104), never inside the band, which can be one
+    election wide: the band before the window's at its left edge, after it (``after``)
+    at its right, ``raised`` pixels higher where another label sits below it."""
+    low, high = components.year_edges(years, first, last)
+    shape = {
+        "type": "rect",
+        "xref": "x",
+        "x0": low,
+        "x1": high,
+        "yref": "paper",
+        "y0": 0,
+        "y1": 1,
+        "layer": "below",
+        "fillcolor": "var(--chart-grid)",
+        "line": {"width": 1, "color": "var(--chart-reference)"},
+    }
+    note = {
+        "text": label,
+        "showarrow": False,
+        "font": {"color": "var(--text)", "size": 12},
+        "xref": "x",
+        "x": high if after else low,
+        "xanchor": "right" if after else "left",
+        "align": "right" if after else "left",
+        "yref": "paper",
+        "y": 1,
+        "yanchor": "bottom",
+        "yshift": raised,
+    }
+    return shape, note
+
+
+class Bands(NamedTuple):
+    """The bands over the served years outside the popular-vote window: their shapes,
+    their labels, the top margin that holds the labels, and which bands are drawn."""
+
+    shapes: list[dict[str, Any]]
+    annotations: list[dict[str, Any]]
+    top_px: int
+    before: bool
+    after: bool
+
+
+def pv_bands(
+    years: list[int], window: tuple[int, int], before_label: str, after_label: str
+) -> Bands:
+    """The shaded bands over the served ``years`` before and after the popular-vote
+    ``window`` (read from ``coverage`` by the page), each labeled above the plot; with
+    both drawn, the before label goes on top (#436, D100; #558, D104). C5 and C2 (#564)
+    draw them; the labels are the page's."""
+    pv_min, pv_max = window
+    before = [year for year in years if year < pv_min]
+    after = [year for year in years if year > pv_max]
+    raised = BAND_LABEL_PX if before and after else 0
+    shapes: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
+    if before:
+        shape, note = _band(
+            years, before[0], before[-1], before_label, after=False, raised=raised
+        )
+        shapes.append(shape)
+        annotations.append(note)
+    if after:
+        shape, note = _band(
+            years, after[0], after[-1], after_label, after=True, raised=0
+        )
+        shapes.append(shape)
+        annotations.append(note)
+    top = TOP_PX + BAND_LABEL_PX * len(annotations)
+    return Bands(shapes, annotations, top, bool(before), bool(after))
 
 
 class OverTime(NamedTuple):

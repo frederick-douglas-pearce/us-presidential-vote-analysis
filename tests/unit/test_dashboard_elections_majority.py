@@ -15,7 +15,7 @@ from typing import Any
 import dash
 import pytest
 
-from explore import api, charts, components, labels
+from explore import api, charts, components, labels, over_time
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -87,12 +87,26 @@ def hover_share(hover: str) -> str:
     return match.group(1).split("<br>")[0]
 
 
+def named(figure: dict[str, Any], name: str) -> dict[str, Any]:
+    """C2's one trace of that name (#564: the circle's is no longer the first)."""
+    (trace,) = [t for t in figure["data"] if t["name"] == name and "marker" in t]
+    found: dict[str, Any] = trace
+    return found
+
+
+#: The marker series' names, whose traces are not marks at a value.
+MARKER_NAMES = (labels.C2_NO_FIGURE, labels.UNRECOGNIZED)
+
+
+def markers(figure: dict[str, Any]) -> list[dict[str, Any]]:
+    return [t for t in figure["data"] if t["name"] in MARKER_NAMES]
+
+
 def points(tree: Any) -> dict[str, tuple[Any, str, str]]:
-    """Each year's main point: its share (y), the share cell its hover writes, and the
+    """Each year's circle: its share (y), the share cell its hover writes, and the
     hover, by the year (the trace's ids). Each point sits at its year (x), which the
     ids repeat as text (#558, D104)."""
-    trace = c2_figure(tree)["data"][0]
-    assert trace["name"] == labels.LABELS["ec_share_full"]
+    trace = named(c2_figure(tree), labels.LABELS["ec_share_full"])
     assert "text" not in trace and trace["mode"] == "markers"
     assert trace["ids"] == [str(x) for x in trace["x"]]
     assert all(type(x) is int for x in trace["x"])
@@ -136,15 +150,16 @@ class TestC2:
     def test_one_point_for_every_served_year_oldest_first(self) -> None:
         tree = render_c2()
         figure = c2_figure(tree)
-        assert [str(y) for y in YEARS] == figure["data"][0]["ids"]
+        circles = named(figure, labels.LABELS["ec_share_full"])
+        assert [str(y) for y in YEARS] == circles["ids"]
         # Each point at its year on the numeric year axis along the bottom (#558, D104),
         # oldest at the left.
-        assert figure["data"][0]["x"] == list(YEARS)
+        assert circles["x"] == list(YEARS)
         assert figure["layout"]["xaxis"] == components.year_axis(YEARS)
         assert figure["layout"]["xaxis"]["type"] == "linear"
         coverage = BODY["meta"]["provenance"]["coverage"]
         assert (YEARS[0], YEARS[-1]) == (coverage["year_min"], coverage["year_max"])
-        assert len(figure["data"]) == 1  # no marker: every leader has a share
+        assert markers(figure) == []  # no marker: every leader has a share
         assert charts.figure_problems(figure) == []
 
     def test_one_point_per_year_however_the_index_is_cut(self) -> None:
@@ -246,7 +261,7 @@ class TestC2:
     @pytest.mark.parametrize(
         ("value", "label"),
         [
-            (None, labels.C1_NO_SHARE),
+            (None, labels.C2_NO_FIGURE),
             ("zz", labels.UNRECOGNIZED),
             # Finite, but its percentage overflows, so its cell reads UNRECOGNIZED.
             (1e308, labels.UNRECOGNIZED),
@@ -263,7 +278,7 @@ class TestC2:
         tree = render_c2(summary)
         figure = c2_figure(tree)
         assert "1860" not in points(tree)
-        (marks,) = figure["data"][1:]
+        (marks,) = markers(figure)
         # Labeled by the chart's key, one series per label (#558, D104), never a text.
         assert marks["name"] == label and marks["showlegend"] is True
         assert "text" not in marks and marks["mode"] == "markers"
@@ -285,23 +300,28 @@ class TestC2:
         tree = render_c2()
         (caption,) = of_type(find(tree, C2), "Figcaption")
         assert labels.C2_NO_SHARE_NOTE not in caption.children[0]
-        assert caption.children[0].endswith(labels.C2_TOOK_OFFICE)
-        assert len(c2_figure(tree)["data"]) == 1  # the premise: no marker drawn
+        assert caption.children[0].endswith(labels.C2_PV_DIFFERENT_NOTE)
+        assert markers(c2_figure(tree)) == []  # the premise: no marker drawn
 
     def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
         layout = c2_figure(render_c2())["layout"]
-        (line,) = layout["shapes"]
+        (line,) = [s for s in layout["shapes"] if s["type"] == "line"]
         # Horizontal across the plot at half (#558, D104).
         assert (line["yref"], line["y0"], line["y1"]) == ("y", 0.5, 0.5)
         assert (line["xref"], line["x0"], line["x1"]) == ("paper", 0, 1)
         assert line["line"]["dash"] == "dash"
-        # One label, just below the line at the right (owner, #558's plan gate).
-        (note,) = layout["annotations"]
+        # One label, just below the line at the left (owner, #564's plan gate, D108).
+        (note,) = [a for a in layout["annotations"] if a["yref"] == "y"]
         assert note["text"] == labels.C2_MAJORITY_LINE
-        assert (note["xref"], note["x"], note["xanchor"]) == ("paper", 1, "right")
+        # From the second served year, clear of 1824's point below the line (#564).
+        assert (note["xref"], note["x"], note["xanchor"]) == ("x", YEARS[1], "left")
         assert (note["yref"], note["y"], note["yanchor"]) == ("y", 0.5, "top")
-        assert layout["yaxis"]["range"] == [0, 1]
-        assert layout["showlegend"] is False  # no marker, so no key
+        assert note["yshift"] < 0
+        # The axis runs past 100% for the strip; its ticks stop at 100% (#564).
+        assert layout["yaxis"]["range"] == [0, MOD["_C2_Y_TOP"]]
+        assert layout["yaxis"]["tickvals"][-1] == 1
+        assert 1 < MOD["_C2_STRIP_Y"] < MOD["_C2_Y_TOP"]
+        assert layout["showlegend"] is True  # three series at least, always keyed
 
     def test_the_title_is_page_text(self) -> None:
         assert find(render_c2(), f"{C2}-title").children == labels.C2_TITLE
@@ -312,7 +332,7 @@ class TestC2:
         shown = points(tree)
         assert [r[0] for r in rows] == [str(y) for y in YEARS]
         for row in rows:
-            year, candidate, counted, appointed, share, majority, took = row
+            year, candidate, counted, appointed, share, majority, took = row[:7]
             if year not in shown:
                 # A marker, at zero, exactly where the table shows no share (#558, I-5).
                 assert share in (labels.NOT_IN_DATASET, labels.UNRECOGNIZED), year
@@ -356,6 +376,366 @@ class TestC2:
         ]
         assert link.download == "elections-electoral-college-leaders.csv"
         assert link.children == "Download the Electoral College leaders (CSV)"
+
+
+# --- the three methods (#564, D108) ----------------------------------------------------
+
+OVER_TIME_MOD: dict[str, Any] = dash.page_registry["pages.elections_over_time"][
+    "layout"
+].__globals__
+COVERAGE = BODY["meta"]["provenance"]["coverage"]
+WINDOW = (COVERAGE["pv_year_min"], COVERAGE["pv_year_max"])
+#: Each year's ``has_popular_vote``, from the index, T3's year rule.
+HAS_PV = {row["year"]: row["has_popular_vote"] for row in BODY["data"]}
+ITEMS = {item["year"]: item for item in SUMMARY["elections"]}
+LEADER = {
+    row["year"]: row for row in SUMMARY["data"] if row["electoral_rank"] == 1
+}
+
+
+def _named_or_none(figure: dict[str, Any], name: str) -> dict[str, Any] | None:
+    found = [t for t in figure["data"] if t["name"] == name and "marker" in t]
+    return found[0] if found else None
+
+
+def _caption(tree: Any) -> str:
+    (caption,) = of_type(find(tree, C2), "Figcaption")
+    text: str = caption.children[0]
+    return text
+
+
+def _cell_of(tree: Any, year: int, field: str) -> str:
+    (row,) = [r for r in leader_rows(tree) if r[0] == str(year)]
+    cell: str = row[MOD["LEADER_FIELDS"].index(field)]
+    return cell
+
+
+def _with(**changes: Any) -> dict[str, Any]:
+    """N1 with ``changes`` (``"<year>.<field>"``: value) applied to that year's item."""
+    summary = copy.deepcopy(SUMMARY)
+    for key, value in changes.items():
+        year, field = key.split(".", 1)
+        (item,) = [i for i in summary["elections"] if i["year"] == int(year)]
+        item[field] = value
+    return summary
+
+
+class TestC2Methods:
+    def test_one_meaning_per_symbol_across_the_time_series(self) -> None:
+        """D104(d), extended by D108 (#564, B1): every C2 symbol, written out, and none
+        that C4, C5 or C7 use for another meaning (C7 draws C4's)."""
+        c2 = {
+            MOD["_C2_EC_SYMBOL"]: "electoral share",
+            MOD["_C2_PV_SYMBOL"]: "popular-vote share",
+            MOD["_C2_HYBRID_SYMBOL"]: "hybrid score",
+            MOD["_C2_PV_DIFFERENT_SYMBOL"]: "popular-vote winner differs",
+            MOD["_C2_HYBRID_DIFFERENT_SYMBOL"]: "hybrid winner differs",
+            **{symbol: label for label, symbol in MOD["_C2_SYMBOLS"].items()},
+        }
+        assert c2 == {
+            "circle": "electoral share",
+            "triangle-up": "popular-vote share",
+            "star": "hybrid score",
+            "hexagon": "popular-vote winner differs",
+            "pentagon": "hybrid winner differs",
+            "circle-open": labels.C2_NO_FIGURE,
+            "square-open": labels.UNRECOGNIZED,
+        }
+        others = {**over_time.C4_SYMBOLS, **OVER_TIME_MOD["_C5_SYMBOLS"]}
+        shared = {"circle-open", "square-open"}  # no figure, unrecognized: one meaning
+        for label, symbol in others.items():
+            assert symbol not in set(c2) - shared, (label, symbol)
+            if symbol == "square-open":
+                assert label == labels.UNRECOGNIZED
+            if symbol == "circle-open":
+                assert label in (labels.NOT_IN_DATASET, labels.C5_NO_TOTAL)
+
+    def test_the_drawing_order_puts_the_circle_on_top(self) -> None:
+        """M1: the connector under the triangles, then the stars, then the circles."""
+        names = [t["name"] for t in c2_figure(render_c2())["data"]]
+        order = [
+            labels.LABELS["pv_share"],  # the connector, no marker
+            labels.LABELS["pv_share"],
+            labels.C2_HYBRID_KEY,
+            labels.LABELS["ec_share_full"],
+        ]
+        assert names[:4] == order
+        assert "marker" not in c2_figure(render_c2())["data"][0]
+
+    def test_the_triangle_and_star_stand_at_the_served_values(self) -> None:
+        """T2: each mark's y is the served value whose table cell its hover writes, in
+        every year T3's rule treats as having a popular vote, and in no other."""
+        tree = render_c2()
+        figure = c2_figure(tree)
+        drawn = sorted(y for y, has in HAS_PV.items() if has)
+        assert drawn  # the premise
+        for name, field, template, key in (
+            (labels.LABELS["pv_share"], "pv_share", labels.C2_PV_HOVER, "share"),
+            (labels.C2_HYBRID_KEY, "hybrid_score", labels.C2_HYBRID_HOVER, "score"),
+        ):
+            trace = named(figure, name)
+            assert trace["x"] == drawn
+            for year, y, hover in zip(
+                trace["x"], trace["y"], trace["hovertext"], strict=True
+            ):
+                assert y == LEADER[year][field]
+                cell = _cell_of(tree, year, field)
+                assert labels.share(y) == cell
+                assert hover == template.format(
+                    year=year, candidate=LEADER[year]["candidate"], **{key: cell}
+                )
+        for year, has in HAS_PV.items():
+            if not has:
+                assert _cell_of(tree, year, "pv_share") == labels.NOT_APPLICABLE
+                assert _cell_of(tree, year, "hybrid_score") == labels.NOT_APPLICABLE
+
+    def test_the_connector_joins_each_year_s_circle_to_its_triangle(self) -> None:
+        """T1: no hover, no text, so only this ties it to the marks."""
+        figure = c2_figure(render_c2())
+        line = figure["data"][0]
+        assert line["mode"] == "lines" and line["hoverinfo"] == "skip"
+        assert line["showlegend"] is False and line["line"]["width"] == 1
+        circles = named(figure, labels.LABELS["ec_share_full"])
+        triangles = named(figure, labels.LABELS["pv_share"])
+        ec = dict(zip(circles["x"], circles["y"], strict=True))
+        pv = dict(zip(triangles["x"], triangles["y"], strict=True))
+        xs, ys = line["x"], line["y"]
+        segments = [(xs[i : i + 3], ys[i : i + 3]) for i in range(0, len(xs), 3)]
+        assert [x[0] for x, _ in segments] == triangles["x"]
+        for (x0, x1, gap), (y0, y1, ygap) in segments:
+            assert x0 == x1 and gap is None and ygap is None
+            assert (y0, y1) == (ec[x0], pv[x0])
+
+    def test_the_strip_marks_the_served_disagreements(self) -> None:
+        """AC3: the marked years equal those whose served winner slug differs from the
+        Electoral College's, an oracle independent of the flags the chart reads."""
+        figure = c2_figure(render_c2())
+        for name, winner in (
+            (labels.C2_PV_DIFFERENT_KEY, "pv_winner_slug"),
+            (labels.C2_HYBRID_DIFFERENT_KEY, "hybrid_winner_slug"),
+        ):
+            expected = sorted(
+                year
+                for year, item in ITEMS.items()
+                if item[winner] is not None and item[winner] != item["ec_winner_slug"]
+            )
+            trace = _named_or_none(figure, name)
+            if not expected:
+                assert trace is None, name
+                continue
+            assert trace is not None and trace["x"] == expected
+            assert trace["y"] == [MOD["_C2_STRIP_Y"]] * len(expected)
+        assert named(figure, labels.C2_PV_DIFFERENT_KEY)["x"] == [2000, 2016]
+
+    def test_the_strip_follows_the_flag_not_the_slugs(self) -> None:
+        """T4: 2000's flag doctored false, its slugs still differing: no mark there."""
+        trace = named(
+            c2_figure(render_c2(_with(**{"2000.pv_flip": False}))),
+            labels.C2_PV_DIFFERENT_KEY,
+        )
+        assert trace["x"] == [2016]
+
+    def test_the_strip_hover_names_the_table_s_winner(self) -> None:
+        tree = render_c2()
+        trace = named(c2_figure(tree), labels.C2_PV_DIFFERENT_KEY)
+        for year, hover in zip(trace["x"], trace["hovertext"], strict=True):
+            assert hover == labels.C2_PV_DIFFERENT_HOVER.format(
+                year=year, winner=_cell_of(tree, year, "pv_winner")
+            )
+            assert _cell_of(tree, year, "pv_winner") == ITEMS[year]["pv_winner"]
+
+    def test_both_strips_drawn_keep_the_chart_drawn(self) -> None:
+        """B2, T3: with a hybrid disagreement too, both strip series draw, each its own
+        symbol, and the figure passes the chart rules."""
+        summary = _with(
+            **{
+                "2016.hybrid_flip": True,
+                "2016.hybrid_winner": "Hillary Clinton",
+                "2016.hybrid_winner_slug": "hillary-clinton",
+            }
+        )
+        tree = render_c2(summary)
+        figure = c2_figure(tree)
+        pv = named(figure, labels.C2_PV_DIFFERENT_KEY)
+        hybrid = named(figure, labels.C2_HYBRID_DIFFERENT_KEY)
+        assert hybrid["x"] == [2016]
+        assert pv["marker"]["symbol"] != hybrid["marker"]["symbol"]
+        assert charts.figure_problems(figure) == []
+        caption = _caption(tree)
+        assert labels.C2_PV_DIFFERENT_NOTE in caption
+        assert labels.C2_HYBRID_DIFFERENT_NOTE in caption
+        assert labels.C2_HYBRID_DIFFERENT_NOTE not in _caption(render_c2())
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"2000.pv_flip": 1},
+            {"2000.pv_flip": "yes"},
+            {"2016.hybrid_flip": 0},
+            # A flag naming the leader as the different candidate (C4).
+            {"2004.pv_flip": True},
+            # The leader is not the flags' baseline (C4).
+            {"2016.ec_winner_slug": "hillary-clinton"},
+            {"2016.pv_winner": None, "2016.pv_flip": None, "2016.missing": 1},
+        ],
+    )
+    def test_a_flag_c2_cannot_read_degrades_the_section(
+        self, changes: dict[str, Any]
+    ) -> None:
+        summary = _with(**changes)
+        if "2016.missing" in changes:  # a missing year-level field
+            del summary["elections"][-2]["hybrid_winner"]
+        tree = render_c2(summary)
+        assert tree.id == PAGE_ID
+        assert find(tree, C2) is None and find(tree, LEADERS) is None
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+
+    def test_an_index_has_popular_vote_that_is_no_bool_degrades_the_section(
+        self,
+    ) -> None:
+        index = copy.deepcopy(BODY)
+        index["data"][-1]["has_popular_vote"] = 1
+        tree = render_c2(index=index)
+        assert tree.id == PAGE_ID
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+
+    @pytest.mark.parametrize(
+        ("value", "label", "symbol"),
+        [
+            (None, labels.C2_NO_FIGURE, "circle-open"),
+            ("zz", labels.UNRECOGNIZED, "square-open"),
+        ],
+    )
+    @pytest.mark.parametrize("field", ["pv_share", "hybrid_score"])
+    def test_an_in_window_share_with_no_figure_is_a_marker(
+        self, field: str, value: Any, label: str, symbol: str
+    ) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r for r in summary["data"] if r["year"] == 1992 and r["electoral_rank"] == 1
+        ]
+        row[field] = value
+        tree = render_c2(summary)
+        figure = c2_figure(tree)
+        (marks,) = markers(figure)
+        assert (marks["name"], marks["marker"]["symbol"]) == (label, symbol)
+        assert marks["x"] == [1992] and marks["y"] == [0]
+        cell = _cell_of(tree, 1992, field)
+        assert cell in marks["hovertext"][0]
+        name = labels.LABELS["pv_share"] if field == "pv_share" else labels.C2_HYBRID_KEY
+        assert 1992 not in named(figure, name)["x"]
+        if field == "pv_share":  # no triangle, so no connector that year
+            assert 1992 not in figure["data"][0]["x"]
+        assert labels.C2_NO_SHARE_NOTE in _caption(tree)
+        assert charts.figure_problems(figure) == []
+
+    def test_the_band_comes_from_coverage_and_only_the_band_moves(self) -> None:
+        """T5: the index's window doctored to start in 1980 moves the band and its
+        caption sentence; 1976's cells and marks follow T3's year rule, unchanged."""
+
+        def band(tree: Any) -> dict[str, Any]:
+            (shape,) = [
+                s for s in c2_figure(tree)["layout"]["shapes"] if s["type"] == "rect"
+            ]
+            found: dict[str, Any] = shape
+            return found
+
+        served = render_c2()
+        before = [y for y in YEARS if y < WINDOW[0]]
+        low, high = components.year_edges(list(YEARS), before[0], before[-1])
+        assert (band(served)["x0"], band(served)["x1"]) == (low, high)
+        notes = [a["text"] for a in c2_figure(served)["layout"]["annotations"]]
+        assert labels.C5_BEFORE_BAND.format(pv_year_min=WINDOW[0]) in notes
+        assert labels.C2_BEFORE_NOTE.format(pv_year_min=WINDOW[0]) in _caption(served)
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"]["pv_year_min"] = 1980
+        moved = render_c2(index=index)
+        later = [y for y in YEARS if y < 1980]
+        assert band(moved)["x1"] == components.year_edges(
+            list(YEARS), later[0], later[-1]
+        )[1]
+        assert labels.C2_BEFORE_NOTE.format(pv_year_min=1980) in _caption(moved)
+        assert _cell_of(moved, 1976, "pv_share") == _cell_of(served, 1976, "pv_share")
+        assert 1976 in named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
+
+    def test_the_hybrid_is_labeled_the_project_s_proposal(self) -> None:
+        """AC5: its trace name and key, its hover, the caption and the table note."""
+        tree = render_c2()
+        figure = c2_figure(tree)
+        star = named(figure, labels.C2_HYBRID_KEY)
+        assert star["showlegend"] is True and "proposal" in star["name"]
+        assert all("proposal" in hover for hover in star["hovertext"])
+        assert labels.C2_HYBRID_MARK in _caption(tree)
+        assert "proposal" in labels.C2_HYBRID_MARK
+        assert labels.C2_HYBRID_TABLE_NOTE in texts(tree)
+
+    def test_the_caption_s_plurality_example_is_the_served_1992_leader(self) -> None:
+        """AC6, M3: the example is the leader (who also won the popular vote) and its
+        figure the table's cell for the served share."""
+        item, leader = ITEMS[1992], LEADER[1992]
+        assert item["pv_winner_slug"] == item["ec_winner_slug"] == leader[
+            "candidate_slug"
+        ]
+        assert leader["pv_share"] < 0.5
+        text = labels.C2_PLURALITY_NOTE
+        assert f"{leader['candidate']} did in 1992 with" in text
+        assert f"with {labels.share(leader['pv_share'])}." in text
+        assert text in _caption(render_c2())
+
+    def test_the_caption_s_shape_words_name_the_traces_symbols(self) -> None:
+        words = {
+            labels.C2_EC_MARK: ("circle", MOD["_C2_EC_SYMBOL"]),
+            labels.C2_PV_MARK: ("solid triangle", MOD["_C2_PV_SYMBOL"]),
+            labels.C2_HYBRID_MARK: ("star", MOD["_C2_HYBRID_SYMBOL"]),
+            labels.C2_PV_DIFFERENT_NOTE: ("hexagon", MOD["_C2_PV_DIFFERENT_SYMBOL"]),
+            labels.C2_HYBRID_DIFFERENT_NOTE: (
+                "pentagon",
+                MOD["_C2_HYBRID_DIFFERENT_SYMBOL"],
+            ),
+        }
+        plotly = {
+            "circle": "circle",
+            "solid triangle": "triangle-up",
+            "star": "star",
+            "hexagon": "hexagon",
+            "pentagon": "pentagon",
+        }
+        for sentence, (word, symbol) in words.items():
+            assert f" {word} " in sentence, sentence
+            assert plotly[word] == symbol
+
+    def test_the_new_columns_reconcile_to_n1_on_every_year(self) -> None:
+        """AC4: appended at the end, each cell from the served value by T3's rule (the
+        shares) or the panel's (the winners)."""
+        assert MOD["LEADER_FIELDS"][-4:] == (
+            "pv_share",
+            "hybrid_score",
+            "pv_winner",
+            "hybrid_winner",
+        )
+        tree = render_c2()
+        for year in YEARS:
+            row, item = LEADER[year], ITEMS[year]
+            for field in ("pv_share", "hybrid_score"):
+                assert _cell_of(tree, year, field) == labels.national_pv(
+                    row[field], HAS_PV[year], True
+                ), (year, field)
+            applicable = labels.in_pv_window(year, COVERAGE)
+            for field in ("pv_winner", "hybrid_winner"):
+                assert _cell_of(tree, year, field) == labels.winner(
+                    item[field], applicable
+                ), (year, field)
+
+    def test_the_table_notes_name_the_methods_and_the_proposal(self) -> None:
+        shown = texts(render_c2())
+        for note in (
+            labels.C2_LEADER_ROW,
+            labels.C2_TOOK_OFFICE,
+            labels.C2_TABLE_METHODS_NOTE,
+            labels.HYBRID_NOTE,
+            labels.C2_HYBRID_TABLE_NOTE,
+        ):
+            assert note in shown
 
 
 def _unserved() -> dict[str, Any]:

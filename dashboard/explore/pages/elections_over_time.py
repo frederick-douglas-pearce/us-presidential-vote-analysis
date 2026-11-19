@@ -62,9 +62,6 @@ OVER_TIME_UNAVAILABLE = (
     "shown right now. Please try again in a minute."
 )
 
-#: Room for each of C5's band labels above the plot: two lines of 12 px text at
-#: plotly's 1.3 line height (2 × 16 px) and 8 px between labels (#558, D104).
-_BAND_LABEL_PX = 40
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
     labels.C5_LEGISLATURE: "diamond",
@@ -144,43 +141,6 @@ def _all_states_points(
     return points
 
 
-def _band(
-    years: list[int], first: int, last: int, label: str, *, after: bool, raised: int
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """A shaded band over the served years ``first`` to ``last`` of ``years``
-    (:func:`explore.components.year_edges`), the whole height of the plot, and its
-    label above the plot (#558, D104), never inside the band, which can be one
-    election wide: the band before the window's at its left edge, after it (``after``)
-    at its right, ``raised`` pixels higher where another label sits below it."""
-    low, high = components.year_edges(years, first, last)
-    shape = {
-        "type": "rect",
-        "xref": "x",
-        "x0": low,
-        "x1": high,
-        "yref": "paper",
-        "y0": 0,
-        "y1": 1,
-        "layer": "below",
-        "fillcolor": "var(--chart-grid)",
-        "line": {"width": 1, "color": "var(--chart-reference)"},
-    }
-    note = {
-        "text": label,
-        "showarrow": False,
-        "font": {"color": "var(--text)", "size": 12},
-        "xref": "x",
-        "x": high if after else low,
-        "xanchor": "right" if after else "left",
-        "align": "right" if after else "left",
-        "yref": "paper",
-        "y": 1,
-        "yanchor": "bottom",
-        "yshift": raised,
-    }
-    return shape, note
-
-
 def _c5_figure(
     points: list[over_time.Point],
     years: list[int],
@@ -222,40 +182,18 @@ def _c5_figure(
     layout = over_time.time_layout(
         title, labels.C5_VALUE_AXIS, years, longest, marked=bool(marks)
     )
-    shapes: list[dict[str, Any]] = []
-    annotations: list[dict[str, Any]] = []
-    before = [year for year in years if year < pv_min]
-    after = [year for year in years if year > pv_max]
-    # Both labels sit above the plot; with both drawn, the before label goes on top.
-    raised = _BAND_LABEL_PX if before and after else 0
-    if before:
-        shape, note = _band(
-            years,
-            before[0],
-            before[-1],
-            labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
-            after=False,
-            raised=raised,
-        )
-        shapes.append(shape)
-        annotations.append(note)
-    if after:
-        shape, note = _band(
-            years,
-            after[0],
-            after[-1],
-            labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
-            after=True,
-            raised=0,
-        )
-        shapes.append(shape)
-        annotations.append(note)
-    if shapes:
-        layout["shapes"] = shapes
-        layout["annotations"] = annotations
-        layout["margin"] = {"t": over_time.TOP_PX + _BAND_LABEL_PX * len(annotations)}
+    bands = over_time.pv_bands(
+        years,
+        window,
+        labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
+        labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
+    )
+    if bands.shapes:
+        layout["shapes"] = bands.shapes
+        layout["annotations"] = bands.annotations
+        layout["margin"] = {"t": bands.top_px}
     return over_time.OverTime(
-        {"data": data, "layout": layout}, False, bool(marks), bool(before), bool(after)
+        {"data": data, "layout": layout}, False, bool(marks), bands.before, bands.after
     )
 
 

@@ -588,6 +588,8 @@ class TestTimeSeriesAxis:
         figures.append(c2_figure(render_majority()))
         for figure in figures:
             for t in figure["data"]:
+                if t.get("hoverinfo") == "skip":  # C2's connector (#564): no hover
+                    continue
                 assert len(t["x"]) == len(t["hovertext"]) > 0
                 for x, hover in zip(t["x"], t["hovertext"], strict=True):
                     assert hover.startswith(str(x)), (t["name"], x)
@@ -619,17 +621,21 @@ class TestTimeSeriesAxis:
         leaders_[1]["ec_share_full"] = None
         leaders_[2]["ec_share_full"] = "zz"
         figure = c2_figure(render_majority(summary))
-        symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
+        names = (labels.C2_NO_FIGURE, labels.UNRECOGNIZED)
+        marks = [t for t in figure["data"] if t["name"] in names]
+        symbols = {t["name"]: t["marker"]["symbol"] for t in marks}
         assert symbols == {
-            labels.C1_NO_SHARE: "circle-open",
+            labels.C2_NO_FIGURE: "circle-open",
             labels.UNRECOGNIZED: "square-open",
         }
         assert charts.figure_problems(figure) == []
         # Every hover, the markers' too, names the year it is drawn at (F5).
         for t in figure["data"]:
+            if t.get("hoverinfo") == "skip":  # C2's connector (#564): no hover
+                continue
             for x, hover in zip(t["x"], t["hovertext"], strict=True):
                 assert hover.startswith(f"{x}: "), (t["name"], x)
-        assert [t["x"] for t in figure["data"][1:]] == [
+        assert [t["x"] for t in marks] == [
             [leaders_[1]["year"]],
             [leaders_[2]["year"]],
         ]
@@ -654,7 +660,7 @@ class TestTimeSeriesAxis:
         tree = render_over_time()
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
         assert c4["layout"]["margin"] == c5["layout"]["margin"]
-        assert c5["layout"]["margin"]["t"] == (over_time.TOP_PX + MOD["_BAND_LABEL_PX"])
+        assert c5["layout"]["margin"]["t"] == (over_time.TOP_PX + over_time.BAND_LABEL_PX)
 
     def test_no_years_is_a_type_error(self) -> None:
         """Caught by a page's degraded state, never a 500 (#558, cr.10)."""
@@ -695,12 +701,12 @@ class TestTimeSeriesAxis:
         # of 12 px text at plotly's 1.3 line height, plus a gap, so the two never touch
         # (#558, guard-efficacy F2).
         assert (
-            first_note["yshift"] == MOD["_BAND_LABEL_PX"] and last_note["yshift"] == 0
+            first_note["yshift"] == over_time.BAND_LABEL_PX and last_note["yshift"] == 0
         )
         assert first_note["font"]["size"] == last_note["font"]["size"] == 12
-        assert MOD["_BAND_LABEL_PX"] >= 2 * math.ceil(12 * 1.3) + 4
+        assert 2 * math.ceil(12 * 1.3) + 4 <= over_time.BAND_LABEL_PX
         assert figure["layout"]["margin"]["t"] == (
-            over_time.TOP_PX + 2 * MOD["_BAND_LABEL_PX"]
+            over_time.TOP_PX + 2 * over_time.BAND_LABEL_PX
         )
         assert charts.figure_problems(figure) == []
 

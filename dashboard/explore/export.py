@@ -98,6 +98,9 @@ POPULAR_VOTE_FIELDS = frozenset(
         "pv_share",
         "hybrid_score",
         "has_popular_vote",
+        # The year's popular-vote and hybrid winners, in C2's leader table (#564).
+        "pv_winner",
+        "hybrid_winner",
         # The nation's total popular vote, in C5's companion table (#436); a state's
         # left with C5's one-state mode (#562).
         "national_pv_denominator",

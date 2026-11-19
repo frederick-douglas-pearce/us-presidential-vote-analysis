@@ -7305,3 +7305,82 @@ that would refuse it, and serving the list otherwise keeps a legacy link working
 state's page. `labels.C5_LEGISLATURE` and `C5_TOOK_NO_PART` and their symbols stay in C5's tables
 though an all-states series cannot reach them (a state's status reaches no national total); #582
 may reuse them.
+
+## D108: C2 draws the leader's popular-vote share and hybrid score beside the electoral share; a chart may draw the hybrid when it labels it the project's proposal
+
+**Date:** 2026-11-19
+**Builds on:** D037, D038, D084, D091, D093, D095, D096, D104, D107 · **Amends:** the S6 frame's "No hybrid series in S6" (`backlog-dashboard.md`); D096(b); D104(d), (e) · **Decided by:** the owner, approving #564's plan (architect-reviewed)
+
+**Context.** C2 drew each election's Electoral College leader's electoral share against the
+majority line. The owner's dashboard review (2026-11-17) asked for the same leader's
+popular-vote share and hybrid score on the same chart, so the gap between the methods reads at a
+glance. The S6 frame kept the hybrid out of every S6 chart until S7's labeled opinion tab. N1
+already serves every figure needed (`pv_share`, `hybrid_score`, the three winners and both
+flips), so no new data shape is needed (D070(c)).
+
+**Decision.**
+- **(a) Chart ID.** C2 is extended, not retired: same subject, same companion table, same
+  `#c2` fragment. Its title, value axis and leader sentence are reworded for three measures.
+- **(b) The hybrid in a neutral chart (amends the S6 frame).** A chart may draw the hybrid score
+  when its key entry, its hover and its caption call it the project's proposal, not an official
+  measure, and its companion table carries the same note. S7's labeled opinion tab stays the
+  only home of argument *for* the hybrid; a chart carries the labeled series and nothing about
+  its merits. #550 (C6, a compact version of this chart) inherits this rule under the same
+  label requirement. T3 and the election panel, which show the score as a table cell, gain the
+  label in #590.
+- **(c) Marks.** For each served year: the leader's `ec_share_full` (a circle, as before), their
+  `pv_share` (a solid upward triangle) joined to the circle by a thin line with no hover and no
+  key entry, and their `hybrid_score` (a star). Each mark is drawn wherever its companion-table
+  cell is a share, never by the popular-vote window; a share or score with no figure inside the
+  window, or one no figure can show, is a marker at zero (D091's exception), one open-circle
+  series named `C2_NO_FIGURE` for any missing mark and one open-square series for an
+  unrecognized value. Drawn in the order connector, triangles, stars, circles, so the circle is
+  on top. Under policy (b) the star always sits at the midpoint of the line (D038, D084); it is
+  kept as the issue asks.
+- **(d) Disagreements.** A strip of marks above 100% (the value axis runs to 112%, its ticks
+  stop at 100%): one series per method, drawn only where the served `pv_flip` or `hybrid_flip`
+  is `True`, never from a list of years. A hexagon marks a popular-vote winner who is not the
+  leader, a pentagon a hybrid winner who is not; each is named in the key, and its hover names
+  the table's winner cell. A ring on the mark was rejected: in 2000 the three marks sit about
+  6 px apart at phone width. `leaders()` makes the flags' baseline provably C2's leader: the
+  section degrades when the rank-1 row's slug is not the item's `ec_winner_slug`, when a flip is
+  anything but `True`, `False` or `None`, or when a flip is `True` while that method's winner is
+  the leader.
+- **(e) Bands.** The years before (and, in a later snapshot, after) the popular-vote window are
+  shaded from the index's `coverage`, labeled above the plot with C5's band text, through one
+  shared function, `over_time.pv_bands`, which C5 now calls too. The caption says shading means
+  this dataset has no popular-vote share or hybrid score for those years, not that no popular
+  vote was held.
+- **(f) Symbols (extends D104(d)).** One meaning per symbol across C2, C4, C5 and C7 still
+  holds. C2 adds `triangle-up` (popular-vote share), `star` (hybrid score), `hexagon` and
+  `pentagon` (the strip). The fill carries the triangle's meaning: C4's and C7's open upward
+  triangle means no electors appointed, and no chart may draw an open triangle for anything
+  else. A test pins the table.
+- **(g) Key and majority label (amends D104(d), (e)).** C2's key is always shown: it has three
+  series at least. The majority line's label moves from just below the line at the right, where
+  the leaders' popular-vote shares now sit, to just below the line at the left, starting at the
+  second served year so it clears the first year's leader, the one share below the line there
+  (1824's 37.9%).
+- **(h) Companion table (amends D096(b)).** Its columns are D096(b)'s seven, then, appended:
+  `pv_share`, `hybrid_score`, `pv_winner`, `hybrid_winner`. The two shares follow T3's year rule
+  (`has_popular_vote` from the index row: `labels.NOT_APPLICABLE` outside it even for a value,
+  `labels.NO_NATIONAL_FIGURE` for a null inside it), through `labels.national_pv`, now shared by
+  T3 and C2, so the leader's share reads the same on `/election/<year>` and here; the winners
+  follow the panel's rule (`labels.winner` with the window). Its notes add what the two winner
+  columns name and that the hybrid is the project's proposal. The four fields join
+  `export.POPULAR_VOTE_FIELDS`.
+- **(i) Owner choices at the plan gate.** "The project's proposal"; the caption's plurality
+  example, William J. Clinton in 1992 with 43.0%, pinned to the served value; the label at the
+  left; one no-figure series; a triangle for the popular-vote share; the hybrid strip's key
+  entry without the proposal label, to fit 360 px (its hover carries it); the star kept; the
+  D071(g) re-measure after deploy, in a docs PR that closes #564.
+
+**Rationale.** Every mark is a served value whose table cell its hover writes (D091), so the
+chart derives nothing; drawing by cell rather than by window means a wider popular-vote window
+(#565, #566) needs no change here. The strip keeps the disagreements legible where the marks
+crowd. Labeling the hybrid in the chart itself states what it is without arguing for it, which
+is the one labeled-opinion exception the series allows.
+
+**Residuals.** The recorded N1 has no hybrid disagreement, so the hybrid strip and the key at
+its largest are checked only offline (a doctored body); the browser tests see the recorded
+key. Nothing yet labels the hybrid under T3 and the panel (#590).
