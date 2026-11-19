@@ -120,7 +120,7 @@ jobs:
         # cutting its run time; with the other caps and the setup margin it stays under
         # the job's 30 (tests/unit/test_e2e_workflow.py).
         timeout-minutes: 11
-        run: uv run pytest -m e2e --tracing retain-on-failure --durations=0
+        run: uv run pytest -m e2e --durations=0
 
       - name: Upload traces (on failure)
         if: ${{ failure() }}
