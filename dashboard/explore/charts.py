@@ -52,10 +52,11 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
 #: here once retired. C1 (#433) was the first, C3 (#435) the second, C2 (#434) the
-#: third, and C4 and C5 (#436) the fourth and fifth. ``components.chart`` reads it by
-#: attribute at call time. ``ISSUED``, a hand-written literal of every issued ID with
-#: its whole row, must equal this (``TestChartRegistry`` in
-#: ``test_dashboard_charts.py`` reads it), and
+#: third, C4 and C5 (#436) the fourth and fifth, and C7 (#560) the sixth: IDs follow
+#: the stories' filing order, and C6 (#550) is filed but not yet registered.
+#: ``components.chart`` reads it by attribute at call time. ``ISSUED``, a hand-written
+#: literal of every issued ID with its whole row, must equal this
+#: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
 #: ``test_every_row_is_well_formed_and_on_a_registered_page`` checks each row.
 CHARTS: Mapping[str, Chart] = {
     # Each candidate's electoral share beside their popular-vote share, with the
@@ -73,6 +74,10 @@ CHARTS: Mapping[str, Chart] = {
     # companion table they share (#436, D100).
     "C4": Chart("/elections", "elections-over-time-table"),
     "C5": Chart("/elections", "elections-over-time-table"),
+    # One state's electors appointed in each election, never narrowed by the page's
+    # filters, on the state's history page, beside its own companion table (#560,
+    # D106).
+    "C7": Chart("/state/<usps>", "state-electors"),
 }
 
 

@@ -177,7 +177,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   states); in C4: the bars, the value-axis title `labels.C4_VALUE_AXIS`, the hover line
   "Electors appointed", `labels.C4_TITLE`, `labels.C4_TITLE_STATE`, `labels.C4_TITLE_SELECTED`,
   the key entries `labels.C4_NO_ELECTORS_TOOK_NO_PART` and `labels.C4_NO_ELECTORS`,
-  `labels.C4_BASIS`, `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`.
+  `labels.C4_BASIS`, `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`. C7 on the state history:
+  its bars, `labels.C4_TITLE_STATE` or `labels.C7_TITLE_THIS_STATE`, `labels.C4_VALUE_AXIS`, the
+  hover line "Electors appointed" (`labels.C4_STATE_HOVER`), the key entries, `labels.C4_BASIS`
+  and `labels.C4_ZERO_NOTE`, and `LABELS["state_electoral_votes"]` in its companion table.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
   `ElectionSummary.electoral_denominator`;
@@ -432,7 +435,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral vote page (`/election/<year>/per-capita`). The home page's lede (`pages/home.py`)
   already says "Tables and charts". C2 is on the elections index (`/elections`), above the filters.
   C4 and C5 are on `/elections`, after the list of elections, followed by the one companion
-  table they share.
+  table they share. C7 is on a state's history page (`/state/<usps>`), before the filters, with
+  its own companion table.
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
@@ -453,7 +457,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   chart's caption goes to it, and its download is how to take those numbers away.
 - **Precise:** The table that each chart's registry row names by its element id. Two charts can
   share one companion table (C4 and C5). On `/elections` the state filter switches both charts
-  and their table together (D100).
+  and their table together (D100). On a state's history page, C7's companion table is its own;
+  the page's filters narrow T4 only.
   `components.chart` refuses any other table. The table pointer links to `#<table id>`, the table
   element itself, below the table's heading. Every chart's pointer has the same text; the caption
   it ends tells the reader which chart it belongs to. Like every table, it is built by
@@ -605,8 +610,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral vote), read from that index and never computed as four years before or after; a year
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
-- **Shown as:** `LABELS["year"]`; the year axis of C2, C4 and C5 on `/elections`, a numeric axis
-  with a tick every 40 years; the year-range slider (`/elections`, `/state/<usps>`,
+- **Shown as:** `LABELS["year"]`; the year axis of C2, C4 and C5 on `/elections` and of C7 on
+  `/state/<usps>`, a numeric axis with a tick every 40 years; the year-range slider
+  (`/elections`, `/state/<usps>`,
   `/state/<usps>/per-capita`), which on both state pages is labeled "Years" and offered by each
   page's `FILTER_SENTENCE`; the label of the year control on `/candidate/<slug>`, and the lede
   sentence that offers it (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages'
@@ -920,6 +926,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   - C4 and C5 are in `CHARTS` on `/elections`, ids `c4` and `c5`, sharing one companion table.
     The section follows T1's column-name list and comes before the footer, under
     `OVER_TIME_HEADING`.
+  - C7 draws the same one-state series of electors appointed on that state's history page
+    (*State's electors appointed over time*).
   - All states: C4 reads the N1 `elections` items' `electoral_denominator`. C5 reads each year's
     one distinct `national_pv_denominator` across N1's `data` rows; two distinct values make the
     section unavailable.
@@ -1640,11 +1648,14 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### State pages (state history, people per electoral vote)
 - **Plain:** Each state in this dataset has two pages. The state history shows the state's
   electoral votes for each candidate in every election this dataset holds for it, with the popular
-  vote where the dataset has it; a reader can narrow it by year, candidate or popular-vote status.
+  vote where the dataset has it; a chart of the state's electors appointed in each election comes
+  first, and the filters narrow only the table of each candidate's electoral votes, by year,
+  candidate or popular-vote status.
   People per electoral vote shows how many people the state's electoral votes stood for in each of
   those elections; a reader can narrow it by year. Links near the top of each page go between the
   two, and the page being read is marked. Following one keeps the years chosen.
-- **Precise:** Two registered pages: `/state/<usps>`, the state history (T4, its three filters
+- **Precise:** Two registered pages: `/state/<usps>`, the state history (chart C7 and its
+  companion table `state-electors`, which no filter reaches; then T4, its three filters
   `year_from`/`year_to`, `candidate` and `pv_status`, T4's party notes, and the provenance footer),
   filled from `/v1/states/{usps}`; and `/state/<usps>/per-capita` (T7 and the year range only),
   filled from `/v1/states/{usps}/per-capita` and registered with `order=` ahead of the history
@@ -1656,14 +1667,15 @@ articles and announcements). Every rule binds all three unless the rule states a
   string, never `candidate` or `pv_status`. Unlike the election pages' section links, these carry a
   filter, because both pages have the year range. No `/state/<usps>` query key reached T7 alone, so
   an old link is not redirected: it opens the history page with its filters applied (D105).
-- **Shown as:** the section links `labels.SECTION_STATE_HISTORY` and `labels.SECTION_PER_CAPITA`
-  and their landmark name `labels.STATE_SECTIONS_LABEL` (read by assistive technology, not shown);
-  in `pages/state.py`, the history page's heading (the state's name as served, from `render`; on the
+- **Shown as:** the section links `labels.SECTION_STATE_HISTORY` and `labels.SECTION_PER_CAPITA` and
+  their landmark name `labels.STATE_SECTIONS_LABEL` (read by assistive technology, not shown); in
+  `pages/state.py`, the history page's heading (the state's name as served, from `render`; on the
   degraded state "State history", a literal in `layout`), `LEDE` (success and degraded),
-  `FILTER_SENTENCE` (success only), its title (`title`: the code, then "state history", then the
-  site title once the code is checked, and before then "State history" and the site title; never
-  the state's name), its `description`, and T4's download, named "this state's history" in the file
-  `state-{usps}-history.csv`; in `pages/state_per_capita.py`,
+  `FILTER_SENTENCE` (success only; both reworded by #560), the section headings `C7_HEADING`,
+  `C7_TABLE_HEADING` and `HISTORY_TABLE_HEADING`, C7's `C7_UNAVAILABLE`, its title (`title`: the
+  code, then "state history", then the site title once the code is checked, and before then "State
+  history" and the site title; never the state's name), its `description`, and T4's download, named
+  "this state's history" in the file `state-{usps}-history.csv`; in `pages/state_per_capita.py`,
   `PER_CAPITA_HEADING` ("{state}: people per electoral vote") and `PER_CAPITA_GENERIC_HEADING`,
   `LEDE`, `FILTER_SENTENCE`, `title` (the code, then "people per electoral vote", then the site
   title; before then the generic heading and the site title), `description`, the year control's
@@ -1676,6 +1688,36 @@ articles and announcements). Every rule binds all three unless the rule states a
   (T7); reader wording: `ba` spec for #559, approved by the owner at its plan gate (2026-11-18).
 - **Not:** *Election pages*. *Site navigation*. A filter: the section links change the page; the
   year range they carry is the reader's own.
+- **Status:** settled
+
+### State's electors appointed over time (chart C7)
+- **Plain:** A chart on each state's history page with election years running left to right; each
+  bar is the electors the state appointed in one election, from its first election in this dataset.
+  Where there is nothing to draw, a marker stands in the bar's place, never a bar of zero length,
+  and the chart's key says what each kind of marker means; an election in which the state appointed
+  no electors (its allotment was 0) is marked that way too. A table beside it holds its numbers,
+  with its own download. The page's year, candidate and popular-vote filters narrow only the table
+  of each candidate's electoral votes, never this chart or its table.
+- **Precise:** `CHARTS["C7"]` on `/state/<usps>`, id `c7`, companion table `state-electors` (fields
+  `year`, `state_electoral_votes`, `pv_status`; CSV extra `state_usps`). One point per served year,
+  collapsed from `/v1/states/{usps}` rows (one per candidate per year); rows of one year that
+  disagree on the allotment or status make the section unavailable. Its values equal C4's one-state
+  series for the same state. Bars, markers, symbols, the key and the year axis are C4's (D100,
+  D104). Never filtered and no selection trace (D093(a)). If the series cannot be built, the section
+  shows its heading and `C7_UNAVAILABLE` only; T4, its filters and the page's success marker stay.
+- **Shown as:** in `pages/state.py`, `C7_HEADING`, `C7_TABLE_HEADING`, `C7_UNAVAILABLE` and the
+  download "this state's electors appointed in each election" (`state-{usps}-electors.csv`); in
+  `labels.py`, `C4_TITLE_STATE` (else `C7_TITLE_THIS_STATE`), `C4_VALUE_AXIS`, `C4_STATE_HOVER`, the
+  key entries `C4_NO_ELECTORS_TOOK_NO_PART`, `C4_NO_ELECTORS`, `NOT_IN_DATASET` and `UNRECOGNIZED`,
+  the caption sentences `C4_BASIS`, `C4_ZERO_NOTE`, `C4_NO_FIGURE_NOTE`, `FIRST_ELECTION_NOTE` (else
+  `FIRST_ELECTION_NOTE_THIS_STATE`) and `C7_FILTERS_NOTE`; `LABELS["year"]` (the year axis); the
+  table's note `C4_BASIS`; then `labels.CHART_TABLE_POINTER`.
+- **Source:** #560 ACs; D091, D093(a), D096(d), D100, D104, D106; `EcPvRow.state_electoral_votes`
+  and `EcPvRow.pv_status` on `/v1/states/{usps}`; reader wording: `ba` spec for #560, approved by
+  the owner at its plan gate (2026-11-18).
+- **Not:** electoral votes cast or counted; anything the page's filters narrow; the *Degraded state*
+  (a failed C7 is its section's own sentence, and the page stays); a second definition of C4's
+  series (same values, another page).
 - **Status:** settled
 
 ### State's total popular vote (`state_popular_total`)
@@ -1876,7 +1918,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`). In C2, C4 and C5, `labels.UNRECOGNIZED`
+  value's help text (set by `labels.cell`). In C2, C4, C5 and C7, `labels.UNRECOGNIZED`
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
   value (C5 through `labels.C5_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C5_STATE_HOVER` write
@@ -1987,6 +2029,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state at the elections between its admission and the first redistribution of House seats that included it, for California 1852–1860, and for DC from 1964 (`docs/governing-census.md`). |
 | "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
 | "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
+| "the selected state" on a state's own page | this state, or the state's name | `labels.C7_TITLE_THIS_STATE`, `labels.FIRST_ELECTION_NOTE_THIS_STATE` | The state comes from the page address; no one selected it. |
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |

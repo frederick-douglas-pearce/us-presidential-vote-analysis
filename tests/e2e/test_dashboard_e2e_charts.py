@@ -24,10 +24,10 @@ from playwright.sync_api import Page, Request, expect
 from explore import charts, components, labels
 from tests.e2e.conftest import plotlyjs_file, plotlyjs_url
 from tests.e2e.dashboard_pages import (
+    CANDIDATE_SUCCESS,
     ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     RESOURCE_ERROR,
-    STATE_SUCCESS,
     assert_chunk_failure_stops,
     assert_rendered,
     watch_chunk_errors,
@@ -112,8 +112,11 @@ def test_the_installed_plotlyjs_is_the_version_the_address_names() -> None:
 
 @pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.parametrize(
-    # /elections draws C2 since #434, so the page with filters but no chart is a state's.
-    ("path", "success"), [("/", HOME_SUCCESS), ("/state/GA", STATE_SUCCESS)]
+    # /elections draws C2 since #434 and a state's history C7 since #560, so the page
+    # with filters but no chart is a candidate's (a state's per-capita page gains C8 in
+    # #561).
+    ("path", "success"),
+    [("/", HOME_SUCCESS), ("/candidate/andrew-jackson", CANDIDATE_SUCCESS)],
 )
 def test_a_page_with_no_chart_fetches_no_plotlyjs(
     page: Page, path: str, success: str

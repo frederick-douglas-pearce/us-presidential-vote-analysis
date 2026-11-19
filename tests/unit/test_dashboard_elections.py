@@ -778,6 +778,7 @@ SHARED_MODULES = (
     "export.py",
     "labels.py",
     "metrics.py",  # the dashboard's own summaries (#437, D097)
+    "over_time.py",  # the election-year time series' pieces, C4's and C7's (#560)
     "query.py",
     "state_view.py",  # the state pages' shared pieces (#559)
 )
@@ -3671,8 +3672,8 @@ class TestOverTimeCaptions:
     def test_a_name_that_is_not_plain_text_uses_the_selected_state_forms(
         self, name: str
     ) -> None:
-        """Each of ``_plain``'s refusals on its own (#498): markup, and a token with no
-        ``<``. Alaska's first election comes after the dataset's, so both captions
+        """Each of ``over_time.plain``'s refusals on its own (#498): markup, and a token
+        with no ``<``. Alaska's first election comes after the dataset's, so both captions
         carry the first-election sentence, in its selected form, never the name."""
         states = copy.deepcopy(N2)
         for row in states["data"]:

@@ -724,6 +724,20 @@ FIRST_ELECTION_NOTE_SELECTED = (
     "is drawn for the years before it."
 )
 
+#: Chart C7 (#560): one state's electors appointed, on its history page. Its title,
+#: axis, hover, key and most of its caption are C4's one-state wording. Two of these are
+#: the forms for a state its page names by address, never by a choice; the third says
+#: what the page's filters reach (ba spec, approved at #560's plan gate, 2026-11-18).
+C7_TITLE_THIS_STATE = "Electors appointed by this state in each election"
+FIRST_ELECTION_NOTE_THIS_STATE = (
+    "The first election in this dataset for this state is {year}, so nothing is drawn "
+    "for the years before it."
+)
+C7_FILTERS_NOTE = (
+    "The year, candidate and popular-vote filters on this page narrow only the table "
+    "of each candidate's electoral votes, not this chart or its table."
+)
+
 C5_TITLE = "Total popular vote in each election, all states"
 C5_TITLE_STATE = "Total popular vote in {state} in each election"
 C5_TITLE_SELECTED = "Total popular vote in the selected state in each election"
