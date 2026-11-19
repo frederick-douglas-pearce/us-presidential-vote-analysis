@@ -1782,6 +1782,32 @@ class TestC7:
                 year=year, state="Georgia", appointed=appointed, pv_status=status
             )
 
+    @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
+    def test_the_table_s_links_view_and_note(self, query: str) -> None:
+        # Its own table, never T4's: each year links to that election's page, its
+        # file names the history page with no filter whatever the render applied
+        # (D093(a)), and its note, the allotment's basis, is under the table and in
+        # the file's preamble (#560's acceptance gate, Class B).
+        tree = render(query)
+        rows = body_rows(tree, ELECTORS)
+        assert rows
+        for tr in rows:
+            (link,) = of_type(tr.children[0], "Link")
+            assert link.href == f"/election/{link.children}"
+        lines = download(tree, ELECTORS).lines
+        assert "View: https://explore.us-presidential-election-center.org/state/GA" in (
+            lines
+        )
+        assert labels.C4_BASIS in lines
+        table = find(tree, ELECTORS)
+        at = [
+            i
+            for i, k in enumerate(tree.children)
+            if find(k, ELECTORS) is not None
+        ]
+        assert table is not None and at
+        assert labels.C4_BASIS in texts(tree.children[at[0] + 1 : at[0] + 4])
+
     def test_a_zero_allotment_is_a_marker_by_its_cause(self) -> None:
         # Georgia took no part in 1864 (recorded); Texas's 1864 and 1868 zeros through
         # the recorded N2 rows (#575 records its history).
