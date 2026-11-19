@@ -450,8 +450,9 @@ C2_TITLE = (
 C2_VALUE_AXIS = "Leader's shares<br>and hybrid score"
 #: The dashed line's label, just below the line at the left (#564's plan gate, D108):
 #: "each election's", since the number of electors appointed changes with the year
-#: (never a fixed number such as 270).
-C2_MAJORITY_LINE = "Majority line: half of each<br>election's electors appointed"
+#: (never a fixed number such as 270). Three lines since #564, so it ends before the
+#: first popular-vote year at 360 px in CI's wider font (the words are unchanged).
+C2_MAJORITY_LINE = "Majority line: half of<br>each election's<br>electors appointed"
 #: The circle's hover, filled with strings the page writes: the year as written, the
 #: name as served, the companion table's cells, and the majority line every year.
 C2_HOVER = (
