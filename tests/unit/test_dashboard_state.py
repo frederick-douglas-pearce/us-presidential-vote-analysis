@@ -1632,7 +1632,9 @@ class TestWideLayout:
 
 C7_DOM = charts.dom_id("C7")
 ELECTORS = MOD["ELECTORS_TABLE_ID"]
-N2: dict[str, Any] = RECORDED[api.ELECTION_STATES_PATH]
+#: N2, by its literal path: no dashboard page reads it since #562 (D107), and its
+#: recording stays test input for C7's reconciliation (D106(h)).
+N2: dict[str, Any] = RECORDED["/v1/elections/states"]
 SERVED = sorted(state_view.served_years(INDEX))
 
 

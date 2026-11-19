@@ -120,10 +120,10 @@ FIXTURE_FILES = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
     "/v1/elections/1824": "v1_elections_1824.json",
-    # N1 (#431), the elections index's fill on a miss for chart C2 (#434).
+    # N1 (#431), the elections pages' fill on a miss (#434, #436, #437, #562). N2
+    # (#428) is not here: no page reads it since #562 (D107), so a page that reads it
+    # again fails this run by name.
     "/v1/elections/summary": "v1_elections_summary.json",
-    # N2 (#428), the elections index's fill on a miss for charts C4 and C5 (#436).
-    "/v1/elections/states": "v1_elections_states.json",
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
@@ -139,9 +139,10 @@ FIXTURE_FILES = {
 #: success run at :data:`GUARD_PATH_VALUES`: the CSV is built there, in the render,
 #: under the guard. Checked per page, so a link that moved to another page fails.
 DOWNLOAD_IDS_BY_PAGE = {
-    "/elections": ("elections-table-csv", "elections-over-time-table-csv"),
-    # Chart C2's page since #562.
+    "/elections": ("elections-table-csv",),
+    # Chart C2's page, and C4 and C5's, since #562.
     "/elections/majority": ("elections-leader-table-csv",),
+    "/elections/over-time": ("elections-over-time-table-csv",),
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),
@@ -184,12 +185,19 @@ ELECTION_PAGE_MISSES = {
 #: the pages (by concrete path: the overview, then ``/per-capita``, then ``/states``).
 ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
-#: The elections index's fills on a miss after :data:`ELECTION_MISSES` (``/elections``
-#: sorts after ``/election/1824…`` and before ``/state/GA``): N1, chart C2's source
-#: (#434, D096), then N2, charts C4 and C5's one-state source (#436, D100). With them
-#: the success run plans eleven fills, past the bucket's burst of ten, so the program
-#: runs on a permissive bucket.
-ELECTIONS_MISSES = ["/v1/elections/summary", "/v1/elections/states"]
+#: The elections pages' fills on a miss after :data:`ELECTION_MISSES` (``/elections``
+#: sorts after ``/election/1824…`` and before ``/state/GA``): N1, which the index's
+#: averages read first, and its two subpages (#562) then find cached. N2 is read by no
+#: page since #562 (D107). The program still runs on a permissive bucket (D100(h)).
+ELECTIONS_MISSES = ["/v1/elections/summary"]
+#: The same fill by page (#562), each render's own slice of ``SERVED``.
+ELECTIONS_PAGE_MISSES = {
+    "/elections": ["/v1/elections/summary"],
+    "/elections/majority": [],
+    "/elections/over-time": [],
+}
+#: N2, which no page reads since #562 (D107): asserted absent from every request.
+RETIRED_N2 = "/v1/elections/states"
 
 #: The fills on a miss after :data:`ELECTIONS_MISSES`, in the order the success run
 #: renders the pages that make them: the state history's roster,
@@ -571,8 +579,12 @@ for page in PAGES:
         assert _VERSION in text
 # Each election page made its own fill and no other's (#465), and so did each state
 # page (#559).
-for key, misses in {{**{ELECTION_PAGE_MISSES!r}, **{STATE_PAGE_MISSES!r}}}.items():
+for key, misses in {{
+    **{ELECTION_PAGE_MISSES!r}, **{STATE_PAGE_MISSES!r}, **{ELECTIONS_PAGE_MISSES!r}
+}}.items():
     assert served_by_page[key] == misses, (key, served_by_page[key], misses)
+# No page reads N2 since #562 (D107), answered or not.
+assert {RETIRED_N2!r} not in REQUESTED, REQUESTED
 # Every table's CSV (#309) is built in these renders, under this guard, on its own
 # page. That a download is its link's data: URL with no route or callback behind it
 # is checked elsewhere: link_problems and TestRequestBudget in test_dashboard_export.py.

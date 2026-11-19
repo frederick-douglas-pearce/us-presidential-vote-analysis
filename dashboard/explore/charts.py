@@ -72,8 +72,8 @@ CHARTS: Mapping[str, Chart] = {
     # Electors appointed and the total popular vote in each election, all states or the
     # one state the page's state filter chooses, on the elections index, beside one
     # companion table they share (#436, D100).
-    "C4": Chart("/elections", "elections-over-time-table"),
-    "C5": Chart("/elections", "elections-over-time-table"),
+    "C4": Chart("/elections/over-time", "elections-over-time-table"),
+    "C5": Chart("/elections/over-time", "elections-over-time-table"),
     # One state's electors appointed in each election, never narrowed by the page's
     # filters, on the state's history page, beside its own companion table (#560,
     # D106).

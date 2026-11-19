@@ -238,6 +238,7 @@ class TestCurrentPage:
             "pages.home": "home",
             "pages.elections": "elections",
             "pages.elections_majority": "elections",
+            "pages.elections_over_time": "elections",
             "pages.election": "elections",
             "pages.election_states": "elections",
             "pages.election_per_capita": "elections",

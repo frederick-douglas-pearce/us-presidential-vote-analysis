@@ -41,8 +41,8 @@ TABLES = {
     "elections-table": "/elections",
     # Chart C2's companion table (#434), on its own page since #562.
     "elections-leader-table": "/elections/majority",
-    # Charts C4 and C5's companion table (#436).
-    "elections-over-time-table": "/elections",
+    # Charts C4 and C5's companion table (#436), on their own page since #562.
+    "elections-over-time-table": "/elections/over-time",
     "election-states": "/election/<year>/states",
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
@@ -62,11 +62,11 @@ TABLES = {
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
-    # The index, then N1 for chart C2, then N2 for C4 and C5, in the same view (#434,
-    # #436).
-    "/elections": ["/v1/elections", "/v1/elections/summary", "/v1/elections/states"],
-    # Chart C2's page (#562): the index, then N1, in the same view.
+    # The index, then N1 for the averages, in the same view (#437); no N2 since #562.
+    "/elections": ["/v1/elections", "/v1/elections/summary"],
+    # Chart C2's page and C4 and C5's (#562): the index, then N1, in the same view.
     "/elections/majority": ["/v1/elections", "/v1/elections/summary"],
+    "/elections/over-time": ["/v1/elections", "/v1/elections/summary"],
     # #465 split the one-election view's reads across its three pages: each fills one
     # path (the per-capita page reads no /v1/elections/{year}), and none adds a read.
     "/election/<year>": ["/v1/elections", "/v1/elections/1824", "/v1/elections"],
@@ -466,27 +466,18 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({"year": "1864"}, "state=GA", "filtered"),
         ({"year": "1864"}, "state=ZZ", "absent"),
     ],
-    # #434, D096: the filters narrow T1, never C2 or its companion table. 1700 is four
-    # digits the parser keeps and the layout replaces with the span's start.
-    "/elections": [
-        ({}, "year_from=1824&year_to=1900", "filtered"),
-        ({}, "year_from=1700", "absent"),
-        # #436, D100: the state switches C4 and C5's series and their table only.
-        # Georgia from 1824 (with 1864's zero allotment), Alaska from 1960, and a
-        # state with a year filter, which reaches T1 only.
-        ({}, "state=GA", "filtered"),
-        ({}, "state=AK", "filtered"),
-        ({}, "state=GA&year_from=1900", "filtered"),
-        ({}, "state=ZZ", "absent"),
-        # The popular-vote filter reaches T1 only (#436's review).
-        ({}, "pv=1", "filtered"),
-        ({}, "state=GA&pv=1", "filtered"),
-    ],
     # #562: C2's own page reads no filter (no ``query=``), so the list's old keys and
     # the retired state key change nothing on it, as the overview's moved keys do.
     "/elections/majority": [
         ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
         ({}, "state=GA", "filtered"),
+    ],
+    # #562: C4 and C5's own page reads no filter either; the old state key, which
+    # switched their series before (D100), now changes nothing on it.
+    "/elections/over-time": [
+        ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
+        ({}, "state=GA", "filtered"),
+        ({}, "state=ZZ", "absent"),
     ],
     # #560, D106: the state page's filters narrow T4 only, never C7 or its companion
     # table. Georgia from 1824, with 1864's zero allotment.
@@ -513,10 +504,8 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
 #: with a ``query=`` parser that lists none.
 FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/election/<year>/per-capita": {"election-per-capita": ("state",)},
-    "/elections": {
-        "elections-table": ("year_from", "year_to", "pv"),
-        "elections-over-time-table": ("state",),
-    },
+    # ``/elections`` has no chart since #562 (D107), so it is listed again when #563
+    # brings C9 there; T1's narrowing is checked by ``test_dashboard_elections.py``.
     # #560: T4 alone; C7's companion table is unlisted, so it equals the unfiltered
     # render under every query.
     "/state/<usps>": {
@@ -530,8 +519,9 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
 #: these keys; every other chart reduces to the empty query, which is D093(a)'s "a
 #: filter never narrows a chart". Hand-written.
 SERIES_KEYS: dict[str, tuple[str, ...]] = {
-    charts.dom_id("C4"): ("state",),
-    charts.dom_id("C5"): ("state",),
+    # Empty since #562 (D107): C4 and C5's state key retired with their one-state
+    # mode, so D100(b)'s branch is visibly vacuous until a chart's filter chooses a
+    # series again.
 }
 
 
@@ -2272,12 +2262,6 @@ def _over_time(body: dict[str, Any]) -> None:
             row["national_pv_denominator"] = SENTINEL
 
 
-#: The state the doctored one-state render and the C4/C5 ``SERVED_ROWS`` entries choose
-#: (#436): N2's first recorded row's, derived from the recording, never a hard-coded
-#: code. ``DOCTORED``, ``UNRECOGNIZED_CELLS`` and ``SERVED_ROWS`` read this one
-#: definition (#498); ``CHART_QUERIES`` names its own states.
-N2_STATE = RECORDED[api.ELECTION_STATES_PATH]["data"][0]["state_usps"]
-
 #: How many candidate rows Georgia's first recorded election has (#560), derived from
 #: the recording.
 GA_FIRST_ROWS = sum(
@@ -2286,8 +2270,7 @@ GA_FIRST_ROWS = sum(
     if row["year"] == RECORDED["/v1/states/GA"]["data"][0]["year"]
 )
 
-#: Each doctored render, by page key and, after a ``?``, the query it renders under
-#: (#436: ``/elections`` renders all states and one state).
+#: Each doctored render, by page key and, after a ``?``, the query it renders under.
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
         {},
@@ -2296,16 +2279,9 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
             "/v1/elections/summary": _over_time,
         },
     ),
-    # C2's leader table, on its own page since #562.
+    # C2's leader table, and C4 and C5's, on their own pages since #562.
     "/elections/majority": ({}, {"/v1/elections/summary": _over_time}),
-    f"/elections?state={N2_STATE}": (
-        {},
-        {
-            "/v1/elections/states": _row(
-                "state_electoral_votes", "state_popular_total", "pv_status"
-            ),
-        },
-    ),
+    "/elections/over-time": ({}, {"/v1/elections/summary": _over_time}),
     "/election/<year>": ({"year": "2016"}, {"/v1/elections/2016": _election}),
     "/election/<year>/states": ({"year": "2016"}, {"/v1/elections/2016": _election}),
     "/election/<year>/per-capita": (
@@ -2337,17 +2313,11 @@ UNRECOGNIZED_CELLS = {
         "elections-table": 2,
         # One per average whose field a doctored item holds (#437).
         "elections-metrics": len(AVERAGED_FIELDS),
-        # The first year's allotment and 2016's national total (#436).
-        "elections-over-time-table": 2,
     },
+    # The first year's allotment and 2016's national total (#436).
+    "/elections/over-time": {"elections-over-time-table": 2},
     # One per doctored field, ``ec_determinative`` from the year's item (#434).
     "/elections/majority": {"elections-leader-table": len(LEADER_ROW_FIELDS) + 1},
-    # One state (#436): its first row's allotment, total and status.
-    f"/elections?state={N2_STATE}": {
-        "elections-table": 0,
-        "elections-metrics": 0,
-        "elections-over-time-table": 3,
-    },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
         "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
@@ -2620,16 +2590,14 @@ class TestNoRawValues:
 
 class Served(NamedTuple):
     """One served source of a chart's figure (#484; a list per chart since #436): the
-    page's path values and query, the path, the rows of its body to doctor (each
-    field is doctored in every one of them at once), and the fields whose doctored text
-    must reach the one-state build rather than refuse the body: every hover carries it,
-    escaped, and the title takes its selected-state form (#498)."""
+    page's path values and query, the path, and the rows of its body to doctor (each
+    field is doctored in every one of them at once). The one-state build whose fields
+    #498 required to reach it retired with #562 (D107)."""
 
     values: dict[str, str]
     query: str
     path: str
     rows: Callable[[dict[str, Any]], list[dict[str, Any]]]
-    reaches: frozenset[str] = frozenset()
 
 
 def _first(key: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
@@ -2644,47 +2612,18 @@ def _year_rows(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     return lambda body: [row for row in body["data"] if row["year"] == year]
 
 
-def _state_rows(usps: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
-    """Every N2 ``data`` row of one state (#498): its name is on each, so doctoring one
-    row would name the state two ways and refuse N2, and a doctored name would never
-    reach the one-state build: its hovers, which carry the name escaped, and its titles
-    and captions, which take their selected-state forms for a name ``over_time.plain``
-    refuses."""
-    return lambda body: [row for row in body["data"] if row["state_usps"] == usps]
-
-
 #: Per live chart (#484): the page it renders on with its path values and query, and
 #: the served rows its figure is built from. Every live ``CHARTS`` row has an entry
-#: (``test_every_live_chart_has_its_served_rows``). C4 and C5 read N1 with all states
-#: and N2 with one (#436); C5's N1 rows are every row of one year inside the window, and
-#: their N2 rows every row of the chosen state, so a doctored name reaches the one-state
-#: build (#498): its hovers carry the name, its titles take the selected-state forms.
+#: (``test_every_live_chart_has_its_served_rows``). C4 and C5 read N1 (#436; all states
+#: only since #562); C5's rows are every row of one year inside the window.
 SERVED_ROWS: dict[str, list[Served]] = {
     "C1": [Served({"year": "2016"}, "", "/v1/elections/2016", _first("summary"))],
     "C2": [Served({}, "", "/v1/elections/summary", _first("data"))],
     "C3": [
         Served({"year": "2016"}, "", "/v1/elections/2016/per-capita", _first("data"))
     ],
-    "C4": [
-        Served({}, "", api.SUMMARY_PATH, _first("elections")),
-        Served(
-            {},
-            f"state={N2_STATE}",
-            api.ELECTION_STATES_PATH,
-            _state_rows(N2_STATE),
-            frozenset({"state"}),
-        ),
-    ],
-    "C5": [
-        Served({}, "", api.SUMMARY_PATH, _year_rows(2016)),
-        Served(
-            {},
-            f"state={N2_STATE}",
-            api.ELECTION_STATES_PATH,
-            _state_rows(N2_STATE),
-            frozenset({"state"}),
-        ),
-    ],
+    "C4": [Served({}, "", api.SUMMARY_PATH, _first("elections"))],
+    "C5": [Served({}, "", api.SUMMARY_PATH, _year_rows(2016))],
     # #560: every candidate row of one election, since C7 collapses them to one point
     # and refuses a year whose rows disagree: doctoring one row would degrade the
     # section instead of reaching the point.
@@ -2700,9 +2639,6 @@ SECTION_UNAVAILABLE = {
     "C5": "elections-over-time-unavailable",
     "C7": "state-electors-unavailable",
 }
-
-#: C4 and C5's titles for a chosen state whose name is not plain text (#498).
-SELECTED_TITLES = {"C4": labels.C4_TITLE_SELECTED, "C5": labels.C5_TITLE_SELECTED}
 
 #: The unexpected kinds a served field is doctored to (#484).
 SERVED_KINDS: dict[str, Any] = {
@@ -2737,17 +2673,6 @@ class TestServedValuesReachNoFigureUntyped:
             c for c, row in charts.CHARTS.items() if not row.retired
         }
         assert set(SECTION_UNAVAILABLE) <= set(SERVED_ROWS)
-        # C4 and C5's N2 entries doctor every row of one state and require the name to
-        # reach the one-state build (#498): one row alone would refuse N2 instead.
-        for chart_id in ("C4", "C5"):
-            (entry,) = [
-                e for e in SERVED_ROWS[chart_id] if e.path == api.ELECTION_STATES_PATH
-            ]
-            assert entry.reaches == {"state"}, chart_id
-            data = RECORDED[entry.path]["data"]
-            selected = entry.rows(RECORDED[entry.path])
-            (usps,) = {row["state_usps"] for row in selected}
-            assert selected == [r for r in data if r["state_usps"] == usps], chart_id
 
     @pytest.mark.parametrize("kind", list(SERVED_KINDS))
     @pytest.mark.parametrize(
@@ -2758,7 +2683,7 @@ class TestServedValuesReachNoFigureUntyped:
         self, chart_id: str, entry: int, kind: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         row = charts.CHARTS[chart_id]
-        values, search, path, rows, reaches = SERVED_ROWS[chart_id][entry]
+        values, search, path, rows = SERVED_ROWS[chart_id][entry]
         success = page_of(row.page)["success"]
         dom = charts.dom_id(chart_id)
         targets = rows(RECORDED[path])
@@ -2795,21 +2720,6 @@ class TestServedValuesReachNoFigureUntyped:
             built = built_figure(tree)
             if built is not None and built != plain:
                 changed.append(field)
-            if field in reaches and labels.has_text(SERVED_KINDS[kind]):
-                # Text reaches the one-state build: every hover carries it, escaped,
-                # and the title takes its selected-state form, since
-                # ``over_time.plain`` refuses it. Any change is not enough: a refused
-                # body's all-states fallback changes the figure too (#498).
-                assert built is not None, field
-                name = charts.escaped(SERVED_KINDS[kind])
-                hovers = [h for t in built["data"] for h in t.get("hovertext", [])]
-                assert hovers and all(name in h for h in hovers), field
-                (title,) = [
-                    p.children
-                    for p in of_type(tree, "P")
-                    if getattr(p, "id", None) == f"{dom}-title"
-                ]
-                assert title == SELECTED_TITLES[chart_id], field
             if figures and mount_points(figures[0]):
                 outcome = "drawn"
             elif figures:
@@ -2830,7 +2740,6 @@ class TestServedValuesReachNoFigureUntyped:
 #: ``components.label_sorted_options`` returned. Every other dropdown lists a closed
 #: vocabulary in its ``labels`` table's order and must not be.
 NAME_DROPDOWNS = {
-    "elections-state",  # the elections index's state control (N2's states)
     "election-state",  # T2's state filter
     "election-candidate",  # T2's candidate filter
     "election-per-capita-state",  # T6's state filter
