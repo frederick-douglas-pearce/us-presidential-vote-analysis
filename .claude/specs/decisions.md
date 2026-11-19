@@ -7202,7 +7202,7 @@ it shares with C4 lives, which table is its companion, where it sits on the page
 - **(e) What "degrades only C7's section" means.** C7 reads the page's only response, so a
   failed fetch still degrades the whole page, as before #560. C7's section degrades alone when
   a body T4 accepts cannot be read as one allotment per election (a year's rows disagreeing,
-  a gap): its heading and `C7_UNAVAILABLE` only, with no chart, no `c7` id and no table,
+  a gap) or names the state with no text (D101's rule): its heading and `C7_UNAVAILABLE` only, with no chart, no `c7` id and no table,
   while T4, its filters and the page's success marker stay. A fault in what T4 shows is never
   swallowed by C7's section: the `try` covers C7's build alone, never `components.chart`
   (D095(f)).
