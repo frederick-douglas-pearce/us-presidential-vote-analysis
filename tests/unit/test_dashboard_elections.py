@@ -1625,8 +1625,9 @@ def n1_client(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[list[str], 
     monkeypatch.setattr(api, "CLIENT", client)
     return calls, bucket
 
-#: The Electoral College majority page (#562), for the year-axis checks C2 shares with
-#: C4 and C5 below.
+#: The Electoral College majority page (#562): the one C2 figure helper, which
+#: ``test_dashboard_elections_majority.py`` and the year-axis checks C2 shares with C4
+#: and C5 (``test_dashboard_elections_over_time.py``) import.
 MAJORITY: dict[str, Any] = dash.page_registry["pages.elections_majority"][
     "layout"
 ].__globals__

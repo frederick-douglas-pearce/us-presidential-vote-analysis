@@ -99,8 +99,7 @@ LABELS: dict[str, str] = {
     "hybrid_score": "Hybrid score",
     # Charts C4 and C5 and their companion table (#436): N1's ``elections`` item's
     # appointed allotment (the same national figure as
-    # ``national_electoral_denominator``), N1's per-year total popular vote, and a
-    # ``/v1/elections/states`` row's total popular vote.
+    # ``national_electoral_denominator``) and N1's per-year total popular vote.
     "electoral_denominator": "Electors appointed (nation)",
     "national_pv_denominator": "Total popular vote (nation)",
 }
@@ -164,8 +163,8 @@ BEFORE_WINDOW = "Popular vote held; not in this dataset before {pv_year_min}"
 AFTER_WINDOW = "Popular vote held; not in this dataset yet"
 NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this state"
 NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
-#: A total popular vote with no figure inside the window (#436): a state's, in the
-#: C4/C5 table with one state chosen, and the nation's, with all states.
+#: The nation's total popular vote with no figure inside the window (#436), in the
+#: C4/C5 table and C5.
 NO_NATIONAL_TOTAL = "No total popular vote in this dataset for this election"
 
 #: What the party column shows (#389): a table note under T2–T5 and in their
@@ -1055,7 +1054,6 @@ def popular_votes(
     pv_status: object,
     year: int,
     coverage: dict[str, Any],
-    no_figure: str = NO_FIGURE,
 ) -> str:
     """A state's popular-vote cell: the figure, or why there is none.
 
@@ -1064,8 +1062,8 @@ def popular_votes(
     the year lies before the dataset's popular-vote window, after it (a snapshot whose
     Electoral College data runs ahead of its popular vote), or inside it. An unknown
     status names no cause it cannot vouch for: see :func:`_unknown`. The window comes
-    from ``coverage``, never a literal. ``no_figure`` is the cell inside the window:
-    a candidate's by default.
+    from ``coverage``, never a literal. Inside the window the cell is
+    :data:`NO_FIGURE` (a state's total had its own cell until #562).
     """
     if not is_blank(value):
         return number(value)
@@ -1079,7 +1077,7 @@ def popular_votes(
         return BEFORE_WINDOW.format(pv_year_min=coverage["pv_year_min"])
     if year > coverage["pv_year_max"]:
         return AFTER_WINDOW
-    return no_figure
+    return NO_FIGURE
 
 
 def pv_status(value: object) -> str:

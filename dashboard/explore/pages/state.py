@@ -418,7 +418,8 @@ def _electors_section(
     """C7's section (#560, D106): its heading, the chart, its heading-led companion
     table and that table's column-name list, for the rows T4 shows from the API path
     ``source``. Rows that cannot be read as one allotment per election, or a served
-    name with nothing in it (D101's rule, which C4's ``n2_rows`` applies), show the
+    name with nothing in it (the rule D101 set for N2's rows, which D106 keeps for
+    C7's and D107 retired for N2), show the
     heading and :data:`C7_UNAVAILABLE` only, with no chart (D096(d)'s rule), while T4
     and the page stay. The ``try`` covers everything built from the rows, never
     ``components.chart`` (D095(f))."""

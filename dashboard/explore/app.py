@@ -90,7 +90,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, unquote, unquote_plus
 
@@ -393,7 +393,9 @@ class PathMove:
     key: str
     template: str
     variable: str
-    target: Mapping[str, Any]
+    # The registry's page dict: compared and hashed by nothing, so a PathMove stays
+    # hashable as a Move is (#562's review, cr.15).
+    target: Mapping[str, Any] = field(compare=False, hash=False)
 
 
 def page_path_move(
@@ -406,8 +408,9 @@ def page_path_move(
     declares no ``moved=`` as well; the page has no path variables of its own; the
     target is a page registered by that ``path_template``, over exactly one variable,
     with a ``validate`` (only a value the target accepts may build a redirect); and
-    the page's own ``query=`` parser drops the key, so the page provably never reads
-    the key it redirects."""
+    the page's own ``query=`` parser drops the key for a well-formed value: an
+    import-time tripwire against a page that would both read and redirect it, not a
+    proof (#562's review, cr.3); the parser contract itself is tested."""
     moved = page.get("moved_to_path")
     if moved is None:
         return None

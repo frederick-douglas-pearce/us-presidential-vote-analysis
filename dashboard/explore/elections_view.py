@@ -62,6 +62,30 @@ def section_nav(current: str) -> html.Nav:
 N1 = "N1 (/elections/summary)"
 
 
+def served_years(index: dict[str, Any]) -> set[int]:
+    """The years a ``/v1/elections`` body serves (#562's review, cr.1): the one check of
+    the index's rows on the two elections subpages, which call it before building any
+    section, so an index defect degrades the whole page and only an N1 defect a section.
+
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for ``data`` that is
+    not a non-empty list, a row whose year :func:`explore.election_view.row_year`
+    refuses, or a year outside the served span. A year listed twice is one served year
+    (#334). ``/elections`` keeps its own checks until #334 converges them.
+    """
+    coverage = index["meta"]["provenance"]["coverage"]
+    first, last = query.year_span(coverage["year_min"], coverage["year_max"])
+    rows = index["data"]
+    if not isinstance(rows, list) or not rows:
+        raise TypeError("/v1/elections carries no list of elections")
+    served: set[int] = set()
+    for row in rows:
+        year = election_view.row_year(row)
+        if year is None or not first <= year <= last:
+            raise TypeError("/v1/elections names a year outside its served span")
+        served.add(year)
+    return served
+
+
 def n1_items(index: dict[str, Any], summary: Any) -> dict[int, dict[str, Any]]:
     """N1's ``elections`` items by year, one for each year the index serves (D096(c)):
     the one check of those items, which C2, the averages (#437, D097) and C4 (#436)
@@ -76,14 +100,7 @@ def n1_items(index: dict[str, Any], summary: Any) -> dict[int, dict[str, Any]]:
     served year: refusing the duplicate is the index's own rule (#334). It reads no
     ``data`` row: those are C2's alone.
     """
-    coverage = index["meta"]["provenance"]["coverage"]
-    first, last = query.year_span(coverage["year_min"], coverage["year_max"])
-    served: set[int] = set()
-    for row in index["data"]:
-        year = election_view.row_year(row)
-        if year is None or not first <= year <= last:
-            raise TypeError("/v1/elections names a year outside its served span")
-        served.add(year)
+    served = served_years(index)
     if not isinstance(summary, dict):
         raise TypeError(f"{N1} is not an object")
     items = summary["elections"]

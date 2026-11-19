@@ -53,7 +53,8 @@ TABLE_ID = "elections-table"
 YEARS_ID = "elections-years"
 PV_ID = "elections-pv"
 URL_ID = "elections-url"
-#: T1's column-name list: the page has three since #436.
+#: T1's column-name list, by an id of its own (the page had three from #436 to #562;
+#: the id stays, since the e2e tests name it).
 GLOSSARY_ID = "elections-glossary"
 #: The list's pair (#553, D102): its filters left, the count and averages right.
 LIST_PAIR_ID = "elections-list-pair"
@@ -104,10 +105,11 @@ def parse_filters(params: Any) -> list[tuple[str, str]]:
     Syntactic and total, and it reads no API: Dash's index runs it to build ``og:url``,
     before any data is read. Keeps ``year_from`` / ``year_to`` only as four ASCII
     digits and ``pv`` only as ``"1"``; a key repeated with differing values is
-    dropped, and so is a key it does not know, ``state`` among them since #562 (an
-    old link carrying one is redirected, ``moved_to_path``). A range whose start is
-    after its end drops both bounds. Whether a year lies inside the served span is the
-    layout's question (:func:`filters`).
+    dropped, and so is a key it does not know, ``state`` among them since #562: an old
+    link carrying one is redirected (``moved_to_path``) once the roster in memory
+    accepts its code, and is served this page with the key ignored otherwise. A range
+    whose start is after its end drops both bounds. Whether a year lies inside the
+    served span is the layout's question (:func:`filters`).
     """
     if not isinstance(params, dict):
         return []

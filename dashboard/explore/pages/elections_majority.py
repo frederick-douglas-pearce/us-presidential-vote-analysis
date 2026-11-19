@@ -63,8 +63,6 @@ LEADER_EXTRA = ("candidate_slug",)
 C2_TABLE_HEADING = "Each election's Electoral College leader"
 #: C2's section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
 #: wording: the D070(b) guard's success run asserts that absent from every page.
-#: C2's section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
-#: wording: the D070(b) guard's success run asserts that absent from every page.
 C2_UNAVAILABLE = (
     "The chart and table of each election's Electoral College leader can't be shown "
     "right now. Please try again in a minute."
@@ -354,6 +352,9 @@ def render(index: dict[str, Any], summary: Any) -> html.Div:
     """The whole page for one ``/v1/elections`` response and N1's body (``None`` when
     it could not be read): the heading and lede, then C2's section, then the footer."""
     provenance = index["meta"]["provenance"]
+    # The index's rows are the page's, not a section's (cr.1): a defect there raises to
+    # the layout, which degrades the whole page.
+    elections_view.served_years(index)
     return html.Div(
         [
             html.H1(HEADING),

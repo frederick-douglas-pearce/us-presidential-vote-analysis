@@ -373,6 +373,9 @@ def render(index: dict[str, Any], summary: Any) -> html.Div:
     it could not be read): the heading and lede, then C4 and C5's section, then the
     footer."""
     provenance = index["meta"]["provenance"]
+    # The index's rows are the page's, not a section's (cr.1): a defect there raises to
+    # the layout, which degrades the whole page.
+    elections_view.served_years(index)
     return html.Div(
         [
             html.H1(HEADING),

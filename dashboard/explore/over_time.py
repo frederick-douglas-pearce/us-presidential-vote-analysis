@@ -5,7 +5,7 @@ the same one-state series (C7) without importing a page module, which Dash canno
 
 A shared module: it reads no API and imports only other shared modules (``charts``,
 ``components`` and ``labels``), so a source's path reaches an error message only as an
-argument. C5's figure, its band and the N1/N2 readers stay with their page.
+argument. C5's figure, its band and the N1 reader stay with their page.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from explore import charts, components, labels
 #: C4, C5 and C7's height, the same in every mode now that years run along the bottom
 #: (#558, D104). Their titles are page text (``components.chart`` takes them out of the
 #: figure), so the top margin is the template's; C5 adds room above it for its band
-#: labels (``pages/elections.py``), and C4 beside it takes C5's margin, so the pair's
-#: plots line up.
+#: labels (``pages/elections_over_time.py``), and C4 beside it takes C5's margin, so
+#: the pair's plots line up.
 HEIGHT_PX = 360
 TOP_PX = 16
 #: C4's marker series' symbols (#558, D104), which C7 draws too (#560): one series per
@@ -47,7 +47,8 @@ def same(a: Any, b: Any) -> bool:
 def plain(name: Any) -> str | None:
     """A served state name a title or caption may name (#436): text with something in
     it and nothing ``components.chart`` refuses in a title or plotly could read as
-    markup or a token; else ``None``, and the "selected state" form is used."""
+    markup or a token; else ``None``, and C7's "this state" form is used (#560; the
+    "selected state" forms retired with C4's one-state mode, #562)."""
     if not isinstance(name, str) or not labels.has_text(name):
         return None
     if "<" in name or "var(" in name:
@@ -248,8 +249,8 @@ def state_series(
     by_year: Mapping[int, _Row], served: Iterable[int], source: str, usps: str
 ) -> list[_Row]:
     """One state's rows in year order from its first served election (#436, D100(c);
-    #560): the rule C4's one-state series (``n2_rows``) and C7 share. ``by_year`` maps
-    each served year the state has a row in to that row.
+    #560): C7's rule, which C4's one-state series shared until #562 (D107).
+    ``by_year`` maps each served year the state has a row in to that row.
 
     Pure; raises ``TypeError`` for a state with no row, a row for a year not served,
     or a gap: a served year after its first with no row for it. ``source`` is the API

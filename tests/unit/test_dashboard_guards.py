@@ -52,7 +52,8 @@ election pages (#307, #465) make the next ones, :data:`ELECTION_MISSES`, rendere
 per-capita page its table (#280) and the states page nothing more, each render's own
 slice checked (:data:`ELECTION_PAGE_MISSES`, and the two state pages' likewise,
 :data:`STATE_PAGE_MISSES`, #559), through the render-scoped view pages use;
-the elections index then fills N1 for chart C2, :data:`ELECTIONS_MISSES` (#434); the run checks every named miss, in some registered page's ``on_miss`` and in
+the elections index then fills N1 for its averages, which C2's and C4 and C5's pages
+find cached, :data:`ELECTIONS_MISSES` (#434, #437, #562); the run checks every named miss, in some registered page's ``on_miss`` and in
 the snapshot. It validates the year from the
 ``/v1/elections`` it prefetches before formatting it into a path (#312), and the
 success run renders each of the three at 1825 too: each page's own not-found state,
@@ -567,7 +568,8 @@ for page in PAGES:
     key = page.get("path_template") or page["path"]
     # The candidate history's render makes the first fills on a miss
     # (CANDIDATE_MISSES), then the election pages', at 1824 (ELECTION_MISSES), then
-    # the elections index's N1 for chart C2 (ELECTIONS_MISSES, #434).
+    # the elections index's N1 for its averages (ELECTIONS_MISSES, #437; the subpages
+    # find it cached, #562).
     before = len(SERVED)
     text = route(client, path)
     served_by_page[key] = SERVED[before:]

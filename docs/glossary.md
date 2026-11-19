@@ -1581,9 +1581,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   reads no data. The site-name link carries `aria-current="page"` on `/`, as Elections does on
   `/elections` and States on `/states`. Elections carries `aria-current="true"` on
   `/election/<year>`, `/election/<year>/states` and `/election/<year>/per-capita`, and States on
-  `/state/<usps>` and `/state/<usps>/per-capita`; Elections carries `aria-current="true"` on
-  `/elections/majority` and `/elections/over-time` too (#562), matched by route, so a link the dataset does
-  not serve marks its section too: the mark names the section, not the page being read. Nothing
+  `/state/<usps>` and `/state/<usps>/per-capita`, matched by route, so a link the dataset does
+  not serve marks its section too: the mark names the section, not the page being read.
+  Elections also carries `aria-current="true"` on `/elections/majority` and
+  `/elections/over-time` (#562). Nothing
   is marked on `/candidate/<slug>` or the custom 404 page. Elections, States and the site name
   navigate client-side. API docs is an ordinary same-tab link to the API's `/docs` page, which
   is not on this site (*Site name*). Not the links between the three Elections pages

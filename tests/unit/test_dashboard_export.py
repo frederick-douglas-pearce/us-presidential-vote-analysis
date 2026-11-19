@@ -467,7 +467,10 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({"year": "1864"}, "state=ZZ", "absent"),
     ],
     # #562: C2's own page reads no filter (no ``query=``), so the list's old keys and
-    # the retired state key change nothing on it, as the overview's moved keys do.
+    # the retired state key change nothing on it, as the overview's moved keys do. They
+    # are "filtered" queries, as the overview's are: a page with no parser lists one,
+    # and with no FILTERED_TABLES or SERIES_KEYS entry each must equal the unfiltered
+    # render.
     "/elections/majority": [
         ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
         ({}, "state=GA", "filtered"),
@@ -505,7 +508,8 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
 FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/election/<year>/per-capita": {"election-per-capita": ("state",)},
     # ``/elections`` has no chart since #562 (D107), so it is listed again when #563
-    # brings C9 there; T1's narrowing is checked by ``test_dashboard_elections.py``.
+    # brings C9 there; T1's narrowing is checked by ``TestFilters`` in
+    # ``test_dashboard_elections.py``.
     # #560: T4 alone; C7's companion table is unlisted, so it equals the unfiltered
     # render under every query.
     "/state/<usps>": {

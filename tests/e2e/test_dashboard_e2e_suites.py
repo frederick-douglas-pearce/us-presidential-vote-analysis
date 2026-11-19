@@ -5,8 +5,9 @@ Dash adds dash_table's bundle to every index, and no page renders a DataTable, s
 dcc's ``async-datepicker`` chunk is not the date picker alone: it is a split chunk dcc's
 own Graph, Dropdown and Slider loaders require, so a page with any of them still loads
 it. The index's scripts do not depend on the page, so the home page and the not-found
-page stand for every shell, and load none of dcc's lazily loaded chunks; ``/elections``,
-with dropdowns, a slider and charts, is the control that the used chunk still loads.
+page stand for every shell, and load none of dcc's lazily loaded chunks; an election's
+results-by-state page (``/election/2016/states``), with dropdowns, is the control that
+the used chunk still loads (``/elections`` lost its one dropdown with #562).
 Each test prints the suite files it saw (run with ``-s``), the browser network log
 #524's acceptance asks for.
 """
@@ -20,10 +21,10 @@ from playwright.sync_api import Page, Request
 
 from tests.e2e.conftest import is_chunk
 from tests.e2e.dashboard_pages import (
-    ELECTIONS_SUCCESS,
     HOME_SUCCESS,
     NOT_FOUND_ERROR,
     PAGE_NOT_FOUND,
+    STATES_SUCCESS,
     assert_rendered,
 )
 
@@ -89,6 +90,6 @@ def test_a_page_with_dropdowns_still_loads_the_shared_chunk(page: Page) -> None:
     does not imply it loaded; the test waits for the request itself."""
     seen = watch(page)
     with page.expect_request(lambda r: is_chunk(r.url, "async-datepicker")):
-        page.goto("/elections")
-    assert_rendered(page, ELECTIONS_SUCCESS)
-    assert_shell_without_dash_table("/elections", seen)
+        page.goto("/election/2016/states")
+    assert_rendered(page, STATES_SUCCESS)
+    assert_shell_without_dash_table("/election/2016/states", seen)

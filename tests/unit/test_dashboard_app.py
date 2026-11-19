@@ -1491,11 +1491,14 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
             continue
         # A query key the page reads (or ignores); never one it moved to another page,
         # which the index redirects (#465, TestMovedFilters).
-        query = (
-            "?zz=1" if page.get("moved") or page.get("moved_to_path") else "?state=OH"
-        )
+        query = "?zz=1" if page.get("moved") else "?state=OH"
         for path in {concrete, concrete.rstrip("/") + "/"}:
             status, head, _ = get(f"{path}{query}")
+            if page.get("moved_to_path"):
+                # The key moved to a path (#562): judged from the cached roster with
+                # no fetch (no_fetch would answer 500), so OH redirects (ge.4).
+                assert status == 302, (page["module"], path)
+                status, head, _ = get(path)
             assert status == 200, (page["module"], path)
             assert head.canonical == url(concrete), (page["module"], path)
             found, path_vars = _path_to_page(concrete.strip("/"))
@@ -5368,6 +5371,13 @@ class TestPathMoveContract:
             "/thing/a%2Fb%3Fc%23d"
         )
 
+    def test_a_path_move_is_hashable_and_equal_by_its_route(self) -> None:
+        """As a ``Move`` is (cr.15): the target page dict takes no part."""
+        a = appmod.PathMove("code", "/thing/<code>", "code", {"module": "a"})
+        b = appmod.PathMove("code", "/thing/<code>", "code", {"module": "b"})
+        assert hash(a) == hash(b) and a == b
+        assert {a} == {b}
+
     def test_no_move_serves_the_page(self) -> None:
         assert appmod.path_moved_location(None, "code=GA", self.warm("GA")) is None
 
@@ -5433,7 +5443,9 @@ class TestPathMovedThroughTheIndex:
     def test_a_cold_roster_serves_the_list(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The index never waits on the API (D071(g)): no roster cached, no redirect."""
-        cached_client(monkeypatch)
+        """The index never waits on the API (D071(g)): no roster cached, no redirect,
+        and nothing read, filled or waited for to decide (#562's review, ge.4)."""
+        _, calls, bucket = cached_client(monkeypatch)
         assert get("/elections?state=GA")[0] == 200
+        assert (calls, bucket.waits) == ([], [])
 

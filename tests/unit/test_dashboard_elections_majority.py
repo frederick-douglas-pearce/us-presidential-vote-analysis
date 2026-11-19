@@ -31,6 +31,7 @@ from tests.unit.test_dashboard_elections import (
     _second_item,
     _second_leader,
     _without,
+    c2_figure,
     find,
     in_order,
     n1_client,
@@ -65,25 +66,12 @@ NATION_CELLS = dash.page_registry["pages.election"]["layout"].__globals__[
 ]
 
 
-def render_c2(
-    summary: Any = None, index: Any = None, query: dict[str, Any] | None = None
-) -> Any:
-    """The page for the index and an N1 body (the recording unless given). ``query``
-    is ignored: the page has no filter (D096(b))."""
+def render_c2(summary: Any = None, index: Any = None) -> Any:
+    """The page for the index and an N1 body (the recording unless given)."""
     return MOD["render"](
         copy.deepcopy(BODY if index is None else index),
         copy.deepcopy(SUMMARY if summary is None else summary),
     )
-
-
-def c2_figure(tree: Any) -> dict[str, Any]:
-    (store,) = [
-        node
-        for node in of_type(tree, "Store")
-        if isinstance(getattr(node, "id", None), dict) and node.id.get("chart") == C2
-    ]
-    figure: dict[str, Any] = store.data
-    return figure
 
 
 #: The hover's share line, whose cell is what a point's text label carried before
@@ -550,3 +538,45 @@ class TestN1Fixture:
         # Order-insensitive: the year recordings predate 0.8.0's order within ties, and
         # this checks content; C2 reads only each year's rank-1 row.
         assert sorted(rows, key=key) == sorted(body["summary"], key=key)
+
+
+#: Malformed ``/v1/elections`` bodies (#562's review, cr.1): the index's own defect.
+BAD_INDEXES = {
+    "data empty": lambda b: b.update(data=[]),
+    "data null": lambda b: b.update(data=None),
+    "a string year": lambda b: b["data"][0].update(year="1824"),
+}
+
+
+@pytest.mark.parametrize(
+    "module", ["pages.elections_majority", "pages.elections_over_time"]
+)
+@pytest.mark.parametrize("name", list(BAD_INDEXES))
+def test_a_malformed_index_degrades_the_whole_subpage(
+    monkeypatch: pytest.MonkeyPatch, module: str, name: str
+) -> None:
+    """An index defect is the page's, never a section's (cr.1): the layout shows the
+    degraded state, with no success marker and no section links."""
+    page = dash.page_registry[module]
+    index = copy.deepcopy(BODY)
+    BAD_INDEXES[name](index)
+
+    class View:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+        def get(self, path: str) -> Any:
+            return index if path == api.ELECTIONS_PATH else copy.deepcopy(SUMMARY)
+
+    class Client:
+        def view(self) -> Any:
+            return View()
+
+    monkeypatch.setattr(api, "CLIENT", Client())
+    tree = page["layout"]()
+    assert components.UNAVAILABLE_MESSAGE in texts(tree), name
+    assert find(tree, page["success"]) is None, name
+    assert find(tree, "elections-sections") is None, name

@@ -138,6 +138,7 @@ def test_no_state_control_and_an_old_state_key_changes_nothing(page: Page) -> No
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="#496: the browser handles the fragment before Dash renders the chart",
 )
 @pytest.mark.plotlyjs_fetches(1)
@@ -148,12 +149,11 @@ def test_the_c4_fragment_scrolls_to_the_chart_after_dash_renders(page: Page) -> 
     assert_rendered(page, OVER_TIME_SUCCESS)
     page.locator(f"{C4} .main-svg").first.wait_for()
     page.wait_for_timeout(SETTLE_MS)
-    box = page.locator(f"{C4} .chart-title").bounding_box()
-    # Landed: the chart at the viewport's top, scrolled past the heading, lede and
-    # section links above it (#562 put C4 near the page's top, so "on screen" alone
-    # no longer tells a landing from none).
+    # Landed: the fragment's target, the chart's figure, at the viewport's top
+    # (#562's review, ge.5), scrolled past the heading, lede and section links above it.
     assert page.evaluate("scrollY") > 0
-    assert box is not None and 0 <= box["y"] <= 60, box
+    top = page.evaluate("document.getElementById('c4').getBoundingClientRect().top")
+    assert abs(top) <= 1, top
 
 
 @pytest.mark.plotlyjs_fetches(1, abort=True)
