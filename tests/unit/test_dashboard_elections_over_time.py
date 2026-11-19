@@ -582,6 +582,8 @@ class TestTimeSeriesAxis:
         """AC: the hover on every point names its year, the year it is drawn at."""
         tree = render_over_time(marked_summary() if marked else None)
         figures = [chart_figure(tree, C4), chart_figure(tree, C5)]
+        if marked:  # the premise: both charts draw a marker (r2.recheck.3)
+            assert all(any(t["type"] == "scatter" for t in f["data"]) for f in figures)
         figures.append(c2_figure(render_majority()))
         for figure in figures:
             for t in figure["data"]:
@@ -594,6 +596,9 @@ class TestTimeSeriesAxis:
         """C2's points and C4 and C5's bars and markers draw no text (#558, D104):
         the hover and the chart's key carry it."""
         tree = render_over_time(marked_summary() if marked else None)
+        if marked:  # the premise: both charts draw a marker (r2.recheck.3)
+            for dom in (C4, C5):
+                assert any(t["type"] == "scatter" for t in chart_figure(tree, dom)["data"])
         for figure in (
             c2_figure(render_majority()),
             chart_figure(tree, C4),

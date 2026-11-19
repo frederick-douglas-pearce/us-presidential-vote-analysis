@@ -354,8 +354,8 @@ def electors(
     Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
     rows that disagree on either value (a null beside a figure is two values, D077,
     D098) or a gap after the state's first election
-    (:func:`explore.over_time.state_series`, the rule C4's one-state series reads), so
-    C7 draws one value per election or nothing.
+    (:func:`explore.over_time.state_series`, C7's rule, which C4's one-state series
+    shared until #562, D107), so C7 draws one value per election or nothing.
     """
     by_year: dict[int, dict[str, Any]] = {}
     for row in rows:

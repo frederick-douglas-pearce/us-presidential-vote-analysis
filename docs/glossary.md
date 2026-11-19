@@ -1428,8 +1428,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   `_controls` in `pages/election_states.py` and in `pages/state.py`), and each page's
   `FILTER_SENTENCE` names it "popular-vote status". On the API's `/docs` page, the
   `EcPvRow.pv_status` and `ElectionStateRow.pv_status` field descriptions in
-  `src/usvote/api/models.py`. The hover line in `labels.C4_STATE_HOVER` (C7);
-  `labels.C5_LEGISLATURE`, `labels.C5_TOOK_NO_PART` and `labels.C4_NO_ELECTORS_TOOK_NO_PART`.
+  `src/usvote/api/models.py`. The hover line in `labels.C4_STATE_HOVER` (C7) and the C7 key
+  entry `labels.C4_NO_ELECTORS_TOOK_NO_PART`. `labels.C5_LEGISLATURE` and
+  `labels.C5_TOOK_NO_PART` are not shown: C5 draws all states only since #562, so
+  `labels.national_total` never returns the cells their key entries map from. They are kept,
+  unreachable, for C10 (#582) to reuse (D107, Residuals).
 - **Source:** `src/usvote/pv/status.py`, `PV_STATUS_VALUES` and its comment; `EcPvRow.pv_status`;
   D024 §4; D048 §2–3; `posts/2026-08-18-presidential-elections-are-messy.md`, "How the record
   keeps them apart" (the three values as readers see them: held, the legislature chose the
