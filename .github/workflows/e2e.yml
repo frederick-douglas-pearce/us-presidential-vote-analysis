@@ -115,7 +115,11 @@ jobs:
         run: uv run playwright install-deps chromium-headless-shell
 
       - name: Browser tests (pytest -m e2e)
-        timeout-minutes: 8
+        # The suite ran 474–480 s on CI by #560 (C7), at the old 8-minute cap, and timed
+        # out with every test passing (#578). 11 minutes leaves room while #579 looks at
+        # cutting its run time; with the other caps and the setup margin it stays under
+        # the job's 30 (tests/unit/test_e2e_workflow.py).
+        timeout-minutes: 11
         run: uv run pytest -m e2e --tracing retain-on-failure
 
       - name: Upload traces (on failure)
