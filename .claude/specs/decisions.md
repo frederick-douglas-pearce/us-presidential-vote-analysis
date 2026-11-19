@@ -7225,3 +7225,83 @@ its regression guard.
 figure builder for C4 and C7 keeps "same drawing" a property of the code rather than of two
 copies, a test against the recorded rows keeps "same series", and an unfiltered companion
 table is the one design D093 and D091 both hold for.
+
+## D107: The elections index splits into three pages; C4 and C5 draw all states only; an old `?state=` link names the state's page
+
+**Date:** 2026-11-19
+**Builds on:** D070, D072, D073, D091, D092, D093, D096, D100, D101, D102, D103, D104, D106 · **Amends:** D096(b), (c); D100(a), (b), (c), (e), (f), (g), (h), (i) · **Retires:** D101 · **Decided by:** the owner, approving #562's plan (architect-reviewed)
+
+**Context.** `/elections` carried the list of elections (T1) with its filters and averages,
+chart C2 with its leader table, and charts C4 and C5 with their table and a state filter. It
+was long, above all on a phone. The owner's dashboard review (2026-11-17) asked for it to be
+split as D092 split the election page. C7 (#560, D106) already draws a state's electors
+appointed on its own page, which made C4's state filter redundant.
+
+**Decision.**
+- **(a) Three pages.** `/elections` (`pages/elections.py`): section links, T1, its year-range
+  and popular-vote filters, the count and the averages; it reads the index and N1.
+  `/elections/majority` (`pages/elections_majority.py`): C2 and its leader table; it reads the
+  index and N1 and has no `query=` parser. `/elections/over-time` (`pages/elections_over_time.py`):
+  C4 and C5 and their table; it reads the index and N1 and has no `query=` parser. Every chart
+  keeps its companion table in its section (D091); C2, C4 and C5 keep their IDs, and their
+  `CHARTS` rows name the new pages. Neither subpage needs `order=`: `/elections` is untemplated.
+- **(b) Shared pieces.** `explore/elections_view.py`, a shared module in `TestSharedPieces`'
+  list (importing `election_view`, `labels` and `query`): the three paths, the section links
+  (`section_nav`, on D092's pattern: a landmark named `labels.ELECTIONS_SECTIONS_LABEL`, the
+  current page as text with `aria-current="page"`, the other two unfiltered client-side links,
+  on success only) and N1's item check `n1_items` (D097(c)'s one check), which all three pages
+  call. A completeness assert now fails a module under `explore/` that is neither listed as
+  shared nor named as not.
+- **(c) C2's page and N1 (amends D096(b), (c)).** C2 has its own page, so "no filter reaches C2"
+  holds by the page having no parser. N1 is still read in the same view as the index, filled on
+  first use; a failed or malformed N1 degrades only the section that reads it (D096(d)'s rule),
+  and each page keeps its heading, lede, section links and success marker, which sits outside
+  every section's `try`.
+- **(d) The one-state mode retires (amends D100(a), (c), (e), (f); D100(g) is moot).** C4 and C5
+  draw all states only: the state control, the `state` key's reach, N2's read, the per-state
+  download, the "selected state" title and caption forms and the merge of a state key into the
+  filter callback all go. `api.ELECTION_STATES_PATH` is deleted: no page reads N2. Its recording
+  stays test input for C7's reconciliation (D106(h)), keyed by its literal path; the D070(b)
+  guard no longer serves it and asserts that no request names it. **D101 retires** with
+  `n2_rows`, the only reader its rule constrained; C7 keeps the same rule for its own rows
+  (D106). `over_time.state_series` is now called by C7 alone.
+- **(e) Reach (amends D100(b), (h), (i)).** `SERIES_KEYS` is empty, so D100(b)'s branch is
+  visibly vacuous until a chart's filter chooses a series again. `/elections` has no chart until
+  #563 adds C9, so its `CHART_QUERIES` and `FILTERED_TABLES` entries are dropped until then. The
+  guard's bucket stays permissive (D100(h)); the N2 cold-fill measurement D100(i) asked for no
+  longer applies.
+- **(f) Old links.** The list's keys stay on `/elections`: no redirect. A `state=` key, which
+  reached only C4, C5 and their table, names the state's page: `/elections` registers
+  `moved_to_path=("state", "/state/<usps>")`, **a second move kind**, not an amendment of D092's
+  same-variables `moved=`. `app.page_path_move` checks it at import: the target registered by
+  `path_template` over exactly one variable, with a `validate`; the source with no path
+  variables of its own and a parser that drops the key; at most one move kind per page. At the
+  index, `path_moved_location` answers 302 with a relative `Location` (the template with the
+  value percent-quoted, no query: T1's keys never narrow T4) **only** when the target's own
+  `validate` accepts the single value against the snapshot in memory. A refused value, and one
+  whose judge source (the roster, filled on a miss by the state pages) is not cached yet, are
+  served `/elections` with the key ignored and T1's own keys applied: no redirect to itself and
+  never a wait on the API (D071(g)). The cold case is an accepted residual: the roster is not
+  added to `/elections`' prefetch, which would change D072's extent for a legacy link. The
+  index reads the snapshot once per request for `resolve` and both move kinds. A client-side
+  route never reaches the index, so there the key is simply ignored. Fragment links
+  (`/elections#c2`, `#c4`, `#c5`) never reach the server; none was found in `posts/`, `social/`
+  or `README.md`, and #496 holds client-side handling. The strict xfail moves to
+  `/elections/over-time#c4`.
+- **(g) Owner choices at the plan gate.** C5's one-state popular vote is accepted as lost here and
+  restored by a follow-up story on the state page (#582, C10). The redirect target is
+  `/state/<usps>`. C9's placement on `/elections` is decided at #563's plan gate. D071(g) is
+  re-measured on the three pages after deploy, in a docs PR that closes #562. The section-link
+  wording is the `ba` spec approved at the gate; each subpage's heading is its former section
+  heading.
+
+**Rationale.** Three short pages read better on a phone than one long one, and each keeps D092's
+one-fill shape (index plus N1). Retiring the state mode removes the dashboard's only N2 read and
+its ~680 KB cold fill. A separate move kind keeps D092's contract exact and makes the new one
+checkable at import; redirecting only an accepted value means a redirect never leads to a page
+that would refuse it, and serving the list otherwise keeps a legacy link working without a loop.
+
+**Residuals.** Until the roster is cached, an old `?state=` link shows the list rather than the
+state's page. `labels.C5_LEGISLATURE` and `C5_TOOK_NO_PART` and their symbols stay in C5's tables
+though an all-states series cannot reach them (a state's status reaches no national total); #582
+may reuse them.
