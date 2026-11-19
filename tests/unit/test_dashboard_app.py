@@ -5449,3 +5449,37 @@ class TestPathMovedThroughTheIndex:
         assert get("/elections?state=GA")[0] == 200
         assert (calls, bucket.waits) == ([], [])
 
+
+
+class TestPathMoveOrderAtTheIndex:
+    """How the index composes the two move kinds (#562's acceptance gate, Class B):
+    a page's ``moved=`` is tried first and a path move only on a found page. No
+    registered page declares both today (``page_path_move`` refuses it), so a path move
+    is lent to the election overview, which declares ``moved=``, for these two."""
+
+    @staticmethod
+    def lend(monkeypatch: pytest.MonkeyPatch) -> None:
+        cached_client(monkeypatch)
+        route("/state/GA")  # the roster cached, so GA is accepted
+        move = appmod.PathMove(
+            "state",
+            "/state/<usps>",
+            "usps",
+            dash.page_registry["pages.state"],
+        )
+        monkeypatch.setitem(appmod.PATH_MOVES, "pages.election", move)
+
+    def test_a_moved_filter_wins_over_a_path_move(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.lend(monkeypatch)
+        assert _location("/election/2016?state=GA") == (
+            302,
+            "/election/2016/states?state=GA",
+        )
+
+    def test_a_path_move_never_redirects_a_page_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.lend(monkeypatch)
+        assert _location("/election/1825?state=GA") == (404, None)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import math
 import re
+import urllib.parse
 from typing import Any
 
 import dash
@@ -598,7 +599,9 @@ class TestTimeSeriesAxis:
         tree = render_over_time(marked_summary() if marked else None)
         if marked:  # the premise: both charts draw a marker (r2.recheck.3)
             for dom in (C4, C5):
-                assert any(t["type"] == "scatter" for t in chart_figure(tree, dom)["data"])
+                assert any(
+                    t["type"] == "scatter" for t in chart_figure(tree, dom)["data"]
+                )
         for figure in (
             c2_figure(render_majority()),
             chart_figure(tree, C4),
@@ -728,3 +731,42 @@ class TestWideLayout:
     def test_an_unavailable_n1_builds_no_over_time_pair(self) -> None:
         tree = MOD["render"](copy.deepcopy(BODY), None)
         assert find(tree, MOD["OVER_TIME_PAIR_ID"]) is None
+
+
+class TestGuardsTheGateAdded:
+    """Guards #562's acceptance gate found missing (Class B)."""
+
+    def test_national_pv_refuses_a_row_for_a_year_not_served(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"].append({**summary["data"][0], "year": 1826})
+        with pytest.raises(TypeError, match="not served"):
+            MOD["national_pv"](summary, YEARS)
+
+    def test_the_download_names_this_page_as_its_view(self) -> None:
+        link = find(render_over_time(), f"{OVER_TIME}-csv")
+        text = urllib.parse.unquote(link.href)
+        assert "explore.us-presidential-election-center.org/elections/over-time" in text
+
+    def test_the_all_states_sentences_are_the_approved_wording(self) -> None:
+        """ba spec rows 26 and 27, approved at #562's plan gate."""
+        assert labels.C4_ALL_STATES == (
+            "Each bar is the whole Electoral College that year: every state's "
+            "electors appointed, added up."
+        )
+        assert labels.C5_ALL_STATES == (
+            "Each bar is the national total: every state's total, added up."
+        )
+
+    def test_c5_has_no_one_state_hover(self) -> None:
+        point = over_time.Point(
+            year=2016,
+            appointed=1,
+            appointed_cell="1",
+            total=1,
+            total_cell="1",
+            status=None,
+            status_cell=None,
+        )
+        with pytest.raises(ValueError, match="all states only"):
+            over_time.point_hover(point, "Georgia", total=True)
+        assert over_time.point_hover(point, None, total=True).startswith("2016")

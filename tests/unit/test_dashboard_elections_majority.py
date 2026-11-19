@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import re
+import urllib.parse
 from typing import Any
 
 import dash
@@ -580,3 +581,10 @@ def test_a_malformed_index_degrades_the_whole_subpage(
     assert components.UNAVAILABLE_MESSAGE in texts(tree), name
     assert find(tree, page["success"]) is None, name
     assert find(tree, "elections-sections") is None, name
+
+
+def test_the_download_names_this_page_as_its_view() -> None:
+    """Class B at #562's acceptance gate: the CSV's view URL is this page's."""
+    link = find(render_c2(), f"{LEADERS}-csv")
+    text = urllib.parse.unquote(link.href)
+    assert "explore.us-presidential-election-center.org/elections/majority" in text
