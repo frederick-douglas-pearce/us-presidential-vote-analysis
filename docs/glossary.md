@@ -940,9 +940,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   - If `/v1/elections/summary` cannot be read or is malformed, the section shows
     `OVER_TIME_UNAVAILABLE` only; the section links, heading and lede still show.
   - The one-state mode (D100(a), (c), (e), (f)) retired with #562 (D107).
-- **Shown as:** `HEADING`, `LEDE`, `OVER_TIME_TABLE_HEADING` and `OVER_TIME_UNAVAILABLE`, the table
-  heading and the download "electors appointed and the total popular vote, all states"
-  (`elections-electors-and-popular-vote-all-states.csv`) in `pages/elections_over_time.py`;
+- **Shown as:** `HEADING`, `LEDE`, `OVER_TIME_TABLE_HEADING`, `OVER_TIME_UNAVAILABLE` and the
+  download "electors appointed and the total popular vote, all states"
+  (`elections-electors-and-popular-vote-all-states.csv`) in `pages/elections_over_time.py`; the
+  section link `labels.SECTION_OVER_TIME`;
   `C4_*`, `C5_*` and `NO_NATIONAL_TOTAL` in `labels.py`; `LABELS["year"]` (the year axis); then
   `labels.CHART_TABLE_POINTER`.
 - **Source:**
