@@ -66,14 +66,14 @@ CHARTS: Mapping[str, Chart] = {
     # filter, on an election's People per electoral vote page, beside T6 (#435, D093).
     "C3": Chart("/election/<year>/per-capita", "election-per-capita"),
     # Each election's Electoral College leader's electoral share against the majority
-    # line, never narrowed by the page's filters, on the elections index, beside its
-    # own companion table (#434, D096).
-    "C2": Chart("/elections", "elections-leader-table"),
-    # Electors appointed and the total popular vote in each election, all states or the
-    # one state the page's state filter chooses, on the elections index, beside one
-    # companion table they share (#436, D100).
-    "C4": Chart("/elections", "elections-over-time-table"),
-    "C5": Chart("/elections", "elections-over-time-table"),
+    # line, on its own page, which reads no filter, beside its own companion table
+    # (#434, D096; page since #562, D107).
+    "C2": Chart("/elections/majority", "elections-leader-table"),
+    # Electors appointed and the total popular vote in each election, all states, on
+    # their own page, which reads no filter, beside one companion table they share
+    # (#436, D100; all states only since #562, D107).
+    "C4": Chart("/elections/over-time", "elections-over-time-table"),
+    "C5": Chart("/elections/over-time", "elections-over-time-table"),
     # One state's electors appointed in each election, never narrowed by the page's
     # filters, on the state's history page, beside its own companion table (#560,
     # D106).
@@ -116,7 +116,7 @@ def escaped(text: str) -> str:
 
 def dom_id(chart_id: str) -> str:
     """The chart's element id, its ID in lower case (``c1``): also a fragment link
-    (``/elections#c2``), which never reaches the server."""
+    (``/elections/majority#c2``), which never reaches the server."""
     return chart_id.lower()
 
 

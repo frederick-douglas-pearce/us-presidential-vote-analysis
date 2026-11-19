@@ -354,8 +354,8 @@ def electors(
     Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
     rows that disagree on either value (a null beside a figure is two values, D077,
     D098) or a gap after the state's first election
-    (:func:`explore.over_time.state_series`, the rule C4's one-state series reads), so
-    C7 draws one value per election or nothing.
+    (:func:`explore.over_time.state_series`, C7's rule, which C4's one-state series
+    shared until #562, D107), so C7 draws one value per election or nothing.
     """
     by_year: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -418,7 +418,8 @@ def _electors_section(
     """C7's section (#560, D106): its heading, the chart, its heading-led companion
     table and that table's column-name list, for the rows T4 shows from the API path
     ``source``. Rows that cannot be read as one allotment per election, or a served
-    name with nothing in it (D101's rule, which C4's ``n2_rows`` applies), show the
+    name with nothing in it (the rule D101 set for N2's rows, which D106 keeps for
+    C7's and D107 retired for N2), show the
     heading and :data:`C7_UNAVAILABLE` only, with no chart (D096(d)'s rule), while T4
     and the page stay. The ``try`` covers everything built from the rows, never
     ``components.chart`` (D095(f))."""

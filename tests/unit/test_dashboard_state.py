@@ -1632,7 +1632,9 @@ class TestWideLayout:
 
 C7_DOM = charts.dom_id("C7")
 ELECTORS = MOD["ELECTORS_TABLE_ID"]
-N2: dict[str, Any] = RECORDED[api.ELECTION_STATES_PATH]
+#: N2, by its literal path: no dashboard page reads it since #562 (D107), and its
+#: recording stays test input for C7's reconciliation (D106(h)).
+N2: dict[str, Any] = RECORDED["/v1/elections/states"]
 SERVED = sorted(state_view.served_years(INDEX))
 
 
@@ -1666,7 +1668,8 @@ def c7_caption(tree: Any) -> str:
 
 
 def n2_state(usps: str) -> list[dict[str, Any]]:
-    """The recorded N2 rows of one state, in year order: C4's one-state source."""
+    """The recorded N2 rows of one state, in year order: C7's reconciliation oracle
+    (D106(h)), C4's one-state source until #562."""
     return sorted(
         (r for r in N2["data"] if r["state_usps"] == usps), key=lambda r: r["year"]
     )
@@ -1966,7 +1969,7 @@ class TestC7Degraded:
 
     @pytest.mark.parametrize("name", [None, 7, "", "   "])
     def test_a_served_name_with_nothing_in_it(self, name: Any) -> None:
-        # D101's rule, as C4's n2_rows applies it: a hover would write the name as
+        # D101's rule, as C4's n2_rows applied it until #562: a hover would write it as
         # "None", a number or nothing, so the section degrades.
         body = ga_body()
         for row in body["data"]:
@@ -2006,7 +2009,8 @@ class TestC7Degraded:
 
 
 class TestStateSeries:
-    """The one-state ordering and gap rule C4's ``n2_rows`` and C7 share (#560)."""
+    """The one-state ordering and gap rule C7 uses (#560), which C4's ``n2_rows``
+    shared until #562 (D107)."""
 
     def test_rows_in_year_order_from_the_first(self) -> None:
         got = over_time.state_series(
@@ -2023,3 +2027,74 @@ class TestStateSeries:
             over_time.state_series({1824: "a", 1826: "b"}, [1824, 1828], "s", "GA")
         with pytest.raises(TypeError, match="has no row for GA"):
             over_time.state_series({}, [1824], "s", "GA")
+
+
+# --- the N2 recording, C7's oracle (#562's review, cr.4) ------------------------------
+
+_N1: dict[str, Any] = RECORDED["/v1/elections/summary"]
+N2_FIXTURE_N1_ITEMS = {item["year"]: item for item in _N1["elections"]}
+N2_FIXTURE_N1_TOTALS = {
+    row["year"]: row["national_pv_denominator"] for row in _N1["data"]
+}
+N2_FIXTURE_PV = (
+    INDEX["meta"]["provenance"]["coverage"]["pv_year_min"],
+    INDEX["meta"]["provenance"]["coverage"]["pv_year_max"],
+)
+
+
+class TestN2Fixture:
+    """The N2 recording's own integrity (#436; moved here by #562's review, cr.4): no
+    page reads N2 since #562 (D107), but it is C7's reconciliation oracle above, so a
+    re-recording with a repeated row or a year that disagrees with N1 fails here."""
+
+    def test_one_snapshot_with_the_index(self) -> None:
+        assert N2["meta"]["provenance"] == INDEX["meta"]["provenance"]
+
+    def test_count_and_no_repeat(self) -> None:
+        assert N2["meta"]["count"] == len(N2["data"])
+        keys = [(r["year"], r["state_usps"]) for r in N2["data"]]
+        assert len(keys) == len(set(keys))
+
+    def test_georgia_equals_the_state_history(self) -> None:
+        history = {r["year"]: r for r in RECORDED["/v1/states/GA"]["data"]}
+        for row in [r for r in N2["data"] if r["state_usps"] == "GA"]:
+            assert (
+                row["state_electoral_votes"]
+                == history[row["year"]]["state_electoral_votes"]
+            )
+            assert row["pv_status"] == history[row["year"]]["pv_status"]
+
+    def test_each_per_capita_recording_on_the_shared_fields(self) -> None:
+        shared = (
+            "state",
+            "governing_census_year",
+            "state_electoral_votes",
+            "population",
+            "persons_per_electoral_vote",
+        )
+        by_key = {(r["year"], r["state_usps"]): r for r in N2["data"]}
+        checked = 0
+        for path, body in RECORDED.items():
+            if not (path.startswith("/v1/elections/") and path.endswith("/per-capita")):
+                continue
+            for row in body["data"]:
+                key = (row["year"], row["state_usps"])
+                assert {f: by_key[key][f] for f in shared} == {
+                    f: row[f] for f in shared
+                }, key
+                checked += 1
+        assert checked > 0
+
+    def test_each_year_sums_to_n1(self) -> None:
+        """A test-side integrity check of the recordings; the dashboard sums nothing."""
+        for year, item in N2_FIXTURE_N1_ITEMS.items():
+            year_rows = [r for r in N2["data"] if r["year"] == year]
+            assert (
+                sum(r["state_electoral_votes"] for r in year_rows)
+                == (item["electoral_denominator"])
+            ), year
+            totals = [r["state_popular_total"] for r in year_rows]
+            if N2_FIXTURE_PV[0] <= year <= N2_FIXTURE_PV[1]:
+                assert sum(totals) == N2_FIXTURE_N1_TOTALS[year], year
+            else:
+                assert set(totals) == {None}, year

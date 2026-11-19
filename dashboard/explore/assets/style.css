@@ -555,8 +555,9 @@ fieldset.filter legend { padding: 0; }
    follows .filter-row .filter, whose specificity it shares, so its basis and its lifted
    cap (max-width: none) win.
    .pair is two equal columns, each holding one section, in source order, built by
-   components.pair (#553, D103): the overview's panel beside C1, and on /elections the
-   list's filters beside the count and averages, and C4 beside C5. A column is the
+   components.pair (#553, D103): the overview's panel beside C1, on /elections the
+   list's filters beside the count and averages, and on /elections/over-time C4 beside
+   C5 (#562). A column is the
    section itself, never a wrapper around it, so the margin reset below reaches its
    first and last child. minmax(0, …),
    not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a

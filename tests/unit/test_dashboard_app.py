@@ -1494,6 +1494,11 @@ def test_every_registered_page_is_found_at_the_index_and_reads_nothing(
         query = "?zz=1" if page.get("moved") else "?state=OH"
         for path in {concrete, concrete.rstrip("/") + "/"}:
             status, head, _ = get(f"{path}{query}")
+            if page.get("moved_to_path"):
+                # The key moved to a path (#562): judged from the cached roster with
+                # no fetch (no_fetch would answer 500), so OH redirects (ge.4).
+                assert status == 302, (page["module"], path)
+                status, head, _ = get(path)
             assert status == 200, (page["module"], path)
             assert head.canonical == url(concrete), (page["module"], path)
             found, path_vars = _path_to_page(concrete.strip("/"))
@@ -3936,10 +3941,8 @@ PAGE_API_NAMES = {
     "ELECTIONS_PATH",
     "ROSTER_PATH",
     "CANDIDATES_PATH",
-    # N1, chart C2's source on the elections index (#434).
+    # N1, read by the three elections pages (#434, #437, #436; #562).
     "SUMMARY_PATH",
-    # N2, charts C4 and C5's one-state source on the elections index (#436).
-    "ELECTION_STATES_PATH",
     "Validate",
     "accepted",
     # A constant pair a page registers as ``not_found=`` (#325); reads nothing.
@@ -5228,9 +5231,255 @@ class TestMoveContract:
             "/x/a%2Fb%3Fc%23d/y?k=v"
         )
 
+    def test_a_page_declares_at_most_one_kind_of_move(self) -> None:
+        page = {
+            "module": "p",
+            "path": "/p",
+            "moved": (("a",), "/x/<year>/y"),
+            "moved_to_path": ("a", "/x/<year>/y"),
+        }
+        with pytest.raises(RuntimeError, match="both"):
+            appmod.page_path_move(page, self.registry())
+
     def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
         assert set(appmod.MOVES) == {"pages.election"}
         move = appmod.MOVES["pages.election"]
         assert move.keys == ("state", "candidate", "pv_status", "electoral_count_status")
         assert move.template == "/election/<year>/states"
         assert move.parser is dash.page_registry["pages.election_states"]["query"]
+
+
+class TestPathMoveContract:
+    """``moved_to_path=`` (#562): a key whose value names another page's one path
+    variable, checked at import (:func:`explore.app.page_path_move`) and redirected only
+    for a value the target's ``validate`` accepts from the snapshot in memory
+    (:func:`explore.app.path_moved_location`)."""
+
+    SOURCE = "/v1/roster"
+    VALIDATE = (SOURCE, lambda path_vars, body: path_vars["code"] in body["codes"])
+
+    def registry(self, **target: Any) -> dict[str, Any]:
+        return {
+            "t": {
+                "module": "t",
+                "path_template": "/thing/<code>",
+                "validate": self.VALIDATE,
+                **target,
+            }
+        }
+
+    def page(self, **page: Any) -> dict[str, Any]:
+        return {
+            "module": "p",
+            "path": "/p",
+            "query": lambda params: [
+                (k, v) for k, v in params.items() if k == "keep" and isinstance(v, str)
+            ],
+            "moved_to_path": ("code", "/thing/<code>"),
+            **page,
+        }
+
+    def move(self) -> appmod.PathMove:
+        move = appmod.page_path_move(self.page(), self.registry())
+        assert move is not None
+        return move
+
+    def warm(self, *codes: str) -> api.Snapshot:
+        return api.Snapshot(version="v", responses={self.SOURCE: {"codes": list(codes)}})
+
+    def test_a_page_without_one_has_none(self) -> None:
+        assert appmod.page_path_move({"module": "p"}, {}) is None
+
+    def test_a_valid_move_names_the_target_and_its_variable(self) -> None:
+        registry = self.registry()
+        move = appmod.page_path_move(self.page(), registry)
+        assert move == appmod.PathMove("code", "/thing/<code>", "code", registry["t"])
+
+    @pytest.mark.parametrize(
+        ("page", "target", "message"),
+        [
+            ({"moved_to_path": ("code", "/nowhere/<code>")}, {}, "unregistered"),
+            ({"moved_to_path": ("", "/thing/<code>")}, {}, "no key"),
+            ({"moved_to_path": (b"code", "/thing/<code>")}, {}, "no key"),
+            ({"moved_to_path": ["code", "/thing/<code>"]}, {}, "is not"),
+            ({"moved_to_path": ("code", "/thing/<code>", "x")}, {}, "is not"),
+            ({"path_template": "/p/<year>"}, {}, "path variables of its own"),
+            ({}, {"validate": None}, "no validate"),
+            (
+                {"moved_to_path": ("code", "/thing/<code>/<x>")},
+                {"path_template": "/thing/<code>/<x>"},
+                "not one variable",
+            ),
+            (
+                {"moved_to_path": ("code", "/thing")},
+                {"path_template": "/thing"},
+                "not one variable",
+            ),
+            # The page must provably never read the key it redirects.
+            ({"query": lambda params: list(params.items())}, {}, "still reads"),
+        ],
+    )
+    def test_a_bad_move_fails_the_import(
+        self, page: dict[str, Any], target: dict[str, Any], message: str
+    ) -> None:
+        with pytest.raises(RuntimeError, match=message):
+            appmod.page_path_move(self.page(**page), self.registry(**target))
+
+    def test_an_accepted_value_redirects_to_its_path_with_no_query(self) -> None:
+        location = appmod.path_moved_location(
+            self.move(), "code=GA&keep=1", self.warm("GA")
+        )
+        assert location == "/thing/GA"
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "code=ZZ",
+            "code=ga",
+            "code=",
+            "code=GA&code=TX",
+            "code=..",
+            "code=%2E%2E%2Fx",
+            "keep=1",
+            "",
+        ],
+    )
+    def test_any_other_query_serves_the_page(self, query: str) -> None:
+        assert (
+            appmod.path_moved_location(self.move(), query, self.warm("GA", "TX"))
+            is None
+        )
+
+    def test_a_repeated_identical_value_is_one_value(self) -> None:
+        location = appmod.path_moved_location(
+            self.move(), "code=GA&code=GA", self.warm("GA")
+        )
+        assert location == "/thing/GA"
+
+    @pytest.mark.parametrize(
+        "snapshot", [None, api.Snapshot(version="v", responses={})]
+    )
+    def test_a_cold_judge_serves_the_page(self, snapshot: api.Snapshot | None) -> None:
+        assert appmod.path_moved_location(self.move(), "code=GA", snapshot) is None
+
+    def test_the_value_is_quoted_into_the_location(self) -> None:
+        """A looser ``validate`` could never add a segment, query or fragment."""
+        move = appmod.PathMove(
+            "code", "/thing/<code>", "code", {"module": "t", "validate": None}
+        )
+        assert appmod.path_moved_location(move, "code=a%2Fb%3Fc%23d", None) == (
+            "/thing/a%2Fb%3Fc%23d"
+        )
+
+    def test_a_path_move_is_hashable_and_equal_by_its_route(self) -> None:
+        """As a ``Move`` is (cr.15): the target page dict takes no part."""
+        a = appmod.PathMove("code", "/thing/<code>", "code", {"module": "a"})
+        b = appmod.PathMove("code", "/thing/<code>", "code", {"module": "b"})
+        assert hash(a) == hash(b) and a == b
+        assert {a} == {b}
+
+    def test_no_move_serves_the_page(self) -> None:
+        assert appmod.path_moved_location(None, "code=GA", self.warm("GA")) is None
+
+    def test_the_registry_s_path_moves(self) -> None:
+        """One today: the elections index's old ``state`` key (#562, D107)."""
+        assert set(appmod.PATH_MOVES) == {"pages.elections"}
+        move = appmod.PATH_MOVES["pages.elections"]
+        assert (move.key, move.template, move.variable) == (
+            "state",
+            "/state/<usps>",
+            "usps",
+        )
+        assert move.target is dash.page_registry["pages.state"]
+
+
+class TestPathMovedThroughTheIndex:
+    """``/elections?state=<usps>``, shared before #562, through the real app and
+    registry (AC3, AC4): a 302 to the state's page for a state the roster in memory
+    accepts, relative and with no query; the list served for anything else."""
+
+    @staticmethod
+    def warm(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Any]:
+        _, calls, bucket = cached_client(monkeypatch)
+        # Fill the roster as a state page's render does, then forget the fill: the
+        # redirect must read and fill nothing itself.
+        route("/state/GA")
+        calls.clear()
+        bucket.waits.clear()
+        return calls, bucket
+
+    @pytest.mark.parametrize(
+        "query",
+        ["state=GA", "state=GA&year_from=1900", "state=GA&state=GA", "st%61te=GA"],
+    )
+    def test_an_accepted_state_redirects_to_its_page(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        calls, bucket = self.warm(monkeypatch)
+        assert _location(f"/elections?{query}") == (302, "/state/GA")
+        assert (calls, bucket.waits) == ([], [])
+
+    @pytest.mark.parametrize(
+        "query",
+        ["state=ZZ", "state=ga", "state=", "state=GA&state=TX", "state=%2E%2E"],
+    )
+    def test_any_other_state_serves_the_list(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        self.warm(monkeypatch)
+        status, head, _ = get(f"/elections?{query}")
+        assert status == 200
+        # The parser drops the key, so og:url names none.
+        assert "state" not in (head.og_url or "")
+
+    def test_the_list_s_keys_alone_keep_narrowing_t1(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.warm(monkeypatch)
+        status, head, _ = get("/elections?year_from=1900&pv=1")
+        assert status == 200
+        assert (head.og_url or "").endswith("/elections?pv=1&year_from=1900")
+
+    def test_a_cold_roster_serves_the_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The index never waits on the API (D071(g)): no roster cached, no redirect,
+        and nothing read, filled or waited for to decide (#562's review, ge.4)."""
+        _, calls, bucket = cached_client(monkeypatch)
+        assert get("/elections?state=GA")[0] == 200
+        assert (calls, bucket.waits) == ([], [])
+
+
+
+class TestPathMoveOrderAtTheIndex:
+    """How the index composes the two move kinds (#562's acceptance gate, Class B):
+    a page's ``moved=`` is tried first and a path move only on a found page. No
+    registered page declares both today (``page_path_move`` refuses it), so a path move
+    is lent to the election overview, which declares ``moved=``, for these two."""
+
+    @staticmethod
+    def lend(monkeypatch: pytest.MonkeyPatch) -> None:
+        cached_client(monkeypatch)
+        route("/state/GA")  # the roster cached, so GA is accepted
+        move = appmod.PathMove(
+            "state",
+            "/state/<usps>",
+            "usps",
+            dash.page_registry["pages.state"],
+        )
+        monkeypatch.setitem(appmod.PATH_MOVES, "pages.election", move)
+
+    def test_a_moved_filter_wins_over_a_path_move(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.lend(monkeypatch)
+        assert _location("/election/2016?state=GA") == (
+            302,
+            "/election/2016/states?state=GA",
+        )
+
+    def test_a_path_move_never_redirects_a_page_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.lend(monkeypatch)
+        assert _location("/election/1825?state=GA") == (404, None)

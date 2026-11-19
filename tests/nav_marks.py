@@ -23,6 +23,10 @@ MARKS: dict[str, tuple[str, str] | None] = {
     "/elections": ("elections", "page"),
     "/elections/": ("elections", "page"),
     "/elections/x": None,
+    # The elections pages (#562): a subpage marks the index's link as a detail page.
+    "/elections/majority": ("elections", "true"),
+    "/elections/majority/": ("elections", "true"),
+    "/elections/over-time": ("elections", "true"),
     "/election": None,
     "/election/1824": ("elections", "true"),
     "/election/1825": ("elections", "true"),
