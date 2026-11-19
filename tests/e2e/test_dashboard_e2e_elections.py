@@ -1,4 +1,5 @@
-"""The elections index in a browser, at a phone's width (#321).
+"""The elections index in a browser, at a phone's width (#321); since #562 the list of
+elections alone, with the section links to C2's page and C4 and C5's.
 
 The checks #306 ran by hand, in a throwaway script, before #321 filed them: a filter
 change writes the URL, settles without a callback loop, survives back and forward and a
@@ -18,51 +19,39 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from explore import charts, components, labels
+from explore import components, labels
 from tests.e2e.dashboard_pages import (
-    C2,
-    C4,
-    C5,
     ELECTIONS_ROWS,
+    ELECTIONS_SECTIONS,
     ELECTIONS_SUCCESS,
     FIELDS,
-    FILTER_MAX_PX,
-    FILTER_MIN_PX,
     FILTER_OUTPUT,
     FIRST,
     GLOSSARY,
     LAST,
-    LEADER_ROWS,
+    MAJORITY_SUCCESS,
     MARKS,
     NARROW_DESKTOP,
-    OVER_TIME_ROWS,
-    PHONE_WIDTHS,
+    OVER_TIME_SUCCESS,
     PROVENANCE,
     PV,
     PV_BOX,
     PV_FIRST,
-    RESOURCE_ERROR,
     ROUTER_OUTPUT,
-    STATE_CONTROL,
     UNAVAILABLE,
     UPDATE_PATH,
-    WIDE_BREAKPOINT_PX,
     WIDE_WIDTHS,
     YEARS,
     assert_chunk_failure_stops,
-    assert_hover_names_year,
     assert_layout_holds,
     assert_rendered,
-    assert_year_ticks_apart,
     lower_thumb,
-    recorded,
     rect,
     rects,
     row_years,
     search,
     served_years,
     watch_chunk_errors,
-    year_ticks,
     years_shown,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
@@ -195,116 +184,6 @@ def test_a_failed_slider_chunk_stops_logging(page: Page) -> None:
     assert_chunk_failure_stops(page, seen)
 
 
-# --- chart C2 (#434, D096) ------------------------------------------------------------
-
-#: C2's drawn texts (#558, D104): its year ticks along the bottom, its share ticks, both
-#: axes' titles, the majority line's label and the key's entries; no point draws text.
-C2_CHART_TEXTS = ", ".join(
-    f"{C2} {part}"
-    for part in (
-        ".xtick text",
-        ".ytick text",
-        ".g-xtitle text",
-        ".g-ytitle text",
-        ".annotation-text",
-        ".legendtext",
-    )
-)
-C2_POINTS = f"{C2} .scatterlayer .trace:first-child .points path"
-
-
-def open_c2(page: Page, query: str = "", *, width: int = 390) -> None:
-    page.goto(f"/elections{query}")
-    assert_rendered(page, ELECTIONS_SUCCESS, width=width)
-    page.locator(f"{C2} .main-svg").first.wait_for()
-    page.locator(f"{C2} .xtick text").first.wait_for()
-
-
-@pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", PHONE_WIDTHS)
-def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
-    """AC Phone width (#558, D104): year along the bottom, its sparse ticks apart, every
-    text inside the width and none over another, the majority line's label over no
-    point, no sideways scroll; one point per served year, no point text, and a hover
-    naming its year."""
-    page.set_viewport_size({"width": width, "height": 844})
-    open_c2(page, width=width)
-    expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    assert_year_ticks_apart(page, C2)
-    expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
-    expect(page.locator(f"{C2} .textpoint")).to_have_count(0)
-    texts_ = [b for b in boxes(page, C2_CHART_TEXTS) if b["w"] > 0]
-    found = [b["text"] for b in texts_]
-    assert found.count(labels.C2_VALUE_AXIS.replace("<br>", "")) == 1
-    assert found.count(labels.LABELS["year"]) == 1
-    line = labels.C2_MAJORITY_LINE.replace("<br>", "")
-    assert found.count(line) == 1
-    for i, a in enumerate(texts_):
-        assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
-        for b in texts_[i + 1 :]:
-            assert not overlaps(a, b), (a, b)
-    (label,) = [b for b in texts_ if b["text"] == line]
-    for point in boxes(page, C2_POINTS):
-        assert not overlaps(label, point), (label, point)
-    last = served_years()[-1]
-    assert_hover_names_year(page, C2, f"{C2_POINTS} >> nth=-1", last)
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_c2_and_its_table_ignore_the_filters(page: Page) -> None:
-    """D096: a filter narrows T1, never C2 or its companion table."""
-    open_c2(page, "?year_from=1900")
-    ticks = [b["text"] for b in boxes(page, f"{C2} .xtick text")]
-    assert ticks == year_ticks()
-    expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
-    expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
-    assert row_years(page) == years_shown(year_from=1900)
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_c2_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
-    open_c2(page)
-    point = page.locator(C2_POINTS).first
-    light = point.evaluate("el => getComputedStyle(el).fill")
-    assert light == rgb(token(page, "--chart-1"))
-    seen: list[str] = []
-
-    def on_request(request: Request) -> None:
-        seen.append(f"{request.method} {urlsplit(request.url).path}")
-
-    page.on("request", on_request)
-    page.evaluate("window.__e2e_mark = 1")
-    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
-    expect(point).not_to_have_css("fill", light)
-    assert point.evaluate("el => getComputedStyle(el).fill") == rgb(
-        token(page, "--chart-1")
-    )
-    page.wait_for_timeout(SETTLE_MS)
-    assert seen == [], seen
-    assert page.evaluate("window.__e2e_mark") == 1
-
-
-@pytest.mark.plotlyjs_fetches(1, abort=True)
-@pytest.mark.expected_console_error(RESOURCE_ERROR)
-def test_with_plotlyjs_blocked_c2_s_title_caption_and_both_tables_render(
-    page: Page,
-) -> None:
-    page.goto("/elections")
-    assert_rendered(page, ELECTIONS_SUCCESS)
-    memo = f"window.{charts.PLOTLYJS_MEMO}"
-    page.wait_for_function(f"{memo} !== undefined")
-    assert page.evaluate(f"async () => await {memo}") is False
-    expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
-    expect(page.locator(f"{C2} figcaption")).to_contain_text(labels.C2_LEADER_POINT)
-    expect(page.locator(f"{C2} figcaption a")).to_have_attribute(
-        "href", "#elections-leader-table"
-    )
-    expect(page.locator("#elections-leader-table")).to_be_visible()
-    expect(page.locator(ELECTIONS_ROWS)).to_have_count(len(served_years()))
-    expect(page.locator(f"{C2} .js-plotly-plot")).to_have_count(0)
-
-
 # --- the headline metrics (#437, D097) ------------------------------------------------
 
 METRICS = "#elections-metrics"
@@ -382,250 +261,21 @@ def test_a_filter_change_updates_the_metrics(page: Page) -> None:
     expect(page.locator(f"{METRICS} p.note")).to_have_text([labels.MARGIN_NOTE])
 
 
-# --- charts C4 and C5 (#436, D100) ---------------------------------------------------
-
-#: Every text C4 or C5 draws that a reader reads (#558, D104): year ticks, value ticks,
-#: both axes' titles, the band's labels and the key's entries; no bar or marker draws
-#: text.
-OVER_TIME_TEXTS = (
-    ".xtick text",
-    ".ytick text",
-    ".annotation-text",
-    ".g-xtitle text",
-    ".g-ytitle text",
-    ".legendtext",
-)
-
-
-def open_over_time(page: Page, query: str = "", *, width: int = 390) -> None:
-    page.goto(f"/elections{query}")
-    assert_rendered(page, ELECTIONS_SUCCESS, width=width)
-    for chart in (C4, C5):
-        page.locator(f"{chart} .main-svg").first.wait_for()
-        page.locator(f"{chart} .xtick text").first.wait_for()
-
-
-def state_name(usps: str) -> str:
-    rows = recorded("/v1/elections/states")["data"]
-    return str(next(r["state"] for r in rows if r["state_usps"] == usps))
-
-
-def filter_posts(page: Page) -> list[str]:
-    """The filter callback's posts, recorded from now on."""
-    posts: list[str] = []
-
-    def on_request(request: Request) -> None:
-        if urlsplit(request.url).path == UPDATE_PATH and FILTER_OUTPUT in (
-            request.post_data or ""
-        ):
-            posts.append(request.post_data or "")
-
-    page.on("request", on_request)
-    return posts
-
-
-def choose_state(page: Page, name: str) -> None:
-    page.locator(STATE_CONTROL).click()
-    page.get_by_role("option", name=name, exact=True).click()
-
-
-@pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", PHONE_WIDTHS)
-@pytest.mark.parametrize("query", ["", "?state=GA", "?state=SC", "?state=AK"])
-def test_c4_and_c5_are_readable_at_phone_width(
-    page: Page, query: str, width: int
-) -> None:
-    """AC Phone width (#558, D104): year along the bottom with its sparse ticks apart,
-    every tick, axis title, band label and key entry inside the width, none over
-    another, no bar or marker text, and no sideways scroll, and a hover on each chart
-    naming its year."""
-    page.set_viewport_size({"width": width, "height": 844})
-    open_over_time(page, query, width=width)
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    for chart in (C4, C5):
-        assert_year_ticks_apart(page, chart)
-        expect(page.locator(f"{chart} .bartext")).to_have_count(0)
-        expect(page.locator(f"{chart} .textpoint")).to_have_count(0)
-        drawn = [
-            b
-            for part in OVER_TIME_TEXTS
-            for b in boxes(page, f"{chart} {part}")
-            if b["w"] > 0 and b["text"]
-        ]
-        # Value ticks and both titles beside the year ticks.
-        assert len(drawn) > len(year_ticks()) + 2, chart
-        for i, a in enumerate(drawn):
-            assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
-            for b in drawn[i + 1 :]:
-                assert not overlaps(a, b), (chart, a, b)
-    for chart in (C4, C5):
-        bar = f"{chart} .barlayer .point path >> nth=-1"
-        assert_hover_names_year(page, chart, bar, served_years()[-1])
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_c5_bands_the_years_before_the_window(page: Page) -> None:
-    open_over_time(page)
-    notes = [b["text"] for b in boxes(page, f"{C5} .annotation-text")]
-    band = labels.C5_BEFORE_BAND.format(pv_year_min=PV_FIRST).replace("<br>", "")
-    assert notes == [band]
-    # Above the plot (#558, D104), never inside the band.
-    (note,) = boxes(page, f"{C5} .annotation-text")
-    (plot,) = boxes(page, f"{C5} .draglayer .nsewdrag")
-    assert note["y"] + note["h"] <= plot["y"] + 1, (note, plot)
-    expect(page.locator(f"{C5} .layer-below .shapelayer path")).to_have_count(1)
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_a_state_change_writes_the_url_in_one_callback_and_back_and_forward_work(
-    page: Page,
-) -> None:
-    open_over_time(page)
-    posts = filter_posts(page)
-    control = page.locator(STATE_CONTROL)
-    top = control.bounding_box()
-    assert top is not None
-    choose_state(page, state_name("GA"))
-    expect(page).to_have_url(url_pattern("?state=GA"))
-    title = labels.C4_TITLE_STATE.format(state=state_name("GA"))
-    expect(page.locator(f"{C4} .chart-title")).to_have_text(title)
-    expect(page.locator(OVER_TIME_ROWS)).to_have_count(
-        sum(
-            1
-            for r in recorded("/v1/elections/states")["data"]
-            if r["state_usps"] == "GA"
-        )
-    )
-    page.wait_for_timeout(SETTLE_MS)
-    assert len(posts) == 1, posts
-    # The re-render does not jump the page: the control stays in view.
-    after = page.locator(STATE_CONTROL).bounding_box()
-    assert after is not None and 0 <= after["y"] <= 844
-    page.go_back()
-    expect(page).to_have_url(url_pattern(""))
-    expect(page.locator(f"{C4} .chart-title")).to_have_text(labels.C4_TITLE)
-    page.go_forward()
-    expect(page.locator(f"{C4} .chart-title")).to_have_text(title)
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_a_pasted_state_and_year_url_narrows_t1_by_the_years_only(page: Page) -> None:
-    open_over_time(page, "?state=GA&year_from=1900&pv=1")
-    assert row_years(page) == years_shown(year_from=1900, pv_only=True)
-    expect(page.locator(f"{C4} .chart-title")).to_have_text(
-        labels.C4_TITLE_STATE.format(state=state_name("GA"))
-    )
-    assert [b["text"] for b in boxes(page, f"{C4} .xtick text")] == year_ticks()
-    expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_c4_and_c5_redraw_on_a_theme_switch_with_no_request(page: Page) -> None:
-    open_over_time(page)
-    bars = [page.locator(f"{chart} .barlayer .point path").first for chart in (C4, C5)]
-    light = [bar.evaluate("el => getComputedStyle(el).fill") for bar in bars]
-    seen: list[str] = []
-    page.on("request", lambda r: seen.append(urlsplit(r.url).path))
-    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
-    for bar, before in zip(bars, light, strict=True):
-        expect(bar).not_to_have_css("fill", before)
-        assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
-            token(page, "--chart-1")
-        )
-    page.wait_for_timeout(SETTLE_MS)
-    assert seen == [], seen
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_a_state_link_in_the_table_navigates_client_side(page: Page) -> None:
-    open_over_time(page, "?state=GA")
-    page.evaluate("window.__e2e_mark = 1")
-    page.locator("#elections-over-time-table a[href='/state/GA']").first.click()
-    expect(page).to_have_url(re.compile(r"/state/GA$"))
-    assert page.evaluate("window.__e2e_mark") == 1
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="#496: the browser handles the fragment before Dash renders the chart",
-)
-@pytest.mark.plotlyjs_fetches(1)
-def test_the_c4_fragment_scrolls_to_the_chart_after_dash_renders(page: Page) -> None:
-    """Checked whether or not the C3 link ships (#436, owner): it does not, since the
-    fragment does not land; #496 holds both."""
-    page.goto("/elections#c4")
-    assert_rendered(page, ELECTIONS_SUCCESS)
-    page.locator(f"{C4} .main-svg").first.wait_for()
-    page.wait_for_timeout(SETTLE_MS)
-    box = page.locator(f"{C4} .chart-title").bounding_box()
-    assert box is not None and 0 <= box["y"] <= 844, box
-
-
-@pytest.mark.plotlyjs_fetches(1, abort=True)
-@pytest.mark.expected_console_error(RESOURCE_ERROR)
-def test_with_plotlyjs_blocked_c4_and_c5_keep_their_text_and_table(page: Page) -> None:
-    page.goto("/elections")
-    assert_rendered(page, ELECTIONS_SUCCESS)
-    memo = f"window.{charts.PLOTLYJS_MEMO}"
-    page.wait_for_function(f"{memo} !== undefined")
-    assert page.evaluate(f"async () => await {memo}") is False
-    for chart, title, basis in (
-        (C4, labels.C4_TITLE, labels.C4_BASIS),
-        (C5, labels.C5_TITLE, labels.C5_BASIS),
-    ):
-        expect(page.locator(f"{chart} .chart-title")).to_have_text(title)
-        expect(page.locator(f"{chart} figcaption")).to_contain_text(basis)
-        expect(page.locator(f"{chart} figcaption a")).to_have_attribute(
-            "href", "#elections-over-time-table"
-        )
-        expect(page.locator(f"{chart} .js-plotly-plot")).to_have_count(0)
-    expect(page.locator(OVER_TIME_ROWS)).to_have_count(len(served_years()))
-
-
-@pytest.mark.aborted_chunk("async-dropdown")
-def test_a_failed_dropdown_chunk_stops_logging(page: Page) -> None:
-    """#456, D089, for the state control (#436): with dcc's dropdown chunk refused,
-    the page logs a bounded number of errors and stops, and its tables render."""
-    seen = watch_chunk_errors(page)
-    page.goto("/elections")
-    assert_rendered(page, ELECTIONS_SUCCESS)
-    assert_chunk_failure_stops(page, seen)
-    expect(page.locator(OVER_TIME_ROWS)).to_have_count(len(served_years()))
-
-
 # --- the wide layout (#553, D102, D103) ----------------------------------------------
 
 LIST_PAIR = "#elections-list-pair"
 LIST_COLUMNS = f"{LIST_PAIR} > div"
-OVER_TIME_PAIR = "#elections-over-time-pair"
-OVER_TIME_COLUMNS = f"{OVER_TIME_PAIR} > div"
-#: The page's three tables: the leader table, T1 and C4 and C5's companion table.
-TABLES = ("#elections-leader-table", "#elections-table", "#elections-over-time-table")
-#: A section heading's top margin, 1.75rem: what a pair keeps above the next heading.
-HEADING_GAP_PX = 1.75 * 16
+#: The page's one table since #562: T1.
+TABLES = ("#elections-table",)
 
 
 def open_at(page: Page, width: int) -> None:
-    """``/elections`` at ``width``, with C4 and C5 drawn."""
+    """``/elections`` at ``width``."""
     page.set_viewport_size({"width": width, "height": 900})
     page.goto("/elections")
     page.locator(ELECTIONS_SUCCESS).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
     assert page.evaluate("innerWidth") == width
-    for chart in (C4, C5):
-        page.locator(f"{chart} .main-svg").first.wait_for()
-
-
-def wait_charts_fill(page: Page) -> None:
-    """C4's and C5's drawings each as wide as its box (#433's responsive check)."""
-    page.wait_for_function(
-        f"""() => [{C4!r}, {C5!r}].every(chart => {{
-            const svg = document.querySelector(chart + " .main-svg");
-            const box = document.querySelector(chart + " .chart-graph");
-            return svg && Math.abs(svg.getBoundingClientRect().width
-                - box.getBoundingClientRect().width) < 1;
-        }})"""
-    )
 
 
 def side_by_side(left: dict[str, float], right: dict[str, float]) -> None:
@@ -635,7 +285,6 @@ def side_by_side(left: dict[str, float], right: dict[str, float]) -> None:
     assert abs(left["top"] - right["top"]) <= 1, (left, right)
 
 
-@pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.parametrize("width", WIDE_WIDTHS)
 def test_wide_the_list_s_filters_sit_beside_the_count_and_averages(
     page: Page, width: int
@@ -667,75 +316,57 @@ def test_wide_the_list_s_filters_sit_beside_the_count_and_averages(
     )
 
 
-@pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", WIDE_WIDTHS)
-def test_wide_c4_sits_beside_c5_with_their_table_below(page: Page, width: int) -> None:
-    open_at(page, width)
-    wait_charts_fill(page)
-    left, right = rects(page, OVER_TIME_COLUMNS)
-    side_by_side(left, right)
-    for chart, column in ((C4, left), (C5, right)):
-        graph = rect(page, f"{chart} .chart-graph")
-        assert abs(graph["width"] - column["width"]) <= 1, (chart, graph, column)
-        assert abs(graph["left"] - column["left"]) <= 1, (chart, graph, column)
-    # The companion table's heading a section heading's gap below the taller column,
-    # and its table across both columns.
-    heading = rect(page, f"{OVER_TIME_PAIR} + h2")
-    taller = max(left["bottom"], right["bottom"])
-    assert heading["top"] - taller >= HEADING_GAP_PX - 1, (heading, taller)
-    table = rect(page, ".table-scroll:has(#elections-over-time-table)")
-    assert table["top"] > taller, (table, taller)
-    assert abs(table["left"] - left["left"]) <= 1, (table, left)
-    assert table["right"] >= right["right"] - 1, (table, right)
-    # The state filter, alone in its row, is a filter row's 14rem to 20rem.
-    state = rect(page, "#elections-state-control > .filter")
-    assert FILTER_MIN_PX - 0.5 <= state["width"] <= FILTER_MAX_PX + 0.5, state
-    assert state["bottom"] <= left["top"], (state, left)
-
-
-@pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", WIDE_WIDTHS)
-def test_wide_c2_s_section_stays_full_width_and_first(page: Page, width: int) -> None:
-    open_at(page, width)
-    page.locator(f"{C2} .main-svg").first.wait_for()
-    content = rect(page, ELECTIONS_SUCCESS)
-    c2 = rect(page, f"{C2} .chart-graph")
-    assert abs(c2["width"] - content["width"]) <= 1, (c2, content)
-    assert c2["bottom"] <= rect(page, LIST_PAIR)["top"], c2
-
-
-@pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.parametrize("width", [NARROW_DESKTOP, 390])
-def test_narrow_both_pairs_stack_as_before(page: Page, width: int) -> None:
+def test_narrow_the_list_pair_stacks_as_before(page: Page, width: int) -> None:
     open_at(page, width)
-    for columns in (LIST_COLUMNS, OVER_TIME_COLUMNS):
-        left, right = rects(page, columns)
-        assert right["top"] >= left["bottom"] - 0.5, (width, columns, left, right)
-        assert abs(left["left"] - right["left"]) <= 0.5, (width, columns, left, right)
-    # C4 above C5, and the filters above the count, as the one column always had.
-    assert rect(page, C4)["bottom"] <= rect(page, C5)["top"] + 0.5
+    left, right = rects(page, LIST_COLUMNS)
+    assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
+    assert abs(left["left"] - right["left"]) <= 0.5, (width, left, right)
+    # The filters above the count, as the one column always had.
     assert rect(page, PV)["bottom"] <= rect(page, "#elections-metrics")["top"] + 0.5
 
 
-@pytest.mark.plotlyjs_fetches(1)
-def test_c4_and_c5_fill_their_columns_after_a_resize_across_the_breakpoint(
-    page: Page,
-) -> None:
-    open_at(page, 1280)
-    for width in (1280, NARROW_DESKTOP, 1280, 1850, 1280):
-        page.set_viewport_size({"width": width, "height": 900})
-        wait_charts_fill(page)
-        left, right = rects(page, OVER_TIME_COLUMNS)
-        # Side by side from the breakpoint, stacked below it, after every crossing.
-        if width >= WIDE_BREAKPOINT_PX:
-            side_by_side(left, right)
-        else:
-            assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
-        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-
-
-@pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
 def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
     open_at(page, width)
     assert_layout_holds(page, ELECTIONS_SUCCESS, TABLES, width)
+
+
+# --- the section links between the three elections pages (#562) ---------------------
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_section_links_chain_client_side_and_back(page: Page) -> None:
+    """D092's pattern: each link a client-side navigation, the current page marked,
+    back and forward restoring each page."""
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    page.evaluate("window.__e2e_mark = 1")
+    nav = page.locator(ELECTIONS_SECTIONS)
+    expect(nav.locator("[aria-current=page]")).to_have_text(
+        labels.SECTION_ELECTIONS_LIST
+    )
+    for name, path, success in (
+        (labels.SECTION_MAJORITY, "/elections/majority", MAJORITY_SUCCESS),
+        (labels.SECTION_OVER_TIME, "/elections/over-time", OVER_TIME_SUCCESS),
+        (labels.SECTION_ELECTIONS_LIST, "/elections", ELECTIONS_SUCCESS),
+    ):
+        page.locator(ELECTIONS_SECTIONS).get_by_role("link", name=name).click()
+        expect(page).to_have_url(re.compile(re.escape(path) + "$"))
+        assert_rendered(page, success)
+        expect(page.locator(f"{ELECTIONS_SECTIONS} [aria-current=page]")).to_have_text(
+            name
+        )
+    page.go_back()
+    expect(page).to_have_url(re.compile(r"/elections/over-time$"))
+    assert_rendered(page, OVER_TIME_SUCCESS)
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load
+
+
+def test_an_old_state_link_lands_on_the_state_page(page: Page) -> None:
+    """AC3 in a browser: a document load of ``/elections?state=GA`` follows the 302
+    to ``/state/GA`` once the roster is cached."""
+    page.goto("/states")  # the picker reads the roster, as the index judges by
+    page.locator("#states").wait_for()
+    page.goto("/elections?state=GA")
+    expect(page).to_have_url(re.compile(r"/state/GA$"))

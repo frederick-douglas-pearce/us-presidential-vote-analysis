@@ -245,7 +245,7 @@ def test_a_direct_load_marks_the_pages_link(page: Page, path: str) -> None:
 )
 def test_a_navigation_to_a_page_with_no_mark_clears_it(page: Page, path: str) -> None:
     # Starting marked, so the cleared state proves the callback ran on the new path.
-    # On a page with no chart (#434: /elections draws C2), so no plotly.js fetch can
+    # On a page with no chart, so no plotly.js fetch can
     # land after the push and be counted against the page pushed to.
     page.goto("/states")
     page.locator("#states").wait_for()
@@ -278,9 +278,8 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))
-    # C2 (#434) drawn first: plotly.js and dcc's graph chunk load once per document,
-    # so the return to /elections below requests neither.
-    page.locator("#c2 .main-svg").first.wait_for()
+    # No chart on /elections since #562 (C2 has its own page), so no plotly.js or
+    # graph chunk is requested here or on the return below.
     seen: list[tuple[str, str, str]] = []
 
     def on_request(request: Request) -> None:

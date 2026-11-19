@@ -39,14 +39,22 @@ GLOSSARY = "#elections-glossary"
 #: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
 FIELDS = ("year", "candidate_count", "has_popular_vote")
 
-#: Chart C2 (#434) and its companion table, above the filters.
+#: The section links between the three elections pages (#562).
+ELECTIONS_SECTIONS = "#elections-sections"
+
+# Ids of the Electoral College majority page (pages/elections_majority.py, #562):
+# chart C2 (#434) and its companion table.
+MAJORITY_SUCCESS = "#elections-majority"
 C2 = "#c2"
 LEADER_ROWS = "#elections-leader-table tbody tr"
-#: Charts C4 and C5, their shared companion table and the state control (#436).
+
+# Ids of the electors appointed and total popular vote page
+# (pages/elections_over_time.py, #562): charts C4 and C5 and their shared companion
+# table (#436), all states only.
+OVER_TIME_SUCCESS = "#elections-over-time"
 C4 = "#c4"
 C5 = "#c5"
 OVER_TIME_ROWS = "#elections-over-time-table tbody tr"
-STATE_CONTROL = "#elections-state"
 
 # Ids of the state history (pages/state.py) and its people per electoral vote
 # (pages/state_per_capita.py, #559).
