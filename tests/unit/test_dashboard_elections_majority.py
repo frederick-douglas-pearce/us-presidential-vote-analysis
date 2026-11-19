@@ -388,9 +388,7 @@ WINDOW = (COVERAGE["pv_year_min"], COVERAGE["pv_year_max"])
 #: Each year's ``has_popular_vote``, from the index, T3's year rule.
 HAS_PV = {row["year"]: row["has_popular_vote"] for row in BODY["data"]}
 ITEMS = {item["year"]: item for item in SUMMARY["elections"]}
-LEADER = {
-    row["year"]: row for row in SUMMARY["data"] if row["electoral_rank"] == 1
-}
+LEADER = {row["year"]: row for row in SUMMARY["data"] if row["electoral_rank"] == 1}
 
 
 def _named_or_none(figure: dict[str, Any], name: str) -> dict[str, Any] | None:
@@ -527,13 +525,32 @@ class TestC2Methods:
             assert trace["y"] == [MOD["_C2_STRIP_Y"]] * len(expected)
         assert named(figure, labels.C2_PV_DIFFERENT_KEY)["x"] == [2000, 2016]
 
-    def test_the_strip_follows_the_flag_not_the_slugs(self) -> None:
-        """T4: 2000's flag doctored false, its slugs still differing: no mark there."""
-        trace = named(
-            c2_figure(render_c2(_with(**{"2000.pv_flip": False}))),
-            labels.C2_PV_DIFFERENT_KEY,
+    def test_the_strip_follows_the_flag(self) -> None:
+        """T4 (#564's review, g.2): with a flag and its winner doctored together, so the
+        two still agree, the strip moves with them; for the hybrid too, which the
+        recording never marks."""
+        moved = _with(
+            **{
+                "2000.pv_flip": False,
+                "2000.pv_winner": ITEMS[2000]["ec_winner"],
+                "2000.pv_winner_slug": ITEMS[2000]["ec_winner_slug"],
+            }
         )
+        trace = named(c2_figure(render_c2(moved)), labels.C2_PV_DIFFERENT_KEY)
         assert trace["x"] == [2016]
+        hybrid = _with(
+            **{
+                "2016.hybrid_flip": True,
+                "2016.hybrid_winner": "Doctored Winner",
+                "2016.hybrid_winner_slug": "doctored-winner",
+            }
+        )
+        figure = c2_figure(render_c2(hybrid))
+        assert named(figure, labels.C2_HYBRID_DIFFERENT_KEY)["x"] == [2016]
+        assert (
+            _named_or_none(c2_figure(render_c2()), labels.C2_HYBRID_DIFFERENT_KEY)
+            is None
+        )
 
     def test_the_strip_hover_names_the_table_s_winner(self) -> None:
         tree = render_c2()
@@ -572,32 +589,45 @@ class TestC2Methods:
             {"2000.pv_flip": 1},
             {"2000.pv_flip": "yes"},
             {"2016.hybrid_flip": 0},
-            # A flag naming the leader as the different candidate (C4).
+            # A True flag naming the leader as the different candidate (C4), both methods.
             {"2004.pv_flip": True},
+            {"2004.hybrid_flip": True},
+            # A flag that disagrees with its winner (#564's review, cr.2): False with
+            # another winner, null with a winner, True with no winner.
+            {"2000.pv_flip": False},
+            {"2000.pv_flip": None},
+            {"2016.pv_winner_slug": None},
+            {"2016.pv_winner_slug": "  "},
+            {"2016.hybrid_flip": None},
+            {"1972.pv_winner_slug": "richard-m-nixon"},
             # The leader is not the flags' baseline (C4).
             {"2016.ec_winner_slug": "hillary-clinton"},
-            {"2016.pv_winner": None, "2016.pv_flip": None, "2016.missing": 1},
         ],
     )
     def test_a_flag_c2_cannot_read_degrades_the_section(
         self, changes: dict[str, Any]
     ) -> None:
-        summary = _with(**changes)
-        if "2016.missing" in changes:  # a missing year-level field
-            del summary["elections"][-2]["hybrid_winner"]
-        tree = render_c2(summary)
+        tree = render_c2(_with(**changes))
         assert tree.id == PAGE_ID
         assert find(tree, C2) is None and find(tree, LEADERS) is None
         assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
 
-    def test_an_index_has_popular_vote_that_is_no_bool_degrades_the_section(
-        self,
-    ) -> None:
-        index = copy.deepcopy(BODY)
-        index["data"][-1]["has_popular_vote"] = 1
-        tree = render_c2(index=index)
+    def test_a_missing_year_level_field_degrades_the_section(self) -> None:
+        """g.5: 2016's item, chosen by its year, without ``hybrid_winner``."""
+        summary = copy.deepcopy(SUMMARY)
+        (item,) = [i for i in summary["elections"] if i["year"] == 2016]
+        del item["hybrid_winner"]
+        tree = render_c2(summary)
         assert tree.id == PAGE_ID
         assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+
+    def test_the_recording_s_flags_agree_with_its_winners(self) -> None:
+        """The premise of the strict rule (cr.2): every recorded year passes it."""
+        for year, item in ITEMS.items():
+            for flip, winner in MOD["FLIP_WINNERS"]:
+                assert MOD["_agrees"](
+                    item[flip], item[winner], LEADER[year]["candidate_slug"]
+                ), (year, flip)
 
     @pytest.mark.parametrize(
         ("value", "label", "symbol"),
@@ -622,41 +652,176 @@ class TestC2Methods:
         assert marks["x"] == [1992] and marks["y"] == [0]
         cell = _cell_of(tree, 1992, field)
         assert cell in marks["hovertext"][0]
-        name = labels.LABELS["pv_share"] if field == "pv_share" else labels.C2_HYBRID_KEY
+        name = (
+            labels.LABELS["pv_share"] if field == "pv_share" else labels.C2_HYBRID_KEY
+        )
         assert 1992 not in named(figure, name)["x"]
         if field == "pv_share":  # no triangle, so no connector that year
             assert 1992 not in figure["data"][0]["x"]
         assert labels.C2_NO_SHARE_NOTE in _caption(tree)
         assert charts.figure_problems(figure) == []
 
-    def test_the_band_comes_from_coverage_and_only_the_band_moves(self) -> None:
-        """T5: the index's window doctored to start in 1980 moves the band and its
-        caption sentence; 1976's cells and marks follow T3's year rule, unchanged."""
+    def test_the_bands_come_from_coverage(self) -> None:
+        """T5, g.4: the band before the window, its label and caption sentence on the
+        recording; with the index's window doctored to 1980–2016 (and its flags with it,
+        which the page requires, cr.8), the band before moves, a band after appears with
+        its label, its caption sentence and the raised top margin, and 1976's cells and
+        marks follow the same rule."""
 
-        def band(tree: Any) -> dict[str, Any]:
-            (shape,) = [
+        def bands(tree: Any) -> list[dict[str, Any]]:
+            return [
                 s for s in c2_figure(tree)["layout"]["shapes"] if s["type"] == "rect"
             ]
-            found: dict[str, Any] = shape
-            return found
+
+        def notes(tree: Any) -> list[str]:
+            return [a["text"] for a in c2_figure(tree)["layout"]["annotations"]]
 
         served = render_c2()
         before = [y for y in YEARS if y < WINDOW[0]]
         low, high = components.year_edges(list(YEARS), before[0], before[-1])
-        assert (band(served)["x0"], band(served)["x1"]) == (low, high)
-        notes = [a["text"] for a in c2_figure(served)["layout"]["annotations"]]
-        assert labels.C5_BEFORE_BAND.format(pv_year_min=WINDOW[0]) in notes
+        (band,) = bands(served)
+        assert (band["x0"], band["x1"]) == (low, high)
+        assert band["fillcolor"] == "var(--chart-grid)"
+        assert labels.C5_BEFORE_BAND.format(pv_year_min=WINDOW[0]) in notes(served)
         assert labels.C2_BEFORE_NOTE.format(pv_year_min=WINDOW[0]) in _caption(served)
+        assert labels.C5_AFTER_NOTE.format(pv_year_max=WINDOW[1]) not in _caption(
+            served
+        )
+        top = over_time.TOP_PX + over_time.BAND_LABEL_PX
+        assert c2_figure(served)["layout"]["margin"] == {"t": top}
         index = copy.deepcopy(BODY)
-        index["meta"]["provenance"]["coverage"]["pv_year_min"] = 1980
+        index["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1980, pv_year_max=2016
+        )
+        for row in index["data"]:
+            row["has_popular_vote"] = 1980 <= row["year"] <= 2016
         moved = render_c2(index=index)
-        later = [y for y in YEARS if y < 1980]
-        assert band(moved)["x1"] == components.year_edges(
-            list(YEARS), later[0], later[-1]
-        )[1]
+        first, last = bands(moved)
+        early = [y for y in YEARS if y < 1980]
+        late = [y for y in YEARS if y > 2016]
+        assert (first["x0"], first["x1"]) == components.year_edges(
+            list(YEARS), early[0], early[-1]
+        )
+        assert (last["x0"], last["x1"]) == components.year_edges(
+            list(YEARS), late[0], late[-1]
+        )
+        assert labels.C5_AFTER_BAND.format(pv_year_max=2016) in notes(moved)
         assert labels.C2_BEFORE_NOTE.format(pv_year_min=1980) in _caption(moved)
-        assert _cell_of(moved, 1976, "pv_share") == _cell_of(served, 1976, "pv_share")
-        assert 1976 in named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
+        assert labels.C5_AFTER_NOTE.format(pv_year_max=2016) in _caption(moved)
+        assert c2_figure(moved)["layout"]["margin"] == {
+            "t": over_time.TOP_PX + 2 * over_time.BAND_LABEL_PX
+        }
+        assert _cell_of(moved, 1976, "pv_share") == labels.NOT_APPLICABLE
+        triangles = named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
+        assert 1976 not in triangles and 2020 not in triangles and 1980 in triangles
+
+    def test_the_drawn_symbols_are_the_table_s_and_distinct(self) -> None:
+        """g.1: read off the drawn traces, not the module's constants."""
+        figure = c2_figure(
+            render_c2(
+                _with(
+                    **{
+                        "2016.hybrid_flip": True,
+                        "2016.hybrid_winner": "Doctored Winner",
+                        "2016.hybrid_winner_slug": "doctored-winner",
+                    }
+                )
+            )
+        )
+        drawn = {
+            t["name"]: t["marker"]["symbol"] for t in figure["data"] if "marker" in t
+        }
+        assert drawn == {
+            labels.LABELS["ec_share_full"]: "circle",
+            labels.LABELS["pv_share"]: "triangle-up",
+            labels.C2_HYBRID_KEY: "star",
+            labels.C2_PV_DIFFERENT_KEY: "hexagon",
+            labels.C2_HYBRID_DIFFERENT_KEY: "pentagon",
+        }
+        assert len(set(drawn.values())) == len(drawn)
+
+    def test_an_unrecognized_winner_s_strip_hover_keeps_its_line_break(self) -> None:
+        """cr.1: the note's ``<br>`` is added after escaping, never escaped itself."""
+        tree = render_c2(_with(**{"2016.pv_winner": 5}))
+        trace = named(c2_figure(tree), labels.C2_PV_DIFFERENT_KEY)
+        (hover,) = [
+            h for x, h in zip(trace["x"], trace["hovertext"], strict=True) if x == 2016
+        ]
+        assert f"{labels.UNRECOGNIZED}<br>{labels.UNRECOGNIZED_NOTE}" in hover
+        assert "&lt;" not in hover
+
+    def test_a_year_missing_two_marks_is_one_marker_with_both_hovers(self) -> None:
+        """cr.5: one point per label and year, so each hover is reachable."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r for r in summary["data"] if r["year"] == 1992 and r["electoral_rank"] == 1
+        ]
+        row["pv_share"] = None
+        row["hybrid_score"] = None
+        figure = c2_figure(render_c2(summary))
+        (marks,) = markers(figure)
+        assert marks["x"] == [1992] and marks["ids"] == ["1992"]
+        (hover,) = marks["hovertext"]
+        assert "Popular-vote share: " in hover and "Hybrid score: " in hover
+        assert charts.figure_problems(figure) == []
+
+    def test_the_majority_label_sits_over_no_mark_left_of_the_window(self) -> None:
+        """cr.4's tripwire (D108 residual): the label starts at the second served year
+        and runs about a century to its right at 360 px; no mark but a circle may sit
+        below the line there. A wider popular-vote window (#565, #566) that puts one
+        there fails this, which re-placing the label must answer."""
+        span = 100  # years: the three-line label's width at 360 px, generously
+        figure = c2_figure(render_c2())
+        (note,) = [
+            a
+            for a in figure["layout"]["annotations"]
+            if a["text"] == labels.C2_MAJORITY_LINE
+        ]
+        start = note["x"]
+        for t in figure["data"]:
+            if "marker" not in t or t["name"] == labels.LABELS["ec_share_full"]:
+                continue
+            for x, y in zip(t["x"], t["y"], strict=True):
+                assert not (start <= x <= start + span and y < 0.5), (t["name"], x)
+
+    def test_c2_paints_only_measured_tokens(self) -> None:
+        """g.8: every color C2's figure paints is one the theme tests hold to its ratio
+        on the page and on the band's fill; the majority label is in the text color."""
+        from tests.unit.test_dashboard_theme import CHART_MARKS
+
+        figure = c2_figure(
+            render_c2(
+                _with(
+                    **{
+                        "2016.hybrid_flip": True,
+                        "2016.hybrid_winner": "Doctored Winner",
+                        "2016.hybrid_winner_slug": "doctored-winner",
+                    }
+                )
+            )
+        )
+        painted: set[str] = set()
+        for t in figure["data"]:
+            for part in ("marker", "line"):
+                if part in t:
+                    painted.add(t[part]["color"])
+        for shape in figure["layout"]["shapes"]:
+            painted.add(shape["line"]["color"])
+        for note in figure["layout"]["annotations"]:
+            assert note["font"]["color"] == "var(--text)"
+        tokens = {c.removeprefix("var(").removesuffix(")") for c in painted}
+        assert tokens <= {*CHART_MARKS, "--text"}, tokens
+        fills = {s.get("fillcolor") for s in figure["layout"]["shapes"]} - {None}
+        assert fills == {"var(--chart-grid)"}
+
+    def test_c2_s_shares_read_as_t3_s(self) -> None:
+        """g.7: C2's leader cells for the popular-vote share and hybrid score are T3's
+        own for the same row and year (one rule, ``labels.national_pv``)."""
+        tree = render_c2()
+        for year in RECONCILED:
+            cells = NATION_CELLS(rank1(year), HAS_PV[year])
+            for field in ("pv_share", "hybrid_score"):
+                assert _cell_of(tree, year, field) == cells[field], (year, field)
 
     def test_the_hybrid_is_labeled_the_project_s_proposal(self) -> None:
         """AC5: its trace name and key, its hover, the caption and the table note."""
@@ -673,9 +838,9 @@ class TestC2Methods:
         """AC6, M3: the example is the leader (who also won the popular vote) and its
         figure the table's cell for the served share."""
         item, leader = ITEMS[1992], LEADER[1992]
-        assert item["pv_winner_slug"] == item["ec_winner_slug"] == leader[
-            "candidate_slug"
-        ]
+        assert (
+            item["pv_winner_slug"] == item["ec_winner_slug"] == leader["candidate_slug"]
+        )
         assert leader["pv_share"] < 0.5
         text = labels.C2_PLURALITY_NOTE
         assert f"{leader['candidate']} did in 1992 with" in text
@@ -803,7 +968,7 @@ SHAPE_DEFECTS = _shape_defects()
 class TestC2Validation:
     def test_a_row_for_a_year_not_served_is_refused_by_its_own_check(self) -> None:
         with pytest.raises(TypeError, match="not served"):
-            MOD["leaders"](copy.deepcopy(BODY), _unserved())
+            MOD["leaders"](copy.deepcopy(BODY), _unserved(), HAS_PV)
 
     @pytest.mark.parametrize("name", SHAPE_DEFECTS)
     def test_no_n1_defect_reaches_the_page(self, name: str) -> None:
@@ -830,10 +995,10 @@ class TestC2Validation:
     @pytest.mark.parametrize("name", MALFORMED)
     def test_a_malformed_body_is_refused(self, name: str) -> None:
         with pytest.raises((TypeError, KeyError)):
-            MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(MALFORMED[name]))
+            MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(MALFORMED[name]), HAS_PV)
 
     def test_the_recording_is_accepted(self) -> None:
-        leaders = MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY))
+        leaders = MOD["leaders"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY), HAS_PV)
         assert [r["year"] for r in leaders] == YEARS
         assert all(r["electoral_rank"] == 1 for r in leaders)
         assert leaders[0]["ec_determinative"] is False
@@ -842,7 +1007,7 @@ class TestC2Validation:
         index = copy.deepcopy(BODY)
         index["meta"]["provenance"]["coverage"]["year_max"] = 2020
         with pytest.raises(TypeError):
-            MOD["leaders"](index, copy.deepcopy(SUMMARY))
+            MOD["leaders"](index, copy.deepcopy(SUMMARY), HAS_PV)
 
     @pytest.mark.parametrize("name", MALFORMED)
     def test_a_malformed_body_degrades_only_the_section(self, name: str) -> None:
@@ -919,6 +1084,42 @@ class TestN1Fixture:
         # Order-insensitive: the year recordings predate 0.8.0's order within ties, and
         # this checks content; C2 reads only each year's rank-1 row.
         assert sorted(rows, key=key) == sorted(body["summary"], key=key)
+
+
+#: Malformed popular-vote windows and flags in ``/v1/elections`` (#564's review, cr.3,
+#: cr.8, g.3): C2's page checks them as the page's, so each degrades the whole page.
+BAD_MAJORITY_INDEXES = {
+    "window bound missing": lambda b: b["meta"]["provenance"]["coverage"].pop(
+        "pv_year_min"
+    ),
+    "window bound null": lambda b: b["meta"]["provenance"]["coverage"].update(
+        pv_year_max=None
+    ),
+    "window bound a bool": lambda b: b["meta"]["provenance"]["coverage"].update(
+        pv_year_min=True
+    ),
+    "window bound a string": lambda b: b["meta"]["provenance"]["coverage"].update(
+        pv_year_min="1976"
+    ),
+    "window reversed": lambda b: b["meta"]["provenance"]["coverage"].update(
+        pv_year_min=2024, pv_year_max=1976
+    ),
+    "has_popular_vote not a bool": lambda b: b["data"][-1].update(has_popular_vote=1),
+    "has_popular_vote outside the window": lambda b: b["data"][0].update(
+        has_popular_vote=True
+    ),
+    "no popular vote inside the window": lambda b: b["data"][-1].update(
+        has_popular_vote=False
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(BAD_MAJORITY_INDEXES))
+def test_a_bad_popular_vote_window_is_the_page_s_defect(name: str) -> None:
+    index = copy.deepcopy(BODY)
+    BAD_MAJORITY_INDEXES[name](index)
+    with pytest.raises((KeyError, TypeError)):
+        MOD["render"](index, copy.deepcopy(SUMMARY))
 
 
 #: Malformed ``/v1/elections`` bodies (#562's review, cr.1): the index's own defect.

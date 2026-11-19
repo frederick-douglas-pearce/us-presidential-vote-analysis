@@ -126,11 +126,19 @@ def bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str, 
 
 
 def marker_trace(
-    name: str, symbol: str, years: list[int], hovers: list[str]
+    name: str,
+    symbol: str,
+    years: list[int],
+    hovers: list[str],
+    *,
+    y: list[float] | None = None,
+    size: int = 9,
+    color: str = "var(--text)",
 ) -> dict[str, Any]:
-    """A time-series chart's series of markers at zero (C2, C4, C5 and C7), one per year
-    with nothing to draw, named by ``name`` in the chart's key (#558, D104: the key
-    labels the marker, not a text beside each), drawn whole at the plot's edge."""
+    """A time-series chart's series of markers, one per year, named by ``name`` in the
+    chart's key (#558, D104: the key labels the marker, not a text beside each), drawn
+    whole at the plot's edge. By default at zero, one per year with nothing to draw
+    (C2, C4, C5 and C7); C2 also draws its marks at their values (``y``, #564)."""
     return {
         "type": "scatter",
         "mode": "markers",
@@ -138,9 +146,9 @@ def marker_trace(
         "showlegend": True,
         "ids": [str(year) for year in years],
         "x": list(years),
-        "y": [0] * len(years),
+        "y": [0] * len(years) if y is None else list(y),
         "cliponaxis": False,
-        "marker": {"symbol": symbol, "size": 9, "color": "var(--text)"},
+        "marker": {"symbol": symbol, "size": size, "color": color},
         "hovertext": list(hovers),
         "hovertemplate": "%{hovertext}<extra></extra>",
     }

@@ -731,8 +731,11 @@ articles and announcements). Every rule binds all three unless the rule states a
     marks of that year's single `data` row with `electoral_rank` 1 (its served `ec_share_full`,
     `pv_share` and `hybrid_score`), with that year's `elections` item's `ec_determinative`,
     `pv_winner`, `hybrid_winner`, `pv_flip` and `hybrid_flip`. A body with a year missing, a
-    second rank-1 row, an unserved year, a leader whose slug is not `ec_winner_slug`, a flip that
-    is not a flag, or a flip naming the leader shows the section's unavailable state.
+    second rank-1 row, an unserved year, a leader whose slug is not `ec_winner_slug`, or a flip
+    that disagrees with the winner it names (null exactly when there is no winner, true exactly
+    when the winner is another candidate; D108 as amended) shows the section's unavailable
+    state. The index's popular-vote window and each year's `has_popular_vote` must agree, or the
+    whole page shows its degraded state.
   - It derives nothing. No mark carries a text label; each hover writes the companion table's
     cells: votes counted and electors appointed, never votes cast (1868: 214 and 294; 1872: 286
     and 366; 2016: 304 and 538).
@@ -751,7 +754,8 @@ articles and announcements). Every rule binds all three unless the rule states a
     to 100% (it runs to 112% to hold the strip). The line is horizontal at 0.5 and the test is
     strict, so a point on the line is not a majority. Its label sits just below the line at the
     left, from the second served year (D104(e) as D108 amends it).
-  - A share or score that is not a finite number draws a marker at zero with no text label, in a
+  - A share or score that is not a finite number draws a marker at zero with no text label, one
+    point per label and year (two missing marks in one year share it, their hovers joined), in a
     series named by its label (`labels.C2_NO_FIGURE` for no figure in this dataset, or
     `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
     `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
@@ -845,11 +849,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   the marker drawn in place of a null or blank electoral-share bar, and the caption sentences
   `labels.C1_BASES`, `labels.C1_EC_BASIS`, `labels.C1_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY` and
   `labels.C1_ROW_ORDER`; each electoral-share bar's text is T3's cell for the same value.
-  `ec_share_hybrid` is on no dashboard page and in no download since #358; the API serves it. In C2,
-  the title `labels.C2_TITLE`, the value axis `labels.C2_VALUE_AXIS`, the hover `labels.C2_HOVER`
-  (its share line is `labels.share_cell`; no point carries text), the key entry
-  `labels.C1_NO_SHARE` and the caption sentences `labels.C1_EC_BASIS` and, when a marker is drawn,
-  `labels.C2_NO_SHARE_NOTE`. In C2 (#564): the circle series, now in the key; `labels.C2_EC_MARK`; the value axis `labels.C2_VALUE_AXIS`.
+  `ec_share_hybrid` is on no dashboard page and in no download since #358; the API serves it. In C2, the circle series `LABELS["ec_share_full"]`, in the chart's key; the title `labels.C2_TITLE`; the value axis `labels.C2_VALUE_AXIS`; the hover `labels.C2_HOVER` (its share line is `labels.share_cell`; no mark carries text); the key entry `labels.C2_NO_FIGURE` for a missing electoral share (#564; formerly `labels.C1_NO_SHARE`); and the caption sentences `labels.C2_EC_MARK`, `labels.C1_EC_BASIS` and, when a marker is drawn, `labels.C2_NO_SHARE_NOTE`.
 - **Source:** `NationalSummaryRow.ec_share_full` and `ec_share_hybrid`; D037; D038; D041;
   D042 §2; D046 §4; one electoral share on the page and in T3's download: owner decision,
   2026-11-02, #358.

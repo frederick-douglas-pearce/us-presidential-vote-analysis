@@ -184,10 +184,11 @@ def year_edges(years: Sequence[int], first: int, last: int) -> tuple[float, floa
     return low, high
 
 
-#: Where a time-series chart's key sits (#558, D104): one row along the foot of the
-#: chart, below the year axis, as C1's sits along its head. It names only marker
-#: series (each missing-value cause, D091 as amended by D104); a bar or point series
-#: is kept off it.
+#: Where a time-series chart's key sits (#558, D104): along the foot of the chart,
+#: below the year axis, as C1's sits along its head. In C4, C5 and C7 it names only
+#: marker series (each missing-value cause, D091 as amended by D104), and a bar series
+#: is kept off it; C2's names its point and strip series too, and can wrap past one
+#: row (#564, D108(g)).
 TIME_SERIES_LEGEND: dict[str, Any] = {
     "orientation": "h",
     "yref": "container",

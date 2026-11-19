@@ -88,7 +88,8 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     width and none over another, the majority line's label over no mark (circle,
     triangle, star or strip), no sideways scroll; one circle per served year, a
     triangle and a star per popular-vote year, a strip mark per disagreement, no mark
-    text, and hovers on a circle, a triangle and a star naming their year."""
+    text, and hovers on a circle, a triangle, a star and a strip mark naming their
+    year."""
     page.set_viewport_size({"width": width, "height": 844})
     open_c2(page, width=width)
     expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
@@ -124,6 +125,8 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     assert_hover_names_year(page, C2, f"{C2_POINTS} >> nth=-1", last)
     page.mouse.move(0, 0)
     assert_hover_names_year(page, C2, f"{C2_TRIANGLES} >> nth=0", str(PV_YEARS[0]))
+    page.mouse.move(0, 0)
+    assert_hover_names_year(page, C2, f"{C2_STARS} >> nth=-1", str(PV_YEARS[-1]))
     page.mouse.move(0, 0)
     assert_hover_names_year(page, C2, f"{C2_STRIP} >> nth=0", str(DIFFERENT[0]))
 

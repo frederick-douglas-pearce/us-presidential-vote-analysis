@@ -655,6 +655,23 @@ class TestTimeSeriesAxis:
                 if t["type"] == "scatter":
                     assert t["cliponaxis"] is False, t["name"]
 
+    def test_c5_s_bands_are_the_shared_pv_bands(self) -> None:
+        """g.7 (#564's review): C5 draws exactly what ``over_time.pv_bands`` gives for its
+        years and window, the function C2 shares, so the two cannot drift apart."""
+        c5 = chart_figure(render_over_time(), C5)
+        coverage = BODY["meta"]["provenance"]["coverage"]
+        window = (coverage["pv_year_min"], coverage["pv_year_max"])
+        years = sorted(row["year"] for row in BODY["data"])
+        expected = over_time.pv_bands(
+            years,
+            window,
+            labels.C5_BEFORE_BAND.format(pv_year_min=window[0]),
+            labels.C5_AFTER_BAND.format(pv_year_max=window[1]),
+        )
+        assert c5["layout"]["shapes"] == expected.shapes
+        assert c5["layout"]["annotations"] == expected.annotations
+        assert c5["layout"]["margin"] == {"t": expected.top_px}
+
     def test_the_pair_s_plots_start_at_one_height(self) -> None:
         """C4 takes C5's top margin, the room C5's band labels need (#558, cr.6)."""
         tree = render_over_time()

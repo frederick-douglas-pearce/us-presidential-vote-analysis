@@ -7384,3 +7384,26 @@ is the one labeled-opinion exception the series allows.
 **Residuals.** The recorded N1 has no hybrid disagreement, so the hybrid strip and the key at
 its largest are checked only offline (a doctored body); the browser tests see the recorded
 key. Nothing yet labels the hybrid under T3 and the panel (#590).
+
+**Amended in review (#564, round 1; owner, 2026-11-19).**
+- **(d), the flags.** `leaders()` requires each flip to agree with the winner it names, on the
+  producer's own rule (`usvote.hybrid`): null exactly when that method has no winner; true
+  exactly when its winner slug is text and not the leader's; false exactly when it is the
+  leader's. Any other body is malformed, and the section degrades (D096(d)). So drawing the
+  strip from the flags and from the slugs gives the same years on every body that is not
+  degraded. The recorded N1 meets the rule in every year.
+- **(c), (h), the window.** The index's popular-vote window and each year's `has_popular_vote`
+  are checked by the page, not the section (D107(c)'s rule that the index's rows are the page's):
+  the window through `query.year_span`, each flag a `bool`, and each flag true exactly inside
+  the window, so the marks (T3's rule) and the bands and caption (the window) follow one rule. A
+  disagreement degrades the whole page as an index defect.
+- **(c), the markers.** Missing marks are one point per label and year, their hovers joined, so
+  each is reachable. Two different labels in one year (an open circle and an open square at the
+  same point) remain a residual: it needs a null and an unrecognized value in one year.
+- **Rationale, corrected.** Drawing by cell means a wider popular-vote window (#565, #566) needs
+  no change to how the marks are drawn. It does not mean the chart needs none: the majority
+  line's label, at the second served year and just below the line, clears the marks only
+  because no popular-vote share or hybrid score before 1976 sits under 50% (with a wider window,
+  1844, 1848, 1860, 1912 and 1968 would). **Residual:** re-placing the label belongs to #565 and
+  #566. A unit test (`test_the_majority_label_sits_over_no_mark_left_of_the_window`) fails on
+  any re-recorded fixture that puts a mark there.
