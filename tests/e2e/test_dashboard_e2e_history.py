@@ -75,13 +75,18 @@ DROPDOWNS = {
 
 
 def open_at(page: Page, path: str, width: int) -> str:
-    """``path`` rendered from data at ``width``; returns its success marker."""
+    """``path`` rendered from data at ``width``; returns its success marker. On the
+    state history it waits for C7 to be drawn too (#560): the chart mounts after
+    plotly.js loads, above the filters, so a measurement taken before then can see
+    them move by the chart's height."""
     page.set_viewport_size({"width": width, "height": 900})
     page.goto(path)
     success = PAGES[path][0]
     page.locator(success).wait_for()
     assert page.locator(UNAVAILABLE).count() == 0
     assert page.evaluate("innerWidth") == width
+    if path == STATE_PATH:
+        page.locator(f"{C7} .main-svg").first.wait_for()
     return success
 
 
