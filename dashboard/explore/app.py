@@ -383,6 +383,85 @@ def moved_location(resolution: Resolution, move: Move | None, query: str) -> str
     return path + query_syntax.encode_search(move.parser(params))
 
 
+@dataclass(frozen=True)
+class PathMove:
+    """A query key a page no longer reads whose value now names another page (#562):
+    ``/elections?state=GA`` is ``/state/GA``. A second kind beside :class:`Move`, which
+    moves keys between pages over the same path variables; this one turns the key's
+    value into the target's one path variable, judged by the target's ``validate``."""
+
+    key: str
+    template: str
+    variable: str
+    target: Mapping[str, Any]
+
+
+def page_path_move(
+    page: Mapping[str, Any], registry: Mapping[str, Any]
+) -> PathMove | None:
+    """A page's ``moved_to_path=(key, target_template)`` (#562) as a :class:`PathMove`,
+    or ``None`` for a page without one.
+
+    ``RuntimeError`` unless: it is a pair of a non-empty key and a template; the page
+    declares no ``moved=`` as well; the page has no path variables of its own; the
+    target is a page registered by that ``path_template``, over exactly one variable,
+    with a ``validate`` (only a value the target accepts may build a redirect); and
+    the page's own ``query=`` parser drops the key, so the page provably never reads
+    the key it redirects."""
+    moved = page.get("moved_to_path")
+    if moved is None:
+        return None
+    module = page["module"]
+    if not (isinstance(moved, tuple) and len(moved) == 2):
+        raise RuntimeError(f"{module} moved_to_path= is not (key, target_template)")
+    key, template = moved
+    if not (isinstance(key, str) and key):
+        raise RuntimeError(f"{module} moves no key to a path")
+    if page.get("moved") is not None:
+        raise RuntimeError(f"{module} declares both moved= and moved_to_path=")
+    if page.get("path_template"):
+        raise RuntimeError(f"{module} has path variables of its own")
+    target = next(
+        (p for p in registry.values() if p.get("path_template") == template), None
+    )
+    if target is None:
+        raise RuntimeError(f"{module} moves {key!r} to unregistered {template!r}")
+    variables = _VARIABLE_RE.findall(template)
+    if len(variables) != 1:
+        raise RuntimeError(f"{module} moves {key!r} to {template!r}, not one variable")
+    if target.get("validate") is None:
+        raise RuntimeError(f"{target['module']} has no validate to judge {key!r}")
+    parser = page.get("query")
+    if parser is not None and any(k == key for k, _ in parser({key: "GA"})):
+        raise RuntimeError(f"{module} still reads {key!r}, which it moves to a path")
+    return PathMove(key, template, variables[0], target)
+
+
+def path_moved_location(
+    move: PathMove | None, query: str, snapshot: api.Snapshot | None
+) -> str | None:
+    """Where a document request carrying a key moved to a path is redirected (#562),
+    or ``None`` to serve the page, which ignores the key.
+
+    Only when the key holds one value (:func:`explore.query.single`) that the target's
+    ``validate`` accepts against the snapshot in memory: a refused value, and one whose
+    judge source is not cached yet, both serve the page (no redirect to itself, and
+    never a wait on the API). The ``Location`` is relative, the target template with
+    the accepted value percent-quoted, and carries no query: the page's other keys are
+    its own and never narrow the target."""
+    if move is None or not query:
+        return None
+    params = _parse_query_string(f"?{query}")
+    if move.key not in params:
+        return None
+    value = query_syntax.single(params[move.key])
+    if value is None:
+        return None
+    if checked(move.target, {move.variable: value}, snapshot) is not Check.ACCEPTED:
+        return None
+    return _VARIABLE_RE.sub(lambda m: quote(value, safe=""), move.template)
+
+
 def card_tags(resolution: Resolution, root: str) -> list[dict[str, str]]:
     """The page's card tags, as Dash's ``_page_meta_tags`` builds them for a page but
     from the resolution's title and description, and without its ``twitter:url`` (the
@@ -640,13 +719,18 @@ class ExploreDash(dash.Dash):
         # meanwhile. The cards are built here, never by Dash's _page_meta_tags, which
         # would call the registry's title and so read the snapshot again (#325).
         query = flask.request.query_string.decode("utf-8", "replace")
-        resolution = resolve(flask.request.path, query, api.CLIENT.snapshot)
-        # A filter that moved to another page (#465): a 302, never a 301, which
-        # browsers cache with no undo; the routing callback never reaches the index,
-        # so a client-side route to the page renders it unfiltered.
-        target = moved_location(
-            resolution, MOVES.get(resolution.page.get("module", "")), query
-        )
+        snapshot = api.CLIENT.snapshot
+        resolution = resolve(flask.request.path, query, snapshot)
+        # A filter that moved to another page (#465), or a key whose value now names
+        # a page (#562): a 302, never a 301, which browsers cache with no undo; the
+        # routing callback never reaches the index, so a client-side route to the
+        # page renders it without the key.
+        module = resolution.page.get("module", "")
+        target: str | None = moved_location(resolution, MOVES.get(module), query)
+        if target is None and resolution.found:
+            target = path_moved_location(
+                PATH_MOVES.get(module), query, snapshot
+            )
         if target is not None:
             return flask.redirect(target, code=302)
         cards = card_tags(resolution, flask.request.url_root)
@@ -780,6 +864,14 @@ MOVES: dict[str, Move] = {
     module: move
     for module, page in dash.page_registry.items()
     if (move := page_move(page, dash.page_registry)) is not None
+}
+
+#: Each page's keys moved to a path (#562), by module, built and checked the same way
+#: (:func:`page_path_move`).
+PATH_MOVES: dict[str, PathMove] = {
+    module: path_move
+    for module, page in dash.page_registry.items()
+    if (path_move := page_path_move(page, dash.page_registry)) is not None
 }
 
 #: The site navigation's current-page table (#448): one entry per registered page, in

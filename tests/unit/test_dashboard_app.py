@@ -5228,9 +5228,148 @@ class TestMoveContract:
             "/x/a%2Fb%3Fc%23d/y?k=v"
         )
 
+    def test_a_page_declares_at_most_one_kind_of_move(self) -> None:
+        page = {
+            "module": "p",
+            "path": "/p",
+            "moved": (("a",), "/x/<year>/y"),
+            "moved_to_path": ("a", "/x/<year>/y"),
+        }
+        with pytest.raises(RuntimeError, match="both"):
+            appmod.page_path_move(page, self.registry())
+
     def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
         assert set(appmod.MOVES) == {"pages.election"}
         move = appmod.MOVES["pages.election"]
         assert move.keys == ("state", "candidate", "pv_status", "electoral_count_status")
         assert move.template == "/election/<year>/states"
         assert move.parser is dash.page_registry["pages.election_states"]["query"]
+
+
+class TestPathMoveContract:
+    """``moved_to_path=`` (#562): a key whose value names another page's one path
+    variable, checked at import (:func:`explore.app.page_path_move`) and redirected only
+    for a value the target's ``validate`` accepts from the snapshot in memory
+    (:func:`explore.app.path_moved_location`)."""
+
+    SOURCE = "/v1/roster"
+    VALIDATE = (SOURCE, lambda path_vars, body: path_vars["code"] in body["codes"])
+
+    def registry(self, **target: Any) -> dict[str, Any]:
+        return {
+            "t": {
+                "module": "t",
+                "path_template": "/thing/<code>",
+                "validate": self.VALIDATE,
+                **target,
+            }
+        }
+
+    def page(self, **page: Any) -> dict[str, Any]:
+        return {
+            "module": "p",
+            "path": "/p",
+            "query": lambda params: [
+                (k, v) for k, v in params.items() if k == "keep" and isinstance(v, str)
+            ],
+            "moved_to_path": ("code", "/thing/<code>"),
+            **page,
+        }
+
+    def move(self) -> appmod.PathMove:
+        move = appmod.page_path_move(self.page(), self.registry())
+        assert move is not None
+        return move
+
+    def warm(self, *codes: str) -> api.Snapshot:
+        return api.Snapshot(version="v", responses={self.SOURCE: {"codes": list(codes)}})
+
+    def test_a_page_without_one_has_none(self) -> None:
+        assert appmod.page_path_move({"module": "p"}, {}) is None
+
+    def test_a_valid_move_names_the_target_and_its_variable(self) -> None:
+        registry = self.registry()
+        move = appmod.page_path_move(self.page(), registry)
+        assert move == appmod.PathMove("code", "/thing/<code>", "code", registry["t"])
+
+    @pytest.mark.parametrize(
+        ("page", "target", "message"),
+        [
+            ({"moved_to_path": ("code", "/nowhere/<code>")}, {}, "unregistered"),
+            ({"moved_to_path": ("", "/thing/<code>")}, {}, "no key"),
+            ({"moved_to_path": (b"code", "/thing/<code>")}, {}, "no key"),
+            ({"moved_to_path": ["code", "/thing/<code>"]}, {}, "is not"),
+            ({"moved_to_path": ("code", "/thing/<code>", "x")}, {}, "is not"),
+            ({"path_template": "/p/<year>"}, {}, "path variables of its own"),
+            ({}, {"validate": None}, "no validate"),
+            (
+                {"moved_to_path": ("code", "/thing/<code>/<x>")},
+                {"path_template": "/thing/<code>/<x>"},
+                "not one variable",
+            ),
+            (
+                {"moved_to_path": ("code", "/thing")},
+                {"path_template": "/thing"},
+                "not one variable",
+            ),
+            # The page must provably never read the key it redirects.
+            ({"query": lambda params: list(params.items())}, {}, "still reads"),
+        ],
+    )
+    def test_a_bad_move_fails_the_import(
+        self, page: dict[str, Any], target: dict[str, Any], message: str
+    ) -> None:
+        with pytest.raises(RuntimeError, match=message):
+            appmod.page_path_move(self.page(**page), self.registry(**target))
+
+    def test_an_accepted_value_redirects_to_its_path_with_no_query(self) -> None:
+        location = appmod.path_moved_location(
+            self.move(), "code=GA&keep=1", self.warm("GA")
+        )
+        assert location == "/thing/GA"
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "code=ZZ",
+            "code=ga",
+            "code=",
+            "code=GA&code=TX",
+            "code=..",
+            "code=%2E%2E%2Fx",
+            "keep=1",
+            "",
+        ],
+    )
+    def test_any_other_query_serves_the_page(self, query: str) -> None:
+        assert (
+            appmod.path_moved_location(self.move(), query, self.warm("GA", "TX"))
+            is None
+        )
+
+    def test_a_repeated_identical_value_is_one_value(self) -> None:
+        location = appmod.path_moved_location(
+            self.move(), "code=GA&code=GA", self.warm("GA")
+        )
+        assert location == "/thing/GA"
+
+    @pytest.mark.parametrize(
+        "snapshot", [None, api.Snapshot(version="v", responses={})]
+    )
+    def test_a_cold_judge_serves_the_page(self, snapshot: api.Snapshot | None) -> None:
+        assert appmod.path_moved_location(self.move(), "code=GA", snapshot) is None
+
+    def test_the_value_is_quoted_into_the_location(self) -> None:
+        """A looser ``validate`` could never add a segment, query or fragment."""
+        move = appmod.PathMove(
+            "code", "/thing/<code>", "code", {"module": "t", "validate": None}
+        )
+        assert appmod.path_moved_location(move, "code=a%2Fb%3Fc%23d", None) == (
+            "/thing/a%2Fb%3Fc%23d"
+        )
+
+    def test_no_move_serves_the_page(self) -> None:
+        assert appmod.path_moved_location(None, "code=GA", self.warm("GA")) is None
+
+    def test_the_registry_s_path_moves(self) -> None:
+        assert appmod.PATH_MOVES == {}
