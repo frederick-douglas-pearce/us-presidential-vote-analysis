@@ -610,8 +610,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral vote), read from that index and never computed as four years before or after; a year
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
-- **Shown as:** `LABELS["year"]`; the year axis of C2, C4 and C5 on `/elections`, a numeric axis
-  with a tick every 40 years; the year-range slider (`/elections`, `/state/<usps>`,
+- **Shown as:** `LABELS["year"]`; the year axis of C2, C4 and C5 on `/elections` and of C7 on
+  `/state/<usps>`, a numeric axis with a tick every 40 years; the year-range slider
+  (`/elections`, `/state/<usps>`,
   `/state/<usps>/per-capita`), which on both state pages is labeled "Years" and offered by each
   page's `FILTER_SENTENCE`; the label of the year control on `/candidate/<slug>`, and the lede
   sentence that offers it (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages'
@@ -1917,7 +1918,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`). In C2, C4 and C5, `labels.UNRECOGNIZED`
+  value's help text (set by `labels.cell`). In C2, C4, C5 and C7, `labels.UNRECOGNIZED`
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
   value (C5 through `labels.C5_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C5_STATE_HOVER` write
