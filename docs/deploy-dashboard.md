@@ -1589,3 +1589,88 @@ least 23 px apart at 360 px; no tick, axis title, key entry or label sits over a
 outside the width. GA's and TX's charts carry the "No electors: took no part" marker for
 their zero allotments, and AK's carries none. §9's checks: `/election/%2531824` is a 404
 with `noindex`, `/election/%31824` a 200, and the plotly.js path a 404.
+
+### The elections index and its two subpages, measured after deploy (2026-11-19, #562)
+
+#562 (D107) split `/elections` into an index and two subpages: the list and its averages stay
+on `/elections`, C2 moves to `/elections/majority`, and C4 and C5 move to
+`/elections/over-time`. Each page prefetches `/v1/elections` and fills N1
+(`/v1/elections/summary`) on a miss, and N2 is no longer read by any of them, so a first
+visit after a start makes one fill, which then serves all three pages. #562 asked for D071(g)
+re-measured on each of the three pages after deploy. The baseline is
+[#558's record](#year-on-the-x-axis-of-c2-c4-and-c5-measured-after-deploy-2026-11-18-558),
+the one page that carried all three charts and filled both N1 and N2.
+
+Dashboard version `v-ac6cd8a8788e-r33-a1` (deploy run 44532819061 of ac6cd8a, the merge of
+#583), snapshot `37af4064…`, API 0.9.0, revision `usvote-api-00013-czh`, with no API deploy
+since 2026-11-12. The API origin was warm throughout: it answered `/health` from 13:15Z to
+13:30Z and logged no `Starting new instance` in the window. Measured 13:29–13:32Z, by #277's
+method: `scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser
+context each run), with `--chart "#c2 .main-svg"` on `/elections/majority` and
+`--chart "#c5 .main-svg"` on `/elections/over-time` (one run with `#c4`). The chart column is
+the time until that chart is drawn, which is not a D071(g) measure. The window falls after
+the daily canary's 13:17Z slot, which runs late: its last run was 2026-11-18 21:27Z and
+today's had not started when the window closed, so no canary request fell inside it.
+
+**Three instances**, one first visit each, each on a different page:
+
+- **A**, the deploy's new instance, up since 13:25:00Z: a first visit to `/elections`, then
+  three runs from the cache on each of the three pages. The deploy's probes request `/`, so
+  A held no N1 before the run.
+- **B** and **C**, after [restarts](#restarting-the-instance-to-empty-its-cache) at
+  13:30:10Z and 13:31:06Z: a first visit to `/elections/majority` on B and to
+  `/elections/over-time` on C, then runs from the cache. Warmup ran on each as a loading
+  request (2.20 s and 2.12 s), and each was serving its snapshot (2 responses) about 4 s
+  after the delete command was issued.
+
+Each first visit was a genuine miss: check 3 found no N1 fill on that instance before the
+run, and its `api fetch /v1/elections/summary` line was logged during it (13:29:16Z,
+13:30:38Z, 13:31:27Z). A's and C's fills were edge hits; B's reached the warm origin (10 ms
+there).
+
+| Run | Instance | TTFB (s) | First data (s) | Chart drawn (s) |
+|---|---|---|---|---|
+| `/elections`, first visit | A | 0.15 | 1.10 | (no chart) |
+| `/elections/majority`, first visit | B | 0.12 | 1.54 | 3.80 (C2) |
+| `/elections/over-time`, first visit | C | 0.17 | 1.57 | 3.90 (C5) |
+| `/elections`, from the cache (4 runs) | A, B | 0.11–0.15 | 1.00–1.09 | (no chart) |
+| `/elections/majority`, from the cache (5 runs) | A, B | 0.08–0.20 | 0.99–1.13 | 3.59–4.58 (C2) |
+| `/elections/over-time`, from the cache (6 runs) | A, C | 0.08–0.67 | 0.99–1.53 | 3.63–4.14 (C5), 3.66 (C4) |
+
+Every run reached data, with no degraded page and no section unavailable.
+
+- **TTFB met D071(g) on 18 of 18 runs** (0.08–0.67 s, against ≤ 1 s). The one above 0.20 s
+  was A's first run of `/elections/over-time` (0.67 s), whose first data (1.53 s) was also
+  the slowest from the cache; the next two runs there were 0.09 s and 0.11 s.
+- **First data met it on 18 of 18** (1.10–1.57 s on a first visit, 0.99–1.53 s from the
+  cache, against ≤ 3 s), within the baseline (1.17–1.50 s on a first visit, 0.99–1.20 s
+  from the cache).
+- **The fill.** The routing callback that makes the fill took 0.17 s (A, `/elections`),
+  0.29 s (B, `/elections/majority`) and 0.17 s (C, `/elections/over-time`) on the server,
+  against 0.013–0.032 s for the same renders from the cache; the baseline's two-fill
+  callback took 0.27–0.28 s, and 0.06–0.20 s from the cache.
+- C2 is drawn 2.3 s after first data on B's first visit and 2.5–3.6 s from the cache; C5
+  2.3 s after first data on C's first visit and 2.6 s from the cache, against the
+  baseline's 2.5–3.2 s for C5.
+
+**Request budget held.** The new version logged only the expected fills: each instance's
+two prefetched paths as it started, and one N1 fill for each first visit. The runs from the
+cache and the checks below made none. The app logged no warnings and no 5xx since the
+deploy.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes):
+
+- A: 134.2 MB (128.0 MiB), 35 % of the 384 MB D071 names for F1, after its ten runs (169
+  requests).
+- B: 122.6 MB (116.9 MiB), 32 %, after its four runs (65 requests).
+- C: 124.1 MB (118.3 MiB), 32 %, after its four runs (65 requests).
+
+The peak is below #470's 143.7 MB, so D071's F1 flip condition is not near.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, in light and dark, on each of the three pages (12 renders): no sideways scroll, and
+none of the three pages' unavailable notes rendered. C2, C4 and C5 are drawn on every render,
+each with the year ticks 1840, 1880, 1920, 1960 and 2000 along the bottom, at least 12 px
+apart at 360 px (C5's, the closest); no chart text sits over other chart text or outside
+the width. C2 draws 51 points and C4 51 bars. §9's checks: `/election/%2531824` is a 404
+with `noindex`, `/election/%31824` a 200, and the plotly.js path a 404.
