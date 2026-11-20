@@ -1789,7 +1789,7 @@ there), the only `/v1/` request the origin logged in the window.
 | `/elections/majority`, first visit | B | 0.23 | 1.29 | 4.09 (C2) |
 | `/elections/over-time?year_from=1960`, first visit | C | 0.21 | 1.57 | 4.01 (C5) |
 | `/elections/majority`, from the cache (4 runs) | A, B | 0.11–0.18 | 1.04–1.08 | 3.66–3.84 (C2) |
-| `/elections/majority`, filtered, from the cache (5 runs) | A, B, C | 0.11–0.21 | 1.02–1.09 | 3.57–3.70 (C2) |
+| `/elections/majority`, filtered, from the cache (5 runs) | A, B, C | 0.11–0.21 | 1.02–1.09 | 3.56–3.70 (C2) |
 | `/elections/over-time`, from the cache (4 runs) | A, B, C | 0.13–0.24 | 0.98–1.12 | 3.56–3.67 (C5), 3.69 (C4) |
 | `/elections/over-time`, filtered, from the cache (4 runs) | A, C | 0.09–0.32 | 1.02–1.16 | 3.51–3.88 (C5) |
 
@@ -1801,8 +1801,9 @@ Every run reached data, with no degraded page and no section unavailable.
   from the cache).
 - **The fill.** The routing callback that makes the fill took 0.17 s (A), 0.28 s (B) and
   0.38 s (C, filtered) on the server, against 0.17–0.34 s in the baselines, and
-  0.010–0.091 s for the renders from the cache, filtered or not (baselines 0.013–0.040 s;
-  the two above 0.04 s were A's second and third renders, 0.057 s and 0.090 s).
+  0.010–0.090 s for the renders from the cache, filtered or not (baselines 0.013–0.040 s;
+  the two above 0.04 s were A's first two renders of `/elections/majority`, 0.057 s and
+  0.090 s).
 - **Charts drawn** in 3.51–3.88 s from the cache and 3.92–4.09 s on a first visit, inside
   the baselines' 3.59–4.58 s; a filtered view drew no slower than the full span.
 
