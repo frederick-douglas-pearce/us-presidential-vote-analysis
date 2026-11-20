@@ -29,11 +29,10 @@ The first table, and the one that sets the conventions later tables reuse (#306)
 from __future__ import annotations
 
 import functools
-from typing import Any, NamedTuple
-from urllib.parse import parse_qs
+from typing import Any
 
 import dash
-from dash import Input, Output, State, callback, dcc, html, no_update
+from dash import dcc, html
 
 from explore import (
     api,
@@ -50,9 +49,10 @@ from explore.config import CANONICAL_HOST, SITE_TITLE
 #: The wrapper every successful render carries, whatever the filters leave in the table.
 PAGE_ID = "elections"
 TABLE_ID = "elections-table"
-YEARS_ID = "elections-years"
-PV_ID = "elections-pv"
-URL_ID = "elections-url"
+#: The filter controls' ids, shared with the two chart pages (#596, D110).
+YEARS_ID = elections_view.YEARS_ID
+PV_ID = elections_view.PV_ID
+URL_ID = elections_view.URL_ID
 #: T1's column-name list, by an id of its own (the page had three from #436 to #562;
 #: the id stays, since the e2e tests name it).
 GLOSSARY_ID = "elections-glossary"
@@ -89,34 +89,15 @@ METRICS_UNAVAILABLE = (
     "The average margins can't be shown right now. Please try again in a minute."
 )
 
-#: The query keys this page reads. ``year_from`` and ``year_to`` are the API's own names
-#: for a year range, so later tables with a year range share them.
-YEAR_FROM = query.YEAR_FROM
-YEAR_TO = query.YEAR_TO
-PV = "pv"
+#: The query keys and the one parser, shared with the two chart pages (#596, D110):
+#: :func:`explore.elections_view.parse_filters`.
+YEAR_FROM = elections_view.YEAR_FROM
+YEAR_TO = elections_view.YEAR_TO
+PV = elections_view.PV
 #: The key C4 and C5 read before #562, whose value now names a state's page, where
 #: chart C7 draws its electors appointed: an old link answers 302 there (D107).
 STATE = election_view.STATE
-
-
-def parse_filters(params: Any) -> list[tuple[str, str]]:
-    """This page's filters from a parsed query string, as sorted ``(key, value)`` pairs.
-
-    Syntactic and total, and it reads no API: Dash's index runs it to build ``og:url``,
-    before any data is read. Keeps ``year_from`` / ``year_to`` only as four ASCII
-    digits and ``pv`` only as ``"1"``; a key repeated with differing values is
-    dropped, and so is a key it does not know, ``state`` among them since #562: an old
-    link carrying one is redirected (``moved_to_path``) once the roster in memory
-    accepts its code, and is served this page with the key ignored otherwise. A range
-    whose start is after its end drops both bounds. Whether a year lies inside the
-    served span is the layout's question (:func:`filters`).
-    """
-    if not isinstance(params, dict):
-        return []
-    kept = query.parse_year_range(params)
-    if query.single(params.get(PV)) == "1":
-        kept[PV] = "1"
-    return sorted(kept.items())
+parse_filters = elections_view.parse_filters
 
 
 dash.register_page(
@@ -140,118 +121,15 @@ dash.register_page(
 )
 
 
-class Filters(NamedTuple):
-    """The filters a render applies, inside the served span.
-
-    A ``NamedTuple``, not a dataclass: Dash executes a page module before it is in
-    ``sys.modules``, which ``dataclass`` needs.
-    """
-
-    year_from: int
-    year_to: int
-    pv_only: bool
-
-
-def span(coverage: dict[str, Any]) -> tuple[int, int]:
-    """The served span, ``(year_min, year_max)``, or ``TypeError`` for a malformed one
-    (:func:`explore.query.year_span`), which the layout turns into the degraded
-    state."""
-    return query.year_span(coverage["year_min"], coverage["year_max"])
-
-
-def filters(pairs: list[tuple[str, str]], coverage: dict[str, Any]) -> Filters:
-    """The filters to apply; a bound outside the served span falls back to its default.
-
-    Fallback is per parameter, as ``og:url``'s is: ``og:url`` keeps each syntactically
-    valid parameter except both bounds of an inverted pair (an out-of-span year
-    included, which this replaces with its default) and drops the rest. The result is
-    never inverted: :func:`parse_filters` already dropped an inverted pair, and a bound
-    replaced by its default cannot pass the other bound.
-    """
-    first, last = span(coverage)
-    year_from, year_to = query.year_range(pairs, first, last)
-    return Filters(
-        year_from=year_from,
-        year_to=year_to,
-        pv_only=dict(pairs).get(PV) == "1",
-    )
-
-
-def applied_search(chosen: Filters, first: int, last: int) -> str:
-    """The filters a render applied, in the normal form :func:`merged_search` writes:
-    already checked, so they are encoded without the parser."""
-    params = query.year_range_search([chosen.year_from, chosen.year_to], first, last)
-    if chosen.pv_only:
-        params[PV] = "1"
-    return query.encode_search(params.items())
-
-
-#: Each filter control's query keys (#436): a change replaces only the keys of the
-#: control that changed.
-CONTROL_KEYS: dict[str, tuple[str, ...]] = {
-    YEARS_ID: (YEAR_FROM, YEAR_TO),
-    PV_ID: (PV,),
-}
-
-
-def merged_search(
-    triggered: Any,
-    years: Any,
-    pv: Any,
-    first: Any,
-    last: Any,
-    current: Any,
-) -> str:
-    """The query string after the control ``triggered`` changed (#436, D100), in the
-    normal form ``og:url`` uses: the current search through :func:`parse_filters`,
-    only the triggered control's keys (:data:`CONTROL_KEYS`) replaced by its value,
-    and the result through :func:`parse_filters` again. Pure; reads no API. A trigger
-    that is no filter control replaces nothing."""
-    params: dict[str, Any] = {}
-    if isinstance(current, str):
-        params.update(
-            parse_filters(parse_qs(current.removeprefix("?"), keep_blank_values=True))
-        )
-    owned = CONTROL_KEYS.get(triggered, ()) if isinstance(triggered, str) else ()
-    for key in owned:
-        params.pop(key, None)
-    if triggered == YEARS_ID:
-        params.update(query.year_range_search(years, first, last))
-    elif triggered == PV_ID and isinstance(pv, list) and "1" in pv:
-        params[PV] = "1"
-    return query.encode_search(parse_filters(params))
-
-
-def next_search(
-    triggered: Any,
-    years: Any,
-    pv: Any,
-    first: Any,
-    last: Any,
-    current: Any,
-) -> Any:
-    """What the filter callback writes: :func:`merged_search`, or ``no_update`` when
-    that is the search the URL already has, which would navigate for nothing. Pure;
-    reads no API."""
-    search = merged_search(triggered, years, pv, first, last, current)
-    return no_update if search == (current or "") else search
-
-
-@callback(
-    Output(URL_ID, "search"),
-    Input(YEARS_ID, "value"),
-    Input(PV_ID, "value"),
-    State(YEARS_ID, "min"),
-    State(YEARS_ID, "max"),
-    State(URL_ID, "search"),
-    prevent_initial_call=True,
-)
-def on_filter_change(years: Any, pv: Any, first: Any, last: Any, current: Any) -> Any:
-    """A filter change becomes a URL change; the router re-renders from the cache.
-
-    Reads no API. Only the changed control's keys change (:func:`next_search`).
-    """
-    return next_search(dash.ctx.triggered_id, years, pv, first, last, current)
+#: The filter helpers and the one filter callback live in :mod:`explore.elections_view`
+#: since #596 (D110), which all three elections pages share.
+Filters = elections_view.Filters
+span = elections_view.span
+filters = elections_view.filters
+applied_search = elections_view.applied_search
+CONTROL_KEYS = elections_view.CONTROL_KEYS
+merged_search = elections_view.merged_search
+next_search = elections_view.next_search
 
 
 def _row(election: dict[str, Any]) -> html.Tr:
@@ -360,35 +238,17 @@ def render(
     shown = [
         e
         for e in elections
-        if chosen.year_from <= e["year"] <= chosen.year_to
-        and (e["has_popular_vote"] is True or not chosen.pv_only)
+        if elections_view.shows(e["year"], e["has_popular_vote"], chosen)
     ]
     first, last = span(coverage)
-    controls = html.Div(
-        [
-            html.Label("Years", htmlFor=YEARS_ID, className="label"),
-            components.year_slider(
-                YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
-            ),
-            dcc.Checklist(
-                id=PV_ID,
-                options=[
-                    {
-                        "label": " Only years with a popular vote in this dataset",
-                        "value": "1",
-                    }
-                ],
-                value=["1"] if chosen.pv_only else [],
-            ),
-        ],
-        className="filters",
-    )
+    search = applied_search(chosen, first, last)
+    controls = elections_view.filter_controls(first, last, chosen)
     download = export.Download(
         filename="elections.csv",
         name="the elections",
         provenance=provenance,
         view_url=export.view_url(
-            CANONICAL_HOST, elections_view.LIST, applied_search(chosen, first, last)
+            CANONICAL_HOST, elections_view.LIST, search
         ),
     )
     return html.Div(
@@ -396,7 +256,7 @@ def render(
             html.H1("Elections"),
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            elections_view.section_nav(elections_view.LIST),
+            elections_view.section_nav(elections_view.LIST, search),
             html.H2(LIST_HEADING),
             # Source order is reading order at every width: the filters are the pair's
             # left column and the count and averages they narrow its right, which is
@@ -424,7 +284,7 @@ def render(
                 TABLE_ID,
                 download,
                 notes=(labels.HAS_POPULAR_VOTE_NOTE,),
-                empty="No elections match these filters.",
+                empty=labels.NO_ELECTIONS_MATCH,
             ),
             labels.glossary(FIELDS, ident=GLOSSARY_ID),
             components.provenance_footer(provenance),

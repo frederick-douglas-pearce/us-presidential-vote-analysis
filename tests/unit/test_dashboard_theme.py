@@ -1188,9 +1188,10 @@ class TestChartColors:
     @pytest.mark.parametrize("theme", ["light", "dark"])
     @pytest.mark.parametrize("token", (*CHART_MARKS, "--text"))
     def test_each_mark_meets_3_to_1_on_a_band(self, theme: str, token: str) -> None:
-        """C2 draws its marks, its majority line and that line's label over the band
-        before the popular-vote window, filled ``--chart-grid`` (#564, D108; C5 draws
-        no bar there): each at 3:1 on that fill too, the label's text included."""
+        """C2 draws its marks, its majority line and the band's own label over the band
+        before the popular-vote window, filled ``--chart-grid`` (#564, D108; the line's
+        label is a key entry since #596, D110; C5 draws no bar there): each at 3:1 on
+        that fill too, the label's text included."""
         palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
         fill = parse_color(palette["--chart-grid"])
         ratio = contrast(parse_color(palette[token]), fill)

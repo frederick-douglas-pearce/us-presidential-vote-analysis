@@ -599,6 +599,21 @@ class TestRequestBudget:
         assert len(bucket.waits) == 1
 
     @pytest.mark.parametrize(
+        "path", [elections_view.MAJORITY, elections_view.OVER_TIME]
+    )
+    def test_a_chart_page_s_filter_changes_make_no_api_request(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        """#596 (D110), the AC on the two chart pages: only the first render fills N1,
+        on a miss; every filtered render after it is answered from the cache."""
+        _, calls, bucket = cached_client(monkeypatch)
+        for search in ("", "?pv=1", "?year_from=1900", "?year_from=1900&year_to=1950"):
+            response = route(path, search)
+            assert response.status_code == 200, search
+            assert calls == FILLS, (path, search)
+            assert len(bucket.waits) == 1, (path, search)
+
+    @pytest.mark.parametrize(
         ("changed", "years", "pv", "current", "written"),
         [
             (YEARS_ID, [1900, LAST], [], "", "?year_from=1900"),
@@ -920,7 +935,13 @@ class TestSharedPieces:
         # The election pages' shared pieces build on labels and query only (#465).
         assert graph["election_view"] == {"labels", "query"}
         # And the elections pages' (#562), which check a year as the election pages do.
-        assert graph["elections_view"] == {"election_view", "labels", "query"}
+        # And its year filters (#596) build the year slider.
+        assert graph["elections_view"] == {
+            "components",
+            "election_view",
+            "labels",
+            "query",
+        }
         # And the state pages' (#559), which therefore own the roster reading.
         assert graph["state_view"] == {"labels", "query"}
         # The summaries share the cells' rule of what is a figure (#437, D097(f)).
@@ -2463,16 +2484,36 @@ class TestSectionLinks:
                 # Client-side and unfiltered: the bare path, no query.
                 assert type(entry).__name__ == "Link" and entry.href == section
 
-    def test_the_index_s_links_carry_no_filter(self) -> None:
-        own = PAGE["layout"].__globals__
-        tree = own["render"](
-            copy.deepcopy(BODY),
-            own["parse_filters"]({"year_from": "1900", "pv": "1"}),
-            copy.deepcopy(SUMMARY),
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_each_page_s_links_carry_the_filters_it_applied(self, path: str) -> None:
+        """#596 (D110): the section links carry the filters the render applied, in
+        their normal form, as a state's two pages carry the year range (D105); an
+        out-of-span bound falls back and is not carried."""
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        own = page["layout"].__globals__
+        pairs = elections_view.parse_filters(
+            {"year_from": "1900", "year_to": "3000", "pv": "1"}
         )
+        if path == elections_view.LIST:
+            tree = own["render"](copy.deepcopy(BODY), pairs, copy.deepcopy(SUMMARY))
+        else:
+            tree = own["render"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY), pairs)
         nav = find(tree, elections_view.SECTIONS_ID)
         hrefs = [e.href for e in nav.children if type(e).__name__ == "Link"]
-        assert hrefs == [elections_view.MAJORITY, elections_view.OVER_TIME]
+        others = [p for p in elections_view.SECTIONS if p != path]
+        assert hrefs == [f"{p}?pv=1&year_from=1900" for p in others]
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_an_unfiltered_page_s_links_carry_nothing(self, path: str) -> None:
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        own = page["layout"].__globals__
+        if path == elections_view.LIST:
+            tree = own["render"](copy.deepcopy(BODY), [], copy.deepcopy(SUMMARY))
+        else:
+            tree = own["render"](copy.deepcopy(BODY), copy.deepcopy(SUMMARY))
+        nav = find(tree, elections_view.SECTIONS_ID)
+        hrefs = [e.href for e in nav.children if type(e).__name__ == "Link"]
+        assert hrefs == [p for p in elections_view.SECTIONS if p != path]
 
     @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
     def test_a_failed_n1_keeps_the_links(self, path: str) -> None:
@@ -2508,3 +2549,108 @@ class TestSectionLinks:
             success = dash.page_registry[module]["success"]
             ids = routed_ids(route(path))
             assert success in ids and elections_view.SECTIONS_ID in ids, path
+
+
+# --- the elections pages' shared year filters (#596, D110) -----------------------------
+
+
+class TestSharedFilters:
+    def test_one_callback_writes_the_filters_url_for_all_three_pages(self) -> None:
+        """The one registration ``elections_view`` makes: the three pages render the
+        same ids, so one callback serves each (#596's architect review)."""
+        from explore import app as appmod
+
+        output = f"{elections_view.URL_ID}.search"
+        pending = [
+            c
+            for c in dash._callback.GLOBAL_CALLBACK_LIST
+            if str(c.get("output")) == output
+        ]
+        # Registered once: pending until the app takes it, then in its map (Dash
+        # refuses a second callback writing the same output).
+        assert len(pending) + (output in appmod.app.callback_map) == 1
+        assert elections_view.on_filter_change.__module__ == "explore.elections_view"
+        # No page module registers one of its own.
+        for path in ELECTIONS_PAGES:
+            own = dash.page_registry[ELECTIONS_PAGES[path]]["layout"].__globals__
+            assert "on_filter_change" not in own, path
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_every_elections_page_reads_the_one_parser(self, path: str) -> None:
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        assert page["query"] is elections_view.parse_filters
+
+    def test_the_controls_read_their_wording_from_labels(self) -> None:
+        chosen = elections_view.Filters(1900, 2000, True)
+        controls = elections_view.filter_controls(1824, 2024, chosen)
+        (label,) = of_type(controls, "Label")
+        assert label.children == labels.YEARS_FILTER
+        (slider,) = of_type(controls, "RangeSlider")
+        assert (slider.id, slider.value) == (elections_view.YEARS_ID, [1900, 2000])
+        (checklist,) = of_type(controls, "Checklist")
+        assert checklist.id == elections_view.PV_ID
+        assert checklist.options == [
+            {"label": f" {labels.PV_ONLY_FILTER}", "value": "1"}
+        ]
+        assert checklist.value == ["1"]
+
+    def test_the_metric_note_names_the_checkbox_by_its_text(self) -> None:
+        assert labels.PV_ONLY_FILTER in labels.METRIC_SAME_ELECTIONS
+
+    @pytest.mark.parametrize(
+        ("year", "has_pv", "chosen", "expected"),
+        [
+            (1900, False, elections_view.Filters(1824, 2024, False), True),
+            (1900, False, elections_view.Filters(1824, 2024, True), False),
+            (1980, True, elections_view.Filters(1824, 2024, True), True),
+            (1980, True, elections_view.Filters(1984, 2024, False), False),
+            (2024, True, elections_view.Filters(1824, 2020, False), False),
+            # Only True counts as a popular vote.
+            (1980, 1, elections_view.Filters(1824, 2024, True), False),
+        ],
+    )
+    def test_shows(self, year: int, has_pv: Any, chosen: Any, expected: bool) -> None:
+        assert elections_view.shows(year, has_pv, chosen) is expected
+
+    def test_the_empty_note(self) -> None:
+        note: Any = elections_view.no_match()
+        assert (note.id, note.className) == (elections_view.NO_MATCH_ID, "empty")
+        assert note.children == labels.NO_ELECTIONS_MATCH
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_no_page_defines_its_own_copy_of_a_shared_helper(self, path: str) -> None:
+        """#596's guard-efficacy review: the AC says shared, not copied. No elections
+        page module defines a function or class of these names; any it holds is
+        ``elections_view``'s own object."""
+        names = {
+            "parse_filters",
+            "Filters",
+            "filters",
+            "span",
+            "shows",
+            "applied_search",
+            "filter_controls",
+            "no_match",
+            "merged_search",
+            "next_search",
+            "on_filter_change",
+            "index_rule",
+        }
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        module = page["module"].removeprefix("pages.")
+        tree = ast.parse((PACKAGE / "pages" / f"{module}.py").read_text("utf-8"))
+        defined = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        }
+        assert not defined & names, defined & names
+        own = page["layout"].__globals__
+        for name in names & set(own):
+            assert own[name] is getattr(elections_view, name), (path, name)
+
+    def test_the_list_page_shares_the_helpers(self) -> None:
+        own = PAGE["layout"].__globals__
+        for name in ("parse_filters", "filters", "applied_search", "next_search"):
+            assert own[name] is getattr(elections_view, name), name
+        assert "on_filter_change" not in own

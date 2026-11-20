@@ -38,12 +38,15 @@ from dash import dcc
 
 class Chart(NamedTuple):
     """One registered chart: the path template of the page it renders on, the DOM id of
-    its companion table (the table on that page holding its values), and whether its ID
-    is retired. A retired ID is never built and never reused."""
+    its companion table (the table on that page holding its values), whether its ID
+    is retired, and whether its value axis writes its numbers short
+    (:data:`SHORT_TICKFORMAT`; C5 alone, #596, D110, the one exception to the
+    numbers-in-full rule). A retired ID is never built and never reused."""
 
     page: str
     table: str
     retired: bool = False
+    short_value_ticks: bool = False
 
 
 #: A chart ID: ``C1``, ``C2``, …, issued in order of story filing.
@@ -66,14 +69,17 @@ CHARTS: Mapping[str, Chart] = {
     # filter, on an election's People per electoral vote page, beside T6 (#435, D093).
     "C3": Chart("/election/<year>/per-capita", "election-per-capita"),
     # Each election's Electoral College leader's electoral share against the majority
-    # line, on its own page, which reads no filter, beside its own companion table
-    # (#434, D096; page since #562, D107).
+    # line, on its own page, narrowed by its year filters (#596, D110), beside its own
+    # companion table (#434, D096; page since #562, D107).
     "C2": Chart("/elections/majority", "elections-leader-table"),
     # Electors appointed and the total popular vote in each election, all states, on
-    # their own page, which reads no filter, beside one companion table they share
-    # (#436, D100; all states only since #562, D107).
+    # their own page, narrowed by its year filters (#596, D110), beside one companion
+    # table they share (#436, D100; all states only since #562, D107). C5's value axis
+    # writes its numbers short (#596, D110).
     "C4": Chart("/elections/over-time", "elections-over-time-table"),
-    "C5": Chart("/elections/over-time", "elections-over-time-table"),
+    "C5": Chart(
+        "/elections/over-time", "elections-over-time-table", short_value_ticks=True
+    ),
     # One state's electors appointed in each election, never narrowed by the page's
     # filters, on the state's history page, beside its own companion table (#560,
     # D106).
@@ -95,6 +101,7 @@ def registry_problems(registry: Mapping[str, Chart]) -> list[str]:
             and isinstance(chart.table, str)
             and chart.table
             and isinstance(chart.retired, bool)
+            and isinstance(chart.short_value_ticks, bool)
         ):
             problems.append(f"{chart_id!r}: not a chart row")
     return problems
@@ -260,6 +267,11 @@ FIXED_AXIS_KEYS = ("fixedrange", "exponentformat", "separatethousands")
 #: ``%`` is a date format, not a number one, and is left alone.
 _D3_FORMAT_RE = re.compile(r"(?:.?[<>=^])?[-+( ]?[$#]?0?\d*,?(?:\.\d+)?~?([A-Za-z%]?)")
 _FULL_TYPES = frozenset({"d", "f", "r", "%", "p"})
+#: The one short format a chart may name, and only on ``layout.yaxis`` of a chart
+#: whose registry row sets ``short_value_ticks`` (C5, #596, D110): d3's SI form with
+#: trailing zeros trimmed ("50M"). Page-written ``ticktext`` is not checked for
+#: shortened numbers; it is wording, as row names are (D110's accepted residual).
+SHORT_TICKFORMAT = "~s"
 
 
 def _shortens(tickformat: str) -> bool:
@@ -428,11 +440,15 @@ def markup_problems(figure: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def override_problems(figure: Mapping[str, Any]) -> list[str]:
+def override_problems(
+    figure: Mapping[str, Any], *, short_value_ticks: bool = False
+) -> list[str]:
     """Each template default ``figure``'s own layout overrides (#432's review): the
     :data:`FIXED_LAYOUT_KEYS`, :data:`FIXED_LEGEND_KEYS` and :data:`FIXED_AXIS_KEYS`,
     a shortening axis ``tickformat``, and a second legend, in the layout or named by a
-    trace."""
+    trace. With ``short_value_ticks`` (a registry row's, #596) exactly
+    :data:`SHORT_TICKFORMAT` on ``layout.yaxis`` is admitted; any other axis or short
+    format is still refused. Only ``True`` admits it."""
     problems = [
         f"data[{index}].legend: {trace['legend']!r}, not the template's legend"
         for index, trace in enumerate(figure.get("data") or [])
@@ -467,7 +483,12 @@ def override_problems(figure: Mapping[str, Any]) -> list[str]:
             if key in axis
         ]
         tickformat = axis.get("tickformat")
-        if isinstance(tickformat, str) and _shortens(tickformat):
+        admitted = (
+            short_value_ticks is True
+            and name == "yaxis"
+            and tickformat == SHORT_TICKFORMAT
+        )
+        if isinstance(tickformat, str) and _shortens(tickformat) and not admitted:
             problems.append(
                 f"layout.{name}.tickformat: {tickformat!r} shortens numbers"
             )
@@ -844,14 +865,15 @@ def slot_problems(figure: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def figure_problems(figure: Any) -> list[str]:
+def figure_problems(figure: Any, *, short_value_ticks: bool = False) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
     with a list of traces, sets no template or config of its own and overrides none of
     the template's fixed defaults, names colors only as token references, carries no
     markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
     numbering them and names every scatter trace's mode, writes its own hover text with
     no number format, sets no bar's width or offset, and never tells two traces apart
-    by color alone.
+    by color alone. ``short_value_ticks`` is the chart's registry row's (#596, D110):
+    see :func:`override_problems`.
 
     Total (#484, D099): for any input it returns a list of strings and never raises. A
     figure that is not a JSON value of bounded depth gets :func:`json_problems`' alone,
@@ -871,7 +893,7 @@ def figure_problems(figure: Any) -> list[str]:
         *slot_problems(figure),
         *color_problems(figure),
         *markup_problems(figure),
-        *override_problems(figure),
+        *override_problems(figure, short_value_ticks=short_value_ticks),
         *number_problems(figure),
         *hover_problems(figure),
         *template_problems(figure),

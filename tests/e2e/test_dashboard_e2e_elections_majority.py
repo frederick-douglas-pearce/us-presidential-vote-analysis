@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from explore import charts, components, labels
+from explore import charts, components, elections_view, labels
 from tests.e2e.dashboard_pages import (
     C2,
     COVERAGE,
@@ -28,7 +28,6 @@ from tests.e2e.dashboard_pages import (
     recorded,
     rect,
     served_years,
-    year_ticks,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
 from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_inside
@@ -43,7 +42,8 @@ SETTLE_MS = 1000
 # --- chart C2 (#434, D096) ------------------------------------------------------------
 
 #: C2's drawn texts (#558, D104): its year ticks along the bottom, its share ticks, both
-#: axes' titles, the majority line's label and the key's entries; no point draws text.
+#: axes' titles, the band labels and the key's entries (the majority line's among them
+#: since #596); no point draws text.
 C2_CHART_TEXTS = ", ".join(
     f"{C2} {part}"
     for part in (
@@ -55,13 +55,14 @@ C2_CHART_TEXTS = ", ".join(
         ".legendtext",
     )
 )
-#: C2's traces in drawing order (#564, D108; #593, D109): the connector, the triangles,
-#: the crossbars, the circles, then the strip; on the recorded N1 every one is drawn.
-C2_TRACE = f"{C2} .scatterlayer .trace:nth-child({{}}) .points path"
-C2_TRIANGLES = C2_TRACE.format(2)
-C2_CROSSBARS = C2_TRACE.format(3)
-C2_POINTS = C2_TRACE.format(4)
-C2_STRIP = C2_TRACE.format(5)
+#: C2's traces by their stable identity (#596's architect review: the trace's ``uid``,
+#: which plotly.js writes into its class), never by their place in the drawing order,
+#: which a filter changes; on the recorded N1 every one is drawn.
+C2_TRACE = f"{C2} .scatterlayer .trace.trace{{}} .points path"
+C2_TRIANGLES = C2_TRACE.format("c2pv")
+C2_CROSSBARS = C2_TRACE.format("c2hybrid")
+C2_POINTS = C2_TRACE.format("c2ec")
+C2_STRIP = C2_TRACE.format("c2pvstrip")
 #: Every mark C2 draws, the strip's included.
 C2_MARKS = f"{C2} .scatterlayer .points path"
 _N1 = recorded("/v1/elections/summary")
@@ -86,8 +87,8 @@ def open_c2(page: Page, query: str = "", *, width: int = 390) -> None:
 def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     """AC Phone width (#558, D104; #564, D108): year along the bottom, its sparse ticks
     apart, every text (the band's label and the key's entries included) inside the
-    width and none over another, the majority line's label over no mark (circle,
-    triangle, crossbar or strip), no sideways scroll; one circle per served year, a
+    width and none over another, the majority line named in the key (#596, D110: no
+    label in the plot), no sideways scroll; one circle per served year, a
     triangle and a crossbar per popular-vote year, a strip mark per disagreement, no
     mark text, and hovers on a circle, a triangle, a crossbar and a strip mark naming
     their year. Since #593 (D109): the band's label inside its band and the key above
@@ -107,9 +108,8 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     found = [b["text"] for b in texts_]
     assert found.count(labels.C2_VALUE_AXIS.replace("<br>", "")) == 1
     assert found.count(labels.LABELS["year"]) == 1
-    line = labels.C2_MAJORITY_LINE.replace("<br>", "")
-    assert found.count(line) == 1
     for name in (
+        labels.C2_MAJORITY_KEY.replace("<br>", ""),
         labels.LABELS["ec_share_full"],
         labels.LABELS["pv_share"],
         labels.C2_HYBRID_KEY,
@@ -120,9 +120,6 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
         assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
         for b in texts_[i + 1 :]:
             assert not overlaps(a, b), (a, b)
-    (label,) = [b for b in texts_ if b["text"] == line]
-    for point in boxes(page, C2_MARKS):
-        assert not overlaps(label, point), (label, point)
     last = served_years()[-1]
     assert_band_label_inside(page, C2)
     (plot,) = boxes(page, f"{C2} .draglayer .nsewdrag")
@@ -138,13 +135,72 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_no_filter_reaches_c2_or_its_table(page: Page) -> None:
-    """D096(b): the page has no filter, so the list's old keys change nothing."""
+def test_the_year_filters_narrow_c2_and_its_table(page: Page) -> None:
+    """#596 (D110): the list's filters narrow C2 and its table; the controls show the
+    filters applied."""
     open_c2(page, "?year_from=1900&pv=1")
-    ticks = [b["text"] for b in boxes(page, f"{C2} .xtick text")]
-    assert ticks == year_ticks()
-    expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
-    expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
+    shown = [y for y in PV_YEARS if y >= 1900]
+    expect(page.locator(C2_POINTS)).to_have_count(len(shown))
+    expect(page.locator(LEADER_ROWS)).to_have_count(len(shown))
+    expect(page.locator(f"#{elections_view.PV_ID} input")).to_be_checked()
+    expect(page.locator(f"{C2} .layer-below .shapelayer path")).to_have_count(
+        len([0.25, 0.75, 1])  # the gridlines alone: no band
+    )
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize(
+    "query",
+    [
+        "?pv=1",  # the popular-vote years alone: no band
+        "?year_from=2024",  # one year
+        "?year_from=1968",  # a before band two elections wide: its label above
+        "?year_to=1900",  # no popular-vote year: the electoral share alone
+    ],
+)
+def test_filtered_c2_is_readable_at_360(page: Page, query: str) -> None:
+    """#596 (D110): under a filter every text C2 draws stays inside 360 px with none
+    over another, the key (the majority line's entry included) stays above the plot,
+    and a band's label sits inside its band or above the plot."""
+    width = 360
+    page.set_viewport_size({"width": width, "height": 844})
+    open_c2(page, query, width=width)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    texts_ = [b for b in boxes(page, C2_CHART_TEXTS) if b["w"] > 0]
+    for i, a in enumerate(texts_):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
+        for b in texts_[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+    (plot,) = boxes(page, f"{C2} .draglayer .nsewdrag")
+    entries = boxes(page, f"{C2} .legendtext")
+    assert labels.C2_MAJORITY_KEY.replace("<br>", "") in [e["text"] for e in entries]
+    for entry in entries:
+        assert entry["y"] + entry["h"] <= plot["y"] + 1, (entry, plot)
+    for note in boxes(page, f"{C2} .annotation-text"):
+        for mark in boxes(page, C2_MARKS):
+            assert not overlaps(note, mark), (note, mark)
+    # Each band's label inside its band, or above the plot (#596, D110): the bands are
+    # the shapes the plot's full height.
+    bands = [
+        b
+        for b in boxes(page, f"{C2} .layer-below .shapelayer path")
+        if abs(b["h"] - plot["h"]) < 2
+    ]
+    notes = boxes(page, f"{C2} .annotation-text")
+    if query == "?year_from=1968":
+        # Not vacuous (#596's round 2): the narrow band and its one label are drawn.
+        assert len(bands) == 1 and len(notes) == 1, (bands, notes)
+    for note in notes:
+        above = note["y"] + note["h"] <= plot["y"] + 1
+        inside = any(
+            band["x"] - 1 <= note["x"]
+            and note["x"] + note["w"] <= band["x"] + band["w"] + 1
+            and note["y"] >= plot["y"] - 1
+            for band in bands
+        )
+        assert above or inside, (query, note, bands)
+        if query == "?year_from=1968":
+            assert above, note  # a band two elections wide: its label above the plot
 
 
 @pytest.mark.plotlyjs_fetches(1)

@@ -136,6 +136,13 @@ def year_marks(first: int, last: int) -> dict[int, str]:
 #: ``TestEveryChart``'s ``ROW_AXES`` comparison reads (``test_dashboard_export.py``,
 #: D093(c)); 40 keeps two four-digit ticks apart at 360 px, where 20 does not.
 YEAR_TICK_STEP = 40
+#: The steps a shorter span may take instead (#596, D110: a year filter leaves spans
+#: of a few elections): the smallest that goes into the span at most
+#: :data:`YEAR_TICK_MAX` times, so the axis writes at most that many ticks (a smaller
+#: step might also fit once the end trim drops ticks; the rule does not look for it),
+#: as the full span's 40 does, so the density at 360 px stays the full view's.
+YEAR_TICK_STEPS = (4, 8, 10, 20, YEAR_TICK_STEP)
+YEAR_TICK_MAX = 5
 #: Years of room on each side of the first and last served year.
 YEAR_PAD = 2
 #: The year ticks' text size (#593, D109): the template's 14 px, the size of the
@@ -144,9 +151,10 @@ YEAR_PAD = 2
 #: this size passes ``tick_px`` to :func:`year_axis`.
 YEAR_TICK_FONT_PX = 14
 #: The year ticks' size on a chart whose plot is narrowed by wide value ticks: C4 and
-#: C5, whose fixed left margin holds C5's "160,000,000" (#593: at 14 px their ticks sat
-#: 4 px apart at 360 px in the browser check, under its 6 px; the owner's fallback at
-#: the plan gate).
+#: C5, whose shared fixed left margin narrows their plots (#593: at 14 px their ticks
+#: sat 4 px apart at 360 px in the browser check, under its 6 px, with that margin at
+#: 112 px; the owner's fallback at the plan gate. #596 narrowed it to 72 px and kept
+#: 12 px).
 YEAR_TICK_NARROW_PX = 12
 
 
@@ -156,18 +164,31 @@ def year_axis(
     """A time-series chart's x-axis (#558, D104): numeric, so each point sits at its
     year and a gap between served elections is drawn at its true width; its range the
     served years' with :data:`YEAR_PAD` either side; its ticks every multiple of
-    :data:`YEAR_TICK_STEP` within them, written as plain years (the template's
-    thousands separator would write "1,840") at ``tick_px`` (:data:`YEAR_TICK_FONT_PX`
-    unless a chart passes its own, #593), and the first
-    and last years instead where that gives fewer than two; and titled "Election year".
-    One axis for every mode of a chart: built from the served years, never from what a
-    filter leaves. No years is a ``TypeError``, which a page's degraded state
-    catches."""
+    step within them, written as plain years (the template's thousands separator would
+    write "1,840") at ``tick_px`` (:data:`YEAR_TICK_FONT_PX` unless a chart passes its
+    own, #593), and the first and last years instead where that gives fewer than two;
+    and titled "Election year". The step is :data:`YEAR_TICK_STEP` over the served
+    span; a shorter span (#596, D110) takes the smallest of :data:`YEAR_TICK_STEPS`
+    that goes into the span at most :data:`YEAR_TICK_MAX` times, so it writes at most
+    that many ticks, and no tick within a quarter step of
+    either end, where its text would run past the plot's corner into the value
+    axis's first tick.
+    Built from the years a chart shows: the served years, or, on the elections pages
+    since #596 (D110, amending D104(a)), what the year filters leave. No years is a
+    ``TypeError``, which a page's degraded state catches."""
     if not years:
         raise TypeError("a year axis needs at least one served year")
     first, last = min(years), max(years)
-    start = -(-first // YEAR_TICK_STEP) * YEAR_TICK_STEP
-    ticks = list(range(start, last + 1, YEAR_TICK_STEP))
+    step = next(
+        (s for s in YEAR_TICK_STEPS if (last - first) / s <= YEAR_TICK_MAX),
+        YEAR_TICK_STEP,
+    )
+    start = -(-first // step) * step
+    ticks = [
+        t
+        for t in range(start, last + 1, step)
+        if min(t - first, last - t) * 4 >= step
+    ]
     if len(ticks) < 2:
         ticks = sorted({first, last})
     return {
@@ -618,7 +639,9 @@ def chart(
         )
     else:
         pointer = html.Figcaption([caption, " ", link, "."])
-    problems = problems or charts.figure_problems(source)
+    problems = problems or charts.figure_problems(
+        source, short_value_ticks=row.short_value_ticks
+    )
     if problems:
         log.error(
             "%s on %s not drawn: %d figure problem(s): %r",

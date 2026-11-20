@@ -370,3 +370,57 @@ def test_an_old_state_link_lands_on_the_state_page(page: Page) -> None:
     page.locator("#states").wait_for()
     page.goto("/elections?state=GA")
     expect(page).to_have_url(re.compile(r"/state/GA$"))
+
+
+# --- the year filters across the three elections pages (#596, D110) --------------------
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_section_links_carry_the_filters_and_a_change_stays_on_the_page(
+    page: Page,
+) -> None:
+    """#596 (D110): from a filtered list, each section link opens the other page with
+    the same filters (client-side, no document load); a filter change there writes
+    that page's URL with one callback and the router's render, never the list's
+    (the architect's check of the shared ids), and back restores the view."""
+    page.goto("/elections")
+    assert_view(page)
+    check_pv(page)
+    assert_view(page, pv_only=True)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(ELECTIONS_SECTIONS).get_by_role(
+        "link", name=labels.SECTION_MAJORITY
+    ).click()
+    expect(page).to_have_url(re.compile(r"/elections/majority\?pv=1$"))
+    assert_rendered(page, MAJORITY_SUCCESS)
+    expect(page.locator(f"{PV} input")).to_be_checked()
+    outputs: list[str] = []
+
+    def on_request(request: Request) -> None:
+        if request.method == "POST" and urlsplit(request.url).path == UPDATE_PATH:
+            body: Any = request.post_data_json
+            outputs.append(body["output"])
+
+    page.on("request", on_request)
+    lower_thumb(page).press("ArrowRight")
+    expect(page).to_have_url(
+        re.compile(rf"/elections/majority\?pv=1&year_from={FIRST + 1}$")
+    )
+    assert_rendered(page, MAJORITY_SUCCESS)
+    page.wait_for_timeout(SETTLE_MS)
+    assert Counter(outputs) == Counter([FILTER_OUTPUT, ROUTER_OUTPUT]), outputs
+    page.locator(ELECTIONS_SECTIONS).get_by_role(
+        "link", name=labels.SECTION_OVER_TIME
+    ).click()
+    expect(page).to_have_url(
+        re.compile(rf"/elections/over-time\?pv=1&year_from={FIRST + 1}$")
+    )
+    assert_rendered(page, OVER_TIME_SUCCESS)
+    page.go_back()
+    expect(page).to_have_url(
+        re.compile(rf"/elections/majority\?pv=1&year_from={FIRST + 1}$")
+    )
+    page.go_back()
+    expect(page).to_have_url(re.compile(r"/elections/majority\?pv=1$"))
+    expect(page.locator(f"{PV} input")).to_be_checked()
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load

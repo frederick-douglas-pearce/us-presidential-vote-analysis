@@ -840,7 +840,7 @@ dash.register_page(
 def test_a_chart_not_drawn_in_the_success_run_reaches_its_stderr() -> None:
     """Non-vacuity for the check above: with every figure refused, the run still
     renders every page (each chart keeps its DOM id), and the line is on stderr."""
-    forced = "import explore.charts as _c\n_c.figure_problems = lambda f: ['forced']\n"
+    forced = "import explore.charts as _c\n_c.figure_problems = lambda f, **_k: ['forced']\n"
     completed = _run(_success_program(forced))
     assert completed.returncode == 0, completed.stderr[-3000:]
     assert NOT_DRAWN_LINE in completed.stderr

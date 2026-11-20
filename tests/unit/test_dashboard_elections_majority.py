@@ -15,7 +15,7 @@ from typing import Any
 import dash
 import pytest
 
-from explore import api, charts, components, labels, over_time
+from explore import api, charts, components, elections_view, labels, over_time
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -39,6 +39,7 @@ from tests.unit.test_dashboard_elections import (
     n1_client,
     of_type,
 )
+from tests.unit.test_dashboard_export import Csv, table_csv
 
 PAGE: dict[str, Any] = dash.page_registry["pages.elections_majority"]
 #: The page module's namespace, reached through its layout (``pages.elections``' rule).
@@ -52,7 +53,8 @@ def test_the_page_is_registered_as_planned() -> None:
     # N1, chart C2's source: a literal filled on a miss (#434, D074(ii)).
     assert PAGE["on_miss"] == (api.SUMMARY_PATH,)
     assert PAGE["success"] == PAGE_ID
-    assert PAGE.get("query") is None  # no filter reaches C2 (D096(b))
+    # The elections pages' one parser (#596, D110, reversing D096(b)).
+    assert PAGE["query"] is elections_view.parse_filters
     assert PAGE["nav"] == "elections"
 
 
@@ -139,13 +141,17 @@ class TestC2:
         assert PAGE_ID not in [n.id for n in of_type(find(tree, C2), "Div") if n.id]
 
     def test_the_page_order_puts_the_chart_first(self) -> None:
-        """The page's heading is C2's (#562): then the lede, the chart, the companion
-        table's heading and the table."""
+        """The page's heading is C2's (#562): then the lede with the filter sentence
+        (#596), the filters, the chart, the companion table's heading and the table."""
         tree = render_c2()
         assert of_type(tree, "H1")[0].children == MOD["HEADING"]
         assert of_type(tree, "H2")[0].children == MOD["C2_TABLE_HEADING"]
-        assert of_type(tree, "P")[0].children == MOD["LEDE"]
+        assert of_type(tree, "P")[0].children == (
+            f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        )
         order = in_order(tree)
+        (slider,) = of_type(tree, "RangeSlider")
+        assert order.index(slider) < order.index(find(tree, C2))
         assert order.index(find(tree, C2)) < order.index(find(tree, LEADERS))
 
     def test_one_point_for_every_served_year_oldest_first(self) -> None:
@@ -302,25 +308,34 @@ class TestC2:
         assert _caption(tree).endswith(labels.C2_PV_DIFFERENT_NOTE)
         assert markers(c2_figure(tree)) == []  # the premise: no marker drawn
 
-    def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
-        layout = c2_figure(render_c2())["layout"]
-        (line,) = [
-            s for s in layout["shapes"] if s["type"] == "line" and "dash" in s["line"]
-        ]
-        # Horizontal across the plot at half (#558, D104), in the reference token
-        # (#593's review: the gridlines' exemption from the painted-color check is by
-        # color, so the line's own color is pinned here).
-        assert (line["yref"], line["y0"], line["y1"]) == ("y", 0.5, 0.5)
-        assert line["line"]["color"] == "var(--chart-reference)"
-        assert (line["xref"], line["x0"], line["x1"]) == ("paper", 0, 1)
-        assert line["line"]["dash"] == "dash"
-        # One label, just below the line at the left (owner, #564's plan gate, D108).
-        (note,) = [a for a in layout["annotations"] if a["yref"] == "y"]
-        assert note["text"] == labels.C2_MAJORITY_LINE
-        # From the second served year, clear of 1824's point below the line (#564).
-        assert (note["xref"], note["x"], note["xanchor"]) == ("x", YEARS[1], "left")
-        assert (note["yref"], note["y"], note["yanchor"]) == ("y", 0.5, "top")
-        assert note["yshift"] < 0
+    def test_the_majority_line_is_a_dashed_line_at_half_named_in_the_key(
+        self,
+    ) -> None:
+        """#596 (D110, the owner's choice): the majority line is a trace across the
+        axis at half, dashed in the reference token and named in the chart's key; no
+        label in the plot, which a filter set among the marks."""
+        figure = c2_figure(render_c2())
+        layout = figure["layout"]
+        line = figure["data"][0]
+        assert line["name"] == labels.C2_MAJORITY_KEY
+        assert (line["mode"], line["showlegend"]) == ("lines", True)
+        assert line["y"] == [0.5, 0.5]
+        assert line["x"] == layout["xaxis"]["range"]
+        assert line["line"] == {
+            "dash": "dash",
+            "width": 2,
+            "color": "var(--chart-reference)",
+        }
+        assert line["hoverinfo"] == "skip"
+        assert all(a.get("yref") != "y" for a in layout.get("annotations", []))
+        assert not any(
+            s["type"] == "line" and "dash" in s.get("line", {})
+            for s in layout["shapes"]
+        )
+        # The key's entry reads the words approved at #564's plan gate (#596).
+        assert labels.C2_MAJORITY_KEY.replace("<br>", " ") == (
+            "Majority line: half of each election's electors appointed"
+        )
         # The axis runs past 100% for the strip; its ticks stop at 100% (#564).
         assert layout["yaxis"]["range"] == [0, MOD["_C2_Y_TOP"]]
         assert layout["yaxis"]["tickvals"][-1] == 1
@@ -476,17 +491,35 @@ class TestC2Methods:
             if symbol == "circle-open":
                 assert label in (labels.NOT_IN_DATASET, labels.C5_NO_TOTAL)
 
-    def test_the_drawing_order_puts_the_circle_on_top(self) -> None:
-        """M1: the connector under the triangles, then the crossbars, then the circles."""
-        names = [t["name"] for t in c2_figure(render_c2())["data"]]
-        order = [
+    def test_the_drawing_order_puts_the_crossbar_on_top(self) -> None:
+        """#596 (D110): the line, then the connector, the triangles and the circles,
+        and the crossbars last, so neither the circle nor the triangle can hide one."""
+        data = c2_figure(render_c2())["data"]
+        names = [t["name"] for t in data]
+        assert names[:4] == [
+            labels.C2_MAJORITY_KEY,
             labels.LABELS["pv_share"],  # the connector, no marker
+            labels.LABELS["pv_share"],
+            labels.LABELS["ec_share_full"],
+        ]
+        assert names[-1] == labels.C2_HYBRID_KEY
+        assert "marker" not in data[1]
+
+    def test_the_key_keeps_its_order(self) -> None:
+        """#596 (D110): the drawing order changed, the key's did not: each keyed
+        trace's legendrank is its place in the key, the line last."""
+        keyed = [
+            t for t in c2_figure(render_c2())["data"] if t.get("showlegend") is True
+        ]
+        ranked = [t["name"] for t in sorted(keyed, key=lambda t: t["legendrank"])]
+        assert ranked == [
             labels.LABELS["pv_share"],
             labels.C2_HYBRID_KEY,
             labels.LABELS["ec_share_full"],
+            labels.C2_PV_DIFFERENT_KEY,
+            labels.C2_MAJORITY_KEY,
         ]
-        assert names[:4] == order
-        assert "marker" not in c2_figure(render_c2())["data"][0]
+        assert len({t["legendrank"] for t in keyed}) == len(keyed)
 
     def test_the_triangle_and_crossbar_stand_at_the_served_values(self) -> None:
         """T2: each mark's y is the served value whose table cell its hover writes, in
@@ -518,7 +551,7 @@ class TestC2Methods:
     def test_the_connector_joins_each_year_s_circle_to_its_triangle(self) -> None:
         """T1: no hover, no text, so only this ties it to the marks."""
         figure = c2_figure(render_c2())
-        line = figure["data"][0]
+        line = figure["data"][1]  # after the majority line (#596)
         assert line["mode"] == "lines" and line["hoverinfo"] == "skip"
         assert line["showlegend"] is False and line["line"]["width"] == 1
         circles = named(figure, labels.LABELS["ec_share_full"])
@@ -748,18 +781,21 @@ class TestC2Methods:
         assert labels.C5_AFTER_NOTE.format(pv_year_max=2016) in _caption(moved)
         # The after band's label sits above the key, raised by one key row per entry
         # the key shows, the most rows it can wrap to (#593's review): here the
-        # triangle, the crossbar, the circle and the popular-vote strip, four.
+        # triangle, the crossbar, the circle, the popular-vote strip and the majority
+        # line (#596), five entries.
         keyed = [tr for tr in c2_figure(moved)["data"] if tr.get("showlegend")]
-        assert len(keyed) == 4
+        assert len(keyed) == 5
         assert c2_figure(moved)["layout"]["margin"] == {
-            "t": over_time.TOP_PX + 4 * 24 + over_time.BAND_LABEL_PX
+            "t": over_time.TOP_PX + 6 * 24 + over_time.BAND_LABEL_PX
         }
         (after,) = [
             n
             for n in c2_figure(moved)["layout"]["annotations"]
             if n["text"] == labels.C5_AFTER_BAND.format(pv_year_max=2016)
         ]
-        assert after["yshift"] == 4 * 24 == len(keyed) * over_time.KEY_ROW_PX
+        # The majority line's entry is two lines (#596): six rows in all.
+        rows = sum(1 + t["name"].count("<br>") for t in keyed)
+        assert after["yshift"] == 6 * 24 == rows * over_time.KEY_ROW_PX
         assert _cell_of(moved, 1976, "pv_share") == labels.NOT_APPLICABLE
         triangles = named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
         assert 1976 not in triangles and 2020 not in triangles and 1980 in triangles
@@ -784,7 +820,7 @@ class TestC2Methods:
         assert sizes == {
             labels.LABELS["ec_share_full"]: 7,
             labels.LABELS["pv_share"]: 8,
-            labels.C2_HYBRID_KEY: 16,
+            labels.C2_HYBRID_KEY: 10,  # #596 (D110): 16 px touched at 360 px
             labels.C2_PV_DIFFERENT_KEY: 11,
         }
         strokes = {
@@ -828,7 +864,7 @@ class TestC2Methods:
     def test_no_gridline_at_the_majority_line(self) -> None:
         """#593 (D109): the value axis draws no gridlines of its own, so none shows
         through the majority line's dashes; the others are shapes at the ticks, and
-        the 50% tick keeps its label."""
+        the 50% tick keeps its label. The line itself is a trace since #596."""
         layout = c2_figure(render_c2())["layout"]
         assert layout["yaxis"]["showgrid"] is False
         assert layout["yaxis"]["tickvals"] == [0, 0.25, 0.5, 0.75, 1]
@@ -842,12 +878,9 @@ class TestC2Methods:
             (s["y0"] == s["y1"], s["xref"], s["layer"]) == (True, "paper", "below")
             for s in grid
         )
-        at_half = [
+        assert not [
             s for s in layout["shapes"] if s["type"] == "line" and s["y0"] == 0.5
         ]
-        assert len(at_half) == 1 and at_half[0]["line"]["dash"] == "dash"
-        # Drawn after the bands and the gridlines, so on top of both.
-        assert layout["shapes"][-1] is at_half[0]
 
     def test_the_caption_is_collapsed(self) -> None:
         """#593 (D109): C2's caption closed under its summary, the pointer after it."""
@@ -910,28 +943,9 @@ class TestC2Methods:
         assert "Popular-vote share: " in hover and "Hybrid score: " in hover
         assert charts.figure_problems(figure) == []
 
-    def test_the_majority_label_sits_over_no_mark_left_of_the_window(self) -> None:
-        """cr.4's tripwire (D108 residual): the label starts at the second served year
-        and runs about a century to its right at 360 px; no mark but a circle may sit
-        below the line there. A wider popular-vote window (#565, #566) that puts one
-        there fails this, which re-placing the label must answer."""
-        span = 100  # years: the three-line label's width at 360 px, generously
-        figure = c2_figure(render_c2())
-        (note,) = [
-            a
-            for a in figure["layout"]["annotations"]
-            if a["text"] == labels.C2_MAJORITY_LINE
-        ]
-        start = note["x"]
-        for t in figure["data"]:
-            if "marker" not in t or t["name"] == labels.LABELS["ec_share_full"]:
-                continue
-            for x, y in zip(t["x"], t["y"], strict=True):
-                assert not (start <= x <= start + span and y < 0.5), (t["name"], x)
-
     def test_c2_paints_only_measured_tokens(self) -> None:
         """g.8: every color C2's figure paints is one the theme tests hold to its ratio
-        on the page and on the band's fill; the majority label is in the text color."""
+        on the page and on the band's fill; the band labels are in the text color."""
         from tests.unit.test_dashboard_theme import CHART_MARKS
 
         figure = c2_figure(
@@ -1318,3 +1332,172 @@ def test_the_download_names_this_page_as_its_view() -> None:
     link = find(render_c2(), f"{LEADERS}-csv")
     text = urllib.parse.unquote(link.href)
     assert "explore.us-presidential-election-center.org/elections/majority" in text
+
+
+# --- the year filters (#596, D110) ------------------------------------------------------
+
+
+def filtered_c2(query: dict[str, str], summary: Any = None) -> Any:
+    """The page under ``query``, read through the page's own parser."""
+    return MOD["render"](
+        copy.deepcopy(BODY),
+        copy.deepcopy(SUMMARY) if summary is None else summary,
+        elections_view.parse_filters(query),
+    )
+
+
+def lede(tree: Any) -> str:
+    (p,) = [p for p in of_type(tree, "P") if getattr(p, "className", None) == "lede"]
+    text: str = p.children
+    return text
+
+
+class TestC2Filters:
+    def test_the_filters_narrow_the_chart_and_its_table(self) -> None:
+        tree = filtered_c2({"year_from": "1900", "year_to": "1990"})
+        shown = [y for y in YEARS if 1900 <= y <= 1990]
+        assert [int(r[0]) for r in leader_rows(tree)] == shown
+        figure = c2_figure(tree)
+        assert figure["layout"]["xaxis"] == components.year_axis(shown)
+        for trace in figure["data"][1:]:
+            assert {x for x in trace["x"] if x is not None} <= set(shown), trace["name"]
+
+    def test_popular_vote_only_draws_no_band(self) -> None:
+        tree = filtered_c2({"pv": "1"})
+        figure = c2_figure(tree)
+        layout = figure["layout"]
+        assert not [s for s in layout["shapes"] if s["type"] == "rect"]
+        assert layout.get("annotations") == []
+        assert "margin" not in layout
+        caption = _caption(tree)
+        assert labels.C2_BEFORE_NOTE.format(pv_year_min=1976) not in caption
+        assert all(r[MOD["LEADER_FIELDS"].index("pv_share")] for r in leader_rows(tree))
+
+    def test_no_year_shown_in_the_window_names_the_electoral_share_alone(
+        self,
+    ) -> None:
+        """Option B (#596's plan gate): the title, axis and caption name only what
+        is drawn, as C1's do for an election with no popular-vote figure."""
+        tree = filtered_c2({"year_to": "1900"})
+        layout = c2_figure(tree)["layout"]
+        assert find(tree, f"{C2}-title").children == labels.C2_TITLE_NO_PV
+        assert layout["yaxis"]["title"]["text"] == labels.C2_VALUE_AXIS_NO_PV
+        caption = _caption(tree)
+        for sentence in (
+            labels.C2_PV_MARK,
+            labels.C2_HYBRID_MARK,
+            labels.C1_LINE_EC_ONLY,
+            labels.C2_PLURALITY_NOTE,
+        ):
+            assert sentence not in caption
+        for sentence in (labels.C2_EC_MARK, labels.C2_MAJORITY_NOTE):
+            assert sentence in caption
+        # One year inside the window brings the full wording back.
+        tree = filtered_c2({"year_from": "1972", "year_to": "1976"})
+        assert find(tree, f"{C2}-title").children == labels.C2_TITLE
+        assert labels.C2_PV_MARK in _caption(tree)
+
+    def test_a_filter_leaving_no_year_shows_the_empty_note(self) -> None:
+        tree = filtered_c2({"year_to": "1972", "pv": "1"})
+        assert tree.id == PAGE_ID  # a filtered success, not a degraded read
+        note = find(tree, elections_view.NO_MATCH_ID)
+        assert note.children == labels.NO_ELECTIONS_MATCH
+        assert note.className == "empty"
+        assert find(tree, C2) is None and find(tree, LEADERS) is None
+        assert len(of_type(tree, "RangeSlider")) == 1
+        assert lede(tree) == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert find(tree, elections_view.SECTIONS_ID) is not None
+
+    def test_a_failed_n1_shows_no_filters(self) -> None:
+        """ba spec (d)3: the filters would narrow nothing, so neither they nor the
+        filter sentence show; the section links still carry the URL's filters."""
+        tree = MOD["render"](
+            copy.deepcopy(BODY), None, elections_view.parse_filters({"pv": "1"})
+        )
+        assert of_type(tree, "RangeSlider") == [] and of_type(tree, "Checklist") == []
+        assert lede(tree) == MOD["LEDE"]
+        nav = find(tree, elections_view.SECTIONS_ID)
+        assert [e.href for e in nav.children if type(e).__name__ == "Link"] == [
+            "/elections?pv=1",
+            "/elections/over-time?pv=1",
+        ]
+
+    def test_the_download_names_the_filtered_view(self) -> None:
+        tree = filtered_c2({"pv": "1"})
+        text = table_csv(tree, LEADERS)
+        assert text is not None
+        csv = Csv(text)
+        assert any("/elections/majority?pv=1" in " ".join(line) for line in csv.preamble)
+        assert [r[next(iter(r))] for r in csv.rows] == [
+            str(y) for y in YEARS if y >= 1976
+        ]
+
+    def test_an_out_of_span_bound_falls_back(self) -> None:
+        tree = filtered_c2({"year_from": "1700"})
+        assert [int(r[0]) for r in leader_rows(tree)] == YEARS
+
+
+class TestC2Crossbar:
+    def test_the_crossbar_is_10_px_and_drawn_last(self) -> None:
+        """#596 (D110): wider than the circle and the triangle, on top of both."""
+        data = c2_figure(render_c2())["data"]
+        assert data[-1]["name"] == labels.C2_HYBRID_KEY
+        assert data[-1]["marker"]["symbol"] == "line-ew"
+        assert data[-1]["marker"]["size"] == 10
+        sizes = {t["name"]: t["marker"]["size"] for t in data if "marker" in t}
+        assert sizes[labels.LABELS["ec_share_full"]] == 7
+        assert sizes[labels.LABELS["pv_share"]] == 8
+
+
+class TestC2ReviewGuards:
+    """Guards #596's round-1 review found missing."""
+
+    def test_a_hidden_year_s_row_defect_degrades_the_filtered_view_too(self) -> None:
+        """cr.1: every served year's cells are built before the filters apply, so a
+        filtered view never shows what the default view refuses (D110(a))."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1828 and r["electoral_rank"] == 1
+        ]
+        del row["took_office"]
+        for pairs in ([], [("year_from", "1900")]):
+            tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, pairs
+            assert find(tree, C2) is None, pairs
+
+    def test_a_hidden_year_s_table_row_defect_degrades_the_filtered_view_too(
+        self,
+    ) -> None:
+        """#596's acceptance gate (a surviving mutant): the table row of a year the
+        filters hide is built too, so a leader with no ``candidate``, which only the row
+        (and the figure, for shown years) reads, degrades a filtered view as it does the
+        default one."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1828 and r["electoral_rank"] == 1
+        ]
+        del row["candidate"]
+        for pairs in ([], [("year_from", "1900")]):
+            tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, pairs
+            assert find(tree, C2) is None, pairs
+
+    def test_every_trace_carries_its_stable_uid(self) -> None:
+        """guard-efficacy .4: the e2e tests select traces by ``uid``; each trace has
+        one, none twice, and the four the e2e tests name sit on the right series."""
+        data = c2_figure(render_c2())["data"]
+        uids = [t.get("uid") for t in data]
+        assert None not in uids and len(set(uids)) == len(uids)
+        by_uid = {t["uid"]: t for t in data}
+        assert by_uid["c2pv"]["name"] == labels.LABELS["pv_share"]
+        assert "marker" in by_uid["c2pv"]
+        assert by_uid["c2connector"]["name"] == labels.LABELS["pv_share"]
+        assert "marker" not in by_uid["c2connector"]
+        assert by_uid["c2hybrid"]["name"] == labels.C2_HYBRID_KEY
+        assert by_uid["c2ec"]["name"] == labels.LABELS["ec_share_full"]
+        assert by_uid["c2pvstrip"]["name"] == labels.C2_PV_DIFFERENT_KEY
+        assert by_uid["c2line"]["name"] == labels.C2_MAJORITY_KEY
