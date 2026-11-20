@@ -1674,3 +1674,71 @@ each with the year ticks 1840, 1880, 1920, 1960 and 2000 along the bottom, at le
 apart at 360 px (C5's, the closest); no chart text sits over other chart text or outside
 the width. C2 draws 51 points and C4 51 bars. §9's checks: `/election/%2531824` is a 404
 with `noindex`, `/election/%31824` a 200, and the plotly.js path a 404.
+
+### C2's three shares on `/elections/majority`, measured after deploy (2026-11-20, #564)
+
+#564 (D108) extends C2 from the leader's electoral share alone to three shares per election:
+the electoral share, the popular-vote share and the hybrid score, which is the project's
+proposal. The popular-vote and hybrid marks are drawn for the years MIT covers. The page
+still makes one fill on a miss, N1 (`/v1/elections/summary`), so the change is in what C2
+draws, not in what the page reads. #564 asked for D071(g) to be re-measured on
+`/elections/majority` after deploy. The baseline is that page in
+[#562's record](#the-elections-index-and-its-two-subpages-measured-after-deploy-2026-11-19-562).
+
+Dashboard version `v-3afc923d4261-r34-a1` (deploy run 44654389151 of 3afc923, the merge of
+#591), snapshot `37af4064…`, API 0.9.0, revision `usvote-api-00013-czh`, with no API deploy
+since 2026-11-12. The API origin was warm throughout: the dashboard's keep-warm ping reached
+its `/health` every few minutes from 01:26Z on, and it logged no `Starting new instance` in
+the window. Measured 01:42–01:44Z, by #277's method: `scripts/measure_dashboard_cold_start.py`
+(390 px, 10 Mbps / 100 ms, a fresh browser context each run) with `--chart "#c2 .main-svg"`.
+The chart column is not a D071(g) measure. The previous day's canary had completed at 21:38Z
+and the next was not due until 13:17Z, so no canary request fell inside the window.
+
+**Two instances**, each after a
+[restart](#restarting-the-instance-to-empty-its-cache): B at 01:41:35Z and C at 01:42:49Z.
+The deploy's own instance could not give a first visit: a browser visit at 01:37:43Z, before
+the window, had already filled N1 on it. Warmup ran on each as a loading request (2.23 s and
+5.16 s), and each was serving its snapshot (2 responses) 4–14 s after the delete command was
+issued. Each first visit was a genuine miss: check 3 found no N1 fill on that instance
+before the run, and its `api fetch /v1/elections/summary` line was logged during it
+(01:42:14Z, 01:43:31Z). Both fills were edge hits: the origin logged no `/v1/` request
+after 01:37:49Z.
+
+| Run | Instance | TTFB (s) | First data (s) | Chart drawn (s) |
+|---|---|---|---|---|
+| First visit | B | 0.23 | 1.64 | 5.16 |
+| First visit | C | 0.16 | 1.54 | 3.93 |
+| From the cache (4 runs) | B | 0.15–0.23 | 1.04–1.11 | 3.73–3.86 |
+| From the cache (3 runs) | C | 0.15–0.17 | 1.01–1.08 | 3.71–3.78 |
+
+Every run reached data, with no degraded page and no section unavailable.
+
+- **TTFB met D071(g) on 9 of 9 runs** (0.15–0.23 s, against ≤ 1 s).
+- **First data met it on 9 of 9** (1.54–1.64 s on a first visit, 1.01–1.11 s from the
+  cache, against ≤ 3 s). The baseline was 1.54 s on a first visit and 0.99–1.13 s from the
+  cache.
+- **The fill.** The routing callback that makes the fill took 0.33 s (B) and 0.34 s (C) on
+  the server, against 0.29 s in the baseline, and 0.021–0.040 s for the same render from
+  the cache (baseline 0.013–0.032 s).
+- **C2 drawn.** From the cache it took 3.71–3.86 s, inside the baseline's 3.59–4.58 s. C's
+  first visit drew it in 3.93 s (baseline 3.80 s). B's took 5.16 s, 3.5 s after first data,
+  the only run outside that spread. Its server side was no slower than C's (fill 0.33 s,
+  first data 1.64 s), so the extra time was spent in the browser after first data, which
+  includes fetching plotly.js from its CDN (D087/D088). This record does not separate that
+  further.
+
+**Request budget held.** Each instance logged only the expected fills: the two prefetched
+paths as it started, and one N1 fill for its first visit. The runs from the cache made none.
+The app logged no warnings and no 5xx since the deploy.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes): C, 132.3 MB
+(126.2 MiB), 34 % of the 384 MB D071 names for F1, after its four runs (65 requests). This is
+below #562's peak of 134.2 MB, so the three shares did not move D071's F1 flip condition.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, in light and dark (4 renders): no sideways scroll, and the page's unavailable note
+did not render. C2 is drawn on every render, with the year ticks 1840, 1880, 1920, 1960 and
+2000, and 51 electoral-share points, 13 popular-vote triangles, 13 hybrid stars and the 2
+years the popular-vote and electoral leaders differed in MIT's range. §9's checks:
+`/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200, and the plotly.js
+path a 404.
