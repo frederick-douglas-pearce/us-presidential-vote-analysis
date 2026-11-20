@@ -31,6 +31,7 @@ from tests.e2e.dashboard_pages import (
     year_ticks,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
+from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_inside
 
 pytestmark = pytest.mark.e2e
 
@@ -54,11 +55,11 @@ C2_CHART_TEXTS = ", ".join(
         ".legendtext",
     )
 )
-#: C2's traces in drawing order (#564, D108): the connector, the triangles, the stars,
-#: the circles, then the strip; on the recorded N1 every one is drawn.
+#: C2's traces in drawing order (#564, D108; #593, D109): the connector, the triangles,
+#: the crossbars, the circles, then the strip; on the recorded N1 every one is drawn.
 C2_TRACE = f"{C2} .scatterlayer .trace:nth-child({{}}) .points path"
 C2_TRIANGLES = C2_TRACE.format(2)
-C2_STARS = C2_TRACE.format(3)
+C2_CROSSBARS = C2_TRACE.format(3)
 C2_POINTS = C2_TRACE.format(4)
 C2_STRIP = C2_TRACE.format(5)
 #: Every mark C2 draws, the strip's included.
@@ -86,10 +87,11 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     """AC Phone width (#558, D104; #564, D108): year along the bottom, its sparse ticks
     apart, every text (the band's label and the key's entries included) inside the
     width and none over another, the majority line's label over no mark (circle,
-    triangle, star or strip), no sideways scroll; one circle per served year, a
-    triangle and a star per popular-vote year, a strip mark per disagreement, no mark
-    text, and hovers on a circle, a triangle, a star and a strip mark naming their
-    year."""
+    triangle, crossbar or strip), no sideways scroll; one circle per served year, a
+    triangle and a crossbar per popular-vote year, a strip mark per disagreement, no
+    mark text, and hovers on a circle, a triangle, a crossbar and a strip mark naming
+    their year. Since #593 (D109): the band's label inside its band and the key above
+    the plot."""
     page.set_viewport_size({"width": width, "height": 844})
     open_c2(page, width=width)
     expect(page.locator(f"{C2} .chart-title")).to_have_text(labels.C2_TITLE)
@@ -97,7 +99,7 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     assert_year_ticks_apart(page, C2)
     expect(page.locator(C2_POINTS)).to_have_count(len(served_years()))
     expect(page.locator(C2_TRIANGLES)).to_have_count(len(PV_YEARS))
-    expect(page.locator(C2_STARS)).to_have_count(len(PV_YEARS))
+    expect(page.locator(C2_CROSSBARS)).to_have_count(len(PV_YEARS))
     expect(page.locator(C2_STRIP)).to_have_count(len(DIFFERENT))
     assert DIFFERENT and PV_YEARS[0] == COVERAGE["pv_year_min"]  # the premises
     expect(page.locator(f"{C2} .textpoint")).to_have_count(0)
@@ -122,11 +124,15 @@ def test_c2_is_readable_at_phone_width(page: Page, width: int) -> None:
     for point in boxes(page, C2_MARKS):
         assert not overlaps(label, point), (label, point)
     last = served_years()[-1]
+    assert_band_label_inside(page, C2)
+    (plot,) = boxes(page, f"{C2} .draglayer .nsewdrag")
+    for entry in boxes(page, f"{C2} .legendtext"):
+        assert entry["y"] + entry["h"] <= plot["y"] + 1, (entry, plot)
     assert_hover_names_year(page, C2, f"{C2_POINTS} >> nth=-1", last)
     page.mouse.move(0, 0)
     assert_hover_names_year(page, C2, f"{C2_TRIANGLES} >> nth=0", str(PV_YEARS[0]))
     page.mouse.move(0, 0)
-    assert_hover_names_year(page, C2, f"{C2_STARS} >> nth=-1", str(PV_YEARS[-1]))
+    assert_hover_names_year(page, C2, f"{C2_CROSSBARS} >> nth=-1", str(PV_YEARS[-1]))
     page.mouse.move(0, 0)
     assert_hover_names_year(page, C2, f"{C2_STRIP} >> nth=0", str(DIFFERENT[0]))
 
@@ -146,7 +152,7 @@ def test_c2_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     open_c2(page)
     point = page.locator(C2_POINTS).first
     light = point.evaluate("el => getComputedStyle(el).fill")
-    assert light == rgb(token(page, "--chart-1"))
+    assert light == rgb(token(page, "--chart-ec"))
     seen: list[str] = []
 
     def on_request(request: Request) -> None:
@@ -157,7 +163,7 @@ def test_c2_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(point).not_to_have_css("fill", light)
     assert point.evaluate("el => getComputedStyle(el).fill") == rgb(
-        token(page, "--chart-1")
+        token(page, "--chart-ec")
     )
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
@@ -182,6 +188,45 @@ def test_with_plotlyjs_blocked_c2_s_title_caption_and_table_render(
     expect(page.locator("#elections-leader-table")).to_be_visible()
     expect(page.locator(LEADER_ROWS)).to_have_count(len(served_years()))
     expect(page.locator(f"{C2} .js-plotly-plot")).to_have_count(0)
+
+
+@pytest.mark.plotlyjs_fetches(2)
+def test_each_mark_is_its_measure_s_color_and_no_axis_gridline_is_drawn(
+    page: Page,
+) -> None:
+    """#593 (D109): circle red, triangle blue, crossbar purple, read from what the
+    browser paints; and plotly draws no value-axis gridline on C2 (its gridlines are
+    shapes, which ``TestC2Methods.test_no_gridline_at_the_majority_line`` in
+    ``tests/unit/test_dashboard_elections_majority.py`` pins away from 50%). The
+    control: C4, which keeps the
+    axis's own gridlines, does draw ``.ygrid`` paths, so the count is not vacuous."""
+    open_c2(page)
+    for selector, measure, prop in (
+        (C2_POINTS, "--chart-ec", "fill"),
+        (C2_TRIANGLES, "--chart-pv", "fill"),
+        (C2_CROSSBARS, "--chart-hybrid", "stroke"),
+    ):
+        painted = page.locator(selector).first.evaluate(
+            f"el => getComputedStyle(el).{prop}"
+        )
+        assert painted == rgb(token(page, measure)), (selector, painted)
+    expect(page.locator(f"{C2} .ygrid")).to_have_count(0)
+    page.goto("/elections/over-time")
+    page.locator("#c4 .main-svg").first.wait_for()
+    expect(page.locator("#c4 .ygrid").first).to_be_attached()
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_caption_is_closed_until_its_summary_is_opened(page: Page) -> None:
+    """#593 (D109): hidden on load, shown once the summary is clicked; the table
+    pointer shown throughout."""
+    open_c2(page)
+    text = page.locator(f"{C2} .chart-caption-text")
+    expect(text).to_be_hidden()
+    expect(page.locator(f"{C2} .chart-pointer a")).to_be_visible()
+    page.locator(f"{C2} summary").click()
+    expect(text).to_be_visible()
+    expect(text).to_contain_text(labels.C2_HYBRID_MARK)
 
 
 # --- the wide layout (#553, D102, D103) ----------------------------------------------

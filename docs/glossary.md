@@ -390,13 +390,17 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Chart (C1, C2, …)
 - **Plain:** A drawing of some of this dataset's numbers on a page, with a title, a caption under
-  it and a link to the table on the same page that holds its numbers. The tables are the record.
+  it (on most charts the reader opens it with "About this chart"), and a link, always shown, to
+  the table on the same page that holds its numbers. The tables are the record.
   A chart is another way to see it, and the page works without one.
 - **Precise:** Built only by `components.chart(chart_id, figure, table_id, caption)`. It is an
   HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
   (`figcaption`). The title is written as page text (a paragraph, not a heading), so it shows and
-  wraps even when the drawing cannot load. The caption ends with the table pointer,
-  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*. The builder refuses a
+  wraps even when the drawing cannot load. The caption sits in a disclosure (`details`), closed
+  when the page loads and opened by its summary, `labels.CHART_CAPTION_SUMMARY`. The table
+  pointer, `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*, follows it
+  outside the disclosure and is always shown. C1's caption stays open, unfolded and with no
+  summary, because its bar-order sentence is its one cue apart from color (#593). The builder refuses a
   chart with no title or no caption. Each series writes its own hover text or shows none. A figure
   that breaks the chart rules `charts.figure_problems` checks (a series whose hover text would be
   plotly's own, a color that is not a theme token, and the rest) is not drawn. The chart keeps its
@@ -417,7 +421,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   table. The chart's element id is the ID in lower case (`c1`), so `/elections/majority#c2` is a
   link to that chart. The part after `#` never reaches the server and changes neither the canonical link
   nor `og:url`. Readers meet the ID only in such a link, never in page text. Colors come from the
-  page's theme tokens and follow the *Theme in effect*: switching the theme redraws every chart on
+  page's theme tokens and follow the *Theme in effect*. Each measure has one color on every chart
+  (#593, owner decision 2026-11-19): values derived from electoral votes (electoral share, electors
+  appointed) `--chart-ec`, red; values derived from popular votes (popular-vote share, total
+  popular vote) `--chart-pv`, blue; the hybrid score `--chart-hybrid`, purple. Switching the theme redraws every chart on
   the page, with no reload and no request. Series always differ by more than color. The drawing
   needs plotly.js, which the browser fetches from plotly's CDN when the page's first chart
   mounts; a page with no chart fetches nothing from it. If the fetch fails, or the figure breaks
@@ -426,14 +433,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   own: its companion table's CSV carries its numbers.
 - **Shown as:** `components.chart`, which writes each chart's title as page text above the drawing
   (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below it;
-  `labels.CHART_TABLE_POINTER`; each chart's own wording (title, axis titles, trace names, legend
+  `labels.CHART_TABLE_POINTER`; `labels.CHART_CAPTION_SUMMARY`; each chart's own wording (title, axis titles, trace names, legend
   title, hover text, annotations, caption) in `labels.py`; the axis number format, the hover
   behavior and the inert legend in `charts.TEMPLATE`, and the absent toolbar in
   `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the election overview
   (`/election/<year>`), is the first chart a page renders. C3 is on an election's People per
   electoral vote page (`/election/<year>/per-capita`). The home page's lede (`pages/home.py`)
   already says "Tables and charts". C2 is on `/elections/majority`, followed by its companion
-  table. C4 and C5 are on `/elections/over-time`, side by side, followed by the one companion
+  table. C4 and C5 are on `/elections/over-time`, C4 above C5 with their year axes lined up, followed by the one companion
   table they share. C7 is on a state's history page (`/state/<usps>`), before the filters, with
   its own companion table.
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
@@ -444,16 +451,19 @@ articles and announcements). Every rule binds all three unless the rule states a
   at #432's plan gate, 2026-11-06 (the table pointer's wording, no toolbar, no chart IDs in
   reader text); `CHARTS` and `dom_id`, `TEMPLATE` and `CHART_CONFIG` in
   `dashboard/explore/charts.py`; a figure that breaks the chart rules is not drawn, and its page
-  keeps its tables: #467 acceptance criteria, recorded in D095.
+  keeps its tables: #467 acceptance criteria, recorded in D095; the collapsed caption, the
+  measure colors and the summary's wording: #593 (D109, amending D102, D104, D108); `ba` spec for
+  #593.
 - **Not:** A *figure*: in this file and on the page, a figure is a number ("no popular-vote
   figure"), and Plotly's and HTML's word for a chart stays in code. Not a page's title (the
   browser tab, `og:title`): a chart has a chart title. Not a stand-in for its companion table.
-  Not a column-name list.
+  Not a column-name list. The measure colors are not party colors: red does not mean Republican
+  and blue does not mean Democratic.
 - **Status:** settled
 
 ### Companion table
-- **Plain:** The table on the same page that holds a chart's numbers. The link at the end of the
-  chart's caption goes to it, and its download is how to take those numbers away.
+- **Plain:** The table on the same page that holds a chart's numbers. The link under the chart,
+  after its caption, goes to it, and its download is how to take those numbers away.
 - **Precise:** The table that each chart's registry row names by its element id. Two charts can
   share one companion table (C4 and C5). C4 and C5's table, on `/elections/over-time`, shows all
   states, and no filter reaches it. On a state's history page, C7's companion table is its own;
@@ -464,7 +474,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `components.table` with its own CSV. A filter on the page can narrow the table without
   narrowing the chart, so the pointer says only that the chart's numbers are in a table on the
   page, never that the table shows "the same" or "all" of them.
-- **Shown as:** `labels.CHART_TABLE_POINTER`, at the end of each chart's caption.
+- **Shown as:** `labels.CHART_TABLE_POINTER`, after each chart's caption, outside its collapsed
+  part.
 - **Source:** #432 ("a pointer to the table on the page that holds the same values"); E9-S6
   conventions ("a companion table holding the same values"); `CHARTS` in
   `dashboard/explore/charts.py`; the pointer's wording: owner decision, 2026-11-06, #432.
@@ -699,9 +710,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   election years running left to right, oldest at the left. Each year's marks are for that
   election's Electoral College leader, the candidate with the most electoral votes counted. A
   circle is their electoral share. For the years this dataset has popular-vote figures, a solid
-  triangle is their popular-vote share, a thin line joins it to the circle, and a star is their
-  hybrid score, the project's own proposal and not an official measure. Marks along the top of
-  the chart show a year in which a different candidate won the popular vote (a hexagon) or had
+  triangle is their popular-vote share, a thin line joins it to the circle, and a short crossbar
+  on that line, halfway between the two, is their hybrid score, the project's own proposal and
+  not an official measure. Marks along the top of
+  the chart show a year in which a different candidate won the popular vote (an asterisk) or had
   the highest hybrid score (a pentagon). Years before (or after) the popular-vote figures are
   shaded; shading does not mean no popular vote was held. Hovering over or tapping a mark shows
   its number as the table on the same page writes it. A dashed line across the chart marks half
@@ -739,16 +751,22 @@ articles and announcements). Every rule binds all three unless the rule states a
   - It derives nothing. No mark carries a text label; each hover writes the companion table's
     cells: votes counted and electors appointed, never votes cast (1868: 214 and 294; 1872: 286
     and 366; 2016: 304 and 538).
-  - The leader's `pv_share` (solid upward triangle, `triangle-up`) and `hybrid_score` (star) are
-    drawn wherever the cell is a share; a thin connector line joins the triangle to the circle,
-    with no hover and no key entry. Drawn in the order connector, triangles, stars, circles.
+  - The leader's `pv_share` (solid upward triangle, `triangle-up`) and `hybrid_score` (a short
+    horizontal crossbar, `line-ew`, on the connector at the midpoint of the circle and triangle)
+    are drawn wherever the cell is a share; a thin connector line joins the triangle to the
+    circle, with no hover and no key entry. Drawn in the order connector, triangles, crossbars,
+    circles.
+  - Colors by measure (#593, D109): circle `--chart-ec`, triangle `--chart-pv`, crossbar
+    `--chart-hybrid`; the connector `--chart-axis`; the strip marks `--text`. Height 560 px. No
+    gridline at 50%, where the majority line is the one dashed line; the 50% tick stays.
   - A strip series per method, at a fixed height above 100%, drawn only where the served
-    `pv_flip` / `hybrid_flip` is true, never from a list of years: `hexagon` when the
+    `pv_flip` / `hybrid_flip` is true, never from a list of years: `asterisk` when the
     popular-vote winner differs, `pentagon` when the hybrid winner differs, each named in the key.
   - The solid upward triangle is C2's alone; C4's open upward triangle means no electors
     appointed (D104(d) as D108 extends it).
   - Bands over the years outside the popular-vote window, from the index's `coverage`
-    (`over_time.pv_bands`, shared with C5).
+    (`over_time.pv_bands`, shared with C5); the before band's label sits inside the band at its
+    top; the after band's above the plot.
   - Election year runs along the bottom as a number, so a gap between served elections is drawn at
     its true width, with a tick every 40 years. The value axis runs up the side, with ticks from 0
     to 100% (it runs to 112% to hold the strip). The line is horizontal at 0.5 and the test is
@@ -760,7 +778,7 @@ articles and announcements). Every rule binds all three unless the rule states a
     series named by its label (`labels.C2_NO_FIGURE` for no figure in this dataset, or
     `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
     `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
-  - The key is always shown.
+  - The key is always shown, above the plot.
   - Neither the chart nor its companion table is narrowed by a filter (D093(a); fork B, D096,
     amending D093(c)).
   - If the summary read fails, the section shows `C2_UNAVAILABLE`, with no chart and no companion
@@ -796,10 +814,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it happened"; the 1992
   example (William J. Clinton, 43.0%) checked against served N1; reader wording: `ba` spec for
   #434, approved at its plan gate (2026-11-11), with its historical claims, and `ba` spec for
-  #564, approved at its plan gate (2026-11-19).
+  #564, approved at its plan gate (2026-11-19); #593; D109; `ba` spec for #593.
 - **Not:** A chart of winners: in 1824 the leader had no majority. The chart does not show who took
   office (*Took office*); its companion table does. Not votes cast. The line is not a fixed number
-  such as 270. The star is not an official measure. A strip mark is not a correction or recount:
+  such as 270. The crossbar (the hybrid score) is not an official measure. A strip mark is not a correction or recount:
   it says only who came first under that method. Shading is not "no popular vote". Not a
   stand-in for its companion table. A marker is not a zero.
 - **Status:** settled
@@ -894,6 +912,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   No caption sentence explains the other two markers: the label and hover of each say what it
   stands for. `components.chart` then appends `labels.CHART_TABLE_POINTER`. In a year without
   popular-vote figures, `NO_PV_SENTENCE` in `pages/election.py` still shows above T3.
+  Electoral-share bars `--chart-ec`, popular-vote bars `--chart-pv` (#593).
 - **Shown as:** the chart, placed by `pages/election.py` through `components.chart`; its wording
   in `labels.py`: the title `labels.C1_TITLE`, or `labels.C1_TITLE_NO_PV` in a year without
   popular-vote figures; the share axis `labels.C1_X_AXIS`; the series names
@@ -959,8 +978,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   state's own electors appointed are on that state's page (chart C7).
 - **Precise:**
   - C4 and C5 are in `CHARTS` on `/elections/over-time`, ids `c4` and `c5`, sharing one
-    companion table. They sit under the page's heading (`HEADING`), after the section links, side
-    by side from the wide breakpoint, with the table full width below.
+    companion table. They sit under the page's heading (`HEADING`), after the section links,
+    stacked, C4 above C5, with the same fixed left and right margins so their year axes line up,
+    and the table below.
+  - C4 `--chart-ec` (red), C5 `--chart-pv` (blue) (#593, D109).
   - C7 draws one state's series of electors appointed on that state's history page
     (*State's electors appointed over time*).
   - C4 reads the N1 `elections` items' `electoral_denominator`. C5 reads each year's one distinct
@@ -973,8 +994,9 @@ articles and announcements). Every rule binds all three unless the rule states a
     no marker; every other cause gets a marker wherever it falls, inside the band included.
   - Both charts put election year on one numeric axis along the bottom (D100(a) as amended by D104
     and D107), with a tick every 40 years. The value axis runs up the side with full-number ticks.
-    C5's band is vertical, spanning the years outside the window, and its label sits above the
-    plot, beginning "Shaded:".
+    C5's band is vertical, spanning the years outside the window, and its label sits inside the
+    band at its top, beginning "Shaded:"; the after band's label, where drawn, sits above the
+    plot. The key sits above the plot.
   - The band's bounds come from `meta.provenance.coverage`. Hover text is the table's cells.
   - If `/v1/elections/summary` cannot be read or is malformed, the section shows
     `OVER_TIME_UNAVAILABLE` only; the section links, heading and lede still show.
@@ -988,6 +1010,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:**
   - #436 ACs (owner, 2026-11-05);
   - decisions D091, D093, D096, D100 and D107;
+  - #593; D109;
   - #558; D104; #562;
   - `ElectionSummary.electoral_denominator` and `NationalSummaryRow.national_pv_denominator`;
   - posts 2026-08-18 (messy), 2026-08-25 (270 of what) and 2026-08-06 (222 votes away);
@@ -1036,7 +1059,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   reader wording names the Electoral College side the same way `ec_winner` does.
 - **Shown as:** `LABELS["pv_flip"]`, `LABELS["hybrid_flip"]`; the cell `labels.flip`, given
   `ec_determinative`, which fills `labels.FLIP_YES` with the Electoral College's role by the same
-  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader). In C2 (#564), a strip series per method above the data, from the served flag: `hexagon`, `labels.C2_PV_DIFFERENT_KEY`; `pentagon`, `labels.C2_HYBRID_DIFFERENT_KEY`; their hovers and `labels.C2_PV_DIFFERENT_NOTE` / `labels.C2_HYBRID_DIFFERENT_NOTE`.
+  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader). In C2 (#564), a strip series per method above the data, from the served flag: `asterisk`, `labels.C2_PV_DIFFERENT_KEY`; `pentagon`, `labels.C2_HYBRID_DIFFERENT_KEY`; their hovers and `labels.C2_PV_DIFFERENT_NOTE` / `labels.C2_HYBRID_DIFFERENT_NOTE`.
 - **Source:** `ElectionSummary.pv_flip`, `hybrid_flip` and the class docstring; owner decision,
   2026-10-10, #348 (consistency with `ec_winner`).
 - **Not:** "No", which is a recorded agreement. *Outside the popular-vote window*, which is no
@@ -1054,7 +1077,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   a `ba` spec.
 - **Shown as:** `LABELS["hybrid_score"]`, `LABELS["hybrid_winner"]`, `LABELS["hybrid_margin"]`,
   `LABELS["hybrid_flip"]`; help text `labels.HYBRID_NOTE` (panel, and under T3 and in its
-  download's preamble, and under C2's companion table); in C2 (#564), the star
+  download's preamble, and under C2's companion table); in C2 (#564, #593), the crossbar
   (`labels.C2_HYBRID_KEY`, `labels.C2_HYBRID_HOVER`, `labels.C2_HYBRID_MARK`), its strip series
   (`labels.C2_HYBRID_DIFFERENT_KEY`, `labels.C2_HYBRID_DIFFERENT_HOVER`,
   `labels.C2_HYBRID_DIFFERENT_NOTE`), its table columns `hybrid_score` and `hybrid_winner`, and
@@ -1194,7 +1217,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   of C1's marker, `labels.C1_NO_FIGURE_HOVER`); in C1, the label of the marker drawn in place of a
   popular-vote bar, `labels.C1_NO_FIGURE`, and the caption sentence `labels.C1_NO_FIGURE_NOTE`,
   shown only when such a marker is drawn; `labels.NO_NATIONAL_TOTAL` and `labels.C5_NO_TOTAL`
-  (the C4/C5 table and C5). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and star's marker hovers.
+  (the C4/C5 table and C5). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and crossbar's marker hovers.
 - **Source:** `EcPvRow` docstring and `pv_status` description; `NationalSummaryRow` docstring;
   `.claude/specs/backlog-dashboard.md`, E9-S3 null table;
   `posts/2026-08-18-presidential-elections-are-messy.md`, "One empty cell, five different
@@ -1294,7 +1317,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   popular-vote bar is drawn, the title `labels.C1_TITLE_NO_PV` and the caption sentence
   `labels.C1_NO_PV_CAPTION`; `labels.NOT_APPLICABLE` as the national total's cell outside the
   window (the C4/C5 table); C5's band (vertical, over the years outside the window) and its labels
-  `labels.C5_BEFORE_BAND` and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE`
+  `labels.C5_BEFORE_BAND`, inside the band at its top, and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE`
   and `labels.C5_AFTER_NOTE`. In C2 (#564): the bands (`labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`, reused), `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, and `labels.NOT_APPLICABLE` in its four appended columns.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
@@ -1434,7 +1457,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.UNRECOGNIZED` for any other cell), with T6's cell in full in its hover; never a
   zero-length bar and never an infinity. The bars are two series split on T6's border cell,
   sharing one row slot: striped exactly where the cell is `BOUNDARY_BASIS["present_day"]`, plain
-  for every other row. The stripes mean present-day borders in every year. The legend has an entry for each bar series drawn and, when a state is selected, one for its mark (`labels.C3_SELECTED`); the marker series has none (its name, `labels.C3_NO_FIGURE_SERIES`, is never shown). The plain series is named `BOUNDARY_BASIS["at_election"]` when every
+  for every other row. Both are `--chart-ec`, red, the color of values derived from electoral
+  votes (owner, #593's plan gate). The stripes mean present-day borders in every year. The legend has an entry for each bar series drawn and, when a state is selected, one for its mark (`labels.C3_SELECTED`); the marker series has none (its name, `labels.C3_NO_FIGURE_SERIES`, is never shown). The plain series is named `BOUNDARY_BASIS["at_election"]` when every
   plain row is at the election, and `labels.C3_PLAIN_SERIES` otherwise, and in that case the
   caption adds `labels.C3_PLAIN_MIXED`. The selected state (the page's filter, once T6's rows name
   it) is marked by one diamond, filled with the page color (`--page`) and ringed in the text color (`--text`), at zero in its row (the start of the row), in a series of its own named
@@ -1769,6 +1793,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   series for the same state. Bars, markers, symbols, the key and the year axis are C4's (D100,
   D104). Never filtered and no selection trace (D093(a)). If the series cannot be built, the section
   shows its heading and `C7_UNAVAILABLE` only; T4, its filters and the page's success marker stay.
+  Bars `--chart-ec`; the key above the plot (#593).
 - **Shown as:** in `pages/state.py`, `C7_HEADING`, `C7_TABLE_HEADING`, `C7_UNAVAILABLE` and the
   download "this state's electors appointed in each election" (`state-{usps}-electors.csv`); in
   `labels.py`, `C4_TITLE_STATE` (else `C7_TITLE_THIS_STATE`), `C4_VALUE_AXIS`, `C4_STATE_HOVER`, the
@@ -2115,7 +2140,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "win margin", "winning margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
 | "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
 | "turnout" | "total popular vote" | `labels.C5_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
-| "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_BAND`, `labels.C5_BEFORE_NOTE` | |
+| "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_NOTE`, `labels.C2_BEFORE_NOTE` | The band label, `labels.C5_BEFORE_BAND`, says "no popular-vote figures in this dataset" and leaves the year to these notes (#593). |
 
 ## Open decisions
 

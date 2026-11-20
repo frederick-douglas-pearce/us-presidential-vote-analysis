@@ -42,14 +42,15 @@
    Python. Chart text and the plot's background are the page tokens above (--text,
    --text-secondary, --page). Each series and line token meets 3:1 on --page and the
    categorical three stay apart under simulated color-vision deficiencies
-   (TestChartColors, tests/unit/test_dashboard_theme.py). The order is fixed and a chart
-   takes them in order. A chart with more series than tokens appends one here, in all
+   (TestChartColors, tests/unit/test_dashboard_theme.py). The three series tokens are
+   one per measure, not per position (#593, D109): every chart that shows a measure
+   paints it with that measure's token (charts.EC_COLOR, PV_COLOR, HYBRID_COLOR), so a
+   color means the same thing on every page. A new measure appends a token here, in all
    three palette blocks, to charts.TEMPLATE's colorway, and to TOKENS and CHART_SERIES
-   in tests/unit/test_dashboard_theme.py, since plotly would otherwise repeat a color
-   (nothing enforces this: no filed chart needs more than two):
-     --chart-1         the first series (blue)
-     --chart-2         the second series (orange)
-     --chart-3         the third series (green)
+   in tests/unit/test_dashboard_theme.py:
+     --chart-ec        electoral-vote-derived values (red): electoral share, electors appointed
+     --chart-pv        popular-vote-derived values (blue): popular-vote share, total popular vote
+     --chart-hybrid    the hybrid score (purple)
      --chart-axis      axis lines and ticks
      --chart-grid      gridlines, decoration under the marks (exempt from 3:1)
      --chart-reference  a reference line, such as a majority line
@@ -102,9 +103,9 @@
   --disabled: rgba(0, 24, 102, 0.1); /* --Dash-Fill-Disabled */
   --hover: rgba(0, 18, 77, 0.04); /* --Dash-Fill-Primary-Hover */
   --active: rgba(0, 18, 77, 0.08); /* --Dash-Fill-Primary-Active */
-  --chart-1: #2a78d6;
-  --chart-2: #c94d16;
-  --chart-3: #168a60;
+  --chart-ec: #c62f2f;
+  --chart-pv: #1f7fd6;
+  --chart-hybrid: #6a2c9e;
   --chart-axis: #767676;
   --chart-grid: #e6e6e6;
   --chart-reference: #595959;
@@ -127,9 +128,9 @@
     --disabled: #666;
     --hover: rgba(255, 255, 255, 0.06);
     --active: rgba(255, 255, 255, 0.12);
-    --chart-1: #3987e5;
-    --chart-2: #d95926;
-    --chart-3: #199e70;
+    --chart-ec: #e8605a;
+    --chart-pv: #3f86e3;
+    --chart-hybrid: #d7a6ec;
     --chart-axis: #8a8a8a;
     --chart-grid: #2e2e2e;
     --chart-reference: #a6a6a6;
@@ -166,9 +167,9 @@
   --disabled: #666;
   --hover: rgba(255, 255, 255, 0.06);
   --active: rgba(255, 255, 255, 0.12);
-  --chart-1: #3987e5;
-  --chart-2: #d95926;
-  --chart-3: #199e70;
+  --chart-ec: #e8605a;
+  --chart-pv: #3f86e3;
+  --chart-hybrid: #d7a6ec;
   --chart-axis: #8a8a8a;
   --chart-grid: #2e2e2e;
   --chart-reference: #a6a6a6;
@@ -555,9 +556,9 @@ fieldset.filter legend { padding: 0; }
    follows .filter-row .filter, whose specificity it shares, so its basis and its lifted
    cap (max-width: none) win.
    .pair is two equal columns, each holding one section, in source order, built by
-   components.pair (#553, D103): the overview's panel beside C1, on /elections the
-   list's filters beside the count and averages, and on /elections/over-time C4 beside
-   C5 (#562). A column is the
+   components.pair (#553, D103): the overview's panel beside C1, and on /elections the
+   list's filters beside the count and averages (C4 and C5 are stacked since #593,
+   D109). A column is the
    section itself, never a wrapper around it, so the margin reset below reaches its
    first and last child. minmax(0, …),
    not 1fr, is defensive: a 1fr track grows to its widest child's min-content, so a
@@ -584,3 +585,8 @@ fieldset.filter legend { padding: 0; }
 .chart {
   margin: 0;
 }
+/* A chart's collapsed caption (#593, D109): the summary that opens it is a control, so
+   it shows it is one and takes the site's focus ring; the table pointer after it stays
+   shown. */
+.chart summary { cursor: pointer; }
+.chart summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

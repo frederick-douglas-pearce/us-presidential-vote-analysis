@@ -138,18 +138,27 @@ def year_marks(first: int, last: int) -> dict[int, str]:
 YEAR_TICK_STEP = 40
 #: Years of room on each side of the first and last served year.
 YEAR_PAD = 2
-#: The year ticks' text size, the size the charts' annotations use: at 14 px, C5's
-#: ticks at 360 px sat only 2 px apart in CI's browser font, beside its wide value
-#: ticks.
-YEAR_TICK_FONT_PX = 12
+#: The year ticks' text size (#593, D109): the template's 14 px, the size of the
+#: value axis's ticks. D104 chose 12 px when C5's ticks at 360 px sat only 2 px apart
+#: in CI's browser font, beside its wide value ticks; a chart whose year ticks crowd at
+#: this size passes ``tick_px`` to :func:`year_axis`.
+YEAR_TICK_FONT_PX = 14
+#: The year ticks' size on a chart whose plot is narrowed by wide value ticks: C4 and
+#: C5, whose fixed left margin holds C5's "160,000,000" (#593: at 14 px their ticks sat
+#: 4 px apart at 360 px in the browser check, under its 6 px; the owner's fallback at
+#: the plan gate).
+YEAR_TICK_NARROW_PX = 12
 
 
-def year_axis(years: Sequence[int]) -> dict[str, Any]:
+def year_axis(
+    years: Sequence[int], *, tick_px: int = YEAR_TICK_FONT_PX
+) -> dict[str, Any]:
     """A time-series chart's x-axis (#558, D104): numeric, so each point sits at its
     year and a gap between served elections is drawn at its true width; its range the
     served years' with :data:`YEAR_PAD` either side; its ticks every multiple of
     :data:`YEAR_TICK_STEP` within them, written as plain years (the template's
-    thousands separator would write "1,840") at :data:`YEAR_TICK_FONT_PX`, and the first
+    thousands separator would write "1,840") at ``tick_px`` (:data:`YEAR_TICK_FONT_PX`
+    unless a chart passes its own, #593), and the first
     and last years instead where that gives fewer than two; and titled "Election year".
     One axis for every mode of a chart: built from the served years, never from what a
     filter leaves. No years is a ``TypeError``, which a page's degraded state
@@ -166,7 +175,7 @@ def year_axis(years: Sequence[int]) -> dict[str, Any]:
         "range": [first - YEAR_PAD, last + YEAR_PAD],
         "tickvals": ticks,
         "ticktext": [str(year) for year in ticks],
-        "tickfont": {"size": YEAR_TICK_FONT_PX},
+        "tickfont": {"size": tick_px},
         "showgrid": False,
         "zeroline": False,
         "title": {"text": labels.LABELS["year"]},
@@ -184,15 +193,16 @@ def year_edges(years: Sequence[int], first: int, last: int) -> tuple[float, floa
     return low, high
 
 
-#: Where a time-series chart's key sits (#558, D104): along the foot of the chart,
-#: below the year axis, as C1's sits along its head. In C4, C5 and C7 it names only
-#: marker series (each missing-value cause, D091 as amended by D104), and a bar series
-#: is kept off it; C2's names its point and strip series too, and can wrap past one
-#: row (#564, D108(g)).
+#: Where a time-series chart's key sits (#593, D109, amending D104(d)): along the top
+#: of the plot, above it, as C1's sits along its head, so a reader meets the key before
+#: the marks. plotly.js pushes the top margin to hold it, however many rows it wraps
+#: to. In C4, C5 and C7 it names only marker series (each missing-value cause, D091 as
+#: amended by D104), and a bar series is kept off it; C2's names its point and strip
+#: series too, and can wrap past one row (#564, D108(g)).
 TIME_SERIES_LEGEND: dict[str, Any] = {
     "orientation": "h",
-    "yref": "container",
-    "y": 0,
+    "yref": "paper",
+    "y": 1,
     "yanchor": "bottom",
     "x": 0,
     "xanchor": "left",
@@ -517,7 +527,12 @@ def table(
 
 
 def chart(
-    chart_id: str, figure: dict[str, Any], table_id: str, caption: str
+    chart_id: str,
+    figure: dict[str, Any],
+    table_id: str,
+    caption: str,
+    *,
+    collapsed: bool = True,
 ) -> html.Figure:
     """A chart (#432): the one way to build one, as :func:`table` is for tables.
 
@@ -532,9 +547,15 @@ def chart(
     link): the chart title as page text (a paragraph, since a chart cannot know the
     page's outline), so it shows and wraps when plotly.js cannot load; the chart's
     mount point, a ``role="img"`` wrapper named by that title, which hides the
-    drawing's SVG from assistive technology; the store holding the unresolved figure;
-    and the caption, ending with :data:`labels.CHART_TABLE_POINTER`, a link to the
-    companion table. The mount point is rendered empty, never with a ``dcc.Graph``
+    drawing's SVG from assistive technology (the figure itself is named by that title
+    too, #593, since a closed caption leaves its own text out of the name); the store
+    holding the unresolved figure;
+    and the caption, followed by :data:`labels.CHART_TABLE_POINTER`, a link to the
+    companion table. The caption is collapsed (#593, D109): an HTML ``details`` closed
+    on load and opened by its summary, :data:`labels.CHART_CAPTION_SUMMARY`, with the
+    pointer after it, outside it and always shown. ``collapsed=False`` keeps a caption
+    open, for a chart whose caption is its only cue apart from color (C1's bar order,
+    WCAG 1.4.1). The mount point is rendered empty, never with a ``dcc.Graph``
     (#452): ``charts.CHART_MOUNT_CALLBACK`` puts the graph in it, hidden and with no
     figure, only once plotly.js has loaded, and ``charts.CHART_CALLBACK`` then draws it
     in the theme in effect and shows it, so it never flashes plotly's own colors and a
@@ -581,9 +602,22 @@ def chart(
     title_id = f"{dom}-title"
     named: dict[str, Any] = {"aria-labelledby": title_id}
     heading = html.P(text, id=title_id, className="chart-title")
-    pointer = html.Figcaption(
-        [caption, " ", html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}"), "."]
-    )
+    link = html.A(labels.CHART_TABLE_POINTER, href=f"#{table_id}")
+    if collapsed:
+        pointer = html.Figcaption(
+            [
+                html.Details(
+                    [
+                        html.Summary(labels.CHART_CAPTION_SUMMARY),
+                        html.P(caption, className="chart-caption-text"),
+                    ],
+                    className="chart-caption",
+                ),
+                html.P([link, "."], className="chart-pointer"),
+            ]
+        )
+    else:
+        pointer = html.Figcaption([caption, " ", link, "."])
     problems = problems or charts.figure_problems(source)
     if problems:
         log.error(
@@ -594,7 +628,7 @@ def chart(
             problems[:LOGGED_PROBLEMS],
             extra={"chart_id": chart_id},
         )
-        return html.Figure([heading, pointer], id=dom, className="chart")
+        return html.Figure([heading, pointer], id=dom, className="chart", **named)
     return html.Figure(
         [
             heading,
@@ -609,6 +643,10 @@ def chart(
         ],
         id=dom,
         className="chart",
+        # Named by its title, not its figcaption (#593's review): a closed caption's
+        # text is left out of the name, which would leave every chart's figure named
+        # by the same summary and pointer.
+        **named,
     )
 
 

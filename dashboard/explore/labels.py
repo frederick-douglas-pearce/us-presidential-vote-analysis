@@ -370,6 +370,10 @@ STATE_NOT_FOUND_LINK = "Browse every state in the dataset"
 #: nor "above", "below" or "hover" (it must read right when the chart could not load).
 #: Not a ``LABELS`` key.
 CHART_TABLE_POINTER = "See this chart's numbers in a table on this page"
+#: The summary that opens a chart's collapsed caption (#593, D109; ba spec, approved
+#: by the owner at #593's plan gate, 2026-11-19): one label for every chart, true of
+#: every caption, naming no position or shape. Not a ``LABELS`` key.
+CHART_CAPTION_SUMMARY = "About this chart"
 
 #: Chart C1 (#433; ba spec, approved by the owner at #433's plan gate, 2026-11-09):
 #: each candidate's electoral share beside their popular-vote share on the one-election
@@ -469,7 +473,8 @@ C2_HYBRID_DIFFERENT_KEY = "Hybrid winner: a different candidate"
 #: The marker series for a share or score this dataset has no figure for (#564's option
 #: A): one open-circle series for any of the three marks; its hover says which.
 C2_NO_FIGURE = "No share or score in this dataset"
-#: The triangle's and the star's hovers, and the strip marks' (#564): table cells only.
+#: The triangle's and the crossbar's hovers, and the strip marks' (#564): table cells
+#: only.
 C2_PV_HOVER = "{year}: {candidate}<br>Popular-vote share: {share}"
 C2_HYBRID_HOVER = (
     "{year}: {candidate}<br>Hybrid score: {score}<br>"
@@ -495,9 +500,12 @@ C2_PV_MARK = (
     "The solid triangle is the leader's popular-vote share, their share of all votes "
     "cast for president nationally, and a thin line joins it to the circle."
 )
+#: "Crossbar", not "dash": the caption already says "the dashed line" for the
+#: majority line (#593's ba spec).
 C2_HYBRID_MARK = (
-    "The star is the leader's hybrid score: the average of their electoral share and "
-    "popular-vote share. The hybrid score is the project's own proposal, not an "
+    "A short crossbar on the thin line is the leader's hybrid score: the average of "
+    "their electoral share and popular-vote share, so it sits halfway between the "
+    "circle and the triangle. The hybrid score is the project's own proposal, not an "
     "official measure."
 )
 C2_MAJORITY_NOTE = (
@@ -524,8 +532,8 @@ C2_BEFORE_NOTE = (
 )
 #: Only when that strip series is drawn.
 C2_PV_DIFFERENT_NOTE = (
-    "A hexagon along the top of the chart marks a year in which a different candidate "
-    "won the popular vote; the table names them."
+    "An asterisk along the top of the chart marks a year in which a different "
+    "candidate won the popular vote; the table names them."
 )
 C2_HYBRID_DIFFERENT_NOTE = (
     "A pentagon along the top of the chart marks a year in which a different "
@@ -534,9 +542,9 @@ C2_HYBRID_DIFFERENT_NOTE = (
 #: The caption's last sentence, only when a marker is drawn (#558, D104; #564): the
 #: marker sits at zero, and without a text label it would read as 0%.
 C2_NO_SHARE_NOTE = (
-    "A marker at the bottom of the chart in place of a circle, triangle or star means "
-    "this dataset has no figure to draw there for that election: its hover says which, "
-    "and the chart's key says why. It is not a zero."
+    "A marker at the bottom of the chart in place of a circle, triangle or crossbar "
+    "means this dataset has no figure to draw there for that election: its hover says "
+    "which, and the chart's key says why. It is not a zero."
 )
 #: The companion table's notes, under the table and in its CSV's preamble, which has no
 #: caption: with :data:`C2_TOOK_OFFICE` and :data:`HYBRID_NOTE` (#564).
@@ -813,11 +821,12 @@ C7_FILTERS_NOTE = (
 C5_TITLE = "Total popular vote in each election, all states"
 C5_VALUE_AXIS = "Total popular vote"
 C5_HOVER = "{year}, all states<br>Total popular vote: {total}"
-#: The bands' labels, above the plot (#558, D104): before the window, at the band's
-#: left edge, and after it, at its right edge.
-C5_BEFORE_BAND = (
-    "Shaded: years before this dataset's<br>popular-vote figures begin in {pv_year_min}"
-)
+#: The bands' labels (#558, D104; #593, D109): before the window, inside the band at
+#: its top left, short enough for the band at 360 px on two lines (the year is in the
+#: caption and the table; ``.format(pv_year_min=…)`` still applies, naming nothing);
+#: after it, above the plot at the band's right edge, since that band can be one
+#: election wide.
+C5_BEFORE_BAND = "Shaded: no popular-vote<br>figures in this dataset"
 C5_AFTER_BAND = (
     "Shaded: years after this dataset's<br>popular-vote figures run to {pv_year_max}"
 )

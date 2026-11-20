@@ -48,9 +48,9 @@ TOKENS: tuple[str, ...] = (
     "--disabled",
     "--hover",
     "--active",
-    "--chart-1",
-    "--chart-2",
-    "--chart-3",
+    "--chart-ec",
+    "--chart-pv",
+    "--chart-hybrid",
     "--chart-axis",
     "--chart-grid",
     "--chart-reference",
@@ -1031,7 +1031,7 @@ class TestThemeContrast:
 # --- chart colors (#432) ---------------------------------------------------------------
 
 #: The categorical series tokens, in the order a chart takes them.
-CHART_SERIES = ("--chart-1", "--chart-2", "--chart-3")
+CHART_SERIES = ("--chart-ec", "--chart-pv", "--chart-hybrid")
 
 #: Chart text, on the plot's background (the page): WCAG 1.4.3.
 CHART_TEXT = ("--text", "--text-secondary")
@@ -1198,13 +1198,52 @@ class TestChartColors:
 
     @pytest.mark.parametrize("theme", ["light", "dark"])
     def test_the_majority_label_meets_aa_on_a_band(self, theme: str) -> None:
-        """C2's majority-line label sits at the left (#564), over the band: text, so
-        WCAG 1.4.3's ratio, in the color the figure paints it."""
+        """C2's majority-line label sits at the left (#564), over the band, and since
+        #593 (D109) the before band's own label sits inside it: text, so WCAG 1.4.3's
+        ratio, in the color the figure paints it."""
         palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
         ratio = contrast(
             parse_color(palette["--text"]), parse_color(palette["--chart-grid"])
         )
         assert ratio >= AA, (theme, round(ratio, 2))
+
+    def test_a_chart_caption_s_summary_takes_the_site_s_focus_ring(self) -> None:
+        """#593 (D109): the summary that opens a chart's caption is a control, so it
+        takes the focus ring every control here takes, --accent at 3:1 on the page
+        in both palettes."""
+        # Read through the stylesheet's own parser, so a commented-out rule is no rule
+        # (#593's review).
+        assert toggle_rule(".chart summary:focus-visible") == {
+            "outline": "2px solid var(--accent)",
+            "outline-offset": "2px",
+        }
+        for key in (LIGHT, EXPLICIT_DARK):
+            palette = block(key)
+            ratio = contrast(
+                parse_color(palette["--accent"]), parse_color(palette["--page"])
+            )
+            assert ratio >= NON_TEXT, (key, round(ratio, 2))
+
+    def test_each_measure_token_is_its_decided_color(self) -> None:
+        """D109(a): each measure's token holds the value the owner approved, in each
+        palette block, so swapping two measures' values fails even though contrast and
+        separation are symmetric and would not."""
+        expected = {
+            LIGHT: {
+                "--chart-ec": "#c62f2f",
+                "--chart-pv": "#1f7fd6",
+                "--chart-hybrid": "#6a2c9e",
+            },
+            EXPLICIT_DARK: {
+                "--chart-ec": "#e8605a",
+                "--chart-pv": "#3f86e3",
+                "--chart-hybrid": "#d7a6ec",
+            },
+        }
+        for key in PALETTE_BLOCKS:
+            palette = block(key)
+            want = expected[LIGHT if key == LIGHT else EXPLICIT_DARK]
+            assert {t: palette[t] for t in want} == want, key
 
     def test_what_the_template_paints_is_what_these_tests_measure(self) -> None:
         """Closure over ``charts.TEMPLATE`` (#432's review): each color it paints is a

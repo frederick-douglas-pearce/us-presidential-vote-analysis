@@ -32,6 +32,8 @@ from tests.unit.test_dashboard_elections import (
     SUMMARY,
     YEARS,
     c2_figure,
+    caption_text,
+    classed,
     find,
     in_order,
     n1_client,
@@ -164,10 +166,34 @@ N1_TOTALS = {row["year"]: row["national_pv_denominator"] for row in SUMMARY["dat
 def caption(tree: Any, dom: str) -> str:
     """A chart's caption text, without its table pointer."""
     (figcaption,) = of_type(find(tree, dom), "Figcaption")
-    return str(figcaption.children[0])
+    return caption_text(figcaption)
 
 
 class TestC4:
+    def test_each_bar_series_is_its_measure_s_color(self) -> None:
+        """#593 (D109): electors appointed is electoral (red), the total popular
+        vote popular-vote (blue); read by measure, not by position."""
+        tree = render_over_time()
+        for dom, field, color in (
+            (C4, "electoral_denominator", "var(--chart-ec)"),
+            (C5, "national_pv_denominator", "var(--chart-pv)"),
+        ):
+            (bars,) = [
+                tr for tr in chart_figure(tree, dom)["data"] if tr["type"] == "bar"
+            ]
+            assert bars["name"] == labels.LABELS[field]
+            assert bars["marker"]["color"] == color
+
+    def test_the_captions_are_collapsed(self) -> None:
+        """#593 (D109): each caption closed under its summary, the pointer shown."""
+        tree = render_over_time()
+        for dom in (C4, C5):
+            (figcaption,) = of_type(find(tree, dom), "Figcaption")
+            details, pointer = figcaption.children
+            assert type(details).__name__ == "Details"
+            assert details.children[0].children == labels.CHART_CAPTION_SUMMARY
+            assert pointer.children[0].children == labels.CHART_TABLE_POINTER
+
     def test_registered_on_their_page_beside_the_shared_table(self) -> None:
         assert charts.CHARTS["C4"] == charts.Chart("/elections/over-time", OVER_TIME)
         assert charts.CHARTS["C5"] == charts.Chart("/elections/over-time", OVER_TIME)
@@ -261,11 +287,13 @@ class TestC5:
         moved["meta"]["provenance"]["coverage"]["pv_year_min"] = 1980
         assert band(moved) == (FIRST - pad, (1976 + 1980) / 2)
         figure = chart_figure(render_over_time(index=moved), C5)
-        # One label, above the plot at the band's left edge, never inside the band.
+        # One label, inside the band at its top left (#593, D109).
         (note,) = figure["layout"]["annotations"]
         assert note["text"] == labels.C5_BEFORE_BAND.format(pv_year_min=1980)
         assert (note["xref"], note["x"], note["xanchor"]) == ("x", FIRST - pad, "left")
-        assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "bottom")
+        assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "top")
+        inset = over_time.BAND_LABEL_INSET_PX
+        assert (note["yshift"], note["xshift"]) == (-inset, inset)
 
     def test_a_year_after_the_window_is_banded_too(self) -> None:
         moved, summary = after_2016()
@@ -343,7 +371,9 @@ class TestC5:
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
         # One year axis, the served years' (D100(a), #558, D104).
         assert c4["layout"]["xaxis"] == c5["layout"]["xaxis"]
-        assert c4["layout"]["xaxis"] == components.year_axis(YEARS)
+        assert c4["layout"]["xaxis"] == components.year_axis(
+            YEARS, tick_px=components.YEAR_TICK_NARROW_PX
+        )
         assert c4["layout"]["xaxis"]["range"][0] < FIRST
 
 
@@ -538,7 +568,7 @@ class TestTimeSeriesAxis:
         assert axis["title"] == {"text": labels.LABELS["year"]}
         assert components.YEAR_TICK_STEP == 40
         assert (
-            axis["tickfont"] == {"size": components.YEAR_TICK_FONT_PX} == {"size": 12}
+            axis["tickfont"] == {"size": components.YEAR_TICK_FONT_PX} == {"size": 14}
         )
         assert "tickformat" not in axis and "dtick" not in axis
 
@@ -662,13 +692,13 @@ class TestTimeSeriesAxis:
         assert plain["y"] == [0, 0]
         assert plain["marker"] == {"symbol": "x", "size": 9, "color": "var(--text)"}
         drawn = over_time.marker_trace(
-            "n", "star", [1824], ["a"], y=[0.4], size=5, color="var(--chart-3)"
+            "n", "star", [1824], ["a"], y=[0.4], size=5, color="var(--chart-hybrid)"
         )
         assert drawn["y"] == [0.4]
         assert drawn["marker"] == {
             "symbol": "star",
             "size": 5,
-            "color": "var(--chart-3)",
+            "color": "var(--chart-hybrid)",
         }
 
     def test_c5_s_bands_are_the_shared_pv_bands(self) -> None:
@@ -686,14 +716,34 @@ class TestTimeSeriesAxis:
         )
         assert c5["layout"]["shapes"] == expected.shapes
         assert c5["layout"]["annotations"] == expected.annotations
-        assert c5["layout"]["margin"] == {"t": expected.top_px}
+        # No after band: the before band's label takes no margin (#593, D109).
+        assert expected.top_px == 0
+        assert c5["layout"]["margin"]["t"] == over_time.TOP_PX
 
-    def test_the_pair_s_plots_start_at_one_height(self) -> None:
-        """C4 takes C5's top margin, the room C5's band labels need (#558, cr.6)."""
+    def test_the_stacked_plots_share_one_left_and_right_margin(self) -> None:
+        """#593 (D109): C4 above C5 on one year axis, so their plots start and end at
+        the same x: one fixed left and right margin, and no value axis pushing its
+        own. Each keeps its own top margin."""
         tree = render_over_time()
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
-        assert c4["layout"]["margin"] == c5["layout"]["margin"]
-        assert c5["layout"]["margin"]["t"] == (over_time.TOP_PX + over_time.BAND_LABEL_PX)
+        margin = MOD["OVER_TIME_MARGIN"]
+        assert margin == {"l": 112, "r": 16}
+        for figure in (c4, c5):
+            assert {k: figure["layout"]["margin"][k] for k in "lr"} == margin
+            assert figure["layout"]["yaxis"]["automargin"] is False
+        assert c4["layout"]["margin"]["t"] == over_time.TOP_PX
+        # Narrowed by that margin, their year ticks keep 12 px (#593: 14 px crowded at
+        # 360 px); C2 and C7 take the shared 14 px.
+        for figure in (c4, c5):
+            assert figure["layout"]["xaxis"]["tickfont"] == {"size": 12}
+        assert components.YEAR_TICK_NARROW_PX == 12
+
+    def test_c7_keeps_its_own_margins(self) -> None:
+        """The fixed margins are the over-time page's, never the shared layout's
+        (#593's architect review, I2): C7's short ticks keep their width."""
+        layout = over_time.time_layout("t", "a", list(YEARS), 10, marked=False)
+        assert layout["margin"] == {"t": over_time.TOP_PX}
+        assert "automargin" not in layout["yaxis"]
 
     def test_no_years_is_a_type_error(self) -> None:
         """Caught by a page's degraded state, never a 500 (#558, cr.10)."""
@@ -712,10 +762,13 @@ class TestTimeSeriesAxis:
         assert figure["layout"]["legend"] == components.TIME_SERIES_LEGEND
         assert chart_figure(render_over_time(), C4)["layout"]["showlegend"] is False
 
-    def test_both_band_labels_sit_above_the_plot_never_in_a_band(self) -> None:
-        """An after-band can be one election wide, so no band label is inside one
-        (#558, architect I-2): each is above the plot, the before label at its band's
-        left edge and raised over the after label, at its band's right edge."""
+    def test_the_before_label_sits_in_its_band_and_the_after_label_above(
+        self,
+    ) -> None:
+        """#593 (D109): the before band spans every year before the window, so its
+        label sits inside it at its top left; an after band can be one election wide
+        (#558, architect I-2), so its label sits above the plot at its right edge,
+        raised over the chart's key when the key is drawn."""
         moved, summary = after_2016()
         moved["meta"]["provenance"]["coverage"]["pv_year_max"] = 2020
         for row in summary["data"]:
@@ -726,38 +779,84 @@ class TestTimeSeriesAxis:
         before, after = figure["layout"]["shapes"]
         assert (after["x0"], after["x1"]) == (2022, LAST + components.YEAR_PAD)
         first_note, last_note = figure["layout"]["annotations"]
-        for note in (first_note, last_note):
-            assert (note["yref"], note["y"], note["yanchor"]) == ("paper", 1, "bottom")
+        assert (first_note["yref"], first_note["y"], first_note["yanchor"]) == (
+            "paper",
+            1,
+            "top",
+        )
+        assert (last_note["yref"], last_note["y"], last_note["yanchor"]) == (
+            "paper",
+            1,
+            "bottom",
+        )
         assert (first_note["x"], first_note["xanchor"]) == (before["x0"], "left")
         assert (last_note["x"], last_note["xanchor"]) == (after["x1"], "right")
-        # The before label is raised by one label's room over the after label: two lines
-        # of 12 px text at plotly's 1.3 line height, plus a gap, so the two never touch
-        # (#558, guard-efficacy F2).
-        assert (
-            first_note["yshift"] == over_time.BAND_LABEL_PX and last_note["yshift"] == 0
-        )
+        # No marker in this body, so no key and no raise (#593's review: literal, never
+        # derived from the figure); the marked cases are
+        # ``test_the_after_label_rises_one_key_row_per_key_entry``.
+        assert figure["layout"]["showlegend"] is False
+        key = 0
+        assert first_note["yshift"] == -over_time.BAND_LABEL_INSET_PX
+        assert last_note["yshift"] == key
+        # The after label's room: two lines of 12 px text at plotly's 1.3 line height,
+        # plus a gap (#558, guard-efficacy F2), over the key's.
         assert first_note["font"]["size"] == last_note["font"]["size"] == 12
         assert 2 * math.ceil(12 * 1.3) + 4 <= over_time.BAND_LABEL_PX
         assert figure["layout"]["margin"]["t"] == (
-            over_time.TOP_PX + 2 * over_time.BAND_LABEL_PX
+            over_time.TOP_PX + key + over_time.BAND_LABEL_PX
         )
+        # The before label is two short lines (#593's ba spec), naming no year.
+        assert first_note["text"] == labels.C5_BEFORE_BAND
+        assert first_note["text"].count("<br>") == 1
         assert charts.figure_problems(figure) == []
 
 
-class TestWideLayout:
-    """C4 and C5's pair (#553, D102), on their own page since #562."""
+    @pytest.mark.parametrize(("doctored", "rows"), [(("x",), 1), (("x", None), 2)])
+    def test_the_after_label_rises_one_key_row_per_key_entry(
+        self, doctored: tuple[Any, ...], rows: int
+    ) -> None:
+        """#593's review: with an after band drawn, the label is raised by one key row
+        per entry the key shows (an unrecognized total, then also a missing one inside
+        the window), and the top margin holds it."""
+        moved, summary = after_2016()
+        for value, year in zip(doctored, (1996, 2000), strict=False):
+            for row in summary["data"]:
+                if row["year"] == year:
+                    row["national_pv_denominator"] = value
+        figure = chart_figure(render_over_time(index=moved, summary=summary), C5)
+        assert len([tr for tr in figure["data"] if tr["showlegend"]]) == rows
+        (after,) = [
+            n
+            for n in figure["layout"]["annotations"]
+            if n["text"] == labels.C5_AFTER_BAND.format(pv_year_max=2016)
+        ]
+        assert after["yshift"] == rows * 24
+        assert figure["layout"]["margin"]["t"] == 16 + rows * 24 + 40
 
-    def test_the_over_time_pair_holds_c4_left_and_c5_right(self) -> None:
+    def test_the_key_sits_above_the_plot(self) -> None:
+        """#593 (D109), pinned by value, not by the constant compared with itself."""
+        assert components.TIME_SERIES_LEGEND == {
+            "orientation": "h",
+            "yref": "paper",
+            "y": 1,
+            "yanchor": "bottom",
+            "x": 0,
+            "xanchor": "left",
+        }
+
+
+class TestWideLayout:
+    """C4 and C5 stacked (#593, D109, amending D102 and D103(c)), on their own page
+    since #562."""
+
+    def test_c4_sits_above_c5_in_one_column_with_no_pair(self) -> None:
         tree = render_over_time()
-        pair = find(tree, MOD["OVER_TIME_PAIR_ID"])
-        assert pair is not None and pair.className == "pair"
-        left, right = pair.children
-        assert [f.id for f in of_type(left, "Figure")] == [C4]
-        assert [f.id for f in of_type(right, "Figure")] == [C5]
-        assert of_type(pair, "Table") == [] and find(pair, OVER_TIME) is None
-        # The companion table after the pair, full width (D102(d), D103).
+        assert classed(tree, "pair") == []
         order = ids_of(tree)
-        assert order.index(C5) < order.index(OVER_TIME)
+        # C4, then C5, then the companion table (D102(d)).
+        assert order.index(C4) < order.index(C5) < order.index(OVER_TIME)
+        c4, c5 = find(tree, C4), find(tree, C5)
+        assert c4 in tree.children and c5 in tree.children
 
     def test_the_heading_and_lede_open_the_page_with_no_control(self) -> None:
         """No filter reaches the page (#562): no dropdown, slider or checklist."""
@@ -767,9 +866,9 @@ class TestWideLayout:
         for kind in ("Dropdown", "RangeSlider", "Checklist", "Location"):
             assert of_type(tree, kind) == [], kind
 
-    def test_an_unavailable_n1_builds_no_over_time_pair(self) -> None:
+    def test_an_unavailable_n1_builds_no_chart(self) -> None:
         tree = MOD["render"](copy.deepcopy(BODY), None)
-        assert find(tree, MOD["OVER_TIME_PAIR_ID"]) is None
+        assert find(tree, C4) is None and find(tree, C5) is None
 
 
 class TestGuardsTheGateAdded:

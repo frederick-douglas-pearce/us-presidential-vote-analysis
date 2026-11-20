@@ -21,6 +21,7 @@ from dash import dcc, html
 
 from explore import (
     api,
+    charts,
     components,
     election_view,
     elections_view,
@@ -50,8 +51,12 @@ C4_ID = "C4"
 C5_ID = "C5"
 OVER_TIME_TABLE_ID = "elections-over-time-table"
 OVER_TIME_UNAVAILABLE_ID = "elections-over-time-unavailable"
-#: C4 and C5's pair (#553, D102): C4 left, C5 right, their table full width below.
-OVER_TIME_PAIR_ID = "elections-over-time-pair"
+#: C4 and C5 stacked, C4 above C5, their table below (#593, D109, amending D102 and
+#: D103(c), which set them side by side): they share the election-year axis, so one
+#: column lets a reader read a year down both. Their one left and right margin, sized
+#: for C5's widest value ticks ("160,000,000" at 14 px) and its axis title, so the
+#: two plots start and end at the same x.
+OVER_TIME_MARGIN = {"l": 112, "r": 16}
 #: The companion table's columns, in display order, by public field name.
 OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
 OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular vote"
@@ -149,8 +154,9 @@ def _c5_figure(
 ) -> over_time.OverTime:
     """C5's figure (#436, D100): the total popular vote of each row with one, as a bar
     at its year. The years before and after the popular-vote window (``window``, read
-    from ``coverage``) are a shaded band, labeled above the plot, which alone marks a
-    held popular vote outside it; every other row with nothing to draw is a marker, one
+    from ``coverage``) are a shaded band, labeled inside it at its top (the band after
+    the window above the plot, #593, D109), which alone marks a held popular vote
+    outside it; every other row with nothing to draw is a marker, one
     series per label (:data:`explore.labels.C5_MARKER_LABELS`), named in the chart's
     key (#558, D104), wherever it falls, inside the band included. All states only
     since #562 (D107)."""
@@ -176,21 +182,29 @@ def _c5_figure(
     name = labels.LABELS["national_pv_denominator"]
     data: list[dict[str, Any]] = []
     if drawn:
-        data.append(over_time.bar_trace(name, drawn))
+        data.append(over_time.bar_trace(name, drawn, charts.PV_COLOR))
     data += over_time.series(marks, _C5_SYMBOLS)
     longest = max((value for _, value, _, _ in drawn), default=1)
     layout = over_time.time_layout(
-        title, labels.C5_VALUE_AXIS, years, longest, marked=bool(marks)
+        title,
+        labels.C5_VALUE_AXIS,
+        years,
+        longest,
+        marked=bool(marks),
+        tick_px=components.YEAR_TICK_NARROW_PX,
     )
     bands = over_time.pv_bands(
         years,
         window,
         labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
         labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
+        # One key row per entry, the most rows the key can wrap to (#593's review).
+        key_px=over_time.KEY_ROW_PX * len(marks),
     )
     if bands.shapes:
         layout["shapes"] = bands.shapes
         layout["annotations"] = bands.annotations
+    if bands.top_px:
         layout["margin"] = {"t": bands.top_px}
     return over_time.OverTime(
         {"data": data, "layout": layout}, False, bool(marks), bands.before, bands.after
@@ -263,11 +277,21 @@ def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
             provenance=summary["meta"]["provenance"],
             view_url=export.view_url(CANONICAL_HOST, PATH, ""),
         )
-        c4 = over_time.c4_figure(points, years, labels.C4_TITLE, None)
+        c4 = over_time.c4_figure(
+            points,
+            years,
+            labels.C4_TITLE,
+            None,
+            tick_px=components.YEAR_TICK_NARROW_PX,
+        )
         c5 = _c5_figure(points, years, labels.C5_TITLE, window)
-        # The pair's plots line up (#553's pair, #558): C4 leaves room for C5's band
-        # labels.
-        c4.figure["layout"]["margin"] = dict(c5.figure["layout"]["margin"])
+        # Stacked, the two plots line up on one year axis (#593, D109): one fixed
+        # left and right margin for both, sized for C5's widest value ticks, with no
+        # value axis pushing its own; each keeps its own top margin.
+        for figure in (c4.figure, c5.figure):
+            layout = figure["layout"]
+            layout["margin"] = {**layout.get("margin", {}), **OVER_TIME_MARGIN}
+            layout["yaxis"]["automargin"] = False
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
         notes = (
             labels.C4_BASIS,
@@ -291,14 +315,9 @@ def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
             )
         ]
     return [
-        components.pair(
-            [components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, _c4_caption(c4))],
-            [
-                components.chart(
-                    C5_ID, c5.figure, OVER_TIME_TABLE_ID, _c5_caption(c5, window)
-                )
-            ],
-            OVER_TIME_PAIR_ID,
+        components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, _c4_caption(c4)),
+        components.chart(
+            C5_ID, c5.figure, OVER_TIME_TABLE_ID, _c5_caption(c5, window)
         ),
         html.H2(OVER_TIME_TABLE_HEADING),
         *table,

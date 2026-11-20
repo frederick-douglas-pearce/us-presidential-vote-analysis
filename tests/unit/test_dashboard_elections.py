@@ -102,6 +102,18 @@ def of_type(node: Any, name: str) -> list[Any]:
     return []
 
 
+def caption_text(figcaption: Any) -> str:
+    """A chart's caption text without its table pointer, collapsed or open (#593,
+    D109): a collapsed caption is the paragraph inside its ``details``, after the
+    summary; an open one (C1) is the figcaption's first child."""
+    first = figcaption.children[0]
+    if type(first).__name__ == "Details":
+        summary, paragraph = first.children
+        assert type(summary).__name__ == "Summary"
+        return str(paragraph.children)
+    return str(first)
+
+
 def classed(node: Any, wanted: str) -> list[Any]:
     """Every component in a rendered tree whose class list holds ``wanted``,
     depth-first, as :func:`of_type` walks it."""

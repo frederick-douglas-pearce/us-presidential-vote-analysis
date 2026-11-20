@@ -426,7 +426,7 @@ TEST_FIGURE: dict[str, Any] = {
             "name": "Electoral share",
             "x": ["A", "B"],
             "y": [0.5, 0.4],
-            "marker": {"color": "var(--chart-1)"},
+            "marker": {"color": "var(--chart-ec)"},
             "hovertext": ["A: 50.0% of electors", "B: 40.0% of electors"],
             "hovertemplate": "%{hovertext}<extra></extra>",
         },
@@ -435,7 +435,7 @@ TEST_FIGURE: dict[str, Any] = {
             "name": "Popular-vote share",
             "x": ["A", "B"],
             "y": [0.48, 0.45],
-            "marker": {"color": "var(--chart-2)", "pattern": {"shape": "/"}},
+            "marker": {"color": "var(--chart-pv)", "pattern": {"shape": "/"}},
             "hovertemplate": "%{customdata.pv_share} of votes<extra>%{fullData.name}</extra>",
             "customdata": [{"pv_share": "48.0%"}, {"pv_share": "45.0%"}],
         },
@@ -2647,7 +2647,7 @@ def _item_of(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
 SERVED_ROWS: dict[str, list[Served]] = {
     "C1": [Served({"year": "2016"}, "", "/v1/elections/2016", _first("summary"))],
     # #564: 1824's leader (outside the popular-vote window), 2016's leader (inside it:
-    # the triangle and the star) and 2016's item (the winners and flags the strip reads).
+    # the triangle and the crossbar) and 2016's item (the winners and flags the strip reads).
     "C2": [
         Served({}, "", "/v1/elections/summary", _first("data")),
         Served({}, "", api.SUMMARY_PATH, _leader_of(2016)),

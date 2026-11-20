@@ -267,7 +267,7 @@ def _c3_figure(
     ):
         if not series:
             continue
-        marker: dict[str, Any] = {"color": "var(--chart-1)"}
+        marker: dict[str, Any] = {"color": charts.EC_COLOR}
         if pattern is not None:
             marker["pattern"] = {
                 "shape": pattern,
