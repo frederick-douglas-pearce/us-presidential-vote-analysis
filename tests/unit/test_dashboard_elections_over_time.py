@@ -599,6 +599,9 @@ class TestTimeSeriesAxis:
             ([1976, 2024], [1980, 1990, 2000, 2010, 2020]),
             ([1824, 1900], [1840, 1860, 1880]),
             ([1960, 2000], [1968, 1976, 1984, 1992]),
+            # The first step that goes into the span at most five times, checked
+            # before the end trim: 8 here, though 4 would draw five (#596's review).
+            ([1900, 1924], [1904, 1912, 1920]),
             # Fewer than two inside: both ends.
             ([2000, 2004], [2000, 2004]),
             ([2024], [2024]),
@@ -610,6 +613,15 @@ class TestTimeSeriesAxis:
         axis = components.year_axis(years)
         assert axis["tickvals"] == ticks
         assert axis["ticktext"] == [str(t) for t in ticks]
+
+    def test_no_span_writes_more_than_five_ticks(self) -> None:
+        """#596 (D110(c)): over every first and last year a filter can leave, the axis
+        writes at least one and at most ``YEAR_TICK_MAX`` ticks, each inside the span."""
+        for i, first in enumerate(YEARS):
+            for last in YEARS[i:]:
+                ticks = components.year_axis([first, last])["tickvals"]
+                assert 1 <= len(ticks) <= components.YEAR_TICK_MAX, (first, last)
+                assert all(first <= t <= last for t in ticks), (first, last, ticks)
 
     def test_a_gap_between_elections_is_drawn_at_its_true_width(self) -> None:
         """No even spacing: a figure built on served years 1824, 1828 and 1900 puts

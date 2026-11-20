@@ -137,7 +137,9 @@ def year_marks(first: int, last: int) -> dict[int, str]:
 #: D093(c)); 40 keeps two four-digit ticks apart at 360 px, where 20 does not.
 YEAR_TICK_STEP = 40
 #: The steps a shorter span may take instead (#596, D110: a year filter leaves spans
-#: of a few elections): the smallest that writes at most :data:`YEAR_TICK_MAX` ticks,
+#: of a few elections): the smallest that goes into the span at most
+#: :data:`YEAR_TICK_MAX` times, so the axis writes at most that many ticks (a smaller
+#: step might also fit once the end trim drops ticks; the rule does not look for it),
 #: as the full span's 40 does, so the density at 360 px stays the full view's.
 YEAR_TICK_STEPS = (4, 8, 10, 20, YEAR_TICK_STEP)
 YEAR_TICK_MAX = 5
@@ -167,7 +169,8 @@ def year_axis(
     own, #593), and the first and last years instead where that gives fewer than two;
     and titled "Election year". The step is :data:`YEAR_TICK_STEP` over the served
     span; a shorter span (#596, D110) takes the smallest of :data:`YEAR_TICK_STEPS`
-    that writes at most :data:`YEAR_TICK_MAX`, and no tick within a quarter step of
+    that goes into the span at most :data:`YEAR_TICK_MAX` times, so it writes at most
+    that many ticks, and no tick within a quarter step of
     either end, where its text would run past the plot's corner into the value
     axis's first tick.
     Built from the years a chart shows: the served years, or, on the elections pages
