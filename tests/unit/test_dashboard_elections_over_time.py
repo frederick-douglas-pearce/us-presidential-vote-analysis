@@ -655,6 +655,22 @@ class TestTimeSeriesAxis:
                 if t["type"] == "scatter":
                     assert t["cliponaxis"] is False, t["name"]
 
+    def test_marker_trace_carries_its_keywords_and_keeps_its_defaults(self) -> None:
+        """#564: C2 passes ``y``, ``size`` and ``color``; C4, C5 and C7 keep zeros, 9 and
+        the text color."""
+        plain = over_time.marker_trace("n", "x", [1824, 1828], ["a", "b"])
+        assert plain["y"] == [0, 0]
+        assert plain["marker"] == {"symbol": "x", "size": 9, "color": "var(--text)"}
+        drawn = over_time.marker_trace(
+            "n", "star", [1824], ["a"], y=[0.4], size=5, color="var(--chart-3)"
+        )
+        assert drawn["y"] == [0.4]
+        assert drawn["marker"] == {
+            "symbol": "star",
+            "size": 5,
+            "color": "var(--chart-3)",
+        }
+
     def test_c5_s_bands_are_the_shared_pv_bands(self) -> None:
         """g.7 (#564's review): C5 draws exactly what ``over_time.pv_bands`` gives for its
         years and window, the function C2 shares, so the two cannot drift apart."""

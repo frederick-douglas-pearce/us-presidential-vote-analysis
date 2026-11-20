@@ -378,6 +378,31 @@ class TestC2:
         assert link.children == "Download the Electoral College leaders (CSV)"
 
 
+def _leader_before(year: int) -> dict[str, Any]:
+    """A second rank-1 row in ``year``, placed BEFORE the real leader (#564's Class B
+    survivor): a later row would overwrite it, so only the tie refusal catches it."""
+    summary = copy.deepcopy(SUMMARY)
+    i = next(
+        k
+        for k, r in enumerate(summary["data"])
+        if r["year"] == year and r["electoral_rank"] == 1
+    )
+    extra = copy.deepcopy(summary["data"][i])
+    extra["candidate_slug"] = "someone-else"
+    summary["data"].insert(i, extra)
+    return summary
+
+
+def _leader_twice(year: int) -> dict[str, Any]:
+    """The leader's own row twice (#564's Class B survivor)."""
+    summary = copy.deepcopy(SUMMARY)
+    row = next(
+        r for r in summary["data"] if r["year"] == year and r["electoral_rank"] == 1
+    )
+    summary["data"].append(copy.deepcopy(row))
+    return summary
+
+
 # --- the three methods (#564, D108) ----------------------------------------------------
 
 OVER_TIME_MOD: dict[str, Any] = dash.page_registry["pages.elections_over_time"][
@@ -724,6 +749,29 @@ class TestC2Methods:
         triangles = named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
         assert 1976 not in triangles and 2020 not in triangles and 1980 in triangles
 
+    @pytest.mark.parametrize(
+        "body", [_leader_before(1860), _leader_twice(1860), _second_leader()]
+    )
+    def test_a_tie_at_rank_1_is_refused_as_a_tie(self, body: dict[str, Any]) -> None:
+        """Class B (#564): the tie refusal itself, not a later check that a row placed
+        last happens to trip."""
+        with pytest.raises(TypeError, match="two leaders"):
+            MOD["leaders"](copy.deepcopy(BODY), body, HAS_PV)
+
+    def test_each_series_draws_at_its_size(self) -> None:
+        """Class B (#564): a star and a triangle drawn larger than the circle show
+        around it where they coincide; a hand-written literal, not the page's table."""
+        figure = c2_figure(render_c2())
+        sizes = {
+            t["name"]: t["marker"]["size"] for t in figure["data"] if "marker" in t
+        }
+        assert sizes == {
+            labels.LABELS["ec_share_full"]: 7,
+            labels.LABELS["pv_share"]: 8,
+            labels.C2_HYBRID_KEY: 9,
+            labels.C2_PV_DIFFERENT_KEY: 9,
+        }
+
     def test_the_drawn_symbols_are_the_table_s_and_distinct(self) -> None:
         """g.1: read off the drawn traces, not the module's constants."""
         figure = c2_figure(
@@ -931,6 +979,8 @@ def _bool_rank() -> dict[str, Any]:
 MALFORMED = {
     "a served year with no elections item": _without(1876),
     "two rank-1 rows in a year": _second_leader(),
+    "a second rank-1 row before the leader": _leader_before(1860),
+    "the leader's row twice": _leader_twice(1860),
     "a row for a year not served": _unserved(),
     "a served year with two elections items": _second_item(),
     "a rank that is a bool": _bool_rank(),
