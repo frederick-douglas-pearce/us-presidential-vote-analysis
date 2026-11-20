@@ -545,8 +545,17 @@ class TestC2Methods:
                 "2016.hybrid_winner_slug": "doctored-winner",
             }
         )
-        figure = c2_figure(render_c2(hybrid))
-        assert named(figure, labels.C2_HYBRID_DIFFERENT_KEY)["x"] == [2016]
+        tree = render_c2(hybrid)
+        strip = named(c2_figure(tree), labels.C2_HYBRID_DIFFERENT_KEY)
+        assert strip["x"] == [2016]
+        # Its hover names the table's hybrid winner, not the popular vote's, and carries
+        # the proposal label (#564's review, r2.recheck.2).
+        winner = _cell_of(tree, 2016, "hybrid_winner")
+        assert winner == "Doctored Winner" != _cell_of(tree, 2016, "pv_winner")
+        assert strip["hovertext"] == [
+            labels.C2_HYBRID_DIFFERENT_HOVER.format(year=2016, winner=winner)
+        ]
+        assert "proposal" in strip["hovertext"][0]
         assert (
             _named_or_none(c2_figure(render_c2()), labels.C2_HYBRID_DIFFERENT_KEY)
             is None

@@ -755,7 +755,8 @@ articles and announcements). Every rule binds all three unless the rule states a
     strict, so a point on the line is not a majority. Its label sits just below the line at the
     left, from the second served year (D104(e) as D108 amends it).
   - A share or score that is not a finite number draws a marker at zero with no text label, one
-    point per label and year (two missing marks in one year share it, their hovers joined), in a
+    point per label and year (two missing marks of one label in one year share it, their hovers
+    joined), in a
     series named by its label (`labels.C2_NO_FIGURE` for no figure in this dataset, or
     `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
     `labels.C2_NO_SHARE_NOTE`. A year is never dropped.

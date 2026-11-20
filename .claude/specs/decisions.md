@@ -7393,7 +7393,8 @@ key. Nothing yet labels the hybrid under T3 and the panel (#590).
   strip from the flags and from the slugs gives the same years on every body that is not
   degraded. The recorded N1 meets the rule in every year.
 - **(c), (h), the window.** The index's popular-vote window and each year's `has_popular_vote`
-  are checked by the page, not the section (D107(c)'s rule that the index's rows are the page's):
+  are checked by the page, not the section (#562's review, cr.1: the index's rows are the page's,
+  as `elections_view.served_years` states):
   the window through `query.year_span`, each flag a `bool`, and each flag true exactly inside
   the window, so the marks (T3's rule) and the bands and caption (the window) follow one rule. A
   disagreement degrades the whole page as an index defect.
@@ -7403,7 +7404,8 @@ key. Nothing yet labels the hybrid under T3 and the panel (#590).
 - **Rationale, corrected.** Drawing by cell means a wider popular-vote window (#565, #566) needs
   no change to how the marks are drawn. It does not mean the chart needs none: the majority
   line's label, at the second served year and just below the line, clears the marks only
-  because no popular-vote share or hybrid score before 1976 sits under 50% (with a wider window,
-  1844, 1848, 1860, 1912 and 1968 would). **Residual:** re-placing the label belongs to #565 and
-  #566. A unit test (`test_the_majority_label_sits_over_no_mark_left_of_the_window`) fails on
-  any re-recorded fixture that puts a mark there.
+  because no popular-vote share or hybrid score is drawn before 1976; a leader's popular-vote
+  share can sit under 50% (1992's does, in served data), so a wider window may put marks under
+  the label. **Residual:** re-placing the label belongs to #565 and #566.
+  A unit test (`test_the_majority_label_sits_over_no_mark_left_of_the_window`) fails on any
+  re-recorded fixture that puts a popular-vote, hybrid or missing-value mark there.
